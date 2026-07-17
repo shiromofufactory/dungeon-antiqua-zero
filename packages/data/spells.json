@@ -1,0 +1,864 @@
+[
+  {
+    "name_en": "FIRE1",
+    "name_ja": "ファイア1",
+    "type": 1,
+    "lv": 1,
+    "mp": 2,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "炎",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 15,
+    "description_ja": [
+      "てき１たいに%FIRE%ほのおぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals %FIRE% damage",
+      "to one enemy($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "SLOW",
+    "name_ja": "スロウ",
+    "type": 1,
+    "lv": 2,
+    "mp": 2,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "SLOW",
+    "intensity": 0,
+    "description_ja": [
+      "てき１たいの",
+      "すばやさダウン"
+    ],
+    "description_en": [
+      "Lowers AGI",
+      "of one enemy"
+    ]
+  },
+  {
+    "name_en": "SPARK",
+    "name_ja": "スパーク",
+    "type": 1,
+    "lv": 3,
+    "mp": 4,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 15,
+    "description_ja": [
+      "てきすべてに むぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals damage",
+      "to all enemies($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "FREEZE1",
+    "name_ja": "フリーズ1",
+    "type": 1,
+    "lv": 4,
+    "mp": 4,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "冷",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 40,
+    "description_ja": [
+      "てき１たいに%FREEZE%れいきぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals %FREEZE% damage",
+      "to one enemy($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "FIRE2",
+    "name_ja": "ファイア2",
+    "type": 1,
+    "lv": 5,
+    "mp": 6,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "炎",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 30,
+    "description_ja": [
+      "てきすべてに%FIRE%ほのおぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals %FIRE% damage",
+      "to all enemies($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "HASTE",
+    "name_ja": "ヘイスト",
+    "type": 1,
+    "lv": 6,
+    "mp": 4,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "HASTE",
+    "intensity": 0,
+    "description_ja": [
+      "みかたひとりの",
+      "すばやさアップ"
+    ],
+    "description_en": [
+      "Raises AGI",
+      "for one ally"
+    ]
+  },
+  {
+    "name_en": "AIR BLADE",
+    "name_ja": "エアブレード",
+    "type": 1,
+    "lv": 7,
+    "mp": 7,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "",
+    "race": "FLYING",
+    "action": "DAMAGE",
+    "intensity": 35,
+    "description_ja": [
+      "てきすべてに ダメージ（x$INTENSITY$）",
+      "%FLY%とんでいるてき に よくきく"
+    ],
+    "description_en": [
+      "Damage to all enemies",
+      "($INTENSITY$x) effective:%FLY%"
+    ]
+  },
+  {
+    "name_en": "FREEZE2",
+    "name_ja": "フリーズ2",
+    "type": 1,
+    "lv": 8,
+    "mp": 8,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "冷",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 45,
+    "description_ja": [
+      "てきすべてに%FREEZE%れいきぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals %FREEZE% damage",
+      "to all enemies($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "DISTORTION",
+    "name_ja": "ディストーション",
+    "type": 1,
+    "lv": 9,
+    "mp": 8,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "死",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 120,
+    "description_ja": [
+      "てき１たいを %DEATH%そくしさせる",
+      "または ダメージ（x$INTENSITY$）"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "TELEPORT",
+    "name_ja": "テレポート",
+    "type": 1,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 1,
+    "attr": "",
+    "race": "",
+    "action": "TELEPORT",
+    "intensity": 0,
+    "description_ja": [
+      "いったことがある",
+      "まほうじんまで ひとっとび"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "HEALING1",
+    "name_ja": "ヒーリング1",
+    "type": 2,
+    "lv": 1,
+    "mp": 3,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "HEAL",
+    "intensity": 20,
+    "description_ja": [
+      "みかたひとりの きずを",
+      "かいふく（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Heals one ally's",
+      "wounds($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "PROTECTION",
+    "name_ja": "プロテクション",
+    "type": 2,
+    "lv": 2,
+    "mp": 3,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "PROTECTION",
+    "intensity": 0,
+    "description_ja": [
+      "みかたひとりの",
+      "ぼうぎょりょくアップ"
+    ],
+    "description_en": [
+      "Increases one ally's",
+      "DEF"
+    ]
+  },
+  {
+    "name_en": "CURE",
+    "name_ja": "キュアー",
+    "type": 2,
+    "lv": 3,
+    "mp": 3,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "CURE",
+    "intensity": 0,
+    "description_ja": [
+      "%POSION%どく%PARALIZE%まひ%SLEEP%すいみん",
+      "%CONFUSE%こんらん を ちりょうする"
+    ],
+    "description_en": [
+      "Cures one ally's",
+      "%POISON%%PARALIZE%%SLEEP%%CONFUSE%"
+    ]
+  },
+  {
+    "name_en": "SILENCE",
+    "name_ja": "サイレンス",
+    "type": 2,
+    "lv": 4,
+    "mp": 4,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "黙",
+    "race": "",
+    "action": "SILENCE",
+    "intensity": 0,
+    "description_ja": [
+      "てきすべての",
+      "じゅもんをふうじる"
+    ],
+    "description_en": [
+      "Seals all enemies",
+      "spells"
+    ]
+  },
+  {
+    "name_en": "REVIVE1",
+    "name_ja": "リヴァイヴ1",
+    "type": 2,
+    "lv": 5,
+    "mp": 10,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "REVIVE",
+    "intensity": 25,
+    "description_ja": [
+      "しぼうした みかたをそせい",
+      "HPは さいだいの１／４になる"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "MAGIC SHIELD",
+    "name_ja": "マジックシールド",
+    "type": 2,
+    "lv": 6,
+    "mp": 8,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 1,
+    "attr": "",
+    "race": "",
+    "action": "MAGIC_SHIELD",
+    "intensity": 0,
+    "description_ja": [
+      "%FIRE%ほのお%FREEZE%れいき%DARK%やみ を",
+      "ふせぐ バリアをはる"
+    ],
+    "description_en": [
+      "Shield all allies",
+      "from %FIRE%%FREEZE%%DARK%"
+    ]
+  },
+  {
+    "name_en": "HEALING2",
+    "name_ja": "ヒーリング2",
+    "type": 2,
+    "lv": 7,
+    "mp": 7,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "HEAL",
+    "intensity": 80,
+    "description_ja": [
+      "みかたひとりの きずを",
+      "かいふく（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Heals one ally's",
+      "wounds($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "HEAVENGATE",
+    "name_ja": "ヘヴンゲート",
+    "type": 2,
+    "lv": 8,
+    "mp": 5,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "",
+    "race": "UNDEAD",
+    "action": "HEAVENGATE",
+    "intensity": 0,
+    "description_ja": [
+      "アンデッドモンスターを",
+      "たいさんさせる"
+    ],
+    "description_en": [
+      "Banishes undead",
+      "monsters"
+    ]
+  },
+  {
+    "name_en": "PUNISH",
+    "name_ja": "パニッシュ",
+    "type": 2,
+    "lv": 9,
+    "mp": 10,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 160,
+    "description_ja": [
+      "てきすべてに むぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals damage",
+      "to all enemies($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "REVIVE2",
+    "name_ja": "リヴァイヴ2",
+    "type": 2,
+    "lv": 0,
+    "mp": 20,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "REVIVE",
+    "intensity": 100,
+    "description_ja": [
+      "しぼうした みかたをそせい",
+      "HPは まんたんになる"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "POISON1",
+    "name_ja": "ポイズン1",
+    "type": 3,
+    "lv": 1,
+    "mp": 2,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "毒",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 10,
+    "description_ja": [
+      "てき１たいを%POISON%どくにおかし",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "%POISON%Poisons one enemy",
+      "with small damage"
+    ]
+  },
+  {
+    "name_en": "SLEEP",
+    "name_ja": "スリープ",
+    "type": 3,
+    "lv": 2,
+    "mp": 3,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "眠",
+    "race": "",
+    "action": "SLEEP",
+    "intensity": 0,
+    "description_ja": [
+      "てきすべてを",
+      "%SLEEP%ねむらせる"
+    ],
+    "description_en": [
+      "Puts all enemies",
+      "to %SLEEP%"
+    ]
+  },
+  {
+    "name_en": "ARMOR BREAK",
+    "name_ja": "アーマーブレイク",
+    "type": 3,
+    "lv": 3,
+    "mp": 3,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "BREAK",
+    "intensity": 0,
+    "description_ja": [
+      "てき１たいの",
+      "ぼうぎょりょくダウン"
+    ],
+    "description_en": [
+      "Lowers DEF",
+      "of one enemy"
+    ]
+  },
+  {
+    "name_en": "FADE",
+    "name_ja": "フェード",
+    "type": 3,
+    "lv": 4,
+    "mp": 4,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "FADE",
+    "intensity": 0,
+    "description_ja": [
+      "けはいをけして",
+      "てきに みつかりづらくする"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "CONFUSION",
+    "name_ja": "コンフュージョン",
+    "type": 3,
+    "lv": 5,
+    "mp": 3,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "乱",
+    "race": "",
+    "action": "CONFUSE",
+    "intensity": 0,
+    "description_ja": [
+      "てき１たいを",
+      "%CONFUSE%こんらんさせる"
+    ],
+    "description_en": [
+      "%CONFUSE%Confuse one enemy",
+      ""
+    ]
+  },
+  {
+    "name_en": "BLOOD SUCK",
+    "name_ja": "ブラッドサック",
+    "type": 3,
+    "lv": 6,
+    "mp": 5,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "闇",
+    "race": "",
+    "action": "BLOOD_SUCK",
+    "intensity": 30,
+    "description_ja": [
+      "てき１たいから",
+      "せいめいりょくを%DARK%すいとる"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "POISON2",
+    "name_ja": "ポイズン2",
+    "type": 3,
+    "lv": 7,
+    "mp": 7,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "毒",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 25,
+    "description_ja": [
+      "てきぜんたいを%POISON%どくにおかし",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "PURGE",
+    "name_ja": "パージ",
+    "type": 3,
+    "lv": 8,
+    "mp": 5,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "",
+    "race": "",
+    "action": "PURGE",
+    "intensity": 0,
+    "description_ja": [
+      "てきすべての すべての",
+      "とくしゅこうかを うちけす"
+    ],
+    "description_en": [
+      "Remove all buffs",
+      "from all enemies"
+    ]
+  },
+  {
+    "name_en": "CURSE",
+    "name_ja": "カース",
+    "type": 3,
+    "lv": 9,
+    "mp": 6,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 0,
+    "attr": "闇",
+    "race": "",
+    "action": "CURSE",
+    "intensity": 0,
+    "description_ja": [
+      "てき１たいを",
+      "%DARK%ひんしにする"
+    ],
+    "description_en": [
+      "Makes one enemy",
+      "fatal"
+    ]
+  },
+  {
+    "name_en": "ABYSS NOVA",
+    "name_ja": "アビスノヴァ",
+    "type": 3,
+    "lv": 0,
+    "mp": 12,
+    "on_camp": 0,
+    "on_battle": 1,
+    "to_enemy": 1,
+    "to_all": 1,
+    "attr": "闇",
+    "race": "",
+    "action": "DAMAGE",
+    "intensity": 75,
+    "description_ja": [
+      "てきすべてに%DARK%やみぞくせいの",
+      "ダメージ（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Deals %DARK% damage",
+      "to all enemies($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "POTION",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "HEAL",
+    "intensity": 30,
+    "description_ja": [
+      "みかたひとりの きずを",
+      "かいふく（ばいりつ：$INTENSITY$）"
+    ],
+    "description_en": [
+      "Heals one ally's",
+      "wounds($INTENSITY$x)"
+    ]
+  },
+  {
+    "name_en": "MANA DROP",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "MANA",
+    "intensity": 12,
+    "description_ja": [
+      "みかたひとりの MPを",
+      "すこし かいふく"
+    ],
+    "description_en": [
+      "Slightly restores",
+      "one ally's MP"
+    ]
+  },
+  {
+    "name_en": "PANACEA",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 1,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "HEAL",
+    "intensity": 0,
+    "description_ja": [
+      "みかたひとりの きずと",
+      "いじょうを かんちさせる"
+    ],
+    "description_en": [
+      "Heals one ally,",
+      "cures all"
+    ]
+  },
+  {
+    "name_en": "FRUIT of STR",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 0,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "STR_UP",
+    "intensity": 0,
+    "description_ja": [
+      "おいしくたべて",
+      "ちからもアップ！"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "FRUIT of AGI",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 0,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "AGI_UP",
+    "intensity": 0,
+    "description_ja": [
+      "おいしくたべて",
+      "すばやさもアップ！"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "FRUIT of MAG",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 0,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "MAG_UP",
+    "intensity": 0,
+    "description_ja": [
+      "おいしくたべて",
+      "まりょくもアップ！"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "EAN SI MEAT",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 0,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "MHP_UP",
+    "intensity": 0,
+    "description_ja": [
+      "もりもりたべて",
+      "さいだいHPもアップ！"
+    ],
+    "description_en": [
+      ""
+    ]
+  },
+  {
+    "name_en": "ELVEN'S ARCANAM",
+    "name_ja": "-",
+    "type": 0,
+    "lv": 0,
+    "mp": 0,
+    "on_camp": 1,
+    "on_battle": 0,
+    "to_enemy": 0,
+    "to_all": 0,
+    "attr": "",
+    "race": "",
+    "action": "MMP_UP",
+    "intensity": 0,
+    "description_ja": [
+      "ぐいぐいのんで",
+      "さいだいMPもアップ！"
+    ],
+    "description_en": [
+      ""
+    ]
+  }
+]
