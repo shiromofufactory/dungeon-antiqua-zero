@@ -1,32 +1,18 @@
 const axios = require("axios")
 const fs = require("fs")
 const path = require("path")
-const { DATA_DIR, GAS_URL, SHARED_DATA_DIR } = require("./config")
+const { DATA_DIR, DATASETS: DATASET_CONFIG, GAS_URL, SHARED_DATA_DIR } = require("./config")
 
-const DATASETS = [
-  {
-    key: "items",
-    file: process.env.ITEMS_JSON || path.join(DATA_DIR, "items.json"),
-    localFile: path.join(DATA_DIR, "items.json"),
-    sharedFile: path.join(SHARED_DATA_DIR, "items.json"),
-    lineBreakFields: [],
-  },
-  {
-    key: "spells",
-    file: process.env.SPELLS_JSON || path.join(DATA_DIR, "spells.json"),
-    localFile: path.join(DATA_DIR, "spells.json"),
-    sharedFile: path.join(SHARED_DATA_DIR, "spells.json"),
-    // get_data.js ではこれらを改行単位の配列に変換しているため、シート用に戻す。
-    lineBreakFields: ["description_ja", "description_en"],
-  },
-  {
-    key: "skills",
-    file: process.env.SKILLS_JSON || path.join(DATA_DIR, "skills.json"),
-    localFile: path.join(DATA_DIR, "skills.json"),
-    sharedFile: path.join(SHARED_DATA_DIR, "skills.json"),
-    lineBreakFields: ["description_ja", "description_en"],
-  },
-]
+const DATASETS = DATASET_CONFIG.map(({ key, lineBreakFields }) => {
+  const filename = `${key}.json`
+  return {
+    key,
+    file: process.env[`${key.toUpperCase()}_JSON`] || path.join(DATA_DIR, filename),
+    localFile: path.join(DATA_DIR, filename),
+    sharedFile: path.join(SHARED_DATA_DIR, filename),
+    lineBreakFields,
+  }
+})
 
 function copyFromSharedFolder() {
   DATASETS.forEach(({ localFile, sharedFile }) => {

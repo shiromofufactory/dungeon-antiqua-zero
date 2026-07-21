@@ -1386,6 +1386,24 @@
     "note": "回避率アップ"
   },
   {
+    "name_en": "LEATHER ARMOR",
+    "name_ja": "かわよろい",
+    "type1": "BODY",
+    "type2": "LIGHT",
+    "requirements": "",
+    "reach": 0,
+    "attr": "",
+    "tolerance": "",
+    "race": "",
+    "str": 0,
+    "agi": 0,
+    "mag": 0,
+    "healing": 0,
+    "extra": "",
+    "use": "",
+    "note": ""
+  },
+  {
     "name_en": "ELVEN LEATHER",
     "name_ja": "エルフのかわよろい",
     "type1": "BODY",

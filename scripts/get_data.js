@@ -1,7 +1,7 @@
 const axios = require("axios")
 const fs = require("fs")
 const path = require("path")
-const { DATA_DIR, GAS_URL, SHARED_DATA_DIR } = require("./config")
+const { DATA_DIR, DATASETS, GAS_URL, SHARED_DATA_DIR } = require("./config")
 
 const save = (fname, json) => {
   const filename = fname + ".json"
@@ -19,13 +19,16 @@ const isNumeric = (value) => value !== "" && !isNaN(value)
 
 async function main() {
   const { data: dataAll } = await axios.get(GAS_URL)
-  saveData(dataAll.items, "items")
-  saveData(dataAll.spells, "spells")
-  saveData(dataAll.skills, "skills")
-  // getMonsters(dataAll.monsters)
+  DATASETS.forEach(({ key, lineBreakFields }) => {
+    saveData(dataAll[key], key, lineBreakFields)
+  })
 }
 
-function saveData(data, fname) {
+function saveData(data, fname, lineBreakFields) {
+  if (!Array.isArray(data)) {
+    throw new Error(`${fname} のデータを取得できませんでした`)
+  }
+
   const json = []
   data.forEach((item) => {
     const output = {}
@@ -34,7 +37,7 @@ function saveData(data, fname) {
       if (isNumeric(result)) {
         result = result * 1
       }
-      if (key == "description_ja" || key == "description_en") {
+      if (lineBreakFields.includes(key)) {
         result = (result || "").split("\n")
       }
       output[key] = result
