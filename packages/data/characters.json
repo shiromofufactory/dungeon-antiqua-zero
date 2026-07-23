@@ -7,6 +7,11 @@
     "skills": [
       "Hide"
     ],
+    "lv": 0,
+    "equips": [
+      "DAGGER",
+      "ROBE"
+    ],
     "base_hp": 44,
     "base_mp": 27,
     "base_str": 17,
@@ -27,7 +32,8 @@
     "eq_light": 1,
     "sp_1": 1,
     "sp_2": 0,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": ""
   },
   {
     "name_en": "Cerion",
@@ -36,6 +42,11 @@
     "gender": "MALE",
     "skills": [
       "Aim"
+    ],
+    "lv": 2,
+    "equips": [
+      "BRONZE SPEAR",
+      "ROBE"
     ],
     "base_hp": 46,
     "base_mp": 30,
@@ -57,7 +68,8 @@
     "eq_light": 1,
     "sp_1": 1,
     "sp_2": 2,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": "再加入しても装備変更なし"
   },
   {
     "name_en": "Alvan",
@@ -65,7 +77,12 @@
     "race": "FAIRY",
     "gender": "MALE",
     "skills": [
-      "ためる"
+      "Focus"
+    ],
+    "lv": 21,
+    "equips": [
+      "GREAT SWORD",
+      "ROBE of EVASION"
     ],
     "base_hp": 50,
     "base_mp": 23,
@@ -87,7 +104,8 @@
     "eq_light": 1,
     "sp_1": 1,
     "sp_2": 1,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   },
   {
     "name_en": "Ragna",
@@ -96,7 +114,14 @@
     "gender": "MALE",
     "skills": [
       "Two-Handed",
-      "ためる"
+      "Focus"
+    ],
+    "lv": 10,
+    "equips": [
+      "ENHANCE SWORD",
+      "STEEL ARMOR",
+      "IRON HELM",
+      "SILVER GLOVES"
     ],
     "base_hp": 57,
     "base_mp": 0,
@@ -118,7 +143,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 0,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": "再加入時装備変更なし"
   },
   {
     "name_en": "Elika",
@@ -127,7 +153,14 @@
     "gender": "FEMALE",
     "skills": [
       "Dual-Wield",
-      "いあい"
+      "Iai"
+    ],
+    "lv": 7,
+    "equips": [
+      "ICING BLADE!",
+      "FALCON DAGGER",
+      "CHAIN MAIL",
+      "SHIELD RING"
     ],
     "base_hp": 48,
     "base_mp": 20,
@@ -149,7 +182,8 @@
     "eq_light": 1,
     "sp_1": 1,
     "sp_2": 0,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": "初手ムラサメは強すぎるのでムラサメを取得するイベントを入れたい"
   },
   {
     "name_en": "Dain",
@@ -157,7 +191,15 @@
     "race": "DRAGONEWT",
     "gender": "MALE",
     "skills": [
+      "Two-Handed",
       "Cover"
+    ],
+    "lv": 10,
+    "equips": [
+      "IRON AXE",
+      "IRON ARMOR",
+      "IRON HELM",
+      "COPPER GLOVES"
     ],
     "base_hp": 58,
     "base_mp": 22,
@@ -179,7 +221,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 1,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": "再加入時装備差し替え：ZOMBIE HEWER, GOLDEN ARMOR, SILVER GLOVES"
   },
   {
     "name_en": "Cress",
@@ -188,6 +231,13 @@
     "gender": "FEMALE",
     "skills": [
       "Identify"
+    ],
+    "lv": 7,
+    "equips": [
+      "ROD of DISCORD",
+      "ROBE",
+      "LILITH’S CIRCLET",
+      "PEACE RING"
     ],
     "base_hp": 35,
     "base_mp": 26,
@@ -209,7 +259,8 @@
     "eq_light": 0,
     "sp_1": 2,
     "sp_2": 1,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": "再加入時装備差し替え：ROBE of EVASION"
   },
   {
     "name_en": "Alphard",
@@ -218,6 +269,13 @@
     "gender": "MALE",
     "skills": [
       "Pray"
+    ],
+    "lv": 5,
+    "equips": [
+      "FLAIL",
+      "IRON SHIELD",
+      "IRON ARMOR",
+      "IRON BANGLE"
     ],
     "base_hp": 54,
     "base_mp": 29,
@@ -239,7 +297,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 2,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": "再加入時装備差し替え：MORNINGSTAR"
   },
   {
     "name_en": "Bartholome",
@@ -248,6 +307,12 @@
     "gender": "MALE",
     "skills": [
       "Reflect"
+    ],
+    "lv": 5,
+    "equips": [
+      "WAND of POISON",
+      "ROBE",
+      "FLAME RING"
     ],
     "base_hp": 34,
     "base_mp": 32,
@@ -269,7 +334,8 @@
     "eq_light": 0,
     "sp_1": 1,
     "sp_2": 0,
-    "sp_3": 2
+    "sp_3": 2,
+    "note": "再加入時装備差し替え：WAND of DARK"
   },
   {
     "name_en": "Kagetora",
@@ -278,6 +344,13 @@
     "gender": "MALE",
     "skills": [
       "Dual-Wield"
+    ],
+    "lv": 1,
+    "equips": [
+      "KATANA",
+      "SILVER KNIFE",
+      "CHAIN MAIL",
+      "HACHIMAKI"
     ],
     "base_hp": 51,
     "base_mp": 17,
@@ -299,7 +372,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 0,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": ""
   },
   {
     "name_en": "Orwen",
@@ -308,6 +382,11 @@
     "gender": "MALE",
     "skills": [
       "Identify"
+    ],
+    "lv": 2,
+    "equips": [
+      "MORNINGSTAR",
+      "CHAIN MAIL"
     ],
     "base_hp": 42,
     "base_mp": 31,
@@ -326,10 +405,11 @@
     "eq_shield": 1,
     "eq_heavy": 0,
     "eq_magical": 1,
-    "eq_light": 0,
+    "eq_light": 1,
     "sp_1": 1,
     "sp_2": 1,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": ""
   },
   {
     "name_en": "Liza",
@@ -338,6 +418,13 @@
     "gender": "FEMALE",
     "skills": [
       "Two-Handed"
+    ],
+    "lv": 4,
+    "equips": [
+      "IRON SWORD",
+      "IRON SHIELD",
+      "IRON ARMOR",
+      "COPPER GLOVES"
     ],
     "base_hp": 47,
     "base_mp": 21,
@@ -359,7 +446,8 @@
     "eq_light": 1,
     "sp_1": 1,
     "sp_2": 0,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   },
   {
     "name_en": "Iris",
@@ -368,6 +456,12 @@
     "gender": "FEMALE",
     "skills": [
       "Cover"
+    ],
+    "lv": 3,
+    "equips": [
+      "MACE of POWER",
+      "MIRROR SHIELD",
+      "STEEL ARMOR"
     ],
     "base_hp": 45,
     "base_mp": 18,
@@ -389,7 +483,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 1,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   },
   {
     "name_en": "Milia",
@@ -398,6 +493,11 @@
     "gender": "FEMALE",
     "skills": [
       "Pray"
+    ],
+    "lv": 1,
+    "equips": [
+      "ROD of SILENCE",
+      "ROBE of EVASION"
     ],
     "base_hp": 36,
     "base_mp": 28,
@@ -416,10 +516,11 @@
     "eq_shield": 0,
     "eq_heavy": 0,
     "eq_magical": 1,
-    "eq_light": 1,
+    "eq_light": 0,
     "sp_1": 0,
     "sp_2": 2,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": ""
   },
   {
     "name_en": "Rizel",
@@ -428,6 +529,12 @@
     "gender": "FEMALE",
     "skills": [
       "Reflect"
+    ],
+    "lv": 0,
+    "equips": [
+      "WAND of FIRE",
+      "MIRROR SHIELD",
+      "CHAIN MAIL"
     ],
     "base_hp": 49,
     "base_mp": 19,
@@ -449,7 +556,8 @@
     "eq_light": 1,
     "sp_1": 2,
     "sp_2": 0,
-    "sp_3": 1
+    "sp_3": 1,
+    "note": ""
   },
   {
     "name_en": "Kasumi",
@@ -458,6 +566,13 @@
     "gender": "FEMALE",
     "skills": [
       "Lethal"
+    ],
+    "lv": 3,
+    "equips": [
+      "IRON KUNAI",
+      "CHAIN MAIL",
+      "HACHIMAKI",
+      "IRON BANGLE"
     ],
     "base_hp": 40,
     "base_mp": 0,
@@ -479,7 +594,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 0,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   },
   {
     "name_en": "Sylpha",
@@ -488,6 +604,12 @@
     "gender": "MALE",
     "skills": [
       "Hide"
+    ],
+    "lv": 3,
+    "equips": [
+      "SILVER KNIFE",
+      "LEATHER ARMOR",
+      "LEATHER CAP"
     ],
     "base_hp": 38,
     "base_mp": 24,
@@ -509,7 +631,8 @@
     "eq_light": 1,
     "sp_1": 1,
     "sp_2": 0,
-    "sp_3": 2
+    "sp_3": 2,
+    "note": ""
   },
   {
     "name_en": "Vald",
@@ -517,7 +640,13 @@
     "race": "DRAGONEWT",
     "gender": "MALE",
     "skills": [
-      "ブレス"
+      "Breath"
+    ],
+    "lv": 4,
+    "equips": [
+      "FIRE SPEAR",
+      "STEEL ARMOR",
+      "COPPER GLOVES"
     ],
     "base_hp": 55,
     "base_mp": 0,
@@ -539,7 +668,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 0,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   },
   {
     "name_en": "Grim",
@@ -547,7 +677,13 @@
     "race": "DWARF",
     "gender": "FEMALE",
     "skills": [
-      "さいせい"
+      "Regenerate"
+    ],
+    "lv": 2,
+    "equips": [
+      "IRON MACE",
+      "IRON SHIELD",
+      "STEEL ARMOR"
     ],
     "base_hp": 60,
     "base_mp": 16,
@@ -569,7 +705,8 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 1,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   },
   {
     "name_en": "TKG-48",
@@ -577,8 +714,13 @@
     "race": "ROBOT",
     "gender": "NONE",
     "skills": [
-      "チャージ",
-      "がくしゅう"
+      "MP share",
+      "Install"
+    ],
+    "lv": 0,
+    "equips": [
+      "MACE",
+      "IRON ARMOR"
     ],
     "base_hp": 53,
     "base_mp": 12,
@@ -600,6 +742,7 @@
     "eq_light": 1,
     "sp_1": 0,
     "sp_2": 0,
-    "sp_3": 0
+    "sp_3": 0,
+    "note": ""
   }
 ]

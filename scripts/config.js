@@ -13,7 +13,7 @@ const DATASETS = [
   { key: "items", lineBreakFields: [] },
   { key: "spells", lineBreakFields: ["description_ja", "description_en"] },
   { key: "skills", lineBreakFields: ["description_ja", "description_en"] },
-  { key: "characters", lineBreakFields: ["skills"] },
+  { key: "characters", lineBreakFields: ["skills", "equips"] },
 ]
 
 module.exports = { DATA_DIR, DATASETS, GAS_URL, SHARED_DATA_DIR }

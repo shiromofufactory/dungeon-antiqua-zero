@@ -648,6 +648,24 @@
     "note": ""
   },
   {
+    "name_en": "BRONZE SPEAR",
+    "name_ja": "ブロンズスピア",
+    "type1": "TWO_HANDS",
+    "type2": "SPEAR",
+    "requirements": "",
+    "reach": 2,
+    "attr": "",
+    "tolerance": "",
+    "race": "",
+    "str": 0,
+    "agi": 0,
+    "mag": 0,
+    "healing": 0,
+    "extra": "止",
+    "use": "",
+    "note": ""
+  },
+  {
     "name_en": "IRON SPEAR",
     "name_ja": "アイアンスピア",
     "type1": "TWO_HANDS",

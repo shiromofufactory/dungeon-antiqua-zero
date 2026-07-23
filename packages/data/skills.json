@@ -28,7 +28,7 @@
     "name_ja": "しきべつ",
     "command": "IDENTIFY",
     "description_ja": [
-      "%COL_BLUE%しきべつ%COLEND% を つかえる",
+      "%COL_BLUE%しきべつ%COL_END% を つかえる",
       "（モンスターの データを しらべる）"
     ],
     "description_en": [
@@ -53,16 +53,16 @@
     "command": "COVER",
     "description_ja": [
       "ピンチの みかたを じどうてきに かばう",
-      "さらに %COL_BLUE%かばう%COLEND% を つかえる"
+      "さらに %COL_BLUE%かばう%COL_END% を つかえる"
     ],
     "description_en": [
       ""
     ]
   },
   {
-    "name_en": "hoge",
+    "name_en": "Iai",
     "name_ja": "いあい",
-    "command": "hoge",
+    "command": "IAI",
     "description_ja": [
       "てきぜんたいに こうげき",
       "つぎの こうどうが おくれる"
@@ -72,9 +72,9 @@
     ]
   },
   {
-    "name_en": "hoge",
+    "name_en": "Focus",
     "name_ja": "ためる",
-    "command": "hoge",
+    "command": "FOCUS",
     "description_ja": [
       "ちからを ためて",
       "つぎの こうげきの いりょくを あげる"
@@ -84,9 +84,9 @@
     ]
   },
   {
-    "name_en": "hoge",
+    "name_en": "Breath",
     "name_ja": "ブレス",
-    "command": "hoge",
+    "command": "BREATH",
     "description_ja": [
       "HPを しょうひして てきぜんたいに",
       "%FIRE%ほのおぞくせいの ダメージ"
@@ -96,9 +96,9 @@
     ]
   },
   {
-    "name_en": "hoge",
-    "name_ja": "チャージ",
-    "command": "hoge",
+    "name_en": "MP share",
+    "name_ja": "MPシェア",
+    "command": "MP_SHARE",
     "description_ja": [
       "じぶんの MPを",
       "みかたひとりに わけあたえる"
@@ -155,7 +155,7 @@
     ]
   },
   {
-    "name_en": "hoge",
+    "name_en": "Regenerate",
     "name_ja": "さいせい",
     "command": "",
     "description_ja": [
@@ -198,7 +198,8 @@
       "ねむり こんらん ちんもく から すぐにかいふく"
     ],
     "description_en": [
-      "ATK +50%, recovers from sleep,"
+      "At low HP, ATK +50％",
+      "Gradually recovers from ~4 ~7 ~8"
     ]
   },
   {
@@ -213,8 +214,8 @@
     ]
   },
   {
-    "name_en": "hoge",
-    "name_ja": "がくしゅう",
+    "name_en": "Install",
+    "name_ja": "インストール",
     "command": "",
     "description_ja": [
       "みかたの コマンドを みて",
