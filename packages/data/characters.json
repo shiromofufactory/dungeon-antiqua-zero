@@ -119,9 +119,7 @@
     "lv": 10,
     "equips": [
       "ENHANCE SWORD",
-      "STEEL ARMOR",
-      "IRON HELM",
-      "SILVER GLOVES"
+      "STEEL ARMOR"
     ],
     "base_hp": 57,
     "base_mp": 0,
@@ -159,8 +157,7 @@
     "equips": [
       "ICING BLADE!",
       "FALCON DAGGER",
-      "CHAIN MAIL",
-      "SHIELD RING"
+      "たくみのかわよろい"
     ],
     "base_hp": 48,
     "base_mp": 20,
@@ -197,9 +194,7 @@
     "lv": 10,
     "equips": [
       "IRON AXE",
-      "IRON ARMOR",
-      "IRON HELM",
-      "COPPER GLOVES"
+      "IRON ARMOR"
     ],
     "base_hp": 58,
     "base_mp": 22,
@@ -222,7 +217,7 @@
     "sp_1": 0,
     "sp_2": 1,
     "sp_3": 0,
-    "note": "再加入時装備差し替え：ZOMBIE HEWER, GOLDEN ARMOR, SILVER GLOVES"
+    "note": "再加入時装備差し替え：ZOMBIE HEWER, GOLDEN ARMOR"
   },
   {
     "name_en": "Cress",
@@ -235,9 +230,7 @@
     "lv": 7,
     "equips": [
       "ROD of DISCORD",
-      "ROBE",
-      "LILITH’S CIRCLET",
-      "PEACE RING"
+      "ROBE"
     ],
     "base_hp": 35,
     "base_mp": 26,
@@ -274,8 +267,7 @@
     "equips": [
       "FLAIL",
       "IRON SHIELD",
-      "IRON ARMOR",
-      "IRON BANGLE"
+      "IRON ARMOR"
     ],
     "base_hp": 54,
     "base_mp": 29,
@@ -311,8 +303,7 @@
     "lv": 5,
     "equips": [
       "WAND of POISON",
-      "ROBE",
-      "FLAME RING"
+      "ROBE"
     ],
     "base_hp": 34,
     "base_mp": 32,

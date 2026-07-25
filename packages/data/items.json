@@ -555,7 +555,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
-    "note": "ウエイト短縮"
+    "note": "攻撃後ウエイト短縮"
   },
   {
     "name_en": "MISTILTEINN",
@@ -1077,7 +1077,7 @@
     "healing": 0,
     "extra": "",
     "use": "SILENCE",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "ROD of DISCORD",
@@ -1095,7 +1095,7 @@
     "healing": 0,
     "extra": "",
     "use": "CONFUSION",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "ROD of SANCTITY",
@@ -1113,7 +1113,7 @@
     "healing": 0,
     "extra": "",
     "use": "HEAVENGATE",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "MANA STUNGUN",
@@ -1149,7 +1149,7 @@
     "healing": 0,
     "extra": "",
     "use": "REVIVE1",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "WAND of POISON",
@@ -1167,7 +1167,7 @@
     "healing": 0,
     "extra": "",
     "use": "POISON1",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "WAND of FIRE",
@@ -1185,7 +1185,7 @@
     "healing": 0,
     "extra": "",
     "use": "FIRE2",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "WAND of DARK",
@@ -1203,7 +1203,7 @@
     "healing": 0,
     "extra": "",
     "use": "BLOOD SUCK",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "WAND of WIZARD",
@@ -1221,7 +1221,7 @@
     "healing": 0,
     "extra": "",
     "use": "FREEZE2",
-    "note": ""
+    "note": "呪文発動時WT減少"
   },
   {
     "name_en": "DAYBRINGER",
@@ -1239,7 +1239,7 @@
     "healing": 1,
     "extra": "",
     "use": "",
-    "note": "クリティカル↑。ワンドなのにやたら火力が高い"
+    "note": "クリティカル↑。ワンドなのにやたら火力が高い。呪文発動時WT減少"
   },
   {
     "name_en": "IRON SHIELD",
@@ -1422,6 +1422,24 @@
     "note": ""
   },
   {
+    "name_en": "たくみのかわよろい",
+    "name_ja": "たくみのかわよろい",
+    "type1": "BODY",
+    "type2": "LIGHT",
+    "requirements": "",
+    "reach": 0,
+    "attr": "",
+    "tolerance": "乱",
+    "race": "",
+    "str": 0,
+    "agi": 0,
+    "mag": 0,
+    "healing": 0,
+    "extra": "",
+    "use": "",
+    "note": ""
+  },
+  {
     "name_en": "ELVEN LEATHER",
     "name_ja": "エルフのかわよろい",
     "type1": "BODY",
@@ -1535,7 +1553,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
-    "reach": "",
+    "reach": 0,
     "attr": "",
     "tolerance": "",
     "race": "",
