@@ -5,6 +5,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 50,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -15,6 +16,7 @@
     "healing": 0,
     "extra": "",
     "use": "POTION",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -23,6 +25,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 40,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -33,6 +36,7 @@
     "healing": 0,
     "extra": "",
     "use": "CURE",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -41,6 +45,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -51,6 +56,7 @@
     "healing": 0,
     "extra": "",
     "use": "MANA DROP",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -59,6 +65,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -69,6 +76,7 @@
     "healing": 0,
     "extra": "",
     "use": "PANACEA",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -77,6 +85,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -87,6 +96,7 @@
     "healing": 0,
     "extra": "",
     "use": "REVIVE2",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -95,6 +105,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 100,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -105,6 +116,7 @@
     "healing": 0,
     "extra": "",
     "use": "FADE",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -113,6 +125,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 20,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -123,6 +136,7 @@
     "healing": 0,
     "extra": "",
     "use": "FIRE1",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -131,6 +145,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 60,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -141,6 +156,7 @@
     "healing": 0,
     "extra": "",
     "use": "SLEEP",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -149,6 +165,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 200,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -159,6 +176,7 @@
     "healing": 0,
     "extra": "",
     "use": "SPARK",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -167,6 +185,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 150,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -177,6 +196,7 @@
     "healing": 0,
     "extra": "",
     "use": "SLOW",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -185,6 +205,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 1500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -195,6 +216,7 @@
     "healing": 0,
     "extra": "",
     "use": "DISTORTION",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -203,6 +225,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 1500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -213,6 +236,7 @@
     "healing": 0,
     "extra": "",
     "use": "PUNISH",
+    "source": "店売り",
     "note": ""
   },
   {
@@ -221,6 +245,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -231,6 +256,7 @@
     "healing": 0,
     "extra": "",
     "use": "FRUIT of STR",
+    "source": "各地の宝箱・ドロップ",
     "note": ""
   },
   {
@@ -239,6 +265,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -249,6 +276,7 @@
     "healing": 0,
     "extra": "",
     "use": "FRUIT of AGI",
+    "source": "各地の宝箱・ドロップ",
     "note": ""
   },
   {
@@ -257,6 +285,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -267,6 +296,7 @@
     "healing": 0,
     "extra": "",
     "use": "FRUIT of MAG",
+    "source": "各地の宝箱・ドロップ",
     "note": ""
   },
   {
@@ -275,6 +305,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -285,6 +316,7 @@
     "healing": 0,
     "extra": "",
     "use": "EAN SI MEAT",
+    "source": "各地の宝箱・ドロップ",
     "note": ""
   },
   {
@@ -293,6 +325,7 @@
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
+    "price": 2,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -303,6 +336,7 @@
     "healing": 0,
     "extra": "",
     "use": "ELVEN'S ARCANUM",
+    "source": "各地の宝箱・ドロップ",
     "note": ""
   },
   {
@@ -311,6 +345,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "",
+    "price": 300,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -321,24 +356,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
-    "note": ""
-  },
-  {
-    "name_en": "GREAT SWORD",
-    "name_ja": "グレートソード",
-    "type1": "RIGHT",
-    "type2": "SWORD",
-    "requirements": "",
-    "reach": 1,
-    "attr": "",
-    "tolerance": "",
-    "race": "",
-    "str": 1,
-    "agi": 0,
-    "mag": 0,
-    "healing": 0,
-    "extra": "",
-    "use": "",
+    "source": "ライザ初期装備、ローンウィック、フロストハイム",
     "note": ""
   },
   {
@@ -347,6 +365,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "",
+    "price": 600,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -357,24 +376,27 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ヒュドラの洞窟、ストーンバラ",
     "note": ""
   },
   {
-    "name_en": "SOUL SLAYER",
-    "name_ja": "ソウルスレイヤー",
+    "name_en": "GREAT SWORD",
+    "name_ja": "グレートソード",
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "",
+    "price": 0,
     "reach": 1,
     "attr": "",
     "tolerance": "",
-    "race": "ANIMATED",
-    "str": 0,
+    "race": "",
+    "str": 1,
     "agi": 0,
-    "mag": 1,
+    "mag": 0,
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "アルヴァン初期装備",
     "note": ""
   },
   {
@@ -383,6 +405,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "",
+    "price": 4800,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -393,6 +416,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ラグナ初期装備、ストーンバラ、ヴァレンス",
     "note": ""
   },
   {
@@ -401,6 +425,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "",
+    "price": 10000,
     "reach": 1,
     "attr": "",
     "tolerance": "眠",
@@ -411,6 +436,27 @@
     "healing": 0,
     "extra": "眠",
     "use": "",
+    "source": "試練の塔、混沌の洞窟",
+    "note": ""
+  },
+  {
+    "name_en": "SOUL SLAYER",
+    "name_ja": "ソウルスレイヤー",
+    "type1": "RIGHT",
+    "type2": "SWORD",
+    "requirements": "",
+    "price": 20000,
+    "reach": 1,
+    "attr": "",
+    "tolerance": "",
+    "race": "ANIMATED",
+    "str": 0,
+    "agi": 0,
+    "mag": 1,
+    "healing": 0,
+    "extra": "",
+    "use": "",
+    "source": "アイゼンタール（黒）",
     "note": ""
   },
   {
@@ -419,6 +465,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "",
+    "price": 0,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -429,6 +476,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イベント：ヒュドラの洞窟",
     "note": ""
   },
   {
@@ -437,6 +485,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "ONLY_MALE",
+    "price": 24000,
     "reach": 1,
     "attr": "",
     "tolerance": "乱",
@@ -447,6 +496,7 @@
     "healing": 0,
     "extra": "乱",
     "use": "",
+    "source": "パンデモニウム、混沌の洞窟",
     "note": ""
   },
   {
@@ -455,6 +505,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "LV9",
+    "price": 45000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -465,6 +516,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": ""
   },
   {
@@ -473,6 +525,7 @@
     "type1": "RIGHT",
     "type2": "SWORD",
     "requirements": "ONLY_RAGNA",
+    "price": 0,
     "reach": 1,
     "attr": "",
     "tolerance": "死",
@@ -483,6 +536,7 @@
     "healing": 0,
     "extra": "死",
     "use": "",
+    "source": "イベント：孤児院襲撃",
     "note": ""
   },
   {
@@ -491,6 +545,7 @@
     "type1": "RIGHT",
     "type2": "KNIFE",
     "requirements": "",
+    "price": 20,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -501,6 +556,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "フィオラ初期装備、妖精の里、シルヴァリア",
     "note": ""
   },
   {
@@ -509,6 +565,7 @@
     "type1": "RIGHT",
     "type2": "KNIFE",
     "requirements": "",
+    "price": 800,
     "reach": 1,
     "attr": "",
     "tolerance": "麻",
@@ -519,6 +576,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "カゲトラ・シルファ初期装備、ローンウィック、イザヨイ",
     "note": ""
   },
   {
@@ -527,6 +585,7 @@
     "type1": "RIGHT",
     "type2": "KNIFE",
     "requirements": "",
+    "price": 5000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -537,6 +596,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "セレノス、鉱山",
     "note": ""
   },
   {
@@ -545,6 +605,7 @@
     "type1": "RIGHT",
     "type2": "KNIFE",
     "requirements": "",
+    "price": 8500,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -555,6 +616,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "エリカ初期装備、試練の塔、混沌の洞窟",
     "note": "攻撃後ウエイト短縮"
   },
   {
@@ -563,6 +625,7 @@
     "type1": "RIGHT",
     "type2": "KNIFE",
     "requirements": "LV9",
+    "price": 22000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -573,6 +636,7 @@
     "healing": 0,
     "extra": "死",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": ""
   },
   {
@@ -581,6 +645,7 @@
     "type1": "RIGHT",
     "type2": "KATANA",
     "requirements": "",
+    "price": 1000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -591,24 +656,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
-    "note": ""
-  },
-  {
-    "name_en": "CHIZAKURA!",
-    "name_ja": "ちざくら",
-    "type1": "RIGHT",
-    "type2": "KATANA",
-    "requirements": "",
-    "reach": 1,
-    "attr": "闇",
-    "tolerance": "闇",
-    "race": "",
-    "str": 0,
-    "agi": 0,
-    "mag": 0,
-    "healing": 0,
-    "extra": "吸",
-    "use": "",
+    "source": "カゲトラ初期装備、イザヨイ",
     "note": ""
   },
   {
@@ -617,6 +665,7 @@
     "type1": "RIGHT",
     "type2": "KATANA",
     "requirements": "",
+    "price": 8400,
     "reach": 1,
     "attr": "冷",
     "tolerance": "冷",
@@ -627,6 +676,27 @@
     "healing": 0,
     "extra": "",
     "use": "FREEZE1",
+    "source": "エリカ初期装備、鉱山、イザヨイ行商人",
+    "note": ""
+  },
+  {
+    "name_en": "CHIZAKURA!",
+    "name_ja": "ちざくら",
+    "type1": "RIGHT",
+    "type2": "KATANA",
+    "requirements": "",
+    "price": 19000,
+    "reach": 1,
+    "attr": "闇",
+    "tolerance": "闇",
+    "race": "",
+    "str": 0,
+    "agi": 0,
+    "mag": 0,
+    "healing": 0,
+    "extra": "吸",
+    "use": "",
+    "source": "アイゼンタール（黒）",
     "note": ""
   },
   {
@@ -635,6 +705,7 @@
     "type1": "RIGHT",
     "type2": "KATANA",
     "requirements": "LV9",
+    "price": 50000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -645,6 +716,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イベント：ヴァレンス",
     "note": ""
   },
   {
@@ -653,6 +725,7 @@
     "type1": "TWO_HANDS",
     "type2": "SPEAR",
     "requirements": "",
+    "price": 130,
     "reach": 2,
     "attr": "",
     "tolerance": "",
@@ -663,6 +736,7 @@
     "healing": 0,
     "extra": "止",
     "use": "",
+    "source": "セリオン初期装備、シルヴァリア、ローンウィック",
     "note": ""
   },
   {
@@ -671,6 +745,7 @@
     "type1": "TWO_HANDS",
     "type2": "SPEAR",
     "requirements": "",
+    "price": 400,
     "reach": 2,
     "attr": "",
     "tolerance": "",
@@ -681,6 +756,7 @@
     "healing": 0,
     "extra": "止",
     "use": "",
+    "source": "ローンウィック、フロストハイム",
     "note": ""
   },
   {
@@ -689,6 +765,7 @@
     "type1": "TWO_HANDS",
     "type2": "SPEAR",
     "requirements": "",
+    "price": 3900,
     "reach": 2,
     "attr": "炎",
     "tolerance": "炎",
@@ -699,6 +776,7 @@
     "healing": 0,
     "extra": "止",
     "use": "",
+    "source": "ヴァルド初期装備、アイゼンタール（赤）",
     "note": ""
   },
   {
@@ -707,6 +785,7 @@
     "type1": "TWO_HANDS",
     "type2": "SPEAR",
     "requirements": "",
+    "price": 9000,
     "reach": 2,
     "attr": "冷",
     "tolerance": "冷",
@@ -717,6 +796,7 @@
     "healing": 0,
     "extra": "止",
     "use": "",
+    "source": "アイゼンタール（青）",
     "note": ""
   },
   {
@@ -725,6 +805,7 @@
     "type1": "TWO_HANDS",
     "type2": "SPEAR",
     "requirements": "LV9",
+    "price": 35000,
     "reach": 2,
     "attr": "",
     "tolerance": "",
@@ -735,6 +816,7 @@
     "healing": 0,
     "extra": "止",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": "なぎ倒しの槍。スタン率上げる？"
   },
   {
@@ -743,6 +825,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "",
+    "price": 30,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -753,6 +836,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "TKG-48初期装備、シルヴァリア、ハルウェル",
     "note": ""
   },
   {
@@ -761,6 +845,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "",
+    "price": 240,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -771,6 +856,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "グリム初期装備、ローンウィック、ハルウェル",
     "note": ""
   },
   {
@@ -779,6 +865,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "",
+    "price": 3600,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -789,6 +876,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イリス初期装備、ストーンバラ",
     "note": "クリティカル↑"
   },
   {
@@ -797,6 +885,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "",
+    "price": 5800,
     "reach": 1,
     "attr": "",
     "tolerance": "毒",
@@ -807,6 +896,7 @@
     "healing": 0,
     "extra": "毒",
     "use": "",
+    "source": "地下水路、ドロップ",
     "note": ""
   },
   {
@@ -815,6 +905,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "LV9",
+    "price": 28000,
     "reach": 1,
     "attr": "炎",
     "tolerance": "炎",
@@ -825,6 +916,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": ""
   },
   {
@@ -833,6 +925,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "",
+    "price": 160,
     "reach": 2,
     "attr": "",
     "tolerance": "",
@@ -843,6 +936,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "アルファード初期装備、ローンウィック、ハルウェル",
     "note": ""
   },
   {
@@ -851,6 +945,7 @@
     "type1": "RIGHT",
     "type2": "HAMMER",
     "requirements": "",
+    "price": 2900,
     "reach": 2,
     "attr": "",
     "tolerance": "",
@@ -861,6 +956,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "アルファード再加入時装備、オルウェン初期装備、ヴァレンス",
     "note": ""
   },
   {
@@ -869,6 +965,7 @@
     "type1": "TWO_HANDS",
     "type2": "AXE",
     "requirements": "",
+    "price": 540,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -879,6 +976,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ダイン初期装備、ローンウィック、フロストハイム",
     "note": ""
   },
   {
@@ -887,6 +985,7 @@
     "type1": "TWO_HANDS",
     "type2": "AXE",
     "requirements": "",
+    "price": 2500,
     "reach": 1,
     "attr": "",
     "tolerance": "麻",
@@ -897,24 +996,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
-    "note": ""
-  },
-  {
-    "name_en": "DRAGON HEWER",
-    "name_ja": "ドラゴンバスター",
-    "type1": "TWO_HANDS",
-    "type2": "AXE",
-    "requirements": "NO_DRAGONS",
-    "reach": 1,
-    "attr": "",
-    "tolerance": "",
-    "race": "DRAGON",
-    "str": 0,
-    "agi": 0,
-    "mag": 0,
-    "healing": 0,
-    "extra": "",
-    "use": "",
+    "source": "フロストハイム",
     "note": ""
   },
   {
@@ -923,6 +1005,7 @@
     "type1": "TWO_HANDS",
     "type2": "AXE",
     "requirements": "",
+    "price": 7600,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -933,6 +1016,27 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ダイン再加入時装備、ヴァレンス、鉱山",
+    "note": ""
+  },
+  {
+    "name_en": "DRAGON HEWER",
+    "name_ja": "ドラゴンバスター",
+    "type1": "TWO_HANDS",
+    "type2": "AXE",
+    "requirements": "NO_DRAGONS",
+    "price": 11000,
+    "reach": 1,
+    "attr": "",
+    "tolerance": "",
+    "race": "DRAGON",
+    "str": 0,
+    "agi": 0,
+    "mag": 0,
+    "healing": 0,
+    "extra": "",
+    "use": "",
+    "source": "峠の道、混沌の洞窟",
     "note": ""
   },
   {
@@ -941,6 +1045,7 @@
     "type1": "TWO_HANDS",
     "type2": "AXE",
     "requirements": "LV9",
+    "price": 35000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -951,6 +1056,7 @@
     "healing": 0,
     "extra": "破",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": ""
   },
   {
@@ -959,6 +1065,7 @@
     "type1": "RIGHT",
     "type2": "THROWING",
     "requirements": "",
+    "price": 750,
     "reach": 3,
     "attr": "",
     "tolerance": "",
@@ -969,6 +1076,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "カスミ初期装備、イザヨイ",
     "note": ""
   },
   {
@@ -977,6 +1085,7 @@
     "type1": "RIGHT",
     "type2": "THROWING",
     "requirements": "",
+    "price": 2100,
     "reach": 3,
     "attr": "",
     "tolerance": "",
@@ -987,6 +1096,7 @@
     "healing": 0,
     "extra": "毒",
     "use": "",
+    "source": "イザヨイ、鉱山",
     "note": ""
   },
   {
@@ -995,6 +1105,7 @@
     "type1": "RIGHT",
     "type2": "THROWING",
     "requirements": "",
+    "price": 6000,
     "reach": 3,
     "attr": "",
     "tolerance": "",
@@ -1005,6 +1116,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イザヨイ行商人、地下水路、ドロップ",
     "note": ""
   },
   {
@@ -1013,6 +1125,7 @@
     "type1": "RIGHT",
     "type2": "THROWING",
     "requirements": "",
+    "price": 13000,
     "reach": 3,
     "attr": "",
     "tolerance": "",
@@ -1023,6 +1136,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イザヨイ行商人、ドロップ",
     "note": ""
   },
   {
@@ -1031,6 +1145,7 @@
     "type1": "RIGHT",
     "type2": "THROWING",
     "requirements": "",
+    "price": 32000,
     "reach": 3,
     "attr": "",
     "tolerance": "",
@@ -1041,6 +1156,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "パンデモニウム、混沌の洞窟",
     "note": "クリティカル↑"
   },
   {
@@ -1049,6 +1165,7 @@
     "type1": "RIGHT",
     "type2": "THROWING",
     "requirements": "LV9",
+    "price": 50000,
     "reach": 3,
     "attr": "",
     "tolerance": "闇死",
@@ -1059,6 +1176,7 @@
     "healing": 0,
     "extra": "死",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": ""
   },
   {
@@ -1067,6 +1185,7 @@
     "type1": "RIGHT",
     "type2": "ROD",
     "requirements": "",
+    "price": 1200,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -1077,6 +1196,7 @@
     "healing": 0,
     "extra": "",
     "use": "SILENCE",
+    "source": "ミリア初期装備、シルヴァリア、ハルウェル、賢者のほこら",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1085,6 +1205,7 @@
     "type1": "RIGHT",
     "type2": "ROD",
     "requirements": "",
+    "price": 7000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -1095,6 +1216,7 @@
     "healing": 0,
     "extra": "",
     "use": "CONFUSION",
+    "source": "クレス初期装備、イザヨイ行商人、地下水路",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1103,6 +1225,7 @@
     "type1": "RIGHT",
     "type2": "ROD",
     "requirements": "",
+    "price": 15000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -1113,6 +1236,7 @@
     "healing": 0,
     "extra": "",
     "use": "HEAVENGATE",
+    "source": "ハルウェル、試練の塔",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1121,6 +1245,7 @@
     "type1": "RIGHT",
     "type2": "ROD",
     "requirements": "ONLY_ROBO",
+    "price": 8000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -1131,6 +1256,7 @@
     "healing": 0,
     "extra": "止",
     "use": "",
+    "source": "ローンウィック",
     "note": ""
   },
   {
@@ -1139,6 +1265,7 @@
     "type1": "RIGHT",
     "type2": "ROD",
     "requirements": "LV9",
+    "price": 34000,
     "reach": 1,
     "attr": "",
     "tolerance": "",
@@ -1149,6 +1276,7 @@
     "healing": 0,
     "extra": "",
     "use": "REVIVE1",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1157,6 +1285,7 @@
     "type1": "RIGHT",
     "type2": "WAND",
     "requirements": "",
+    "price": 900,
     "reach": 1,
     "attr": "",
     "tolerance": "毒",
@@ -1167,6 +1296,7 @@
     "healing": 0,
     "extra": "",
     "use": "POISON1",
+    "source": "バルトロメ初期装備、妖精の里、シルヴァリア",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1175,6 +1305,7 @@
     "type1": "RIGHT",
     "type2": "WAND",
     "requirements": "",
+    "price": 6400,
     "reach": 1,
     "attr": "炎",
     "tolerance": "炎",
@@ -1185,6 +1316,7 @@
     "healing": 0,
     "extra": "",
     "use": "FIRE2",
+    "source": "リゼル初期装備、セレノス、鉱山",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1193,6 +1325,7 @@
     "type1": "RIGHT",
     "type2": "WAND",
     "requirements": "",
+    "price": 14400,
     "reach": 1,
     "attr": "闇",
     "tolerance": "闇",
@@ -1203,6 +1336,7 @@
     "healing": 0,
     "extra": "",
     "use": "BLOOD SUCK",
+    "source": "バルトロメ再加入時装備、試練の塔",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1211,6 +1345,7 @@
     "type1": "RIGHT",
     "type2": "WAND",
     "requirements": "LV9",
+    "price": 22500,
     "reach": 1,
     "attr": "冷",
     "tolerance": "冷",
@@ -1221,6 +1356,7 @@
     "healing": 0,
     "extra": "",
     "use": "FREEZE2",
+    "source": "パンデモニウム、混沌の洞窟",
     "note": "呪文発動時WT減少"
   },
   {
@@ -1229,6 +1365,7 @@
     "type1": "RIGHT",
     "type2": "WAND",
     "requirements": "ONLY_FAIRYS",
+    "price": 60000,
     "reach": 1,
     "attr": "",
     "tolerance": "炎死",
@@ -1239,6 +1376,7 @@
     "healing": 1,
     "extra": "",
     "use": "",
+    "source": "混沌の洞窟、アイゼンタール（金）",
     "note": "クリティカル↑。ワンドなのにやたら火力が高い。呪文発動時WT減少"
   },
   {
@@ -1247,6 +1385,7 @@
     "type1": "LEFT",
     "type2": "SHIELD",
     "requirements": "",
+    "price": 350,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1257,6 +1396,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "アルファード・ライザ初期装備、ローンウィック",
     "note": ""
   },
   {
@@ -1265,6 +1405,7 @@
     "type1": "LEFT",
     "type2": "SHIELD",
     "requirements": "",
+    "price": 8500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1275,6 +1416,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イリス初期装備、セレノス、鉱山",
     "note": "呪文反射"
   },
   {
@@ -1283,6 +1425,7 @@
     "type1": "LEFT",
     "type2": "SHIELD",
     "requirements": "",
+    "price": 25000,
     "reach": 0,
     "attr": "",
     "tolerance": "冷眠",
@@ -1293,6 +1436,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "鉱山、パンデモニウム、混沌の洞窟",
     "note": ""
   },
   {
@@ -1301,6 +1445,7 @@
     "type1": "LEFT",
     "type2": "SHIELD",
     "requirements": "",
+    "price": 38000,
     "reach": 0,
     "attr": "",
     "tolerance": "止",
@@ -1311,6 +1456,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "混沌の洞窟",
     "note": "反撃スタン"
   },
   {
@@ -1319,6 +1465,7 @@
     "type1": "LEFT",
     "type2": "SHIELD",
     "requirements": "ONLY_RAGNA",
+    "price": 0,
     "reach": 0,
     "attr": "",
     "tolerance": "冷乱",
@@ -1329,6 +1476,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イベント：アバドーン登場",
     "note": ""
   },
   {
@@ -1337,6 +1485,7 @@
     "type1": "BODY",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 20,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1347,6 +1496,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "フィオラ・セリオン・バルトロメ・クレス初期装備、妖精の里、シルヴァリア",
     "note": ""
   },
   {
@@ -1355,6 +1505,7 @@
     "type1": "BODY",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 1700,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1365,6 +1516,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "アルヴァン・ミリア初期装備、クレス再加入時装備、ハルウェル",
     "note": "回避率アップ"
   },
   {
@@ -1373,6 +1525,7 @@
     "type1": "BODY",
     "type2": "MAGICAL",
     "requirements": "",
+    "price": 14000,
     "reach": 0,
     "attr": "",
     "tolerance": "死",
@@ -1383,6 +1536,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "試練の塔、混沌の洞窟",
     "note": ""
   },
   {
@@ -1391,6 +1545,7 @@
     "type1": "BODY",
     "type2": "MAGICAL",
     "requirements": "ONLY_FAIRYS",
+    "price": 26000,
     "reach": 0,
     "attr": "",
     "tolerance": "眠乱麻毒",
@@ -1401,6 +1556,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ドロップ",
     "note": "回避率アップ"
   },
   {
@@ -1409,6 +1565,7 @@
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 100,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1419,6 +1576,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ライザ・カゲトラ・シルファ初期装備、シルヴァリア、ローンウィック、イザヨイ",
     "note": ""
   },
   {
@@ -1427,6 +1585,7 @@
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 2000,
     "reach": 0,
     "attr": "",
     "tolerance": "乱",
@@ -1437,6 +1596,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "エリカ初期装備、イザヨイ",
     "note": ""
   },
   {
@@ -1445,6 +1605,7 @@
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 5000,
     "reach": 0,
     "attr": "",
     "tolerance": "闇",
@@ -1455,6 +1616,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "シルヴァリア",
     "note": ""
   },
   {
@@ -1463,6 +1625,7 @@
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 300,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1473,6 +1636,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "オルウェン・リゼル・カスミ初期装備、ローンウィック、イザヨイ",
     "note": ""
   },
   {
@@ -1481,6 +1645,7 @@
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 7500,
     "reach": 0,
     "attr": "",
     "tolerance": "冷",
@@ -1491,6 +1656,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "アイゼンタール（青）",
     "note": ""
   },
   {
@@ -1499,6 +1665,7 @@
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 8000,
     "reach": 0,
     "attr": "",
     "tolerance": "麻",
@@ -1509,6 +1676,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "グリム初期装備、フロストハイム",
     "note": ""
   },
   {
@@ -1517,6 +1685,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 700,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1527,6 +1696,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ダイン・アルファード・TKG-48初期装備、ローンウィック、フロストハイム、ストーンバラ",
     "note": ""
   },
   {
@@ -1535,6 +1705,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 3000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1545,6 +1716,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ラグナ・イリス・ヴァルド初期装備、フロストハイム、ストーンバラ、ヴァレンス",
     "note": ""
   },
   {
@@ -1553,6 +1725,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 12000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1563,6 +1736,7 @@
     "healing": 0,
     "extra": "敵",
     "use": "",
+    "source": "ダイン再加入時装備、ヴァレンス、鉱山",
     "note": ""
   },
   {
@@ -1571,6 +1745,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 17000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1581,6 +1756,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "試練の塔、パンデモニウム、混沌の洞窟",
     "note": ""
   },
   {
@@ -1589,6 +1765,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 50000,
     "reach": 0,
     "attr": "",
     "tolerance": "麻死闇",
@@ -1599,6 +1776,7 @@
     "healing": 1,
     "extra": "",
     "use": "",
+    "source": "混沌の洞窟",
     "note": ""
   },
   {
@@ -1607,6 +1785,7 @@
     "type1": "BODY",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 0,
     "reach": 0,
     "attr": "",
     "tolerance": "炎",
@@ -1617,6 +1796,7 @@
     "healing": 1,
     "extra": "",
     "use": "",
+    "source": "イベント：アバドーン登場",
     "note": ""
   },
   {
@@ -1625,6 +1805,7 @@
     "type1": "HEAD",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 150,
     "reach": 0,
     "attr": "",
     "tolerance": "眠",
@@ -1635,6 +1816,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "カゲトラ・カスミ初期装備、イザヨイ",
     "note": ""
   },
   {
@@ -1643,6 +1825,7 @@
     "type1": "HEAD",
     "type2": "GENERAL",
     "requirements": "ONLY_FEMALE",
+    "price": 3000,
     "reach": 0,
     "attr": "",
     "tolerance": "眠黙乱",
@@ -1653,6 +1836,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "試練の塔、混沌の洞窟、ドロップ",
     "note": ""
   },
   {
@@ -1661,6 +1845,7 @@
     "type1": "HEAD",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 6700,
     "reach": 0,
     "attr": "",
     "tolerance": "乱死",
@@ -1671,6 +1856,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "賢者の祠（隠し）、ドロップ",
     "note": ""
   },
   {
@@ -1679,6 +1865,7 @@
     "type1": "HEAD",
     "type2": "GENERAL",
     "requirements": "ONLY_DRAGON",
+    "price": 4200,
     "reach": 0,
     "attr": "",
     "tolerance": "炎",
@@ -1689,6 +1876,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "セレノス",
     "note": ""
   },
   {
@@ -1697,6 +1885,7 @@
     "type1": "HEAD",
     "type2": "GENERAL",
     "requirements": "ONLY_ROBO",
+    "price": 3500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1707,6 +1896,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ローンウィック",
     "note": "けいかい"
   },
   {
@@ -1715,6 +1905,7 @@
     "type1": "HEAD",
     "type2": "MAGICAL",
     "requirements": "",
+    "price": 3200,
     "reach": 0,
     "attr": "",
     "tolerance": "闇",
@@ -1725,6 +1916,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "賢者の祠、混沌の洞窟、ドロップ",
     "note": ""
   },
   {
@@ -1733,6 +1925,7 @@
     "type1": "HEAD",
     "type2": "MAGICAL",
     "requirements": "",
+    "price": 10000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1743,6 +1936,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "パンデモニウム、混沌の洞窟、ドロップ",
     "note": ""
   },
   {
@@ -1751,6 +1945,7 @@
     "type1": "HEAD",
     "type2": "MAGICAL",
     "requirements": "ONLY_FAIRYS",
+    "price": 2,
     "reach": 0,
     "attr": "",
     "tolerance": "黙",
@@ -1761,6 +1956,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ドロップ",
     "note": ""
   },
   {
@@ -1769,6 +1965,7 @@
     "type1": "HEAD",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 40,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1779,6 +1976,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "シルファ初期装備、妖精の里、シルヴァリア、ローンウィック",
     "note": ""
   },
   {
@@ -1787,6 +1985,7 @@
     "type1": "HEAD",
     "type2": "LIGHT",
     "requirements": "NO_FAIRYS",
+    "price": 1400,
     "reach": 0,
     "attr": "",
     "tolerance": "毒",
@@ -1797,6 +1996,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "峠の道、混沌の洞窟、ドロップ",
     "note": ""
   },
   {
@@ -1805,6 +2005,7 @@
     "type1": "HEAD",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 400,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1815,6 +2016,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ローンウィック、ストーンバラ、フロストハイム",
     "note": ""
   },
   {
@@ -1823,6 +2025,7 @@
     "type1": "HEAD",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 5500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1833,6 +2036,7 @@
     "healing": 0,
     "extra": "敵",
     "use": "",
+    "source": "ヴァレンス",
     "note": ""
   },
   {
@@ -1841,6 +2045,7 @@
     "type1": "HEAD",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 16000,
     "reach": 0,
     "attr": "",
     "tolerance": "炎黙",
@@ -1851,6 +2056,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "パンデモニウム、混沌の洞窟",
     "note": ""
   },
   {
@@ -1859,6 +2065,7 @@
     "type1": "HEAD",
     "type2": "HEAVY",
     "requirements": "ONLY_RAGNA",
+    "price": 0,
     "reach": 0,
     "attr": "",
     "tolerance": "眠麻",
@@ -1869,6 +2076,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イベント：アバドーン登場",
     "note": ""
   },
   {
@@ -1877,6 +2085,7 @@
     "type1": "ARM",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 10000,
     "reach": 0,
     "attr": "",
     "tolerance": "炎",
@@ -1887,6 +2096,7 @@
     "healing": 0,
     "extra": "",
     "use": "FIRE1",
+    "source": "アイゼンタール（赤）",
     "note": ""
   },
   {
@@ -1895,6 +2105,7 @@
     "type1": "ARM",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 1000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1905,6 +2116,7 @@
     "healing": 0,
     "extra": "",
     "use": "TELEPORT",
+    "source": "各地の宝箱",
     "note": ""
   },
   {
@@ -1913,6 +2125,7 @@
     "type1": "ARM",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 9600,
     "reach": 0,
     "attr": "",
     "tolerance": "麻",
@@ -1923,6 +2136,7 @@
     "healing": 0,
     "extra": "",
     "use": "PROTECTION",
+    "source": "試練の塔、ハルウェル",
     "note": ""
   },
   {
@@ -1931,6 +2145,7 @@
     "type1": "ARM",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 30000,
     "reach": 0,
     "attr": "",
     "tolerance": "毒死",
@@ -1941,6 +2156,7 @@
     "healing": 0,
     "extra": "",
     "use": "CURSE",
+    "source": "混沌の洞窟、ドロップ",
     "note": ""
   },
   {
@@ -1949,6 +2165,7 @@
     "type1": "ARM",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 30000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -1959,6 +2176,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "イザヨイ行商人",
     "note": "経験値2倍"
   },
   {
@@ -1967,6 +2185,7 @@
     "type1": "ARM",
     "type2": "GENERAL",
     "requirements": "",
+    "price": 40000,
     "reach": 0,
     "attr": "",
     "tolerance": "闇",
@@ -1977,6 +2196,7 @@
     "healing": 1,
     "extra": "",
     "use": "HEALING1",
+    "source": "混沌の洞窟",
     "note": ""
   },
   {
@@ -1985,6 +2205,7 @@
     "type1": "ARM",
     "type2": "MAGICAL",
     "requirements": "",
+    "price": 8200,
     "reach": 0,
     "attr": "",
     "tolerance": "黙",
@@ -1995,6 +2216,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "セレノス",
     "note": ""
   },
   {
@@ -2003,6 +2225,7 @@
     "type1": "ARM",
     "type2": "MAGICAL",
     "requirements": "",
+    "price": 7000,
     "reach": 0,
     "attr": "",
     "tolerance": "眠",
@@ -2013,6 +2236,7 @@
     "healing": 0,
     "extra": "",
     "use": "SLEEP",
+    "source": "鉱山、混沌の洞窟",
     "note": ""
   },
   {
@@ -2021,6 +2245,7 @@
     "type1": "ARM",
     "type2": "MAGICAL",
     "requirements": "ONLY_FAIRYS",
+    "price": 36000,
     "reach": 0,
     "attr": "",
     "tolerance": "冷闇",
@@ -2031,6 +2256,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ドロップ",
     "note": "じゅもんミラー"
   },
   {
@@ -2039,6 +2265,7 @@
     "type1": "ARM",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 280,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -2049,6 +2276,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "カスミ初期装備、ローンウィック、ハルウェル",
     "note": ""
   },
   {
@@ -2057,6 +2285,7 @@
     "type1": "ARM",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 2200,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -2067,6 +2296,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "鉱山、ドロップ",
     "note": ""
   },
   {
@@ -2075,6 +2305,7 @@
     "type1": "ARM",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 20000,
     "reach": 0,
     "attr": "",
     "tolerance": "乱",
@@ -2085,6 +2316,7 @@
     "healing": 0,
     "extra": "",
     "use": "HASTE",
+    "source": "パンデモニウム、混沌の洞窟",
     "note": ""
   },
   {
@@ -2093,6 +2325,7 @@
     "type1": "ARM",
     "type2": "LIGHT",
     "requirements": "",
+    "price": 27000,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -2103,6 +2336,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ドロップ",
     "note": "にとうりゅう"
   },
   {
@@ -2111,6 +2345,7 @@
     "type1": "ARM",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 150,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -2121,6 +2356,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ローンウィック、ストーンバラ",
     "note": ""
   },
   {
@@ -2129,6 +2365,7 @@
     "type1": "ARM",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 3300,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -2139,6 +2376,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "ストーンバラ、ヴァレンス",
     "note": ""
   },
   {
@@ -2147,6 +2385,7 @@
     "type1": "ARM",
     "type2": "HEAVY",
     "requirements": "",
+    "price": 9500,
     "reach": 0,
     "attr": "",
     "tolerance": "",
@@ -2157,6 +2396,7 @@
     "healing": 0,
     "extra": "",
     "use": "",
+    "source": "混沌の洞窟、ドロップ",
     "note": "りょうてもち"
   },
   {
@@ -2165,6 +2405,7 @@
     "type1": "ARM",
     "type2": "HEAVY",
     "requirements": "ONLY_RAGNA",
+    "price": 0,
     "reach": 0,
     "attr": "",
     "tolerance": "毒闇",
@@ -2175,24 +2416,7 @@
     "healing": 0,
     "extra": "",
     "use": "ABYSS NOVA",
-    "note": ""
-  },
-  {
-    "name_en": "",
-    "name_ja": "",
-    "type1": "",
-    "type2": "",
-    "requirements": "",
-    "reach": "",
-    "attr": "",
-    "tolerance": "",
-    "race": "",
-    "str": 0,
-    "agi": 1,
-    "mag": 0,
-    "healing": 0,
-    "extra": "",
-    "use": "",
+    "source": "イベント：アバドーン登場",
     "note": ""
   }
 ]

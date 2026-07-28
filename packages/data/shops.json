@@ -1,0 +1,173 @@
+[
+  {
+    "shop_key": "FAIRY_HAMLET_ITEMS",
+    "items": [
+      "POTION",
+      "MANA DROP",
+      "DAGGER",
+      "WAND of POISON",
+      "ROBE",
+      "LEATHER CAP"
+    ],
+    "note": "妖精の里よろずや、WAND of POISONはヒュドラの洞窟で頑張れば買えるくらい"
+  },
+  {
+    "shop_key": "SILVALIA_ARMORY",
+    "items": [
+      "DAGGER",
+      "BRONZE SPEAR",
+      "MACE",
+      "ROD of SILENCE",
+      "ROBE",
+      "LEATHER ARMOR",
+      "ELVEN LEATHER",
+      "LEATHER CAP"
+    ],
+    "note": "シルヴァリア武具屋、ELVEN LEATHERはこの時点ではほぼ買えない"
+  },
+  {
+    "shop_key": "LOREWICK_WEAPONS",
+    "items": [
+      "IRON SWORD",
+      "SILVER KNIFE",
+      "BRONZE SPEAR",
+      "IRON SPEAR",
+      "IRON MACE",
+      "FLAIL",
+      "IRON AXE",
+      "WAND of POISON"
+    ],
+    "note": "ローンウィック武器屋、大都会なのでラインナップ豊富"
+  },
+  {
+    "shop_key": "LOREWICK_ARMORS",
+    "items": [
+      "IRON SHIELD",
+      "LEATHER ARMOR",
+      "CHAIN MAIL",
+      "IRON ARMOR",
+      "LEATHER CAP",
+      "IRON HELM",
+      "IRON BANGLE",
+      "COPPER GLOVES"
+    ],
+    "note": "ローンウィック防具屋、大都会なのでラインナップ豊富"
+  },
+  {
+    "shop_key": "LOREWICK_MACHINIST",
+    "items": [
+      "MANA STUNGUN",
+      "MANA RADAR"
+    ],
+    "note": "ローンウィック機械工、TKG-48が加入しなければ無意味な店"
+  },
+  {
+    "shop_key": "HALWELL_ARMORY",
+    "items": [
+      "MACE",
+      "IRON MACE",
+      "FLAIL",
+      "ROD of SILENCE",
+      "ROD of SANCTITY",
+      "ROBE",
+      "ROBE of EVASION",
+      "SHIELD RING",
+      "IRON BANGLE"
+    ],
+    "note": "ハルウェル武具屋、術師向け武具が充実。ROD of SANCTITYやSHIELD RINGはめちゃくちゃ高い"
+  },
+  {
+    "shop_key": "IZAYOI_ARMORY",
+    "items": [
+      "SILVER KNIFE",
+      "KATANA",
+      "IRON KUNAI",
+      "POISON KUNAI",
+      "LEATHER ARMOR",
+      "たくみのかわよろい",
+      "CHAIN MAIL",
+      "HACHIMAKI"
+    ],
+    "note": "イザヨイ武具屋、和系"
+  },
+  {
+    "shop_key": "IZAYOI_PEDDLER",
+    "items": [
+      "BOOK of DOOM",
+      "ICING BLADE!",
+      "SHISHIGOROSHI",
+      "ONIGOROSHI",
+      "ROD of DISCORD",
+      "ORDEAL RING"
+    ],
+    "note": "イザヨイ行商人（孤児院襲撃後）"
+  },
+  {
+    "shop_key": "EISENTAL_BLACKSMITH",
+    "items": [
+      "SOUL SLAYER",
+      "CHIZAKURA!",
+      "FIRE SPEAR",
+      "ICE SPEAR",
+      "FLAME RING",
+      "FROSTY CHAIN"
+    ],
+    "note": "アイゼンタール鍛冶屋（作ったものだけ買える）"
+  },
+  {
+    "shop_key": "FROSTHEIM_ARMORY",
+    "items": [
+      "IRON SWORD",
+      "IRON SPEAR",
+      "IRON AXE",
+      "DWARVEN AXE",
+      "DWARVEN VEST",
+      "IRON ARMOR",
+      "STEEL ARMOR",
+      "IRON HELM"
+    ],
+    "note": "フロストハイム武具屋、ドワーフのベストが目玉（だが高い）"
+  },
+  {
+    "shop_key": "STONEBOROUGH_ARMORY",
+    "items": [
+      "GOBLIN SLAYER",
+      "ENHANCE SWORD",
+      "MACE of POWER",
+      "IRON ARMOR",
+      "STEEL ARMOR",
+      "IRON HELM",
+      "COPPER GLOVES",
+      "SILVER GLOVES"
+    ],
+    "note": "ストーンバラ武具屋、戦士がつどう街のためラインナップ充実"
+  },
+  {
+    "shop_key": "VALENS_ARMORY",
+    "items": [
+      "ENHANCE SWORD",
+      "MORNINGSTAR",
+      "ZOMBIE HEWER",
+      "MIRROR SHIELD",
+      "STEEL ARMOR",
+      "GOLDEN ARMOR",
+      "GOLDEN HELM",
+      "SILVER GLOVES"
+    ],
+    "note": "ヴァレンス武具屋、世界最大で栄えている街なので豪華な武具が多い"
+  },
+  {
+    "shop_key": "SERENOS_ITEMS",
+    "items": [
+      "POTION",
+      "REMEDY",
+      "MANA DROP",
+      "MAGE MASHER",
+      "WAND of FIRE",
+      "ROBE of EVASION",
+      "DRAGON HOOD",
+      "WIZARD BANGLE"
+    ],
+    "note": "セレノスよろずや、変わり種が多い"
+  }
+]

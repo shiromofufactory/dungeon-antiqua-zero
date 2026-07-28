@@ -340,7 +340,7 @@
     "equips": [
       "KATANA",
       "SILVER KNIFE",
-      "CHAIN MAIL",
+      "LEATHER ARMOR",
       "HACHIMAKI"
     ],
     "base_hp": 51,
@@ -414,8 +414,7 @@
     "equips": [
       "IRON SWORD",
       "IRON SHIELD",
-      "IRON ARMOR",
-      "COPPER GLOVES"
+      "LEATHER ARMOR"
     ],
     "base_hp": 47,
     "base_mp": 21,
@@ -524,7 +523,6 @@
     "lv": 0,
     "equips": [
       "WAND of FIRE",
-      "MIRROR SHIELD",
       "CHAIN MAIL"
     ],
     "base_hp": 49,
@@ -673,8 +671,7 @@
     "lv": 2,
     "equips": [
       "IRON MACE",
-      "IRON SHIELD",
-      "STEEL ARMOR"
+      "DWARVEN VEST"
     ],
     "base_hp": 60,
     "base_mp": 16,
