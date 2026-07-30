@@ -260,8 +260,8 @@
     "source": "店売り"
   },
   {
-    "name_en": "BOOK of DEATH",
-    "name_ja": "ぜつめいのしょ",
+    "name_en": "BOOK of WRING",
+    "name_ja": "ほうかいのしょ",
     "type1": "ITEM",
     "type2": "ITEM",
     "requirements": "",
@@ -2054,8 +2054,8 @@
     "source": "ライザ・カゲトラ・シルファ初期装備、シルヴァリア、ローンウィック、イザヨイ"
   },
   {
-    "name_en": "たくみのかわよろい",
-    "name_ja": "たくみのかわよろい",
+    "name_en": "MASTER LEATHER",
+    "name_ja": "たつじんのかわよろい",
     "type1": "BODY",
     "type2": "LIGHT",
     "requirements": "",
