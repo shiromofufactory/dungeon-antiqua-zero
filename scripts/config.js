@@ -7,7 +7,7 @@ const SHARED_DATA_DIR =
 // doGet / doPost をデプロイした同一の GAS ウェブアプリ URL。
 const GAS_URL =
   process.env.GAS_URL ||
-  "https://script.google.com/macros/s/AKfycbyWzlmUEBF-wHiAubV5LP-BWVNhk83xGr5as1G3TRmhsOnvmitaGk7f4JolPebHnaSd/exec"
+  "https://script.google.com/macros/s/AKfycbwLPb_Ry07KPHVu_q9Csc4t8bNrLH04paMU0Rpa5xNkiMfWb0ivL4M7vf3-tvMmzGxD/exec"
 
 const DATASETS = [
   { key: "items", lineBreakFields: [] },
@@ -15,6 +15,7 @@ const DATASETS = [
   { key: "skills", lineBreakFields: ["description_ja", "description_en"] },
   { key: "characters", lineBreakFields: ["skills", "equips"] },
   { key: "shops", lineBreakFields: ["items"] },
+  { key: "monsters", lineBreakFields: ["monsters"] },
 ]
 
 module.exports = { DATA_DIR, DATASETS, GAS_URL, SHARED_DATA_DIR }

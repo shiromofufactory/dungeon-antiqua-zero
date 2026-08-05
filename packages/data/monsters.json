@@ -1,0 +1,418 @@
+[
+  {
+    "name_en": "Giant Spider",
+    "name_ja": "ヒュージスパイダー"
+  },
+  {
+    "name_en": "Tarantula",
+    "name_ja": "タランチュラ"
+  },
+  {
+    "name_en": "ワイルドボア",
+    "name_ja": "ワイルドボア"
+  },
+  {
+    "name_en": "ソニックボア",
+    "name_ja": "ソニックボア"
+  },
+  {
+    "name_en": "ジャイアントバット",
+    "name_ja": "ジャイアントバット"
+  },
+  {
+    "name_en": "ヴァンパイアバット",
+    "name_ja": "ヴァンパイアバット"
+  },
+  {
+    "name_en": "Coyote",
+    "name_ja": "コヨーテ"
+  },
+  {
+    "name_en": "Killer Wolf",
+    "name_ja": "キラーウルフ"
+  },
+  {
+    "name_en": "Hellhound",
+    "name_ja": "ヘルハウンド"
+  },
+  {
+    "name_en": "Fenrir",
+    "name_ja": "フェンリル"
+  },
+  {
+    "name_en": "Behemoth",
+    "name_ja": "ベヒーモス"
+  },
+  {
+    "name_en": "Behemoth Zombie",
+    "name_ja": "ベヒーモスゾンビ"
+  },
+  {
+    "name_en": "Griffin",
+    "name_ja": "グリフォン"
+  },
+  {
+    "name_en": "Roc",
+    "name_ja": "ロック"
+  },
+  {
+    "name_en": "Phoenix",
+    "name_ja": "フェニックス"
+  },
+  {
+    "name_en": "Ean Si",
+    "name_ja": "エイン・シー"
+  },
+  {
+    "name_en": "Cobra",
+    "name_ja": "コブラ"
+  },
+  {
+    "name_en": "Basilisk",
+    "name_ja": "バジリスク"
+  },
+  {
+    "name_en": "Lamia",
+    "name_ja": "ラミア"
+  },
+  {
+    "name_en": "Jormungandr",
+    "name_ja": "ヨルムンガンド"
+  },
+  {
+    "name_en": "アンデッドヒュドラ",
+    "name_ja": "アンデッドヒュドラ"
+  },
+  {
+    "name_en": "クラーケン",
+    "name_ja": "クラーケン"
+  },
+  {
+    "name_en": "Zombie",
+    "name_ja": "ゾンビ"
+  },
+  {
+    "name_en": "Ghoul",
+    "name_ja": "グール"
+  },
+  {
+    "name_en": "Wight",
+    "name_ja": "ワイト"
+  },
+  {
+    "name_en": "Lifestealer",
+    "name_ja": "ライフスティーラー"
+  },
+  {
+    "name_en": "Ghost",
+    "name_ja": "ゴースト"
+  },
+  {
+    "name_en": "Wraith",
+    "name_ja": "レイス"
+  },
+  {
+    "name_en": "Phantom",
+    "name_ja": "ファントム"
+  },
+  {
+    "name_en": "Jack-o'-Lantern",
+    "name_ja": "ジャックオーランタン"
+  },
+  {
+    "name_en": "Lesser Vampire",
+    "name_ja": "レッサーヴァンパイア"
+  },
+  {
+    "name_en": "Vampire",
+    "name_ja": "ヴァンパイア"
+  },
+  {
+    "name_en": "Vampire Lord",
+    "name_ja": "ヴァンパイアロード"
+  },
+  {
+    "name_en": "Goblin",
+    "name_ja": "ゴブリン"
+  },
+  {
+    "name_en": "Hobgoblin",
+    "name_ja": "ホブゴブリン"
+  },
+  {
+    "name_en": "Goblin Shaman",
+    "name_ja": "ゴブリンシャーマン"
+  },
+  {
+    "name_en": "Goblin Knight",
+    "name_ja": "ゴブリンナイト"
+  },
+  {
+    "name_en": "Goblin Lord",
+    "name_ja": "ゴブリンロード"
+  },
+  {
+    "name_en": "Goblin King",
+    "name_ja": "ゴブリンキング"
+  },
+  {
+    "name_en": "Ronin",
+    "name_ja": "ローニン"
+  },
+  {
+    "name_en": "Samurai",
+    "name_ja": "サムライ"
+  },
+  {
+    "name_en": "Master Samurai",
+    "name_ja": "マスターサムライ"
+  },
+  {
+    "name_en": "Ittosai",
+    "name_ja": "イットウサイ"
+  },
+  {
+    "name_en": "Assassin",
+    "name_ja": "アサシン"
+  },
+  {
+    "name_en": "Ninja",
+    "name_ja": "ニンジャ"
+  },
+  {
+    "name_en": "Master Ninja",
+    "name_ja": "マスターニンジャ"
+  },
+  {
+    "name_en": "Kasumi",
+    "name_ja": "カスミ"
+  },
+  {
+    "name_en": "Hanzo",
+    "name_ja": "ハンゾウ"
+  },
+  {
+    "name_en": "Swordsman",
+    "name_ja": "ソードマン"
+  },
+  {
+    "name_en": "Berserker",
+    "name_ja": "バーサーカー"
+  },
+  {
+    "name_en": "Siegfried",
+    "name_ja": "ジークフリート"
+  },
+  {
+    "name_en": "Magician",
+    "name_ja": "マジシャン"
+  },
+  {
+    "name_en": "Necromancer",
+    "name_ja": "ネクロマンサー"
+  },
+  {
+    "name_en": "Witch",
+    "name_ja": "ウィッチ"
+  },
+  {
+    "name_en": "Dark Witch",
+    "name_ja": "ダークウィッチ"
+  },
+  {
+    "name_en": "Priest",
+    "name_ja": "プリースト"
+  },
+  {
+    "name_en": "High Priest",
+    "name_ja": "ハイプリースト"
+  },
+  {
+    "name_en": "Gigas",
+    "name_ja": "ギガース"
+  },
+  {
+    "name_en": "Fire Gigas",
+    "name_ja": "ファイアギガース"
+  },
+  {
+    "name_en": "Frost Gigas",
+    "name_ja": "フロストギガース"
+  },
+  {
+    "name_en": "Poison Gigas",
+    "name_ja": "ポイズンギガース"
+  },
+  {
+    "name_en": "Snowman",
+    "name_ja": "スノウマン"
+  },
+  {
+    "name_en": "Bigfoot",
+    "name_ja": "ビッグフット"
+  },
+  {
+    "name_en": "Air Giant",
+    "name_ja": "エアジャイアント"
+  },
+  {
+    "name_en": "Ifrit",
+    "name_ja": "イフリート"
+  },
+  {
+    "name_en": "ドワーフファイター",
+    "name_ja": "ドワーフファイター"
+  },
+  {
+    "name_en": "メイジドワーフ",
+    "name_ja": "メイジドワーフ"
+  },
+  {
+    "name_en": "マッドドワーフ",
+    "name_ja": "マッドドワーフ"
+  },
+  {
+    "name_en": "Gas Dragon",
+    "name_ja": "ガスドラゴン"
+  },
+  {
+    "name_en": "Fire Dragon",
+    "name_ja": "ファイアドラゴン"
+  },
+  {
+    "name_en": "Gold Dragon",
+    "name_ja": "ゴールドドラゴン"
+  },
+  {
+    "name_en": "Undead Dragon",
+    "name_ja": "アンデッドドラゴン"
+  },
+  {
+    "name_en": "ブラックドラゴン",
+    "name_ja": "ブラックドラゴン"
+  },
+  {
+    "name_en": "Elder Dragon",
+    "name_ja": "エルディアス"
+  },
+  {
+    "name_en": "Lesser Dragon",
+    "name_ja": "レッサードラゴン"
+  },
+  {
+    "name_en": "Wyvern",
+    "name_ja": "ワイバーン"
+  },
+  {
+    "name_en": "Lindwurm",
+    "name_ja": "リントヴルム"
+  },
+  {
+    "name_en": "ティエンルン",
+    "name_ja": "ティエンルン"
+  },
+  {
+    "name_en": "ファーヴニル",
+    "name_ja": "ファーヴニル"
+  },
+  {
+    "name_en": "ニーズヘッグ",
+    "name_ja": "ニーズヘッグ"
+  },
+  {
+    "name_en": "ティアマト",
+    "name_ja": "ティアマト"
+  },
+  {
+    "name_en": "ラードーン",
+    "name_ja": "ラードーン"
+  },
+  {
+    "name_en": "Spirit",
+    "name_ja": "スピリット"
+  },
+  {
+    "name_en": "Poltergeist",
+    "name_ja": "ポルターガイスト"
+  },
+  {
+    "name_en": "Will-o'-Wisp",
+    "name_ja": "ウィルオーウィスプ"
+  },
+  {
+    "name_en": "Frau",
+    "name_ja": "フラウ"
+  },
+  {
+    "name_en": "Treant",
+    "name_ja": "トレント"
+  },
+  {
+    "name_en": "Deino",
+    "name_ja": "ディーノ"
+  },
+  {
+    "name_en": "Enyo",
+    "name_ja": "エニューオ"
+  },
+  {
+    "name_en": "Pemphredo",
+    "name_ja": "ペムフレド"
+  },
+  {
+    "name_en": "Alphard",
+    "name_ja": "アルファード"
+  },
+  {
+    "name_en": "Bartholomew",
+    "name_ja": "バルトロメ"
+  },
+  {
+    "name_en": "Cress",
+    "name_ja": "クレス"
+  },
+  {
+    "name_en": "Dain",
+    "name_ja": "ダイン"
+  },
+  {
+    "name_en": "Elika",
+    "name_ja": "エリカ"
+  },
+  {
+    "name_en": "Imp",
+    "name_ja": "インプ"
+  },
+  {
+    "name_en": "Gargoyle",
+    "name_ja": "ガーゴイル"
+  },
+  {
+    "name_en": "Incubus",
+    "name_ja": "インキュバス"
+  },
+  {
+    "name_en": "Greater Demon",
+    "name_ja": "グレーターデーモン"
+  },
+  {
+    "name_en": "Belial",
+    "name_ja": "ベリアル"
+  },
+  {
+    "name_en": "Lilith",
+    "name_ja": "リリス"
+  },
+  {
+    "name_en": "Succubus",
+    "name_ja": "サキュバス"
+  },
+  {
+    "name_en": "Hel",
+    "name_ja": "ヘル"
+  },
+  {
+    "name_en": "だいあくま",
+    "name_ja": "だいあくま"
+  }
+]

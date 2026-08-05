@@ -605,7 +605,7 @@
     "base_str": 14,
     "base_agi": 23,
     "base_mag": 22,
-    "eq_sword": 0,
+    "eq_sword": 1,
     "eq_knife": 1,
     "eq_katana": 0,
     "eq_spear": 1,
