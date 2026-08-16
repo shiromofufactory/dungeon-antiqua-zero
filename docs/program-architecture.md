@@ -88,9 +88,8 @@ app/
 │
 ├── scenes/
 │   ├── title.py
-│   ├── village.py
 │   ├── field.py
-│   ├── town.py
+│   ├── town.py              # 「妖精の里」もtownの1種である
 │   └── battle.py
 │
 ├── ui/
