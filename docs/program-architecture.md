@@ -4,7 +4,7 @@
 
 この文書は、Dungeon Antiqua ZERO（以下、ZERO）の実装を開始・拡張するときのプログラム構造の基準を定める。
 
-ゲーム内容、世界設定、シナリオ、システム仕様のベースドキュメントは [`da0.md`](./da0.md) とする。本書はそれらを実装するための責務分割、依存関係、状態管理、画面遷移の方針を扱う。
+ゲーム内容、世界設定、シナリオ、システム仕様のベースドキュメントは [`content/docs/da0.md`](../content/docs/da0.md) とする。本書はそれらを実装するための責務分割、依存関係、状態管理、画面遷移の方針を扱う。共有データの運用は [`content-workflow.md`](./content-workflow.md) に定める。
 
 設計は最初から全ディレクトリを作ることを要求しない。小さく実装を始め、責務が増えた時点で本書の境界に沿って分割する。
 
@@ -49,7 +49,7 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 
 ## 現在のリポジトリ構成
 
-2026年8月時点では、実装用ディレクトリは `packages` から `app` に改名されている。
+2026年8月時点では、実装用ディレクトリは `packages` から `app` に改名されている。スタッフ共有コンテンツは独立したprivateリポジトリへ履歴付きで分離し、`content` 自体をGit submoduleとして配置する。
 
 ```text
 app/
@@ -65,14 +65,23 @@ app/
     ├── k6x8_gothic.bdf
     └── k8x12S.bdf
 
+content/                    # 共有コンテンツsubmodule
+├── data/                   # JSONの正本
+├── docs/da0.md             # 企画・仕様のベースドキュメント
+├── portal/                 # スタッフポータルの生成処理・表示資産
+└── scripts/                # JSON検証とGoogle Sheets同期
+
 docs/
-├── da0.md
+├── content-workflow.md
 └── program-architecture.md
+
+scripts/
+└── sync-content.mjs        # submoduleからapp/dataを生成
 ```
 
-`app/data` と `app/fonts` は既存資産として扱い、構造整備のために内容やキーを無断で変更しない。
+`content/data` は共有JSONの正本である。`app/data` は `npm run content:sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
 
-データ同期スクリプト `scripts/config.js` は現時点で旧パス `packages/data` を参照している。同期スクリプトを実行する前に `app/data` へ更新する必要がある。パスが更新されるまでは、スクリプトが新しい `app/data` を読み書きするとはみなさない。
+Google Sheetsとの双方向同期とポータル生成は共有コンテンツsubmoduleの責務とし、ゲーム本体の `scripts/` へ混在させない。`app/fonts` は引き続きゲーム本体の既存資産として扱う。
 
 ## 目標ディレクトリ構成
 
@@ -103,7 +112,7 @@ app/
 │   ├── inventory.py         # 所持、使用、装備にまたがる操作
 │   └── save.py              # SaveDataと保存形式の変換・入出力
 │
-├── data/                    # JSONデータ
+├── data/                    # content/dataから生成するJSON
 ├── fonts/                   # フォント資産
 ├── member.py
 ├── monster.py

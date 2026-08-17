@@ -1,0 +1,4 @@
+[submodule "content"]
+	path = content
+	url = https://github.com/shiromofufactory/dungeon-antiqua-zero-content.git
+	branch = master
