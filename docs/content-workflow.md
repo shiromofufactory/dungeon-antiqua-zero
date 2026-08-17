@@ -104,7 +104,9 @@ npm run content:put-data
 npm run portal:build
 ```
 
-出力は `dist/` に作られ、画像とCSSは別ファイルとして配信する。単体HTMLは生成しない。Cloud Runへの配備はGitHub Actionsの `deploy-portal.yml` が担当し、Google認証にはCloud Run IAPを用いる。GCPプロジェクト、リージョン、Workload Identity Federation、閲覧許可ユーザーはリポジトリ設定で管理し、ソースへ埋め込まない。
+出力は `dist/` に作られ、画像とCSSは別ファイルとして配信する。単体HTMLは生成しない。ローカル確認は `npm run portal:serve` を使い、`http://localhost:8000/`を開く。このコマンドは配信前にポータルを再生成する。`npm run portal:preview`も同じ処理の別名である。
+
+Cloud Runへの配備はGitHub Actionsの `deploy-portal.yml` が担当し、Google認証にはCloud Run IAPを用いる。GCPプロジェクト、リージョン、Workload Identity Federation、閲覧許可ユーザーはリポジトリ設定で管理し、ソースへ埋め込まない。
 
 ## 禁止事項
 
