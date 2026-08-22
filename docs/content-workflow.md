@@ -131,7 +131,7 @@ npm run content:put-data
 
 ## スタッフポータル
 
-ポータルは `docs/da0.md` と `data/*.json` から生成するWebサイトである。JSON由来の表はMarkdownへ手作業で転記せず、`docs/da0.md` 内の `portal:` マーカーへビルド時に挿入する。
+ポータルは `docs/da0.md`、`data/*.json`、`images/` から生成するWebサイトである。JSON由来の表と画像リファレンスはMarkdownへ手作業で転記せず、`docs/da0.md` 内の `portal:` マーカーへビルド時に挿入する。
 
 ```sh
 npm run portal:build
