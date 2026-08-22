@@ -53,6 +53,8 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 
 ```text
 app/
+├── resources/
+│   └── images.py              # 生成済み画像bundleの本番用loader
 ├── data/
 │   ├── characters.json
 │   ├── items.json
@@ -60,6 +62,7 @@ app/
 │   ├── shops.json
 │   ├── skills.json
 │   └── spells.json
+├── images/                    # content/imagesから生成する実行時画像データ
 └── fonts/
     ├── fusion-pixel-12px-monospaced-zh_hans.bdf
     ├── k6x8_gothic.bdf
@@ -67,6 +70,7 @@ app/
 
 content/                    # 共有コンテンツsubmodule
 ├── data/                   # JSONの正本
+├── images/                 # PNG/GIF画像の正本
 ├── docs/da0.md             # 企画・仕様のベースドキュメント
 ├── portal/                 # スタッフポータルの生成処理・表示資産
 └── scripts/                # JSON検証とGoogle Sheets同期
@@ -76,10 +80,17 @@ docs/
 └── program-architecture.md
 
 scripts/
-└── sync-content.mjs        # submoduleからapp/dataを生成
+├── sync-content.mjs        # submoduleからapp/dataを生成
+└── build-images.py         # PNGをパレット番号へ変換してapp/imagesを生成
+
+tools/
+├── README.md               # 開発用プログラムの配置基準と操作方法
+└── image_viewer.py         # 本番用画像をPyxelで確認するviewer
 ```
 
 `content/data` は共有JSONの正本である。`app/data` は `npm run content:sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
+
+`content/images` はゲームとスタッフポータルで共有するPNG/GIF画像の正本である。`app/images` は `npm run images:build` で作るGit管理対象外の実行時データであり、直接編集しない。画像のパレット変換はビルド時に行い、実行時は生成済みの1ピクセル1バイトのパレット番号を読み込む。
 
 Google Sheetsとの双方向同期とポータル生成は共有コンテンツsubmoduleの責務とし、ゲーム本体の `scripts/` へ混在させない。`app/fonts` は引き続きゲーム本体の既存資産として扱う。
 
@@ -112,13 +123,65 @@ app/
 │   ├── inventory.py         # 所持、使用、装備にまたがる操作
 │   └── save.py              # SaveDataと保存形式の変換・入出力
 │
+├── resources/
+│   └── images.py            # manifestと画像bundleの読込・検証
+│
 ├── data/                    # content/dataから生成するJSON
+├── images/                  # content/imagesから生成するmanifestと画像バイナリ
 ├── fonts/                   # フォント資産
 ├── member.py
 ├── monster.py
 ├── item.py
 └── spell.py
 ```
+
+## 画像リソースの責務
+
+画像のPNG/GIF原本、ゲーム用生成物、実行時のイメージバンクを同じものとして扱わない。
+
+- `content/images`: 編集、レビュー、ポータル表示に使うPNG/GIFの正本
+- `app/images/manifest.json`: 安定した画像ID、寸法、バイナリ内の配置情報
+- `app/images/graphics.bin`: Pyxelパレット番号へ変換済みの画素列
+- `app/assets.pyxres`: UIや共通タイルなど、常駐させる固定リソース
+- Pyxelイメージバンク: 現在のSceneで必要な画像を置く実行時領域
+
+SceneやRendererは表示名や元画像ファイル名を直接組み立てず、manifestの画像IDを使う。元画像の読み込み、色変換、ファイルI/O、イメージバンクへの転送は `draw()` で行わず、起動時またはScene遷移時に画像リソースを所有するサービスが行う。Domain Modelはバンク番号やUV座標を所有しない。
+
+ゲーム起動時にComposition Rootで `ImageResources` を1つ生成し、画像を必要とするSceneやRendererへ明示的に渡す。モジュールグローバルのloaderや汎用 `util.set_image()` は作らない。
+
+```python
+image_resources = ImageResources()
+field_scene = FieldScene(save_data, images=image_resources)
+```
+
+イメージバンクへの転送には `ImageResources.copy_to_bank()` を標準APIとして使う。呼び出し側は生の画素配列ではなく安定した画像IDと転送先を指定する。256×256を超えるシートやアニメーションの一部を転送するときは、転送元矩形を明示する `copy_region_to_bank()` を使う。
+
+```python
+images.copy_to_bank("background/bg_nector", bank=1, x=0, y=0)
+
+images.copy_region_to_bank(
+    "effects/spells",
+    bank=2,
+    source_x=0,
+    source_y=64,
+    width=128,
+    height=64,
+    x=0,
+    y=0,
+)
+```
+
+いずれも転送元または転送先が範囲外ならエラーとし、暗黙のクリッピングは行わない。転送はScene開始、敵出現、装備変更など画像が変わったタイミングで行い、`draw()` ではバンクからの描画だけを行う。バンク番号と配置座標はSceneやRenderer側の一時的な表示設計であり、Domain Modelや画像manifestへ保存しない。
+
+パレット番号1の `#FF0080` は、ZERO全体で画像の透過色として予約する。画像ビルドではPNGの完全透明ピクセル、GIFの論理背景色と完全透明ピクセルを番号1へ変換し、半透明ピクセルはエラーとする。透過付き画像を描画するRendererは `blt()` / `bltm()` の `colkey` に1を指定する。番号1を通常の表示色として使わず、透過番号をSceneや個別画像ごとに変更しない。GIFは静止画だけを扱い、アニメーションGIFは専用の実行時仕様を定めるまで変換しない。
+
+## 開発用中間プログラム
+
+画像viewer、マップ確認、戦闘テストなど、Pyxelを起動して本番データを確認するプログラムはリポジトリ直下の `tools/` に置く。自動生成や非対話の検証を行う `scripts/`、配布対象の `app/` と責務を分ける。
+
+開発用プログラムのために画像やJSONを複製しない。`app/data`、`app/images`、`app/assets.pyxres`、`app/assets.pyxpal` を本番と同じ入口から読む。manifestや保存形式など、本番と共有すべき解釈処理は `app/resources` や該当Systemが所有し、`tools/` は画面、入力、選択中の対象といったツール固有状態だけを所有する。これによりviewerだけが成功し、ゲーム本体では読めないという形式差異を防ぐ。
+
+ツール同士を巨大な共通Appへ統合しない。各ツールを `python3 -m tools.<name>` で独立起動できる小さなComposition Rootとし、複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。`tools/` は `pyxel package app ...` の配布対象に含めない。
 
 例えば `scenes/town.py` が店、寺院、宿など複数の独立した変更理由を持つようになったら、次のようにパッケージへ昇格させる。
 

@@ -1,5 +1,8 @@
 node_modules
+__pycache__/
+*.pyc
 app/data/
+app/images/
 scripts/node_modules
 scripts/package-lock.json
 tmp

@@ -11,6 +11,9 @@
     "content:get-data": "npm --prefix content run get-data",
     "content:put-data": "npm --prefix content run put-data",
     "content:put-data:dry-run": "npm --prefix content run put-data:dry-run",
+    "images:build": "python3 scripts/build-images.py",
+    "images:build:force": "python3 scripts/build-images.py --allow-palette-mismatch",
+    "tools:image-viewer": "python3 -B -m tools.image_viewer",
     "portal:build": "npm --prefix content run portal:build",
     "portal:serve": "npm --prefix content run portal:serve",
     "portal:preview": "npm --prefix content run portal:preview"
