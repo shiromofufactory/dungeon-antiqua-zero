@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 import pyxel
 
-TEXT_GRID_X = 2
+TEXT_GRID_X = 4
 TEXT_GRID_Y = 4
 
 FRAME_BANK = 0
@@ -18,18 +18,18 @@ FRAME_EDGE_STEP = 4
 FRAME_COLKEY = 1
 GRADIENT_INSET = 4
 
-GRADIENT_COLORS = (10, 11)
-GRADIENT_STAGE_COUNT = len(GRADIENT_COLORS) * 2 - 1
-GRADIENT_DITHER = 0.5
+GRADIENT_COLORS = (10, 6)
+GRADIENT_DITHER_RATIOS = (1.0, 0.75, 0.5, 0.25, 0.0)
+GRADIENT_STAGE_COUNT = len(GRADIENT_DITHER_RATIOS)
 DEFAULT_TEXT_COLOR = 5
 DEFAULT_TEXT_SHADOW_COLOR = 0
 
 
 @dataclass(frozen=True)
 class WindowText:
-    """Text placed relative to a window's content origin.
+    """Text placed relative to a window's frame origin.
 
-    ``x`` advances in 2-pixel units and ``y`` advances in 4-pixel units.
+    ``x`` and ``y`` both advance in 4-pixel units.
     A font can be assigned per text; ``None`` uses the window's default font.
     """
 
@@ -56,11 +56,11 @@ class WindowText:
 
 
 class Window:
-    """A grid-positioned window with a framed gradient background.
+    """A grid-positioned text origin with an optional framed background.
 
-    The window rectangle and its text use the same fine grid: 2 pixels
-    horizontally and 4 pixels vertically. Drawing coordinates are converted to
-    pixels internally.
+    The window rectangle and its text use the same 4x4-pixel grid. Drawing
+    coordinates are converted to pixels internally. A transparent window draws
+    only its text and uses its top-left position as the coordinate origin.
     """
 
     def __init__(
@@ -72,6 +72,7 @@ class Window:
         texts: Iterable[WindowText] = (),
         *,
         font: Any | None = None,
+        transparent: bool = False,
     ) -> None:
         values = (x, y, width, height)
         if not all(isinstance(value, int) for value in values):
@@ -81,14 +82,17 @@ class Window:
             or height * TEXT_GRID_Y < FRAME_TILE_SIZE * 2
         ):
             raise ValueError(
-                "window width must be at least 8 grid units and height at least 4"
+                "window width and height must be at least 4 grid units"
             )
+        if not isinstance(transparent, bool):
+            raise TypeError("transparent must be a boolean")
 
         self.x = x
         self.y = y
         self.width = width
         self.height = height
         self.font = font
+        self.transparent = transparent
         self._texts: list[WindowText] = []
         for text in texts:
             self._validate_text_position(text)
@@ -140,7 +144,7 @@ class Window:
         font: Any | None = None,
         shadow_color: int | None = DEFAULT_TEXT_SHADOW_COLOR,
     ) -> WindowText:
-        """Add text at a free position in the window's 2x4-pixel grid."""
+        """Add text at a free position in the window's 4x4-pixel grid."""
 
         placement = WindowText(text, x, y, color, font, shadow_color)
         self._validate_text_position(placement)
@@ -158,13 +162,14 @@ class Window:
 
         self._validate_text_position(text)
         return (
-            self.content_x + text.x * TEXT_GRID_X,
-            self.content_y + text.y * TEXT_GRID_Y,
+            self.pixel_x + text.x * TEXT_GRID_X,
+            self.pixel_y + text.y * TEXT_GRID_Y,
         )
 
     def draw(self) -> None:
-        self._draw_gradient()
-        self._draw_frame()
+        if not self.transparent:
+            self._draw_gradient()
+            self._draw_frame()
         self._draw_texts()
 
     def _validate_text_position(self, text: WindowText) -> None:
@@ -172,36 +177,34 @@ class Window:
             raise TypeError("texts must contain WindowText instances")
         pixel_x = text.x * TEXT_GRID_X
         pixel_y = text.y * TEXT_GRID_Y
-        if pixel_x >= self.content_width or pixel_y >= self.content_height:
-            raise ValueError("text origin must be inside the window content area")
+        if pixel_x >= self.pixel_width or pixel_y >= self.pixel_height:
+            raise ValueError("text origin must be inside the window area")
 
     def _draw_gradient(self) -> None:
         gradient_x = self.pixel_x + GRADIENT_INSET
         gradient_y = self.pixel_y + GRADIENT_INSET
         gradient_width = self.pixel_width - GRADIENT_INSET * 2
         gradient_height = self.pixel_height - GRADIENT_INSET * 2
+        foreground_color, background_color = GRADIENT_COLORS
 
         try:
             for stage, offset, band_height in _gradient_bands(gradient_height):
-                lower_color = GRADIENT_COLORS[stage // 2]
                 pyxel.dither(1.0)
                 pyxel.rect(
                     gradient_x,
                     gradient_y + offset,
                     gradient_width,
                     band_height,
-                    lower_color,
+                    background_color,
                 )
-                if stage % 2:
-                    upper_color = GRADIENT_COLORS[stage // 2 + 1]
-                    pyxel.dither(GRADIENT_DITHER)
-                    pyxel.rect(
-                        gradient_x,
-                        gradient_y + offset,
-                        gradient_width,
-                        band_height,
-                        upper_color,
-                    )
+                pyxel.dither(GRADIENT_DITHER_RATIOS[stage])
+                pyxel.rect(
+                    gradient_x,
+                    gradient_y + offset,
+                    gradient_width,
+                    band_height,
+                    foreground_color,
+                )
         finally:
             pyxel.dither(1.0)
 

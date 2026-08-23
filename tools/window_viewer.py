@@ -14,6 +14,8 @@ from ui import Window, WindowText
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 BACKGROUND_IMAGE_ID = "background/bg_nector"
+CH_BATTLE_IMAGE_ID = "characters/ch_battle"
+MONSTERS_IMAGE_IDS = ["monsters/01", "monsters/04", "monsters/09", "monsters/12"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,7 +38,7 @@ class WindowViewer:
         pyxel.init(
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
-            title="Dungeon Antiqua ZERO Window Viewer",
+            title="Dungeon Antiqua ZERO Test Viewer",
         )
         pyxel.load(str(APP_ROOT / "assets.pyxres"))
         pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
@@ -53,26 +55,46 @@ class WindowViewer:
                 f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}"
             )
         self.background = resources.image(BACKGROUND_IMAGE_ID)
-
+        self.characters = resources.image(CH_BATTLE_IMAGE_ID)
+        self.monsters = [resources.image(id) for id in MONSTERS_IMAGE_IDS]
         font_6x8 = pyxel.Font(str(APP_ROOT / "fonts" / "k6x8_gothic.bdf"))
         font_8x12 = pyxel.Font(str(APP_ROOT / "fonts" / "k8x12S.bdf"))
-
+        """
         self.windows = (
             Window(
-                4,
-                40,
-                120,
+                0,
+                41,
+                30,
                 19,
                 (
-                    WindowText("フィオラ", 0, 0, font=font_8x12),
-                    WindowText("セリオン", 0, 3, font=font_8x12),
-                    WindowText("アルヴァン", 0, 6, font=font_8x12),
-                    WindowText("ラグナ", 0, 9, font=font_8x12),
-                    WindowText("エリカ", 0, 12, font=font_8x12),
+                    WindowText("ヒュージスパイダー　　　２", 2, 2, font=font_8x12),
+                    WindowText("コヨーテ　　　　　　　　１", 2, 5, font=font_8x12),
+                    WindowText("グリフォン　　　　　　　１", 2, 8, font=font_8x12),
+                    WindowText("コブラ　　　　　　　　　１", 2, 11, font=font_8x12),
+                ),
+            ),
+            Window(
+                30,
+                41,
+                34,
+                19,
+                (
+                    WindowText("フィオラ　　　９９９／９９９", 2, 2, font=font_8x12),
+                    WindowText("セリオン　　　９９９／９９９", 2, 5, font=font_8x12),
+                    WindowText("アルヴァン　　９９９／９９９", 2, 8, font=font_8x12),
+                    WindowText("エリカ　　　　９９９／９９９", 2, 11, font=font_8x12),
+                    WindowText("ラグナ　　　　９９９／９９９", 2, 14, font=font_8x12),
                 ),
             ),
         )
-
+        """
+        self.windows = []
+        for i in range(5):
+            window = Window(52, 17 + i * 8, 7, 5, transparent=True)
+            name = ("フィオラ", "セリオン", "アルヴァン", "エリカ", "ラグナ")[i]
+            window.add_text(name, 0, 0, font=font_8x12)
+            window.add_text("９９９／９９９", 0, 4, font=font_6x8)
+            self.windows.append(window)
         if screenshot is not None:
             self.draw()
             screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +121,35 @@ class WindowViewer:
         )
         for window in self.windows:
             window.draw()
+        """
+        # キャラ絵（仮）
+        for i in range(5):
+            x = 200 + i * 4 + (20 if i in (1, 2) else 0)
+            pyxel.blt(x, 48 + i * 20, self.characters, 0, i * 32, 16, 32, 1)
+        # モンスター絵（仮）
+        for i in range(5):
+            x = (2, 18, 66, 82, 126)[i]
+            y = (36, 100, 36, 100, 36)[i]
+            pat = (0, 0, 1, 2, 3)[i]
+            pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, 5)
+        """
+        # キャラ絵（仮）
+        for i in range(5):
+            x = 160 + i * 4 + (16 if i in (1, 2, 4) else 0)
+            pyxel.blt(x, 68 + i * 32, self.characters, 0, i * 32, 16, 32, 1)
+        # モンスター絵（仮）
+        for i in range(5):
+            x = (4, 12, 4, 68, 76)[i]
+            y = (40, 104, 168, 72, 136)[i]
+            pat = (0, 0, 1, 2, 3)[i]
+            pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, 5)
+        # タイムライン（仮）
+        for i in range(6):
+            u = (0, 2, 4, 6, 8, 0)[i]
+            v, c = (2, 13) if i == 2 else (6, 49)
+            pyxel.blt(8 + i * 20, 8, 1, u * 16, v * 16, 16, 16, 6)
+            pyxel.rect(8 + i * 20, 26, 16, 1, c)
+            pyxel.rect(8 + i * 20, 27, 16, 1, c - 1)
 
 
 def main() -> int:

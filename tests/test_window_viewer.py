@@ -10,6 +10,7 @@ class WindowViewerTest(unittest.TestCase):
     def test_draw_places_windows_over_full_screen_background(self) -> None:
         viewer = WindowViewer.__new__(WindowViewer)
         viewer.background = object()
+        viewer.characters = object()
         first_window = Mock()
         second_window = Mock()
         viewer.windows = (first_window, second_window)
@@ -20,12 +21,13 @@ class WindowViewerTest(unittest.TestCase):
 
         with patch(
             "tools.window_viewer.pyxel.blt",
-            side_effect=lambda *args: draw_order.append("background"),
+            side_effect=lambda *args: draw_order.append("blt"),
         ) as blt:
-            viewer.draw()
+            with patch("tools.window_viewer.pyxel.rect"):
+                viewer.draw()
 
         self.assertEqual(
-            blt.call_args,
+            blt.call_args_list[0],
             call(
                 0,
                 0,
@@ -37,8 +39,8 @@ class WindowViewerTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            draw_order,
-            ["background", "first_window", "second_window"],
+            draw_order[:3],
+            ["blt", "first_window", "second_window"],
         )
 
 

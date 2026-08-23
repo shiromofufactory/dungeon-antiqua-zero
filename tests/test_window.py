@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from app.ui.window import (
     GRADIENT_COLORS,
+    GRADIENT_DITHER_RATIOS,
     GRADIENT_STAGE_COUNT,
     Window,
     WindowText,
@@ -13,9 +14,11 @@ from app.ui.window import (
 
 
 class WindowTest(unittest.TestCase):
-    def test_text_uses_fine_grid_relative_to_content_origin(self) -> None:
-        window = Window(3, 5, 40, 10)
-        text = window.add_text("right", 17, 3)
+    def test_text_uses_fine_grid_relative_to_frame_origin(self) -> None:
+        window = Window(2, 5, 20, 10)
+        frame_origin = window.add_text("frame", 0, 0)
+        former_content_origin = window.add_text("content", 2, 2)
+        text = window.add_text("right", 10, 5)
 
         self.assertEqual(
             (
@@ -24,29 +27,31 @@ class WindowTest(unittest.TestCase):
                 window.pixel_width,
                 window.pixel_height,
             ),
-            (6, 20, 80, 40),
+            (8, 20, 80, 40),
         )
+        self.assertEqual(window.text_position(frame_origin), (8, 20))
+        self.assertEqual(window.text_position(former_content_origin), (16, 28))
         self.assertEqual(window.text_position(text), (48, 40))
 
-    def test_text_origin_must_be_in_content_area(self) -> None:
-        window = Window(0, 0, 16, 6)
+    def test_text_origin_must_be_in_window_area(self) -> None:
+        window = Window(0, 0, 8, 6)
 
         with self.assertRaises(ValueError):
             window.add_text("outside", 8, 0)
         with self.assertRaises(ValueError):
-            window.add_text("outside", 0, 2)
+            window.add_text("outside", 0, 6)
 
     def test_texts_can_use_window_default_and_per_text_fonts(self) -> None:
         default_font = object()
         override_font = object()
         window = Window(
+            1,
             2,
-            2,
-            32,
+            16,
             10,
             (
-                WindowText("left", 0, 0),
-                WindowText("right", 16, 2, 12, override_font),
+                WindowText("left", 2, 2),
+                WindowText("right", 10, 4, 12, override_font),
             ),
             font=default_font,
         )
@@ -75,7 +80,7 @@ class WindowTest(unittest.TestCase):
         window = Window(
             0,
             0,
-            16,
+            8,
             6,
             (WindowText("flat", 0, 0, shadow_color=None),),
         )
@@ -84,10 +89,10 @@ class WindowTest(unittest.TestCase):
             window._draw_texts()
 
         self.assertEqual(draw_text.call_count, 1)
-        self.assertEqual(draw_text.call_args.args, (8, 8, "flat", 5, None))
+        self.assertEqual(draw_text.call_args.args, (0, 0, "flat", 5, None))
 
-    def test_gradient_has_solid_and_dithered_intermediate_stages(self) -> None:
-        window = Window(2, 2, 16, 8)
+    def test_gradient_changes_dither_ratio_between_two_colors(self) -> None:
+        window = Window(1, 2, 8, 8)
 
         with (
             patch("app.ui.window.pyxel.dither") as dither,
@@ -96,15 +101,14 @@ class WindowTest(unittest.TestCase):
             window._draw_gradient()
 
         drawn_colors = [call.args[4] for call in rect.call_args_list]
-        expected_colors: list[int] = []
-        for stage in range(len(GRADIENT_COLORS) * 2 - 1):
-            expected_colors.append(GRADIENT_COLORS[stage // 2])
-            if stage % 2:
-                expected_colors.append(GRADIENT_COLORS[stage // 2 + 1])
-        self.assertEqual(drawn_colors, expected_colors)
         self.assertEqual(
-            [call.args[0] for call in dither.call_args_list].count(0.5),
-            len(GRADIENT_COLORS) - 1,
+            drawn_colors,
+            [GRADIENT_COLORS[1], GRADIENT_COLORS[0]]
+            * len(GRADIENT_DITHER_RATIOS),
+        )
+        self.assertEqual(
+            [call.args[0] for call in dither.call_args_list[1:-1:2]],
+            list(GRADIENT_DITHER_RATIOS),
         )
         self.assertTrue(
             all(
@@ -117,7 +121,7 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(dither.call_args_list[-1].args, (1.0,))
 
     def test_draw_places_frame_over_gradient(self) -> None:
-        window = Window(2, 2, 16, 8)
+        window = Window(1, 2, 8, 8)
         draw_order: list[str] = []
 
         with (
@@ -141,6 +145,39 @@ class WindowTest(unittest.TestCase):
 
         self.assertEqual(draw_order, ["gradient", "frame", "texts"])
 
+    def test_transparent_window_draws_only_text(self) -> None:
+        window = Window(
+            3,
+            4,
+            20,
+            8,
+            (WindowText("overlay", 2, 2),),
+            transparent=True,
+        )
+        draw_order: list[str] = []
+
+        with (
+            patch.object(
+                window,
+                "_draw_gradient",
+                side_effect=lambda: draw_order.append("gradient"),
+            ),
+            patch.object(
+                window,
+                "_draw_frame",
+                side_effect=lambda: draw_order.append("frame"),
+            ),
+            patch.object(
+                window,
+                "_draw_texts",
+                side_effect=lambda: draw_order.append("texts"),
+            ),
+        ):
+            window.draw()
+
+        self.assertEqual(draw_order, ["texts"])
+        self.assertEqual(window.text_position(window.texts[0]), (20, 24))
+
     def test_gradient_stages_are_evenly_distributed(self) -> None:
         height = GRADIENT_STAGE_COUNT * 3 + 1
         bands = _gradient_bands(height)
@@ -154,7 +191,7 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(sum(band_heights), height)
 
     def test_frame_uses_expected_four_corner_sources(self) -> None:
-        window = Window(2, 2, 16, 6)
+        window = Window(1, 2, 8, 6)
 
         with patch("app.ui.window.pyxel.blt") as blt:
             window._draw_frame()
@@ -172,9 +209,9 @@ class WindowTest(unittest.TestCase):
 
     def test_minimum_window_size_is_enforced(self) -> None:
         with self.assertRaises(ValueError):
-            Window(0, 0, 7, 4)
+            Window(0, 0, 3, 4)
         with self.assertRaises(ValueError):
-            Window(0, 0, 8, 3)
+            Window(0, 0, 4, 3)
 
 
 if __name__ == "__main__":
