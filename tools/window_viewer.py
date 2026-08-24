@@ -15,7 +15,7 @@ SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
-MONSTERS_IMAGE_IDS = ["monsters/01", "monsters/04", "monsters/09", "monsters/12"]
+MONSTERS_IMAGE_IDS = ["monsters/1", "monsters/04", "monsters/09", "monsters/12"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,7 +138,7 @@ class WindowViewer:
                 """
 
         for i in range(5):
-            window = Window(52, 14 + i * 8, 7, 5, transparent=True)
+            window = Window(52, 16 + i * 7, 7, 5, transparent=True)
             name = ("フィオラ", "セリオン", "アルヴァン", "エリカ", "ラグナ")[i]
             c = 5 if i == 0 else 4
             window.add_text(name, 0, 0, font=font_8x12, color=c)
@@ -182,32 +182,33 @@ class WindowViewer:
         """
         # キャラ絵（仮）
         for i in range(5):
-            x = 160 + i * 4 + (16 if i in (1, 2, 4) else 0)
-            pyxel.blt(x, 56 + i * 32, self.characters, 0, i * 32, 16, 32, 1)
+            x = 156 + i * 4 + (16 if i in (1, 2, 4) else 0)
+            pyxel.blt(x, 64 + i * 28, self.characters, 0, i * 32, 16, 32, 1)
         # モンスター絵（仮）
         for i in range(5):
-            x = (4, 12, 4, 68, 76)[i]
-            y = (28, 92, 156, 60, 124)[i]
+            x = (4, 4, 68, 68, 68)[i]
+            y = (56, 120, 24, 88, 152)[i]
             pat = (0, 0, 1, 2, 3)[i]
-            pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, 5)
+            c = (1, 1, 5, 5, 5)[i]
+            pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, c)
         # タイムライン（仮）
         # base_x, base_y = 136,216
         # base_x, base_y = 8, 8
-        base_x, base_y = 72, 216
+        base_x, base_y = 70, 220
         for i in range(6):
             u = (0, 2, 1, 3, 0, 0)[i]
             v = (3, 4, 4, 4, 0, 4)[i]
             c = 13 if i in (0, 4) else 49
             pyxel.blt(base_x + i * 20, base_y, 1, u * 16, v * 16, 16, 16, 1)
-            pyxel.rect(base_x + i * 20, base_y + 18, 16, 1, c)
-            pyxel.rect(base_x + i * 20, base_y + 19, 16, 1, c - 1)
+            pyxel.rect(base_x + i * 20, base_y + 17, 16, 1, c)
+            pyxel.rect(base_x + i * 20, base_y + 18, 16, 1, c - 1)
         pyxel.blt(base_x + 4, base_y - 8, 0, 32, 0, 8, 8, 1)
         # ウィンドウ
         for window in self.windows:
             window.draw()
         # カーソル（仮）
         # pyxel.blt(96, 52, 0, 48, 0, 16, 16, 1)
-        pyxel.blt(34 * 4, 1 * 4, 0, 48, 0, 16, 16, 1)
+        pyxel.blt(34 * 4, 2 * 4, 0, 48, 0, 16, 16, 1)
         # pyxel.blt(0 * 4, 49 * 4, 0, 48, 0, 16, 16, 1)
 
 
