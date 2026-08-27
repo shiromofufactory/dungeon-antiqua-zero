@@ -117,6 +117,7 @@ class BattleScreenMock:
                     WindowText("　にげる", 16, 2, font=font_8x12),
                     WindowText("　アイテム", 16, 5, font=font_8x12),
                 ),
+                thin_frame=True,
             )
         ]
         """
@@ -202,7 +203,7 @@ class BattleScreenMock:
             pyxel.blt(base_x + i * 20, base_y, 1, u * 16, v * 16, 16, 16, 1)
             pyxel.rect(base_x + i * 20, base_y + 17, 16, 1, c)
             pyxel.rect(base_x + i * 20, base_y + 18, 16, 1, c - 1)
-        pyxel.blt(base_x + 4, base_y - 8, 0, 32, 0, 8, 8, 1)
+        pyxel.blt(base_x + 4, base_y - 8, 0, 64, 0, 8, 8, 1)
         # ウィンドウ
         for window in self.windows:
             window.draw()

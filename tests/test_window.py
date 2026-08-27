@@ -207,6 +207,24 @@ class WindowTest(unittest.TestCase):
             ],
         )
 
+    def test_thin_frame_uses_thin_frame_sources_for_edges_and_corners(self) -> None:
+        window = Window(1, 2, 8, 6, thin_frame=True)
+
+        with patch("app.ui.window.pyxel.blt") as blt:
+            window._draw_frame()
+
+        self.assertEqual(blt.call_args_list[0].args[3], 38)
+        corner_calls = blt.call_args_list[-4:]
+        self.assertEqual(
+            [call.args[:7] for call in corner_calls],
+            [
+                (4, 8, 0, 32, 0, 8, 8),
+                (28, 8, 0, 40, 0, 8, 8),
+                (4, 24, 0, 32, 8, 8, 8),
+                (28, 24, 0, 40, 8, 8, 8),
+            ],
+        )
+
     def test_minimum_window_size_is_enforced(self) -> None:
         with self.assertRaises(ValueError):
             Window(0, 0, 3, 4)

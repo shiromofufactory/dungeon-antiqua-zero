@@ -12,6 +12,7 @@ TEXT_GRID_Y = 4
 
 FRAME_BANK = 0
 FRAME_X = 16
+THIN_FRAME_X = 32
 FRAME_Y = 0
 FRAME_TILE_SIZE = 8
 FRAME_EDGE_STEP = 4
@@ -73,6 +74,7 @@ class Window:
         *,
         font: Any | None = None,
         transparent: bool = False,
+        thin_frame: bool = False,
     ) -> None:
         values = (x, y, width, height)
         if not all(isinstance(value, int) for value in values):
@@ -81,11 +83,11 @@ class Window:
             width * TEXT_GRID_X < FRAME_TILE_SIZE * 2
             or height * TEXT_GRID_Y < FRAME_TILE_SIZE * 2
         ):
-            raise ValueError(
-                "window width and height must be at least 4 grid units"
-            )
+            raise ValueError("window width and height must be at least 4 grid units")
         if not isinstance(transparent, bool):
             raise TypeError("transparent must be a boolean")
+        if not isinstance(thin_frame, bool):
+            raise TypeError("thin_frame must be a boolean")
 
         self.x = x
         self.y = y
@@ -93,6 +95,7 @@ class Window:
         self.height = height
         self.font = font
         self.transparent = transparent
+        self.thin_frame = thin_frame
         self._texts: list[WindowText] = []
         for text in texts:
             self._validate_text_position(text)
@@ -213,15 +216,28 @@ class Window:
         top = self.pixel_y
         right = self.pixel_x + self.pixel_width - FRAME_TILE_SIZE
         bottom = self.pixel_y + self.pixel_height - FRAME_TILE_SIZE
+        frame_x = THIN_FRAME_X if self.thin_frame else FRAME_X
 
-        self._draw_horizontal_edges(left + FRAME_TILE_SIZE, right, top, bottom)
-        self._draw_vertical_edges(top + FRAME_TILE_SIZE, bottom, left, right)
+        self._draw_horizontal_edges(
+            left + FRAME_TILE_SIZE,
+            right,
+            top,
+            bottom,
+            frame_x,
+        )
+        self._draw_vertical_edges(
+            top + FRAME_TILE_SIZE,
+            bottom,
+            left,
+            right,
+            frame_x,
+        )
 
         pyxel.blt(
             left,
             top,
             FRAME_BANK,
-            FRAME_X,
+            frame_x,
             FRAME_Y,
             FRAME_TILE_SIZE,
             FRAME_TILE_SIZE,
@@ -231,7 +247,7 @@ class Window:
             right,
             top,
             FRAME_BANK,
-            FRAME_X + FRAME_TILE_SIZE,
+            frame_x + FRAME_TILE_SIZE,
             FRAME_Y,
             FRAME_TILE_SIZE,
             FRAME_TILE_SIZE,
@@ -241,7 +257,7 @@ class Window:
             left,
             bottom,
             FRAME_BANK,
-            FRAME_X,
+            frame_x,
             FRAME_Y + FRAME_TILE_SIZE,
             FRAME_TILE_SIZE,
             FRAME_TILE_SIZE,
@@ -251,7 +267,7 @@ class Window:
             right,
             bottom,
             FRAME_BANK,
-            FRAME_X + FRAME_TILE_SIZE,
+            frame_x + FRAME_TILE_SIZE,
             FRAME_Y + FRAME_TILE_SIZE,
             FRAME_TILE_SIZE,
             FRAME_TILE_SIZE,
@@ -264,6 +280,7 @@ class Window:
         end: int,
         top: int,
         bottom: int,
+        frame_x: int,
     ) -> None:
         x = start
         while x < end:
@@ -272,7 +289,7 @@ class Window:
                 x,
                 top,
                 FRAME_BANK,
-                FRAME_X + 6,
+                frame_x + 6,
                 FRAME_Y,
                 width,
                 FRAME_TILE_SIZE,
@@ -282,7 +299,7 @@ class Window:
                 x,
                 bottom,
                 FRAME_BANK,
-                FRAME_X + 6,
+                frame_x + 6,
                 FRAME_Y + FRAME_TILE_SIZE,
                 width,
                 FRAME_TILE_SIZE,
@@ -296,6 +313,7 @@ class Window:
         end: int,
         left: int,
         right: int,
+        frame_x: int,
     ) -> None:
         y = start
         while y < end:
@@ -304,7 +322,7 @@ class Window:
                 left,
                 y,
                 FRAME_BANK,
-                FRAME_X,
+                frame_x,
                 FRAME_Y + 6,
                 FRAME_TILE_SIZE,
                 height,
@@ -314,7 +332,7 @@ class Window:
                 right,
                 y,
                 FRAME_BANK,
-                FRAME_X + FRAME_TILE_SIZE,
+                frame_x + FRAME_TILE_SIZE,
                 FRAME_Y + 6,
                 FRAME_TILE_SIZE,
                 height,

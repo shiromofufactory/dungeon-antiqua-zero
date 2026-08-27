@@ -13,6 +13,7 @@
     "content:put-data:dry-run": "npm --prefix content run put-data:dry-run",
     "images:build": "python3 scripts/build-images.py",
     "images:build:force": "python3 scripts/build-images.py --allow-palette-mismatch",
+    "tools:pyxel-edit": "pyxel edit app/assets",
     "tools:image-viewer": "python3 -B -m tools.image_viewer",
     "tools:screen-mock:battle": "python3 -B -m tools.screen_mocks.battle",
     "tools:screen-mock:status": "python3 -B -m tools.screen_mocks.status",
