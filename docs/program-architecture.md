@@ -85,7 +85,10 @@ scripts/
 
 tools/
 ├── README.md               # 開発用プログラムの配置基準と操作方法
-└── image_viewer.py         # 本番用画像をPyxelで確認するviewer
+├── image_viewer.py         # 本番用画像をPyxelで確認するviewer
+└── screen_mocks/
+    ├── battle.py           # 本番用部品を使う戦闘画面モック
+    └── status.py           # ステータス画面モック
 ```
 
 `content/data` は共有JSONの正本である。`app/data` は `npm run content:sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
@@ -181,7 +184,9 @@ images.copy_region_to_bank(
 
 開発用プログラムのために画像やJSONを複製しない。`app/data`、`app/images`、`app/assets.pyxres`、`app/assets.pyxpal` を本番と同じ入口から読む。manifestや保存形式など、本番と共有すべき解釈処理は `app/resources` や該当Systemが所有し、`tools/` は画面、入力、選択中の対象といったツール固有状態だけを所有する。これによりviewerだけが成功し、ゲーム本体では読めないという形式差異を防ぐ。
 
-ツール同士を巨大な共通Appへ統合しない。各ツールを `python3 -m tools.<name>` で独立起動できる小さなComposition Rootとし、複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。`tools/` は `pyxel package app ...` の配布対象に含めない。
+ツール同士を巨大な共通Appへ統合しない。各ツールを `python3 -m tools.<module>` で独立起動できる小さなComposition Rootとし、複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。`tools/` は `pyxel package app ...` の配布対象に含めない。
+
+戦闘、メニュー、ショップなどの画面レイアウトを試作するプログラムは `tools/screen_mocks/` に画面単位で置く。`battle.py`、`menu.py`、`shop.py` のように独立させ、別画面の仮状態や描画分岐を1つのviewerへ集めない。画面モック間の共通基盤は先に作らず、複数のモックで実際に重複が生じた時点で小さく抽出する。
 
 例えば `scenes/town.py` が店、寺院、宿など複数の独立した変更理由を持つようになったら、次のようにパッケージへ昇格させる。
 

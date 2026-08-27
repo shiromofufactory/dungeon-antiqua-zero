@@ -1,4 +1,4 @@
-"""Display the production window frame, gradient, and text layouts."""
+"""Display and capture the current status-screen layout mock."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ MONSTERS_IMAGE_IDS = ["monsters/1", "monsters/04", "monsters/09", "monsters/12"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="ウィンドウ枠、グラデーション、テキスト配置を表示します。"
+        description="ステータス画面のレイアウトモックを表示します。"
     )
     parser.add_argument(
         "--screenshot",
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class WindowViewer:
+class StatusScreenMock:
     def __init__(self, screenshot: Path | None = None) -> None:
         if screenshot is not None:
             screenshot = screenshot.resolve()
@@ -38,7 +38,7 @@ class WindowViewer:
         pyxel.init(
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
-            title="Dungeon Antiqua ZERO Test Viewer",
+            title="Dungeon Antiqua ZERO Status Screen Mock",
         )
         pyxel.load(str(APP_ROOT / "assets.pyxres"))
         pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
@@ -59,51 +59,6 @@ class WindowViewer:
         self.monsters = [resources.image(id) for id in MONSTERS_IMAGE_IDS]
         font_6x8 = pyxel.Font(str(APP_ROOT / "fonts" / "k6x8_gothic.bdf"))
         font_8x12 = pyxel.Font(str(APP_ROOT / "fonts" / "k8x12S.bdf"))
-        """
-        self.windows = (
-            Window(
-                0,
-                41,
-                30,
-                19,
-                (
-                    WindowText("ヒュージスパイダー　　　２", 2, 2, font=font_8x12),
-                    WindowText("コヨーテ　　　　　　　　１", 2, 5, font=font_8x12),
-                    WindowText("グリフォン　　　　　　　１", 2, 8, font=font_8x12),
-                    WindowText("コブラ　　　　　　　　　１", 2, 11, font=font_8x12),
-                ),
-            ),
-            Window(
-                30,
-                41,
-                34,
-                19,
-                (
-                    WindowText("フィオラ　　　９９９／９９９", 2, 2, font=font_8x12),
-                    WindowText("セリオン　　　９９９／９９９", 2, 5, font=font_8x12),
-                    WindowText("アルヴァン　　９９９／９９９", 2, 8, font=font_8x12),
-                    WindowText("エリカ　　　　９９９／９９９", 2, 11, font=font_8x12),
-                    WindowText("ラグナ　　　　９９９／９９９", 2, 14, font=font_8x12),
-                ),
-            ),
-        )
-        """
-        """
-        self.windows = [
-            Window(
-                24,
-                11,
-                16,
-                16,
-                (
-                    WindowText("　たたかう", 2, 2, font=font_8x12),
-                    WindowText("　ぼうぎょ", 2, 5, font=font_8x12),
-                    WindowText("　じゅもん", 2, 8, font=font_8x12),
-                    WindowText("　アイテム", 2, 11, font=font_8x12),
-                ),
-            )
-        ]
-        """
         self.windows = [
             Window(
                 34,
@@ -119,23 +74,6 @@ class WindowViewer:
                 ),
             )
         ]
-        """
-        self.windows = [
-            Window(
-                0,
-                47,
-                30,
-                13,
-                (
-                    WindowText("　たたかう", 2, 2, font=font_8x12),
-                    WindowText("　ぼうぎょ", 2, 5, font=font_8x12),
-                    WindowText("　じゅもん", 2, 8, font=font_8x12),
-                    WindowText("　にげる", 16, 2, font=font_8x12),
-                    WindowText("　アイテム", 16, 5, font=font_8x12),
-                ),
-            )
-        ]
-                """
 
         for i in range(5):
             window = Window(52, 16 + i * 7, 7, 5, transparent=True)
@@ -168,18 +106,6 @@ class WindowViewer:
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
         )
-        """
-        # キャラ絵（仮）
-        for i in range(5):
-            x = 200 + i * 4 + (20 if i in (1, 2) else 0)
-            pyxel.blt(x, 48 + i * 20, self.characters, 0, i * 32, 16, 32, 1)
-        # モンスター絵（仮）
-        for i in range(5):
-            x = (2, 18, 66, 82, 126)[i]
-            y = (36, 100, 36, 100, 36)[i]
-            pat = (0, 0, 1, 2, 3)[i]
-            pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, 5)
-        """
         # キャラ絵（仮）
         for i in range(5):
             x = 156 + i * 4 + (16 if i in (1, 2, 4) else 0)
@@ -192,8 +118,6 @@ class WindowViewer:
             c = (1, 1, 5, 5, 5)[i]
             pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, c)
         # タイムライン（仮）
-        # base_x, base_y = 136,216
-        # base_x, base_y = 8, 8
         base_x, base_y = 70, 220
         for i in range(6):
             u = (0, 2, 1, 3, 0, 0)[i]
@@ -207,15 +131,13 @@ class WindowViewer:
         for window in self.windows:
             window.draw()
         # カーソル（仮）
-        # pyxel.blt(96, 52, 0, 48, 0, 16, 16, 1)
         pyxel.blt(34 * 4, 2 * 4, 0, 48, 0, 16, 16, 1)
-        # pyxel.blt(0 * 4, 49 * 4, 0, 48, 0, 16, 16, 1)
 
 
 def main() -> int:
     args = parse_args()
     try:
-        WindowViewer(args.screenshot)
+        StatusScreenMock(args.screenshot)
         return 0
     except ImageResourceError as error:
         print(error)
