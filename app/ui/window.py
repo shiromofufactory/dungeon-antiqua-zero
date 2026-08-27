@@ -7,6 +7,8 @@ from typing import Any, Iterable
 
 import pyxel
 
+from .tagged_text import draw_tagged_text
+
 TEXT_GRID_X = 4
 TEXT_GRID_Y = 4
 
@@ -344,9 +346,14 @@ class Window:
         for text in self._texts:
             x, y = self.text_position(text)
             font = text.font if text.font is not None else self.font
-            if text.shadow_color is not None:
-                pyxel.text(x, y + 1, text.text, text.shadow_color, font)
-            pyxel.text(x, y, text.text, text.color, font)
+            draw_tagged_text(
+                x,
+                y,
+                text.text,
+                text.color,
+                font,
+                shadow_color=text.shadow_color,
+            )
 
 
 def _gradient_bands(height: int) -> tuple[tuple[int, int, int], ...]:
