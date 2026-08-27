@@ -209,7 +209,7 @@ class BattleScreenMock:
             window.draw()
         # カーソル（仮）
         # pyxel.blt(96, 52, 0, 48, 0, 16, 16, 1)
-        pyxel.blt(34 * 4, 2 * 4, 0, 48, 0, 16, 16, 1)
+        pyxel.blt(34 * 4, 2 * 4, 0, 88, 16, 8, 8, 1)
         # pyxel.blt(0 * 4, 49 * 4, 0, 48, 0, 16, 16, 1)
 
 
