@@ -16,42 +16,50 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_mock_uses_sixty_fps(self) -> None:
         self.assertEqual(FPS, 60)
 
-    def test_draw_starts_with_background_and_draws_all_windows(self) -> None:
+    def test_draw_uses_explicit_back_to_front_order(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.background = object()
-        mock.characters = object()
-        mock.monsters = [object() for _ in range(4)]
-        first_window = Mock()
-        second_window = Mock()
-        mock.windows = (first_window, second_window)
-        draw_order: list[str] = []
+        mock._draw_background = Mock()
+        mock._draw_party = Mock()
+        mock._draw_monsters = Mock()
+        mock._draw_timeline = Mock()
+        mock._draw_windows = Mock()
 
-        first_window.draw.side_effect = lambda: draw_order.append("first_window")
-        second_window.draw.side_effect = lambda: draw_order.append("second_window")
+        manager = Mock()
+        manager.attach_mock(mock._draw_background, "background")
+        manager.attach_mock(mock._draw_party, "party")
+        manager.attach_mock(mock._draw_monsters, "monsters")
+        manager.attach_mock(mock._draw_timeline, "timeline")
+        manager.attach_mock(mock._draw_windows, "windows")
 
-        with patch(
-            "tools.screen_mocks.battle.pyxel.blt",
-            side_effect=lambda *args: draw_order.append("blt"),
-        ) as blt:
-            with patch("tools.screen_mocks.battle.pyxel.rect"):
-                mock.draw()
+        mock.draw()
 
         self.assertEqual(
-            blt.call_args_list[0],
-            call(
-                0,
-                0,
-                mock.background,
-                0,
-                0,
-                SCREEN_WIDTH,
-                SCREEN_HEIGHT,
-            ),
+            manager.mock_calls,
+            [
+                call.background(),
+                call.party(),
+                call.monsters(),
+                call.timeline(),
+                call.windows(),
+            ],
         )
-        first_index = draw_order.index("first_window")
-        second_index = draw_order.index("second_window")
-        self.assertEqual(draw_order[0], "blt")
-        self.assertLess(first_index, second_index)
+
+    def test_draw_background_is_opaque(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.background = object()
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_background()
+
+        blt.assert_called_once_with(
+            0,
+            0,
+            mock.background,
+            0,
+            0,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )
 
     def test_update_passes_logical_navigation_to_open_command_window(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

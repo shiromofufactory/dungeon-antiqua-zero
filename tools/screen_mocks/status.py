@@ -13,9 +13,6 @@ from ui import Window, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
-BACKGROUND_IMAGE_ID = "background/bg_nector"
-CH_BATTLE_IMAGE_ID = "characters/ch_battle"
-MONSTERS_IMAGE_IDS = ["monsters/1", "monsters/04", "monsters/09", "monsters/12"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,29 +41,17 @@ class StatusScreenMock:
         pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
 
         resources = ImageResources()
-        background_entry = resources.entry(BACKGROUND_IMAGE_ID)
-        if (
-            background_entry.width != SCREEN_WIDTH
-            or background_entry.height != SCREEN_HEIGHT
-        ):
-            raise ImageResourceError(
-                f"背景画像のサイズが画面と一致しません: {BACKGROUND_IMAGE_ID} "
-                f"{background_entry.width}x{background_entry.height} / "
-                f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}"
-            )
-        self.background = resources.image(BACKGROUND_IMAGE_ID)
-        self.characters = resources.image(CH_BATTLE_IMAGE_ID)
-        self.monsters = [resources.image(id) for id in MONSTERS_IMAGE_IDS]
+
         font_6x8 = pyxel.Font(str(APP_ROOT / "fonts" / "k6x8_gothic.bdf"))
         font_8x12 = pyxel.Font(str(APP_ROOT / "fonts" / "k8x12S.bdf"))
         self.windows = [
             Window(
-                34,
                 0,
-                30,
-                13,
+                0,
+                64,
+                19,
                 (
-                    WindowText("　たたかう", 2, 2, font=font_8x12),
+                    WindowText("フィオラ", 2, 2, font=font_8x12),
                     WindowText("　ぼうぎょ", 2, 5, font=font_8x12),
                     WindowText("　じゅもん", 2, 8, font=font_8x12),
                     WindowText("　にげる", 16, 2, font=font_8x12),
@@ -74,21 +59,6 @@ class StatusScreenMock:
                 ),
             )
         ]
-
-        for i in range(5):
-            window = Window(52, 16 + i * 7, 7, 5, transparent=True)
-            name = ("フィオラ", "セリオン", "アルヴァン", "エリカ", "ラグナ")[i]
-            c = 5 if i == 0 else 4
-            window.add_text(name, 0, 0, font=font_8x12, color=c)
-            window.add_text("９９９／９９９", 0, 4, font=font_6x8, color=c)
-            self.windows.append(window)
-        if screenshot is not None:
-            self.draw()
-            screenshot.parent.mkdir(parents=True, exist_ok=True)
-            pyxel.screen.save(str(screenshot), 1)
-            print(f"スクリーンショットを保存しました: {screenshot}")
-            return
-
         pyxel.run(self.update, self.draw)
 
     @staticmethod
@@ -97,41 +67,9 @@ class StatusScreenMock:
             pyxel.quit()
 
     def draw(self) -> None:
-        pyxel.blt(
-            0,
-            0,
-            self.background,
-            0,
-            0,
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-        )
-        # キャラ絵（仮）
-        for i in range(5):
-            x = 156 + i * 4 + (16 if i in (1, 2, 4) else 0)
-            pyxel.blt(x, 64 + i * 28, self.characters, 0, i * 32, 16, 32, 1)
-        # モンスター絵（仮）
-        for i in range(5):
-            x = (4, 4, 68, 68, 68)[i]
-            y = (56, 120, 24, 88, 152)[i]
-            pat = (0, 0, 1, 2, 3)[i]
-            c = (1, 1, 5, 5, 5)[i]
-            pyxel.blt(x, y, self.monsters[pat], 0, 0, 64, 64, c)
-        # タイムライン（仮）
-        base_x, base_y = 70, 220
-        for i in range(6):
-            u = (0, 2, 1, 3, 0, 0)[i]
-            v = (3, 4, 4, 4, 0, 4)[i]
-            c = 13 if i in (0, 4) else 49
-            pyxel.blt(base_x + i * 20, base_y, 1, u * 16, v * 16, 16, 16, 1)
-            pyxel.rect(base_x + i * 20, base_y + 17, 16, 1, c)
-            pyxel.rect(base_x + i * 20, base_y + 18, 16, 1, c - 1)
-        pyxel.blt(base_x + 4, base_y - 8, 0, 32, 0, 8, 8, 1)
         # ウィンドウ
         for window in self.windows:
             window.draw()
-        # カーソル（仮）
-        pyxel.blt(34 * 4, 2 * 4, 0, 48, 0, 16, 16, 1)
 
 
 def main() -> int:
