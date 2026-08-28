@@ -1,9 +1,6 @@
-"""Display and capture the current battle-screen layout mock."""
+"""Display the current battle-screen layout mock."""
 
 from __future__ import annotations
-
-import argparse
-from pathlib import Path
 
 import pyxel
 
@@ -27,23 +24,8 @@ CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 MONSTERS_IMAGE_IDS = ["monsters/1"]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="戦闘画面のレイアウトモックを表示します。"
-    )
-    parser.add_argument(
-        "--screenshot",
-        type=Path,
-        help="初期表示をPNGへ保存して終了します。",
-    )
-    return parser.parse_args()
-
-
 class BattleScreenMock:
-    def __init__(self, screenshot: Path | None = None) -> None:
-        if screenshot is not None:
-            screenshot = screenshot.resolve()
-
+    def __init__(self) -> None:
         pyxel.init(
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
@@ -109,13 +91,6 @@ class BattleScreenMock:
             window.add_text(name, 0, 0, color=c)
             window.add_text("９９９／９９９", 0, 4, font=font_6x8, color=c)
             self.windows.append(window)
-        if screenshot is not None:
-            self.draw()
-            screenshot.parent.mkdir(parents=True, exist_ok=True)
-            pyxel.screen.save(str(screenshot), 1)
-            print(f"スクリーンショットを保存しました: {screenshot}")
-            return
-
         pyxel.run(self.update, self.draw)
 
     def update(self) -> None:
@@ -221,9 +196,8 @@ class BattleScreenMock:
 
 
 def main() -> int:
-    args = parse_args()
     try:
-        BattleScreenMock(args.screenshot)
+        BattleScreenMock()
         return 0
     except (FontResourceError, ImageResourceError) as error:
         print(error)

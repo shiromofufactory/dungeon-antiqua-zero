@@ -44,7 +44,7 @@ npm run tools:image-viewer -- --list
 tools/screen_mocks/
 ├── battle.py               # 戦闘画面モック
 ├── status.py               # ステータス画面モック
-├── menu.py                 # メニュー画面モック（追加時）
+├── menu.py                 # メニュー画面モック
 └── shop.py                 # ショップ画面モック（追加時）
 ```
 
@@ -58,11 +58,7 @@ tools/screen_mocks/
 npm run tools:screen-mock:battle
 ```
 
-起動直後はコマンドウィンドウが閉じている。`Z`または`Enter`を押すと中央から開き、開き切った後は矢印キーでコマンドカーソルを移動できる。もう一度`Z`または`Enter`を押すと現在位置のコマンドキーを取得してウィンドウを閉じる。`Q`または`Esc`で終了する。PNGへ保存して終了する場合:
-
-```sh
-npm run tools:screen-mock:battle -- --screenshot tmp/battle-screen-mock.png
-```
+起動直後はコマンドウィンドウが閉じている。`Z`または`Enter`を押すと中央から開き、開き切った後は矢印キーでコマンドカーソルを移動できる。もう一度`Z`または`Enter`を押すと現在位置のコマンドキーを取得してウィンドウを閉じる。`Q`または`Esc`で終了する。
 
 ### Status Screen Mock
 
@@ -72,8 +68,10 @@ npm run tools:screen-mock:battle -- --screenshot tmp/battle-screen-mock.png
 npm run tools:screen-mock:status
 ```
 
-PNGへ保存して終了する場合:
+### Menu Screen Mock
+
+ステータス画面モックと同じ全画面の枠だけを表示するメニュー画面モック。レイアウト内容は `tools/screen_mocks/menu.py` へ追加する。
 
 ```sh
-npm run tools:screen-mock:status -- --screenshot tmp/status-screen-mock.png
+npm run tools:screen-mock:menu
 ```

@@ -12,7 +12,7 @@ import pyxel
 ICON_BANK = 0
 ICON_SIZE = 8
 ICON_COLKEY = 1
-ICON_Y_OFFSET = 2
+ICON_Y_OFFSET = 3
 
 
 @dataclass(frozen=True)
@@ -60,10 +60,9 @@ _ICON_COORDINATES = {
     "ROD": (104, 24),
     "WAND": (112, 24),
     "SHIELD": (120, 24),
-    "ELEMENT": (128, 24),
+    "MYSTIC": (128, 24),
     "SACRED": (136, 24),
-    # DARK is already the public tag for the attribute icon at (16, 16).
-    "DARK_MAGIC": (144, 24),
+    "NETHER": (144, 24),
 }
 
 TEXT_ICONS = MappingProxyType(

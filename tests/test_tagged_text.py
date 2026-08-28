@@ -7,7 +7,6 @@ from app.ui.tagged_text import (
     ICON_BANK,
     ICON_COLKEY,
     ICON_SIZE,
-    ICON_Y_OFFSET,
     TEXT_ICONS,
     TextIcon,
     draw_tagged_text,
@@ -113,7 +112,7 @@ class TaggedTextTest(unittest.TestCase):
             blt.call_args.args,
             (
                 16,
-                20 + ICON_Y_OFFSET,
+                23,
                 ICON_BANK,
                 0,
                 16,
