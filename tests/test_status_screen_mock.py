@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
-from tools.screen_mocks.status import SCREEN_HEIGHT, SCREEN_WIDTH, StatusScreenMock
+from tools.screen_mocks.status import TRANSPARENT_INDEX, StatusScreenMock
 
 
 class StatusScreenMockTest(unittest.TestCase):
-    def test_draw_starts_with_background_and_draws_all_windows(self) -> None:
+    def test_draws_all_windows_before_face(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
-        mock.background = object()
-        mock.characters = object()
-        mock.monsters = [object() for _ in range(4)]
+        mock.faces = object()
         first_window = Mock()
         second_window = Mock()
         mock.windows = (first_window, second_window)
@@ -22,27 +20,21 @@ class StatusScreenMockTest(unittest.TestCase):
 
         with patch(
             "tools.screen_mocks.status.pyxel.blt",
-            side_effect=lambda *args: draw_order.append("blt"),
+            side_effect=lambda *args: draw_order.append("face"),
         ) as blt:
-            with patch("tools.screen_mocks.status.pyxel.rect"):
-                mock.draw()
+            mock.draw()
 
-        self.assertEqual(
-            blt.call_args_list[0],
-            call(
-                0,
-                0,
-                mock.background,
-                0,
-                0,
-                SCREEN_WIDTH,
-                SCREEN_HEIGHT,
-            ),
+        self.assertEqual(draw_order, ["first_window", "second_window", "face"])
+        blt.assert_called_once_with(
+            8,
+            8,
+            mock.faces,
+            0,
+            0,
+            32,
+            32,
+            TRANSPARENT_INDEX,
         )
-        first_index = draw_order.index("first_window")
-        second_index = draw_order.index("second_window")
-        self.assertEqual(draw_order[0], "blt")
-        self.assertLess(first_index, second_index)
 
 
 if __name__ == "__main__":

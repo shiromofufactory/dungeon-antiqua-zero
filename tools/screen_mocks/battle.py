@@ -9,8 +9,15 @@ import pyxel
 
 from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
-from resources import TRANSPARENT_INDEX, ImageResourceError, ImageResources
-from ui import CursorTarget, Window, WindowText
+from resources import (
+    TRANSPARENT_INDEX,
+    FontResourceError,
+    FontResources,
+    ImageResourceError,
+    ImageResources,
+)
+from state import Language, Settings
+from ui import CursorTarget, WindowFactory, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
@@ -63,19 +70,21 @@ class BattleScreenMock:
         self.background = resources.image(BACKGROUND_IMAGE_ID)
         self.characters = resources.image(CH_BATTLE_IMAGE_ID)
         self.monsters = [resources.image(id) for id in MONSTERS_IMAGE_IDS]
-        font_6x8 = pyxel.Font(str(APP_ROOT / "fonts" / "k6x8_gothic.bdf"))
-        font_8x12 = pyxel.Font(str(APP_ROOT / "fonts" / "k8x12S.bdf"))
-        command_window = Window(
+        settings = Settings()
+        fonts = FontResources()
+        windows = WindowFactory(fonts.font_for(settings.language))
+        font_6x8 = fonts.font_for(Language.ENGLISH)
+        command_window = windows.create(
             34,
             0,
             30,
             13,
             (
-                WindowText("たたかう", 4, 2, font=font_8x12),
-                WindowText("ぼうぎょ", 4, 5, font=font_8x12),
-                WindowText("じゅもん", 4, 8, font=font_8x12),
-                WindowText("にげる", 18, 2, font=font_8x12),
-                WindowText("アイテム", 18, 5, font=font_8x12),
+                WindowText("たたかう", 4, 2),
+                WindowText("ぼうぎょ", 4, 5),
+                WindowText("じゅもん", 4, 8),
+                WindowText("にげる", 18, 2),
+                WindowText("アイテム", 18, 5),
             ),
             thin_frame=True,
             opened=False,
@@ -94,10 +103,10 @@ class BattleScreenMock:
         self.windows = [command_window]
 
         for i in range(5):
-            window = Window(52, 16 + i * 7, 7, 5, transparent=True)
+            window = windows.create(52, 16 + i * 7, 7, 5, transparent=True)
             name = ("フィオラ", "セリオン", "アルヴァン", "エリカ", "ラグナ")[i]
             c = 5 if i == 0 else 4
-            window.add_text(name, 0, 0, font=font_8x12, color=c)
+            window.add_text(name, 0, 0, color=c)
             window.add_text("９９９／９９９", 0, 4, font=font_6x8, color=c)
             self.windows.append(window)
         if screenshot is not None:
@@ -216,7 +225,7 @@ def main() -> int:
     try:
         BattleScreenMock(args.screenshot)
         return 0
-    except ImageResourceError as error:
+    except (FontResourceError, ImageResourceError) as error:
         print(error)
         return 1
     except KeyboardInterrupt:

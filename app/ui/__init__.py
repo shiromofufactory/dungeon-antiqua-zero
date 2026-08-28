@@ -7,6 +7,7 @@ from .window import (
     TEXT_GRID_Y,
     Window,
     WindowCursor,
+    WindowFactory,
     WindowState,
     WindowText,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "TextIcon",
     "Window",
     "WindowCursor",
+    "WindowFactory",
     "WindowState",
     "WindowText",
     "draw_tagged_text",

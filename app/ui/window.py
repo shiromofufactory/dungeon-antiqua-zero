@@ -534,6 +534,42 @@ class Window:
             )
 
 
+class WindowFactory:
+    """Create windows that share one language-specific default font."""
+
+    def __init__(self, default_font: Any) -> None:
+        if default_font is None:
+            raise ValueError("default_font must not be None")
+        self.default_font = default_font
+
+    def create(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        texts: Iterable[WindowText] = (),
+        *,
+        font: Any | None = None,
+        transparent: bool = False,
+        thin_frame: bool = False,
+        opened: bool = True,
+    ) -> Window:
+        """Create a Window, using the factory font unless one is supplied."""
+
+        return Window(
+            x,
+            y,
+            width,
+            height,
+            texts,
+            font=self.default_font if font is None else font,
+            transparent=transparent,
+            thin_frame=thin_frame,
+            opened=opened,
+        )
+
+
 class WindowCursor:
     """Manage and draw one cursor attached to a window.
 

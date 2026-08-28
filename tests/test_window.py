@@ -17,6 +17,7 @@ from app.ui.window import (
     GRADIENT_STAGE_COUNT,
     WINDOW_ANIMATION_HEIGHT_STEP,
     Window,
+    WindowFactory,
     WindowState,
     WindowText,
     _gradient_bands,
@@ -24,6 +25,28 @@ from app.ui.window import (
 
 
 class WindowTest(unittest.TestCase):
+    def test_factory_supplies_language_default_font(self) -> None:
+        default_font = object()
+        factory = WindowFactory(default_font)
+
+        window = factory.create(
+            0,
+            0,
+            8,
+            6,
+            (WindowText("default", 2, 2),),
+        )
+
+        self.assertIs(window.font, default_font)
+
+    def test_factory_allows_a_window_font_override(self) -> None:
+        factory = WindowFactory(object())
+        override_font = object()
+
+        window = factory.create(0, 0, 8, 6, font=override_font)
+
+        self.assertIs(window.font, override_font)
+
     def test_text_uses_fine_grid_relative_to_frame_origin(self) -> None:
         window = Window(2, 5, 20, 10)
         frame_origin = window.add_text("frame", 0, 0)

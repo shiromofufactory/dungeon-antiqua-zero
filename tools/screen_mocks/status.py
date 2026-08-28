@@ -8,11 +8,20 @@ from pathlib import Path
 import pyxel
 
 from tools._bootstrap import APP_ROOT
-from resources import ImageResourceError, ImageResources
-from ui import Window, WindowText
+from resources import (
+    TRANSPARENT_INDEX,
+    FontResourceError,
+    FontResources,
+    ImageResourceError,
+    ImageResources,
+)
+from state import Settings
+from ui import WindowFactory, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
+FPS = 60
+FACES_IMAGE_ID = "faces/faces_pc"
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,26 +45,30 @@ class StatusScreenMock:
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
             title="Dungeon Antiqua ZERO Status Screen Mock",
+            fps=FPS,
         )
         pyxel.load(str(APP_ROOT / "assets.pyxres"))
         pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
 
         resources = ImageResources()
+        self.faces = resources.image(FACES_IMAGE_ID)
 
-        font_6x8 = pyxel.Font(str(APP_ROOT / "fonts" / "k6x8_gothic.bdf"))
-        font_8x12 = pyxel.Font(str(APP_ROOT / "fonts" / "k8x12S.bdf"))
+        settings = Settings()
+        fonts = FontResources()
+        windows = WindowFactory(fonts.font_for(settings.language))
         self.windows = [
-            Window(
+            windows.create(
                 0,
                 0,
                 64,
-                19,
+                60,
                 (
-                    WindowText("フィオラ", 2, 2, font=font_8x12),
-                    WindowText("　ぼうぎょ", 2, 5, font=font_8x12),
-                    WindowText("　じゅもん", 2, 8, font=font_8x12),
-                    WindowText("　にげる", 16, 2, font=font_8x12),
-                    WindowText("　アイテム", 16, 5, font=font_8x12),
+                    WindowText("フィオラ", 12, 2),
+                    WindowText("ようせい", 12, 5),
+                    WindowText("おんな", 28, 5),
+                    WindowText("ＨＰ　９９９／９９９", 6, 11),
+                    WindowText("ＭＰ　２５５／２５５", 6, 14),
+                    WindowText("じょうたい　　　ＯＫ", 6, 17),
                 ),
             )
         ]
@@ -70,6 +83,17 @@ class StatusScreenMock:
         # ウィンドウ
         for window in self.windows:
             window.draw()
+        # 顔
+        pyxel.blt(
+            8,
+            8,
+            self.faces,
+            0,
+            0,
+            32,
+            32,
+            TRANSPARENT_INDEX,
+        )
 
 
 def main() -> int:
@@ -77,7 +101,7 @@ def main() -> int:
     try:
         StatusScreenMock(args.screenshot)
         return 0
-    except ImageResourceError as error:
+    except (FontResourceError, ImageResourceError) as error:
         print(error)
         return 1
     except KeyboardInterrupt:
