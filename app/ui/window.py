@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from enum import Enum, auto
+from typing import Any, Iterable, Protocol
 
 import pyxel
 
@@ -26,6 +27,56 @@ GRADIENT_DITHER_RATIOS = (1.0, 0.75, 0.5, 0.25, 0.0)
 GRADIENT_STAGE_COUNT = len(GRADIENT_DITHER_RATIOS)
 DEFAULT_TEXT_COLOR = 5
 DEFAULT_TEXT_SHADOW_COLOR = 0
+
+CURSOR_BANK = 0
+CURSOR_X = 48
+CURSOR_SHADOW_X = 64
+CURSOR_Y = 0
+CURSOR_SIZE = 16
+CURSOR_COLKEY = 1
+CURSOR_TEXT_OFFSET_X = -8
+CURSOR_FLOAT_OFFSETS = (0, 0, 0, 1, 2, 2, 2, 1)
+CURSOR_FLOAT_PHASE_FRAMES = 12
+
+WINDOW_ANIMATION_EDGE_STEP = TEXT_GRID_Y
+WINDOW_ANIMATION_HEIGHT_STEP = WINDOW_ANIMATION_EDGE_STEP * 2
+
+
+class WindowState(Enum):
+    """Current visibility and animation state of one window."""
+
+    CLOSED = auto()
+    OPENING = auto()
+    OPEN = auto()
+    CLOSING = auto()
+
+
+class NavigationDirection(Protocol):
+    """Cardinal direction shape accepted by ``WindowCursor.update``."""
+
+    @property
+    def dx(self) -> int: ...
+
+    @property
+    def dy(self) -> int: ...
+
+
+@dataclass(frozen=True)
+class CursorTarget:
+    """A selectable position expressed in a window's 4-pixel grid."""
+
+    x: int
+    y: int
+    key: Any | None = None
+    selectable: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.x, int) or not isinstance(self.y, int):
+            raise TypeError("cursor target grid coordinates must be integers")
+        if self.x < 0 or self.y < 0:
+            raise ValueError("cursor target grid coordinates must not be negative")
+        if not isinstance(self.selectable, bool):
+            raise TypeError("cursor target selectable must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -77,6 +128,7 @@ class Window:
         font: Any | None = None,
         transparent: bool = False,
         thin_frame: bool = False,
+        opened: bool = True,
     ) -> None:
         values = (x, y, width, height)
         if not all(isinstance(value, int) for value in values):
@@ -90,6 +142,8 @@ class Window:
             raise TypeError("transparent must be a boolean")
         if not isinstance(thin_frame, bool):
             raise TypeError("thin_frame must be a boolean")
+        if not isinstance(opened, bool):
+            raise TypeError("opened must be a boolean")
 
         self.x = x
         self.y = y
@@ -99,6 +153,9 @@ class Window:
         self.transparent = transparent
         self.thin_frame = thin_frame
         self._texts: list[WindowText] = []
+        self._cursor: WindowCursor | None = None
+        self._state = WindowState.OPEN if opened else WindowState.CLOSED
+        self._visible_height = self.pixel_height if opened else 0
         for text in texts:
             self._validate_text_position(text)
             self._texts.append(text)
@@ -139,6 +196,32 @@ class Window:
     def texts(self) -> tuple[WindowText, ...]:
         return tuple(self._texts)
 
+    @property
+    def cursor(self) -> WindowCursor | None:
+        return self._cursor
+
+    @property
+    def state(self) -> WindowState:
+        return self._state
+
+    @property
+    def visible_height(self) -> int:
+        """Return the currently visible height in pixels."""
+
+        return self._visible_height
+
+    @property
+    def is_open(self) -> bool:
+        return self._state is WindowState.OPEN
+
+    @property
+    def is_closed(self) -> bool:
+        return self._state is WindowState.CLOSED
+
+    @property
+    def is_animating(self) -> bool:
+        return self._state in (WindowState.OPENING, WindowState.CLOSING)
+
     def add_text(
         self,
         text: str,
@@ -162,6 +245,61 @@ class Window:
     def clear_texts(self) -> None:
         self._texts.clear()
 
+    def set_cursor(
+        self,
+        targets: Iterable[CursorTarget],
+        *,
+        active: bool = True,
+    ) -> WindowCursor:
+        """Register selectable cursor targets relative to this window."""
+
+        self._cursor = WindowCursor(self, targets, active=active)
+        return self._cursor
+
+    def clear_cursor(self) -> None:
+        self._cursor = None
+
+    def open(self) -> None:
+        """Start opening from the window's current visible height."""
+
+        if self._state in (WindowState.CLOSED, WindowState.CLOSING):
+            self._state = WindowState.OPENING
+
+    def close(self) -> None:
+        """Start closing from the window's current visible height."""
+
+        if self._state in (WindowState.OPEN, WindowState.OPENING):
+            self._state = WindowState.CLOSING
+
+    def update(self, navigation: NavigationDirection | None = None) -> bool:
+        """Advance the opening/closing animation or update the cursor.
+
+        Cursor input is accepted only while the window is fully open. The
+        return value reports whether the cursor moved.
+        """
+
+        if self._state is WindowState.OPENING:
+            self._visible_height = min(
+                self.pixel_height,
+                self._visible_height + WINDOW_ANIMATION_HEIGHT_STEP,
+            )
+            if self._visible_height == self.pixel_height:
+                self._state = WindowState.OPEN
+            return False
+
+        if self._state is WindowState.CLOSING:
+            self._visible_height = max(
+                0,
+                self._visible_height - WINDOW_ANIMATION_HEIGHT_STEP,
+            )
+            if self._visible_height == 0:
+                self._state = WindowState.CLOSED
+            return False
+
+        if self._state is WindowState.OPEN and self._cursor is not None:
+            return self._cursor.update(navigation)
+        return False
+
     def text_position(self, text: WindowText) -> tuple[int, int]:
         """Return the absolute pixel origin of a text placement."""
 
@@ -172,10 +310,44 @@ class Window:
         )
 
     def draw(self) -> None:
+        if self._visible_height == 0:
+            return
+
+        if self._visible_height == self.pixel_height:
+            self._draw_contents()
+            return
+
+        clip_y = self.pixel_y + (self.pixel_height - self._visible_height) // 2
+        pyxel.clip(
+            self.pixel_x,
+            clip_y,
+            self.pixel_width,
+            self._visible_height,
+        )
+        try:
+            self._draw_animation_contents()
+        finally:
+            pyxel.clip()
+
+    def _draw_contents(self) -> None:
         if not self.transparent:
             self._draw_gradient()
             self._draw_frame()
         self._draw_texts()
+        if self._cursor is not None:
+            self._cursor.draw()
+
+    def _draw_animation_contents(self) -> None:
+        if self.transparent:
+            self._draw_texts()
+            if self._cursor is not None:
+                self._cursor.draw()
+            return
+
+        self._draw_gradient()
+        frame_height = max(self._visible_height, FRAME_TILE_SIZE)
+        frame_top = self.pixel_y + (self.pixel_height - frame_height) // 2
+        self._draw_frame(top=frame_top, height=frame_height)
 
     def _validate_text_position(self, text: WindowText) -> None:
         if not isinstance(text, WindowText):
@@ -213,11 +385,17 @@ class Window:
         finally:
             pyxel.dither(1.0)
 
-    def _draw_frame(self) -> None:
+    def _draw_frame(
+        self,
+        *,
+        top: int | None = None,
+        height: int | None = None,
+    ) -> None:
         left = self.pixel_x
-        top = self.pixel_y
+        top = self.pixel_y if top is None else top
+        height = self.pixel_height if height is None else height
         right = self.pixel_x + self.pixel_width - FRAME_TILE_SIZE
-        bottom = self.pixel_y + self.pixel_height - FRAME_TILE_SIZE
+        bottom = top + height - FRAME_TILE_SIZE
         frame_x = THIN_FRAME_X if self.thin_frame else FRAME_X
 
         self._draw_horizontal_edges(
@@ -354,6 +532,183 @@ class Window:
                 font,
                 shadow_color=text.shadow_color,
             )
+
+
+class WindowCursor:
+    """Manage and draw one cursor attached to a window.
+
+    Input mapping and command execution remain the responsibility of the Scene
+    or Overlay that owns the window.
+    """
+
+    def __init__(
+        self,
+        window: Window,
+        targets: Iterable[CursorTarget],
+        *,
+        active: bool = True,
+    ) -> None:
+        if not isinstance(active, bool):
+            raise TypeError("cursor active must be a boolean")
+
+        registered = tuple(targets)
+        seen_positions: set[tuple[int, int]] = set()
+        for target in registered:
+            if not isinstance(target, CursorTarget):
+                raise TypeError("cursor targets must contain CursorTarget instances")
+            position = (target.x, target.y)
+            if position in seen_positions:
+                raise ValueError("cursor target positions must be unique")
+            seen_positions.add(position)
+            if (
+                target.x * TEXT_GRID_X >= window.pixel_width
+                or target.y * TEXT_GRID_Y >= window.pixel_height
+            ):
+                raise ValueError("cursor target origin must be inside the window area")
+
+        self._window = window
+        self._targets = registered
+        self._selected_index = next(
+            (
+                index
+                for index, target in enumerate(self._targets)
+                if target.selectable
+            ),
+            None,
+        )
+        self._animation_frame = 0
+        self.active = active
+
+    @property
+    def targets(self) -> tuple[CursorTarget, ...]:
+        return self._targets
+
+    @property
+    def selected_index(self) -> int | None:
+        return self._selected_index
+
+    @property
+    def selected_target(self) -> CursorTarget | None:
+        if self._selected_index is None:
+            return None
+        return self._targets[self._selected_index]
+
+    @property
+    def selected_key(self) -> Any | None:
+        target = self.selected_target
+        return None if target is None else target.key
+
+    @property
+    def animation_frame(self) -> int:
+        return self._animation_frame
+
+    def update(self, navigation: NavigationDirection | None = None) -> bool:
+        """Apply logical navigation and advance the floating animation."""
+
+        moved = False
+        if navigation is not None:
+            moved = self.move(dx=navigation.dx, dy=navigation.dy)
+        if self.active and self._selected_index is not None:
+            self._animation_frame += 1
+        else:
+            self._animation_frame = 0
+        return moved
+
+    def move_up(self) -> bool:
+        return self.move(dy=-1)
+
+    def move_down(self) -> bool:
+        return self.move(dy=1)
+
+    def move_left(self) -> bool:
+        return self.move(dx=-1)
+
+    def move_right(self) -> bool:
+        return self.move(dx=1)
+
+    def move(self, *, dx: int = 0, dy: int = 0) -> bool:
+        """Move to the next selectable target in one cardinal direction."""
+
+        if (dx, dy) not in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            raise ValueError("cursor movement must be one cardinal grid step")
+        if not self.active or self._selected_index is None:
+            return False
+
+        self._animation_frame = 0
+        current = self._targets[self._selected_index]
+        if dx:
+            candidates = sorted(
+                (
+                    index
+                    for index, target in enumerate(self._targets)
+                    if target.y == current.y
+                ),
+                key=lambda index: self._targets[index].x,
+            )
+            distance = dx
+        else:
+            candidates = sorted(
+                (
+                    index
+                    for index, target in enumerate(self._targets)
+                    if target.x == current.x
+                ),
+                key=lambda index: self._targets[index].y,
+            )
+            distance = dy
+
+        current_position = candidates.index(self._selected_index)
+        for step in range(1, len(candidates) + 1):
+            candidate_position = (current_position + distance * step) % len(
+                candidates
+            )
+            candidate_index = candidates[candidate_position]
+            if self._targets[candidate_index].selectable:
+                moved = candidate_index != self._selected_index
+                self._selected_index = candidate_index
+                return moved
+        return False
+
+    def draw(self) -> None:
+        """Draw a fixed shadow and a floating cursor at the selected target."""
+
+        target = self.selected_target
+        if target is None:
+            return
+
+        x = (
+            self._window.pixel_x
+            + target.x * TEXT_GRID_X
+            + CURSOR_TEXT_OFFSET_X
+        )
+        y = self._window.pixel_y + target.y * TEXT_GRID_Y
+        float_offset = 0
+        if self.active:
+            phase = (self._animation_frame // CURSOR_FLOAT_PHASE_FRAMES) % len(
+                CURSOR_FLOAT_OFFSETS
+            )
+            float_offset = CURSOR_FLOAT_OFFSETS[phase]
+
+        pyxel.blt(
+            x,
+            y,
+            CURSOR_BANK,
+            CURSOR_SHADOW_X,
+            CURSOR_Y,
+            CURSOR_SIZE,
+            CURSOR_SIZE,
+            CURSOR_COLKEY,
+        )
+        pyxel.blt(
+            x,
+            y - float_offset,
+            CURSOR_BANK,
+            CURSOR_X,
+            CURSOR_Y,
+            CURSOR_SIZE,
+            CURSOR_SIZE,
+            CURSOR_COLKEY,
+        )
 
 
 def _gradient_bands(height: int) -> tuple[tuple[int, int, int], ...]:

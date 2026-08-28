@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
+from app.input import Direction
 from app.ui.window import (
+    CURSOR_COLKEY,
+    CURSOR_FLOAT_PHASE_FRAMES,
+    CURSOR_SIZE,
+    CURSOR_X,
+    CURSOR_Y,
+    CURSOR_SHADOW_X,
+    CursorTarget,
     GRADIENT_COLORS,
     GRADIENT_DITHER_RATIOS,
     GRADIENT_STAGE_COUNT,
+    WINDOW_ANIMATION_HEIGHT_STEP,
     Window,
+    WindowState,
     WindowText,
     _gradient_bands,
 )
@@ -145,6 +155,107 @@ class WindowTest(unittest.TestCase):
 
         self.assertEqual(draw_order, ["gradient", "frame", "texts"])
 
+    def test_closed_window_opens_from_center_and_draws_through_clip(self) -> None:
+        window = Window(1, 2, 8, 6, opened=False)
+
+        self.assertEqual(window.state, WindowState.CLOSED)
+        self.assertEqual(window.visible_height, 0)
+
+        window.open()
+        self.assertEqual(window.state, WindowState.OPENING)
+        window.update()
+
+        self.assertEqual(window.visible_height, WINDOW_ANIMATION_HEIGHT_STEP)
+        with (
+            patch.object(window, "_draw_animation_contents") as draw_contents,
+            patch("app.ui.window.pyxel.clip") as clip,
+        ):
+            window.draw()
+
+        draw_contents.assert_called_once_with()
+        self.assertEqual(
+            clip.call_args_list,
+            [call(4, 16, 32, 8), call()],
+        )
+
+        window.update()
+        window.update()
+
+        self.assertTrue(window.is_open)
+        self.assertEqual(window.visible_height, window.pixel_height)
+        with (
+            patch.object(window, "_draw_contents") as draw_contents,
+            patch("app.ui.window.pyxel.clip") as clip,
+        ):
+            window.draw()
+
+        draw_contents.assert_called_once_with()
+        clip.assert_not_called()
+
+    def test_opening_frame_moves_with_visible_window_edges(self) -> None:
+        window = Window(1, 2, 8, 6, opened=False)
+        window.open()
+        window.update()
+
+        with (
+            patch.object(window, "_draw_gradient") as draw_gradient,
+            patch.object(window, "_draw_frame") as draw_frame,
+        ):
+            window._draw_animation_contents()
+
+        draw_gradient.assert_called_once_with()
+        draw_frame.assert_called_once_with(top=16, height=8)
+
+    def test_open_window_closes_to_center_and_stops_drawing(self) -> None:
+        window = Window(1, 2, 8, 6)
+
+        window.close()
+        window.update()
+
+        self.assertEqual(window.state, WindowState.CLOSING)
+        self.assertEqual(window.visible_height, 16)
+
+        window.update()
+        window.update()
+
+        self.assertTrue(window.is_closed)
+        self.assertEqual(window.visible_height, 0)
+        with patch.object(window, "_draw_contents") as draw_contents:
+            window.draw()
+        draw_contents.assert_not_called()
+
+    def test_opening_and_closing_can_reverse_from_current_height(self) -> None:
+        window = Window(0, 0, 8, 8, opened=False)
+
+        window.open()
+        window.update()
+        window.update()
+        self.assertEqual(window.visible_height, 16)
+
+        window.close()
+        window.update()
+        self.assertEqual(window.visible_height, 8)
+
+        window.open()
+        window.update()
+        self.assertEqual(window.visible_height, 16)
+        self.assertEqual(window.state, WindowState.OPENING)
+
+    def test_draw_does_not_advance_window_animation(self) -> None:
+        window = Window(0, 0, 8, 6, opened=False)
+        window.open()
+        window.update()
+        visible_height = window.visible_height
+
+        with (
+            patch.object(window, "_draw_animation_contents"),
+            patch("app.ui.window.pyxel.clip"),
+        ):
+            window.draw()
+            window.draw()
+
+        self.assertEqual(window.visible_height, visible_height)
+
     def test_transparent_window_draws_only_text(self) -> None:
         window = Window(
             3,
@@ -230,6 +341,150 @@ class WindowTest(unittest.TestCase):
             Window(0, 0, 3, 4)
         with self.assertRaises(ValueError):
             Window(0, 0, 4, 3)
+
+    def test_cursor_moves_in_rows_and_columns_while_skipping_empty_cell(
+        self,
+    ) -> None:
+        window = Window(0, 0, 20, 12)
+        cursor = window.set_cursor(
+            (
+                CursorTarget(2, 2, key="attack"),
+                CursorTarget(2, 5, key="defend"),
+                CursorTarget(2, 8, key="spell"),
+                CursorTarget(16, 2, key="escape"),
+                CursorTarget(16, 5, key="item"),
+            )
+        )
+
+        self.assertEqual(cursor.selected_key, "attack")
+        self.assertTrue(cursor.move_down())
+        self.assertEqual(cursor.selected_key, "defend")
+        self.assertTrue(cursor.move_down())
+        self.assertEqual(cursor.selected_key, "spell")
+
+        self.assertFalse(cursor.move_right())
+        self.assertEqual(cursor.selected_key, "spell")
+
+        self.assertTrue(cursor.move_up())
+        self.assertTrue(cursor.move_right())
+        self.assertEqual(cursor.selected_key, "item")
+        self.assertTrue(cursor.move_down())
+        self.assertEqual(cursor.selected_key, "escape")
+        self.assertTrue(cursor.move_left())
+        self.assertEqual(cursor.selected_key, "attack")
+
+    def test_cursor_skips_unselectable_target(self) -> None:
+        window = Window(0, 0, 12, 12)
+        cursor = window.set_cursor(
+            (
+                CursorTarget(2, 2, key="first"),
+                CursorTarget(2, 5, key="blocked", selectable=False),
+                CursorTarget(2, 8, key="last"),
+            )
+        )
+
+        self.assertTrue(cursor.move_down())
+        self.assertEqual(cursor.selected_key, "last")
+        self.assertTrue(cursor.move_up())
+        self.assertEqual(cursor.selected_key, "first")
+
+    def test_cursor_update_accepts_logical_navigation(self) -> None:
+        window = Window(0, 0, 8, 8)
+        cursor = window.set_cursor(
+            (
+                CursorTarget(2, 2, key="first"),
+                CursorTarget(2, 5, key="last"),
+            )
+        )
+
+        self.assertTrue(cursor.update(Direction.DOWN))
+        self.assertEqual(cursor.selected_key, "last")
+        self.assertEqual(cursor.animation_frame, 1)
+
+    def test_window_updates_cursor_only_while_fully_open(self) -> None:
+        window = Window(0, 0, 8, 6, opened=False)
+        cursor = window.set_cursor(
+            (
+                CursorTarget(2, 2, key="first"),
+                CursorTarget(2, 5, key="last"),
+            )
+        )
+
+        self.assertFalse(window.update(Direction.DOWN))
+        self.assertEqual(cursor.selected_key, "first")
+        self.assertEqual(cursor.animation_frame, 0)
+
+        window.open()
+        while window.is_animating:
+            self.assertFalse(window.update(Direction.DOWN))
+
+        self.assertEqual(cursor.selected_key, "first")
+        self.assertTrue(window.update(Direction.DOWN))
+        self.assertEqual(cursor.selected_key, "last")
+        self.assertEqual(cursor.animation_frame, 1)
+
+    def test_cursor_target_can_be_selected_without_a_key(self) -> None:
+        window = Window(0, 0, 8, 8)
+        cursor = window.set_cursor((CursorTarget(2, 2),))
+
+        self.assertIsNotNone(cursor.selected_target)
+        self.assertIsNone(cursor.selected_key)
+
+    def test_cursor_with_no_selectable_targets_is_not_drawn(self) -> None:
+        window = Window(0, 0, 8, 8)
+        cursor = window.set_cursor(
+            (CursorTarget(2, 2, key="blocked", selectable=False),)
+        )
+
+        with patch("app.ui.window.pyxel.blt") as blt:
+            cursor.draw()
+
+        self.assertIsNone(cursor.selected_target)
+        blt.assert_not_called()
+
+    def test_cursor_draws_fixed_shadow_and_floating_main_image(self) -> None:
+        window = Window(3, 4, 8, 8)
+        cursor = window.set_cursor((CursorTarget(2, 2, key="entry"),))
+        for _ in range(CURSOR_FLOAT_PHASE_FRAMES * 4):
+            cursor.update()
+
+        with patch("app.ui.window.pyxel.blt") as blt:
+            cursor.draw()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    12,
+                    24,
+                    0,
+                    CURSOR_SHADOW_X,
+                    CURSOR_Y,
+                    CURSOR_SIZE,
+                    CURSOR_SIZE,
+                    CURSOR_COLKEY,
+                ),
+                call(
+                    12,
+                    22,
+                    0,
+                    CURSOR_X,
+                    CURSOR_Y,
+                    CURSOR_SIZE,
+                    CURSOR_SIZE,
+                    CURSOR_COLKEY,
+                ),
+            ],
+        )
+        self.assertEqual(cursor.animation_frame, CURSOR_FLOAT_PHASE_FRAMES * 4)
+
+    def test_cursor_rejects_duplicate_and_outside_targets(self) -> None:
+        window = Window(0, 0, 8, 8)
+
+        with self.assertRaises(ValueError):
+            window.set_cursor((CursorTarget(2, 2), CursorTarget(2, 2)))
+        with self.assertRaises(ValueError):
+            window.set_cursor((CursorTarget(8, 2),))
 
 
 if __name__ == "__main__":

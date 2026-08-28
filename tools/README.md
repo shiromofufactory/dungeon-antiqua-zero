@@ -58,7 +58,7 @@ tools/screen_mocks/
 npm run tools:screen-mock:battle
 ```
 
-`Q`または`Esc`で終了する。PNGへ保存して終了する場合:
+起動直後はコマンドウィンドウが閉じている。`Z`または`Enter`を押すと中央から開き、開き切った後は矢印キーでコマンドカーソルを移動できる。もう一度`Z`または`Enter`を押すと現在位置のコマンドキーを取得してウィンドウを閉じる。`Q`または`Esc`で終了する。PNGへ保存して終了する場合:
 
 ```sh
 npm run tools:screen-mock:battle -- --screenshot tmp/battle-screen-mock.png

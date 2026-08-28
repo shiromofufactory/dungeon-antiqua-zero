@@ -53,6 +53,10 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 
 ```text
 app/
+├── input.py                  # Pyxel入力を論理InputStateへ変換
+├── ui/
+│   ├── tagged_text.py        # タグ付きテキストとアイコン描画
+│   └── window.py             # 枠、文字、カーソル
 ├── resources/
 │   └── images.py              # 生成済み画像bundleの本番用loader
 ├── data/
@@ -136,6 +140,34 @@ app/
 ├── monster.py
 ├── item.py
 └── spell.py
+```
+
+## 入力の責務
+
+物理入力の取得と画面内での意味付けを分離する。`app/input.py` の `PyxelInputReader` はキーボード、ゲームパッド、アナログスティックを `InputState` へ変換するが、戦闘コマンド、画面遷移、カーソル対象などのゲーム上の意味を知らない。`InputState` は1フレーム分の不変なスナップショットとし、受け取ったScene、Overlay、Windowが内容を書き換えない。
+
+```text
+Pyxelの物理入力
+  → PyxelInputReader
+  → InputState
+  → 最上位のSceneまたはOverlay
+  → WindowCursorやScene固有処理
+```
+
+`InputBindings` は論理操作ごとに複数のPyxelボタンを保持する。初期設定は矢印キーとゲームパッドの方向、Z・EnterとゲームパッドAの決定、X・Backspace・EscapeとゲームパッドBのキャンセル、S・TabとゲームパッドXのメニューとする。キー設定やAB反転を実装するときは、`Settings`から `InputBindings` を生成し、Reader内部やモジュールグローバルを書き換えない。
+
+`InputState.navigation` はカーソル向けの単発およびリピート込み方向、`held_direction` はフィールド移動など押下中の毎フレーム処理に使う方向を表す。方向は上下左右のいずれか1つとし、新しい方向が押された場合は保持中の以前の方向より優先する。新しい方向が離された後も別の方向が保持されていれば、その方向へ切り替える。
+
+方向リピートの状態、アナログスティックのデッドゾーン、直前フレームの押下状態は `PyxelInputReader` インスタンスが所有する。60fpsでDA2と同じ時間感覚にするため、既定の方向リピートは20フレーム後から4フレーム間隔とする。決定、キャンセル、メニューは標準ではリピートさせず、初回押下だけを `triggered=True` とする。押したままかどうかは別の `held` で表し、Scene遷移時の入力リリース待ちなどに利用する。
+
+本番では `Game.update()` がフレームごとに一度だけ `poll()` し、SceneManagerを通して最上位Overlayまたは現在のSceneへ渡す。開発用モックは独立したComposition RootとしてReaderを1つ生成し、同じ `InputState` とWindow部品を直接利用する。モック固有のQ終了などは、Qをキャンセルへ追加したBindingsをReaderへ渡して表現する。
+
+```python
+input_state = input_reader.poll()
+command_window.update(input_state.navigation)
+
+if input_state.confirm.triggered and command_window.is_open:
+    command = command_cursor.selected_key
 ```
 
 ## 画像リソースの責務
@@ -322,6 +354,30 @@ FieldScene
 テキスト座標はウィンドウ枠の左上を原点とし、横・縦とも4pxの相対グリッドで指定する。`(0, 0)` は枠と重なる位置であり、枠から左右8pxずつ内側に入った従来の内容領域左上は `(2, 2)` となる。行の配列として保持せず、各 `WindowText` が文字列、x、y、色、任意のフォントを所有する。同じウィンドウ内で左右の列や異なる高さへ個別に配置できる。ウィンドウまたは個々のテキストへ `pyxel.Font` を渡し、フォント幅を位置決めの単位にしない。テキストは既定で本体より1px下へパレット0の同じ文字を先に描き、影を付ける。`shadow_color` で影色を変更でき、`None` を指定すると影を描かない。
 
 `transparent=True` を指定したWindowは、グラデーションと枠を描かずテキストだけを描画する。この場合もWindow左上をテキスト座標の原点とし、通常Windowと同じ4×4pxグリッドと領域を使う。背景上へ座標を揃えて文字だけを重ねる用途に使い、透明かどうかによってテキスト座標を変えない。
+
+### Windowの開閉アニメーション
+
+開閉状態は各 `Window` が `WindowState.CLOSED`、`OPENING`、`OPEN`、`CLOSING` のいずれかとして所有する。通常は従来と同じ `OPEN` で生成し、初期状態を閉じたい場合だけ `opened=False` を指定する。所有元のSceneまたはOverlayは `open()` / `close()` で開始を指示し、毎フレーム `Window.update()` を呼ぶ。
+
+アニメーションはウィンドウ本来の座標、サイズ、テキスト、カーソル位置を変更せず、中央を基準にした描画クリップの高さだけを変える。60fpsで上下の端を1フレームにつき4pxずつ動かし、見える全高は1フレームにつき8px増減する。端数がある最終フレームだけ本来の高さまたは0へ揃える。開閉途中に逆の操作を受けた場合は、現在の表示高から反転する。
+
+`update()` が表示高と状態を進め、`draw()` は現在の表示高でクリップして描くだけとする。通常Windowは開閉中も現在の上下端へ枠を描き、背景と枠だけの小さなWindowが中央から伸縮して見えるようにする。文字とカーソルは開き切ってから描画する。透明Windowには枠がないため、開閉中は文字とカーソルを現在の表示高でクリップする。閉じたWindowは何も描画せず、開き切ったWindowはクリップを使わず通常描画する。
+
+開閉中はカーソル移動と浮遊タイマーを進めず、`OPEN` の間だけ `Window.update(input_state.navigation)` がカーソルへ入力を渡す。決定入力を開閉やゲーム進行のどちらとして扱うかは、WindowではなくSceneまたはOverlayが判断する。
+
+### Windowのカーソル
+
+選択肢を持つWindowには `Window.set_cursor()` で `CursorTarget` を登録する。ターゲットの `x`, `y` はテキストと同じWindow相対の4×4pxグリッドで指定し、`key` にはSceneまたはOverlayが確定時に受け取る任意の識別子を設定できる。キーを必要としないカーソル位置では `key=None` のまま登録してよい。
+
+ターゲットの存在、選択可否、キーの有無は別の概念として扱う。空きマスにはターゲットを登録せず、表示はするがカーソルを合わせない項目は `selectable=False` とする。`key=None` を選択不可の印として使わない。全ターゲットが選択不可の場合は選択位置を持たず、カーソルを描画しない。
+
+上下移動は現在位置と同じ `x`、左右移動は同じ `y` のターゲットを座標順に循環する。空きマスと `selectable=False` のターゲットはWindow側で自動的にスキップし、同じ行または列に別の選択可能なターゲットがなければ現在位置に留まる。1列だけを登録した標準的なメニューは、この規則により上下移動だけが有効になる。
+
+カーソルはイメージバンク0の本体 `(48, 0)` から16×16px、影 `(64, 0)` から16×16pxを使い、透過色は1とする。ターゲットのテキスト原点より8px左を基準位置とし、影は固定、本体だけを上へ0～2px動かす。浮遊パターンは `(0, 0, 0, 1, 2, 2, 2, 1)` とする。
+
+ZEROの実行フレームレートは60fpsとする。DA2の30fps時と同じ1.6秒周期を維持するため、浮遊パターンの各段階は12フレーム継続する。カーソルのアニメーションタイマーは `update()` で進め、`draw()` では変更しない。入力待ちでない場合はタイマーを停止する。方向入力のリピートは `PyxelInputReader` が共通して処理する。
+
+カーソルは入力デバイスを直接読まず、Sceneまたは最上位Overlayから `InputState.navigation` を `WindowCursor.update()` へ渡す。決定入力時は `selected_target` または `selected_key` を取得し、その後のゲーム進行はカーソルやWindowではなく所有元のSceneまたはOverlayが処理する。
 
 ```python
 window = Window(2, 2, 60, 16, font=font_8x12)  # 8, 8, 240, 64px

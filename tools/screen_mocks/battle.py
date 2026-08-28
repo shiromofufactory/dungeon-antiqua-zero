@@ -8,11 +8,13 @@ from pathlib import Path
 import pyxel
 
 from tools._bootstrap import APP_ROOT
+from input import InputBindings, PyxelInputReader
 from resources import ImageResourceError, ImageResources
-from ui import Window, WindowText
+from ui import CursorTarget, Window, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
+FPS = 60
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 MONSTERS_IMAGE_IDS = ["monsters/1", "monsters/04", "monsters/09", "monsters/12"]
@@ -39,9 +41,13 @@ class BattleScreenMock:
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
             title="Dungeon Antiqua ZERO Battle Screen Mock",
+            fps=FPS,
         )
         pyxel.load(str(APP_ROOT / "assets.pyxres"))
         pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
+        self.input_reader = PyxelInputReader(
+            InputBindings.default().with_cancel(pyxel.KEY_Q)
+        )
 
         resources = ImageResources()
         background_entry = resources.entry(BACKGROUND_IMAGE_ID)
@@ -104,22 +110,33 @@ class BattleScreenMock:
             )
         ]
         """
-        self.windows = [
-            Window(
-                34,
-                0,
-                30,
-                13,
-                (
-                    WindowText("　たたかう", 2, 2, font=font_8x12),
-                    WindowText("　ぼうぎょ", 2, 5, font=font_8x12),
-                    WindowText("　じゅもん", 2, 8, font=font_8x12),
-                    WindowText("　にげる", 16, 2, font=font_8x12),
-                    WindowText("　アイテム", 16, 5, font=font_8x12),
-                ),
-                thin_frame=True,
+        command_window = Window(
+            34,
+            0,
+            30,
+            13,
+            (
+                WindowText("　たたかう", 2, 2, font=font_8x12),
+                WindowText("　ぼうぎょ", 2, 5, font=font_8x12),
+                WindowText("　じゅもん", 2, 8, font=font_8x12),
+                WindowText("　にげる", 16, 2, font=font_8x12),
+                WindowText("　アイテム", 16, 5, font=font_8x12),
+            ),
+            thin_frame=True,
+            opened=False,
+        )
+        self.command_window = command_window
+        self.command_cursor = command_window.set_cursor(
+            (
+                CursorTarget(2, 2, key="attack"),
+                CursorTarget(2, 5, key="defend"),
+                CursorTarget(2, 8, key="spell"),
+                CursorTarget(16, 2, key="escape"),
+                CursorTarget(16, 5, key="item"),
             )
-        ]
+        )
+        self.selected_command: str | None = None
+        self.windows = [command_window]
         """
         self.windows = [
             Window(
@@ -154,10 +171,20 @@ class BattleScreenMock:
 
         pyxel.run(self.update, self.draw)
 
-    @staticmethod
-    def update() -> None:
-        if pyxel.btnp(pyxel.KEY_Q) or pyxel.btnp(pyxel.KEY_ESCAPE):
+    def update(self) -> None:
+        input_state = self.input_reader.poll()
+        if input_state.cancel.triggered:
             pyxel.quit()
+            return
+
+        if input_state.confirm.triggered:
+            if self.command_window.is_closed:
+                self.command_window.open()
+            elif self.command_window.is_open:
+                self.selected_command = self.command_cursor.selected_key
+                self.command_window.close()
+
+        self.command_window.update(input_state.navigation)
 
     def draw(self) -> None:
         pyxel.blt(
@@ -203,14 +230,10 @@ class BattleScreenMock:
             pyxel.blt(base_x + i * 20, base_y, 1, u * 16, v * 16, 16, 16, 1)
             pyxel.rect(base_x + i * 20, base_y + 17, 16, 1, c)
             pyxel.rect(base_x + i * 20, base_y + 18, 16, 1, c - 1)
-        pyxel.blt(base_x + 4, base_y - 8, 0, 64, 0, 8, 8, 1)
+        pyxel.blt(base_x + 4, base_y - 8, 0, 88, 16, 8, 8, 1)
         # ウィンドウ
         for window in self.windows:
             window.draw()
-        # カーソル（仮）
-        # pyxel.blt(96, 52, 0, 48, 0, 16, 16, 1)
-        pyxel.blt(34 * 4, 2 * 4, 0, 88, 16, 8, 8, 1)
-        # pyxel.blt(0 * 4, 49 * 4, 0, 48, 0, 16, 16, 1)
 
 
 def main() -> int:
