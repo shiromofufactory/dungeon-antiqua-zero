@@ -2,6 +2,7 @@
 
 from .localized_text import LocalizedWindowTextFactory
 from .tagged_text import TEXT_ICONS, TextIcon, draw_tagged_text, split_tagged_text
+from .text_format import pad, spacing
 from .window import (
     CursorTarget,
     TEXT_GRID_X,
@@ -27,5 +28,7 @@ __all__ = [
     "WindowState",
     "WindowText",
     "draw_tagged_text",
+    "pad",
+    "spacing",
     "split_tagged_text",
 ]

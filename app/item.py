@@ -9,12 +9,23 @@ from typing import Mapping
 
 if __package__ == "":
     from localization import Localizer
+    from resistance import ResistanceType, resistances_from_tolerance
 else:
     from .localization import Localizer
+    from .resistance import ResistanceType, resistances_from_tolerance
 
 
 class ItemDataError(ValueError):
     """Raised when an item record cannot be interpreted safely."""
+
+
+def _non_negative_stat(record: Mapping[str, object], field: str) -> int:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ItemDataError(f"item.{field} must be an integer")
+    if value < 0:
+        raise ItemDataError(f"item.{field} must not be negative")
+    return value
 
 
 class ItemEquipType(StrEnum):
@@ -31,16 +42,21 @@ class ItemEquipType(StrEnum):
 
 @dataclass(frozen=True)
 class Item:
-    """Minimal item model with its current lookup key and localized names."""
+    """Item identity, equipment category, and battle status values."""
 
     key: str
     names: Mapping[str, str]
     equip_type: ItemEquipType
     subtype: str
+    attack: int
+    hit: int
+    defense: int
+    spell_resistance: int
+    resistances: frozenset[ResistanceType]
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> Item:
-        """Validate and normalize the identity portion of an item record."""
+        """Validate and normalize one item master-data record."""
 
         if not isinstance(record, Mapping):
             raise ItemDataError("item must be an object")
@@ -72,12 +88,40 @@ class Item:
         subtype = record.get("type2")
         if not isinstance(subtype, str) or not subtype:
             raise ItemDataError("item.type2 must be a non-empty string")
+        tolerance = record.get("tolerance")
+        if not isinstance(tolerance, str):
+            raise ItemDataError("item.tolerance must be a string")
 
         return cls(
             key=key,
             names=MappingProxyType(names),
             equip_type=equip_type,
             subtype=subtype,
+            attack=_non_negative_stat(record, "atk"),
+            hit=_non_negative_stat(record, "hit"),
+            defense=_non_negative_stat(record, "dfc"),
+            spell_resistance=_non_negative_stat(record, "rst"),
+            resistances=resistances_from_tolerance(tolerance),
+        )
+
+    @property
+    def is_weapon(self) -> bool:
+        """Return whether this item supplies weapon attack and hit values."""
+
+        return self.equip_type in (
+            ItemEquipType.RIGHT,
+            ItemEquipType.TWO_HANDS,
+        )
+
+    @property
+    def is_armor(self) -> bool:
+        """Return whether this item contributes defense values."""
+
+        return self.equip_type in (
+            ItemEquipType.LEFT,
+            ItemEquipType.HEAD,
+            ItemEquipType.BODY,
+            ItemEquipType.ARM,
         )
 
     def localized_name(self, localizer: Localizer) -> str:

@@ -3,13 +3,18 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, patch
 
+from app.member import BattleStats, HandHit
+from app.resistance import ResistanceType
 from tools.screen_mocks.status import (
     LOCALIZED_POSITIONS,
     Language,
     TRANSPARENT_INDEX,
     Settings,
     StatusScreenMock,
+    attack_display,
+    hit_display,
     next_language,
+    resistance_icon_tag,
 )
 
 
@@ -61,7 +66,21 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(30, 14)], "からだ　：ローブ")
         self.assertEqual(placed[(30, 17)], "あたま　：")
         self.assertEqual(placed[(30, 20)], "うで　　：")
+        self.assertEqual(placed[(46, 26)], "　８")
+        self.assertEqual(placed[(44, 29)], "１２１（＋１６）")
+        self.assertEqual(placed[(46, 32)], "　３")
+        self.assertEqual(placed[(46, 35)], "１３")
+        self.assertEqual(placed[(46, 38)], "１２")
         self.assertEqual(placed[(30, 38)], "じゅつぼうぎょ")
+        self.assertEqual(placed[(32, 44)], "%FIRE_DISABLED%")
+        self.assertEqual(placed[(34, 44)], "%FREEZE_DISABLED%")
+        self.assertEqual(placed[(36, 44)], "%DARK_DISABLED%")
+        self.assertEqual(placed[(38, 44)], "%SLEEP_DISABLED%")
+        self.assertEqual(placed[(40, 44)], "%POISON_DISABLED%")
+        self.assertEqual(placed[(42, 44)], "%PARALIZE_DISABLED%")
+        self.assertEqual(placed[(44, 44)], "%CONFUSE_DISABLED%")
+        self.assertEqual(placed[(46, 44)], "%SILENCE_DISABLED%")
+        self.assertEqual(placed[(48, 44)], "%DEATH_DISABLED%")
         self.assertEqual(placed[(6, 49)], "%SWORD%：０－００")
         self.assertEqual(placed[(20, 49)], "%KATANA%：０－００")
         self.assertEqual(placed[(34, 49)], "%SPEAR%：０－００")
@@ -74,6 +93,60 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(20, 55)], "%MYSTIC%：８－９９")
         self.assertEqual(placed[(34, 55)], "%SACRED%：０－００")
         self.assertEqual(placed[(48, 55)], "%NETHER%：８－９９")
+
+    def test_formats_dual_wield_attack_and_average_hit(self) -> None:
+        stats = BattleStats(
+            attack_right=40,
+            attack_left=32,
+            hit_right=HandHit(
+                total=109,
+                weapon_level_bonus=16,
+                cross_weapon_bonus=2,
+            ),
+            hit_left=HandHit(
+                total=108,
+                weapon_level_bonus=14,
+                cross_weapon_bonus=2,
+            ),
+            defense=0,
+            evasion=0,
+            spell_resistance=0,
+        )
+
+        self.assertEqual(attack_display(stats), "４０　－　３２")
+        self.assertEqual(hit_display(stats), "１０８（＋１７）")
+
+        narrow_stats = BattleStats(
+            attack_right=8,
+            attack_left=None,
+            hit_right=HandHit(
+                total=8,
+                weapon_level_bonus=0,
+                cross_weapon_bonus=1,
+            ),
+            hit_left=None,
+            defense=0,
+            evasion=0,
+            spell_resistance=0,
+        )
+        self.assertEqual(attack_display(narrow_stats), "　８")
+        self.assertEqual(hit_display(narrow_stats), "　　８（＋　１）")
+
+    def test_resistance_icon_uses_enabled_and_disabled_variants(self) -> None:
+        member = Mock(
+            resistances=frozenset(
+                (ResistanceType.FIRE, ResistanceType.DEATH)
+            )
+        )
+
+        self.assertEqual(
+            resistance_icon_tag(member, ResistanceType.FIRE),
+            "%FIRE%",
+        )
+        self.assertEqual(
+            resistance_icon_tag(member, ResistanceType.FREEZE),
+            "%FREEZE_DISABLED%",
+        )
 
     def test_confirm_cycles_language_and_rebuilds_localized_window(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)

@@ -4,6 +4,7 @@ import unittest
 
 from app.item import Item, ItemDataError, ItemEquipType
 from app.localization import Localizer
+from app.resistance import ResistanceType
 from app.state import Language
 
 
@@ -15,6 +16,11 @@ class ItemTest(unittest.TestCase):
                 "name_ja": "デイブリンガー",
                 "type1": "RIGHT",
                 "type2": "WAND",
+                "atk": 40,
+                "hit": 108,
+                "dfc": 2,
+                "rst": 12,
+                "tolerance": "炎冷炎止",
             }
         )
 
@@ -24,6 +30,40 @@ class ItemTest(unittest.TestCase):
     def test_keeps_equipment_type_and_subtype(self) -> None:
         self.assertEqual(self.item.equip_type, ItemEquipType.RIGHT)
         self.assertEqual(self.item.subtype, "WAND")
+
+    def test_keeps_battle_status_values(self) -> None:
+        self.assertEqual(self.item.attack, 40)
+        self.assertEqual(self.item.hit, 108)
+        self.assertEqual(self.item.defense, 2)
+        self.assertEqual(self.item.spell_resistance, 12)
+
+    def test_parses_recognized_tolerances_as_unique_resistances(self) -> None:
+        self.assertEqual(
+            self.item.resistances,
+            frozenset(
+                (
+                    ResistanceType.FIRE,
+                    ResistanceType.FREEZE,
+                    ResistanceType.STUN,
+                )
+            ),
+        )
+
+    def test_rejects_invalid_battle_status_value(self) -> None:
+        record = {
+            "name_en": "DAYBRINGER",
+            "name_ja": "デイブリンガー",
+            "type1": "RIGHT",
+            "type2": "WAND",
+            "atk": -1,
+            "hit": 108,
+            "dfc": 2,
+            "rst": 12,
+            "tolerance": "",
+        }
+
+        with self.assertRaisesRegex(ItemDataError, "atk"):
+            Item.from_record(record)
 
     def test_returns_localized_display_name(self) -> None:
         self.assertEqual(

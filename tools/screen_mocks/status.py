@@ -9,13 +9,15 @@ import pyxel
 from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
 from item import Item, ItemDataError
-from localization import Localizer, format_number
+from localization import Localizer
 from member import (
+    BattleStats,
     EquipmentSlot,
     Member,
     MemberDataError,
     ProficiencyKind,
 )
+from resistance import ResistanceType
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -26,7 +28,13 @@ from resources import (
 from skill import Skill, SkillDataError
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
-from ui import TEXT_ICONS, LocalizedWindowTextFactory, WindowFactory, WindowText
+from ui import (
+    TEXT_ICONS,
+    LocalizedWindowTextFactory,
+    WindowFactory,
+    WindowText,
+    pad,
+)
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
@@ -94,6 +102,22 @@ PROFICIENCY_POSITIONS = (
     (ProficiencyKind.SACRED, "%SACRED%", 34, 55),
     (ProficiencyKind.NETHER, "%NETHER%", 48, 55),
 )
+RESISTANCE_POSITIONS = tuple(
+    (resistance, 32 + index * 2, 44)
+    for index, resistance in enumerate(
+        (
+            ResistanceType.FIRE,
+            ResistanceType.FREEZE,
+            ResistanceType.DARK,
+            ResistanceType.SLEEP,
+            ResistanceType.POISON,
+            ResistanceType.PARALIZE,
+            ResistanceType.CONFUSE,
+            ResistanceType.SILENCE,
+            ResistanceType.DEATH,
+        )
+    )
+)
 
 
 def next_language(language: Language) -> Language:
@@ -109,8 +133,40 @@ def proficiency_display(member: Member, kind: ProficiencyKind) -> str:
     """Format one member proficiency with fullwidth fixed-width numbers."""
 
     proficiency = member.proficiency(kind)
-    progress = format_number(proficiency.progress).rjust(2, "０")
-    return f"{format_number(proficiency.level)}－{progress}"
+    level = pad(proficiency.level, 1, fill="0")
+    progress = pad(proficiency.progress, 2, fill="0")
+    return f"{level}－{progress}"
+
+
+def attack_display(stats: BattleStats) -> str:
+    """Format one- or two-weapon attack values for the status screen."""
+
+    right = pad(stats.attack_right, 2)
+    if stats.attack_left is None:
+        return right
+    return f"{right}　－　{pad(stats.attack_left, 2)}"
+
+
+def hit_display(stats: BattleStats) -> str:
+    """Format hit and its equipped-weapon level bonus."""
+
+    bonus = stats.hit_bonus
+    sign = "＋" if bonus >= 0 else "－"
+    return (
+        f"{pad(stats.hit, 3)}"
+        f"（{sign}{pad(abs(bonus), 2)}）"
+    )
+
+
+def resistance_icon_tag(
+    member: Member,
+    resistance: ResistanceType,
+) -> str:
+    """Return the enabled or disabled icon tag for one resistance."""
+
+    if resistance in member.resistances:
+        return f"%{resistance.value}%"
+    return f"%{resistance.value}_DISABLED%"
 
 
 class StatusMockDataError(RuntimeError):
@@ -211,6 +267,7 @@ class StatusScreenMock:
         localizer = Localizer(self.settings.language)
         localized = self._localized_texts(localizer)
         abilities = self.member.adjusted_abilities
+        battle_stats = self.member.battle_stats
         localized_texts = LocalizedWindowTextFactory.from_language(
             self.fonts,
             self.settings.language,
@@ -228,25 +285,25 @@ class StatusScreenMock:
                     localized_texts.create(localized["member.race"], 14, 5),
                     localized_texts.create(localized["member.gender"], 14, 8),
                     WindowText(
-                        f"ＨＰ　{format_number(self.member.hp)}"
-                        f"／{format_number(self.member.max_hp)}",
+                        f"ＨＰ　{pad(self.member.hp, 3)}"
+                        f"／{pad(self.member.max_hp, 3)}",
                         6,
                         14,
                     ),
                     WindowText(
-                        f"ＭＰ　{format_number(self.member.mp)}"
-                        f"／{format_number(self.member.max_mp)}",
+                        f"ＭＰ　{pad(self.member.mp, 3)}"
+                        f"／{pad(self.member.max_mp, 3)}",
                         6,
                         17,
                     ),
                     localized_texts.create(localized["label.condition"], 6, 20),
                     localized_texts.create(localized["value.condition"], 22, 20),
                     localized_texts.create(localized["label.strength"], 6, 26),
-                    WindowText(format_number(abilities.strength), 20, 26),
+                    WindowText(pad(abilities.strength, 2), 20, 26),
                     localized_texts.create(localized["label.agility"], 6, 29),
-                    WindowText(format_number(abilities.agility), 20, 29),
+                    WindowText(pad(abilities.agility, 2), 20, 29),
                     localized_texts.create(localized["label.magic"], 6, 32),
-                    WindowText(format_number(abilities.magic), 20, 32),
+                    WindowText(pad(abilities.magic, 2), 20, 32),
                     localized_texts.create(localized["label.skill"], 6, 38),
                     localized_texts.create(localized["skill.0"], 8, 41),
                     localized_texts.create(localized["skill.1"], 8, 44),
@@ -256,25 +313,28 @@ class StatusScreenMock:
                     localized_texts.create(localized["equipment.head"], 30, 17),
                     localized_texts.create(localized["equipment.arm"], 30, 20),
                     localized_texts.create(localized["label.attack"], 30, 26),
-                    WindowText("９６", 46, 26),
+                    WindowText(attack_display(battle_stats), 46, 26),
                     localized_texts.create(localized["label.hit"], 30, 29),
-                    WindowText("１１６（＋１６）", 44, 29),
+                    WindowText(hit_display(battle_stats), 44, 29),
                     localized_texts.create(localized["label.defense"], 30, 32),
-                    WindowText("２０", 46, 32),
+                    WindowText(pad(battle_stats.defense, 2), 46, 32),
                     localized_texts.create(localized["label.evasion"], 30, 35),
-                    WindowText("１５", 46, 35),
+                    WindowText(pad(battle_stats.evasion, 2), 46, 35),
                     localized_texts.create(localized["label.spell_resistance"], 30, 38),
-                    WindowText("４０", 46, 38),
+                    WindowText(
+                        pad(battle_stats.spell_resistance, 2),
+                        46,
+                        38,
+                    ),
                     localized_texts.create(localized["label.tolerance"], 30, 41),
-                    WindowText("%FIRE%", 32, 44),
-                    WindowText("%FREEZE%", 34, 44),
-                    WindowText("%DARK%", 36, 44),
-                    WindowText("%SLEEP%", 38, 44),
-                    WindowText("%POISON%", 40, 44),
-                    WindowText("%PARALIZE%", 42, 44),
-                    WindowText("%CONFUSE%", 44, 44),
-                    WindowText("%SILENCE%", 46, 44),
-                    WindowText("%DEATH%", 48, 44),
+                    *(
+                        WindowText(
+                            resistance_icon_tag(self.member, resistance),
+                            x,
+                            y,
+                        )
+                        for resistance, x, y in RESISTANCE_POSITIONS
+                    ),
                     *(
                         WindowText(
                             f"{icon}：{proficiency_display(self.member, kind)}",

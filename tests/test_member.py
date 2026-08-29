@@ -17,6 +17,7 @@ from app.member import (
     ProficiencyKind,
     Race,
 )
+from app.resistance import ResistanceType
 from app.skill import Skill
 from app.state import Language
 from app.text_catalog import TextCatalog
@@ -93,13 +94,28 @@ class MemberTest(unittest.TestCase):
         )
 
     @staticmethod
-    def item(key: str, equip_type: str, subtype: str = "GENERAL") -> Item:
+    def item(
+        key: str,
+        equip_type: str,
+        subtype: str = "GENERAL",
+        *,
+        attack: int = 0,
+        hit: int = 0,
+        defense: int = 0,
+        spell_resistance: int = 0,
+        tolerance: str = "",
+    ) -> Item:
         return Item.from_record(
             {
                 "name_en": key,
                 "name_ja": key,
                 "type1": equip_type,
                 "type2": subtype,
+                "atk": attack,
+                "hit": hit,
+                "dfc": defense,
+                "rst": spell_resistance,
+                "tolerance": tolerance,
             }
         )
 
@@ -251,6 +267,168 @@ class MemberTest(unittest.TestCase):
 
         with self.assertRaisesRegex(MemberDataError, "eq_sword"):
             Member.from_record(record)
+
+    def test_calculates_single_weapon_and_defensive_battle_stats(self) -> None:
+        dagger = self.item(
+            "DAGGER",
+            "RIGHT",
+            "KNIFE",
+            attack=8,
+            hit=105,
+            defense=99,
+            spell_resistance=99,
+        )
+        robe = self.item(
+            "ROBE",
+            "BODY",
+            defense=3,
+        )
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            "equip_right": "DAGGER",
+            "equip_body": "ROBE",
+            **PROFICIENCY_FIELDS,
+            "eq_knife": 1,
+            "eq_throwing": 1,
+            "eq_wand": 1,
+            "eq_shield": 2,
+            "sp_mystic": 2,
+        }
+        member = Member.from_record(
+            record,
+            items={"DAGGER": dagger, "ROBE": robe},
+        )
+
+        stats = member.battle_stats
+
+        self.assertEqual(stats.attack_right, 8)
+        self.assertIsNone(stats.attack_left)
+        self.assertEqual(stats.hit_right.total, 121)
+        self.assertEqual(stats.hit_right.weapon_level_bonus, 14)
+        self.assertEqual(stats.hit_right.cross_weapon_bonus, 2)
+        self.assertEqual(stats.hit_right.bonus, 16)
+        self.assertIsNone(stats.hit_left)
+        self.assertEqual(stats.hit, 121)
+        self.assertEqual(stats.hit_bonus, 16)
+        self.assertEqual(stats.defense, 3)
+        self.assertEqual(stats.evasion, 13)
+        self.assertEqual(stats.spell_resistance, 12)
+
+    def test_dual_wield_uses_left_attack_factor_and_average_hit(self) -> None:
+        sword = self.item(
+            "SWORD",
+            "RIGHT",
+            "SWORD",
+            attack=41,
+            hit=100,
+        )
+        dagger = self.item(
+            "DAGGER",
+            "RIGHT",
+            "KNIFE",
+            attack=41,
+            hit=90,
+        )
+        record = {
+            "name_en": "Elika",
+            "race": "HUMAN",
+            "gender": "FEMALE",
+            "base_str": 20,
+            "base_agi": 20,
+            "base_mag": 20,
+            "equip_right": "SWORD",
+            "equip_left": "DAGGER",
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 2,
+            "eq_knife": 1,
+            "eq_katana": 2,
+        }
+        member = Member.from_record(
+            record,
+            items={"SWORD": sword, "DAGGER": dagger},
+        )
+
+        stats = member.battle_stats
+
+        self.assertEqual((stats.attack_right, stats.attack_left), (41, 32))
+        self.assertEqual(stats.hit_right.total, 118)
+        self.assertEqual(stats.hit_left.total, 106)
+        self.assertEqual(stats.hit, 112)
+        self.assertEqual(stats.hit_bonus, 17)
+        self.assertEqual(stats.evasion, 0)
+
+    def test_two_handed_skill_increases_compatible_weapon_attack(self) -> None:
+        sword = self.item(
+            "SWORD",
+            "RIGHT",
+            "SWORD",
+            attack=41,
+            hit=100,
+        )
+        two_handed = self.skill("Two-Handed")
+        record = {
+            "name_en": "Ragna",
+            "race": "HUMAN",
+            "gender": "MALE",
+            "base_str": 20,
+            "base_agi": 20,
+            "base_mag": 20,
+            "skills": ["Two-Handed"],
+            "equip_right": "SWORD",
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 2,
+        }
+        member = Member.from_record(
+            record,
+            items={"SWORD": sword},
+            skills={"Two-Handed": two_handed},
+        )
+
+        self.assertEqual(member.battle_stats.attack_right, 61)
+
+    def test_resistances_are_union_of_all_equipped_items(self) -> None:
+        sword = self.item(
+            "SWORD",
+            "RIGHT",
+            "SWORD",
+            tolerance="炎冷",
+        )
+        robe = self.item(
+            "ROBE",
+            "BODY",
+            tolerance="冷闇",
+        )
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            "equip_right": "SWORD",
+            "equip_body": "ROBE",
+            **PROFICIENCY_FIELDS,
+        }
+        member = Member.from_record(
+            record,
+            items={"SWORD": sword, "ROBE": robe},
+        )
+
+        self.assertEqual(
+            member.resistances,
+            frozenset(
+                (
+                    ResistanceType.FIRE,
+                    ResistanceType.FREEZE,
+                    ResistanceType.DARK,
+                )
+            ),
+        )
 
     def test_two_handed_equipment_reserves_the_left_hand(self) -> None:
         spear = self.item("SPEAR", "TWO_HANDS", "SPEAR")

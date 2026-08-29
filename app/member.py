@@ -10,11 +10,13 @@ from typing import Mapping, TypeVar
 if __package__ == "":
     from item import Item, ItemEquipType
     from localization import Localizer, format_number
+    from resistance import ResistanceType
     from skill import Skill
     from text_catalog import TextCatalog
 else:
     from .item import Item, ItemEquipType
     from .localization import Localizer, format_number
+    from .resistance import ResistanceType
     from .skill import Skill
     from .text_catalog import TextCatalog
 
@@ -113,6 +115,31 @@ _EQUIPMENT_TYPES_BY_SLOT = MappingProxyType(
         EquipmentSlot.BODY: frozenset((ItemEquipType.BODY,)),
         EquipmentSlot.ARM: frozenset((ItemEquipType.ARM,)),
     }
+)
+WEAPON_PROFICIENCY_KINDS = frozenset(
+    (
+        ProficiencyKind.SWORD,
+        ProficiencyKind.KNIFE,
+        ProficiencyKind.KATANA,
+        ProficiencyKind.SPEAR,
+        ProficiencyKind.HAMMER,
+        ProficiencyKind.AXE,
+        ProficiencyKind.THROWING,
+        ProficiencyKind.ROD,
+        ProficiencyKind.WAND,
+    )
+)
+_WEAPON_PROFICIENCY_BY_SUBTYPE = MappingProxyType(
+    {kind.name: kind for kind in WEAPON_PROFICIENCY_KINDS}
+)
+_TWO_HANDED_SKILL_KEY = "Two-Handed"
+_TWO_HANDED_SKILL_KINDS = frozenset(
+    (
+        ProficiencyKind.SWORD,
+        ProficiencyKind.KATANA,
+        ProficiencyKind.HAMMER,
+        ProficiencyKind.ROD,
+    )
 )
 
 
@@ -287,6 +314,21 @@ class EquipmentSet:
             if (item := self._items[slot]) is not None
         )
 
+    def weapon_at(self, slot: EquipmentSlot) -> Item | None:
+        """Return the weapon in one hand, excluding a left-hand shield."""
+
+        if not isinstance(slot, EquipmentSlot):
+            raise TypeError("slot must be an EquipmentSlot")
+        if slot not in (EquipmentSlot.RIGHT, EquipmentSlot.LEFT):
+            raise ValueError("weapon slot must be RIGHT or LEFT")
+        item = self.item_at(slot)
+        return item if item is not None and item.is_weapon else None
+
+    def armor_items(self) -> tuple[Item, ...]:
+        """Return equipped shields and armor contributing defense values."""
+
+        return tuple(item for item in self.equipped_items() if item.is_armor)
+
     @property
     def uses_both_hands(self) -> bool:
         """Return whether the right-hand item reserves both hand slots."""
@@ -314,6 +356,50 @@ class AdjustedAbilities:
     strength: int
     agility: int
     magic: int
+
+
+@dataclass(frozen=True)
+class HandHit:
+    """One hand's final hit value and separated hit bonuses."""
+
+    total: int
+    weapon_level_bonus: int
+    cross_weapon_bonus: int
+
+    @property
+    def bonus(self) -> int:
+        """Return all bonuses included in this hand's final hit value."""
+
+        return self.weapon_level_bonus + self.cross_weapon_bonus
+
+
+@dataclass(frozen=True)
+class BattleStats:
+    """Battle status values derived from current member state."""
+
+    attack_right: int
+    attack_left: int | None
+    hit_right: HandHit
+    hit_left: HandHit | None
+    defense: int
+    evasion: int
+    spell_resistance: int
+
+    @property
+    def hit(self) -> int:
+        """Return the displayed hit value, averaging two weapons if present."""
+
+        if self.hit_left is None:
+            return self.hit_right.total
+        return (self.hit_right.total + self.hit_left.total) // 2
+
+    @property
+    def hit_bonus(self) -> int:
+        """Return the displayed total hit bonus."""
+
+        if self.hit_left is None:
+            return self.hit_right.bonus
+        return (self.hit_right.bonus + self.hit_left.bonus) // 2
 
 
 @dataclass(frozen=True)
@@ -529,6 +615,122 @@ class Member:
         if not isinstance(kind, ProficiencyKind):
             raise TypeError("kind must be a ProficiencyKind")
         return self.proficiencies[kind]
+
+    @property
+    def resistances(self) -> frozenset[ResistanceType]:
+        """Return the union of resistances on all currently equipped items."""
+
+        return frozenset(
+            resistance
+            for item in self.equipment.equipped_items()
+            for resistance in item.resistances
+        )
+
+    def has_skill(self, key: str) -> bool:
+        """Return whether the member currently has one stable skill key."""
+
+        if not isinstance(key, str) or not key:
+            raise ValueError("key must be a non-empty string")
+        return any(skill.key == key for skill in self.skills)
+
+    @staticmethod
+    def _weapon_proficiency_kind(weapon: Item) -> ProficiencyKind:
+        try:
+            return _WEAPON_PROFICIENCY_BY_SUBTYPE[weapon.subtype]
+        except KeyError as error:
+            raise MemberDataError(
+                f"unsupported weapon subtype: {weapon.subtype}"
+            ) from error
+
+    def _uses_two_handed_skill(self, weapon: Item) -> bool:
+        kind = self._weapon_proficiency_kind(weapon)
+        return (
+            self.has_skill(_TWO_HANDED_SKILL_KEY)
+            and self.equipment.item_at(EquipmentSlot.LEFT) is None
+            and kind in _TWO_HANDED_SKILL_KINDS
+        )
+
+    def _cross_weapon_hit_bonus(
+        self,
+        equipped_kinds: frozenset[ProficiencyKind],
+    ) -> int:
+        bonus = 0
+        for kind in WEAPON_PROFICIENCY_KINDS - equipped_kinds:
+            proficiency = self.proficiency(kind)
+            if (proficiency.level, proficiency.progress) == (9, 99):
+                bonus += 2
+            elif (proficiency.level, proficiency.progress) == (8, 99):
+                bonus += 1
+        return bonus
+
+    def _hand_hit(self, weapon: Item, cross_weapon_bonus: int) -> HandHit:
+        kind = self._weapon_proficiency_kind(weapon)
+        level = self.proficiency(kind).level
+        weapon_level_bonus = (level - 1) * 2
+        return HandHit(
+            total=weapon.hit + weapon_level_bonus + cross_weapon_bonus,
+            weapon_level_bonus=weapon_level_bonus,
+            cross_weapon_bonus=cross_weapon_bonus,
+        )
+
+    @property
+    def battle_stats(self) -> BattleStats:
+        """Calculate battle status from current equipment and proficiencies."""
+
+        right_weapon = self.equipment.weapon_at(EquipmentSlot.RIGHT)
+        left_weapon = self.equipment.weapon_at(EquipmentSlot.LEFT)
+        weapons = tuple(
+            weapon
+            for weapon in (right_weapon, left_weapon)
+            if weapon is not None
+        )
+        equipped_kinds = frozenset(
+            self._weapon_proficiency_kind(weapon) for weapon in weapons
+        )
+        cross_weapon_bonus = self._cross_weapon_hit_bonus(equipped_kinds)
+
+        attack_right = right_weapon.attack if right_weapon is not None else 0
+        if right_weapon is not None and self._uses_two_handed_skill(right_weapon):
+            attack_right = right_weapon.attack * 15 // 10
+        attack_left = (
+            left_weapon.attack * 8 // 10
+            if left_weapon is not None
+            else None
+        )
+
+        hit_right = (
+            self._hand_hit(right_weapon, cross_weapon_bonus)
+            if right_weapon is not None
+            else HandHit(
+                total=0,
+                weapon_level_bonus=0,
+                cross_weapon_bonus=0,
+            )
+        )
+        hit_left = (
+            self._hand_hit(left_weapon, cross_weapon_bonus)
+            if left_weapon is not None
+            else None
+        )
+
+        armor = self.equipment.armor_items()
+        defense = sum(item.defense for item in armor)
+        abilities = self.adjusted_abilities
+        agility_bonus = max(0, (abilities.agility - 20) * 2)
+        evasion = max(0, defense + agility_bonus)
+        spell_resistance = (
+            sum(item.spell_resistance for item in armor)
+            + abilities.magic // 2
+        )
+        return BattleStats(
+            attack_right=attack_right,
+            attack_left=attack_left,
+            hit_right=hit_right,
+            hit_left=hit_left,
+            defense=defense,
+            evasion=evasion,
+            spell_resistance=spell_resistance,
+        )
 
     def status(
         self,
