@@ -132,6 +132,12 @@ git -C content diff -- data
 二刀流では2本目の武器を `equip_left` に明示する。`skills` は引き続き複数行セルとして
 JSON配列と相互変換する。
 
+武器・呪文適性は `eq_sword`、`eq_knife`、`eq_katana`、`eq_spear`、`eq_hammer`、
+`eq_axe`、`eq_throwing`、`eq_rod`、`eq_wand`、`eq_shield`、`sp_mystic`、
+`sp_sacred`、`sp_nether` の13列で管理する。値は0（使用不可）、1（通常）、
+2（得意）の整数に限定し、現在レベルと熟練度は共有マスターではなくセーブ対象となる
+Member状態で管理する。
+
 共有JSONからGoogle Sheetsへ反映する場合は、まず送信内容だけを確認する。
 
 ```sh

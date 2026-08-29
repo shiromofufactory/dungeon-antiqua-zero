@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from types import MappingProxyType
 from typing import Mapping, TypeVar
 
@@ -50,6 +50,40 @@ class EquipmentSlot(StrEnum):
     HEAD = "HEAD"
     BODY = "BODY"
     ARM = "ARM"
+
+
+class ProficiencyKind(StrEnum):
+    """Stable weapon and spell proficiency identifiers in character data."""
+
+    SWORD = "eq_sword"
+    KNIFE = "eq_knife"
+    KATANA = "eq_katana"
+    SPEAR = "eq_spear"
+    HAMMER = "eq_hammer"
+    AXE = "eq_axe"
+    THROWING = "eq_throwing"
+    ROD = "eq_rod"
+    WAND = "eq_wand"
+    SHIELD = "eq_shield"
+    MYSTIC = "sp_mystic"
+    SACRED = "sp_sacred"
+    NETHER = "sp_nether"
+
+
+class ProficiencyAptitude(IntEnum):
+    """A character's immutable aptitude and corresponding level cap."""
+
+    DISABLED = 0
+    NORMAL = 1
+    FAVORED = 2
+
+    @property
+    def max_level(self) -> int:
+        return {
+            ProficiencyAptitude.DISABLED: 0,
+            ProficiencyAptitude.NORMAL: 8,
+            ProficiencyAptitude.FAVORED: 9,
+        }[self]
 
 
 EnumValue = TypeVar("EnumValue", bound=StrEnum)
@@ -99,6 +133,75 @@ def _string_keys(record: Mapping[str, object], field_name: str) -> tuple[str, ..
             f"character.{field_name} must contain non-empty strings"
         )
     return tuple(value)
+
+
+def _proficiency_aptitudes(
+    record: Mapping[str, object],
+) -> Mapping[ProficiencyKind, ProficiencyAptitude]:
+    aptitudes: dict[ProficiencyKind, ProficiencyAptitude] = {}
+    for kind in ProficiencyKind:
+        value = record.get(kind.value)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise MemberDataError(
+                f"character.{kind.value} must be an integer from 0 to 2"
+            )
+        try:
+            aptitudes[kind] = ProficiencyAptitude(value)
+        except ValueError as error:
+            raise MemberDataError(
+                f"character.{kind.value} must be an integer from 0 to 2"
+            ) from error
+    return MappingProxyType(aptitudes)
+
+
+@dataclass
+class Proficiency:
+    """A member's current level and progress for one weapon or spell kind."""
+
+    aptitude: ProficiencyAptitude
+    level: int = 0
+    progress: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.aptitude, ProficiencyAptitude):
+            raise TypeError("aptitude must be a ProficiencyAptitude")
+        for name in ("level", "progress"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+        if not 0 <= self.level <= self.max_level:
+            raise ValueError(f"level must be from 0 to {self.max_level}")
+        if not 0 <= self.progress <= 99:
+            raise ValueError("progress must be from 0 to 99")
+        if self.aptitude is ProficiencyAptitude.DISABLED and self.progress != 0:
+            raise ValueError("disabled proficiency progress must be 0")
+
+    @property
+    def max_level(self) -> int:
+        return self.aptitude.max_level
+
+    @classmethod
+    def at_limit(cls, aptitude: ProficiencyAptitude) -> Proficiency:
+        """Create the fixed current mock value determined by aptitude."""
+
+        if not isinstance(aptitude, ProficiencyAptitude):
+            raise TypeError("aptitude must be a ProficiencyAptitude")
+        if aptitude is ProficiencyAptitude.DISABLED:
+            return cls(aptitude, level=0, progress=0)
+        return cls(aptitude, level=aptitude.max_level, progress=99)
+
+    def add_progress(self, amount: int) -> None:
+        """Add progress, carrying each 100 points into one level."""
+
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise TypeError("amount must be an integer")
+        if amount < 0:
+            raise ValueError("amount must not be negative")
+        if self.aptitude is ProficiencyAptitude.DISABLED or amount == 0:
+            return
+        current = self.level * 100 + self.progress
+        limit = self.max_level * 100 + 99
+        self.level, self.progress = divmod(min(current + amount, limit), 100)
 
 
 @dataclass
@@ -223,6 +326,10 @@ class CharacterDefinition:
     base_abilities: BaseAbilities
     initial_skill_keys: tuple[str, ...]
     initial_equipment_keys: Mapping[EquipmentSlot, str]
+    proficiency_aptitudes: Mapping[
+        ProficiencyKind,
+        ProficiencyAptitude,
+    ]
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> CharacterDefinition:
@@ -264,6 +371,7 @@ class CharacterDefinition:
             base_abilities,
             initial_skill_keys,
             MappingProxyType(initial_equipment_keys),
+            _proficiency_aptitudes(record),
         )
 
     @staticmethod
@@ -317,6 +425,9 @@ class Member:
     confused: int = 0
     skills: list[Skill] = field(default_factory=list)
     equipment: EquipmentSet = field(default_factory=EquipmentSet)
+    proficiencies: dict[ProficiencyKind, Proficiency] = field(
+        default_factory=dict,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
@@ -346,6 +457,26 @@ class Member:
             raise TypeError("skills must contain only Skill values")
         if not isinstance(self.equipment, EquipmentSet):
             raise TypeError("equipment must be an EquipmentSet")
+        if not isinstance(self.proficiencies, dict):
+            raise TypeError("proficiencies must be a dictionary")
+        if not self.proficiencies:
+            self.proficiencies = {
+                kind: Proficiency.at_limit(aptitude)
+                for kind, aptitude in self.definition.proficiency_aptitudes.items()
+            }
+        if set(self.proficiencies) != set(ProficiencyKind):
+            raise ValueError("proficiencies must contain every ProficiencyKind")
+        for kind, proficiency in self.proficiencies.items():
+            if not isinstance(kind, ProficiencyKind):
+                raise TypeError("proficiency keys must be ProficiencyKind values")
+            if not isinstance(proficiency, Proficiency):
+                raise TypeError("proficiencies must contain Proficiency values")
+            expected = self.definition.proficiency_aptitudes[kind]
+            if proficiency.aptitude is not expected:
+                raise MemberDataError(
+                    "proficiency aptitude differs from character data: "
+                    f"{kind.value}"
+                )
 
     @classmethod
     def from_record(
@@ -391,6 +522,13 @@ class Member:
             agility=base.agility,
             magic=base.magic,
         )
+
+    def proficiency(self, kind: ProficiencyKind) -> Proficiency:
+        """Return the current proficiency for one stable kind."""
+
+        if not isinstance(kind, ProficiencyKind):
+            raise TypeError("kind must be a ProficiencyKind")
+        return self.proficiencies[kind]
 
     def status(
         self,

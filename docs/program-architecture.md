@@ -498,6 +498,15 @@ guide.draw()
 配置を許可する。所持品との交換や装備可否のゲームルールは、必要になった段階で
 `InventorySystem` とMemberへ追加する。
 
+武器・呪文の適性は `characters.json` の `eq_sword` から `eq_shield`、および
+`sp_mystic`、`sp_sacred`、`sp_nether` を正本とする。`CharacterDefinition` は0（使用不可）、
+1（通常）、2（得意）の不変な適性を保持し、`Member` は各 `ProficiencyKind` の現在レベルと
+熟練度を別に保持する。熟練度は0〜99で、100ポイントごとにレベルへ繰り上げる。
+レベル上限は使用不可が0、通常が8、得意が9であり、上限到達後の加算は上限レベル・
+熟練度99で止める。現段階のステータス画面用初期値は、適性0を0・00、適性1を8・99、
+適性2を9・99とする。加入時の実際の成長値やセーブ・復元を導入するときは、この一時的な
+初期化を保存済みのMember状態で置き換え、適性の正本とは混在させない。
+
 キャラクター正本の `base_str`、`base_agi`、`base_mag` は、変更されない
 `CharacterDefinition.base_abilities` として保持する。画面やゲームルールは基礎値を
 直接使わず、`Member.adjusted_abilities` を参照する。現段階では両者は同値だが、

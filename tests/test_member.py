@@ -12,11 +12,17 @@ from app.member import (
     Gender,
     Member,
     MemberDataError,
+    Proficiency,
+    ProficiencyAptitude,
+    ProficiencyKind,
     Race,
 )
 from app.skill import Skill
 from app.state import Language
 from app.text_catalog import TextCatalog
+
+
+PROFICIENCY_FIELDS = {kind.value: 0 for kind in ProficiencyKind}
 
 
 class MemberTest(unittest.TestCase):
@@ -30,6 +36,7 @@ class MemberTest(unittest.TestCase):
                 "base_str": 17,
                 "base_agi": 25,
                 "base_mag": 24,
+                **PROFICIENCY_FIELDS,
             }
         )
         self.texts = TextCatalog.from_records(
@@ -138,6 +145,7 @@ class MemberTest(unittest.TestCase):
                 "equip_head": "",
                 "equip_body": "ROBE",
                 "equip_arm": "",
+                **PROFICIENCY_FIELDS,
             },
             items={"DAGGER": dagger, "ROBE": robe},
             skills={"Focus": focus},
@@ -167,6 +175,82 @@ class MemberTest(unittest.TestCase):
         )
 
         self.assertIs(equipment.item_at(EquipmentSlot.LEFT), dagger)
+
+    def test_initial_proficiencies_are_fixed_at_each_aptitude_limit(self) -> None:
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 2,
+            "eq_knife": 1,
+        }
+
+        member = Member.from_record(record)
+
+        self.assertEqual(
+            member.definition.proficiency_aptitudes[ProficiencyKind.SWORD],
+            ProficiencyAptitude.FAVORED,
+        )
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.SWORD).level,
+                member.proficiency(ProficiencyKind.SWORD).progress,
+            ),
+            (9, 99),
+        )
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.KNIFE).level,
+                member.proficiency(ProficiencyKind.KNIFE).progress,
+            ),
+            (8, 99),
+        )
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.KATANA).level,
+                member.proficiency(ProficiencyKind.KATANA).progress,
+            ),
+            (0, 0),
+        )
+
+    def test_proficiency_progress_carries_at_100_and_respects_cap(self) -> None:
+        proficiency = Proficiency(
+            ProficiencyAptitude.NORMAL,
+            level=7,
+            progress=99,
+        )
+
+        proficiency.add_progress(1)
+        self.assertEqual((proficiency.level, proficiency.progress), (8, 0))
+
+        proficiency.add_progress(200)
+        self.assertEqual((proficiency.level, proficiency.progress), (8, 99))
+
+    def test_disabled_proficiency_cannot_gain_progress(self) -> None:
+        proficiency = Proficiency(ProficiencyAptitude.DISABLED)
+
+        proficiency.add_progress(100)
+
+        self.assertEqual((proficiency.level, proficiency.progress), (0, 0))
+
+    def test_rejects_proficiency_aptitude_outside_zero_to_two(self) -> None:
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 3,
+        }
+
+        with self.assertRaisesRegex(MemberDataError, "eq_sword"):
+            Member.from_record(record)
 
     def test_two_handed_equipment_reserves_the_left_hand(self) -> None:
         spear = self.item("SPEAR", "TWO_HANDS", "SPEAR")

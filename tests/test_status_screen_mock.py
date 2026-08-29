@@ -62,6 +62,18 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(30, 17)], "あたま　：")
         self.assertEqual(placed[(30, 20)], "うで　　：")
         self.assertEqual(placed[(30, 38)], "じゅつぼうぎょ")
+        self.assertEqual(placed[(6, 49)], "%SWORD%：０－００")
+        self.assertEqual(placed[(20, 49)], "%KATANA%：０－００")
+        self.assertEqual(placed[(34, 49)], "%SPEAR%：０－００")
+        self.assertEqual(placed[(48, 49)], "%KNIFE%：８－９９")
+        self.assertEqual(placed[(6, 52)], "%AXE%：０－００")
+        self.assertEqual(placed[(20, 52)], "%HAMMER%：０－００")
+        self.assertEqual(placed[(34, 52)], "%THROWING%：８－９９")
+        self.assertEqual(placed[(48, 52)], "%ROD%：０－００")
+        self.assertEqual(placed[(6, 55)], "%WAND%：８－９９")
+        self.assertEqual(placed[(20, 55)], "%MYSTIC%：８－９９")
+        self.assertEqual(placed[(34, 55)], "%SACRED%：０－００")
+        self.assertEqual(placed[(48, 55)], "%NETHER%：８－９９")
 
     def test_confirm_cycles_language_and_rebuilds_localized_window(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)

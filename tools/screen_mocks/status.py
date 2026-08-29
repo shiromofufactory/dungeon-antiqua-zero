@@ -10,7 +10,12 @@ from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
 from item import Item, ItemDataError
 from localization import Localizer, format_number
-from member import EquipmentSlot, Member, MemberDataError
+from member import (
+    EquipmentSlot,
+    Member,
+    MemberDataError,
+    ProficiencyKind,
+)
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -75,6 +80,20 @@ LANGUAGE_SEQUENCE = (
     Language.ENGLISH,
     Language.SIMPLIFIED_CHINESE,
 )
+PROFICIENCY_POSITIONS = (
+    (ProficiencyKind.SWORD, "%SWORD%", 6, 49),
+    (ProficiencyKind.KATANA, "%KATANA%", 20, 49),
+    (ProficiencyKind.SPEAR, "%SPEAR%", 34, 49),
+    (ProficiencyKind.KNIFE, "%KNIFE%", 48, 49),
+    (ProficiencyKind.AXE, "%AXE%", 6, 52),
+    (ProficiencyKind.HAMMER, "%HAMMER%", 20, 52),
+    (ProficiencyKind.THROWING, "%THROWING%", 34, 52),
+    (ProficiencyKind.ROD, "%ROD%", 48, 52),
+    (ProficiencyKind.WAND, "%WAND%", 6, 55),
+    (ProficiencyKind.MYSTIC, "%MYSTIC%", 20, 55),
+    (ProficiencyKind.SACRED, "%SACRED%", 34, 55),
+    (ProficiencyKind.NETHER, "%NETHER%", 48, 55),
+)
 
 
 def next_language(language: Language) -> Language:
@@ -84,6 +103,14 @@ def next_language(language: Language) -> Language:
         raise TypeError("language must be a Language")
     index = LANGUAGE_SEQUENCE.index(language)
     return LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
+
+
+def proficiency_display(member: Member, kind: ProficiencyKind) -> str:
+    """Format one member proficiency with fullwidth fixed-width numbers."""
+
+    proficiency = member.proficiency(kind)
+    progress = format_number(proficiency.progress).rjust(2, "０")
+    return f"{format_number(proficiency.level)}－{progress}"
 
 
 class StatusMockDataError(RuntimeError):
@@ -248,18 +275,14 @@ class StatusScreenMock:
                     WindowText("%CONFUSE%", 44, 44),
                     WindowText("%SILENCE%", 46, 44),
                     WindowText("%DEATH%", 48, 44),
-                    WindowText("%SWORD%：９－９９", 6, 49),
-                    WindowText("%KATANA%：９－９９", 20, 49),
-                    WindowText("%SPEAR%：９－９９", 34, 49),
-                    WindowText("%KNIFE%：９－９９", 48, 49),
-                    WindowText("%AXE%：９－９９", 6, 52),
-                    WindowText("%HAMMER%：９－９９", 20, 52),
-                    WindowText("%THROWING%：９－９９", 34, 52),
-                    WindowText("%ROD%：９－９９", 48, 52),
-                    WindowText("%WAND%：９－９９", 6, 55),
-                    WindowText("%MYSTIC%：９－９９", 20, 55),
-                    WindowText("%SACRED%：９－９９", 34, 55),
-                    WindowText("%NETHER%：９－９９", 48, 55),
+                    *(
+                        WindowText(
+                            f"{icon}：{proficiency_display(self.member, kind)}",
+                            x,
+                            y,
+                        )
+                        for kind, icon, x, y in PROFICIENCY_POSITIONS
+                    ),
                 ),
             ),
         ]
