@@ -38,6 +38,13 @@ CURSOR_TEXT_OFFSET_X = -8
 CURSOR_FLOAT_OFFSETS = (0, 0, 0, 1, 2, 2, 2, 1)
 CURSOR_FLOAT_PHASE_FRAMES = 12
 
+HORIZONTAL_NAVIGATION_BANK = 0
+HORIZONTAL_NAVIGATION_X = 96
+HORIZONTAL_NAVIGATION_Y = 0
+HORIZONTAL_NAVIGATION_WIDTH = 8
+HORIZONTAL_NAVIGATION_HEIGHT = 16
+HORIZONTAL_NAVIGATION_COLKEY = 1
+
 WINDOW_ANIMATION_EDGE_STEP = TEXT_GRID_Y
 WINDOW_ANIMATION_HEIGHT_STEP = WINDOW_ANIMATION_EDGE_STEP * 2
 
@@ -131,6 +138,7 @@ class Window:
         font: Any | None = None,
         transparent: bool = False,
         thin_frame: bool = False,
+        horizontal_navigation: bool = False,
         opened: bool = True,
     ) -> None:
         values = (x, y, width, height)
@@ -145,6 +153,8 @@ class Window:
             raise TypeError("transparent must be a boolean")
         if not isinstance(thin_frame, bool):
             raise TypeError("thin_frame must be a boolean")
+        if not isinstance(horizontal_navigation, bool):
+            raise TypeError("horizontal_navigation must be a boolean")
         if not isinstance(opened, bool):
             raise TypeError("opened must be a boolean")
 
@@ -155,6 +165,7 @@ class Window:
         self.font = font
         self.transparent = transparent
         self.thin_frame = thin_frame
+        self.horizontal_navigation = horizontal_navigation
         self._texts: list[WindowText] = []
         self._cursor: WindowCursor | None = None
         self._state = WindowState.OPEN if opened else WindowState.CLOSED
@@ -345,6 +356,8 @@ class Window:
         if not self.transparent:
             self._draw_gradient()
             self._draw_frame()
+        if self.horizontal_navigation:
+            self._draw_horizontal_navigation()
         self._draw_texts()
         if self._cursor is not None:
             self._cursor.draw()
@@ -546,6 +559,33 @@ class Window:
                 text_y_offset=text.baseline_offset,
             )
 
+    def _draw_horizontal_navigation(self) -> None:
+        """Draw DA2-style previous/next indicators at both window edges."""
+
+        y = self.pixel_y + (
+            self.pixel_height - HORIZONTAL_NAVIGATION_HEIGHT
+        ) // 2
+        pyxel.blt(
+            self.pixel_x - 1,
+            y,
+            HORIZONTAL_NAVIGATION_BANK,
+            HORIZONTAL_NAVIGATION_X,
+            HORIZONTAL_NAVIGATION_Y,
+            HORIZONTAL_NAVIGATION_WIDTH,
+            HORIZONTAL_NAVIGATION_HEIGHT,
+            HORIZONTAL_NAVIGATION_COLKEY,
+        )
+        pyxel.blt(
+            self.pixel_x + self.pixel_width - HORIZONTAL_NAVIGATION_WIDTH + 1,
+            y,
+            HORIZONTAL_NAVIGATION_BANK,
+            HORIZONTAL_NAVIGATION_X + HORIZONTAL_NAVIGATION_WIDTH,
+            HORIZONTAL_NAVIGATION_Y,
+            HORIZONTAL_NAVIGATION_WIDTH,
+            HORIZONTAL_NAVIGATION_HEIGHT,
+            HORIZONTAL_NAVIGATION_COLKEY,
+        )
+
 
 class WindowFactory:
     """Create windows that share one language-specific default font."""
@@ -566,6 +606,7 @@ class WindowFactory:
         font: Any | None = None,
         transparent: bool = False,
         thin_frame: bool = False,
+        horizontal_navigation: bool = False,
         opened: bool = True,
     ) -> Window:
         """Create a Window, using the factory font unless one is supplied."""
@@ -579,6 +620,7 @@ class WindowFactory:
             font=self.default_font if font is None else font,
             transparent=transparent,
             thin_frame=thin_frame,
+            horizontal_navigation=horizontal_navigation,
             opened=opened,
         )
 

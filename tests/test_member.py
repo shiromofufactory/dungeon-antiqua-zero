@@ -9,6 +9,7 @@ from app.member import (
     BaseAbilities,
     EquipmentSet,
     EquipmentSlot,
+    FacePosition,
     Gender,
     Member,
     MemberDataError,
@@ -24,6 +25,7 @@ from app.text_catalog import TextCatalog
 
 
 PROFICIENCY_FIELDS = {kind.value: 0 for kind in ProficiencyKind}
+FACE_FIELDS = {"face_x": 0, "face_y": 0}
 
 
 class MemberTest(unittest.TestCase):
@@ -37,6 +39,7 @@ class MemberTest(unittest.TestCase):
                 "base_str": 17,
                 "base_agi": 25,
                 "base_mag": 24,
+                **FACE_FIELDS,
                 **PROFICIENCY_FIELDS,
             }
         )
@@ -127,6 +130,9 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.definition.race, Race.FAIRY)
         self.assertEqual(self.member.definition.gender, Gender.FEMALE)
 
+    def test_keeps_face_sheet_position_on_member(self) -> None:
+        self.assertEqual(self.member.face_position, FacePosition(0, 0))
+
     def test_keeps_base_and_adjusted_ability_layers_separate(self) -> None:
         self.assertEqual(
             self.member.definition.base_abilities,
@@ -161,6 +167,7 @@ class MemberTest(unittest.TestCase):
                 "equip_head": "",
                 "equip_body": "ROBE",
                 "equip_arm": "",
+                **FACE_FIELDS,
                 **PROFICIENCY_FIELDS,
             },
             items={"DAGGER": dagger, "ROBE": robe},
@@ -200,6 +207,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_sword": 2,
             "eq_knife": 1,
@@ -261,6 +269,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_sword": 3,
         }
@@ -292,6 +301,7 @@ class MemberTest(unittest.TestCase):
             "base_mag": 24,
             "equip_right": "DAGGER",
             "equip_body": "ROBE",
+            **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_knife": 1,
             "eq_throwing": 1,
@@ -343,6 +353,7 @@ class MemberTest(unittest.TestCase):
             "base_mag": 20,
             "equip_right": "SWORD",
             "equip_left": "DAGGER",
+            **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_sword": 2,
             "eq_knife": 1,
@@ -380,6 +391,7 @@ class MemberTest(unittest.TestCase):
             "base_mag": 20,
             "skills": ["Two-Handed"],
             "equip_right": "SWORD",
+            **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_sword": 2,
         }
@@ -412,6 +424,7 @@ class MemberTest(unittest.TestCase):
             "base_mag": 24,
             "equip_right": "SWORD",
             "equip_body": "ROBE",
+            **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
         }
         member = Member.from_record(
@@ -515,6 +528,24 @@ class MemberTest(unittest.TestCase):
                     "base_agi": 25,
                 }
             )
+
+    def test_rejects_missing_or_unaligned_face_coordinate(self) -> None:
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            **PROFICIENCY_FIELDS,
+        }
+
+        with self.assertRaisesRegex(MemberDataError, "face_x"):
+            Member.from_record(record)
+
+        record.update(face_x=16, face_y=0)
+        with self.assertRaisesRegex(MemberDataError, "face_x"):
+            Member.from_record(record)
 
     def test_returns_japanese_display_identity(self) -> None:
         identity = self.member.display_identity(

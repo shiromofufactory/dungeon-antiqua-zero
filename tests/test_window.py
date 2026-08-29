@@ -15,6 +15,11 @@ from app.ui.window import (
     GRADIENT_COLORS,
     GRADIENT_DITHER_RATIOS,
     GRADIENT_STAGE_COUNT,
+    HORIZONTAL_NAVIGATION_COLKEY,
+    HORIZONTAL_NAVIGATION_HEIGHT,
+    HORIZONTAL_NAVIGATION_WIDTH,
+    HORIZONTAL_NAVIGATION_X,
+    HORIZONTAL_NAVIGATION_Y,
     WINDOW_ANIMATION_HEIGHT_STEP,
     Window,
     WindowFactory,
@@ -404,6 +409,61 @@ class WindowTest(unittest.TestCase):
                 (28, 24, 0, 40, 8, 8, 8),
             ],
         )
+
+    def test_horizontal_navigation_draws_da2_style_edge_indicators(self) -> None:
+        window = Window(2, 3, 20, 10, horizontal_navigation=True)
+
+        with patch("app.ui.window.pyxel.blt") as blt:
+            window._draw_horizontal_navigation()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    7,
+                    24,
+                    0,
+                    HORIZONTAL_NAVIGATION_X,
+                    HORIZONTAL_NAVIGATION_Y,
+                    HORIZONTAL_NAVIGATION_WIDTH,
+                    HORIZONTAL_NAVIGATION_HEIGHT,
+                    HORIZONTAL_NAVIGATION_COLKEY,
+                ),
+                call(
+                    81,
+                    24,
+                    0,
+                    HORIZONTAL_NAVIGATION_X
+                    + HORIZONTAL_NAVIGATION_WIDTH,
+                    HORIZONTAL_NAVIGATION_Y,
+                    HORIZONTAL_NAVIGATION_WIDTH,
+                    HORIZONTAL_NAVIGATION_HEIGHT,
+                    HORIZONTAL_NAVIGATION_COLKEY,
+                ),
+            ],
+        )
+
+    def test_horizontal_navigation_indicators_draw_before_text(self) -> None:
+        window = Window(0, 0, 8, 6, horizontal_navigation=True)
+        draw_order: list[str] = []
+
+        with (
+            patch.object(window, "_draw_gradient"),
+            patch.object(window, "_draw_frame"),
+            patch.object(
+                window,
+                "_draw_horizontal_navigation",
+                side_effect=lambda: draw_order.append("navigation"),
+            ),
+            patch.object(
+                window,
+                "_draw_texts",
+                side_effect=lambda: draw_order.append("texts"),
+            ),
+        ):
+            window.draw()
+
+        self.assertEqual(draw_order, ["navigation", "texts"])
 
     def test_minimum_window_size_is_enforced(self) -> None:
         with self.assertRaises(ValueError):

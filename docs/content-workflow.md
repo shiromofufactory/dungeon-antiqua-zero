@@ -157,6 +157,10 @@ npm run content:put-data
 
 ポータルは `docs/da0.md`、`data/*.json`、`images/` から生成するWebサイトである。JSON由来の表と画像リファレンスはMarkdownへ手作業で転記せず、`docs/da0.md` 内の `portal:` マーカーへビルド時に挿入する。
 
+キャラクター表では `face_x`、`face_y` の座標値を列として表示せず、表の左端に
+`images/faces/faces_pc.png` から該当する32×32pxの顔を切り出して表示する。
+概要表と熟練度・適性表はいずれも同じ顔座標を使用する。
+
 ```sh
 npm run portal:build
 ```

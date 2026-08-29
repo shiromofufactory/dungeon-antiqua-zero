@@ -1,24 +1,75 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from app.member import BattleStats, HandHit
 from app.resistance import ResistanceType
 from tools.screen_mocks.status import (
     LOCALIZED_POSITIONS,
+    Direction,
     Language,
+    MOCK_PARTY_CHARACTER_KEYS,
     TRANSPARENT_INDEX,
     Settings,
     StatusScreenMock,
     attack_display,
     hit_display,
+    load_data_records,
     next_language,
     resistance_icon_tag,
 )
 
 
+def input_state(
+    *,
+    navigation: Direction | None = None,
+    confirm: bool = False,
+    cancel: bool = False,
+    previous_page: bool = False,
+    next_page: bool = False,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        navigation=navigation,
+        confirm=SimpleNamespace(triggered=confirm),
+        cancel=SimpleNamespace(triggered=cancel),
+        previous_page=SimpleNamespace(triggered=previous_page),
+        next_page=SimpleNamespace(triggered=next_page),
+    )
+
+
 class StatusScreenMockTest(unittest.TestCase):
+    def test_character_face_coordinates_match_faces_pc_sheet(self) -> None:
+        expected = {
+            "フィオラ": (0, 0),
+            "セリオン": (32, 0),
+            "アルヴァン": (64, 0),
+            "ラグナ": (0, 32),
+            "エリカ": (32, 32),
+            "クレス": (64, 32),
+            "バルトロメ": (96, 32),
+            "アルファード": (0, 64),
+            "ダイン": (32, 64),
+            "イリス": (0, 96),
+            "ミリア": (32, 96),
+            "オルウェン": (64, 96),
+            "TKG-48": (96, 96),
+            "カスミ": (0, 128),
+            "グリム": (32, 128),
+            "シルファ": (64, 128),
+            "カゲトラ": (0, 160),
+            "ライザ": (32, 160),
+            "リゼル": (64, 160),
+            "ヴァルド": (96, 160),
+        }
+        actual = {
+            record["name_ja"]: (record["face_x"], record["face_y"])
+            for record in load_data_records("characters.json")
+        }
+
+        self.assertEqual(actual, expected)
+
     def test_language_sequence_wraps_after_simplified_chinese(self) -> None:
         self.assertEqual(next_language(Language.JAPANESE), Language.ENGLISH)
         self.assertEqual(
@@ -44,7 +95,18 @@ class StatusScreenMockTest(unittest.TestCase):
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
 
-            StatusScreenMock()
+            mock = StatusScreenMock()
+
+        self.assertEqual(
+            tuple(member.definition.names["name_en"] for member in mock.party),
+            MOCK_PARTY_CHARACTER_KEYS,
+        )
+        self.assertEqual(mock.member_index, 0)
+        self.assertTrue(
+            factory.return_value.create.call_args.kwargs[
+                "horizontal_navigation"
+            ]
+        )
 
         texts = tuple(factory.return_value.create.call_args.args[4])
         self.assertEqual(
@@ -152,16 +214,68 @@ class StatusScreenMockTest(unittest.TestCase):
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.settings = Settings()
         mock.input_reader = Mock()
-        mock.input_reader.poll.return_value = Mock(
-            confirm=Mock(triggered=True),
-            cancel=Mock(triggered=False),
-        )
-        mock._rebuild_localized_window = Mock()
+        mock.input_reader.poll.return_value = input_state(confirm=True)
+        mock._rebuild_window = Mock()
 
         mock.update()
 
         self.assertEqual(mock.settings.language, Language.ENGLISH)
-        mock._rebuild_localized_window.assert_called_once_with()
+        mock._rebuild_window.assert_called_once_with()
+
+    def test_right_navigation_wraps_from_ragna_to_fiora(self) -> None:
+        mock = StatusScreenMock.__new__(StatusScreenMock)
+        mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
+        mock.member_index = 4
+        mock.settings = Settings()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state(
+            navigation=Direction.RIGHT
+        )
+        mock._rebuild_window = Mock()
+
+        mock.update()
+
+        self.assertEqual(mock.member_index, 0)
+        self.assertIs(mock.member, mock.party[0])
+        mock._rebuild_window.assert_called_once_with()
+
+    def test_left_navigation_wraps_from_fiora_to_ragna(self) -> None:
+        mock = StatusScreenMock.__new__(StatusScreenMock)
+        mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
+        mock.member_index = 0
+        mock.settings = Settings()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state(
+            navigation=Direction.LEFT
+        )
+        mock._rebuild_window = Mock()
+
+        mock.update()
+
+        self.assertEqual(mock.member_index, 4)
+        self.assertIs(mock.member, mock.party[4])
+
+    def test_lr_page_buttons_switch_party_members(self) -> None:
+        cases = (
+            ("previous_page", 2, 1),
+            ("next_page", 2, 3),
+        )
+        for button_name, start, expected in cases:
+            with self.subTest(button_name=button_name):
+                mock = StatusScreenMock.__new__(StatusScreenMock)
+                mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
+                mock.member_index = start
+                mock.settings = Settings()
+                mock.input_reader = Mock()
+                mock.input_reader.poll.return_value = input_state(
+                    **{button_name: True},
+                )
+                mock._rebuild_window = Mock()
+
+                mock.update()
+
+                self.assertEqual(mock.member_index, expected)
+                mock._rebuild_window.assert_called_once_with()
 
     def test_english_localized_text_is_rebuilt_as_fullwidth(self) -> None:
         japanese_font = object()
@@ -188,7 +302,7 @@ class StatusScreenMockTest(unittest.TestCase):
             mock = StatusScreenMock()
 
         mock.settings = mock.settings.with_language(Language.ENGLISH)
-        mock._rebuild_localized_window()
+        mock._rebuild_window()
 
         texts = {
             (item.x, item.y): item.text for item in mock.windows[0].texts
@@ -252,7 +366,7 @@ class StatusScreenMockTest(unittest.TestCase):
         mock.settings = mock.settings.with_language(
             Language.SIMPLIFIED_CHINESE
         )
-        mock._rebuild_localized_window()
+        mock._rebuild_window()
 
         texts = {
             (item.x, item.y): item.text for item in mock.windows[0].texts
@@ -281,22 +395,21 @@ class StatusScreenMockTest(unittest.TestCase):
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.settings = Settings()
         mock.input_reader = Mock()
-        mock.input_reader.poll.return_value = Mock(
-            confirm=Mock(triggered=False),
-            cancel=Mock(triggered=True),
-        )
-        mock._rebuild_localized_window = Mock()
+        mock.input_reader.poll.return_value = input_state(cancel=True)
+        mock._rebuild_window = Mock()
 
         with patch("tools.screen_mocks.status.pyxel.quit") as quit_mock:
             mock.update()
 
         quit_mock.assert_called_once_with()
         self.assertEqual(mock.settings.language, Language.JAPANESE)
-        mock._rebuild_localized_window.assert_not_called()
+        mock._rebuild_window.assert_not_called()
 
     def test_draws_all_windows_before_face(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.faces = object()
+        mock.party = (Mock(face_position=Mock(x=64, y=96)),)
+        mock.member_index = 0
         first_window = Mock()
         second_window = Mock()
         mock.windows = (first_window, second_window)
@@ -314,10 +427,10 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(draw_order, ["first_window", "second_window", "face"])
         blt.assert_called_once_with(
             16,
-            8,
+            10,
             mock.faces,
-            0,
-            0,
+            64,
+            96,
             32,
             32,
             TRANSPARENT_INDEX,

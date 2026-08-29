@@ -160,11 +160,11 @@ Pyxelの物理入力
   → WindowCursorやScene固有処理
 ```
 
-`InputBindings` は論理操作ごとに複数のPyxelボタンを保持する。初期設定は矢印キーとゲームパッドの方向、Z・EnterとゲームパッドAの決定、X・Backspace・EscapeとゲームパッドBのキャンセル、S・TabとゲームパッドXのメニューとする。キー設定やAB反転を実装するときは、`Settings`から `InputBindings` を生成し、Reader内部やモジュールグローバルを書き換えない。
+`InputBindings` は論理操作ごとに複数のPyxelボタンを保持する。初期設定は矢印キーとゲームパッドの方向、Z・EnterとゲームパッドAの決定、X・Backspace・EscapeとゲームパッドBのキャンセル、S・TabとゲームパッドXのメニューとする。ページやメンバーの前後切り替えには `previous_page` / `next_page` を使い、DA2に合わせて左Shift・右Shiftとゲームパッドの左・右ショルダーを割り当てる。キー設定やAB反転を実装するときは、`Settings`から `InputBindings` を生成し、Reader内部やモジュールグローバルを書き換えない。
 
 `InputState.navigation` はカーソル向けの単発およびリピート込み方向、`held_direction` はフィールド移動など押下中の毎フレーム処理に使う方向を表す。方向は上下左右のいずれか1つとし、新しい方向が押された場合は保持中の以前の方向より優先する。新しい方向が離された後も別の方向が保持されていれば、その方向へ切り替える。
 
-方向リピートの状態、アナログスティックのデッドゾーン、直前フレームの押下状態は `PyxelInputReader` インスタンスが所有する。60fpsでDA2と同じ時間感覚にするため、既定の方向リピートは20フレーム後から4フレーム間隔とする。決定、キャンセル、メニューは標準ではリピートさせず、初回押下だけを `triggered=True` とする。押したままかどうかは別の `held` で表し、Scene遷移時の入力リリース待ちなどに利用する。
+方向リピートの状態、アナログスティックのデッドゾーン、直前フレームの押下状態は `PyxelInputReader` インスタンスが所有する。60fpsでDA2と同じ時間感覚にするため、既定の方向リピートは20フレーム後から4フレーム間隔とする。決定、キャンセル、メニュー、前後ページは標準ではリピートさせず、初回押下だけを `triggered=True` とする。押したままかどうかは別の `held` で表し、Scene遷移時の入力リリース待ちなどに利用する。
 
 本番では `Game.update()` がフレームごとに一度だけ `poll()` し、SceneManagerを通して最上位Overlayまたは現在のSceneへ渡す。開発用モックは独立したComposition RootとしてReaderを1つ生成し、同じ `InputState` とWindow部品を直接利用する。モック固有のQ終了などは、Qをキャンセルへ追加したBindingsをReaderへ渡して表現する。
 
@@ -365,6 +365,13 @@ FieldScene
 
 `transparent=True` を指定したWindowは、グラデーションと枠を描かずテキストだけを描画する。この場合もWindow左上をテキスト座標の原点とし、通常Windowと同じ4×4pxグリッドと領域を使う。背景上へ座標を揃えて文字だけを重ねる用途に使い、透明かどうかによってテキスト座標を変えない。
 
+左右キーや前後ページ操作で表示対象を切り替えられるWindowは
+`horizontal_navigation=True` とする。左右移動可能であることを示すインジケーターは、
+イメージバンク0の `(96, 0)` から16×16pxの画像を左右8×16pxに分けて使う。
+DA2と同じくWindowの高さ中央へ置き、左側は外接矩形の左端から1px外側、右側は
+右端から1px外側へはみ出す位置に描画する。Windowは切り替え先を知らず、実際の対象変更は
+所有元のSceneまたはOverlayが `InputState` を解釈して行う。
+
 ### Windowの開閉アニメーション
 
 開閉状態は各 `Window` が `WindowState.CLOSED`、`OPENING`、`OPEN`、`CLOSING` のいずれかとして所有する。通常は従来と同じ `OPEN` で生成し、初期状態を閉じたい場合だけ `opened=False` を指定する。所有元のSceneまたはOverlayは `open()` / `close()` で開始を指示し、毎フレーム `Window.update()` を呼ぶ。
@@ -490,6 +497,16 @@ guide.draw()
 用語上、`characters.json` と `CharacterDefinition` は加入可能キャラクターの変更されない
 マスターデータ、`Member` は加入後の可変なゲーム状態を指す。離脱中のキャラクターまで
 「現在のメンバー」と誤認しないよう、この二つは `members` へ統一しない。
+
+プレイヤーキャラクターの顔は共有画像 `faces/faces_pc.png` の32×32px領域を使用する。
+各レコードの左上座標を `characters.json` の `face_x`、`face_y` に保持し、
+`CharacterDefinition.face_position` へ読み込む。画面はキャラクター名による座標分岐や
+固定座標を持たず、現在の `Member.face_position` を参照して描画する。
+
+ステータス画面モックではフィオラ、セリオン、アルヴァン、エリカ、ラグナの順に
+疑似パーティを構築する。左右方向または前後ページ入力で表示中のMemberを切り替え、
+両端では循環する。切り替え時は名前だけでなく、顔、装備、能力値、熟練度を含むWindow全体を
+現在のMemberから再構築する。
 
 加入時スキルは `characters.json` の `skills`、加入時装備は `equip_right`、
 `equip_left`、`equip_head`、`equip_body`、`equip_arm` を正本とする。

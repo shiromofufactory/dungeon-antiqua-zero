@@ -59,6 +59,8 @@ class InputState:
     confirm: InputButton = InputButton()
     cancel: InputButton = InputButton()
     menu: InputButton = InputButton()
+    previous_page: InputButton = InputButton()
+    next_page: InputButton = InputButton()
 
     def __post_init__(self) -> None:
         if self.navigation is not None and not isinstance(
@@ -69,7 +71,13 @@ class InputState:
             self.held_direction, Direction
         ):
             raise TypeError("held_direction must be a Direction or None")
-        for name in ("confirm", "cancel", "menu"):
+        for name in (
+            "confirm",
+            "cancel",
+            "menu",
+            "previous_page",
+            "next_page",
+        ):
             if not isinstance(getattr(self, name), InputButton):
                 raise TypeError(f"{name} must be an InputButton")
 
@@ -85,6 +93,8 @@ class InputBindings:
     confirm: tuple[int, ...] = ()
     cancel: tuple[int, ...] = ()
     menu: tuple[int, ...] = ()
+    previous_page: tuple[int, ...] = ()
+    next_page: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         for binding in fields(self):
@@ -111,6 +121,14 @@ class InputBindings:
                 pyxel.GAMEPAD1_BUTTON_B,
             ),
             menu=(pyxel.KEY_S, pyxel.KEY_TAB, pyxel.GAMEPAD1_BUTTON_X),
+            previous_page=(
+                pyxel.KEY_LSHIFT,
+                pyxel.GAMEPAD1_BUTTON_LEFTSHOULDER,
+            ),
+            next_page=(
+                pyxel.KEY_RSHIFT,
+                pyxel.GAMEPAD1_BUTTON_RIGHTSHOULDER,
+            ),
         )
 
     def with_cancel(self, *buttons: int) -> InputBindings:
@@ -162,6 +180,8 @@ class PyxelInputReader:
             "confirm": False,
             "cancel": False,
             "menu": False,
+            "previous_page": False,
+            "next_page": False,
         }
 
     def poll(self) -> InputState:
@@ -172,6 +192,8 @@ class PyxelInputReader:
         confirm = self._read_action_button("confirm")
         cancel = self._read_action_button("cancel")
         menu = self._read_action_button("menu")
+        previous_page = self._read_action_button("previous_page")
+        next_page = self._read_action_button("next_page")
         self._previous_directions = held_directions
 
         return InputState(
@@ -180,6 +202,8 @@ class PyxelInputReader:
             confirm=confirm,
             cancel=cancel,
             menu=menu,
+            previous_page=previous_page,
+            next_page=next_page,
         )
 
     def _read_held_directions(self) -> dict[Direction, bool]:

@@ -403,12 +403,34 @@ class BattleStats:
 
 
 @dataclass(frozen=True)
+class FacePosition:
+    """Top-left pixel position of one face in the player face sheet."""
+
+    x: int
+    y: int
+
+    def __post_init__(self) -> None:
+        for name in ("x", "y"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise MemberDataError(
+                    f"character.face_{name} must be an integer"
+                )
+            if value < 0 or value % 32 != 0:
+                raise MemberDataError(
+                    f"character.face_{name} must be a non-negative "
+                    "multiple of 32"
+                )
+
+
+@dataclass(frozen=True)
 class CharacterDefinition:
     """Immutable master data loaded from one ``characters.json`` record."""
 
     names: Mapping[str, object]
     race: Race
     gender: Gender
+    face_position: FacePosition
     base_abilities: BaseAbilities
     initial_skill_keys: tuple[str, ...]
     initial_equipment_keys: Mapping[EquipmentSlot, str]
@@ -443,6 +465,10 @@ class CharacterDefinition:
             agility=_validate_ability_value("base_agi", record.get("base_agi")),
             magic=_validate_ability_value("base_mag", record.get("base_mag")),
         )
+        face_position = FacePosition(
+            x=record.get("face_x"),
+            y=record.get("face_y"),
+        )
         initial_skill_keys = _string_keys(record, "skills")
         initial_equipment_keys: dict[EquipmentSlot, str] = {}
         for slot, field_name in EQUIPMENT_RECORD_FIELDS.items():
@@ -454,6 +480,7 @@ class CharacterDefinition:
             MappingProxyType(names),
             race,
             gender,
+            face_position,
             base_abilities,
             initial_skill_keys,
             MappingProxyType(initial_equipment_keys),
@@ -608,6 +635,12 @@ class Member:
             agility=base.agility,
             magic=base.magic,
         )
+
+    @property
+    def face_position(self) -> FacePosition:
+        """Return this member's immutable face-sheet position."""
+
+        return self.definition.face_position
 
     def proficiency(self, kind: ProficiencyKind) -> Proficiency:
         """Return the current proficiency for one stable kind."""

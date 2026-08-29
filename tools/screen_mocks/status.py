@@ -7,7 +7,7 @@ import json
 import pyxel
 
 from tools._bootstrap import APP_ROOT
-from input import InputBindings, PyxelInputReader
+from input import Direction, InputBindings, PyxelInputReader
 from item import Item, ItemDataError
 from localization import Localizer
 from member import (
@@ -31,6 +31,7 @@ from text_catalog import TextCatalog, TextCatalogError
 from ui import (
     TEXT_ICONS,
     LocalizedWindowTextFactory,
+    Window,
     WindowFactory,
     WindowText,
     pad,
@@ -40,7 +41,13 @@ SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 FPS = 60
 FACES_IMAGE_ID = "faces/faces_pc"
-MOCK_CHARACTER_KEY = "Fiora"
+MOCK_PARTY_CHARACTER_KEYS = (
+    "Fiora",
+    "Cerion",
+    "Alvan",
+    "Elika",
+    "Ragna",
+)
 STATUS_TEXT_KEYS = {
     "label.condition": "status.condition",
     "label.strength": "status.strength",
@@ -152,10 +159,7 @@ def hit_display(stats: BattleStats) -> str:
 
     bonus = stats.hit_bonus
     sign = "＋" if bonus >= 0 else "－"
-    return (
-        f"{pad(stats.hit, 3)}"
-        f"（{sign}{pad(abs(bonus), 2)}）"
-    )
+    return f"{pad(stats.hit, 3)}" f"（{sign}{pad(abs(bonus), 2)}）"
 
 
 def resistance_icon_tag(
@@ -195,26 +199,25 @@ def load_data_records(filename: str) -> list[dict[str, object]]:
     return records
 
 
-def load_mock_member(
+def load_mock_party(
     items: dict[str, Item],
     skills: dict[str, Skill],
-) -> Member:
-    """Load the character used by this mock from generated game data."""
+) -> tuple[Member, ...]:
+    """Load the ordered party used by this mock from generated game data."""
 
     records = load_data_records("characters.json")
-    record = next(
-        (
-            candidate
-            for candidate in records
-            if candidate.get("name_en") == MOCK_CHARACTER_KEY
-        ),
-        None,
-    )
-    if record is None:
-        raise MemberDataError(
-            f"モック用キャラクターが見つかりません: {MOCK_CHARACTER_KEY}"
-        )
-    return Member.from_record(record, items=items, skills=skills)
+    records_by_key = {
+        key: record
+        for record in records
+        if isinstance(key := record.get("name_en"), str)
+    }
+    party: list[Member] = []
+    for key in MOCK_PARTY_CHARACTER_KEYS:
+        record = records_by_key.get(key)
+        if record is None:
+            raise MemberDataError(f"モック用キャラクターが見つかりません: {key}")
+        party.append(Member.from_record(record, items=items, skills=skills))
+    return tuple(party)
 
 
 def load_mock_items() -> dict[str, Item]:
@@ -262,8 +265,21 @@ class StatusScreenMock:
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         self.items = load_mock_items()
         self.skills = load_mock_skills()
-        self.member = load_mock_member(self.items, self.skills)
+        self.party = load_mock_party(self.items, self.skills)
+        self.member_index = 0
         self.fonts = FontResources()
+        self.windows = [self._build_window()]
+        pyxel.run(self.update, self.draw)
+
+    @property
+    def member(self) -> Member:
+        """Return the party member currently shown by the status mock."""
+
+        return self.party[self.member_index]
+
+    def _build_window(self) -> Window:
+        """Build the complete status window for the current member."""
+
         localizer = Localizer(self.settings.language)
         localized = self._localized_texts(localizer)
         abilities = self.member.adjusted_abilities
@@ -274,79 +290,75 @@ class StatusScreenMock:
         )
 
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
-        self.windows = [
-            windows.create(
-                0,
-                0,
-                64,
-                60,
-                (
-                    localized_texts.create(localized["member.name"], 14, 2),
-                    localized_texts.create(localized["member.race"], 14, 5),
-                    localized_texts.create(localized["member.gender"], 14, 8),
+        return windows.create(
+            0,
+            0,
+            64,
+            60,
+            (
+                localized_texts.create(localized["member.name"], 14, 2),
+                localized_texts.create(localized["member.race"], 14, 5),
+                localized_texts.create(localized["member.gender"], 14, 8),
+                WindowText(
+                    f"ＨＰ　{pad(self.member.hp, 3)}" f"／{pad(self.member.max_hp, 3)}",
+                    6,
+                    14,
+                ),
+                WindowText(
+                    f"ＭＰ　{pad(self.member.mp, 3)}" f"／{pad(self.member.max_mp, 3)}",
+                    6,
+                    17,
+                ),
+                localized_texts.create(localized["label.condition"], 6, 20),
+                localized_texts.create(localized["value.condition"], 22, 20),
+                localized_texts.create(localized["label.strength"], 6, 26),
+                WindowText(pad(abilities.strength, 2), 20, 26),
+                localized_texts.create(localized["label.agility"], 6, 29),
+                WindowText(pad(abilities.agility, 2), 20, 29),
+                localized_texts.create(localized["label.magic"], 6, 32),
+                WindowText(pad(abilities.magic, 2), 20, 32),
+                localized_texts.create(localized["label.skill"], 6, 38),
+                localized_texts.create(localized["skill.0"], 8, 41),
+                localized_texts.create(localized["skill.1"], 8, 44),
+                localized_texts.create(localized["equipment.right"], 30, 8),
+                localized_texts.create(localized["equipment.left"], 30, 11),
+                localized_texts.create(localized["equipment.body"], 30, 14),
+                localized_texts.create(localized["equipment.head"], 30, 17),
+                localized_texts.create(localized["equipment.arm"], 30, 20),
+                localized_texts.create(localized["label.attack"], 30, 26),
+                WindowText(attack_display(battle_stats), 46, 26),
+                localized_texts.create(localized["label.hit"], 30, 29),
+                WindowText(hit_display(battle_stats), 44, 29),
+                localized_texts.create(localized["label.defense"], 30, 32),
+                WindowText(pad(battle_stats.defense, 2), 46, 32),
+                localized_texts.create(localized["label.evasion"], 30, 35),
+                WindowText(pad(battle_stats.evasion, 2), 46, 35),
+                localized_texts.create(localized["label.spell_resistance"], 30, 38),
+                WindowText(
+                    pad(battle_stats.spell_resistance, 2),
+                    46,
+                    38,
+                ),
+                localized_texts.create(localized["label.tolerance"], 30, 41),
+                *(
                     WindowText(
-                        f"ＨＰ　{pad(self.member.hp, 3)}"
-                        f"／{pad(self.member.max_hp, 3)}",
-                        6,
-                        14,
-                    ),
+                        resistance_icon_tag(self.member, resistance),
+                        x,
+                        y,
+                    )
+                    for resistance, x, y in RESISTANCE_POSITIONS
+                ),
+                *(
                     WindowText(
-                        f"ＭＰ　{pad(self.member.mp, 3)}"
-                        f"／{pad(self.member.max_mp, 3)}",
-                        6,
-                        17,
-                    ),
-                    localized_texts.create(localized["label.condition"], 6, 20),
-                    localized_texts.create(localized["value.condition"], 22, 20),
-                    localized_texts.create(localized["label.strength"], 6, 26),
-                    WindowText(pad(abilities.strength, 2), 20, 26),
-                    localized_texts.create(localized["label.agility"], 6, 29),
-                    WindowText(pad(abilities.agility, 2), 20, 29),
-                    localized_texts.create(localized["label.magic"], 6, 32),
-                    WindowText(pad(abilities.magic, 2), 20, 32),
-                    localized_texts.create(localized["label.skill"], 6, 38),
-                    localized_texts.create(localized["skill.0"], 8, 41),
-                    localized_texts.create(localized["skill.1"], 8, 44),
-                    localized_texts.create(localized["equipment.right"], 30, 8),
-                    localized_texts.create(localized["equipment.left"], 30, 11),
-                    localized_texts.create(localized["equipment.body"], 30, 14),
-                    localized_texts.create(localized["equipment.head"], 30, 17),
-                    localized_texts.create(localized["equipment.arm"], 30, 20),
-                    localized_texts.create(localized["label.attack"], 30, 26),
-                    WindowText(attack_display(battle_stats), 46, 26),
-                    localized_texts.create(localized["label.hit"], 30, 29),
-                    WindowText(hit_display(battle_stats), 44, 29),
-                    localized_texts.create(localized["label.defense"], 30, 32),
-                    WindowText(pad(battle_stats.defense, 2), 46, 32),
-                    localized_texts.create(localized["label.evasion"], 30, 35),
-                    WindowText(pad(battle_stats.evasion, 2), 46, 35),
-                    localized_texts.create(localized["label.spell_resistance"], 30, 38),
-                    WindowText(
-                        pad(battle_stats.spell_resistance, 2),
-                        46,
-                        38,
-                    ),
-                    localized_texts.create(localized["label.tolerance"], 30, 41),
-                    *(
-                        WindowText(
-                            resistance_icon_tag(self.member, resistance),
-                            x,
-                            y,
-                        )
-                        for resistance, x, y in RESISTANCE_POSITIONS
-                    ),
-                    *(
-                        WindowText(
-                            f"{icon}：{proficiency_display(self.member, kind)}",
-                            x,
-                            y,
-                        )
-                        for kind, icon, x, y in PROFICIENCY_POSITIONS
-                    ),
+                        f"{icon}：{proficiency_display(self.member, kind)}",
+                        x,
+                        y,
+                    )
+                    for kind, icon, x, y in PROFICIENCY_POSITIONS
                 ),
             ),
-        ]
-        pyxel.run(self.update, self.draw)
+            horizontal_navigation=len(self.party) > 1,
+        )
 
     def _localized_texts(self, localizer: Localizer) -> dict[str, str]:
         """Resolve all names and labels currently switched by this mock."""
@@ -391,32 +403,18 @@ class StatusScreenMock:
             )
         return localized
 
-    def _rebuild_localized_window(self) -> None:
-        """Rebuild the window with names in the selected language."""
+    def _rebuild_window(self) -> None:
+        """Rebuild all values for the current member and language."""
 
-        current_window = self.windows[0]
-        localizer = Localizer(self.settings.language)
-        localized = self._localized_texts(localizer)
-        localized_texts = LocalizedWindowTextFactory.from_language(
-            self.fonts,
-            self.settings.language,
-        )
-        texts = tuple(
-            (
-                localized_texts.create(
-                    localized[LOCALIZED_POSITIONS[(text.x, text.y)]],
-                    text.x,
-                    text.y,
-                    color=text.color,
-                    shadow_color=text.shadow_color,
-                )
-                if (text.x, text.y) in LOCALIZED_POSITIONS
-                else text
-            )
-            for text in current_window.texts
-        )
-        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
-        self.windows = [windows.create(0, 0, 64, 60, texts)]
+        self.windows = [self._build_window()]
+
+    def _switch_member(self, distance: int) -> None:
+        """Move through the mock party, wrapping at both ends."""
+
+        if distance not in (-1, 1):
+            raise ValueError("member switch distance must be -1 or 1")
+        self.member_index = (self.member_index + distance) % len(self.party)
+        self._rebuild_window()
 
     def update(self) -> None:
         input_state = self.input_reader.poll()
@@ -424,22 +422,32 @@ class StatusScreenMock:
             pyxel.quit()
             return
 
-        if input_state.confirm.triggered:
+        if (
+            input_state.navigation is Direction.LEFT
+            or input_state.previous_page.triggered
+        ):
+            self._switch_member(-1)
+        elif (
+            input_state.navigation is Direction.RIGHT or input_state.next_page.triggered
+        ):
+            self._switch_member(1)
+        elif input_state.confirm.triggered:
             language = next_language(self.settings.language)
             self.settings = self.settings.with_language(language)
-            self._rebuild_localized_window()
+            self._rebuild_window()
 
     def draw(self) -> None:
         # ウィンドウ
         for window in self.windows:
             window.draw()
         # 顔
+        face_position = self.member.face_position
         pyxel.blt(
             16,
-            8,
+            10,
             self.faces,
-            0,
-            0,
+            face_position.x,
+            face_position.y,
             32,
             32,
             TRANSPARENT_INDEX,
