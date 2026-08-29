@@ -93,6 +93,7 @@ class WindowText:
     color: int = DEFAULT_TEXT_COLOR
     font: Any | None = None
     shadow_color: int | None = DEFAULT_TEXT_SHADOW_COLOR
+    baseline_offset: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
@@ -107,6 +108,8 @@ class WindowText:
             raise TypeError(
                 "text shadow color must be an integer palette index or None"
             )
+        if not isinstance(self.baseline_offset, int):
+            raise TypeError("text baseline offset must be an integer")
 
 
 class Window:
@@ -231,10 +234,19 @@ class Window:
         color: int = DEFAULT_TEXT_COLOR,
         font: Any | None = None,
         shadow_color: int | None = DEFAULT_TEXT_SHADOW_COLOR,
+        baseline_offset: int = 0,
     ) -> WindowText:
         """Add text at a free position in the window's 4x4-pixel grid."""
 
-        placement = WindowText(text, x, y, color, font, shadow_color)
+        placement = WindowText(
+            text,
+            x,
+            y,
+            color,
+            font,
+            shadow_color,
+            baseline_offset,
+        )
         self._validate_text_position(placement)
         self._texts.append(placement)
         return placement
@@ -531,6 +543,7 @@ class Window:
                 text.color,
                 font,
                 shadow_color=text.shadow_color,
+                text_y_offset=text.baseline_offset,
             )
 
 

@@ -4,11 +4,22 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from app.resources.fonts import FONT_FILENAMES, FontResourceError, FontResources
+from app.resources.fonts import (
+    FONT_BASELINE_OFFSETS,
+    FONT_FILENAMES,
+    FontResourceError,
+    FontResources,
+)
 from app.state import Language
 
 
 class FontResourcesTest(unittest.TestCase):
+    def test_language_baseline_offsets_match_font_ascents(self) -> None:
+        self.assertEqual(FONT_BASELINE_OFFSETS[Language.JAPANESE], 0)
+        self.assertEqual(FONT_BASELINE_OFFSETS[Language.ENGLISH], 3)
+        self.assertEqual(FONT_BASELINE_OFFSETS[Language.SIMPLIFIED_CHINESE], 0)
+        self.assertEqual(FontResources.baseline_offset_for(Language.ENGLISH), 3)
+
     def test_expected_font_file_is_loaded_once_per_language(self) -> None:
         with TemporaryDirectory() as directory:
             fonts_dir = Path(directory)

@@ -106,10 +106,12 @@ def draw_tagged_text(
     font: Any | None = None,
     *,
     shadow_color: int | None = 0,
+    text_y_offset: int = 0,
 ) -> None:
-    """Draw text and icons from left to right."""
+    """Draw text and icons, vertically offsetting only text glyphs."""
 
     cursor_x = x
+    text_y = y + text_y_offset
     parts = split_tagged_text(text)
     for index, part in enumerate(parts):
         if isinstance(part, TextIcon):
@@ -123,13 +125,12 @@ def draw_tagged_text(
                 ICON_SIZE,
                 ICON_COLKEY,
             )
-            if index < len(parts) - 1:
-                cursor_x += ICON_SIZE
+            cursor_x += ICON_SIZE
             continue
 
         if shadow_color is not None:
-            pyxel.text(cursor_x, y + 1, part, shadow_color, font)
-        pyxel.text(cursor_x, y, part, color, font)
+            pyxel.text(cursor_x, text_y + 1, part, shadow_color, font)
+        pyxel.text(cursor_x, text_y, part, color, font)
         if index < len(parts) - 1:
             cursor_x += _text_width(part, font)
 

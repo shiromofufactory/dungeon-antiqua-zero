@@ -68,7 +68,7 @@ npm run tools:screen-mock:battle
 npm run tools:screen-mock:status
 ```
 
-`Z`、`Enter`、またはゲームパッドAを押すたびに、名前・種族・性別の表示言語が日本語、英語、簡体字中国語の順で切り替わる。`Q`または`Esc`で終了する。
+`Z`、`Enter`、またはゲームパッドAを押すたびに、名前・種族・性別・スキル名・装備名の表示言語が日本語、英語、簡体字中国語の順で切り替わる。`Q`または`Esc`で終了する。
 
 ### Menu Screen Mock
 

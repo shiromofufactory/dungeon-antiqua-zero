@@ -23,6 +23,13 @@ FONT_FILENAMES = MappingProxyType(
         ),
     }
 )
+FONT_BASELINE_OFFSETS = MappingProxyType(
+    {
+        Language.JAPANESE: 0,
+        Language.ENGLISH: 3,
+        Language.SIMPLIFIED_CHINESE: 0,
+    }
+)
 
 
 class FontResourceError(RuntimeError):
@@ -65,6 +72,14 @@ class FontResources:
 
         self._cache[language] = font
         return font
+
+    @staticmethod
+    def baseline_offset_for(language: Language) -> int:
+        """Return the pixel offset that aligns the language font baseline."""
+
+        if not isinstance(language, Language):
+            raise TypeError("language must be a Language")
+        return FONT_BASELINE_OFFSETS[language]
 
     @property
     def loaded_languages(self) -> tuple[Language, ...]:

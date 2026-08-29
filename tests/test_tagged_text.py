@@ -132,6 +132,38 @@ class TaggedTextTest(unittest.TestCase):
         self.assertEqual(text.call_count, 0)
         self.assertEqual([call.args[0] for call in blt.call_args_list], [3, 11])
 
+    def test_icon_advance_is_eight_pixels_with_six_pixel_font(self) -> None:
+        font = StubFont()
+
+        with (
+            patch("app.ui.tagged_text.pyxel.text") as text,
+            patch("app.ui.tagged_text.pyxel.blt") as blt,
+        ):
+            draw_tagged_text(10, 20, "%WAND%X", 5, font, shadow_color=None)
+
+        self.assertEqual(blt.call_args.args[0], 10)
+        self.assertEqual(text.call_args.args, (18, 20, "X", 5, font))
+
+    def test_text_y_offset_does_not_move_icon(self) -> None:
+        font = StubFont()
+
+        with (
+            patch("app.ui.tagged_text.pyxel.text") as text,
+            patch("app.ui.tagged_text.pyxel.blt") as blt,
+        ):
+            draw_tagged_text(
+                10,
+                20,
+                "%WAND%X",
+                5,
+                font,
+                shadow_color=None,
+                text_y_offset=3,
+            )
+
+        self.assertEqual(blt.call_args.args[1], 23)
+        self.assertEqual(text.call_args.args, (18, 23, "X", 5, font))
+
     def test_icon_value_is_a_frozen_description(self) -> None:
         self.assertEqual(TEXT_ICONS["%NETHER%"], TextIcon("%NETHER%", 144, 24))
 

@@ -8,6 +8,7 @@ import pyxel
 
 from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
+from item import Item, ItemDataError
 from localization import Localizer
 from member import Member, MemberDataError
 from resources import (
@@ -17,15 +18,66 @@ from resources import (
     ImageResourceError,
     ImageResources,
 )
+from skill import Skill, SkillDataError
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
-from ui import WindowFactory, WindowText
+from ui import LocalizedWindowTextFactory, WindowFactory, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 FPS = 60
 FACES_IMAGE_ID = "faces/faces_pc"
 MOCK_CHARACTER_KEY = "Fiora"
+MOCK_SKILL_KEYS = ("Inner Steel", "Two-Handed")
+MOCK_EQUIPMENT_KEYS = {
+    "right": "DAYBRINGER",
+    "body": "EAN SI MANTLE",
+    "head": "FLOWER CROWN",
+    "arm": "TINY RING",
+}
+STATUS_TEXT_KEYS = {
+    "label.condition": "status.condition",
+    "value.condition.ok": "status.ok",
+    "label.strength": "status.strength",
+    "label.agility": "status.agility",
+    "label.magic": "status.magic",
+    "label.skill": "status.skill",
+    "label.equip.right": "status.equip.right",
+    "label.equip.left": "status.equip.left",
+    "label.equip.body": "status.equip.body",
+    "label.equip.head": "status.equip.head",
+    "label.equip.arm": "status.equip.arm",
+    "label.attack": "status.attack",
+    "label.hit": "status.hit",
+    "label.defense": "status.defense",
+    "label.evasion": "status.evasion",
+    "label.spell_resistance": "status.spell_resistance",
+    "label.tolerance": "status.tolerance",
+}
+LOCALIZED_POSITIONS = {
+    (14, 2): "member.name",
+    (14, 5): "member.race",
+    (14, 8): "member.gender",
+    (6, 20): "label.condition",
+    (22, 20): "value.condition.ok",
+    (6, 26): "label.strength",
+    (6, 29): "label.agility",
+    (6, 32): "label.magic",
+    (6, 38): "label.skill",
+    (8, 41): "skill.0",
+    (8, 44): "skill.1",
+    (30, 8): "equipment.right",
+    (30, 11): "label.equip.left",
+    (30, 14): "equipment.body",
+    (30, 17): "equipment.head",
+    (30, 20): "equipment.arm",
+    (30, 26): "label.attack",
+    (30, 29): "label.hit",
+    (30, 32): "label.defense",
+    (30, 35): "label.evasion",
+    (30, 38): "label.spell_resistance",
+    (30, 41): "label.tolerance",
+}
 LANGUAGE_SEQUENCE = (
     Language.JAPANESE,
     Language.ENGLISH,
@@ -42,27 +94,41 @@ def next_language(language: Language) -> Language:
     return LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
 
 
-def load_mock_member() -> Member:
-    """Load the character used by this mock from generated game data."""
+class StatusMockDataError(RuntimeError):
+    """Raised when generated data required by this mock is unavailable."""
 
-    path = APP_ROOT / "data" / "characters.json"
+
+def load_data_records(filename: str) -> list[dict[str, object]]:
+    """Load one generated array dataset used by the status mock."""
+
+    path = APP_ROOT / "data" / filename
     try:
         records = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
-        raise MemberDataError(f"キャラクターデータがありません: {path}") from error
+        raise StatusMockDataError(f"ゲームデータがありません: {path}") from error
     except json.JSONDecodeError as error:
-        raise MemberDataError(
-            f"キャラクターデータを読み込めません: {path}: {error}"
+        raise StatusMockDataError(
+            f"ゲームデータを読み込めません: {path}: {error}"
         ) from error
 
-    if not isinstance(records, list):
-        raise MemberDataError("characters.jsonのルートは配列である必要があります")
+    if not isinstance(records, list) or not all(
+        isinstance(record, dict) for record in records
+    ):
+        raise StatusMockDataError(
+            f"{filename}のルートはオブジェクトの配列である必要があります"
+        )
+    return records
+
+
+def load_mock_member() -> Member:
+    """Load the character used by this mock from generated game data."""
+
+    records = load_data_records("characters.json")
     record = next(
         (
             candidate
             for candidate in records
-            if isinstance(candidate, dict)
-            and candidate.get("name_en") == MOCK_CHARACTER_KEY
+            if candidate.get("name_en") == MOCK_CHARACTER_KEY
         ),
         None,
     )
@@ -71,6 +137,30 @@ def load_mock_member() -> Member:
             f"モック用キャラクターが見つかりません: {MOCK_CHARACTER_KEY}"
         )
     return Member.from_record(record)
+
+
+def load_mock_items() -> dict[str, Item]:
+    """Load and index item models by their current data keys."""
+
+    items: dict[str, Item] = {}
+    for record in load_data_records("items.json"):
+        item = Item.from_record(record)
+        if item.key in items:
+            raise StatusMockDataError(f"アイテムキーが重複しています: {item.key}")
+        items[item.key] = item
+    return items
+
+
+def load_mock_skills() -> dict[str, Skill]:
+    """Load and index skill models by their current data keys."""
+
+    skills: dict[str, Skill] = {}
+    for record in load_data_records("skills.json"):
+        skill = Skill.from_record(record)
+        if skill.key in skills:
+            raise StatusMockDataError(f"スキルキーが重複しています: {skill.key}")
+        skills[skill.key] = skill
+    return skills
 
 
 class StatusScreenMock:
@@ -93,10 +183,16 @@ class StatusScreenMock:
         self.settings = Settings()
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         self.member = load_mock_member()
+        self.items = load_mock_items()
+        self.skills = load_mock_skills()
         self.fonts = FontResources()
         localizer = Localizer(self.settings.language)
-        identity = self.member.display_identity(localizer, self.texts)
-        identity_font = self.fonts.font_for(self.settings.language)
+        localized = self._localized_texts(localizer)
+        localized_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
         self.windows = [
             windows.create(
@@ -105,29 +201,38 @@ class StatusScreenMock:
                 64,
                 60,
                 (
-                    WindowText(identity.name, 14, 2, font=identity_font),
-                    WindowText(identity.race, 14, 5, font=identity_font),
-                    WindowText(identity.gender, 14, 8, font=identity_font),
+                    localized_texts.create(localized["member.name"], 14, 2),
+                    localized_texts.create(localized["member.race"], 14, 5),
+                    localized_texts.create(localized["member.gender"], 14, 8),
                     WindowText("ＨＰ　９９９／９９９", 6, 14),
                     WindowText("ＭＰ　２５５／２５５", 6, 17),
-                    WindowText("じょうたい　　　ＯＫ", 6, 20),
-                    WindowText("ちから　　　　１７", 6, 26),
-                    WindowText("すばやさ　　　２５", 6, 29),
-                    WindowText("まりょく　　　２４", 6, 32),
-                    WindowText("スキル：", 6, 38),
-                    WindowText("　ふくつのとうし", 6, 41),
-                    WindowText("　りょうてもち", 6, 44),
-                    WindowText("みぎて　：%WAND%デイブリンガー", 30, 8),
-                    WindowText("ひだりて：", 30, 11),
-                    WindowText("からだ　：エインシーのはごろも", 30, 14),
-                    WindowText("あたま　：はなかんむり", 30, 17),
-                    WindowText("うで　　：タイニーリング", 30, 20),
-                    WindowText("こうげき　　　　９６", 30, 26),
-                    WindowText("めいちゅう　　１１６（＋１６）", 30, 29),
-                    WindowText("ぼうぎょ　　　　２０", 30, 32),
-                    WindowText("かいひりつ　　　１５", 30, 35),
-                    WindowText("じゅつぼうぎょ　４０", 30, 38),
-                    WindowText("たいせい", 30, 41),
+                    localized_texts.create(localized["label.condition"], 6, 20),
+                    localized_texts.create(localized["value.condition.ok"], 22, 20),
+                    localized_texts.create(localized["label.strength"], 6, 26),
+                    WindowText("１７", 20, 26),
+                    localized_texts.create(localized["label.agility"], 6, 29),
+                    WindowText("２５", 20, 29),
+                    localized_texts.create(localized["label.magic"], 6, 32),
+                    WindowText("２４", 20, 32),
+                    localized_texts.create(localized["label.skill"], 6, 38),
+                    localized_texts.create(localized["skill.0"], 8, 41),
+                    localized_texts.create(localized["skill.1"], 8, 44),
+                    localized_texts.create(localized["equipment.right"], 30, 8),
+                    localized_texts.create(localized["label.equip.left"], 30, 11),
+                    localized_texts.create(localized["equipment.body"], 30, 14),
+                    localized_texts.create(localized["equipment.head"], 30, 17),
+                    localized_texts.create(localized["equipment.arm"], 30, 20),
+                    localized_texts.create(localized["label.attack"], 30, 26),
+                    WindowText("９６", 46, 26),
+                    localized_texts.create(localized["label.hit"], 30, 29),
+                    WindowText("１１６（＋１６）", 44, 29),
+                    localized_texts.create(localized["label.defense"], 30, 32),
+                    WindowText("２０", 46, 32),
+                    localized_texts.create(localized["label.evasion"], 30, 35),
+                    WindowText("１５", 46, 35),
+                    localized_texts.create(localized["label.spell_resistance"], 30, 38),
+                    WindowText("４０", 46, 38),
+                    localized_texts.create(localized["label.tolerance"], 30, 41),
                     WindowText("%FIRE%", 32, 44),
                     WindowText("%FREEZE%", 34, 44),
                     WindowText("%DARK%", 36, 44),
@@ -139,8 +244,8 @@ class StatusScreenMock:
                     WindowText("%DEATH%", 48, 44),
                     WindowText("%SWORD%：９－９９", 6, 49),
                     WindowText("%KATANA%：９－９９", 20, 49),
-                    WindowText("%KNIFE%：９－９９", 34, 49),
-                    WindowText("%SPEAR%：９－９９", 48, 49),
+                    WindowText("%SPEAR%：９－９９", 34, 49),
+                    WindowText("%KNIFE%：９－９９", 48, 49),
                     WindowText("%AXE%：９－９９", 6, 52),
                     WindowText("%HAMMER%：９－９９", 20, 52),
                     WindowText("%THROWING%：９－９９", 34, 52),
@@ -154,18 +259,74 @@ class StatusScreenMock:
         ]
         pyxel.run(self.update, self.draw)
 
-    def _rebuild_identity_window(self) -> None:
-        """Rebuild the window with the identity text in the selected language."""
+    def _localized_texts(self, localizer: Localizer) -> dict[str, str]:
+        """Resolve all names and labels currently switched by this mock."""
+
+        identity = self.member.display_identity(localizer, self.texts)
+        try:
+            localized = {
+                "member.name": identity.name,
+                "member.race": identity.race,
+                "member.gender": identity.gender,
+                "skill.0": self.skills[MOCK_SKILL_KEYS[0]].localized_name(localizer),
+                "skill.1": self.skills[MOCK_SKILL_KEYS[1]].localized_name(localizer),
+                "item.right": self.items[MOCK_EQUIPMENT_KEYS["right"]].localized_name(
+                    localizer
+                ),
+                "item.body": self.items[MOCK_EQUIPMENT_KEYS["body"]].localized_name(
+                    localizer
+                ),
+                "item.head": self.items[MOCK_EQUIPMENT_KEYS["head"]].localized_name(
+                    localizer
+                ),
+                "item.arm": self.items[MOCK_EQUIPMENT_KEYS["arm"]].localized_name(
+                    localizer
+                ),
+            }
+        except KeyError as error:
+            raise StatusMockDataError(
+                f"モック用データが見つかりません: {error.args[0]}"
+            ) from error
+
+        for display_key, text_key in STATUS_TEXT_KEYS.items():
+            text = self.texts.text(text_key, localizer)
+            if not text:
+                raise StatusMockDataError(
+                    f"モック用テキストが見つかりません: {text_key}"
+                )
+            localized[display_key] = text
+        localized["equipment.right"] = (
+            localized["label.equip.right"] + "%WAND%" + localized["item.right"]
+        )
+        for slot in ("body", "head", "arm"):
+            localized[f"equipment.{slot}"] = (
+                localized[f"label.equip.{slot}"] + localized[f"item.{slot}"]
+            )
+        return localized
+
+    def _rebuild_localized_window(self) -> None:
+        """Rebuild the window with names in the selected language."""
 
         current_window = self.windows[0]
         localizer = Localizer(self.settings.language)
-        identity = self.member.display_identity(localizer, self.texts)
-        identity_font = self.fonts.font_for(self.settings.language)
-        texts = (
-            WindowText(identity.name, 14, 2, font=identity_font),
-            WindowText(identity.race, 14, 5, font=identity_font),
-            WindowText(identity.gender, 14, 8, font=identity_font),
-            *current_window.texts[3:],
+        localized = self._localized_texts(localizer)
+        localized_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+        texts = tuple(
+            (
+                localized_texts.create(
+                    localized[LOCALIZED_POSITIONS[(text.x, text.y)]],
+                    text.x,
+                    text.y,
+                    color=text.color,
+                    shadow_color=text.shadow_color,
+                )
+                if (text.x, text.y) in LOCALIZED_POSITIONS
+                else text
+            )
+            for text in current_window.texts
         )
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
         self.windows = [windows.create(0, 0, 64, 60, texts)]
@@ -179,7 +340,7 @@ class StatusScreenMock:
         if input_state.confirm.triggered:
             language = next_language(self.settings.language)
             self.settings = self.settings.with_language(language)
-            self._rebuild_identity_window()
+            self._rebuild_localized_window()
 
     def draw(self) -> None:
         # ウィンドウ
@@ -205,7 +366,10 @@ def main() -> int:
     except (
         FontResourceError,
         ImageResourceError,
+        ItemDataError,
         MemberDataError,
+        SkillDataError,
+        StatusMockDataError,
         TextCatalogError,
     ) as error:
         print(error)

@@ -124,6 +124,52 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(draw_text.call_count, 1)
         self.assertEqual(draw_text.call_args.args, (0, 0, "flat", 5, None))
 
+    def test_text_applies_pixel_baseline_offset(self) -> None:
+        font = object()
+        window = Window(
+            1,
+            2,
+            8,
+            6,
+            (WindowText("aligned", 2, 2, font=font, baseline_offset=3),),
+        )
+
+        with patch("app.ui.window.pyxel.text") as draw_text:
+            window._draw_texts()
+
+        self.assertEqual(
+            [item.args for item in draw_text.call_args_list],
+            [
+                (12, 20, "aligned", 0, font),
+                (12, 19, "aligned", 5, font),
+            ],
+        )
+
+    def test_baseline_offset_does_not_move_tagged_icon(self) -> None:
+        font = object()
+        window = Window(
+            0,
+            0,
+            8,
+            6,
+            (WindowText("%WAND%X", 0, 0, font=font, baseline_offset=3),),
+        )
+
+        with (
+            patch("app.ui.window.pyxel.text") as draw_text,
+            patch("app.ui.window.pyxel.blt") as draw_icon,
+        ):
+            window._draw_texts()
+
+        self.assertEqual(draw_icon.call_args.args[1], 3)
+        self.assertEqual(
+            [item.args for item in draw_text.call_args_list],
+            [
+                (8, 4, "X", 0, font),
+                (8, 3, "X", 5, font),
+            ],
+        )
+
     def test_gradient_changes_dither_ratio_between_two_colors(self) -> None:
         window = Window(1, 2, 8, 8)
 
