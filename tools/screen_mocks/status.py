@@ -15,6 +15,7 @@ from member import (
     EquipmentSlot,
     Member,
     MemberDataError,
+    ProficiencyAptitude,
     ProficiencyKind,
 )
 from resistance import ResistanceType
@@ -355,6 +356,12 @@ class StatusScreenMock:
                         y,
                     )
                     for kind, icon, x, y in PROFICIENCY_POSITIONS
+                ),
+                *(
+                    WindowText("%FAVORED%", x - 2, y)
+                    for kind, _icon, x, y in PROFICIENCY_POSITIONS
+                    if self.member.proficiency(kind).aptitude
+                    is ProficiencyAptitude.FAVORED
                 ),
             ),
             horizontal_navigation=len(self.party) > 1,

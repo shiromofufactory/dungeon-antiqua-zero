@@ -61,6 +61,7 @@ class TaggedTextTest(unittest.TestCase):
             "%MYSTIC%": (128, 24),
             "%SACRED%": (136, 24),
             "%NETHER%": (144, 24),
+            "%FAVORED%": (152, 24),
         }
 
         self.assertEqual(
@@ -165,7 +166,10 @@ class TaggedTextTest(unittest.TestCase):
         self.assertEqual(text.call_args.args, (18, 23, "X", 5, font))
 
     def test_icon_value_is_a_frozen_description(self) -> None:
-        self.assertEqual(TEXT_ICONS["%NETHER%"], TextIcon("%NETHER%", 144, 24))
+        self.assertEqual(
+            TEXT_ICONS["%FAVORED%"],
+            TextIcon("%FAVORED%", 152, 24),
+        )
 
 
 if __name__ == "__main__":

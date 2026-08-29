@@ -63,6 +63,7 @@ _ICON_COORDINATES = {
     "MYSTIC": (128, 24),
     "SACRED": (136, 24),
     "NETHER": (144, 24),
+    "FAVORED": (152, 24),
 }
 
 TEXT_ICONS = MappingProxyType(

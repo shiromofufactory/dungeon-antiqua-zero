@@ -155,6 +155,31 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(20, 55)], "%MYSTIC%：８－９９")
         self.assertEqual(placed[(34, 55)], "%SACRED%：０－００")
         self.assertEqual(placed[(48, 55)], "%NETHER%：８－９９")
+        self.assertNotIn("%FAVORED%", (item.text for item in texts))
+
+    def test_favored_marker_is_eight_pixels_left_of_icon(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.pyxel.init"),
+            patch("tools.screen_mocks.status.pyxel.load"),
+            patch("tools.screen_mocks.status.pyxel.load_pal"),
+            patch("tools.screen_mocks.status.pyxel.run"),
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock()
+
+        mock.member_index = 1
+        mock._rebuild_window()
+
+        favored_positions = {
+            (item.x, item.y)
+            for item in mock.windows[0].texts
+            if item.text == "%FAVORED%"
+        }
+        self.assertEqual(favored_positions, {(32, 49), (32, 55)})
 
     def test_formats_dual_wield_attack_and_average_hit(self) -> None:
         stats = BattleStats(
