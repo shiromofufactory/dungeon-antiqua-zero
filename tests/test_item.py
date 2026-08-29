@@ -19,6 +19,7 @@ class ItemTest(unittest.TestCase):
                 "atk": 40,
                 "hit": 108,
                 "dfc": 2,
+                "eva": -5,
                 "rst": 12,
                 "tolerance": "炎冷炎止",
             }
@@ -35,6 +36,7 @@ class ItemTest(unittest.TestCase):
         self.assertEqual(self.item.attack, 40)
         self.assertEqual(self.item.hit, 108)
         self.assertEqual(self.item.defense, 2)
+        self.assertEqual(self.item.evasion, -5)
         self.assertEqual(self.item.spell_resistance, 12)
 
     def test_parses_recognized_tolerances_as_unique_resistances(self) -> None:
@@ -58,11 +60,29 @@ class ItemTest(unittest.TestCase):
             "atk": -1,
             "hit": 108,
             "dfc": 2,
+            "eva": -5,
             "rst": 12,
             "tolerance": "",
         }
 
         with self.assertRaisesRegex(ItemDataError, "atk"):
+            Item.from_record(record)
+
+    def test_rejects_non_integer_evasion(self) -> None:
+        record = {
+            "name_en": "DAYBRINGER",
+            "name_ja": "デイブリンガー",
+            "type1": "RIGHT",
+            "type2": "WAND",
+            "atk": 40,
+            "hit": 108,
+            "dfc": 2,
+            "eva": 1.5,
+            "rst": 12,
+            "tolerance": "",
+        }
+
+        with self.assertRaisesRegex(ItemDataError, "eva"):
             Item.from_record(record)
 
     def test_returns_localized_display_name(self) -> None:

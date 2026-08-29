@@ -90,10 +90,11 @@ class ProficiencyAptitude(IntEnum):
 
 EnumValue = TypeVar("EnumValue", bound=StrEnum)
 
-INITIAL_HP = 999
-INITIAL_MAX_HP = 999
-INITIAL_MP = 255
-INITIAL_MAX_MP = 255
+FIORA_CHARACTER_KEY = "Fiora"
+MIN_INTERNAL_LEVEL = 1
+MAX_INTERNAL_LEVEL = 99
+MAX_HP = 999
+MAX_MP = 255
 EQUIPMENT_RECORD_FIELDS = MappingProxyType(
     {
         EquipmentSlot.RIGHT: "equip_right",
@@ -129,6 +130,13 @@ WEAPON_PROFICIENCY_KINDS = frozenset(
         ProficiencyKind.WAND,
     )
 )
+SPELL_PROFICIENCY_KINDS = frozenset(
+    (
+        ProficiencyKind.MYSTIC,
+        ProficiencyKind.SACRED,
+        ProficiencyKind.NETHER,
+    )
+)
 _WEAPON_PROFICIENCY_BY_SUBTYPE = MappingProxyType(
     {kind.name: kind for kind in WEAPON_PROFICIENCY_KINDS}
 )
@@ -148,6 +156,12 @@ def _validate_ability_value(name: str, value: object) -> int:
         raise MemberDataError(f"character.{name} must be an integer")
     if value < 0:
         raise MemberDataError(f"character.{name} must not be negative")
+    return value
+
+
+def _validate_integer_value(name: str, value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise MemberDataError(f"character.{name} must be an integer")
     return value
 
 
@@ -209,13 +223,50 @@ class Proficiency:
 
     @classmethod
     def at_limit(cls, aptitude: ProficiencyAptitude) -> Proficiency:
-        """Create the fixed current mock value determined by aptitude."""
+        """Create a proficiency at the highest attainable value."""
 
         if not isinstance(aptitude, ProficiencyAptitude):
             raise TypeError("aptitude must be a ProficiencyAptitude")
         if aptitude is ProficiencyAptitude.DISABLED:
             return cls(aptitude, level=0, progress=0)
         return cls(aptitude, level=aptitude.max_level, progress=99)
+
+    @classmethod
+    def for_joining_member(
+        cls,
+        aptitude: ProficiencyAptitude,
+        internal_level: int,
+        *,
+        is_fiora: bool = False,
+    ) -> Proficiency:
+        """Create the proficiency held when a character first joins."""
+
+        if not isinstance(aptitude, ProficiencyAptitude):
+            raise TypeError("aptitude must be a ProficiencyAptitude")
+        if (
+            isinstance(internal_level, bool)
+            or not isinstance(internal_level, int)
+        ):
+            raise TypeError("internal_level must be an integer")
+        if not MIN_INTERNAL_LEVEL <= internal_level <= MAX_INTERNAL_LEVEL:
+            raise ValueError(
+                f"internal_level must be from {MIN_INTERNAL_LEVEL} "
+                f"to {MAX_INTERNAL_LEVEL}"
+            )
+        if not isinstance(is_fiora, bool):
+            raise TypeError("is_fiora must be a boolean")
+        if aptitude is ProficiencyAptitude.DISABLED:
+            return cls(aptitude, level=0, progress=0)
+        if is_fiora:
+            return cls(aptitude, level=1, progress=0)
+
+        if aptitude is ProficiencyAptitude.FAVORED:
+            total = 160 + internal_level * 8
+        else:
+            total = 93 + internal_level * 7
+        total = min(total, aptitude.max_level * 100 + 99)
+        level, progress = divmod(total, 100)
+        return cls(aptitude, level=level, progress=progress)
 
     def add_progress(self, amount: int) -> None:
         """Add progress, carrying each 100 points into one level."""
@@ -427,10 +478,14 @@ class FacePosition:
 class CharacterDefinition:
     """Immutable master data loaded from one ``characters.json`` record."""
 
+    key: str
     names: Mapping[str, object]
     race: Race
     gender: Gender
     face_position: FacePosition
+    level_difference: int
+    base_hp: int
+    base_mp: int
     base_abilities: BaseAbilities
     initial_skill_keys: tuple[str, ...]
     initial_equipment_keys: Mapping[EquipmentSlot, str]
@@ -457,9 +512,18 @@ class CharacterDefinition:
             raise MemberDataError("character must have at least one localized name")
         if not any(names.values()):
             raise MemberDataError("character must have a non-empty localized name")
+        key = names.get("name_en")
+        if not key:
+            raise MemberDataError("character.name_en must be a non-empty string")
 
         race = cls._enum_value(record, "race", Race)
         gender = cls._enum_value(record, "gender", Gender)
+        level_difference = _validate_integer_value(
+            "lv_diff",
+            record.get("lv_diff"),
+        )
+        base_hp = _validate_ability_value("base_hp", record.get("base_hp"))
+        base_mp = _validate_ability_value("base_mp", record.get("base_mp"))
         base_abilities = BaseAbilities(
             strength=_validate_ability_value("base_str", record.get("base_str")),
             agility=_validate_ability_value("base_agi", record.get("base_agi")),
@@ -477,14 +541,41 @@ class CharacterDefinition:
                 raise MemberDataError(f"character.{field_name} must be a string")
             initial_equipment_keys[slot] = value
         return cls(
+            key,
             MappingProxyType(names),
             race,
             gender,
             face_position,
+            level_difference,
+            base_hp,
+            base_mp,
             base_abilities,
             initial_skill_keys,
             MappingProxyType(initial_equipment_keys),
             _proficiency_aptitudes(record),
+        )
+
+    def joining_internal_level(self, fiora_internal_level: int) -> int:
+        """Return this character's internal level at first recruitment."""
+
+        if (
+            isinstance(fiora_internal_level, bool)
+            or not isinstance(fiora_internal_level, int)
+        ):
+            raise TypeError("fiora_internal_level must be an integer")
+        if not MIN_INTERNAL_LEVEL <= fiora_internal_level <= MAX_INTERNAL_LEVEL:
+            raise ValueError(
+                f"fiora_internal_level must be from {MIN_INTERNAL_LEVEL} "
+                f"to {MAX_INTERNAL_LEVEL}"
+            )
+        if self.key == FIORA_CHARACTER_KEY:
+            return MIN_INTERNAL_LEVEL
+        return min(
+            max(
+                fiora_internal_level + self.level_difference,
+                MIN_INTERNAL_LEVEL,
+            ),
+            MAX_INTERNAL_LEVEL,
         )
 
     @staticmethod
@@ -528,10 +619,11 @@ class Member:
     """Current player-character state backed by an immutable definition."""
 
     definition: CharacterDefinition
-    hp: int = INITIAL_HP
-    max_hp: int = INITIAL_MAX_HP
-    mp: int = INITIAL_MP
-    max_mp: int = INITIAL_MAX_MP
+    internal_level: int = MIN_INTERNAL_LEVEL
+    hp: int | None = None
+    max_hp: int | None = None
+    mp: int | None = None
+    max_mp: int | None = None
     poisoned: bool = False
     paralyzed: bool = False
     sleeping: int = 0
@@ -545,6 +637,64 @@ class Member:
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
             raise TypeError("definition must be a CharacterDefinition")
+        if (
+            isinstance(self.internal_level, bool)
+            or not isinstance(self.internal_level, int)
+        ):
+            raise TypeError("internal_level must be an integer")
+        if not MIN_INTERNAL_LEVEL <= self.internal_level <= MAX_INTERNAL_LEVEL:
+            raise ValueError(
+                f"internal_level must be from {MIN_INTERNAL_LEVEL} "
+                f"to {MAX_INTERNAL_LEVEL}"
+            )
+        if not isinstance(self.proficiencies, dict):
+            raise TypeError("proficiencies must be a dictionary")
+        if not self.proficiencies:
+            is_fiora = self.definition.key == FIORA_CHARACTER_KEY
+            self.proficiencies = {
+                kind: Proficiency.for_joining_member(
+                    aptitude,
+                    self.internal_level,
+                    is_fiora=is_fiora,
+                )
+                for kind, aptitude in self.definition.proficiency_aptitudes.items()
+            }
+        if set(self.proficiencies) != set(ProficiencyKind):
+            raise ValueError("proficiencies must contain every ProficiencyKind")
+        for kind, proficiency in self.proficiencies.items():
+            if not isinstance(kind, ProficiencyKind):
+                raise TypeError("proficiency keys must be ProficiencyKind values")
+            if not isinstance(proficiency, Proficiency):
+                raise TypeError("proficiencies must contain Proficiency values")
+            expected = self.definition.proficiency_aptitudes[kind]
+            if proficiency.aptitude is not expected:
+                raise MemberDataError(
+                    "proficiency aptitude differs from character data: "
+                    f"{kind.value}"
+                )
+
+        calculated_max_hp = min(
+            self.definition.base_hp * (4 + self.internal_level) // 5,
+            MAX_HP,
+        )
+        maximum_spell_level = max(
+            self.proficiency(kind).level for kind in SPELL_PROFICIENCY_KINDS
+        )
+        calculated_max_mp = min(
+            self.definition.base_mp
+            * (11 + self.internal_level)
+            * (7 + maximum_spell_level)
+            // 200,
+            MAX_MP,
+        )
+        if self.max_hp is None:
+            self.max_hp = calculated_max_hp
+        if self.hp is None:
+            self.hp = self.max_hp
+        if self.max_mp is None:
+            self.max_mp = calculated_max_mp
+        if self.mp is None:
+            self.mp = self.max_mp
         for name in ("hp", "max_hp", "mp", "max_mp"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -570,26 +720,6 @@ class Member:
             raise TypeError("skills must contain only Skill values")
         if not isinstance(self.equipment, EquipmentSet):
             raise TypeError("equipment must be an EquipmentSet")
-        if not isinstance(self.proficiencies, dict):
-            raise TypeError("proficiencies must be a dictionary")
-        if not self.proficiencies:
-            self.proficiencies = {
-                kind: Proficiency.at_limit(aptitude)
-                for kind, aptitude in self.definition.proficiency_aptitudes.items()
-            }
-        if set(self.proficiencies) != set(ProficiencyKind):
-            raise ValueError("proficiencies must contain every ProficiencyKind")
-        for kind, proficiency in self.proficiencies.items():
-            if not isinstance(kind, ProficiencyKind):
-                raise TypeError("proficiency keys must be ProficiencyKind values")
-            if not isinstance(proficiency, Proficiency):
-                raise TypeError("proficiencies must contain Proficiency values")
-            expected = self.definition.proficiency_aptitudes[kind]
-            if proficiency.aptitude is not expected:
-                raise MemberDataError(
-                    "proficiency aptitude differs from character data: "
-                    f"{kind.value}"
-                )
 
     @classmethod
     def from_record(
@@ -598,6 +728,7 @@ class Member:
         *,
         items: Mapping[str, Item] | None = None,
         skills: Mapping[str, Skill] | None = None,
+        fiora_internal_level: int = MIN_INTERNAL_LEVEL,
     ) -> Member:
         """Create the initial member state from a character data record."""
 
@@ -621,6 +752,9 @@ class Member:
         )
         return cls(
             definition,
+            internal_level=definition.joining_internal_level(
+                fiora_internal_level
+            ),
             skills=current_skills,
             equipment=equipment,
         )
@@ -750,7 +884,10 @@ class Member:
         defense = sum(item.defense for item in armor)
         abilities = self.adjusted_abilities
         agility_bonus = max(0, (abilities.agility - 20) * 2)
-        evasion = max(0, defense + agility_bonus)
+        evasion = max(
+            0,
+            sum(item.evasion for item in armor) + agility_bonus,
+        )
         spell_resistance = (
             sum(item.spell_resistance for item in armor)
             + abilities.magic // 2

@@ -28,6 +28,13 @@ def _non_negative_stat(record: Mapping[str, object], field: str) -> int:
     return value
 
 
+def _integer_stat(record: Mapping[str, object], field: str) -> int:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ItemDataError(f"item.{field} must be an integer")
+    return value
+
+
 class ItemEquipType(StrEnum):
     """Stable item categories used to validate equipment slots."""
 
@@ -51,6 +58,7 @@ class Item:
     attack: int
     hit: int
     defense: int
+    evasion: int
     spell_resistance: int
     resistances: frozenset[ResistanceType]
 
@@ -100,6 +108,7 @@ class Item:
             attack=_non_negative_stat(record, "atk"),
             hit=_non_negative_stat(record, "hit"),
             defense=_non_negative_stat(record, "dfc"),
+            evasion=_integer_stat(record, "eva"),
             spell_resistance=_non_negative_stat(record, "rst"),
             resistances=resistances_from_tolerance(tolerance),
         )
@@ -115,7 +124,7 @@ class Item:
 
     @property
     def is_armor(self) -> bool:
-        """Return whether this item contributes defense values."""
+        """Return whether this item contributes defensive status values."""
 
         return self.equip_type in (
             ItemEquipType.LEFT,

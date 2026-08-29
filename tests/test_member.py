@@ -26,6 +26,7 @@ from app.text_catalog import TextCatalog
 
 PROFICIENCY_FIELDS = {kind.value: 0 for kind in ProficiencyKind}
 FACE_FIELDS = {"face_x": 0, "face_y": 0}
+GROWTH_FIELDS = {"lv_diff": 0, "base_hp": 44, "base_mp": 27}
 
 
 class MemberTest(unittest.TestCase):
@@ -39,8 +40,10 @@ class MemberTest(unittest.TestCase):
                 "base_str": 17,
                 "base_agi": 25,
                 "base_mag": 24,
+                **GROWTH_FIELDS,
                 **FACE_FIELDS,
                 **PROFICIENCY_FIELDS,
+                "sp_mystic": 1,
             }
         )
         self.texts = TextCatalog.from_records(
@@ -105,6 +108,7 @@ class MemberTest(unittest.TestCase):
         attack: int = 0,
         hit: int = 0,
         defense: int = 0,
+        evasion: int = 0,
         spell_resistance: int = 0,
         tolerance: str = "",
     ) -> Item:
@@ -117,6 +121,7 @@ class MemberTest(unittest.TestCase):
                 "atk": attack,
                 "hit": hit,
                 "dfc": defense,
+                "eva": evasion,
                 "rst": spell_resistance,
                 "tolerance": tolerance,
             }
@@ -143,11 +148,18 @@ class MemberTest(unittest.TestCase):
             AdjustedAbilities(strength=17, agility=25, magic=24),
         )
 
-    def test_initial_health_and_magic_points_are_fixed_member_state(self) -> None:
-        self.assertEqual(self.member.hp, 999)
-        self.assertEqual(self.member.max_hp, 999)
-        self.assertEqual(self.member.mp, 255)
-        self.assertEqual(self.member.max_mp, 255)
+    def test_fiora_initial_growth_state_uses_level_one_formulas(self) -> None:
+        self.assertEqual(self.member.internal_level, 1)
+        self.assertEqual(self.member.hp, 44)
+        self.assertEqual(self.member.max_hp, 44)
+        self.assertEqual(self.member.mp, 12)
+        self.assertEqual(self.member.max_mp, 12)
+
+    def test_maximum_points_remain_stored_when_internal_level_changes(self) -> None:
+        self.member.internal_level = 2
+
+        self.assertEqual((self.member.hp, self.member.max_hp), (44, 44))
+        self.assertEqual((self.member.mp, self.member.max_mp), (12, 12))
 
     def test_initial_skills_and_equipment_are_copied_to_member_state(self) -> None:
         dagger = self.item("DAGGER", "RIGHT", "KNIFE")
@@ -161,6 +173,7 @@ class MemberTest(unittest.TestCase):
                 "base_str": 17,
                 "base_agi": 25,
                 "base_mag": 24,
+                **GROWTH_FIELDS,
                 "skills": ["Focus"],
                 "equip_right": "DAGGER",
                 "equip_left": "",
@@ -199,7 +212,7 @@ class MemberTest(unittest.TestCase):
 
         self.assertIs(equipment.item_at(EquipmentSlot.LEFT), dagger)
 
-    def test_initial_proficiencies_are_fixed_at_each_aptitude_limit(self) -> None:
+    def test_fiora_starts_enabled_proficiencies_at_level_one(self) -> None:
         record = {
             "name_en": "Fiora",
             "race": "FAIRY",
@@ -207,6 +220,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **GROWTH_FIELDS,
             **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_sword": 2,
@@ -224,14 +238,14 @@ class MemberTest(unittest.TestCase):
                 member.proficiency(ProficiencyKind.SWORD).level,
                 member.proficiency(ProficiencyKind.SWORD).progress,
             ),
-            (9, 99),
+            (1, 0),
         )
         self.assertEqual(
             (
                 member.proficiency(ProficiencyKind.KNIFE).level,
                 member.proficiency(ProficiencyKind.KNIFE).progress,
             ),
-            (8, 99),
+            (1, 0),
         )
         self.assertEqual(
             (
@@ -239,6 +253,80 @@ class MemberTest(unittest.TestCase):
                 member.proficiency(ProficiencyKind.KATANA).progress,
             ),
             (0, 0),
+        )
+
+    def test_other_member_joining_state_uses_fiora_level_and_difference(self) -> None:
+        record = {
+            "name_en": "Cerion",
+            "race": "FAIRY",
+            "gender": "MALE",
+            "lv_diff": 2,
+            "base_hp": 46,
+            "base_mp": 30,
+            "base_str": 18,
+            "base_agi": 22,
+            "base_mag": 21,
+            **FACE_FIELDS,
+            **PROFICIENCY_FIELDS,
+            "eq_knife": 1,
+            "eq_spear": 2,
+            "sp_mystic": 1,
+            "sp_sacred": 2,
+        }
+
+        member = Member.from_record(record, fiora_internal_level=1)
+
+        self.assertEqual(member.internal_level, 3)
+        self.assertEqual((member.hp, member.max_hp), (64, 64))
+        self.assertEqual((member.mp, member.max_mp), (16, 16))
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.SPEAR).level,
+                member.proficiency(ProficiencyKind.SPEAR).progress,
+            ),
+            (1, 84),
+        )
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.KNIFE).level,
+                member.proficiency(ProficiencyKind.KNIFE).progress,
+            ),
+            (1, 14),
+        )
+
+    def test_joining_internal_level_is_capped_at_99(self) -> None:
+        record = {
+            "name_en": "Cerion",
+            "race": "FAIRY",
+            "gender": "MALE",
+            "lv_diff": 2,
+            "base_hp": 46,
+            "base_mp": 30,
+            "base_str": 18,
+            "base_agi": 22,
+            "base_mag": 21,
+            **FACE_FIELDS,
+            **PROFICIENCY_FIELDS,
+            "eq_knife": 1,
+            "eq_spear": 2,
+        }
+
+        member = Member.from_record(record, fiora_internal_level=98)
+
+        self.assertEqual(member.internal_level, 99)
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.SPEAR).level,
+                member.proficiency(ProficiencyKind.SPEAR).progress,
+            ),
+            (9, 52),
+        )
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.KNIFE).level,
+                member.proficiency(ProficiencyKind.KNIFE).progress,
+            ),
+            (7, 86),
         )
 
     def test_proficiency_progress_carries_at_100_and_respects_cap(self) -> None:
@@ -269,6 +357,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **GROWTH_FIELDS,
             **FACE_FIELDS,
             **PROFICIENCY_FIELDS,
             "eq_sword": 3,
@@ -291,6 +380,7 @@ class MemberTest(unittest.TestCase):
             "ROBE",
             "BODY",
             defense=3,
+            evasion=-12,
         )
         record = {
             "name_en": "Fiora",
@@ -299,6 +389,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **GROWTH_FIELDS,
             "equip_right": "DAGGER",
             "equip_body": "ROBE",
             **FACE_FIELDS,
@@ -313,6 +404,15 @@ class MemberTest(unittest.TestCase):
             record,
             items={"DAGGER": dagger, "ROBE": robe},
         )
+        for kind, level in (
+            (ProficiencyKind.KNIFE, 8),
+            (ProficiencyKind.THROWING, 8),
+            (ProficiencyKind.WAND, 8),
+            (ProficiencyKind.MYSTIC, 9),
+        ):
+            proficiency = member.proficiency(kind)
+            proficiency.level = level
+            proficiency.progress = 99
 
         stats = member.battle_stats
 
@@ -326,7 +426,7 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(stats.hit, 121)
         self.assertEqual(stats.hit_bonus, 16)
         self.assertEqual(stats.defense, 3)
-        self.assertEqual(stats.evasion, 13)
+        self.assertEqual(stats.evasion, 0)
         self.assertEqual(stats.spell_resistance, 12)
 
     def test_dual_wield_uses_left_attack_factor_and_average_hit(self) -> None:
@@ -351,6 +451,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 20,
             "base_agi": 20,
             "base_mag": 20,
+            **GROWTH_FIELDS,
             "equip_right": "SWORD",
             "equip_left": "DAGGER",
             **FACE_FIELDS,
@@ -363,6 +464,14 @@ class MemberTest(unittest.TestCase):
             record,
             items={"SWORD": sword, "DAGGER": dagger},
         )
+        for kind, level in (
+            (ProficiencyKind.SWORD, 9),
+            (ProficiencyKind.KNIFE, 8),
+            (ProficiencyKind.KATANA, 9),
+        ):
+            proficiency = member.proficiency(kind)
+            proficiency.level = level
+            proficiency.progress = 99
 
         stats = member.battle_stats
 
@@ -389,6 +498,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 20,
             "base_agi": 20,
             "base_mag": 20,
+            **GROWTH_FIELDS,
             "skills": ["Two-Handed"],
             "equip_right": "SWORD",
             **FACE_FIELDS,
@@ -422,6 +532,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **GROWTH_FIELDS,
             "equip_right": "SWORD",
             "equip_body": "ROBE",
             **FACE_FIELDS,
@@ -467,7 +578,7 @@ class MemberTest(unittest.TestCase):
     def test_healthy_status_can_show_max_hp_ok_or_nothing(self) -> None:
         localizer = Localizer(Language.JAPANESE)
 
-        self.assertEqual(self.member.status(localizer, self.texts), "９９９")
+        self.assertEqual(self.member.status(localizer, self.texts), "４４")
         self.assertEqual(
             self.member.status(localizer, self.texts, show_ok=True),
             "ＯＫ",
@@ -526,6 +637,7 @@ class MemberTest(unittest.TestCase):
                     "gender": "FEMALE",
                     "base_str": 17,
                     "base_agi": 25,
+                    **GROWTH_FIELDS,
                 }
             )
 
@@ -537,6 +649,7 @@ class MemberTest(unittest.TestCase):
             "base_str": 17,
             "base_agi": 25,
             "base_mag": 24,
+            **GROWTH_FIELDS,
             **PROFICIENCY_FIELDS,
         }
 

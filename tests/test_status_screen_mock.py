@@ -101,6 +101,23 @@ class StatusScreenMockTest(unittest.TestCase):
             tuple(member.definition.names["name_en"] for member in mock.party),
             MOCK_PARTY_CHARACTER_KEYS,
         )
+        self.assertEqual(
+            [
+                (member.internal_level, member.hp, member.mp)
+                for member in mock.party
+            ],
+            [
+                (1, 44, 12),
+                (3, 64, 16),
+                (18, 220, 30),
+                (8, 115, 15),
+                (11, 171, 0),
+            ],
+        )
+        self.assertEqual(
+            [member.battle_stats.evasion for member in mock.party],
+            [10, 4, 12, 0, 0],
+        )
         self.assertEqual(mock.member_index, 0)
         self.assertTrue(
             factory.return_value.create.call_args.kwargs[
@@ -114,8 +131,8 @@ class StatusScreenMockTest(unittest.TestCase):
             ["フィオラ", "ようせい", "おんな"],
         )
         placed = {(item.x, item.y): item.text for item in texts}
-        self.assertEqual(placed[(6, 14)], "ＨＰ　９９９／９９９")
-        self.assertEqual(placed[(6, 17)], "ＭＰ　２５５／２５５")
+        self.assertEqual(placed[(6, 14)], "ＨＰ　　４４／　４４")
+        self.assertEqual(placed[(6, 17)], "ＭＰ　　１２／　１２")
         self.assertEqual(placed[(22, 20)], "ＯＫ")
         self.assertEqual(placed[(6, 26)], "ちから")
         self.assertEqual(placed[(20, 26)], "１７")
@@ -129,9 +146,9 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(30, 17)], "あたま　：")
         self.assertEqual(placed[(30, 20)], "うで　　：")
         self.assertEqual(placed[(46, 26)], "　８")
-        self.assertEqual(placed[(44, 29)], "１２１（＋１６）")
+        self.assertEqual(placed[(44, 29)], "１０５（＋　０）")
         self.assertEqual(placed[(46, 32)], "　３")
-        self.assertEqual(placed[(46, 35)], "１３")
+        self.assertEqual(placed[(46, 35)], "１０")
         self.assertEqual(placed[(46, 38)], "１２")
         self.assertEqual(placed[(30, 38)], "じゅつぼうぎょ")
         self.assertEqual(placed[(32, 44)], "%FIRE_DISABLED%")
@@ -146,15 +163,15 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(6, 49)], "%SWORD%：０－００")
         self.assertEqual(placed[(20, 49)], "%KATANA%：０－００")
         self.assertEqual(placed[(34, 49)], "%SPEAR%：０－００")
-        self.assertEqual(placed[(48, 49)], "%KNIFE%：８－９９")
+        self.assertEqual(placed[(48, 49)], "%KNIFE%：１－００")
         self.assertEqual(placed[(6, 52)], "%AXE%：０－００")
         self.assertEqual(placed[(20, 52)], "%HAMMER%：０－００")
-        self.assertEqual(placed[(34, 52)], "%THROWING%：８－９９")
+        self.assertEqual(placed[(34, 52)], "%THROWING%：１－００")
         self.assertEqual(placed[(48, 52)], "%ROD%：０－００")
-        self.assertEqual(placed[(6, 55)], "%WAND%：８－９９")
-        self.assertEqual(placed[(20, 55)], "%MYSTIC%：８－９９")
+        self.assertEqual(placed[(6, 55)], "%WAND%：１－００")
+        self.assertEqual(placed[(20, 55)], "%MYSTIC%：１－００")
         self.assertEqual(placed[(34, 55)], "%SACRED%：０－００")
-        self.assertEqual(placed[(48, 55)], "%NETHER%：８－９９")
+        self.assertEqual(placed[(48, 55)], "%NETHER%：１－００")
         self.assertNotIn("%FAVORED%", (item.text for item in texts))
 
     def test_favored_marker_is_eight_pixels_left_of_icon(self) -> None:
