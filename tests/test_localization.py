@@ -2,11 +2,25 @@ from __future__ import annotations
 
 import unittest
 
-from app.localization import Localizer, ascii_to_fullwidth, language_candidates
+from app.localization import (
+    Localizer,
+    LocalizedText,
+    ascii_to_fullwidth,
+    format_number,
+    language_candidates,
+)
 from app.state import Language
 
 
 class LocalizationTest(unittest.TestCase):
+    def test_display_numbers_are_always_fullwidth(self) -> None:
+        self.assertEqual(format_number(0), "０")
+        self.assertEqual(format_number(123), "１２３")
+        self.assertEqual(format_number(-45), "－４５")
+
+        with self.assertRaises(TypeError):
+            format_number(True)
+
     def test_printable_ascii_is_converted_to_fullwidth(self) -> None:
         self.assertEqual(
             ascii_to_fullwidth("Hello, world! 123 /+-:*#()[]&"),
@@ -62,6 +76,26 @@ class LocalizationTest(unittest.TestCase):
 
         self.assertEqual(localizer.value(record, "name"), "Sword +1")
         self.assertEqual(localizer.text(record, "name"), "Ｓｗｏｒｄ　＋１")
+
+    def test_authored_fullwidth_english_text_keeps_wide_font_intent(self) -> None:
+        localizer = Localizer(Language.ENGLISH)
+
+        authored_wide = localizer.text({"text_en": "ＳＴＲ"}, "text")
+        normalized_ascii = localizer.text({"text_en": "STR"}, "text")
+
+        self.assertIsInstance(authored_wide, LocalizedText)
+        self.assertTrue(authored_wide.prefers_wide_font)
+        self.assertEqual(authored_wide, "ＳＴＲ")
+        self.assertFalse(normalized_ascii.prefers_wide_font)
+        self.assertEqual(normalized_ascii, "ＳＴＲ")
+
+    def test_display_tags_do_not_trigger_wide_font_intent(self) -> None:
+        text = Localizer(Language.ENGLISH).text(
+            {"text_en": "%RIGHT%:"},
+            "text",
+        )
+
+        self.assertFalse(text.prefers_wide_font)
 
     def test_non_english_display_text_is_not_fullwidth_normalized(self) -> None:
         localizer = Localizer(Language.SIMPLIFIED_CHINESE)

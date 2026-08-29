@@ -9,7 +9,7 @@ import pyxel
 from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
 from item import Item, ItemDataError
-from localization import Localizer
+from localization import Localizer, format_number
 from member import Member, MemberDataError
 from resources import (
     TRANSPARENT_INDEX,
@@ -37,7 +37,6 @@ MOCK_EQUIPMENT_KEYS = {
 }
 STATUS_TEXT_KEYS = {
     "label.condition": "status.condition",
-    "value.condition.ok": "status.ok",
     "label.strength": "status.strength",
     "label.agility": "status.agility",
     "label.magic": "status.magic",
@@ -59,7 +58,7 @@ LOCALIZED_POSITIONS = {
     (14, 5): "member.race",
     (14, 8): "member.gender",
     (6, 20): "label.condition",
-    (22, 20): "value.condition.ok",
+    (22, 20): "value.condition",
     (6, 26): "label.strength",
     (6, 29): "label.agility",
     (6, 32): "label.magic",
@@ -188,6 +187,7 @@ class StatusScreenMock:
         self.fonts = FontResources()
         localizer = Localizer(self.settings.language)
         localized = self._localized_texts(localizer)
+        abilities = self.member.adjusted_abilities
         localized_texts = LocalizedWindowTextFactory.from_language(
             self.fonts,
             self.settings.language,
@@ -204,16 +204,26 @@ class StatusScreenMock:
                     localized_texts.create(localized["member.name"], 14, 2),
                     localized_texts.create(localized["member.race"], 14, 5),
                     localized_texts.create(localized["member.gender"], 14, 8),
-                    WindowText("ＨＰ　９９９／９９９", 6, 14),
-                    WindowText("ＭＰ　２５５／２５５", 6, 17),
+                    WindowText(
+                        f"ＨＰ　{format_number(self.member.hp)}"
+                        f"／{format_number(self.member.max_hp)}",
+                        6,
+                        14,
+                    ),
+                    WindowText(
+                        f"ＭＰ　{format_number(self.member.mp)}"
+                        f"／{format_number(self.member.max_mp)}",
+                        6,
+                        17,
+                    ),
                     localized_texts.create(localized["label.condition"], 6, 20),
-                    localized_texts.create(localized["value.condition.ok"], 22, 20),
+                    localized_texts.create(localized["value.condition"], 22, 20),
                     localized_texts.create(localized["label.strength"], 6, 26),
-                    WindowText("１７", 20, 26),
+                    WindowText(format_number(abilities.strength), 20, 26),
                     localized_texts.create(localized["label.agility"], 6, 29),
-                    WindowText("２５", 20, 29),
+                    WindowText(format_number(abilities.agility), 20, 29),
                     localized_texts.create(localized["label.magic"], 6, 32),
-                    WindowText("２４", 20, 32),
+                    WindowText(format_number(abilities.magic), 20, 32),
                     localized_texts.create(localized["label.skill"], 6, 38),
                     localized_texts.create(localized["skill.0"], 8, 41),
                     localized_texts.create(localized["skill.1"], 8, 44),
@@ -295,6 +305,11 @@ class StatusScreenMock:
                     f"モック用テキストが見つかりません: {text_key}"
                 )
             localized[display_key] = text
+        localized["value.condition"] = self.member.status(
+            localizer,
+            self.texts,
+            show_ok=True,
+        )
         localized["equipment.right"] = (
             localized["label.equip.right"] + "%WAND%" + localized["item.right"]
         )

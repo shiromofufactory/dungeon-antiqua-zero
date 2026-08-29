@@ -47,7 +47,13 @@ class StatusScreenMockTest(unittest.TestCase):
             ["フィオラ", "ようせい", "おんな"],
         )
         placed = {(item.x, item.y): item.text for item in texts}
+        self.assertEqual(placed[(6, 14)], "ＨＰ　９９９／９９９")
+        self.assertEqual(placed[(6, 17)], "ＭＰ　２５５／２５５")
+        self.assertEqual(placed[(22, 20)], "ＯＫ")
         self.assertEqual(placed[(6, 26)], "ちから")
+        self.assertEqual(placed[(20, 26)], "１７")
+        self.assertEqual(placed[(20, 29)], "２５")
+        self.assertEqual(placed[(20, 32)], "２４")
         self.assertEqual(
             placed[(30, 8)], "みぎて　：%WAND%デイブリンガー"
         )
@@ -69,6 +75,8 @@ class StatusScreenMockTest(unittest.TestCase):
         mock._rebuild_localized_window.assert_called_once_with()
 
     def test_english_localized_text_is_rebuilt_as_fullwidth(self) -> None:
+        japanese_font = object()
+        english_font = object()
         with (
             patch("tools.screen_mocks.status.pyxel.init"),
             patch("tools.screen_mocks.status.pyxel.load"),
@@ -78,7 +86,11 @@ class StatusScreenMockTest(unittest.TestCase):
             patch("tools.screen_mocks.status.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.side_effect = (
+                lambda language: english_font
+                if language is Language.ENGLISH
+                else japanese_font
+            )
             fonts.return_value.baseline_offset_for.side_effect = (
                 lambda language: 3
                 if language is Language.ENGLISH
@@ -99,9 +111,9 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(8, 44)], "Ｔｗｏ－Ｈａｎｄｅｄ")
         self.assertEqual(texts[(6, 20)], "Ｓｔａｔｕｓ")
         self.assertEqual(texts[(22, 20)], "ＯＫ")
-        self.assertEqual(texts[(6, 26)], "Ｓｔｒｅｎｇｔｈ")
-        self.assertEqual(texts[(6, 29)], "Ａｇｉｌｉｔｙ")
-        self.assertEqual(texts[(6, 32)], "Ｍａｇｉｃ")
+        self.assertEqual(texts[(6, 26)], "ＳＴＲ")
+        self.assertEqual(texts[(6, 29)], "ＡＧＩ")
+        self.assertEqual(texts[(6, 32)], "ＭＡＧ")
         self.assertEqual(texts[(6, 38)], "Ｓｋｉｌｌ：")
         self.assertEqual(
             texts[(30, 8)],
@@ -127,8 +139,16 @@ class StatusScreenMockTest(unittest.TestCase):
                 for item in mock.windows[0].texts
                 if (item.x, item.y) in LOCALIZED_POSITIONS
             },
-            {3},
+            {0, 3},
         )
+        placements = {
+            (item.x, item.y): item for item in mock.windows[0].texts
+        }
+        for position in ((6, 26), (6, 29), (6, 32)):
+            self.assertIs(placements[position].font, japanese_font)
+            self.assertEqual(placements[position].baseline_offset, 0)
+        self.assertIs(placements[(6, 20)].font, english_font)
+        self.assertEqual(placements[(6, 20)].baseline_offset, 3)
 
     def test_chinese_fixed_labels_are_rebuilt_from_text_catalog(self) -> None:
         with (

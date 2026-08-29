@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 if __package__ == "ui":
+    from localization import LocalizedText
     from resources import FontResources
     from state import Language
 else:
+    from ..localization import LocalizedText
     from ..resources import FontResources
     from ..state import Language
 
@@ -29,6 +31,8 @@ class LocalizedWindowTextFactory:
 
     font: Any
     baseline_offset: int
+    wide_font: Any | None = None
+    wide_baseline_offset: int = 0
 
     def __post_init__(self) -> None:
         if self.font is None:
@@ -36,6 +40,10 @@ class LocalizedWindowTextFactory:
         if not isinstance(self.baseline_offset, int):
             raise TypeError(
                 "localized window text baseline offset must be an integer"
+            )
+        if not isinstance(self.wide_baseline_offset, int):
+            raise TypeError(
+                "wide text baseline offset must be an integer"
             )
 
     @classmethod
@@ -46,9 +54,17 @@ class LocalizedWindowTextFactory:
     ) -> LocalizedWindowTextFactory:
         """Create a factory using the standard style for ``language``."""
 
+        font = fonts.font_for(language)
+        baseline_offset = fonts.baseline_offset_for(language)
+        if language is not Language.ENGLISH:
+            return cls(font, baseline_offset)
         return cls(
-            fonts.font_for(language),
-            fonts.baseline_offset_for(language),
+            font,
+            baseline_offset,
+            wide_font=fonts.font_for(Language.JAPANESE),
+            wide_baseline_offset=fonts.baseline_offset_for(
+                Language.JAPANESE
+            ),
         )
 
     def create(
@@ -62,12 +78,21 @@ class LocalizedWindowTextFactory:
     ) -> WindowText:
         """Place already-localized text in the window's text grid."""
 
+        use_wide_font = (
+            isinstance(text, LocalizedText)
+            and text.prefers_wide_font
+            and self.wide_font is not None
+        )
         return WindowText(
             text,
             x,
             y,
             color=color,
-            font=self.font,
+            font=self.wide_font if use_wide_font else self.font,
             shadow_color=shadow_color,
-            baseline_offset=self.baseline_offset,
+            baseline_offset=(
+                self.wide_baseline_offset
+                if use_wide_font
+                else self.baseline_offset
+            ),
         )

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import re
 from types import MappingProxyType
 from typing import Mapping
+import unicodedata
 
 if __package__ == "":
     from state import Language
@@ -25,6 +26,39 @@ _LANGUAGE_FALLBACKS = MappingProxyType(
     }
 )
 _DISPLAY_TAG_PATTERN = re.compile(r"%[A-Z][A-Z0-9_]*%")
+
+
+class LocalizedText(str):
+    """Display text retaining whether wide glyphs were authored explicitly."""
+
+    prefers_wide_font: bool
+
+    def __new__(
+        cls,
+        value: str,
+        *,
+        prefers_wide_font: bool = False,
+    ) -> LocalizedText:
+        instance = super().__new__(cls, value)
+        instance.prefers_wide_font = prefers_wide_font
+        return instance
+
+
+def _has_authored_wide_text(text: str) -> bool:
+    """Return whether literal source text contains a full/wide character."""
+
+    position = 0
+    for match in _DISPLAY_TAG_PATTERN.finditer(text):
+        if any(
+            unicodedata.east_asian_width(character) in ("F", "W")
+            for character in text[position : match.start()]
+        ):
+            return True
+        position = match.end()
+    return any(
+        unicodedata.east_asian_width(character) in ("F", "W")
+        for character in text[position:]
+    )
 
 
 def ascii_to_fullwidth(text: str) -> str:
@@ -52,6 +86,14 @@ def ascii_to_fullwidth(text: str) -> str:
         position = match.end()
     parts.append(convert_literal(text[position:]))
     return "".join(parts)
+
+
+def format_number(value: int) -> str:
+    """Format an integer with fullwidth digits for every display language."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("display number must be an integer")
+    return ascii_to_fullwidth(str(value))
 
 
 def language_candidates(language: Language) -> tuple[Language, ...]:
@@ -96,12 +138,19 @@ class Localizer:
         record: Mapping[str, object],
         key: str,
         default: str = "",
-    ) -> str:
+    ) -> LocalizedText:
         """Resolve display text and apply language-specific normalization."""
 
         value = self.value(record, key, default)
         if not isinstance(value, str):
             raise TypeError("localized display text must be a string")
+        prefers_wide_font = (
+            self.language is Language.ENGLISH
+            and _has_authored_wide_text(value)
+        )
         if self.language is Language.ENGLISH:
-            return ascii_to_fullwidth(value)
-        return value
+            value = ascii_to_fullwidth(value)
+        return LocalizedText(
+            value,
+            prefers_wide_font=prefers_wide_font,
+        )
