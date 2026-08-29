@@ -58,9 +58,9 @@ class TaggedTextTest(unittest.TestCase):
             "%ROD%": (104, 24),
             "%WAND%": (112, 24),
             "%SHIELD%": (120, 24),
-            "%ELEMENT%": (128, 24),
+            "%MYSTIC%": (128, 24),
             "%SACRED%": (136, 24),
-            "%DARK_MAGIC%": (144, 24),
+            "%NETHER%": (144, 24),
         }
 
         self.assertEqual(
@@ -133,7 +133,7 @@ class TaggedTextTest(unittest.TestCase):
         self.assertEqual([call.args[0] for call in blt.call_args_list], [3, 11])
 
     def test_icon_value_is_a_frozen_description(self) -> None:
-        self.assertEqual(TEXT_ICONS["%DARK_MAGIC%"], TextIcon("%DARK_MAGIC%", 144, 24))
+        self.assertEqual(TEXT_ICONS["%NETHER%"], TextIcon("%NETHER%", 144, 24))
 
 
 if __name__ == "__main__":

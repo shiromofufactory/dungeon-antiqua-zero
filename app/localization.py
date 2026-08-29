@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from types import MappingProxyType
 from typing import Mapping
 
@@ -23,6 +24,34 @@ _LANGUAGE_FALLBACKS = MappingProxyType(
         ),
     }
 )
+_DISPLAY_TAG_PATTERN = re.compile(r"%[A-Z][A-Z0-9_]*%")
+
+
+def ascii_to_fullwidth(text: str) -> str:
+    """Convert printable ASCII to fullwidth forms while preserving tags."""
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+
+    def convert_literal(literal: str) -> str:
+        converted: list[str] = []
+        for character in literal:
+            if character == " ":
+                converted.append("　")
+            elif "!" <= character <= "~":
+                converted.append(chr(ord(character) + 0xFEE0))
+            else:
+                converted.append(character)
+        return "".join(converted)
+
+    parts: list[str] = []
+    position = 0
+    for match in _DISPLAY_TAG_PATTERN.finditer(text):
+        parts.append(convert_literal(text[position : match.start()]))
+        parts.append(match.group())
+        position = match.end()
+    parts.append(convert_literal(text[position:]))
+    return "".join(parts)
 
 
 def language_candidates(language: Language) -> tuple[Language, ...]:
@@ -61,3 +90,18 @@ class Localizer:
             if field in record and record[field] != "":
                 return record[field]
         return default
+
+    def text(
+        self,
+        record: Mapping[str, object],
+        key: str,
+        default: str = "",
+    ) -> str:
+        """Resolve display text and apply language-specific normalization."""
+
+        value = self.value(record, key, default)
+        if not isinstance(value, str):
+            raise TypeError("localized display text must be a string")
+        if self.language is Language.ENGLISH:
+            return ascii_to_fullwidth(value)
+        return value

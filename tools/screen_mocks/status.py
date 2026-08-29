@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pyxel
 
 from tools._bootstrap import APP_ROOT
+from input import InputBindings, PyxelInputReader
+from localization import Localizer
+from member import Member, MemberDataError
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -12,13 +17,60 @@ from resources import (
     ImageResourceError,
     ImageResources,
 )
-from state import Settings
+from state import Language, Settings
+from text_catalog import TextCatalog, TextCatalogError
 from ui import WindowFactory, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 FPS = 60
 FACES_IMAGE_ID = "faces/faces_pc"
+MOCK_CHARACTER_KEY = "Fiora"
+LANGUAGE_SEQUENCE = (
+    Language.JAPANESE,
+    Language.ENGLISH,
+    Language.SIMPLIFIED_CHINESE,
+)
+
+
+def next_language(language: Language) -> Language:
+    """Return the next language used by the status mock."""
+
+    if not isinstance(language, Language):
+        raise TypeError("language must be a Language")
+    index = LANGUAGE_SEQUENCE.index(language)
+    return LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
+
+
+def load_mock_member() -> Member:
+    """Load the character used by this mock from generated game data."""
+
+    path = APP_ROOT / "data" / "characters.json"
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise MemberDataError(f"キャラクターデータがありません: {path}") from error
+    except json.JSONDecodeError as error:
+        raise MemberDataError(
+            f"キャラクターデータを読み込めません: {path}: {error}"
+        ) from error
+
+    if not isinstance(records, list):
+        raise MemberDataError("characters.jsonのルートは配列である必要があります")
+    record = next(
+        (
+            candidate
+            for candidate in records
+            if isinstance(candidate, dict)
+            and candidate.get("name_en") == MOCK_CHARACTER_KEY
+        ),
+        None,
+    )
+    if record is None:
+        raise MemberDataError(
+            f"モック用キャラクターが見つかりません: {MOCK_CHARACTER_KEY}"
+        )
+    return Member.from_record(record)
 
 
 class StatusScreenMock:
@@ -31,13 +83,21 @@ class StatusScreenMock:
         )
         pyxel.load(str(APP_ROOT / "assets.pyxres"))
         pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
+        self.input_reader = PyxelInputReader(
+            InputBindings.default().with_cancel(pyxel.KEY_Q)
+        )
 
         resources = ImageResources()
         self.faces = resources.image(FACES_IMAGE_ID)
 
-        settings = Settings()
-        fonts = FontResources()
-        windows = WindowFactory(fonts.font_for(settings.language))
+        self.settings = Settings()
+        self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        self.member = load_mock_member()
+        self.fonts = FontResources()
+        localizer = Localizer(self.settings.language)
+        identity = self.member.display_identity(localizer, self.texts)
+        identity_font = self.fonts.font_for(self.settings.language)
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
         self.windows = [
             windows.create(
                 0,
@@ -45,9 +105,9 @@ class StatusScreenMock:
                 64,
                 60,
                 (
-                    WindowText("フィオラ", 14, 2),
-                    WindowText("ようせい", 14, 5),
-                    WindowText("おんな", 14, 8),
+                    WindowText(identity.name, 14, 2, font=identity_font),
+                    WindowText(identity.race, 14, 5, font=identity_font),
+                    WindowText(identity.gender, 14, 8, font=identity_font),
                     WindowText("ＨＰ　９９９／９９９", 6, 14),
                     WindowText("ＭＰ　２５５／２５５", 6, 17),
                     WindowText("じょうたい　　　ＯＫ", 6, 20),
@@ -66,7 +126,7 @@ class StatusScreenMock:
                     WindowText("めいちゅう　　１１６（＋１６）", 30, 29),
                     WindowText("ぼうぎょ　　　　２０", 30, 32),
                     WindowText("かいひりつ　　　１５", 30, 35),
-                    WindowText("まほうぼうぎょ　４０", 30, 38),
+                    WindowText("じゅつぼうぎょ　４０", 30, 38),
                     WindowText("たいせい", 30, 41),
                     WindowText("%FIRE%", 32, 44),
                     WindowText("%FREEZE%", 34, 44),
@@ -94,10 +154,32 @@ class StatusScreenMock:
         ]
         pyxel.run(self.update, self.draw)
 
-    @staticmethod
-    def update() -> None:
-        if pyxel.btnp(pyxel.KEY_Q) or pyxel.btnp(pyxel.KEY_ESCAPE):
+    def _rebuild_identity_window(self) -> None:
+        """Rebuild the window with the identity text in the selected language."""
+
+        current_window = self.windows[0]
+        localizer = Localizer(self.settings.language)
+        identity = self.member.display_identity(localizer, self.texts)
+        identity_font = self.fonts.font_for(self.settings.language)
+        texts = (
+            WindowText(identity.name, 14, 2, font=identity_font),
+            WindowText(identity.race, 14, 5, font=identity_font),
+            WindowText(identity.gender, 14, 8, font=identity_font),
+            *current_window.texts[3:],
+        )
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        self.windows = [windows.create(0, 0, 64, 60, texts)]
+
+    def update(self) -> None:
+        input_state = self.input_reader.poll()
+        if input_state.cancel.triggered:
             pyxel.quit()
+            return
+
+        if input_state.confirm.triggered:
+            language = next_language(self.settings.language)
+            self.settings = self.settings.with_language(language)
+            self._rebuild_identity_window()
 
     def draw(self) -> None:
         # ウィンドウ
@@ -120,7 +202,12 @@ def main() -> int:
     try:
         StatusScreenMock()
         return 0
-    except (FontResourceError, ImageResourceError) as error:
+    except (
+        FontResourceError,
+        ImageResourceError,
+        MemberDataError,
+        TextCatalogError,
+    ) as error:
         print(error)
         return 1
     except KeyboardInterrupt:

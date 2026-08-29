@@ -68,6 +68,8 @@ npm run tools:screen-mock:battle
 npm run tools:screen-mock:status
 ```
 
+`Z`、`Enter`、またはゲームパッドAを押すたびに、名前・種族・性別の表示言語が日本語、英語、簡体字中国語の順で切り替わる。`Q`または`Esc`で終了する。
+
 ### Menu Screen Mock
 
 ステータス画面モックと同じ全画面の枠だけを表示するメニュー画面モック。レイアウト内容は `tools/screen_mocks/menu.py` へ追加する。

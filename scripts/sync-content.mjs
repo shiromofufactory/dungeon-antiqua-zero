@@ -19,6 +19,7 @@ const DATA_FILES = [
   "shops.json",
   "skills.json",
   "spells.json",
+  "texts.json",
 ];
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
