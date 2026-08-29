@@ -54,9 +54,13 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(20, 26)], "１７")
         self.assertEqual(placed[(20, 29)], "２５")
         self.assertEqual(placed[(20, 32)], "２４")
-        self.assertEqual(
-            placed[(30, 8)], "みぎて　：%WAND%デイブリンガー"
-        )
+        self.assertEqual(placed[(8, 41)], "")
+        self.assertEqual(placed[(8, 44)], "")
+        self.assertEqual(placed[(30, 8)], "みぎて　：%KNIFE%ダガー")
+        self.assertEqual(placed[(30, 11)], "ひだりて：")
+        self.assertEqual(placed[(30, 14)], "からだ　：ローブ")
+        self.assertEqual(placed[(30, 17)], "あたま　：")
+        self.assertEqual(placed[(30, 20)], "うで　　：")
         self.assertEqual(placed[(30, 38)], "じゅつぼうぎょ")
 
     def test_confirm_cycles_language_and_rebuilds_localized_window(self) -> None:
@@ -107,8 +111,8 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(14, 2)], "Ｆｉｏｒａ")
         self.assertEqual(texts[(14, 5)], "Ｆａｉｒｙ")
         self.assertEqual(texts[(14, 8)], "Ｆｅｍａｌｅ")
-        self.assertEqual(texts[(8, 41)], "Ｉｎｎｅｒ　Ｓｔｅｅｌ")
-        self.assertEqual(texts[(8, 44)], "Ｔｗｏ－Ｈａｎｄｅｄ")
+        self.assertEqual(texts[(8, 41)], "")
+        self.assertEqual(texts[(8, 44)], "")
         self.assertEqual(texts[(6, 20)], "Ｓｔａｔｕｓ")
         self.assertEqual(texts[(22, 20)], "ＯＫ")
         self.assertEqual(texts[(6, 26)], "ＳＴＲ")
@@ -117,16 +121,12 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(6, 38)], "Ｓｋｉｌｌ：")
         self.assertEqual(
             texts[(30, 8)],
-            "%RIGHT%：%WAND%ＤＡＹＢＲＩＮＧＥＲ",
+            "%RIGHT%：%KNIFE%ＤＡＧＧＥＲ",
         )
         self.assertEqual(texts[(30, 11)], "%LEFT%：")
-        self.assertEqual(
-            texts[(30, 14)], "%BODY%：ＥＡＮ　ＳＩ　ＭＡＮＴＬＥ"
-        )
-        self.assertEqual(
-            texts[(30, 17)], "%HEAD%：ＦＬＯＷＥＲ　ＣＲＯＷＮ"
-        )
-        self.assertEqual(texts[(30, 20)], "%ARM%：ＴＩＮＹ　ＲＩＮＧ")
+        self.assertEqual(texts[(30, 14)], "%BODY%：ＲＯＢＥ")
+        self.assertEqual(texts[(30, 17)], "%HEAD%：")
+        self.assertEqual(texts[(30, 20)], "%ARM%：")
         self.assertEqual(texts[(30, 26)], "Ａｔｔａｃｋ")
         self.assertEqual(texts[(30, 29)], "Ｈｉｔ")
         self.assertEqual(texts[(30, 32)], "Ｄｅｆｅｎｃｅ")
@@ -178,11 +178,13 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(6, 29)], "敏捷")
         self.assertEqual(texts[(6, 32)], "魔力")
         self.assertEqual(texts[(6, 38)], "技能：")
-        self.assertEqual(texts[(30, 8)], "右手：%WAND%DAYBRINGER")
+        self.assertEqual(texts[(8, 41)], "")
+        self.assertEqual(texts[(8, 44)], "")
+        self.assertEqual(texts[(30, 8)], "右手：%KNIFE%DAGGER")
         self.assertEqual(texts[(30, 11)], "左手：")
-        self.assertEqual(texts[(30, 14)], "身体：EAN SI MANTLE")
-        self.assertEqual(texts[(30, 17)], "头部：FLOWER CROWN")
-        self.assertEqual(texts[(30, 20)], "手臂：TINY RING")
+        self.assertEqual(texts[(30, 14)], "身体：ROBE")
+        self.assertEqual(texts[(30, 17)], "头部：")
+        self.assertEqual(texts[(30, 20)], "手臂：")
         self.assertEqual(texts[(30, 26)], "攻击")
         self.assertEqual(texts[(30, 29)], "命中")
         self.assertEqual(texts[(30, 32)], "防御")

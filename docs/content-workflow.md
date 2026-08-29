@@ -29,14 +29,18 @@
 ```text
 スタッフがJSONを編集
         ↓ commit / pull request / review
-共有リポジトリ data/*.json
+共有リポジトリ Sheets同期対象JSON（texts.jsonを除く）
         ├──→ put-data.mjs ──→ GAS ──→ Google Sheets
         ├──→ portal:build ──→ スタッフポータル
         └──→ mainのcontent:sync ──→ app/data ──→ Pyxelゲーム
 
-Google Sheets ──→ GAS ──→ get-data.mjs ──→ data/*.json
+Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象JSON
                                             ↓
                                       diff確認・commit
+
+共有リポジトリ texts.json（Sheets同期対象外）
+        ├──→ portal:build ──→ スタッフポータル
+        └──→ mainのcontent:sync ──→ app/data ──→ Pyxelゲーム
 ```
 
 画像はGoogle Sheetsとは同期せず、次の経路で利用する。
@@ -112,6 +116,8 @@ npm run images:build:force
 
 ## Google Sheetsとの同期
 
+`texts.json`はGoogle Sheetsと同期せず、共有リポジトリ上のJSONだけを正本とする。`get-data`では既存の`texts.json`を保持したまま他データとの整合性を検証し、`put-data`では送信しない。
+
 Google Sheetsから共有JSONへ取り込む場合:
 
 ```sh
@@ -119,6 +125,12 @@ npm run content:get-data
 npm run content:validate
 git -C content diff -- data
 ```
+
+キャラクターシートの加入時装備は、順序依存の複数行セルではなく
+`equip_right`、`equip_left`、`equip_head`、`equip_body`、`equip_arm` の5列で管理する。
+空き部位は空文字とし、両手武器は `equip_right` に登録して `equip_left` を空にする。
+二刀流では2本目の武器を `equip_left` に明示する。`skills` は引き続き複数行セルとして
+JSON配列と相互変換する。
 
 共有JSONからGoogle Sheetsへ反映する場合は、まず送信内容だけを確認する。
 

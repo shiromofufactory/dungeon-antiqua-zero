@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
@@ -16,12 +17,26 @@ class ItemDataError(ValueError):
     """Raised when an item record cannot be interpreted safely."""
 
 
+class ItemEquipType(StrEnum):
+    """Stable item categories used to validate equipment slots."""
+
+    ITEM = "ITEM"
+    RIGHT = "RIGHT"
+    LEFT = "LEFT"
+    TWO_HANDS = "TWO_HANDS"
+    HEAD = "HEAD"
+    BODY = "BODY"
+    ARM = "ARM"
+
+
 @dataclass(frozen=True)
 class Item:
     """Minimal item model with its current lookup key and localized names."""
 
     key: str
     names: Mapping[str, str]
+    equip_type: ItemEquipType
+    subtype: str
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> Item:
@@ -44,7 +59,26 @@ class Item:
         if not any(names.values()):
             raise ItemDataError("item must have a non-empty localized name")
 
-        return cls(key=key, names=MappingProxyType(names))
+        equip_type_value = record.get("type1")
+        if not isinstance(equip_type_value, str):
+            raise ItemDataError("item.type1 must be a string")
+        try:
+            equip_type = ItemEquipType(equip_type_value)
+        except ValueError as error:
+            raise ItemDataError(
+                f"unsupported item.type1: {equip_type_value}"
+            ) from error
+
+        subtype = record.get("type2")
+        if not isinstance(subtype, str) or not subtype:
+            raise ItemDataError("item.type2 must be a non-empty string")
+
+        return cls(
+            key=key,
+            names=MappingProxyType(names),
+            equip_type=equip_type,
+            subtype=subtype,
+        )
 
     def localized_name(self, localizer: Localizer) -> str:
         """Return the item name normalized for the selected language."""

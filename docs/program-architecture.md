@@ -482,6 +482,22 @@ guide.draw()
 
 `Member` は現在言語やフォントを保持しない。名前、種族、性別の表示値が必要な場合は、Composition RootまたはSceneから現在の `Localizer` と `TextCatalog` を明示的に渡して表示用の不変スナップショットを生成する。固定幅化、余白、座標などは画面側の責務とし、DA2の `name_disp` のようなレイアウト処理をDomain Modelへ含めない。
 
+用語上、`characters.json` と `CharacterDefinition` は加入可能キャラクターの変更されない
+マスターデータ、`Member` は加入後の可変なゲーム状態を指す。離脱中のキャラクターまで
+「現在のメンバー」と誤認しないよう、この二つは `members` へ統一しない。
+
+加入時スキルは `characters.json` の `skills`、加入時装備は `equip_right`、
+`equip_left`、`equip_head`、`equip_body`、`equip_arm` を正本とする。
+`CharacterDefinition` はこれらを安定キーとして保持し、Member生成時に `Skill` と `Item` へ
+解決して現在状態へコピーする。進行中に変更されるのは `Member.skills` と
+`Member.equipment` であり、加入時の定義を書き換えない。
+
+現在装備は数値添字の配列ではなく、`EquipmentSlot` をキーとする `EquipmentSet` が
+管理する。右手、左手、頭、体、腕を明示し、両手武器は右手に保持したうえで左手を
+使用不可とする。二刀流の武器は `Item.type1` が `RIGHT` であっても左手スロットへの
+配置を許可する。所持品との交換や装備可否のゲームルールは、必要になった段階で
+`InventorySystem` とMemberへ追加する。
+
 キャラクター正本の `base_str`、`base_agi`、`base_mag` は、変更されない
 `CharacterDefinition.base_abilities` として保持する。画面やゲームルールは基礎値を
 直接使わず、`Member.adjusted_abilities` を参照する。現段階では両者は同値だが、

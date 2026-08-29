@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import unittest
 
+from app.item import Item
 from app.localization import Localizer
 from app.member import (
     AdjustedAbilities,
     BaseAbilities,
+    EquipmentSet,
+    EquipmentSlot,
     Gender,
     Member,
     MemberDataError,
     Race,
 )
+from app.skill import Skill
 from app.state import Language
 from app.text_catalog import TextCatalog
 
@@ -81,6 +85,21 @@ class MemberTest(unittest.TestCase):
             ]
         )
 
+    @staticmethod
+    def item(key: str, equip_type: str, subtype: str = "GENERAL") -> Item:
+        return Item.from_record(
+            {
+                "name_en": key,
+                "name_ja": key,
+                "type1": equip_type,
+                "type2": subtype,
+            }
+        )
+
+    @staticmethod
+    def skill(key: str) -> Skill:
+        return Skill.from_record({"name_en": key, "name_ja": key})
+
     def test_normalizes_stable_race_and_gender_values(self) -> None:
         self.assertEqual(self.member.definition.race, Race.FAIRY)
         self.assertEqual(self.member.definition.gender, Gender.FEMALE)
@@ -100,6 +119,75 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.max_hp, 999)
         self.assertEqual(self.member.mp, 255)
         self.assertEqual(self.member.max_mp, 255)
+
+    def test_initial_skills_and_equipment_are_copied_to_member_state(self) -> None:
+        dagger = self.item("DAGGER", "RIGHT", "KNIFE")
+        robe = self.item("ROBE", "BODY")
+        focus = self.skill("Focus")
+        member = Member.from_record(
+            {
+                "name_en": "Fiora",
+                "race": "FAIRY",
+                "gender": "FEMALE",
+                "base_str": 17,
+                "base_agi": 25,
+                "base_mag": 24,
+                "skills": ["Focus"],
+                "equip_right": "DAGGER",
+                "equip_left": "",
+                "equip_head": "",
+                "equip_body": "ROBE",
+                "equip_arm": "",
+            },
+            items={"DAGGER": dagger, "ROBE": robe},
+            skills={"Focus": focus},
+        )
+
+        self.assertEqual(member.definition.initial_skill_keys, ("Focus",))
+        self.assertEqual(member.skills, [focus])
+        self.assertIs(
+            member.equipment.item_at(EquipmentSlot.RIGHT),
+            dagger,
+        )
+        self.assertIs(
+            member.equipment.item_at(EquipmentSlot.BODY),
+            robe,
+        )
+        self.assertEqual(member.equipment.equipped_items(), (dagger, robe))
+
+    def test_equipment_set_supports_explicit_left_hand_weapon(self) -> None:
+        sword = self.item("SWORD", "RIGHT", "SWORD")
+        dagger = self.item("DAGGER", "RIGHT", "KNIFE")
+
+        equipment = EquipmentSet(
+            {
+                EquipmentSlot.RIGHT: sword,
+                EquipmentSlot.LEFT: dagger,
+            }
+        )
+
+        self.assertIs(equipment.item_at(EquipmentSlot.LEFT), dagger)
+
+    def test_two_handed_equipment_reserves_the_left_hand(self) -> None:
+        spear = self.item("SPEAR", "TWO_HANDS", "SPEAR")
+        shield = self.item("SHIELD", "LEFT", "SHIELD")
+
+        equipment = EquipmentSet({EquipmentSlot.RIGHT: spear})
+
+        self.assertTrue(equipment.uses_both_hands)
+        with self.assertRaisesRegex(MemberDataError, "left equipment"):
+            EquipmentSet(
+                {
+                    EquipmentSlot.RIGHT: spear,
+                    EquipmentSlot.LEFT: shield,
+                }
+            )
+
+    def test_rejects_item_in_wrong_equipment_slot(self) -> None:
+        robe = self.item("ROBE", "BODY")
+
+        with self.assertRaisesRegex(MemberDataError, "cannot be equipped"):
+            EquipmentSet({EquipmentSlot.HEAD: robe})
 
     def test_healthy_status_can_show_max_hp_ok_or_nothing(self) -> None:
         localizer = Localizer(Language.JAPANESE)

@@ -10,7 +10,7 @@ from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
 from item import Item, ItemDataError
 from localization import Localizer, format_number
-from member import Member, MemberDataError
+from member import EquipmentSlot, Member, MemberDataError
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -21,20 +21,13 @@ from resources import (
 from skill import Skill, SkillDataError
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
-from ui import LocalizedWindowTextFactory, WindowFactory, WindowText
+from ui import TEXT_ICONS, LocalizedWindowTextFactory, WindowFactory, WindowText
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 FPS = 60
 FACES_IMAGE_ID = "faces/faces_pc"
 MOCK_CHARACTER_KEY = "Fiora"
-MOCK_SKILL_KEYS = ("Inner Steel", "Two-Handed")
-MOCK_EQUIPMENT_KEYS = {
-    "right": "DAYBRINGER",
-    "body": "EAN SI MANTLE",
-    "head": "FLOWER CROWN",
-    "arm": "TINY RING",
-}
 STATUS_TEXT_KEYS = {
     "label.condition": "status.condition",
     "label.strength": "status.strength",
@@ -66,7 +59,7 @@ LOCALIZED_POSITIONS = {
     (8, 41): "skill.0",
     (8, 44): "skill.1",
     (30, 8): "equipment.right",
-    (30, 11): "label.equip.left",
+    (30, 11): "equipment.left",
     (30, 14): "equipment.body",
     (30, 17): "equipment.head",
     (30, 20): "equipment.arm",
@@ -119,7 +112,10 @@ def load_data_records(filename: str) -> list[dict[str, object]]:
     return records
 
 
-def load_mock_member() -> Member:
+def load_mock_member(
+    items: dict[str, Item],
+    skills: dict[str, Skill],
+) -> Member:
     """Load the character used by this mock from generated game data."""
 
     records = load_data_records("characters.json")
@@ -135,7 +131,7 @@ def load_mock_member() -> Member:
         raise MemberDataError(
             f"モック用キャラクターが見つかりません: {MOCK_CHARACTER_KEY}"
         )
-    return Member.from_record(record)
+    return Member.from_record(record, items=items, skills=skills)
 
 
 def load_mock_items() -> dict[str, Item]:
@@ -181,9 +177,9 @@ class StatusScreenMock:
 
         self.settings = Settings()
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        self.member = load_mock_member()
         self.items = load_mock_items()
         self.skills = load_mock_skills()
+        self.member = load_mock_member(self.items, self.skills)
         self.fonts = FontResources()
         localizer = Localizer(self.settings.language)
         localized = self._localized_texts(localizer)
@@ -228,7 +224,7 @@ class StatusScreenMock:
                     localized_texts.create(localized["skill.0"], 8, 41),
                     localized_texts.create(localized["skill.1"], 8, 44),
                     localized_texts.create(localized["equipment.right"], 30, 8),
-                    localized_texts.create(localized["label.equip.left"], 30, 11),
+                    localized_texts.create(localized["equipment.left"], 30, 11),
                     localized_texts.create(localized["equipment.body"], 30, 14),
                     localized_texts.create(localized["equipment.head"], 30, 17),
                     localized_texts.create(localized["equipment.arm"], 30, 20),
@@ -273,30 +269,17 @@ class StatusScreenMock:
         """Resolve all names and labels currently switched by this mock."""
 
         identity = self.member.display_identity(localizer, self.texts)
-        try:
-            localized = {
-                "member.name": identity.name,
-                "member.race": identity.race,
-                "member.gender": identity.gender,
-                "skill.0": self.skills[MOCK_SKILL_KEYS[0]].localized_name(localizer),
-                "skill.1": self.skills[MOCK_SKILL_KEYS[1]].localized_name(localizer),
-                "item.right": self.items[MOCK_EQUIPMENT_KEYS["right"]].localized_name(
-                    localizer
-                ),
-                "item.body": self.items[MOCK_EQUIPMENT_KEYS["body"]].localized_name(
-                    localizer
-                ),
-                "item.head": self.items[MOCK_EQUIPMENT_KEYS["head"]].localized_name(
-                    localizer
-                ),
-                "item.arm": self.items[MOCK_EQUIPMENT_KEYS["arm"]].localized_name(
-                    localizer
-                ),
-            }
-        except KeyError as error:
-            raise StatusMockDataError(
-                f"モック用データが見つかりません: {error.args[0]}"
-            ) from error
+        localized = {
+            "member.name": identity.name,
+            "member.race": identity.race,
+            "member.gender": identity.gender,
+        }
+        for index in range(2):
+            localized[f"skill.{index}"] = (
+                self.member.skills[index].localized_name(localizer)
+                if index < len(self.member.skills)
+                else ""
+            )
 
         for display_key, text_key in STATUS_TEXT_KEYS.items():
             text = self.texts.text(text_key, localizer)
@@ -310,12 +293,18 @@ class StatusScreenMock:
             self.texts,
             show_ok=True,
         )
-        localized["equipment.right"] = (
-            localized["label.equip.right"] + "%WAND%" + localized["item.right"]
-        )
-        for slot in ("body", "head", "arm"):
-            localized[f"equipment.{slot}"] = (
-                localized[f"label.equip.{slot}"] + localized[f"item.{slot}"]
+        for slot in EquipmentSlot:
+            slot_name = slot.value.lower()
+            item = self.member.equipment.item_at(slot)
+            icon = ""
+            if item is not None:
+                candidate = f"%{item.subtype}%"
+                if candidate in TEXT_ICONS:
+                    icon = candidate
+            localized[f"equipment.{slot_name}"] = (
+                localized[f"label.equip.{slot_name}"]
+                + icon
+                + (item.localized_name(localizer) if item is not None else "")
             )
         return localized
 

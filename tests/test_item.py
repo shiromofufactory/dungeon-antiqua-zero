@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.item import Item, ItemDataError
+from app.item import Item, ItemDataError, ItemEquipType
 from app.localization import Localizer
 from app.state import Language
 
@@ -14,11 +14,16 @@ class ItemTest(unittest.TestCase):
                 "name_en": "DAYBRINGER",
                 "name_ja": "デイブリンガー",
                 "type1": "RIGHT",
+                "type2": "WAND",
             }
         )
 
     def test_preserves_raw_english_name_as_lookup_key(self) -> None:
         self.assertEqual(self.item.key, "DAYBRINGER")
+
+    def test_keeps_equipment_type_and_subtype(self) -> None:
+        self.assertEqual(self.item.equip_type, ItemEquipType.RIGHT)
+        self.assertEqual(self.item.subtype, "WAND")
 
     def test_returns_localized_display_name(self) -> None:
         self.assertEqual(
