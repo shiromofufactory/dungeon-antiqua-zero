@@ -132,6 +132,9 @@ git -C content diff -- data
 二刀流では2本目の武器を `equip_left` に明示する。`skills` は引き続き複数行セルとして
 JSON配列と相互変換する。
 
+キャラクター固有の内部レベル補正は `lv_diff` 列で管理する。呪文データの習得レベルに
+使用する `lv` とは意味が異なるため、キャラクターシートでは `lv` 列を使用しない。
+
 武器・呪文適性は `eq_sword`、`eq_knife`、`eq_katana`、`eq_spear`、`eq_hammer`、
 `eq_axe`、`eq_throwing`、`eq_rod`、`eq_wand`、`eq_shield`、`sp_mystic`、
 `sp_sacred`、`sp_nether` の13列で管理する。値は0（使用不可）、1（通常）、
