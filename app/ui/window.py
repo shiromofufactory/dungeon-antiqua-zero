@@ -20,6 +20,7 @@ FRAME_Y = 0
 FRAME_TILE_SIZE = 8
 FRAME_EDGE_STEP = 4
 FRAME_COLKEY = 1
+FRAME_Y_OFFSET = 1
 GRADIENT_INSET = 4
 
 GRADIENT_COLORS = (10, 6)
@@ -340,7 +341,12 @@ class Window:
             self._draw_contents()
             return
 
-        clip_y = self.pixel_y + (self.pixel_height - self._visible_height) // 2
+        frame_offset = 0 if self.transparent else FRAME_Y_OFFSET
+        clip_y = (
+            self.pixel_y
+            + (self.pixel_height - self._visible_height) // 2
+            + frame_offset
+        )
         pyxel.clip(
             self.pixel_x,
             clip_y,
@@ -386,7 +392,9 @@ class Window:
         gradient_x = self.pixel_x + GRADIENT_INSET
         gradient_y = self.pixel_y + GRADIENT_INSET
         gradient_width = self.pixel_width - GRADIENT_INSET * 2
-        gradient_height = self.pixel_height - GRADIENT_INSET * 2
+        gradient_height = (
+            self.pixel_height - GRADIENT_INSET * 2 + FRAME_Y_OFFSET
+        )
         foreground_color, background_color = GRADIENT_COLORS
 
         try:
@@ -417,7 +425,7 @@ class Window:
         height: int | None = None,
     ) -> None:
         left = self.pixel_x
-        top = self.pixel_y if top is None else top
+        top = (self.pixel_y if top is None else top) + FRAME_Y_OFFSET
         height = self.pixel_height if height is None else height
         right = self.pixel_x + self.pixel_width - FRAME_TILE_SIZE
         bottom = top + height - FRAME_TILE_SIZE
@@ -562,9 +570,11 @@ class Window:
     def _draw_horizontal_navigation(self) -> None:
         """Draw DA2-style previous/next indicators at both window edges."""
 
-        y = self.pixel_y + (
-            self.pixel_height - HORIZONTAL_NAVIGATION_HEIGHT
-        ) // 2
+        y = (
+            self.pixel_y
+            + (self.pixel_height - HORIZONTAL_NAVIGATION_HEIGHT) // 2
+            + FRAME_Y_OFFSET
+        )
         pyxel.blt(
             self.pixel_x - 1,
             y,

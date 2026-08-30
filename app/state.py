@@ -1,4 +1,4 @@
-"""Persistent player and device settings kept outside game save data."""
+"""Persistent device settings and per-playthrough game state."""
 
 from __future__ import annotations
 
@@ -13,6 +13,13 @@ class Language(StrEnum):
     JAPANESE = "ja"
     ENGLISH = "en"
     SIMPLIFIED_CHINESE = "zhcn"
+
+
+class Difficulty(StrEnum):
+    """Stable difficulty identifiers stored in game save data."""
+
+    NORMAL = "normal"
+    HARD = "hard"
 
 
 class SettingsDataError(ValueError):
@@ -56,3 +63,32 @@ class Settings:
         except ValueError as error:
             raise SettingsDataError(f"unsupported language: {value}") from error
         return cls(language=language)
+
+
+@dataclass
+class SaveData:
+    """Mutable, saveable state shared by one game playthrough."""
+
+    gold: int = 0
+    experience: int = 0
+    difficulty: Difficulty = Difficulty.NORMAL
+    play_time_frames: int = 0
+
+    def __post_init__(self) -> None:
+        for name in ("gold", "experience", "play_time_frames"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value < 0:
+                raise ValueError(f"{name} must not be negative")
+        if not isinstance(self.difficulty, Difficulty):
+            raise TypeError("difficulty must be a Difficulty")
+
+    def advance_play_time(self, frames: int = 1) -> None:
+        """Add active gameplay frames to the persisted play time."""
+
+        if isinstance(frames, bool) or not isinstance(frames, int):
+            raise TypeError("frames must be an integer")
+        if frames < 0:
+            raise ValueError("frames must not be negative")
+        self.play_time_frames += frames

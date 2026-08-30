@@ -57,9 +57,12 @@ app/
 ├── state.py                  # 言語を含む端末・プレイヤー設定
 ├── localization.py           # 多言語フィールドの選択とフォールバック
 ├── ui/
+│   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
 │   ├── tagged_text.py        # タグ付きテキストとアイコン描画
+│   ├── text_format.py        # 数値やプレイ時間の共通表示形式
 │   └── window.py             # 枠、文字、カーソル、標準フォント付き生成
 ├── resources/
+│   ├── data.py               # 生成済みJSON配列の読込と構造検証
 │   ├── fonts.py              # 言語別フォントの読込とキャッシュ
 │   └── images.py             # 生成済み画像bundleの本番用loader
 ├── data/
@@ -95,6 +98,9 @@ tools/
 ├── README.md               # 開発用プログラムの配置基準と操作方法
 ├── image_viewer.py         # 本番用画像をPyxelで確認するviewer
 └── screen_mocks/
+    ├── _runtime.py         # Pyxel初期化、共通資産、モック入力
+    ├── _runner.py          # 例外表示とCLI終了コード
+    ├── _fixtures.py        # 疑似パーティなどモック専用状態
     ├── battle.py           # 本番用部品を使う戦闘画面モック
     ├── status.py           # ステータス画面モック
     └── menu.py             # メニュー画面モック
@@ -166,6 +172,17 @@ Pyxelの物理入力
 
 方向リピートの状態、アナログスティックのデッドゾーン、直前フレームの押下状態は `PyxelInputReader` インスタンスが所有する。60fpsでDA2と同じ時間感覚にするため、既定の方向リピートは20フレーム後から4フレーム間隔とする。決定、キャンセル、メニュー、前後ページは標準ではリピートさせず、初回押下だけを `triggered=True` とする。押したままかどうかは別の `held` で表し、Scene遷移時の入力リリース待ちなどに利用する。
 
+`InputState.device` は、その時点で操作案内に使う入力種別を
+`InputDevice.KEYBOARD` / `InputDevice.GAMEPAD` で表す。Readerの初期値はキーボードとし、
+どちらか一方の入力だけを検出したフレームでその種別へ切り替え、入力がない間と両方を
+同時に検出した間は直前の種別を維持する。アナログスティックはゲームパッド入力として
+扱う。現段階ではDA2のWASDモードは設けない。
+
+操作案内ではSceneやOverlayが論理操作の `InputAction` と
+`InputState.device` を `ui.input_icons.input_icon_tag()` へ渡し、対応するテキスト内アイコン
+タグを得る。これにより、画面ごとにキーボード／ゲームパッドの座標対応を持たない。
+開発用モックで入力種別を固定する場合も `InputDevice` を明示して同じ変換を使う。
+
 本番では `Game.update()` がフレームごとに一度だけ `poll()` し、SceneManagerを通して最上位Overlayまたは現在のSceneへ渡す。開発用モックは独立したComposition RootとしてReaderを1つ生成し、同じ `InputState` とWindow部品を直接利用する。モック固有のQ終了などは、Qをキャンセルへ追加したBindingsをReaderへ渡して表現する。
 
 ```python
@@ -175,6 +192,20 @@ command_window.update(input_state.navigation)
 if input_state.confirm.triggered and command_window.is_open:
     command = command_cursor.selected_key
 ```
+
+## ゲームデータリソースの責務
+
+`app/resources/data.py` の `load_record_array()` は、`app/data` の生成済みJSONを
+UTF-8で読み込み、ルートがオブジェクト配列であることまでを検証する。本編と開発用
+モックは同じ入口を使い、画面ごとにファイル不在、JSON構文、ルート構造の処理を
+複製しない。ファイル名は `app/data` 直下の名前だけを受け付け、任意のパス探索には
+使用しない。
+
+各レコードの意味的な検証は `Item.from_record()`、
+`CharacterDefinition.from_record()` などのDomain Modelが担当する。安定キーによる索引、
+重複判定、レコード間参照の解決は、必要なマスターデータ単位のloaderまたは
+Composition Rootで行う。モック用の加入済みパーティは本編のマスターデータではないため、
+`tools/screen_mocks/_fixtures.py` が生成し、`app/resources` へ置かない。
 
 ## 画像リソースの責務
 
@@ -222,7 +253,7 @@ images.copy_region_to_bank(
 
 開発用プログラムのために画像やJSONを複製しない。`app/data`、`app/images`、`app/assets.pyxres`、`app/assets.pyxpal` を本番と同じ入口から読む。manifestや保存形式など、本番と共有すべき解釈処理は `app/resources` や該当Systemが所有し、`tools/` は画面、入力、選択中の対象といったツール固有状態だけを所有する。これによりviewerだけが成功し、ゲーム本体では読めないという形式差異を防ぐ。
 
-ツール同士を巨大な共通Appへ統合しない。各ツールを `python3 -m tools.<module>` で独立起動できる小さなComposition Rootとし、複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。`tools/` は `pyxel package app ...` の配布対象に含めない。
+ツール同士を巨大な共通Appへ統合しない。各ツールを `python3 -m tools.<module>` で独立起動できる小さなComposition Rootとし、複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。画面モックでは、Pyxelと共通資産の初期化を `_runtime.py`、想定内例外と終了コードの変換を `_runner.py`、疑似パーティを `_fixtures.py` が担当する。Settings、SaveData、画面固有画像、Window構成は各Composition Rootが必要なものだけを明示的に生成し、すべてを格納する汎用Contextは作らない。`tools/` は `pyxel package app ...` の配布対象に含めない。
 
 戦闘、メニュー、ショップなどの画面レイアウトを試作するプログラムは `tools/screen_mocks/` に画面単位で置く。`battle.py`、`menu.py`、`shop.py` のように独立させ、別画面の仮状態や描画分岐を1つのviewerへ集めない。画面モック間の共通基盤は先に作らず、複数のモックで実際に重複が生じた時点で小さく抽出する。
 
@@ -357,6 +388,12 @@ FieldScene
 
 通常枠は `assets.pyxres` のイメージバンク0、`(16, 0)` から `(31, 15)` にある四隅と、そこから切り出した4px幅または4px高の辺を反復して描く。`thin_frame=True` を指定した場合は、同じ構成の細い枠 `(32, 0)` から `(47, 15)` へ四隅と辺の転送元を切り替える。枠内は `GRADIENT_COLORS` の2色を使い、第2色で下地を塗った上へ第1色を重ねる。第1色のdither率を上から `1.0`, `0.75`, `0.5`, `0.25`, `0.0` と変化させ、5段階のグラデーションにする。全段階の高さは均等に分割し、割り切れない余りの1pxは先頭と末尾が同じ高さになるよう中央対称に配分する。グラデーション領域は外接矩形の各辺から4px内側まで広げて先に塗り、その後に枠を重ねる。これにより枠の内側の丸みを保つ。描画後は後続描画へ影響させないようditherを1.0へ戻す。
 
+枠と左右インジケーターは、指定した外接矩形から描画時だけ1px下へずらす。
+グラデーションは枠画像の内側へ重ねて隙間を埋めるため、開始座標を維持したまま
+下方向へ1px延長する。
+テキストとカーソルも従来のグリッド座標を維持し、透明Windowは枠を持たないため
+オフセットしない。開閉中のクリップ領域は枠と同じ位置へずらす。
+
 テキスト座標はウィンドウ枠の左上を原点とし、横・縦とも4pxの相対グリッドで指定する。`(0, 0)` は枠と重なる位置であり、枠から左右8pxずつ内側に入った従来の内容領域左上は `(2, 2)` となる。行の配列として保持せず、各 `WindowText` が文字列、x、y、色、任意のフォントを所有する。同じウィンドウ内で左右の列や異なる高さへ個別に配置できる。ウィンドウまたは個々のテキストへ `pyxel.Font` を渡し、フォント幅を位置決めの単位にしない。
 
 通常のSceneとOverlayは、現在言語の標準フォントで初期化した `WindowFactory` からWindowを生成する。`WindowText.font=None` はWindowの標準フォントを継承し、個別のフォント指定がある場合だけそちらを優先する。解決順は「WindowText個別フォント → Window標準フォント」とし、言語状態やモジュールグローバルをWindowから参照しない。これにより通常のテキストごとに同じフォントを繰り返し指定せず、数値など例外的な表示だけを個別指定できる。
@@ -437,6 +474,17 @@ guide.draw()
 | `%ROD%` | `(104, 24)` | `%WAND%` | `(112, 24)` |
 | `%SHIELD%` | `(120, 24)` | `%MYSTIC%` | `(128, 24)` |
 | `%SACRED%` | `(136, 24)` | `%NETHER%` | `(144, 24)` |
+| `%FAVORED%` | `(152, 24)` | `%GAMEPAD_A%` | `(160, 16)` |
+| `%GAMEPAD_B%` | `(168, 16)` | `%GAMEPAD_X%` | `(176, 16)` |
+| `%GAMEPAD_Y%` | `(184, 16)` | `%KEY_Z%` | `(160, 24)` |
+| `%KEY_X%` | `(168, 24)` | `%KEY_S%` | `(176, 24)` |
+| `%KEY_TAB%` | `(184, 24)` |  |  |
+
+入力アイコンもほかのアイコンと同じタグとして扱うため、操作案内専用の項目に限らず
+任意の `WindowText.text` 内へ埋め込める。キーボードの決定・キャンセル・メニューは
+`%KEY_Z%`・`%KEY_X%`・`%KEY_S%`、ゲームパッドでは
+`%GAMEPAD_A%`・`%GAMEPAD_B%`・`%GAMEPAD_X%` を標準表示とする。
+`%KEY_TAB%` と `%GAMEPAD_Y%` も明示的な案内が必要な文章から直接利用できる。
 
 指定上は `(16, 16)` と `(144, 24)` の両方が `%DARK%` だったが、同じタグから2つの座標を一意に選べない。既存の呪文説明が使う闇属性アイコンを `%DARK%` `(16, 16)` とし、暗黒呪文系の後者は `%NETHER%` `(144, 24)` として区別する。元素、神聖、暗黒の呪文系アイコン名は、現実装に合わせて `%MYSTIC%`、`%SACRED%`、`%NETHER%` とする。
 
@@ -491,6 +539,12 @@ guide.draw()
 原文で明示された表示スタイルとして扱う。
 
 キャラクター名など各レコード固有の表示値は `name_ja`、`name_en`、`name_zhcn` のような接尾辞付きフィールドに置く。種族名、性別名、画面項目名など複数レコードや画面から参照する表示語彙は `texts.json` に置き、安定した `text_key` で参照する。`TextCatalog` はキーからレコードを引き、実際の言語選択とフォールバックを `Localizer` に委譲する。Domain Modelとセーブデータには翻訳後の文字列ではなく、`FAIRY`、`FEMALE` などの安定キーを保持する。
+
+メニュー画面のコマンド、Gold、経験値、難易度、プレイ時間、閉じる案内も
+`menu.*` の安定キーで `texts.json` に登録する。操作アイコンを含む文言は
+`%CANCEL%` のような論理操作プレースホルダーを翻訳文へ置き、画面構築時に
+`input_icon_tag()` が返す入力種別ごとの表示タグへ置換する。翻訳データへ
+`%KEY_X%` や `%GAMEPAD_B%` を直接固定しない。
 
 `Member` は現在言語やフォントを保持しない。名前、種族、性別の表示値が必要な場合は、Composition RootまたはSceneから現在の `Localizer` と `TextCatalog` を明示的に渡して表示用の不変スナップショットを生成する。固定幅化、余白、座標などは画面側の責務とし、DA2の `name_disp` のようなレイアウト処理をDomain Modelへ含めない。
 
@@ -581,6 +635,13 @@ Python上で保持するときは整数のままとし、画面へ渡す時点�
 - 魔力減衰や設備停止の判定に必要な値
 
 SaveDataは「保存可能な現在のゲーム世界」を表す。ウィンドウ、描画用タイマー、選択中カーソル、Pyxelオブジェクトなどを入れない。
+
+所持金 `gold`、パーティ全体で共有する経験値 `experience`、難易度
+`difficulty`、プレイ時間 `play_time_frames` は、個々のMemberではなく
+SaveDataが所有する。難易度の保存値には表示文言から独立した
+`Difficulty.NORMAL` / `Difficulty.HARD` を使う。プレイ時間はフレーム数のまま保存し、
+プレイ中の `Game.update()` から加算する。表示文字列への変換は複数画面で共有する
+`ui.text_format.format_play_time()` が担当し、SaveDataや `draw()` は表示形式を持たない。
 
 ### Scene固有状態
 

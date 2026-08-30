@@ -12,6 +12,7 @@ from app.ui.window import (
     CURSOR_Y,
     CURSOR_SHADOW_X,
     CursorTarget,
+    FRAME_Y_OFFSET,
     GRADIENT_COLORS,
     GRADIENT_DITHER_RATIOS,
     GRADIENT_STAGE_COUNT,
@@ -202,6 +203,10 @@ class WindowTest(unittest.TestCase):
                 for call in rect.call_args_list
             )
         )
+        self.assertEqual(
+            sum(call.args[3] for call in rect.call_args_list[::2]),
+            24 + FRAME_Y_OFFSET,
+        )
         self.assertEqual(dither.call_args_list[-1].args, (1.0,))
 
     def test_draw_places_frame_over_gradient(self) -> None:
@@ -249,7 +254,7 @@ class WindowTest(unittest.TestCase):
         draw_contents.assert_called_once_with()
         self.assertEqual(
             clip.call_args_list,
-            [call(4, 16, 32, 8), call()],
+            [call(4, 16 + FRAME_Y_OFFSET, 32, 8), call()],
         )
 
         window.update()
@@ -385,10 +390,10 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(
             [call.args[:7] for call in corner_calls],
             [
-                (4, 8, 0, 16, 0, 8, 8),
-                (28, 8, 0, 24, 0, 8, 8),
-                (4, 24, 0, 16, 8, 8, 8),
-                (28, 24, 0, 24, 8, 8, 8),
+                (4, 8 + FRAME_Y_OFFSET, 0, 16, 0, 8, 8),
+                (28, 8 + FRAME_Y_OFFSET, 0, 24, 0, 8, 8),
+                (4, 24 + FRAME_Y_OFFSET, 0, 16, 8, 8, 8),
+                (28, 24 + FRAME_Y_OFFSET, 0, 24, 8, 8, 8),
             ],
         )
 
@@ -403,10 +408,10 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(
             [call.args[:7] for call in corner_calls],
             [
-                (4, 8, 0, 32, 0, 8, 8),
-                (28, 8, 0, 40, 0, 8, 8),
-                (4, 24, 0, 32, 8, 8, 8),
-                (28, 24, 0, 40, 8, 8, 8),
+                (4, 8 + FRAME_Y_OFFSET, 0, 32, 0, 8, 8),
+                (28, 8 + FRAME_Y_OFFSET, 0, 40, 0, 8, 8),
+                (4, 24 + FRAME_Y_OFFSET, 0, 32, 8, 8, 8),
+                (28, 24 + FRAME_Y_OFFSET, 0, 40, 8, 8, 8),
             ],
         )
 
@@ -421,7 +426,7 @@ class WindowTest(unittest.TestCase):
             [
                 call(
                     7,
-                    24,
+                    24 + FRAME_Y_OFFSET,
                     0,
                     HORIZONTAL_NAVIGATION_X,
                     HORIZONTAL_NAVIGATION_Y,
@@ -431,7 +436,7 @@ class WindowTest(unittest.TestCase):
                 ),
                 call(
                     81,
-                    24,
+                    24 + FRAME_Y_OFFSET,
                     0,
                     HORIZONTAL_NAVIGATION_X
                     + HORIZONTAL_NAVIGATION_WIDTH,

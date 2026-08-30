@@ -48,3 +48,32 @@ def pad(value: object, width: int, *, fill: str = " ") -> str:
         return ""
     text = str(value).rjust(width, fill)[-width:]
     return ascii_to_fullwidth(text)
+
+
+def format_play_time(
+    frames: int,
+    *,
+    fps: int = 60,
+    include_seconds: bool = True,
+) -> str:
+    """Format a saved frame count as a fullwidth play-time display."""
+
+    if isinstance(frames, bool) or not isinstance(frames, int):
+        raise TypeError("frames must be an integer")
+    if frames < 0:
+        raise ValueError("frames must not be negative")
+    if isinstance(fps, bool) or not isinstance(fps, int):
+        raise TypeError("fps must be an integer")
+    if fps <= 0:
+        raise ValueError("fps must be positive")
+    if not isinstance(include_seconds, bool):
+        raise TypeError("include_seconds must be a boolean")
+
+    total_seconds = frames // fps
+    hours = min(total_seconds // 3600, 99)
+    minutes = (total_seconds // 60) % 60
+    seconds = total_seconds % 60
+    formatted = f"{hours:02d}:{minutes:02d}"
+    if include_seconds:
+        formatted += f":{seconds:02d}"
+    return ascii_to_fullwidth(formatted)

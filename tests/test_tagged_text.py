@@ -62,6 +62,14 @@ class TaggedTextTest(unittest.TestCase):
             "%SACRED%": (136, 24),
             "%NETHER%": (144, 24),
             "%FAVORED%": (152, 24),
+            "%GAMEPAD_A%": (160, 16),
+            "%GAMEPAD_B%": (168, 16),
+            "%GAMEPAD_X%": (176, 16),
+            "%GAMEPAD_Y%": (184, 16),
+            "%KEY_Z%": (160, 24),
+            "%KEY_X%": (168, 24),
+            "%KEY_S%": (176, 24),
+            "%KEY_TAB%": (184, 24),
         }
 
         self.assertEqual(
@@ -77,6 +85,14 @@ class TaggedTextTest(unittest.TestCase):
         self.assertEqual(parts[2], "と")
         self.assertEqual(parts[3], TEXT_ICONS["%FREEZE%"])
         self.assertEqual(parts[4], "冷気")
+
+    def test_input_icon_tag_can_be_embedded_anywhere_in_text(self) -> None:
+        parts = split_tagged_text("操作：%KEY_X%：とじる")
+
+        self.assertEqual(
+            parts,
+            ("操作：", TEXT_ICONS["%KEY_X%"], "：とじる"),
+        )
 
     def test_unknown_tags_and_percent_signs_remain_literal(self) -> None:
         self.assertEqual(

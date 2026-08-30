@@ -6,17 +6,17 @@ from unittest.mock import Mock, patch
 
 from app.member import BattleStats, HandHit
 from app.resistance import ResistanceType
+from app.resources import load_record_array
+from tools.screen_mocks._fixtures import MOCK_PARTY_CHARACTER_KEYS
 from tools.screen_mocks.status import (
     LOCALIZED_POSITIONS,
     Direction,
     Language,
-    MOCK_PARTY_CHARACTER_KEYS,
     TRANSPARENT_INDEX,
     Settings,
     StatusScreenMock,
     attack_display,
     hit_display,
-    load_data_records,
     next_language,
     resistance_icon_tag,
 )
@@ -65,7 +65,7 @@ class StatusScreenMockTest(unittest.TestCase):
         }
         actual = {
             record["name_ja"]: (record["face_x"], record["face_y"])
-            for record in load_data_records("characters.json")
+            for record in load_record_array("characters.json")
         }
 
         self.assertEqual(actual, expected)
@@ -83,9 +83,8 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_first_three_lines_use_localized_member_identity(self) -> None:
         with (
-            patch("tools.screen_mocks.status.pyxel.init"),
-            patch("tools.screen_mocks.status.pyxel.load"),
-            patch("tools.screen_mocks.status.pyxel.load_pal"),
+            patch("tools.screen_mocks.status.initialize_screen_mock"),
+            patch("tools.screen_mocks.status.create_mock_input_reader"),
             patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
@@ -176,9 +175,8 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_favored_marker_is_eight_pixels_left_of_icon(self) -> None:
         with (
-            patch("tools.screen_mocks.status.pyxel.init"),
-            patch("tools.screen_mocks.status.pyxel.load"),
-            patch("tools.screen_mocks.status.pyxel.load_pal"),
+            patch("tools.screen_mocks.status.initialize_screen_mock"),
+            patch("tools.screen_mocks.status.create_mock_input_reader"),
             patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
@@ -323,9 +321,8 @@ class StatusScreenMockTest(unittest.TestCase):
         japanese_font = object()
         english_font = object()
         with (
-            patch("tools.screen_mocks.status.pyxel.init"),
-            patch("tools.screen_mocks.status.pyxel.load"),
-            patch("tools.screen_mocks.status.pyxel.load_pal"),
+            patch("tools.screen_mocks.status.initialize_screen_mock"),
+            patch("tools.screen_mocks.status.create_mock_input_reader"),
             patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
@@ -393,9 +390,8 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_chinese_fixed_labels_are_rebuilt_from_text_catalog(self) -> None:
         with (
-            patch("tools.screen_mocks.status.pyxel.init"),
-            patch("tools.screen_mocks.status.pyxel.load"),
-            patch("tools.screen_mocks.status.pyxel.load_pal"),
+            patch("tools.screen_mocks.status.initialize_screen_mock"),
+            patch("tools.screen_mocks.status.create_mock_input_reader"),
             patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,

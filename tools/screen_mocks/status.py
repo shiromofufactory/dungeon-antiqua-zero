@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-import json
-
 import pyxel
 
 from tools._bootstrap import APP_ROOT
-from input import Direction, InputBindings, PyxelInputReader
-from item import Item, ItemDataError
+from tools.screen_mocks._fixtures import (
+    MockFixtureError,
+    load_mock_items,
+    load_mock_party,
+    load_mock_skills,
+)
+from tools.screen_mocks._runner import run_screen_mock
+from tools.screen_mocks._runtime import (
+    create_mock_input_reader,
+    initialize_screen_mock,
+)
+from input import Direction
+from item import ItemDataError
 from localization import Localizer
 from member import (
     BattleStats,
@@ -21,12 +30,13 @@ from member import (
 from resistance import ResistanceType
 from resources import (
     TRANSPARENT_INDEX,
+    DataResourceError,
     FontResourceError,
     FontResources,
     ImageResourceError,
     ImageResources,
 )
-from skill import Skill, SkillDataError
+from skill import SkillDataError
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -38,17 +48,7 @@ from ui import (
     pad,
 )
 
-SCREEN_WIDTH = 256
-SCREEN_HEIGHT = 240
-FPS = 60
 FACES_IMAGE_ID = "faces/faces_pc"
-MOCK_PARTY_CHARACTER_KEYS = (
-    "Fiora",
-    "Cerion",
-    "Alvan",
-    "Elika",
-    "Ragna",
-)
 STATUS_TEXT_KEYS = {
     "label.condition": "status.condition",
     "label.strength": "status.strength",
@@ -174,90 +174,12 @@ def resistance_icon_tag(
     return f"%{resistance.value}_DISABLED%"
 
 
-class StatusMockDataError(RuntimeError):
-    """Raised when generated data required by this mock is unavailable."""
-
-
-def load_data_records(filename: str) -> list[dict[str, object]]:
-    """Load one generated array dataset used by the status mock."""
-
-    path = APP_ROOT / "data" / filename
-    try:
-        records = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
-        raise StatusMockDataError(f"ゲームデータがありません: {path}") from error
-    except json.JSONDecodeError as error:
-        raise StatusMockDataError(
-            f"ゲームデータを読み込めません: {path}: {error}"
-        ) from error
-
-    if not isinstance(records, list) or not all(
-        isinstance(record, dict) for record in records
-    ):
-        raise StatusMockDataError(
-            f"{filename}のルートはオブジェクトの配列である必要があります"
-        )
-    return records
-
-
-def load_mock_party(
-    items: dict[str, Item],
-    skills: dict[str, Skill],
-) -> tuple[Member, ...]:
-    """Load the ordered party used by this mock from generated game data."""
-
-    records = load_data_records("characters.json")
-    records_by_key = {
-        key: record
-        for record in records
-        if isinstance(key := record.get("name_en"), str)
-    }
-    party: list[Member] = []
-    for key in MOCK_PARTY_CHARACTER_KEYS:
-        record = records_by_key.get(key)
-        if record is None:
-            raise MemberDataError(f"モック用キャラクターが見つかりません: {key}")
-        party.append(Member.from_record(record, items=items, skills=skills))
-    return tuple(party)
-
-
-def load_mock_items() -> dict[str, Item]:
-    """Load and index item models by their current data keys."""
-
-    items: dict[str, Item] = {}
-    for record in load_data_records("items.json"):
-        item = Item.from_record(record)
-        if item.key in items:
-            raise StatusMockDataError(f"アイテムキーが重複しています: {item.key}")
-        items[item.key] = item
-    return items
-
-
-def load_mock_skills() -> dict[str, Skill]:
-    """Load and index skill models by their current data keys."""
-
-    skills: dict[str, Skill] = {}
-    for record in load_data_records("skills.json"):
-        skill = Skill.from_record(record)
-        if skill.key in skills:
-            raise StatusMockDataError(f"スキルキーが重複しています: {skill.key}")
-        skills[skill.key] = skill
-    return skills
-
-
 class StatusScreenMock:
     def __init__(self) -> None:
-        pyxel.init(
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-            title="Dungeon Antiqua ZERO Status Screen Mock",
-            fps=FPS,
+        initialize_screen_mock(
+            "Dungeon Antiqua ZERO Status Screen Mock"
         )
-        pyxel.load(str(APP_ROOT / "assets.pyxres"))
-        pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
-        self.input_reader = PyxelInputReader(
-            InputBindings.default().with_cancel(pyxel.KEY_Q)
-        )
+        self.input_reader = create_mock_input_reader()
 
         resources = ImageResources()
         self.faces = resources.image(FACES_IMAGE_ID)
@@ -462,22 +384,19 @@ class StatusScreenMock:
 
 
 def main() -> int:
-    try:
-        StatusScreenMock()
-        return 0
-    except (
-        FontResourceError,
-        ImageResourceError,
-        ItemDataError,
-        MemberDataError,
-        SkillDataError,
-        StatusMockDataError,
-        TextCatalogError,
-    ) as error:
-        print(error)
-        return 1
-    except KeyboardInterrupt:
-        return 130
+    return run_screen_mock(
+        StatusScreenMock,
+        expected_errors=(
+            DataResourceError,
+            FontResourceError,
+            ImageResourceError,
+            ItemDataError,
+            MemberDataError,
+            MockFixtureError,
+            SkillDataError,
+            TextCatalogError,
+        ),
+    )
 
 
 if __name__ == "__main__":

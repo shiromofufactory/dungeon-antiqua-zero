@@ -6,7 +6,9 @@ import pyxel
 
 from app.input import (
     Direction,
+    InputDevice,
     InputBindings,
+    InputState,
     PyxelInputReader,
 )
 
@@ -149,6 +151,27 @@ class PyxelInputReaderTest(unittest.TestCase):
         state = reader.poll()
         self.assertIs(state.navigation, Direction.LEFT)
         self.assertIs(state.held_direction, Direction.LEFT)
+        self.assertIs(state.device, InputDevice.GAMEPAD)
+
+    def test_active_device_switches_between_gamepad_and_keyboard(self) -> None:
+        backend = FakePyxelInput()
+        reader = PyxelInputReader(InputBindings.default(), backend=backend)
+
+        self.assertIs(reader.poll().device, InputDevice.KEYBOARD)
+
+        backend.held.add(pyxel.GAMEPAD1_BUTTON_A)
+        self.assertIs(reader.poll().device, InputDevice.GAMEPAD)
+        backend.held.clear()
+        self.assertIs(reader.poll().device, InputDevice.GAMEPAD)
+
+        backend.held.add(pyxel.KEY_X)
+        state = reader.poll()
+        self.assertIs(state.device, InputDevice.KEYBOARD)
+        self.assertIs(reader.active_device, InputDevice.KEYBOARD)
+
+    def test_input_state_rejects_an_unknown_device(self) -> None:
+        with self.assertRaises(TypeError):
+            InputState(device="keyboard")  # type: ignore[arg-type]
 
     def test_extra_cancel_binding_is_added_without_duplicates(self) -> None:
         bindings = test_bindings().with_cancel(8, 6, 9)

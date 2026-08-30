@@ -42,13 +42,20 @@ npm run tools:image-viewer -- --list
 
 ```text
 tools/screen_mocks/
+├── _runtime.py             # 共通初期化、資産、入力設定
+├── _runner.py              # 例外表示と終了コード
+├── _fixtures.py            # 疑似パーティなどの共有fixture
 ├── battle.py               # 戦闘画面モック
 ├── status.py               # ステータス画面モック
 ├── menu.py                 # メニュー画面モック
 └── shop.py                 # ショップ画面モック（追加時）
 ```
 
-複数の画面モックで実際に同じ初期化や操作が必要になった場合だけ、`tools/screen_mocks/` 内の小さな共通モジュールへ抽出する。すべてのモックを管理する巨大な共通Appは作らない。
+Pyxel、共通アセット、パレット、Q終了入力は `_runtime.py`、想定内エラーの表示と
+終了コードは `_runner.py` へ集約する。ゲームデータJSON自体は本編と同じ
+`app.resources.load_record_array()` で読み、モック固有の疑似パーティ構築だけを
+`_fixtures.py` に置く。Settings、SaveData、画面固有画像、Window構築は各モックが
+必要なものだけを所有し、すべてのモックを管理する巨大な共通Appは作らない。
 
 ### Battle Screen Mock
 
@@ -74,7 +81,10 @@ npm run tools:screen-mock:status
 
 ### Menu Screen Mock
 
-ステータス画面モックと同じ全画面の枠だけを表示するメニュー画面モック。レイアウト内容は `tools/screen_mocks/menu.py` へ追加する。
+DA2相当のコマンド、ゲーム情報、閉じる操作案内を右側へ表示するメニュー画面モック。
+表示用語は `content/data/texts.json` の `menu.*` キーを正本とし、日本語、英語、
+簡体字中国語を同じWindow構築処理で解決する。現時点のモック表示は日本語・
+キーボード操作を使用する。
 
 ```sh
 npm run tools:screen-mock:menu

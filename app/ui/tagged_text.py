@@ -64,6 +64,14 @@ _ICON_COORDINATES = {
     "SACRED": (136, 24),
     "NETHER": (144, 24),
     "FAVORED": (152, 24),
+    "GAMEPAD_A": (160, 16),
+    "GAMEPAD_B": (168, 16),
+    "GAMEPAD_X": (176, 16),
+    "GAMEPAD_Y": (184, 16),
+    "KEY_Z": (160, 24),
+    "KEY_X": (168, 24),
+    "KEY_S": (176, 24),
+    "KEY_TAB": (184, 24),
 }
 
 TEXT_ICONS = MappingProxyType(

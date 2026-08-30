@@ -4,11 +4,11 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 from tools.screen_mocks.battle import (
-    FPS,
     BattleScreenMock,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
 )
+from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
 
 

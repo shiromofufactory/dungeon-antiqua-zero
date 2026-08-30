@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
 if __package__ == "":
     from localization import Localizer
+    from resources.data import DataResourceError, load_record_array
 else:
     from .localization import Localizer
+    from .resources.data import DataResourceError, load_record_array
 
 
 class TextCatalogError(RuntimeError):
@@ -66,13 +67,9 @@ class TextCatalog:
         if not isinstance(path, Path):
             raise TypeError("path must be a pathlib.Path")
         try:
-            records = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError as error:
-            raise TextCatalogError(f"text catalog does not exist: {path}") from error
-        except json.JSONDecodeError as error:
-            raise TextCatalogError(
-                f"text catalog is invalid JSON: {path}: {error}"
-            ) from error
+            records = load_record_array(path.name, path.parent)
+        except DataResourceError as error:
+            raise TextCatalogError(str(error)) from error
         return cls.from_records(records)
 
     def text(

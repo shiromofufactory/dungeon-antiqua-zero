@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import pyxel
 
-from tools._bootstrap import APP_ROOT
-from input import InputBindings, PyxelInputReader
+from tools.screen_mocks._runner import run_screen_mock
+from tools.screen_mocks._runtime import (
+    SCREEN_HEIGHT,
+    SCREEN_WIDTH,
+    create_mock_input_reader,
+    initialize_screen_mock,
+)
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -16,9 +21,6 @@ from resources import (
 from state import Language, Settings
 from ui import CursorTarget, WindowFactory, WindowText
 
-SCREEN_WIDTH = 256
-SCREEN_HEIGHT = 240
-FPS = 60
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 MONSTERS_IMAGE_IDS = ["monsters/1"]
@@ -26,17 +28,10 @@ MONSTERS_IMAGE_IDS = ["monsters/1"]
 
 class BattleScreenMock:
     def __init__(self) -> None:
-        pyxel.init(
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-            title="Dungeon Antiqua ZERO Battle Screen Mock",
-            fps=FPS,
+        initialize_screen_mock(
+            "Dungeon Antiqua ZERO Battle Screen Mock"
         )
-        pyxel.load(str(APP_ROOT / "assets.pyxres"))
-        pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
-        self.input_reader = PyxelInputReader(
-            InputBindings.default().with_cancel(pyxel.KEY_Q)
-        )
+        self.input_reader = create_mock_input_reader()
 
         resources = ImageResources()
         background_entry = resources.entry(BACKGROUND_IMAGE_ID)
@@ -196,14 +191,10 @@ class BattleScreenMock:
 
 
 def main() -> int:
-    try:
-        BattleScreenMock()
-        return 0
-    except (FontResourceError, ImageResourceError) as error:
-        print(error)
-        return 1
-    except KeyboardInterrupt:
-        return 130
+    return run_screen_mock(
+        BattleScreenMock,
+        expected_errors=(FontResourceError, ImageResourceError),
+    )
 
 
 if __name__ == "__main__":

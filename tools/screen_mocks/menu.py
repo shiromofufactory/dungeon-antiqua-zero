@@ -1,116 +1,210 @@
-"""Display an empty menu-screen layout mock."""
+"""Display the current menu-screen layout mock."""
 
 from __future__ import annotations
-
-import json
 
 import pyxel
 
 from tools._bootstrap import APP_ROOT
-from input import Direction, InputBindings, PyxelInputReader
-from localization import Localizer
-from member import (
-    Member,
-    MemberDataError,
+from tools.screen_mocks._runner import run_screen_mock
+from tools.screen_mocks._runtime import (
+    FPS,
+    create_mock_input_reader,
+    initialize_screen_mock,
 )
+from input import (
+    InputAction,
+    InputDevice,
+)
+from localization import Localizer
 from resources import (
-    TRANSPARENT_INDEX,
     FontResourceError,
     FontResources,
-    ImageResourceError,
-    ImageResources,
 )
-from state import Language, Settings
+from state import Difficulty, Language, SaveData, Settings
 
-from ui import WindowFactory
 from text_catalog import TextCatalog, TextCatalogError
-
-SCREEN_WIDTH = 256
-SCREEN_HEIGHT = 240
-FPS = 60
-FACES_IMAGE_ID = "faces/faces_pc"
-MOCK_PARTY_CHARACTER_KEYS = (
-    "Fiora",
-    "Cerion",
-    "Alvan",
-    "Elika",
-    "Ragna",
+from ui import (
+    CursorTarget,
+    LocalizedWindowTextFactory,
+    WindowFactory,
+    WindowText,
+    format_play_time,
+    input_icon_tag,
+    pad,
 )
 
-
-class StatusMockDataError(RuntimeError):
-    """Raised when generated data required by this mock is unavailable."""
-
-
-def load_data_records(filename: str) -> list[dict[str, object]]:
-    """Load one generated array dataset used by the status mock."""
-
-    path = APP_ROOT / "data" / filename
-    try:
-        records = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
-        raise StatusMockDataError(f"ゲームデータがありません: {path}") from error
-    except json.JSONDecodeError as error:
-        raise StatusMockDataError(
-            f"ゲームデータを読み込めません: {path}: {error}"
-        ) from error
-
-    if not isinstance(records, list) or not all(
-        isinstance(record, dict) for record in records
-    ):
-        raise StatusMockDataError(
-            f"{filename}のルートはオブジェクトの配列である必要があります"
-        )
-    return records
+MENU_COMMANDS = (
+    ("item", "menu.command.item"),
+    ("spell", "menu.command.spell"),
+    ("equip", "menu.command.equip"),
+    ("skill", "menu.command.skill"),
+    ("status", "menu.command.status"),
+    ("sort", "menu.command.sort"),
+    ("info", "menu.command.info"),
+    ("config", "menu.command.settings"),
+    ("save", "menu.command.save"),
+)
+DIFFICULTY_TEXT_KEYS = {
+    Difficulty.NORMAL: "menu.difficulty.normal",
+    Difficulty.HARD: "menu.difficulty.hard",
+}
+MENU_INFO_TEXT_KEYS = (
+    "menu.info.gold",
+    "menu.info.experience",
+    "menu.info.difficulty",
+    "menu.info.play_time",
+)
+MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
+MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 
 
-def load_mock_party() -> tuple[Member, ...]:
-    """Load the ordered party used by this mock from generated game data."""
+class MenuMockDataError(RuntimeError):
+    """Raised when localized data required by the menu mock is unavailable."""
 
-    records = load_data_records("characters.json")
-    records_by_key = {
-        key: record
-        for record in records
-        if isinstance(key := record.get("name_en"), str)
-    }
-    party: list[Member] = []
-    for key in MOCK_PARTY_CHARACTER_KEYS:
-        record = records_by_key.get(key)
-        if record is None:
-            raise MemberDataError(f"モック用キャラクターが見つかりません: {key}")
-        party.append(Member.from_record(record))
-    return tuple(party)
+
+def localized_menu_texts(
+    catalog: TextCatalog,
+    language: Language,
+) -> dict[str, str]:
+    """Resolve every menu term from the shared text catalog."""
+
+    if not isinstance(catalog, TextCatalog):
+        raise TypeError("catalog must be a TextCatalog")
+    localizer = Localizer(language)
+    keys = (
+        *(text_key for _command_key, text_key in MENU_COMMANDS),
+        *MENU_INFO_TEXT_KEYS,
+        *DIFFICULTY_TEXT_KEYS.values(),
+        MENU_CLOSE_GUIDE_TEXT_KEY,
+    )
+    localized: dict[str, str] = {}
+    for key in keys:
+        text = catalog.text(key, localizer)
+        if not text:
+            raise MenuMockDataError(f"メニューモック用テキストが見つかりません: {key}")
+        localized[key] = text
+
+    close_guide = localized[MENU_CLOSE_GUIDE_TEXT_KEY]
+    if close_guide.count("%CANCEL%") != 1:
+        raise MenuMockDataError(f"{MENU_CLOSE_GUIDE_TEXT_KEY}には%CANCEL%が1つ必要です")
+    return localized
 
 
 class MenuScreenMock:
     def __init__(self) -> None:
-        pyxel.init(
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-            title="Dungeon Antiqua ZERO Menu Screen Mock",
-            fps=FPS,
-        )
-        pyxel.load(str(APP_ROOT / "assets.pyxres"))
-        pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
-        self.input_reader = PyxelInputReader(
-            InputBindings.default().with_cancel(pyxel.KEY_Q)
-        )
+        initialize_screen_mock("Dungeon Antiqua ZERO Menu Screen Mock")
+        self.input_reader = create_mock_input_reader()
 
-        resources = ImageResources()
-        self.faces = resources.image(FACES_IMAGE_ID)
-
-        settings = Settings()
+        self.settings = Settings()
+        self.save_data = SaveData()
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        fonts = FontResources()
-        windows = WindowFactory(fonts.font_for(settings.language))
-        self.windows = [windows.create(48, 0, 16, 60)]
+        localized = localized_menu_texts(
+            self.texts,
+            self.settings.language,
+        )
+        self.fonts = FontResources()
+        localized_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        command_texts = tuple(
+            localized_texts.create(
+                localized[text_key],
+                4,
+                2 + index * 3,
+            )
+            for index, (_command_key, text_key) in enumerate(MENU_COMMANDS)
+        )
+        self.command_window = windows.create(
+            48,
+            0,
+            16,
+            30,
+            command_texts,
+        )
+        self.command_cursor = self.command_window.set_cursor(
+            tuple(
+                CursorTarget(2, 2 + index * 3, key=key)
+                for index, (key, _) in enumerate(MENU_COMMANDS)
+            )
+        )
+        self.info_window = windows.create(
+            48,
+            30,
+            16,
+            27,
+            (
+                localized_texts.create(localized["menu.info.gold"], 2, 2),
+                WindowText(pad(self.save_data.gold, 6), 2, 5),
+                localized_texts.create(
+                    localized["menu.info.experience"],
+                    2,
+                    8,
+                ),
+                WindowText(pad(self.save_data.experience, 6), 2, 11),
+                localized_texts.create(
+                    localized["menu.info.difficulty"],
+                    2,
+                    14,
+                ),
+                localized_texts.create(
+                    localized[DIFFICULTY_TEXT_KEYS[self.save_data.difficulty]],
+                    4,
+                    17,
+                ),
+                localized_texts.create(
+                    localized["menu.info.play_time"],
+                    2,
+                    20,
+                ),
+                WindowText(
+                    "　"
+                    + format_play_time(
+                        self.save_data.play_time_frames,
+                        fps=FPS,
+                        include_seconds=False,
+                    ),
+                    2,
+                    23,
+                ),
+            ),
+        )
+        self.close_guide_window = windows.create(
+            48,
+            57,
+            16,
+            4,
+            (
+                localized_texts.create(
+                    localized[MENU_CLOSE_GUIDE_TEXT_KEY].replace(
+                        "%CANCEL%",
+                        input_icon_tag(
+                            InputAction.CANCEL,
+                            MOCK_INPUT_DEVICE,
+                        ),
+                    ),
+                    2,
+                    0,
+                ),
+            ),
+            transparent=True,
+        )
+        self.windows = [
+            self.command_window,
+            self.info_window,
+            self.close_guide_window,
+        ]
 
         pyxel.run(self.update, self.draw)
 
-    @staticmethod
-    def update() -> None:
-        if pyxel.btnp(pyxel.KEY_Q) or pyxel.btnp(pyxel.KEY_ESCAPE):
+    def update(self) -> None:
+        input_state = self.input_reader.poll()
+        if input_state.cancel.triggered:
             pyxel.quit()
+            return
+
+        self.command_window.update(input_state.navigation)
 
     def draw(self) -> None:
         for window in self.windows:
@@ -118,14 +212,14 @@ class MenuScreenMock:
 
 
 def main() -> int:
-    try:
-        MenuScreenMock()
-        return 0
-    except FontResourceError as error:
-        print(error)
-        return 1
-    except KeyboardInterrupt:
-        return 130
+    return run_screen_mock(
+        MenuScreenMock,
+        expected_errors=(
+            FontResourceError,
+            MenuMockDataError,
+            TextCatalogError,
+        ),
+    )
 
 
 if __name__ == "__main__":

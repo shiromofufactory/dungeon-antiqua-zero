@@ -12,6 +12,12 @@ DEFAULT_REPEAT_DELAY = 20
 DEFAULT_REPEAT_INTERVAL = 4
 DEFAULT_ANALOG_DEADZONE = 12288
 
+_GAMEPAD1_BUTTONS = frozenset(
+    getattr(pyxel, name)
+    for name in dir(pyxel)
+    if name.startswith("GAMEPAD1_BUTTON_")
+)
+
 
 class Direction(Enum):
     """One cardinal direction used for navigation and held movement."""
@@ -28,6 +34,21 @@ class Direction(Enum):
     @property
     def dy(self) -> int:
         return self.value[1]
+
+
+class InputDevice(Enum):
+    """Physical input family most recently used by the player."""
+
+    KEYBOARD = "keyboard"
+    GAMEPAD = "gamepad"
+
+
+class InputAction(Enum):
+    """Logical action that may be represented by an input icon."""
+
+    CONFIRM = "confirm"
+    CANCEL = "cancel"
+    MENU = "menu"
 
 
 DIRECTION_PRIORITY = (
@@ -61,6 +82,7 @@ class InputState:
     menu: InputButton = InputButton()
     previous_page: InputButton = InputButton()
     next_page: InputButton = InputButton()
+    device: InputDevice = InputDevice.KEYBOARD
 
     def __post_init__(self) -> None:
         if self.navigation is not None and not isinstance(
@@ -80,6 +102,8 @@ class InputState:
         ):
             if not isinstance(getattr(self, name), InputButton):
                 raise TypeError(f"{name} must be an InputButton")
+        if not isinstance(self.device, InputDevice):
+            raise TypeError("device must be an InputDevice")
 
 
 @dataclass(frozen=True)
@@ -183,6 +207,14 @@ class PyxelInputReader:
             "previous_page": False,
             "next_page": False,
         }
+        self._active_device = InputDevice.KEYBOARD
+        self._bound_buttons = tuple(
+            dict.fromkeys(
+                button
+                for binding in fields(self.bindings)
+                for button in getattr(self.bindings, binding.name)
+            )
+        )
 
     def poll(self) -> InputState:
         """Read devices once and return this frame's logical input."""
@@ -194,6 +226,7 @@ class PyxelInputReader:
         menu = self._read_action_button("menu")
         previous_page = self._read_action_button("previous_page")
         next_page = self._read_action_button("next_page")
+        device = self._detect_input_device()
         self._previous_directions = held_directions
 
         return InputState(
@@ -204,7 +237,14 @@ class PyxelInputReader:
             menu=menu,
             previous_page=previous_page,
             next_page=next_page,
+            device=device,
         )
+
+    @property
+    def active_device(self) -> InputDevice:
+        """Return the device family selected by the latest unambiguous input."""
+
+        return self._active_device
 
     def _read_held_directions(self) -> dict[Direction, bool]:
         axis_x = self._backend.btnv(pyxel.GAMEPAD1_AXIS_LEFTX)
@@ -275,14 +315,38 @@ class PyxelInputReader:
     def _buttons_held(self, buttons: tuple[int, ...]) -> bool:
         return any(self._backend.btn(button) for button in buttons)
 
+    def _detect_input_device(self) -> InputDevice:
+        keyboard_held = False
+        gamepad_held = (
+            abs(self._backend.btnv(pyxel.GAMEPAD1_AXIS_LEFTX))
+            > self.analog_deadzone
+            or abs(self._backend.btnv(pyxel.GAMEPAD1_AXIS_LEFTY))
+            > self.analog_deadzone
+        )
+        for button in self._bound_buttons:
+            if not self._backend.btn(button):
+                continue
+            if button in _GAMEPAD1_BUTTONS:
+                gamepad_held = True
+            else:
+                keyboard_held = True
+
+        if keyboard_held and not gamepad_held:
+            self._active_device = InputDevice.KEYBOARD
+        elif gamepad_held and not keyboard_held:
+            self._active_device = InputDevice.GAMEPAD
+        return self._active_device
+
 
 __all__ = [
     "DEFAULT_ANALOG_DEADZONE",
     "DEFAULT_REPEAT_DELAY",
     "DEFAULT_REPEAT_INTERVAL",
     "Direction",
+    "InputAction",
     "InputBindings",
     "InputButton",
+    "InputDevice",
     "InputState",
     "PyxelInputReader",
 ]

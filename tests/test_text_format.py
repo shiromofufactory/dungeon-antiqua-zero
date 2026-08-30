@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.ui.text_format import pad, spacing
+from app.ui.text_format import format_play_time, pad, spacing
 
 
 class TextFormatTest(unittest.TestCase):
@@ -29,6 +29,30 @@ class TextFormatTest(unittest.TestCase):
             spacing("A", -1)
         with self.assertRaises(ValueError):
             pad(1, 2, fill="00")
+
+    def test_formats_play_time_from_sixty_fps_frames(self) -> None:
+        frames = (1 * 3600 + 2 * 60 + 3) * 60
+
+        self.assertEqual(format_play_time(0), "００：００：００")
+        self.assertEqual(format_play_time(frames), "０１：０２：０３")
+        self.assertEqual(
+            format_play_time(frames, include_seconds=False),
+            "０１：０２",
+        )
+
+    def test_play_time_hours_are_capped_at_ninety_nine(self) -> None:
+        self.assertEqual(
+            format_play_time(100 * 3600 * 60),
+            "９９：００：００",
+        )
+
+    def test_play_time_rejects_invalid_frame_and_fps_values(self) -> None:
+        with self.assertRaises(TypeError):
+            format_play_time(True)
+        with self.assertRaises(ValueError):
+            format_play_time(-1)
+        with self.assertRaises(ValueError):
+            format_play_time(0, fps=0)
 
 
 if __name__ == "__main__":
