@@ -23,7 +23,7 @@ from input import (
 )
 from item import ItemDataError
 from localization import Localizer, format_number
-from member import Member, MemberDataError
+from member import FormationRow, Member, MemberDataError
 from resources import (
     TRANSPARENT_INDEX,
     DataResourceError,
@@ -44,6 +44,7 @@ from ui import (
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
     WindowFactory,
+    WindowCursor,
     WindowText,
     format_play_time,
     input_icon_tag,
@@ -88,10 +89,44 @@ PARTY_FACE_Y = 14
 PARTY_FACE_SIZE = 32
 PARTY_TEXT_X = 18
 PARTY_RECOVERY_TEXT_X = 38
+PARTY_CURSOR_X = 3
+PARTY_CURSOR_Y = 5
+SORT_SOURCE_CURSOR_X_OFFSET = 1
+FORMATION_ARROW_BANK = 0
+FORMATION_ARROW_LEFT_X = (96, 112)
+FORMATION_ARROW_RIGHT_X = (104, 120)
+FORMATION_ARROW_Y = 0
+FORMATION_ARROW_WIDTH = 8
+FORMATION_ARROW_HEIGHT = 16
+FORMATION_ARROW_COLKEY = 1
+FORMATION_ARROW_FRAME_DURATION = 30
+ALERT_CHANNEL = 1
+ALERT_SOUND_ID = 7
+ALERT_FRAME_COUNT = 3
+ALERT_CAMERA_X = (0, 0, 1, -1)
 
 
 class MenuMockDataError(RuntimeError):
     """Raised when localized data required by the menu mock is unavailable."""
+
+
+class MenuAlertEffect:
+    """Reproduce DA2's short error sound and horizontal screen shake."""
+
+    def __init__(self) -> None:
+        self.remaining_frames = 0
+
+    @property
+    def camera_x(self) -> int:
+        return ALERT_CAMERA_X[self.remaining_frames]
+
+    def start(self) -> None:
+        pyxel.play(ALERT_CHANNEL, ALERT_SOUND_ID)
+        self.remaining_frames = ALERT_FRAME_COUNT
+
+    def update(self) -> None:
+        if self.remaining_frames > 0:
+            self.remaining_frames -= 1
 
 
 def localized_menu_texts(
@@ -127,6 +162,7 @@ class MenuScreenMock:
     def __init__(self) -> None:
         initialize_screen_mock("Dungeon Antiqua ZERO Menu Screen Mock")
         self.input_reader = create_mock_input_reader()
+        self.alert = MenuAlertEffect()
 
         self.settings = Settings()
         self.save_data = SaveData()
@@ -145,6 +181,8 @@ class MenuScreenMock:
             self.fonts,
             self.settings.language,
         )
+        self.localized = localized
+        self.localized_texts = localized_texts
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
         self.party_window = windows.create(
             *PARTY_WINDOW_GRID,
@@ -175,6 +213,9 @@ class MenuScreenMock:
                 for index, (key, _) in enumerate(MENU_COMMANDS)
             )
         )
+        self.party_cursor: WindowCursor | None = None
+        self.sort_source_index: int | None = None
+        self.sort_source_cursor: WindowCursor | None = None
         self.info_window = windows.create(
             48,
             30,
@@ -256,7 +297,7 @@ class MenuScreenMock:
         localizer = Localizer(self.settings.language)
         texts: list[WindowText] = []
         for index, member in enumerate(party):
-            row_y = 3 + index * PARTY_MEMBER_ROW_HEIGHT
+            row_y = 2 + index * PARTY_MEMBER_ROW_HEIGHT
             texts.extend(
                 (
                     text_factory.create(
@@ -318,30 +359,186 @@ class MenuScreenMock:
     def _point_text(label: str, current: int, maximum: int) -> str:
         return f"{label}　{pad(current, 3)}／{pad(maximum, 3)}"
 
+    def _sort_cursor_targets(self) -> tuple[CursorTarget, ...]:
+        return tuple(
+            CursorTarget(
+                PARTY_CURSOR_X,
+                PARTY_CURSOR_Y + index * PARTY_MEMBER_ROW_HEIGHT,
+                key=index,
+            )
+            for index in range(len(self.party))
+        )
+
+    def _sort_source_target(self, index: int) -> CursorTarget:
+        target = self._sort_cursor_targets()[index]
+        return CursorTarget(
+            target.x + SORT_SOURCE_CURSOR_X_OFFSET,
+            target.y,
+            key=target.key,
+        )
+
+    def _start_sort(self) -> None:
+        self.command_cursor.active = False
+        self.party_cursor = self.party_window.set_cursor(
+            self._sort_cursor_targets()
+        )
+
+    def _finish_sort(self) -> None:
+        self._clear_sort_source()
+        self.party_window.clear_cursor()
+        self.party_cursor = None
+        self.command_cursor.active = True
+
+    def _clear_sort_source(self) -> None:
+        self.sort_source_index = None
+        self.sort_source_cursor = None
+
+    def _can_change_formation(self, member: Member) -> bool:
+        return not member.is_front_row or sum(
+            party_member.is_front_row for party_member in self.party
+        ) > 1
+
+    def _confirm_sort_member(self) -> None:
+        if self.party_cursor is None:
+            return
+        target_index = self.party_cursor.selected_key
+        if (
+            not isinstance(target_index, int)
+            or not 0 <= target_index < len(self.party)
+        ):
+            return
+
+        if self.sort_source_index is None:
+            self.sort_source_index = target_index
+            self.sort_source_cursor = WindowCursor(
+                self.party_window,
+                (self._sort_source_target(target_index),),
+                active=False,
+                draw_shadow=False,
+            )
+            return
+
+        source_index = self.sort_source_index
+        if source_index == target_index:
+            member = self.party[target_index]
+            if not self._can_change_formation(member):
+                self.alert.start()
+            elif member.is_front_row:
+                member.formation_row = FormationRow.BACK
+            else:
+                member.formation_row = FormationRow.FRONT
+        else:
+            party = list(self.party)
+            party[source_index], party[target_index] = (
+                party[target_index],
+                party[source_index],
+            )
+            self.party = tuple(party)
+            self._refresh_party_window_texts()
+        self._clear_sort_source()
+
+    def _refresh_party_window_texts(self) -> None:
+        self.party_window.clear_texts()
+        for placement in self._party_window_texts(
+            self.party,
+            self.localized,
+            self.localized_texts,
+        ):
+            self.party_window.add_text(
+                placement.text,
+                placement.x,
+                placement.y,
+                color=placement.color,
+                font=placement.font,
+                shadow_color=placement.shadow_color,
+                baseline_offset=placement.baseline_offset,
+            )
+
     def update(self) -> None:
+        self.alert.update()
         input_state = self.input_reader.poll()
+
+        if self.party_cursor is not None:
+            if input_state.cancel.triggered:
+                if self.sort_source_index is None:
+                    self._finish_sort()
+                else:
+                    self._clear_sort_source()
+                return
+            if input_state.confirm.triggered:
+                self._confirm_sort_member()
+            self.party_window.update(input_state.navigation)
+            return
+
         if input_state.cancel.triggered:
             pyxel.quit()
             return
-
+        if (
+            input_state.confirm.triggered
+            and self.command_cursor.selected_key == "sort"
+        ):
+            self._start_sort()
+            return
         self.command_window.update(input_state.navigation)
 
     def draw(self) -> None:
-        self.party_window.draw()
-        for index, member in enumerate(self.party):
-            face_position = member.face_position
-            pyxel.blt(
-                PARTY_FACE_X[member.is_front_row],
-                PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
-                self.faces,
-                face_position.x,
-                face_position.y,
-                PARTY_FACE_SIZE,
-                PARTY_FACE_SIZE,
-                TRANSPARENT_INDEX,
-            )
-        for window in self.windows[1:]:
-            window.draw()
+        pyxel.camera(self.alert.camera_x, 0)
+        try:
+            self.party_window.draw()
+            for index, member in enumerate(self.party):
+                face_position = member.face_position
+                pyxel.blt(
+                    PARTY_FACE_X[member.is_front_row],
+                    PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
+                    self.faces,
+                    face_position.x,
+                    face_position.y,
+                    PARTY_FACE_SIZE,
+                    PARTY_FACE_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+            if self.party_cursor is not None:
+                if self.sort_source_cursor is not None:
+                    self.sort_source_cursor.draw()
+                    self._draw_formation_arrow()
+                self.party_cursor.draw()
+            for window in self.windows[1:]:
+                window.draw()
+        finally:
+            pyxel.camera()
+
+    def _draw_formation_arrow(self) -> None:
+        if (
+            self.sort_source_index is None
+            or self.party_cursor is None
+            or self.party_cursor.selected_key != self.sort_source_index
+        ):
+            return
+        member = self.party[self.sort_source_index]
+        if not self._can_change_formation(member):
+            return
+        if member.is_front_row:
+            x = PARTY_FACE_X[True] + PARTY_FACE_SIZE
+            source_x = FORMATION_ARROW_RIGHT_X
+        else:
+            x = PARTY_FACE_X[False] - FORMATION_ARROW_WIDTH
+            source_x = FORMATION_ARROW_LEFT_X
+        y = (
+            PARTY_FACE_Y
+            + self.sort_source_index * PARTY_MEMBER_ROW_HEIGHT * 4
+            + (PARTY_FACE_SIZE - FORMATION_ARROW_HEIGHT) // 2
+        )
+        frame = (pyxel.frame_count // FORMATION_ARROW_FRAME_DURATION) % 2
+        pyxel.blt(
+            x,
+            y,
+            FORMATION_ARROW_BANK,
+            source_x[frame],
+            FORMATION_ARROW_Y,
+            FORMATION_ARROW_WIDTH,
+            FORMATION_ARROW_HEIGHT,
+            FORMATION_ARROW_COLKEY,
+        )
 
 
 def main() -> int:

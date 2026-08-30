@@ -7,6 +7,7 @@ from app.input import Direction
 from app.ui.window import (
     CURSOR_COLKEY,
     CURSOR_FLOAT_PHASE_FRAMES,
+    CURSOR_INACTIVE_X,
     CURSOR_SIZE,
     CURSOR_X,
     CURSOR_Y,
@@ -23,6 +24,7 @@ from app.ui.window import (
     HORIZONTAL_NAVIGATION_Y,
     WINDOW_ANIMATION_HEIGHT_STEP,
     Window,
+    WindowCursor,
     WindowFactory,
     WindowState,
     WindowText,
@@ -611,6 +613,29 @@ class WindowTest(unittest.TestCase):
             ],
         )
         self.assertEqual(cursor.animation_frame, CURSOR_FLOAT_PHASE_FRAMES * 4)
+
+    def test_inactive_cursor_can_draw_gray_marker_without_shadow(self) -> None:
+        window = Window(3, 4, 8, 8)
+        cursor = WindowCursor(
+            window,
+            (CursorTarget(3, 2, key="source"),),
+            active=False,
+            draw_shadow=False,
+        )
+
+        with patch("app.ui.window.pyxel.blt") as blt:
+            cursor.draw()
+
+        blt.assert_called_once_with(
+            16,
+            24,
+            0,
+            CURSOR_INACTIVE_X,
+            CURSOR_Y,
+            CURSOR_SIZE,
+            CURSOR_SIZE,
+            CURSOR_COLKEY,
+        )
 
     def test_cursor_rejects_duplicate_and_outside_targets(self) -> None:
         window = Window(0, 0, 8, 8)

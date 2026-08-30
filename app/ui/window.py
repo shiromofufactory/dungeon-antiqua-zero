@@ -32,6 +32,7 @@ DEFAULT_TEXT_SHADOW_COLOR = 0
 CURSOR_BANK = 0
 CURSOR_X = 48
 CURSOR_SHADOW_X = 64
+CURSOR_INACTIVE_X = 80
 CURSOR_Y = 0
 CURSOR_SIZE = 16
 CURSOR_COLKEY = 1
@@ -648,9 +649,12 @@ class WindowCursor:
         targets: Iterable[CursorTarget],
         *,
         active: bool = True,
+        draw_shadow: bool = True,
     ) -> None:
         if not isinstance(active, bool):
             raise TypeError("cursor active must be a boolean")
+        if not isinstance(draw_shadow, bool):
+            raise TypeError("cursor draw_shadow must be a boolean")
 
         registered = tuple(targets)
         seen_positions: set[tuple[int, int]] = set()
@@ -679,6 +683,7 @@ class WindowCursor:
         )
         self._animation_frame = 0
         self.active = active
+        self.draw_shadow = draw_shadow
 
     @property
     def targets(self) -> tuple[CursorTarget, ...]:
@@ -790,21 +795,22 @@ class WindowCursor:
             )
             float_offset = CURSOR_FLOAT_OFFSETS[phase]
 
-        pyxel.blt(
-            x,
-            y,
-            CURSOR_BANK,
-            CURSOR_SHADOW_X,
-            CURSOR_Y,
-            CURSOR_SIZE,
-            CURSOR_SIZE,
-            CURSOR_COLKEY,
-        )
+        if self.draw_shadow:
+            pyxel.blt(
+                x,
+                y,
+                CURSOR_BANK,
+                CURSOR_SHADOW_X,
+                CURSOR_Y,
+                CURSOR_SIZE,
+                CURSOR_SIZE,
+                CURSOR_COLKEY,
+            )
         pyxel.blt(
             x,
             y - float_offset,
             CURSOR_BANK,
-            CURSOR_X,
+            CURSOR_X if self.active else CURSOR_INACTIVE_X,
             CURSOR_Y,
             CURSOR_SIZE,
             CURSOR_SIZE,

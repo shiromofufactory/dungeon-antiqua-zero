@@ -5,15 +5,28 @@ from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks.menu import (
+    ALERT_CHANNEL,
+    ALERT_SOUND_ID,
     FACES_IMAGE_ID,
+    FORMATION_ARROW_COLKEY,
+    FORMATION_ARROW_FRAME_DURATION,
+    FORMATION_ARROW_HEIGHT,
+    FORMATION_ARROW_LEFT_X,
+    FORMATION_ARROW_RIGHT_X,
+    FORMATION_ARROW_WIDTH,
+    FORMATION_ARROW_Y,
     MENU_COMMANDS,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
     PARTY_FACE_Y,
+    PARTY_CURSOR_X,
+    PARTY_CURSOR_Y,
     PARTY_MEMBER_ROW_HEIGHT,
     PARTY_RECOVERY_TEXT_X,
     PARTY_TEXT_X,
     PARTY_WINDOW_GRID,
+    SORT_SOURCE_CURSOR_X_OFFSET,
+    MenuAlertEffect,
     MenuScreenMock,
     TextCatalog,
     TRANSPARENT_INDEX,
@@ -68,6 +81,7 @@ class MenuScreenMockTest(unittest.TestCase):
             "Dungeon Antiqua ZERO Menu Screen Mock"
         )
         self.assertIs(mock.input_reader, create_input_reader.return_value)
+        self.assertIsInstance(mock.alert, MenuAlertEffect)
         images_class.return_value.image.assert_called_once_with(FACES_IMAGE_ID)
         self.assertIs(mock.faces, images_class.return_value.image.return_value)
         self.assertEqual(
@@ -144,6 +158,9 @@ class MenuScreenMockTest(unittest.TestCase):
         )
         self.assertIs(mock.command_window, command_window)
         self.assertIs(mock.command_cursor, cursor)
+        self.assertIsNone(mock.party_cursor)
+        self.assertIsNone(mock.sort_source_index)
+        self.assertIsNone(mock.sort_source_cursor)
         self.assertIs(mock.party_window, party_window)
         self.assertIs(mock.info_window, info_window)
         self.assertIs(mock.close_guide_window, close_guide_window)
@@ -219,6 +236,9 @@ class MenuScreenMockTest(unittest.TestCase):
             held_direction=Direction.DOWN,
         )
         mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="item")
+        mock.party_cursor = None
+        mock.alert = Mock()
 
         mock.update()
 
@@ -277,6 +297,9 @@ class MenuScreenMockTest(unittest.TestCase):
             cancel=InputButton(triggered=True, held=True)
         )
         mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="item")
+        mock.party_cursor = None
+        mock.alert = Mock()
 
         with patch("tools.screen_mocks.menu.pyxel.quit") as quit_game:
             mock.update()
@@ -284,13 +307,21 @@ class MenuScreenMockTest(unittest.TestCase):
         quit_game.assert_called_once_with()
         mock.command_window.update.assert_not_called()
 
+    @patch("tools.screen_mocks.menu.pyxel.camera")
     @patch("tools.screen_mocks.menu.pyxel.blt")
-    def test_draws_windows_and_offsets_back_row_faces(self, blt: Mock) -> None:
+    def test_draws_windows_and_offsets_back_row_faces(
+        self,
+        blt: Mock,
+        camera: Mock,
+    ) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         party_window = Mock()
         side_window = Mock()
         mock.windows = (party_window, side_window)
         mock.party_window = party_window
+        mock.party_cursor = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock(camera_x=0)
         mock.faces = object()
         front = Mock(
             is_front_row=True,
@@ -306,6 +337,7 @@ class MenuScreenMockTest(unittest.TestCase):
 
         party_window.draw.assert_called_once_with()
         side_window.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
         self.assertEqual(
             blt.call_args_list,
             [
@@ -331,6 +363,242 @@ class MenuScreenMockTest(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_confirming_sort_command_activates_member_cursor(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="sort", active=True)
+        mock.party_window = Mock()
+        party_cursor = mock.party_window.set_cursor.return_value
+        mock.party = tuple(Mock() for _ in range(5))
+        mock.party_cursor = None
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+
+        mock.update()
+
+        targets = mock.party_window.set_cursor.call_args.args[0]
+        self.assertEqual(
+            [(target.x, target.y, target.key) for target in targets],
+            [
+                (
+                    PARTY_CURSOR_X,
+                    PARTY_CURSOR_Y + index * PARTY_MEMBER_ROW_HEIGHT,
+                    index,
+                )
+                for index in range(5)
+            ],
+        )
+        self.assertIs(mock.party_cursor, party_cursor)
+        self.assertFalse(mock.command_cursor.active)
+        mock.command_window.update.assert_not_called()
+
+    @patch("tools.screen_mocks.menu.WindowCursor")
+    def test_selecting_two_members_swaps_their_order(
+        self,
+        window_cursor: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.party_window = Mock()
+        mock.party_cursor = Mock(selected_key=0)
+        mock.party = tuple(Mock(key=key) for key in ("a", "b", "c"))
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+        mock._refresh_party_window_texts = Mock()
+
+        mock._confirm_sort_member()
+        mock.party_cursor.selected_key = 2
+        mock._confirm_sort_member()
+
+        self.assertEqual([member.key for member in mock.party], ["c", "b", "a"])
+        self.assertIsNone(mock.sort_source_index)
+        self.assertIsNone(mock.sort_source_cursor)
+        mock._refresh_party_window_texts.assert_called_once_with()
+        window_cursor.assert_called_once_with(
+            mock.party_window,
+            (mock._sort_source_target(0),),
+            active=False,
+            draw_shadow=False,
+        )
+        self.assertEqual(
+            mock._sort_source_target(0).x,
+            PARTY_CURSOR_X + SORT_SOURCE_CURSOR_X_OFFSET,
+        )
+
+    @patch("tools.screen_mocks.menu.WindowCursor")
+    def test_selecting_same_member_changes_formation_row(
+        self,
+        _window_cursor: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.party_window = Mock()
+        mock.party_cursor = Mock(selected_key=0)
+        front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
+        other_front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
+        mock.party = (front, other_front)
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+
+        mock._confirm_sort_member()
+        mock._confirm_sort_member()
+
+        self.assertIs(front.formation_row, FormationRow.BACK)
+        self.assertIsNone(mock.sort_source_index)
+
+    @patch("tools.screen_mocks.menu.WindowCursor")
+    def test_last_front_member_cannot_move_to_back(
+        self,
+        _window_cursor: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.party_window = Mock()
+        mock.party_cursor = Mock(selected_key=0)
+        front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
+        back = Mock(is_front_row=False, formation_row=FormationRow.BACK)
+        mock.party = (front, back)
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+
+        mock._confirm_sort_member()
+        mock._confirm_sort_member()
+
+        self.assertIs(front.formation_row, FormationRow.FRONT)
+        self.assertIsNone(mock.sort_source_index)
+        mock.alert.start.assert_called_once_with()
+
+    def test_cancel_steps_back_from_source_then_from_sort_mode(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            cancel=InputButton(triggered=True, held=True)
+        )
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.party_window = Mock()
+        mock.party_cursor = Mock()
+        mock.sort_source_index = 2
+        mock.sort_source_cursor = Mock()
+        mock.alert = Mock()
+
+        mock.update()
+
+        self.assertIsNone(mock.sort_source_index)
+        self.assertIsNone(mock.sort_source_cursor)
+        self.assertIsNotNone(mock.party_cursor)
+
+        mock.update()
+
+        self.assertIsNone(mock.party_cursor)
+        self.assertTrue(mock.command_cursor.active)
+        mock.party_window.clear_cursor.assert_called_once_with()
+
+    @patch("tools.screen_mocks.menu.pyxel.play")
+    def test_alert_matches_da2_sound_and_three_frame_shake(self, play: Mock) -> None:
+        alert = MenuAlertEffect()
+
+        alert.start()
+
+        play.assert_called_once_with(ALERT_CHANNEL, ALERT_SOUND_ID)
+        self.assertEqual(alert.camera_x, -1)
+        alert.update()
+        self.assertEqual(alert.camera_x, 1)
+        alert.update()
+        self.assertEqual(alert.camera_x, 0)
+        alert.update()
+        self.assertEqual(alert.camera_x, 0)
+
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_selected_member_draws_blinking_formation_arrow(
+        self,
+        blt: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.sort_source_index = 1
+        mock.party_cursor = Mock(selected_key=1)
+        mock.party = (
+            Mock(is_front_row=True),
+            Mock(is_front_row=False),
+        )
+
+        with patch(
+            "tools.screen_mocks.menu.pyxel.frame_count",
+            FORMATION_ARROW_FRAME_DURATION,
+        ):
+            mock._draw_formation_arrow()
+
+        blt.assert_called_once_with(
+            PARTY_FACE_X[False] - FORMATION_ARROW_WIDTH,
+            PARTY_FACE_Y
+            + PARTY_MEMBER_ROW_HEIGHT * 4
+            + (PARTY_FACE_SIZE - FORMATION_ARROW_HEIGHT) // 2,
+            0,
+            FORMATION_ARROW_LEFT_X[1],
+            FORMATION_ARROW_Y,
+            FORMATION_ARROW_WIDTH,
+            FORMATION_ARROW_HEIGHT,
+            FORMATION_ARROW_COLKEY,
+        )
+
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_front_member_draws_right_arrow_when_another_front_remains(
+        self,
+        blt: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.sort_source_index = 0
+        mock.party_cursor = Mock(selected_key=0)
+        mock.party = (
+            Mock(is_front_row=True),
+            Mock(is_front_row=True),
+        )
+
+        with patch("tools.screen_mocks.menu.pyxel.frame_count", 0):
+            mock._draw_formation_arrow()
+
+        self.assertEqual(blt.call_args.args[0], PARTY_FACE_X[True] + PARTY_FACE_SIZE)
+        self.assertEqual(blt.call_args.args[3], FORMATION_ARROW_RIGHT_X[0])
+
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_last_front_member_does_not_draw_formation_arrow(
+        self,
+        blt: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.sort_source_index = 0
+        mock.party_cursor = Mock(selected_key=0)
+        mock.party = (
+            Mock(is_front_row=True),
+            Mock(is_front_row=False),
+        )
+
+        mock._draw_formation_arrow()
+
+        blt.assert_not_called()
+
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_formation_arrow_is_hidden_when_cursor_moves_from_source(
+        self,
+        blt: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.sort_source_index = 0
+        mock.party_cursor = Mock(selected_key=1)
+        mock.party = (
+            Mock(is_front_row=True),
+            Mock(is_front_row=True),
+        )
+
+        mock._draw_formation_arrow()
+
+        blt.assert_not_called()
 
 
 if __name__ == "__main__":
