@@ -8,7 +8,7 @@
     "content:check": "node scripts/sync-content.mjs --check",
     "content:update": "git submodule update --remote --merge content && npm run content:sync",
     "content:validate": "npm --prefix content run validate",
-    "content:get-data": "npm --prefix content run get-data",
+    "content:get-data": "npm --prefix content run get-data && npm run content:sync",
     "content:put-data": "npm --prefix content run put-data",
     "content:put-data:dry-run": "npm --prefix content run put-data:dry-run",
     "images:build": "python3 scripts/build-images.py",

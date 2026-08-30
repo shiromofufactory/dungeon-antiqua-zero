@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tools._bootstrap import APP_ROOT
 from item import Item
-from member import Member, MemberDataError
+from member import FormationRow, Member, MemberDataError
 from resources import load_record_array
 from skill import Skill
 
@@ -15,6 +15,7 @@ MOCK_PARTY_CHARACTER_KEYS = (
     "Elika",
     "Ragna",
 )
+MOCK_BACK_ROW_CHARACTER_KEYS = frozenset(("Cerion", "Elika"))
 
 
 class MockFixtureError(RuntimeError):
@@ -61,12 +62,16 @@ def load_mock_party(
         record = records_by_key.get(key)
         if record is None:
             raise MemberDataError(f"モック用キャラクターが見つかりません: {key}")
-        party.append(Member.from_record(record, items=items, skills=skills))
+        member = Member.from_record(record, items=items, skills=skills)
+        if key in MOCK_BACK_ROW_CHARACTER_KEYS:
+            member.formation_row = FormationRow.BACK
+        party.append(member)
     return tuple(party)
 
 
 __all__ = [
     "MOCK_PARTY_CHARACTER_KEYS",
+    "MOCK_BACK_ROW_CHARACTER_KEYS",
     "MockFixtureError",
     "load_mock_items",
     "load_mock_party",

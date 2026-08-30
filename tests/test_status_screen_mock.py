@@ -7,17 +7,22 @@ from unittest.mock import Mock, patch
 from app.member import BattleStats, HandHit
 from app.resistance import ResistanceType
 from app.resources import load_record_array
+from app.ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 from tools.screen_mocks._fixtures import MOCK_PARTY_CHARACTER_KEYS
 from tools.screen_mocks.status import (
     LOCALIZED_POSITIONS,
+    RESISTANCE_POSITIONS,
     Direction,
+    EquipmentSlot,
     Language,
+    Localizer,
     TRANSPARENT_INDEX,
     Settings,
     StatusScreenMock,
     attack_display,
     hit_display,
     next_language,
+    pad,
     resistance_icon_tag,
 )
 
@@ -130,8 +135,10 @@ class StatusScreenMockTest(unittest.TestCase):
             ["フィオラ", "ようせい", "おんな"],
         )
         placed = {(item.x, item.y): item.text for item in texts}
+        placements = {(item.x, item.y): item for item in texts}
         self.assertEqual(placed[(6, 14)], "ＨＰ　　４４／　４４")
         self.assertEqual(placed[(6, 17)], "ＭＰ　　１２／　１２")
+        self.assertEqual(placements[(6, 17)].color, DEFAULT_TEXT_COLOR)
         self.assertEqual(placed[(22, 20)], "ＯＫ")
         self.assertEqual(placed[(6, 26)], "ちから")
         self.assertEqual(placed[(20, 26)], "１７")
@@ -143,22 +150,30 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(30, 11)], "ひだりて：")
         self.assertEqual(placed[(30, 14)], "からだ　：ローブ")
         self.assertEqual(placed[(30, 17)], "あたま　：")
-        self.assertEqual(placed[(30, 20)], "うで　　：")
+        arm = mock.member.equipment.item_at(EquipmentSlot.ARM)
+        self.assertEqual(
+            placed[(30, 20)],
+            "うで　　："
+            + (
+                arm.localized_name(Localizer(Language.JAPANESE))
+                if arm is not None
+                else ""
+            ),
+        )
         self.assertEqual(placed[(46, 26)], "　８")
         self.assertEqual(placed[(44, 29)], "１０５（＋　０）")
         self.assertEqual(placed[(46, 32)], "　３")
         self.assertEqual(placed[(46, 35)], "１０")
-        self.assertEqual(placed[(46, 38)], "１２")
+        self.assertEqual(
+            placed[(46, 38)],
+            pad(mock.member.battle_stats.spell_resistance, 2),
+        )
         self.assertEqual(placed[(30, 38)], "じゅつぼうぎょ")
-        self.assertEqual(placed[(32, 44)], "%FIRE_DISABLED%")
-        self.assertEqual(placed[(34, 44)], "%FREEZE_DISABLED%")
-        self.assertEqual(placed[(36, 44)], "%DARK_DISABLED%")
-        self.assertEqual(placed[(38, 44)], "%SLEEP_DISABLED%")
-        self.assertEqual(placed[(40, 44)], "%POISON_DISABLED%")
-        self.assertEqual(placed[(42, 44)], "%PARALIZE_DISABLED%")
-        self.assertEqual(placed[(44, 44)], "%CONFUSE_DISABLED%")
-        self.assertEqual(placed[(46, 44)], "%SILENCE_DISABLED%")
-        self.assertEqual(placed[(48, 44)], "%DEATH_DISABLED%")
+        for resistance, x, y in RESISTANCE_POSITIONS:
+            self.assertEqual(
+                placed[(x, y)],
+                resistance_icon_tag(mock.member, resistance),
+            )
         self.assertEqual(placed[(6, 49)], "%SWORD%：０－００")
         self.assertEqual(placed[(20, 49)], "%KATANA%：０－００")
         self.assertEqual(placed[(34, 49)], "%SPEAR%：０－００")
@@ -171,7 +186,48 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(placed[(20, 55)], "%MYSTIC%：１－００")
         self.assertEqual(placed[(34, 55)], "%SACRED%：０－００")
         self.assertEqual(placed[(48, 55)], "%NETHER%：１－００")
+        for position in (
+            (6, 49),
+            (20, 49),
+            (34, 49),
+            (6, 52),
+            (20, 52),
+            (48, 52),
+            (34, 55),
+        ):
+            self.assertEqual(placements[position].color, DISABLED_COLOR)
+        for position in (
+            (48, 49),
+            (34, 52),
+            (6, 55),
+            (20, 55),
+            (48, 55),
+        ):
+            self.assertEqual(placements[position].color, DEFAULT_TEXT_COLOR)
         self.assertNotIn("%FAVORED%", (item.text for item in texts))
+
+    def test_member_without_mp_uses_shared_disabled_color(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.initialize_screen_mock"),
+            patch("tools.screen_mocks.status.create_mock_input_reader"),
+            patch("tools.screen_mocks.status.pyxel.run"),
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock()
+
+        mock.member_index = 4
+        window = mock._build_window()
+        mp_text = next(
+            text for text in window.texts if (text.x, text.y) == (6, 17)
+        )
+
+        self.assertEqual(mock.member.definition.key, "Ragna")
+        self.assertEqual(mock.member.max_mp, 0)
+        self.assertEqual(mp_text.color, DISABLED_COLOR)
 
     def test_favored_marker_is_eight_pixels_left_of_icon(self) -> None:
         with (
@@ -364,7 +420,16 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(30, 11)], "%LEFT%：")
         self.assertEqual(texts[(30, 14)], "%BODY%：ＲＯＢＥ")
         self.assertEqual(texts[(30, 17)], "%HEAD%：")
-        self.assertEqual(texts[(30, 20)], "%ARM%：")
+        arm = mock.member.equipment.item_at(EquipmentSlot.ARM)
+        self.assertEqual(
+            texts[(30, 20)],
+            "%ARM%："
+            + (
+                arm.localized_name(Localizer(Language.ENGLISH))
+                if arm is not None
+                else ""
+            ),
+        )
         self.assertEqual(texts[(30, 26)], "Ａｔｔａｃｋ")
         self.assertEqual(texts[(30, 29)], "Ｈｉｔ")
         self.assertEqual(texts[(30, 32)], "Ｄｅｆｅｎｃｅ")
@@ -421,7 +486,16 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(30, 11)], "左手：")
         self.assertEqual(texts[(30, 14)], "身体：ROBE")
         self.assertEqual(texts[(30, 17)], "头部：")
-        self.assertEqual(texts[(30, 20)], "手臂：")
+        arm = mock.member.equipment.item_at(EquipmentSlot.ARM)
+        self.assertEqual(
+            texts[(30, 20)],
+            "手臂："
+            + (
+                arm.localized_name(Localizer(Language.SIMPLIFIED_CHINESE))
+                if arm is not None
+                else ""
+            ),
+        )
         self.assertEqual(texts[(30, 26)], "攻击")
         self.assertEqual(texts[(30, 29)], "命中")
         self.assertEqual(texts[(30, 32)], "防御")

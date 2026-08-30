@@ -40,6 +40,8 @@ from skill import SkillDataError
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
+    DEFAULT_TEXT_COLOR,
+    DISABLED_COLOR,
     TEXT_ICONS,
     LocalizedWindowTextFactory,
     Window,
@@ -231,6 +233,11 @@ class StatusScreenMock:
                     f"ＭＰ　{pad(self.member.mp, 3)}" f"／{pad(self.member.max_mp, 3)}",
                     6,
                     17,
+                    color=(
+                        DISABLED_COLOR
+                        if self.member.max_mp == 0
+                        else DEFAULT_TEXT_COLOR
+                    ),
                 ),
                 localized_texts.create(localized["label.condition"], 6, 20),
                 localized_texts.create(localized["value.condition"], 22, 20),
@@ -276,6 +283,12 @@ class StatusScreenMock:
                         f"{icon}：{proficiency_display(self.member, kind)}",
                         x,
                         y,
+                        color=(
+                            DISABLED_COLOR
+                            if self.member.proficiency(kind).aptitude
+                            is ProficiencyAptitude.DISABLED
+                            else DEFAULT_TEXT_COLOR
+                        ),
                     )
                     for kind, icon, x, y in PROFICIENCY_POSITIONS
                 ),

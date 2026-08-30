@@ -54,6 +54,13 @@ class EquipmentSlot(StrEnum):
     ARM = "ARM"
 
 
+class FormationRow(StrEnum):
+    """A member's mutable front- or back-row party position."""
+
+    FRONT = "FRONT"
+    BACK = "BACK"
+
+
 class ProficiencyKind(StrEnum):
     """Stable weapon and spell proficiency identifiers in character data."""
 
@@ -624,6 +631,7 @@ class Member:
     max_hp: int | None = None
     mp: int | None = None
     max_mp: int | None = None
+    formation_row: FormationRow = FormationRow.FRONT
     poisoned: bool = False
     paralyzed: bool = False
     sleeping: int = 0
@@ -705,6 +713,8 @@ class Member:
             raise ValueError("hp must not exceed max_hp")
         if self.mp > self.max_mp:
             raise ValueError("mp must not exceed max_mp")
+        if not isinstance(self.formation_row, FormationRow):
+            raise TypeError("formation_row must be a FormationRow")
         for name in ("poisoned", "paralyzed"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a boolean")
@@ -775,6 +785,38 @@ class Member:
         """Return this member's immutable face-sheet position."""
 
         return self.definition.face_position
+
+    @property
+    def is_front_row(self) -> bool:
+        """Return whether the member currently occupies the front row."""
+
+        return self.formation_row is FormationRow.FRONT
+
+    @property
+    def healing(self) -> int:
+        """Return field HP recovery supplied by currently equipped items."""
+
+        if self.hp <= 0:
+            return 0
+        return sum(item.healing for item in self.equipment.equipped_items())
+
+    @property
+    def heal_and_poison_amount(self) -> int:
+        """Return the next net field HP change without mutating the member."""
+
+        if self.hp <= 0:
+            return 0
+        return self.healing - int(self.poisoned)
+
+    def apply_heal_and_poison(self) -> int:
+        """Apply one field recovery/poison tick and return the actual HP delta."""
+
+        old_hp = self.hp
+        self.hp = min(
+            self.max_hp,
+            max(0, self.hp + self.heal_and_poison_amount),
+        )
+        return self.hp - old_hp
 
     def proficiency(self, kind: ProficiencyKind) -> Proficiency:
         """Return the current proficiency for one stable kind."""

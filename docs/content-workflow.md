@@ -122,9 +122,11 @@ Google Sheetsから共有JSONへ取り込む場合:
 
 ```sh
 npm run content:get-data
-npm run content:validate
 git -C content diff -- data
 ```
+
+`content:get-data` は共有JSONの取得と検証に成功した後、`content:sync` を実行して
+`app/data` も同じ内容へ更新する。取得または検証に失敗した場合は `app/data` を更新しない。
 
 キャラクターシートの加入時装備は、順序依存の複数行セルではなく
 `equip_right`、`equip_left`、`equip_head`、`equip_body`、`equip_arm` の5列で管理する。

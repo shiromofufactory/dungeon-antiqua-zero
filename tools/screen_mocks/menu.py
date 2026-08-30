@@ -5,6 +5,12 @@ from __future__ import annotations
 import pyxel
 
 from tools._bootstrap import APP_ROOT
+from tools.screen_mocks._fixtures import (
+    MockFixtureError,
+    load_mock_items,
+    load_mock_party,
+    load_mock_skills,
+)
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
     FPS,
@@ -15,17 +21,28 @@ from input import (
     InputAction,
     InputDevice,
 )
-from localization import Localizer
+from item import ItemDataError
+from localization import Localizer, format_number
+from member import Member, MemberDataError
 from resources import (
+    TRANSPARENT_INDEX,
+    DataResourceError,
     FontResourceError,
     FontResources,
+    ImageResourceError,
+    ImageResources,
 )
+from skill import SkillDataError
 from state import Difficulty, Language, SaveData, Settings
 
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
     CursorTarget,
+    DEFAULT_TEXT_COLOR,
+    DISABLED_COLOR,
     LocalizedWindowTextFactory,
+    NEGATIVE_COLOR,
+    POSITIVE_COLOR,
     WindowFactory,
     WindowText,
     format_play_time,
@@ -55,7 +72,22 @@ MENU_INFO_TEXT_KEYS = (
     "menu.info.play_time",
 )
 MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
+MENU_MEMBER_TEXT_KEYS = (
+    "menu.member.hp",
+    "menu.member.mp",
+)
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
+FACES_IMAGE_ID = "faces/faces_pc"
+PARTY_WINDOW_GRID = (0, 0, 48, 60)
+PARTY_MEMBER_ROW_HEIGHT = 11
+PARTY_FACE_X = {
+    True: 20,
+    False: 32,
+}
+PARTY_FACE_Y = 14
+PARTY_FACE_SIZE = 32
+PARTY_TEXT_X = 18
+PARTY_RECOVERY_TEXT_X = 38
 
 
 class MenuMockDataError(RuntimeError):
@@ -76,6 +108,7 @@ def localized_menu_texts(
         *MENU_INFO_TEXT_KEYS,
         *DIFFICULTY_TEXT_KEYS.values(),
         MENU_CLOSE_GUIDE_TEXT_KEY,
+        *MENU_MEMBER_TEXT_KEYS,
     )
     localized: dict[str, str] = {}
     for key in keys:
@@ -97,17 +130,30 @@ class MenuScreenMock:
 
         self.settings = Settings()
         self.save_data = SaveData()
+        self.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+        )
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         localized = localized_menu_texts(
             self.texts,
             self.settings.language,
         )
         self.fonts = FontResources()
+        self.faces = ImageResources().image(FACES_IMAGE_ID)
         localized_texts = LocalizedWindowTextFactory.from_language(
             self.fonts,
             self.settings.language,
         )
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        self.party_window = windows.create(
+            *PARTY_WINDOW_GRID,
+            self._party_window_texts(
+                self.party,
+                localized,
+                localized_texts,
+            ),
+        )
         command_texts = tuple(
             localized_texts.create(
                 localized[text_key],
@@ -191,12 +237,86 @@ class MenuScreenMock:
             transparent=True,
         )
         self.windows = [
+            self.party_window,
             self.command_window,
             self.info_window,
             self.close_guide_window,
         ]
 
         pyxel.run(self.update, self.draw)
+
+    def _party_window_texts(
+        self,
+        party: tuple[Member, ...],
+        localized: dict[str, str],
+        text_factory: LocalizedWindowTextFactory,
+    ) -> tuple[WindowText, ...]:
+        """Build the five compact name/HP/MP rows for the main window."""
+
+        localizer = Localizer(self.settings.language)
+        texts: list[WindowText] = []
+        for index, member in enumerate(party):
+            row_y = 3 + index * PARTY_MEMBER_ROW_HEIGHT
+            texts.extend(
+                (
+                    text_factory.create(
+                        member.definition.localized_name(localizer),
+                        PARTY_TEXT_X,
+                        row_y,
+                    ),
+                    text_factory.create(
+                        self._point_text(
+                            localized["menu.member.hp"],
+                            member.hp,
+                            member.max_hp,
+                        ),
+                        PARTY_TEXT_X,
+                        row_y + 3,
+                    ),
+                    text_factory.create(
+                        self._point_text(
+                            localized["menu.member.mp"],
+                            member.mp,
+                            member.max_mp,
+                        ),
+                        PARTY_TEXT_X,
+                        row_y + 6,
+                        color=(
+                            DISABLED_COLOR if member.max_mp == 0 else DEFAULT_TEXT_COLOR
+                        ),
+                    ),
+                )
+            )
+            condition = member.status(
+                localizer,
+                self.texts,
+                show_mhp=False,
+            )
+            if condition:
+                texts.append(
+                    text_factory.create(
+                        condition,
+                        PARTY_RECOVERY_TEXT_X,
+                        row_y + 3,
+                    )
+                )
+                continue
+            amount = member.heal_and_poison_amount
+            if amount:
+                sign = "＋" if amount > 0 else "－"
+                texts.append(
+                    text_factory.create(
+                        f"（{sign}{format_number(abs(amount))}）",
+                        PARTY_RECOVERY_TEXT_X,
+                        row_y + 3,
+                        color=(POSITIVE_COLOR if amount > 0 else NEGATIVE_COLOR),
+                    )
+                )
+        return tuple(texts)
+
+    @staticmethod
+    def _point_text(label: str, current: int, maximum: int) -> str:
+        return f"{label}　{pad(current, 3)}／{pad(maximum, 3)}"
 
     def update(self) -> None:
         input_state = self.input_reader.poll()
@@ -207,7 +327,20 @@ class MenuScreenMock:
         self.command_window.update(input_state.navigation)
 
     def draw(self) -> None:
-        for window in self.windows:
+        self.party_window.draw()
+        for index, member in enumerate(self.party):
+            face_position = member.face_position
+            pyxel.blt(
+                PARTY_FACE_X[member.is_front_row],
+                PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
+                self.faces,
+                face_position.x,
+                face_position.y,
+                PARTY_FACE_SIZE,
+                PARTY_FACE_SIZE,
+                TRANSPARENT_INDEX,
+            )
+        for window in self.windows[1:]:
             window.draw()
 
 
@@ -215,8 +348,14 @@ def main() -> int:
     return run_screen_mock(
         MenuScreenMock,
         expected_errors=(
+            DataResourceError,
             FontResourceError,
+            ImageResourceError,
+            ItemDataError,
+            MemberDataError,
             MenuMockDataError,
+            MockFixtureError,
+            SkillDataError,
             TextCatalogError,
         ),
     )

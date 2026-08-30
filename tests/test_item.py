@@ -21,6 +21,7 @@ class ItemTest(unittest.TestCase):
                 "dfc": 2,
                 "eva": -5,
                 "rst": 12,
+                "healing": 1,
                 "tolerance": "炎冷炎止",
             }
         )
@@ -38,6 +39,58 @@ class ItemTest(unittest.TestCase):
         self.assertEqual(self.item.defense, 2)
         self.assertEqual(self.item.evasion, -5)
         self.assertEqual(self.item.spell_resistance, 12)
+        self.assertEqual(self.item.healing, 1)
+
+    def test_missing_healing_defaults_to_zero(self) -> None:
+        record = {
+            "name_en": "POTION",
+            "name_ja": "ポーション",
+            "type1": "ITEM",
+            "type2": "GENERAL",
+            "atk": 0,
+            "hit": 0,
+            "dfc": 0,
+            "eva": 0,
+            "rst": 0,
+            "tolerance": "",
+        }
+
+        self.assertEqual(Item.from_record(record).healing, 0)
+
+    def test_preserves_negative_healing(self) -> None:
+        record = {
+            "name_en": "CURSED RING",
+            "name_ja": "のろいのゆびわ",
+            "type1": "ARM",
+            "type2": "GENERAL",
+            "atk": 0,
+            "hit": 0,
+            "dfc": 0,
+            "eva": 0,
+            "rst": 0,
+            "healing": -1,
+            "tolerance": "",
+        }
+
+        self.assertEqual(Item.from_record(record).healing, -1)
+
+    def test_rejects_non_integer_healing(self) -> None:
+        record = {
+            "name_en": "CURSED RING",
+            "name_ja": "のろいのゆびわ",
+            "type1": "ARM",
+            "type2": "GENERAL",
+            "atk": 0,
+            "hit": 0,
+            "dfc": 0,
+            "eva": 0,
+            "rst": 0,
+            "healing": -1.5,
+            "tolerance": "",
+        }
+
+        with self.assertRaisesRegex(ItemDataError, "healing"):
+            Item.from_record(record)
 
     def test_parses_recognized_tolerances_as_unique_resistances(self) -> None:
         self.assertEqual(

@@ -10,6 +10,7 @@ from app.member import (
     EquipmentSet,
     EquipmentSlot,
     FacePosition,
+    FormationRow,
     Gender,
     Member,
     MemberDataError,
@@ -110,6 +111,7 @@ class MemberTest(unittest.TestCase):
         defense: int = 0,
         evasion: int = 0,
         spell_resistance: int = 0,
+        healing: int = 0,
         tolerance: str = "",
     ) -> Item:
         return Item.from_record(
@@ -123,6 +125,7 @@ class MemberTest(unittest.TestCase):
                 "dfc": defense,
                 "eva": evasion,
                 "rst": spell_resistance,
+                "healing": healing,
                 "tolerance": tolerance,
             }
         )
@@ -137,6 +140,60 @@ class MemberTest(unittest.TestCase):
 
     def test_keeps_face_sheet_position_on_member(self) -> None:
         self.assertEqual(self.member.face_position, FacePosition(0, 0))
+
+    def test_formation_defaults_to_front_and_can_be_changed_to_back(self) -> None:
+        self.assertEqual(self.member.formation_row, FormationRow.FRONT)
+        self.assertTrue(self.member.is_front_row)
+
+        self.member.formation_row = FormationRow.BACK
+
+        self.assertFalse(self.member.is_front_row)
+
+    def test_rejects_unstable_formation_value(self) -> None:
+        with self.assertRaisesRegex(TypeError, "formation_row"):
+            Member(self.member.definition, formation_row="BACK")
+
+    def test_equipment_healing_and_poison_are_owned_by_member(self) -> None:
+        wand = self.item("WAND", "RIGHT", "WAND", healing=1)
+        ring = self.item("RING", "ARM", healing=1)
+        self.member.equipment = EquipmentSet(
+            {
+                EquipmentSlot.RIGHT: wand,
+                EquipmentSlot.ARM: ring,
+            }
+        )
+        self.member.hp = 40
+
+        self.assertEqual(self.member.healing, 2)
+        self.assertEqual(self.member.heal_and_poison_amount, 2)
+        self.assertEqual(self.member.apply_heal_and_poison(), 2)
+        self.assertEqual(self.member.hp, 42)
+
+        self.member.poisoned = True
+        self.assertEqual(self.member.heal_and_poison_amount, 1)
+        self.assertEqual(self.member.apply_heal_and_poison(), 1)
+        self.assertEqual(self.member.hp, 43)
+
+    def test_poison_tick_cannot_reduce_hp_below_zero(self) -> None:
+        self.member.hp = 1
+        self.member.poisoned = True
+
+        self.assertEqual(self.member.heal_and_poison_amount, -1)
+        self.assertEqual(self.member.apply_heal_and_poison(), -1)
+        self.assertEqual(self.member.hp, 0)
+        self.assertEqual(self.member.heal_and_poison_amount, 0)
+
+    def test_negative_equipment_healing_reduces_hp(self) -> None:
+        cursed_ring = self.item("CURSED RING", "ARM", healing=-2)
+        self.member.equipment = EquipmentSet(
+            {EquipmentSlot.ARM: cursed_ring}
+        )
+        self.member.hp = 40
+
+        self.assertEqual(self.member.healing, -2)
+        self.assertEqual(self.member.heal_and_poison_amount, -2)
+        self.assertEqual(self.member.apply_heal_and_poison(), -2)
+        self.assertEqual(self.member.hp, 38)
 
     def test_keeps_base_and_adjusted_ability_layers_separate(self) -> None:
         self.assertEqual(

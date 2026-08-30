@@ -35,6 +35,18 @@ def _integer_stat(record: Mapping[str, object], field: str) -> int:
     return value
 
 
+def _optional_integer_stat(
+    record: Mapping[str, object],
+    field: str,
+    *,
+    default: int = 0,
+) -> int:
+    value = record.get(field, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ItemDataError(f"item.{field} must be an integer")
+    return value
+
+
 class ItemEquipType(StrEnum):
     """Stable item categories used to validate equipment slots."""
 
@@ -60,6 +72,7 @@ class Item:
     defense: int
     evasion: int
     spell_resistance: int
+    healing: int
     resistances: frozenset[ResistanceType]
 
     @classmethod
@@ -110,6 +123,7 @@ class Item:
             defense=_non_negative_stat(record, "dfc"),
             evasion=_integer_stat(record, "eva"),
             spell_resistance=_non_negative_stat(record, "rst"),
+            healing=_optional_integer_stat(record, "healing"),
             resistances=resistances_from_tolerance(tolerance),
         )
 
