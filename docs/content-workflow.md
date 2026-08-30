@@ -137,6 +137,10 @@ JSON配列と相互変換する。
 キャラクター固有の内部レベル補正は `lv_diff` 列で管理する。呪文データの習得レベルに
 使用する `lv` とは意味が異なるため、キャラクターシートでは `lv` 列を使用しない。
 
+呪文データの `type` は文字列enumで管理し、元素呪文は `mystic`、神聖呪文は
+`sacred`、暗黒呪文は `nether`、アイテム効果は `item` とする。旧形式の数値
+`1`、`2`、`3`、`0` は使用しない。
+
 武器・呪文適性は `eq_sword`、`eq_knife`、`eq_katana`、`eq_spear`、`eq_hammer`、
 `eq_axe`、`eq_throwing`、`eq_rod`、`eq_wand`、`eq_shield`、`sp_mystic`、
 `sp_sacred`、`sp_nether` の13列で管理する。値は0（使用不可）、1（通常）、
