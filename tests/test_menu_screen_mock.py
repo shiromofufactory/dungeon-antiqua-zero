@@ -182,6 +182,14 @@ class MenuScreenMockTest(unittest.TestCase):
             mock.windows,
             [party_window, command_window, info_window, close_guide_window],
         )
+        self.assertTrue(
+            all(
+                create_call.kwargs["opened"] is False
+                for create_call in factory.create.call_args_list
+            )
+        )
+        for window in mock.windows:
+            window.open.assert_called_once_with()
         info_args = factory.create.call_args_list[2].args
         self.assertEqual(info_args[:4], (48, 30, 16, 27))
         self.assertEqual(
@@ -289,8 +297,10 @@ class MenuScreenMockTest(unittest.TestCase):
 
         mock._build_settings_window()
 
-        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 3, 56, 45))
+        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 12, 56, 36))
         self.assertEqual(factory.create.call_args.args[:4], SETTINGS_WINDOW_GRID)
+        self.assertFalse(factory.create.call_args.kwargs["opened"])
+        window.open.assert_called_once_with()
         placements = {
             (text.x, text.y): text.text for text in factory.create.call_args.args[4]
         }
@@ -315,7 +325,7 @@ class MenuScreenMockTest(unittest.TestCase):
         )
 
     @patch("tools.screen_mocks.menu.WindowFactory")
-    def test_english_return_confirmation_is_split_across_two_lines(
+    def test_english_return_confirmation_fits_widened_window_on_one_line(
         self,
         window_factory_class: Mock,
     ) -> None:
@@ -341,13 +351,13 @@ class MenuScreenMockTest(unittest.TestCase):
             (text.text, text.x, text.y)
             for text in factory.create.call_args.args[4]
         ]
+        self.assertEqual(factory.create.call_args.args[:4], (8, 22, 48, 16))
+        self.assertFalse(factory.create.call_args.kwargs["opened"])
         self.assertEqual(
-            placements[:2],
-            [
-                ("Ｒｅｔｕｒｎ　ｔｏ　ｔｉｔｌｅ", 4, 4),
-                ("ｓｃｒｅｅｎ，　ＯＫ？", 4, 7),
-            ],
+            placements[0],
+            ("Ｒｅｔｕｒｎ　ｔｏ　ｔｉｔｌｅ　ｓｃｒｅｅｎ，　ＯＫ？", 4, 2),
         )
+        factory.create.return_value.open.assert_called_once_with()
 
     def test_update_passes_logical_navigation_to_command_window(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
@@ -366,6 +376,25 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.update()
 
         mock.command_window.update.assert_called_once_with(Direction.DOWN)
+
+    def test_opening_windows_advance_and_block_menu_input(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            navigation=Direction.DOWN,
+            held_direction=Direction.DOWN,
+        )
+        opening_window = Mock(is_animating=True)
+        mock.windows = (opening_window,)
+        mock.settings_window = None
+        mock.confirmation_window = None
+        mock.command_window = Mock()
+
+        mock.update()
+
+        opening_window.update.assert_called_once_with()
+        mock.command_window.update.assert_not_called()
 
     def test_party_hp_uses_shared_recovery_colors(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
@@ -493,6 +522,32 @@ class MenuScreenMockTest(unittest.TestCase):
                 ),
             ],
         )
+
+    @patch("tools.screen_mocks.menu.pyxel.cls")
+    @patch("tools.screen_mocks.menu.pyxel.camera")
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_party_faces_wait_until_party_window_is_open(
+        self,
+        blt: Mock,
+        _camera: Mock,
+        _clear_screen: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        party_window = Mock(is_open=False)
+        mock.windows = (party_window,)
+        mock.party_window = party_window
+        mock.party_cursor = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock(camera_x=0)
+        mock.settings_window = None
+        mock.confirmation_window = None
+        mock.faces = object()
+        mock.party = (Mock(),)
+
+        mock.draw()
+
+        party_window.draw.assert_called_once_with()
+        blt.assert_not_called()
 
     def test_confirming_sort_command_activates_member_cursor(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
@@ -759,7 +814,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.settings_cursor = Mock(selected_key="language")
         mock.command_cursor = Mock(active=True)
         mock._build_main_windows = Mock()
-        mock._build_settings_window = Mock()
+        mock._refresh_settings_window = Mock()
 
         mock._change_setting(-1)
 
@@ -768,7 +823,7 @@ class MenuScreenMockTest(unittest.TestCase):
             selected_command="config"
         )
         self.assertFalse(mock.command_cursor.active)
-        mock._build_settings_window.assert_called_once_with(
+        mock._refresh_settings_window.assert_called_once_with(
             selected_key="language"
         )
 
@@ -778,20 +833,20 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.settings = Settings(se_volume=4)
         mock.settings_cursor = Mock(selected_key="se")
         mock._apply_se_volume = Mock()
-        mock._build_settings_window = Mock()
+        mock._refresh_settings_window = Mock()
 
         mock._change_setting(1)
 
         self.assertEqual(mock.settings.se_volume, 0)
         mock._apply_se_volume.assert_called_once_with()
         play.assert_called_once_with(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
-        mock._build_settings_window.assert_called_once_with(selected_key="se")
+        mock._refresh_settings_window.assert_called_once_with(selected_key="se")
 
     def test_screen_size_and_display_settings_wrap_in_both_directions(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         mock.settings = Settings(screen_scale=1)
         mock.settings_cursor = Mock(selected_key="screen_size")
-        mock._build_settings_window = Mock()
+        mock._refresh_settings_window = Mock()
 
         mock._change_setting(-1)
 
@@ -803,6 +858,61 @@ class MenuScreenMockTest(unittest.TestCase):
 
         self.assertIs(mock.settings.display_mode, DisplayMode.SMOOTH)
         mock._apply_display_mode.assert_called_once_with()
+
+    def test_moving_settings_cursor_refreshes_text_without_reopening_window(
+        self,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            navigation=Direction.DOWN,
+            held_direction=Direction.DOWN,
+        )
+        mock.windows = ()
+        mock.confirmation_window = None
+        mock.confirmation_cursor = None
+        mock.settings_cursor = Mock(selected_key="se")
+        mock.settings_window = Mock(is_animating=False)
+        mock.settings_window.update.return_value = True
+        mock._refresh_settings_window = Mock()
+        mock._build_settings_window = Mock()
+
+        mock.update()
+
+        mock._refresh_settings_window.assert_called_once_with(selected_key="se")
+        mock._build_settings_window.assert_not_called()
+        mock.settings_window.open.assert_not_called()
+
+    def test_refreshing_settings_text_keeps_existing_window_open(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings_window = Mock()
+        placement = Mock(
+            text="guide",
+            x=4,
+            y=26,
+            color=5,
+            font=object(),
+            shadow_color=0,
+            baseline_offset=3,
+            font_spans=(),
+        )
+        mock._settings_window_texts = Mock(return_value=(placement,))
+
+        mock._refresh_settings_window("se")
+
+        mock.settings_window.clear_texts.assert_called_once_with()
+        mock.settings_window.add_text.assert_called_once_with(
+            "guide",
+            4,
+            26,
+            color=5,
+            font=placement.font,
+            shadow_color=0,
+            baseline_offset=3,
+            font_spans=(),
+        )
+        mock.settings_window.open.assert_not_called()
 
     @patch("tools.screen_mocks.menu.pyxel.reset")
     def test_return_to_title_restarts_mock_with_settings(

@@ -22,7 +22,7 @@ from app.ui.window import (
     HORIZONTAL_NAVIGATION_WIDTH,
     HORIZONTAL_NAVIGATION_X,
     HORIZONTAL_NAVIGATION_Y,
-    WINDOW_ANIMATION_HEIGHT_STEP,
+    WINDOW_ANIMATION_FRAME_COUNT,
     Window,
     WindowCursor,
     WindowFactory,
@@ -246,7 +246,7 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(window.state, WindowState.OPENING)
         window.update()
 
-        self.assertEqual(window.visible_height, WINDOW_ANIMATION_HEIGHT_STEP)
+        self.assertEqual(window.visible_height, window.animation_height_step)
         with (
             patch.object(window, "_draw_animation_contents") as draw_contents,
             patch("app.ui.window.pyxel.clip") as clip,
@@ -256,11 +256,11 @@ class WindowTest(unittest.TestCase):
         draw_contents.assert_called_once_with()
         self.assertEqual(
             clip.call_args_list,
-            [call(4, 16 + FRAME_Y_OFFSET, 32, 8), call()],
+            [call(4, 18 + FRAME_Y_OFFSET, 32, 3), call()],
         )
 
-        window.update()
-        window.update()
+        for _ in range(WINDOW_ANIMATION_FRAME_COUNT - 1):
+            window.update()
 
         self.assertTrue(window.is_open)
         self.assertEqual(window.visible_height, window.pixel_height)
@@ -294,10 +294,10 @@ class WindowTest(unittest.TestCase):
         window.update()
 
         self.assertEqual(window.state, WindowState.CLOSING)
-        self.assertEqual(window.visible_height, 16)
+        self.assertEqual(window.visible_height, 21)
 
-        window.update()
-        window.update()
+        for _ in range(WINDOW_ANIMATION_FRAME_COUNT - 1):
+            window.update()
 
         self.assertTrue(window.is_closed)
         self.assertEqual(window.visible_height, 0)
@@ -311,16 +311,38 @@ class WindowTest(unittest.TestCase):
         window.open()
         window.update()
         window.update()
-        self.assertEqual(window.visible_height, 16)
+        self.assertEqual(window.visible_height, 8)
 
         window.close()
         window.update()
-        self.assertEqual(window.visible_height, 8)
+        self.assertEqual(window.visible_height, 4)
 
         window.open()
         window.update()
-        self.assertEqual(window.visible_height, 16)
+        self.assertEqual(window.visible_height, 8)
         self.assertEqual(window.state, WindowState.OPENING)
+
+    def test_different_window_heights_open_in_the_same_frame_count(self) -> None:
+        small = Window(0, 0, 8, 16, opened=False)
+        large = Window(0, 0, 8, 60, opened=False)
+        small.open()
+        large.open()
+
+        self.assertGreater(
+            large.animation_height_step,
+            small.animation_height_step,
+        )
+        for _ in range(WINDOW_ANIMATION_FRAME_COUNT - 1):
+            small.update()
+            large.update()
+            self.assertTrue(small.is_animating)
+            self.assertTrue(large.is_animating)
+
+        small.update()
+        large.update()
+
+        self.assertTrue(small.is_open)
+        self.assertTrue(large.is_open)
 
     def test_draw_does_not_advance_window_animation(self) -> None:
         window = Window(0, 0, 8, 6, opened=False)

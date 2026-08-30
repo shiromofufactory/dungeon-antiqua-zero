@@ -47,8 +47,7 @@ HORIZONTAL_NAVIGATION_WIDTH = 8
 HORIZONTAL_NAVIGATION_HEIGHT = 16
 HORIZONTAL_NAVIGATION_COLKEY = 1
 
-WINDOW_ANIMATION_EDGE_STEP = TEXT_GRID_Y
-WINDOW_ANIMATION_HEIGHT_STEP = WINDOW_ANIMATION_EDGE_STEP * 2
+WINDOW_ANIMATION_FRAME_COUNT = 8
 
 
 class WindowState(Enum):
@@ -234,6 +233,14 @@ class Window:
         return self._visible_height
 
     @property
+    def animation_height_step(self) -> int:
+        """Return the per-frame height change for an eight-frame animation."""
+
+        return (
+            self.pixel_height + WINDOW_ANIMATION_FRAME_COUNT - 1
+        ) // WINDOW_ANIMATION_FRAME_COUNT
+
+    @property
     def is_open(self) -> bool:
         return self._state is WindowState.OPEN
 
@@ -315,7 +322,7 @@ class Window:
         if self._state is WindowState.OPENING:
             self._visible_height = min(
                 self.pixel_height,
-                self._visible_height + WINDOW_ANIMATION_HEIGHT_STEP,
+                self._visible_height + self.animation_height_step,
             )
             if self._visible_height == self.pixel_height:
                 self._state = WindowState.OPEN
@@ -324,7 +331,7 @@ class Window:
         if self._state is WindowState.CLOSING:
             self._visible_height = max(
                 0,
-                self._visible_height - WINDOW_ANIMATION_HEIGHT_STEP,
+                self._visible_height - self.animation_height_step,
             )
             if self._visible_height == 0:
                 self._state = WindowState.CLOSED

@@ -305,6 +305,7 @@ class MenuScreenMock:
                 localized,
                 localized_texts,
             ),
+            opened=False,
         )
         command_texts = tuple(
             localized_texts.create(
@@ -320,6 +321,7 @@ class MenuScreenMock:
             16,
             30,
             command_texts,
+            opened=False,
         )
         self.command_cursor = self.command_window.set_cursor(
             tuple(
@@ -372,6 +374,7 @@ class MenuScreenMock:
                     23,
                 ),
             ),
+            opened=False,
         )
         self.close_guide_window = windows.create(
             48,
@@ -392,6 +395,7 @@ class MenuScreenMock:
                 ),
             ),
             transparent=True,
+            opened=False,
         )
         self.windows = [
             self.party_window,
@@ -399,6 +403,8 @@ class MenuScreenMock:
             self.info_window,
             self.close_guide_window,
         ]
+        for window in self.windows:
+            window.open()
 
     def _party_window_texts(
         self,
@@ -583,7 +589,10 @@ class MenuScreenMock:
             ]
         raise ValueError(f"settings key has no value: {key}")
 
-    def _build_settings_window(self, selected_key: str = "language") -> None:
+    def _settings_window_texts(
+        self,
+        selected_key: str,
+    ) -> tuple[WindowText, ...]:
         texts: list[WindowText] = []
         label_keys = {
             "language": "settings.language.label",
@@ -631,15 +640,40 @@ class MenuScreenMock:
                     SETTINGS_GUIDE_Y + index * SETTINGS_GUIDE_ROW_HEIGHT,
                 )
             )
+        return tuple(texts)
+
+    def _build_settings_window(self, selected_key: str = "language") -> None:
+        texts = self._settings_window_texts(selected_key)
 
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
-        self.settings_window = windows.create(*SETTINGS_WINDOW_GRID, texts)
+        self.settings_window = windows.create(
+            *SETTINGS_WINDOW_GRID,
+            texts,
+            opened=False,
+        )
         self.settings_cursor = self.settings_window.set_cursor(
             tuple(
                 CursorTarget(SETTINGS_CURSOR_X, y, key=key) for key, y in SETTINGS_ROWS
             )
         )
         self._select_cursor_key(self.settings_cursor, selected_key)
+        self.settings_window.open()
+
+    def _refresh_settings_window(self, selected_key: str) -> None:
+        if self.settings_window is None:
+            return
+        self.settings_window.clear_texts()
+        for placement in self._settings_window_texts(selected_key):
+            self.settings_window.add_text(
+                placement.text,
+                placement.x,
+                placement.y,
+                color=placement.color,
+                font=placement.font,
+                shadow_color=placement.shadow_color,
+                baseline_offset=placement.baseline_offset,
+                font_spans=placement.font_spans,
+            )
 
     def _start_settings(self) -> None:
         self.command_cursor.active = False
@@ -675,7 +709,7 @@ class MenuScreenMock:
             self._apply_display_mode()
         else:
             return
-        self._build_settings_window(selected_key=key)
+        self._refresh_settings_window(selected_key=key)
 
     def _apply_se_volume(self) -> None:
         if len(pyxel.channels) > ALERT_CHANNEL:
@@ -718,6 +752,7 @@ class MenuScreenMock:
                     CONFIRMATION_NO_Y,
                 ),
             ),
+            opened=False,
         )
         self.confirmation_cursor = self.confirmation_window.set_cursor(
             (
@@ -733,6 +768,7 @@ class MenuScreenMock:
                 ),
             )
         )
+        self.confirmation_window.open()
 
     def _cancel_confirmation(self) -> None:
         self.confirmation_window = None
@@ -749,9 +785,29 @@ class MenuScreenMock:
         os.environ.pop(pyxel.WINDOW_STATE_ENV, None)
         pyxel.reset()
 
+    def _visible_windows(self) -> tuple[object, ...]:
+        windows = list(getattr(self, "windows", ()))
+        for attribute in ("settings_window", "confirmation_window"):
+            window = getattr(self, attribute, None)
+            if window is not None:
+                windows.append(window)
+        return tuple(windows)
+
+    def _update_window_animations(self) -> bool:
+        animating = tuple(
+            window
+            for window in self._visible_windows()
+            if window.is_animating is True
+        )
+        for window in animating:
+            window.update()
+        return bool(animating)
+
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        if self._update_window_animations():
+            return
 
         if self.confirmation_cursor is not None:
             if input_state.cancel.triggered:
@@ -785,7 +841,7 @@ class MenuScreenMock:
                     self._start_confirmation(key)
                 return
             if self.settings_window.update(input_state.navigation):
-                self._build_settings_window(
+                self._refresh_settings_window(
                     selected_key=self.settings_cursor.selected_key
                 )
             return
@@ -821,23 +877,24 @@ class MenuScreenMock:
         pyxel.camera(self.alert.camera_x, 0)
         try:
             self.party_window.draw()
-            for index, member in enumerate(self.party):
-                face_position = member.face_position
-                pyxel.blt(
-                    PARTY_FACE_X[member.is_front_row],
-                    PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
-                    self.faces,
-                    face_position.x,
-                    face_position.y,
-                    PARTY_FACE_SIZE,
-                    PARTY_FACE_SIZE,
-                    TRANSPARENT_INDEX,
-                )
-            if self.party_cursor is not None:
-                if self.sort_source_cursor is not None:
-                    self.sort_source_cursor.draw()
-                    self._draw_formation_arrow()
-                self.party_cursor.draw()
+            if self.party_window.is_open:
+                for index, member in enumerate(self.party):
+                    face_position = member.face_position
+                    pyxel.blt(
+                        PARTY_FACE_X[member.is_front_row],
+                        PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
+                        self.faces,
+                        face_position.x,
+                        face_position.y,
+                        PARTY_FACE_SIZE,
+                        PARTY_FACE_SIZE,
+                        TRANSPARENT_INDEX,
+                    )
+                if self.party_cursor is not None:
+                    if self.sort_source_cursor is not None:
+                        self.sort_source_cursor.draw()
+                        self._draw_formation_arrow()
+                    self.party_cursor.draw()
             for window in self.windows[1:]:
                 window.draw()
             if self.settings_window is not None:
