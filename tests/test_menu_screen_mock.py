@@ -175,6 +175,8 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_window)
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
+        self.assertIsNone(mock.status_screen)
+        self.assertEqual(mock.selected_member_index, 0)
         self.assertIs(mock.party_window, party_window)
         self.assertIs(mock.info_window, info_window)
         self.assertIs(mock.close_guide_window, close_guide_window)
@@ -213,6 +215,21 @@ class MenuScreenMockTest(unittest.TestCase):
             [("%KEY_X%：とじる", 2, 0)],
         )
         self.assertTrue(guide_call.kwargs["transparent"])
+
+        rebuilt_windows = tuple(Mock() for _ in range(4))
+        factory.create.reset_mock()
+        factory.create.side_effect = rebuilt_windows
+
+        mock._build_main_windows(animate=False)
+
+        self.assertTrue(
+            all(
+                create_call.kwargs["opened"] is True
+                for create_call in factory.create.call_args_list
+            )
+        )
+        for window in rebuilt_windows:
+            window.open.assert_not_called()
 
     def test_all_menu_terms_are_available_in_each_language(self) -> None:
         catalog = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
@@ -585,6 +602,80 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.command_cursor.active)
         mock.command_window.update.assert_not_called()
 
+    @patch("tools.screen_mocks.menu.StatusScreenMock")
+    def test_confirming_status_command_opens_connected_status_screen(
+        self,
+        status_screen_class: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="status", active=True)
+        mock.party = (Mock(),)
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.faces = object()
+        mock.selected_member_index = 3
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock.status_screen = None
+
+        mock.update()
+
+        status_screen_class.assert_called_once_with(
+            party=mock.party,
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+            faces=mock.faces,
+            member_index=3,
+        )
+        self.assertIs(mock.status_screen, status_screen_class.return_value)
+        self.assertFalse(mock.command_cursor.active)
+        mock.command_window.update.assert_not_called()
+
+    def test_cancel_from_status_returns_to_selected_menu_command(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(
+            cancel=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.settings = Settings()
+        mock.command_cursor = Mock(active=False)
+        mock.selected_member_index = 0
+        mock.status_screen = Mock(settings=mock.settings, member_index=3)
+        mock.status_screen.update.return_value = True
+
+        status_screen = mock.status_screen
+        mock.update()
+
+        status_screen.update.assert_called_once_with(input_state)
+        self.assertIsNone(mock.status_screen)
+        self.assertTrue(mock.command_cursor.active)
+        self.assertEqual(mock.selected_member_index, 3)
+
+    @patch("tools.screen_mocks.menu.pyxel.cls")
+    def test_draw_uses_status_screen_while_status_is_active(
+        self,
+        clear_screen: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.status_screen = Mock()
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        mock.status_screen.draw.assert_called_once_with()
+
     @patch("tools.screen_mocks.menu.WindowCursor")
     def test_selecting_two_members_swaps_their_order(
         self,
@@ -820,7 +911,8 @@ class MenuScreenMockTest(unittest.TestCase):
 
         self.assertIs(mock.settings.language, Language.ENGLISH)
         mock._build_main_windows.assert_called_once_with(
-            selected_command="config"
+            selected_command="config",
+            animate=False,
         )
         self.assertFalse(mock.command_cursor.active)
         mock._refresh_settings_window.assert_called_once_with(

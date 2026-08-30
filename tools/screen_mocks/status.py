@@ -1,4 +1,4 @@
-"""Display the current status-screen layout mock."""
+"""Status-screen view used by the connected menu mock."""
 
 from __future__ import annotations
 
@@ -6,18 +6,11 @@ import pyxel
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
-    MockFixtureError,
     load_mock_items,
     load_mock_party,
     load_mock_skills,
 )
-from tools.screen_mocks._runner import run_screen_mock
-from tools.screen_mocks._runtime import (
-    create_mock_input_reader,
-    initialize_screen_mock,
-)
-from input import Direction
-from item import ItemDataError
+from input import Direction, InputState
 from localization import Localizer
 from member import (
     BattleStats,
@@ -30,15 +23,11 @@ from member import (
 from resistance import ResistanceType
 from resources import (
     TRANSPARENT_INDEX,
-    DataResourceError,
-    FontResourceError,
     FontResources,
-    ImageResourceError,
     ImageResources,
 )
-from skill import SkillDataError
 from state import Language, Settings
-from text_catalog import TextCatalog, TextCatalogError
+from text_catalog import TextCatalog
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
@@ -130,6 +119,10 @@ RESISTANCE_POSITIONS = tuple(
 )
 
 
+class StatusMockDataError(RuntimeError):
+    """Raised when localized data required by the status view is unavailable."""
+
+
 def next_language(language: Language) -> Language:
     """Return the next language used by the status mock."""
 
@@ -177,24 +170,45 @@ def resistance_icon_tag(
 
 
 class StatusScreenMock:
-    def __init__(self) -> None:
-        initialize_screen_mock(
-            "Dungeon Antiqua ZERO Status Screen Mock"
+    def __init__(
+        self,
+        *,
+        party: tuple[Member, ...] | None = None,
+        settings: Settings | None = None,
+        texts: TextCatalog | None = None,
+        fonts: FontResources | None = None,
+        faces: object | None = None,
+        member_index: int = 0,
+    ) -> None:
+        """Build a status view, reusing menu-owned state when supplied."""
+
+        if party is None:
+            items = load_mock_items()
+            skills = load_mock_skills()
+            party = load_mock_party(items, skills)
+        if not party:
+            raise ValueError("party must contain at least one member")
+        if (
+            isinstance(member_index, bool)
+            or not isinstance(member_index, int)
+            or not 0 <= member_index < len(party)
+        ):
+            raise ValueError("member_index must identify a party member")
+        self.party = party
+        self.settings = settings if settings is not None else Settings()
+        self.texts = (
+            texts
+            if texts is not None
+            else TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         )
-        self.input_reader = create_mock_input_reader()
-
-        resources = ImageResources()
-        self.faces = resources.image(FACES_IMAGE_ID)
-
-        self.settings = Settings()
-        self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        self.items = load_mock_items()
-        self.skills = load_mock_skills()
-        self.party = load_mock_party(self.items, self.skills)
-        self.member_index = 0
-        self.fonts = FontResources()
+        self.member_index = member_index
+        self.fonts = fonts if fonts is not None else FontResources()
+        self.faces = (
+            faces
+            if faces is not None
+            else ImageResources().image(FACES_IMAGE_ID)
+        )
         self.windows = [self._build_window()]
-        pyxel.run(self.update, self.draw)
 
     @property
     def member(self) -> Member:
@@ -358,11 +372,11 @@ class StatusScreenMock:
         self.member_index = (self.member_index + distance) % len(self.party)
         self._rebuild_window()
 
-    def update(self) -> None:
-        input_state = self.input_reader.poll()
+    def update(self, input_state: InputState) -> bool:
+        """Update the view and report whether it should return to the menu."""
+
         if input_state.cancel.triggered:
-            pyxel.quit()
-            return
+            return True
 
         if (
             input_state.navigation is Direction.LEFT
@@ -377,6 +391,7 @@ class StatusScreenMock:
             language = next_language(self.settings.language)
             self.settings = self.settings.with_language(language)
             self._rebuild_window()
+        return False
 
     def draw(self) -> None:
         # ウィンドウ
@@ -394,23 +409,3 @@ class StatusScreenMock:
             32,
             TRANSPARENT_INDEX,
         )
-
-
-def main() -> int:
-    return run_screen_mock(
-        StatusScreenMock,
-        expected_errors=(
-            DataResourceError,
-            FontResourceError,
-            ImageResourceError,
-            ItemDataError,
-            MemberDataError,
-            MockFixtureError,
-            SkillDataError,
-            TextCatalogError,
-        ),
-    )
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

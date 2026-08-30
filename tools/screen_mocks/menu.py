@@ -20,6 +20,7 @@ from tools.screen_mocks._runtime import (
     create_mock_input_reader,
     initialize_screen_mock,
 )
+from tools.screen_mocks.status import StatusMockDataError, StatusScreenMock
 from input import (
     Direction,
     InputAction,
@@ -258,6 +259,8 @@ class MenuScreenMock:
         self.confirmation_window = None
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
+        self.status_screen: StatusScreenMock | None = None
+        self.selected_member_index = 0
         self._build_main_windows()
 
         pyxel.run(self.update, self.draw)
@@ -286,7 +289,12 @@ class MenuScreenMock:
                 return
         raise ValueError(f"cursor key is not registered: {key!r}")
 
-    def _build_main_windows(self, selected_command: str = "item") -> None:
+    def _build_main_windows(
+        self,
+        selected_command: str = "item",
+        *,
+        animate: bool = True,
+    ) -> None:
         localized = localized_menu_texts(
             self.texts,
             self.settings.language,
@@ -305,7 +313,7 @@ class MenuScreenMock:
                 localized,
                 localized_texts,
             ),
-            opened=False,
+            opened=not animate,
         )
         command_texts = tuple(
             localized_texts.create(
@@ -321,7 +329,7 @@ class MenuScreenMock:
             16,
             30,
             command_texts,
-            opened=False,
+            opened=not animate,
         )
         self.command_cursor = self.command_window.set_cursor(
             tuple(
@@ -374,7 +382,7 @@ class MenuScreenMock:
                     23,
                 ),
             ),
-            opened=False,
+            opened=not animate,
         )
         self.close_guide_window = windows.create(
             48,
@@ -395,7 +403,7 @@ class MenuScreenMock:
                 ),
             ),
             transparent=True,
-            opened=False,
+            opened=not animate,
         )
         self.windows = [
             self.party_window,
@@ -403,8 +411,9 @@ class MenuScreenMock:
             self.info_window,
             self.close_guide_window,
         ]
-        for window in self.windows:
-            window.open()
+        if animate:
+            for window in self.windows:
+                window.open()
 
     def _party_window_texts(
         self,
@@ -500,6 +509,9 @@ class MenuScreenMock:
     def _start_sort(self) -> None:
         self.command_cursor.active = False
         self.party_cursor = self.party_window.set_cursor(self._sort_cursor_targets())
+        selected_member_index = getattr(self, "selected_member_index", 0)
+        if selected_member_index != 0:
+            self._select_cursor_key(self.party_cursor, selected_member_index)
 
     def _finish_sort(self) -> None:
         self._clear_sort_source()
@@ -679,6 +691,29 @@ class MenuScreenMock:
         self.command_cursor.active = False
         self._build_settings_window()
 
+    def _start_status(self) -> None:
+        self.command_cursor.active = False
+        self.status_screen = StatusScreenMock(
+            party=self.party,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+            member_index=self.selected_member_index,
+        )
+
+    def _finish_status(self) -> None:
+        if self.status_screen is None:
+            return
+        status_settings = self.status_screen.settings
+        self.selected_member_index = self.status_screen.member_index
+        self.status_screen = None
+        if status_settings != self.settings:
+            self.settings = status_settings
+            self._build_main_windows(selected_command="status")
+        else:
+            self.command_cursor.active = True
+
     def _finish_settings(self) -> None:
         self.settings_window = None
         self.settings_cursor = None
@@ -692,7 +727,10 @@ class MenuScreenMock:
             index = LANGUAGE_SEQUENCE.index(self.settings.language)
             language = LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
             self.settings = self.settings.with_language(language)
-            self._build_main_windows(selected_command="config")
+            self._build_main_windows(
+                selected_command="config",
+                animate=False,
+            )
             self.command_cursor.active = False
         elif key == "se":
             volume = (self.settings.se_volume + distance) % 5
@@ -806,6 +844,11 @@ class MenuScreenMock:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        status_screen = getattr(self, "status_screen", None)
+        if status_screen is not None:
+            if status_screen.update(input_state):
+                self._finish_status()
+            return
         if self._update_window_animations():
             return
 
@@ -856,10 +899,19 @@ class MenuScreenMock:
             if input_state.confirm.triggered:
                 self._confirm_sort_member()
             self.party_window.update(input_state.navigation)
+            selected_member_index = self.party_cursor.selected_key
+            if isinstance(selected_member_index, int):
+                self.selected_member_index = selected_member_index
             return
 
         if input_state.cancel.triggered:
             pyxel.quit()
+            return
+        if (
+            input_state.confirm.triggered
+            and self.command_cursor.selected_key == "status"
+        ):
+            self._start_status()
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "sort":
             self._start_sort()
@@ -874,6 +926,10 @@ class MenuScreenMock:
 
     def draw(self) -> None:
         pyxel.cls(0)
+        status_screen = getattr(self, "status_screen", None)
+        if status_screen is not None:
+            status_screen.draw()
+            return
         pyxel.camera(self.alert.camera_x, 0)
         try:
             self.party_window.draw()
@@ -950,6 +1006,7 @@ def main() -> int:
             MenuMockDataError,
             MockFixtureError,
             SkillDataError,
+            StatusMockDataError,
             TextCatalogError,
         ),
     )

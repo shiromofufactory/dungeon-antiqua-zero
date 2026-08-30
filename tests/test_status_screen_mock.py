@@ -88,9 +88,6 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_first_three_lines_use_localized_member_identity(self) -> None:
         with (
-            patch("tools.screen_mocks.status.initialize_screen_mock"),
-            patch("tools.screen_mocks.status.create_mock_input_reader"),
-            patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
             patch("tools.screen_mocks.status.WindowFactory") as factory,
@@ -123,6 +120,7 @@ class StatusScreenMockTest(unittest.TestCase):
             [10, 4, 12, 0, 0],
         )
         self.assertEqual(mock.member_index, 0)
+        self.assertNotIn("opened", factory.return_value.create.call_args.kwargs)
         self.assertTrue(
             factory.return_value.create.call_args.kwargs[
                 "horizontal_navigation"
@@ -206,11 +204,25 @@ class StatusScreenMockTest(unittest.TestCase):
             self.assertEqual(placements[position].color, DEFAULT_TEXT_COLOR)
         self.assertNotIn("%FAVORED%", (item.text for item in texts))
 
+    def test_starts_from_supplied_member_without_opening_animation(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tools.screen_mocks.status.WindowFactory") as factory,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+
+            mock = StatusScreenMock(member_index=2)
+
+        self.assertEqual(mock.member_index, 2)
+        self.assertEqual(mock.member.definition.key, "Alvan")
+        self.assertNotIn("opened", factory.return_value.create.call_args.kwargs)
+        factory.return_value.create.return_value.open.assert_not_called()
+
     def test_member_without_mp_uses_shared_disabled_color(self) -> None:
         with (
-            patch("tools.screen_mocks.status.initialize_screen_mock"),
-            patch("tools.screen_mocks.status.create_mock_input_reader"),
-            patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
         ):
@@ -231,9 +243,6 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_favored_marker_is_eight_pixels_left_of_icon(self) -> None:
         with (
-            patch("tools.screen_mocks.status.initialize_screen_mock"),
-            patch("tools.screen_mocks.status.create_mock_input_reader"),
-            patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
         ):
@@ -313,10 +322,11 @@ class StatusScreenMockTest(unittest.TestCase):
         mock.input_reader.poll.return_value = input_state(confirm=True)
         mock._rebuild_window = Mock()
 
-        mock.update()
+        returned = mock.update(mock.input_reader.poll.return_value)
 
         self.assertEqual(mock.settings.language, Language.ENGLISH)
         mock._rebuild_window.assert_called_once_with()
+        self.assertFalse(returned)
 
     def test_right_navigation_wraps_from_ragna_to_fiora(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
@@ -329,11 +339,12 @@ class StatusScreenMockTest(unittest.TestCase):
         )
         mock._rebuild_window = Mock()
 
-        mock.update()
+        returned = mock.update(mock.input_reader.poll.return_value)
 
         self.assertEqual(mock.member_index, 0)
         self.assertIs(mock.member, mock.party[0])
         mock._rebuild_window.assert_called_once_with()
+        self.assertFalse(returned)
 
     def test_left_navigation_wraps_from_fiora_to_ragna(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
@@ -346,10 +357,11 @@ class StatusScreenMockTest(unittest.TestCase):
         )
         mock._rebuild_window = Mock()
 
-        mock.update()
+        returned = mock.update(mock.input_reader.poll.return_value)
 
         self.assertEqual(mock.member_index, 4)
         self.assertIs(mock.member, mock.party[4])
+        self.assertFalse(returned)
 
     def test_lr_page_buttons_switch_party_members(self) -> None:
         cases = (
@@ -368,18 +380,16 @@ class StatusScreenMockTest(unittest.TestCase):
                 )
                 mock._rebuild_window = Mock()
 
-                mock.update()
+                returned = mock.update(mock.input_reader.poll.return_value)
 
                 self.assertEqual(mock.member_index, expected)
                 mock._rebuild_window.assert_called_once_with()
+                self.assertFalse(returned)
 
     def test_english_localized_text_is_rebuilt_as_fullwidth(self) -> None:
         japanese_font = object()
         english_font = object()
         with (
-            patch("tools.screen_mocks.status.initialize_screen_mock"),
-            patch("tools.screen_mocks.status.create_mock_input_reader"),
-            patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
         ):
@@ -455,9 +465,6 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_chinese_fixed_labels_are_rebuilt_from_text_catalog(self) -> None:
         with (
-            patch("tools.screen_mocks.status.initialize_screen_mock"),
-            patch("tools.screen_mocks.status.create_mock_input_reader"),
-            patch("tools.screen_mocks.status.pyxel.run"),
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
         ):
@@ -503,17 +510,16 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(30, 38)], "抗性")
         self.assertEqual(texts[(30, 41)], "耐性")
 
-    def test_cancel_quits_without_changing_language(self) -> None:
+    def test_cancel_returns_to_menu_without_changing_language(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.settings = Settings()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = input_state(cancel=True)
         mock._rebuild_window = Mock()
 
-        with patch("tools.screen_mocks.status.pyxel.quit") as quit_mock:
-            mock.update()
+        returned = mock.update(mock.input_reader.poll.return_value)
 
-        quit_mock.assert_called_once_with()
+        self.assertTrue(returned)
         self.assertEqual(mock.settings.language, Language.JAPANESE)
         mock._rebuild_window.assert_not_called()
 
@@ -522,7 +528,7 @@ class StatusScreenMockTest(unittest.TestCase):
         mock.faces = object()
         mock.party = (Mock(face_position=Mock(x=64, y=96)),)
         mock.member_index = 0
-        first_window = Mock()
+        first_window = Mock(is_open=True)
         second_window = Mock()
         mock.windows = (first_window, second_window)
         draw_order: list[str] = []
@@ -547,7 +553,6 @@ class StatusScreenMockTest(unittest.TestCase):
             32,
             TRANSPARENT_INDEX,
         )
-
 
 if __name__ == "__main__":
     unittest.main()

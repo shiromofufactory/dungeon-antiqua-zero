@@ -16,7 +16,6 @@
     "tools:pyxel-edit": "pyxel edit app/assets",
     "tools:image-viewer": "python3 -B -m tools.image_viewer",
     "tools:screen-mock:battle": "python3 -B -m tools.screen_mocks.battle",
-    "tools:screen-mock:status": "python3 -B -m tools.screen_mocks.status",
     "tools:screen-mock:menu": "python3 -B -m tools.screen_mocks.menu",
     "portal:build": "npm --prefix content run portal:build",
     "portal:serve": "npm --prefix content run portal:serve",
