@@ -7,6 +7,7 @@ from item import Item
 from member import FormationRow, Member, MemberDataError
 from resources import load_record_array
 from skill import Skill
+from spell import Spell
 
 MOCK_PARTY_CHARACTER_KEYS = (
     "Fiora",
@@ -46,6 +47,18 @@ def load_mock_skills() -> dict[str, Skill]:
     return skills
 
 
+def load_mock_spells() -> dict[str, Spell]:
+    """Load and index spell models by their stable current data keys."""
+
+    spells: dict[str, Spell] = {}
+    for record in load_record_array("spells.json", APP_ROOT / "data"):
+        spell = Spell.from_record(record)
+        if spell.key in spells:
+            raise MockFixtureError(f"呪文キーが重複しています: {spell.key}")
+        spells[spell.key] = spell
+    return spells
+
+
 def load_mock_party(
     items: dict[str, Item],
     skills: dict[str, Skill],
@@ -76,4 +89,5 @@ __all__ = [
     "load_mock_items",
     "load_mock_party",
     "load_mock_skills",
+    "load_mock_spells",
 ]

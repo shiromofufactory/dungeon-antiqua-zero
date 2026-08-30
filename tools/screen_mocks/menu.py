@@ -13,6 +13,7 @@ from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
     load_mock_skills,
+    load_mock_spells,
 )
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
@@ -21,6 +22,7 @@ from tools.screen_mocks._runtime import (
     initialize_screen_mock,
 )
 from tools.screen_mocks.status import StatusMockDataError, StatusScreenMock
+from tools.screen_mocks.spell import SpellMockDataError, SpellScreenMock
 from input import (
     Direction,
     InputAction,
@@ -38,6 +40,7 @@ from resources import (
     ImageResources,
 )
 from skill import SkillDataError
+from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
 
 from text_catalog import TextCatalog, TextCatalogError
@@ -250,6 +253,7 @@ class MenuScreenMock:
         self.save_data = SaveData()
         self.items = load_mock_items()
         self.skills = load_mock_skills()
+        self.spells = load_mock_spells()
         self.party = load_mock_party(self.items, self.skills)
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         self.fonts = FontResources()
@@ -260,6 +264,7 @@ class MenuScreenMock:
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
         self.status_screen: StatusScreenMock | None = None
+        self.spell_screen: SpellScreenMock | None = None
         self.selected_member_index = 0
         self._build_main_windows()
 
@@ -714,6 +719,25 @@ class MenuScreenMock:
         else:
             self.command_cursor.active = True
 
+    def _start_spell(self) -> None:
+        self.command_cursor.active = False
+        self.spell_screen = SpellScreenMock(
+            party=self.party,
+            spells=self.spells,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+            member_index=self.selected_member_index,
+        )
+
+    def _finish_spell(self) -> None:
+        if self.spell_screen is None:
+            return
+        self.selected_member_index = self.spell_screen.member_index
+        self.spell_screen = None
+        self.command_cursor.active = True
+
     def _finish_settings(self) -> None:
         self.settings_window = None
         self.settings_cursor = None
@@ -844,6 +868,11 @@ class MenuScreenMock:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        spell_screen = getattr(self, "spell_screen", None)
+        if spell_screen is not None:
+            if spell_screen.update(input_state):
+                self._finish_spell()
+            return
         status_screen = getattr(self, "status_screen", None)
         if status_screen is not None:
             if status_screen.update(input_state):
@@ -909,6 +938,12 @@ class MenuScreenMock:
             return
         if (
             input_state.confirm.triggered
+            and self.command_cursor.selected_key == "spell"
+        ):
+            self._start_spell()
+            return
+        if (
+            input_state.confirm.triggered
             and self.command_cursor.selected_key == "status"
         ):
             self._start_status()
@@ -926,6 +961,10 @@ class MenuScreenMock:
 
     def draw(self) -> None:
         pyxel.cls(0)
+        spell_screen = getattr(self, "spell_screen", None)
+        if spell_screen is not None:
+            spell_screen.draw()
+            return
         status_screen = getattr(self, "status_screen", None)
         if status_screen is not None:
             status_screen.draw()
@@ -1006,6 +1045,8 @@ def main() -> int:
             MenuMockDataError,
             MockFixtureError,
             SkillDataError,
+            SpellDataError,
+            SpellMockDataError,
             StatusMockDataError,
             TextCatalogError,
         ),

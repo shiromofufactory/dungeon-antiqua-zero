@@ -176,6 +176,8 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
         self.assertIsNone(mock.status_screen)
+        self.assertIsNone(mock.spell_screen)
+        self.assertEqual(len(mock.spells), 38)
         self.assertEqual(mock.selected_member_index, 0)
         self.assertIs(mock.party_window, party_window)
         self.assertIs(mock.info_window, info_window)
@@ -675,6 +677,81 @@ class MenuScreenMockTest(unittest.TestCase):
 
         clear_screen.assert_called_once_with(0)
         mock.status_screen.draw.assert_called_once_with()
+
+    @patch("tools.screen_mocks.menu.SpellScreenMock")
+    def test_confirming_spell_command_opens_connected_spell_screen(
+        self,
+        spell_screen_class: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="spell", active=True)
+        mock.party = (Mock(),)
+        mock.spells = {"FIRE1": Mock()}
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.faces = object()
+        mock.selected_member_index = 2
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock.spell_screen = None
+
+        mock.update()
+
+        spell_screen_class.assert_called_once_with(
+            party=mock.party,
+            spells=mock.spells,
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+            faces=mock.faces,
+            member_index=2,
+        )
+        self.assertIs(mock.spell_screen, spell_screen_class.return_value)
+        self.assertFalse(mock.command_cursor.active)
+        mock.command_window.update.assert_not_called()
+
+    def test_cancel_from_spell_returns_to_selected_menu_command(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(
+            cancel=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.selected_member_index = 0
+        mock.spell_screen = Mock(member_index=2)
+        mock.spell_screen.update.return_value = True
+
+        spell_screen = mock.spell_screen
+        mock.update()
+
+        spell_screen.update.assert_called_once_with(input_state)
+        self.assertIsNone(mock.spell_screen)
+        self.assertTrue(mock.command_cursor.active)
+        self.assertEqual(mock.selected_member_index, 2)
+
+    @patch("tools.screen_mocks.menu.pyxel.cls")
+    def test_draw_uses_spell_screen_while_spell_is_active(
+        self,
+        clear_screen: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.spell_screen = Mock()
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        mock.spell_screen.draw.assert_called_once_with()
 
     @patch("tools.screen_mocks.menu.WindowCursor")
     def test_selecting_two_members_swaps_their_order(
