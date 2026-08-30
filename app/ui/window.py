@@ -8,7 +8,7 @@ from typing import Any, Iterable, Protocol
 
 import pyxel
 
-from .tagged_text import draw_tagged_text
+from .tagged_text import TextFontSpan, draw_tagged_text
 
 TEXT_GRID_X = 4
 TEXT_GRID_Y = 4
@@ -103,6 +103,7 @@ class WindowText:
     font: Any | None = None
     shadow_color: int | None = DEFAULT_TEXT_SHADOW_COLOR
     baseline_offset: int = 0
+    font_spans: tuple[TextFontSpan, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
@@ -119,6 +120,12 @@ class WindowText:
             )
         if not isinstance(self.baseline_offset, int):
             raise TypeError("text baseline offset must be an integer")
+        if not isinstance(self.font_spans, tuple) or not all(
+            isinstance(span, TextFontSpan) for span in self.font_spans
+        ):
+            raise TypeError("font_spans must contain TextFontSpan values")
+        if any(span.end > len(self.text) for span in self.font_spans):
+            raise ValueError("font span must fit inside text")
 
 
 class Window:
@@ -248,6 +255,7 @@ class Window:
         font: Any | None = None,
         shadow_color: int | None = DEFAULT_TEXT_SHADOW_COLOR,
         baseline_offset: int = 0,
+        font_spans: tuple[TextFontSpan, ...] = (),
     ) -> WindowText:
         """Add text at a free position in the window's 4x4-pixel grid."""
 
@@ -259,6 +267,7 @@ class Window:
             font,
             shadow_color,
             baseline_offset,
+            font_spans,
         )
         self._validate_text_position(placement)
         self._texts.append(placement)
@@ -566,6 +575,7 @@ class Window:
                 font,
                 shadow_color=text.shadow_color,
                 text_y_offset=text.baseline_offset,
+                font_spans=text.font_spans,
             )
 
     def _draw_horizontal_navigation(self) -> None:

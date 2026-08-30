@@ -40,6 +40,22 @@ class ScreenMockRuntimeTest(unittest.TestCase):
         self.assertIn(pyxel.KEY_Q, reader.bindings.cancel)
         self.assertIn(pyxel.KEY_ESCAPE, reader.bindings.cancel)
 
+    def test_display_scale_is_forwarded_when_requested(self) -> None:
+        with (
+            patch("tools.screen_mocks._runtime.pyxel.init") as init,
+            patch("tools.screen_mocks._runtime.pyxel.load"),
+            patch("tools.screen_mocks._runtime.pyxel.load_pal"),
+        ):
+            initialize_screen_mock("Scaled Mock", display_scale=4)
+
+        init.assert_called_once_with(
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+            title="Scaled Mock",
+            fps=FPS,
+            display_scale=4,
+        )
+
     def test_runner_returns_zero_after_success(self) -> None:
         factory = Mock()
 

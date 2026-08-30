@@ -63,6 +63,48 @@ class LocalizedWindowTextFactoryTest(unittest.TestCase):
             ),
         )
 
+    def test_japanese_factory_normalizes_ascii_added_by_screen_code(self) -> None:
+        wide_font = object()
+        narrow_font = object()
+        fonts = Mock(spec=FontResources)
+        fonts.font_for.side_effect = (wide_font, narrow_font)
+        fonts.baseline_offset_for.side_effect = (0, 3)
+        factory = LocalizedWindowTextFactory.from_language(
+            fonts,
+            Language.JAPANESE,
+        )
+
+        placement = factory.create("Language：SE 3", 4, 2)
+
+        self.assertEqual(placement.text, "Ｌａｎｇｕａｇｅ：ＳＥ　３")
+        self.assertIs(placement.font, wide_font)
+        self.assertEqual(
+            [
+                (span.start, span.end, span.font, span.text_y_offset)
+                for span in placement.font_spans
+            ],
+            [
+                (0, 8, narrow_font, 3),
+                (9, 13, narrow_font, 3),
+            ],
+        )
+
+    def test_japanese_factory_keeps_authored_fullwidth_on_wide_font(self) -> None:
+        wide_font = object()
+        narrow_font = object()
+        factory = LocalizedWindowTextFactory(
+            wide_font,
+            0,
+            normalize_ascii=True,
+            narrow_font=narrow_font,
+            narrow_baseline_offset=3,
+        )
+
+        placement = factory.create("ＳＴＲ", 4, 2)
+
+        self.assertIs(placement.font, wide_font)
+        self.assertEqual(placement.font_spans, ())
+
     def test_authored_fullwidth_text_uses_wide_font_style(self) -> None:
         language_font = object()
         wide_font = object()

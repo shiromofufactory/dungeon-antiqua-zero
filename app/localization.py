@@ -32,15 +32,18 @@ class LocalizedText(str):
     """Display text retaining whether wide glyphs were authored explicitly."""
 
     prefers_wide_font: bool
+    narrow_spans: tuple[tuple[int, int], ...]
 
     def __new__(
         cls,
         value: str,
         *,
         prefers_wide_font: bool = False,
+        narrow_spans: tuple[tuple[int, int], ...] = (),
     ) -> LocalizedText:
         instance = super().__new__(cls, value)
         instance.prefers_wide_font = prefers_wide_font
+        instance.narrow_spans = narrow_spans
         return instance
 
 
@@ -86,6 +89,46 @@ def ascii_to_fullwidth(text: str) -> str:
         position = match.end()
     parts.append(convert_literal(text[position:]))
     return "".join(parts)
+
+
+def ascii_source_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Return source ranges that should use the 6x8 Latin font."""
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    tag_positions: set[int] = set()
+    for match in _DISPLAY_TAG_PATTERN.finditer(text):
+        tag_positions.update(range(match.start(), match.end()))
+
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, character in enumerate(text):
+        is_ascii_source = (
+            index not in tag_positions
+            and (character == " " or "!" <= character <= "~")
+        )
+        if is_ascii_source and start is None:
+            start = index
+        elif not is_ascii_source and start is not None:
+            spans.append((start, index))
+            start = None
+    if start is not None:
+        spans.append((start, len(text)))
+    return tuple(spans)
+
+
+def normalize_ascii_display_text(
+    text: str,
+    *,
+    prefers_wide_font: bool = False,
+) -> LocalizedText:
+    """Normalize ASCII while preserving its 6x8-font source ranges."""
+
+    return LocalizedText(
+        ascii_to_fullwidth(text),
+        prefers_wide_font=prefers_wide_font,
+        narrow_spans=ascii_source_spans(text),
+    )
 
 
 def format_number(value: int) -> str:
@@ -148,8 +191,11 @@ class Localizer:
             self.language is Language.ENGLISH
             and _has_authored_wide_text(value)
         )
-        if self.language is Language.ENGLISH:
-            value = ascii_to_fullwidth(value)
+        if self.language in (Language.JAPANESE, Language.ENGLISH):
+            return normalize_ascii_display_text(
+                value,
+                prefers_wide_font=prefers_wide_font,
+            )
         return LocalizedText(
             value,
             prefers_wide_font=prefers_wide_font,

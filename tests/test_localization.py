@@ -77,6 +77,20 @@ class LocalizationTest(unittest.TestCase):
         self.assertEqual(localizer.value(record, "name"), "Sword +1")
         self.assertEqual(localizer.text(record, "name"), "Ｓｗｏｒｄ　＋１")
 
+    def test_japanese_display_text_normalizes_embedded_ascii(self) -> None:
+        localizer = Localizer(Language.JAPANESE)
+        record = {"text_ja": "Language：SE 3"}
+
+        self.assertEqual(localizer.value(record, "text"), "Language：SE 3")
+        self.assertEqual(
+            localizer.text(record, "text"),
+            "Ｌａｎｇｕａｇｅ：ＳＥ　３",
+        )
+        self.assertEqual(
+            localizer.text(record, "text").narrow_spans,
+            ((0, 8), (9, 13)),
+        )
+
     def test_authored_fullwidth_english_text_keeps_wide_font_intent(self) -> None:
         localizer = Localizer(Language.ENGLISH)
 
@@ -97,7 +111,7 @@ class LocalizationTest(unittest.TestCase):
 
         self.assertFalse(text.prefers_wide_font)
 
-    def test_non_english_display_text_is_not_fullwidth_normalized(self) -> None:
+    def test_chinese_display_text_is_not_fullwidth_normalized(self) -> None:
         localizer = Localizer(Language.SIMPLIFIED_CHINESE)
 
         self.assertEqual(

@@ -12,17 +12,25 @@ SCREEN_HEIGHT = 240
 FPS = 60
 
 
-def initialize_screen_mock(title: str) -> None:
+def initialize_screen_mock(
+    title: str,
+    *,
+    display_scale: int | None = None,
+) -> None:
     """Initialize Pyxel and load the common bank and palette resources."""
 
     if not isinstance(title, str) or not title:
         raise ValueError("title must be a non-empty string")
-    pyxel.init(
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
-        title=title,
-        fps=FPS,
-    )
+    if display_scale is not None and (
+        isinstance(display_scale, bool)
+        or not isinstance(display_scale, int)
+        or display_scale <= 0
+    ):
+        raise ValueError("display_scale must be a positive integer or None")
+    init_options = {"title": title, "fps": FPS}
+    if display_scale is not None:
+        init_options["display_scale"] = display_scale
+    pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT, **init_options)
     pyxel.load(str(APP_ROOT / "assets.pyxres"))
     pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
 

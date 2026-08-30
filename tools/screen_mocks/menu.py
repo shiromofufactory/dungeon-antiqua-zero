@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+
 import pyxel
 
 from tools._bootstrap import APP_ROOT
@@ -18,6 +21,7 @@ from tools.screen_mocks._runtime import (
     initialize_screen_mock,
 )
 from input import (
+    Direction,
     InputAction,
     InputDevice,
 )
@@ -33,7 +37,7 @@ from resources import (
     ImageResources,
 )
 from skill import SkillDataError
-from state import Difficulty, Language, SaveData, Settings
+from state import DisplayMode, Difficulty, Language, SaveData, Settings
 
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -77,6 +81,58 @@ MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
 )
+SETTINGS_TEXT_KEYS = (
+    "settings.language.label",
+    "settings.language.ja",
+    "settings.language.en",
+    "settings.language.zhcn",
+    "settings.se.label",
+    "settings.screen_size.label",
+    "settings.screen_size.fullscreen",
+    "settings.display.label",
+    "settings.display.pixel",
+    "settings.display.smooth",
+    "settings.return_title",
+    "settings.quit",
+    "settings.guide.language.0",
+    "settings.guide.language.1",
+    "settings.guide.se.0",
+    "settings.guide.se.1",
+    "settings.guide.screen_size.0",
+    "settings.guide.screen_size.1",
+    "settings.guide.display.0",
+    "settings.guide.display.1",
+    "settings.confirm.return_title",
+    "settings.confirm.quit",
+    "settings.yes",
+    "settings.no",
+)
+SETTINGS_ROWS = (
+    ("language", 2),
+    ("se", 5),
+    ("screen_size", 8),
+    ("display", 11),
+    ("return_title", 17),
+    ("quit", 20),
+)
+SETTINGS_GUIDE_KEYS = {
+    "language": (
+        "settings.guide.language.0",
+        "settings.guide.language.1",
+    ),
+    "se": ("settings.guide.se.0", "settings.guide.se.1"),
+    "screen_size": (
+        "settings.guide.screen_size.0",
+        "settings.guide.screen_size.1",
+    ),
+    "display": ("settings.guide.display.0", "settings.guide.display.1"),
+}
+LANGUAGE_SEQUENCE = (
+    Language.JAPANESE,
+    Language.ENGLISH,
+    Language.SIMPLIFIED_CHINESE,
+)
+DISPLAY_SEQUENCE = (DisplayMode.PIXEL, DisplayMode.SMOOTH)
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
 PARTY_WINDOW_GRID = (0, 0, 48, 60)
@@ -104,6 +160,20 @@ ALERT_CHANNEL = 1
 ALERT_SOUND_ID = 7
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
+SETTINGS_WINDOW_GRID = (4, 12, 56, 36)
+SETTINGS_LABEL_X = 4
+SETTINGS_VALUE_X = 30
+SETTINGS_CURSOR_X = 2
+SETTINGS_GUIDE_X = 4
+SETTINGS_GUIDE_Y = 26
+SETTINGS_GUIDE_ROW_HEIGHT = 3
+CONFIRMATION_WINDOW_GRID = (8, 22, 48, 16)
+CONFIRMATION_CURSOR_X = 4
+CONFIRMATION_YES_Y = 8
+CONFIRMATION_NO_Y = 11
+SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
+SE_PREVIEW_SOUND_ID = 9
+MENU_MOCK_SETTINGS_ENV = "DA0_MENU_MOCK_SETTINGS"
 
 
 class MenuMockDataError(RuntimeError):
@@ -144,6 +214,7 @@ def localized_menu_texts(
         *DIFFICULTY_TEXT_KEYS.values(),
         MENU_CLOSE_GUIDE_TEXT_KEY,
         *MENU_MEMBER_TEXT_KEYS,
+        *SETTINGS_TEXT_KEYS,
     )
     localized: dict[str, str] = {}
     for key in keys:
@@ -160,23 +231,66 @@ def localized_menu_texts(
 
 class MenuScreenMock:
     def __init__(self) -> None:
-        initialize_screen_mock("Dungeon Antiqua ZERO Menu Screen Mock")
+        self.settings = self._settings_from_environment()
+        initialize_screen_mock(
+            "Dungeon Antiqua ZERO Menu Screen Mock",
+            display_scale=(
+                None if self.settings.screen_scale == 5 else self.settings.screen_scale
+            ),
+        )
+        if self.settings.screen_scale == 5:
+            pyxel.fullscreen(True)
         self.input_reader = create_mock_input_reader()
         self.alert = MenuAlertEffect()
 
-        self.settings = Settings()
+        self._apply_se_volume()
+        if self.settings.display_mode is DisplayMode.SMOOTH:
+            self._apply_display_mode()
         self.save_data = SaveData()
-        self.party = load_mock_party(
-            load_mock_items(),
-            load_mock_skills(),
-        )
+        self.items = load_mock_items()
+        self.skills = load_mock_skills()
+        self.party = load_mock_party(self.items, self.skills)
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        self.fonts = FontResources()
+        self.faces = ImageResources().image(FACES_IMAGE_ID)
+        self.settings_window = None
+        self.settings_cursor: WindowCursor | None = None
+        self.confirmation_window = None
+        self.confirmation_cursor: WindowCursor | None = None
+        self.pending_settings_action: str | None = None
+        self._build_main_windows()
+
+        pyxel.run(self.update, self.draw)
+
+    @staticmethod
+    def _settings_from_environment() -> Settings:
+        serialized = os.environ.get(MENU_MOCK_SETTINGS_ENV)
+        if serialized is None:
+            return Settings()
+        try:
+            data = json.loads(serialized)
+            return Settings.from_dict(data)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            os.environ.pop(MENU_MOCK_SETTINGS_ENV, None)
+            return Settings()
+
+    @staticmethod
+    def _select_cursor_key(cursor: WindowCursor, key: object) -> None:
+        """Move a newly built vertical cursor to one existing key."""
+
+        if cursor.selected_key == key:
+            return
+        for _target in cursor.targets:
+            cursor.move_down()
+            if cursor.selected_key == key:
+                return
+        raise ValueError(f"cursor key is not registered: {key!r}")
+
+    def _build_main_windows(self, selected_command: str = "item") -> None:
         localized = localized_menu_texts(
             self.texts,
             self.settings.language,
         )
-        self.fonts = FontResources()
-        self.faces = ImageResources().image(FACES_IMAGE_ID)
         localized_texts = LocalizedWindowTextFactory.from_language(
             self.fonts,
             self.settings.language,
@@ -213,6 +327,8 @@ class MenuScreenMock:
                 for index, (key, _) in enumerate(MENU_COMMANDS)
             )
         )
+        if selected_command != MENU_COMMANDS[0][0]:
+            self._select_cursor_key(self.command_cursor, selected_command)
         self.party_cursor: WindowCursor | None = None
         self.sort_source_index: int | None = None
         self.sort_source_cursor: WindowCursor | None = None
@@ -283,8 +399,6 @@ class MenuScreenMock:
             self.info_window,
             self.close_guide_window,
         ]
-
-        pyxel.run(self.update, self.draw)
 
     def _party_window_texts(
         self,
@@ -379,9 +493,7 @@ class MenuScreenMock:
 
     def _start_sort(self) -> None:
         self.command_cursor.active = False
-        self.party_cursor = self.party_window.set_cursor(
-            self._sort_cursor_targets()
-        )
+        self.party_cursor = self.party_window.set_cursor(self._sort_cursor_targets())
 
     def _finish_sort(self) -> None:
         self._clear_sort_source()
@@ -394,18 +506,16 @@ class MenuScreenMock:
         self.sort_source_cursor = None
 
     def _can_change_formation(self, member: Member) -> bool:
-        return not member.is_front_row or sum(
-            party_member.is_front_row for party_member in self.party
-        ) > 1
+        return (
+            not member.is_front_row
+            or sum(party_member.is_front_row for party_member in self.party) > 1
+        )
 
     def _confirm_sort_member(self) -> None:
         if self.party_cursor is None:
             return
         target_index = self.party_cursor.selected_key
-        if (
-            not isinstance(target_index, int)
-            or not 0 <= target_index < len(self.party)
-        ):
+        if not isinstance(target_index, int) or not 0 <= target_index < len(self.party):
             return
 
         if self.sort_source_index is None:
@@ -452,11 +562,233 @@ class MenuScreenMock:
                 font=placement.font,
                 shadow_color=placement.shadow_color,
                 baseline_offset=placement.baseline_offset,
+                font_spans=placement.font_spans,
             )
+
+    def _settings_value(self, key: str) -> str:
+        if key == "language":
+            return self.localized[f"settings.language.{self.settings.language.value}"]
+        if key == "se":
+            return format_number(self.settings.se_volume)
+        if key == "screen_size":
+            if self.settings.screen_scale == 5:
+                return self.localized["settings.screen_size.fullscreen"]
+            return (
+                f"{format_number(self.settings.screen_scale * 256)}"
+                f"×{format_number(self.settings.screen_scale * 240)}"
+            )
+        if key == "display":
+            return self.localized[
+                f"settings.display.{self.settings.display_mode.value}"
+            ]
+        raise ValueError(f"settings key has no value: {key}")
+
+    def _build_settings_window(self, selected_key: str = "language") -> None:
+        texts: list[WindowText] = []
+        label_keys = {
+            "language": "settings.language.label",
+            "se": "settings.se.label",
+            "screen_size": "settings.screen_size.label",
+            "display": "settings.display.label",
+        }
+        action_keys = {
+            "return_title": "settings.return_title",
+            "quit": "settings.quit",
+        }
+        for key, y in SETTINGS_ROWS:
+            if key in label_keys:
+                texts.extend(
+                    (
+                        self.localized_texts.create(
+                            self.localized[label_keys[key]],
+                            SETTINGS_LABEL_X,
+                            y,
+                        ),
+                        self.localized_texts.create("：", 28, y),
+                        self.localized_texts.create(
+                            self._settings_value(key),
+                            SETTINGS_VALUE_X,
+                            y,
+                        ),
+                    )
+                )
+            else:
+                texts.append(
+                    self.localized_texts.create(
+                        self.localized[action_keys[key]],
+                        SETTINGS_LABEL_X,
+                        y,
+                    )
+                )
+        guide_keys = SETTINGS_GUIDE_KEYS.get(selected_key, ())
+        if selected_key == "language" and self.settings.language is Language.ENGLISH:
+            guide_keys = guide_keys[:1]
+        for index, text_key in enumerate(guide_keys):
+            texts.append(
+                self.localized_texts.create(
+                    self.localized[text_key],
+                    SETTINGS_GUIDE_X,
+                    SETTINGS_GUIDE_Y + index * SETTINGS_GUIDE_ROW_HEIGHT,
+                )
+            )
+
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        self.settings_window = windows.create(*SETTINGS_WINDOW_GRID, texts)
+        self.settings_cursor = self.settings_window.set_cursor(
+            tuple(
+                CursorTarget(SETTINGS_CURSOR_X, y, key=key) for key, y in SETTINGS_ROWS
+            )
+        )
+        self._select_cursor_key(self.settings_cursor, selected_key)
+
+    def _start_settings(self) -> None:
+        self.command_cursor.active = False
+        self._build_settings_window()
+
+    def _finish_settings(self) -> None:
+        self.settings_window = None
+        self.settings_cursor = None
+        self.command_cursor.active = True
+
+    def _change_setting(self, distance: int) -> None:
+        if distance not in (-1, 1) or self.settings_cursor is None:
+            raise ValueError("settings distance must be -1 or 1")
+        key = self.settings_cursor.selected_key
+        if key == "language":
+            index = LANGUAGE_SEQUENCE.index(self.settings.language)
+            language = LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
+            self.settings = self.settings.with_language(language)
+            self._build_main_windows(selected_command="config")
+            self.command_cursor.active = False
+        elif key == "se":
+            volume = (self.settings.se_volume + distance) % 5
+            self.settings = self.settings.with_se_volume(volume)
+            self._apply_se_volume()
+            pyxel.play(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
+        elif key == "screen_size":
+            scale = (self.settings.screen_scale - 1 + distance) % 5 + 1
+            self.settings = self.settings.with_screen_scale(scale)
+        elif key == "display":
+            index = DISPLAY_SEQUENCE.index(self.settings.display_mode)
+            mode = DISPLAY_SEQUENCE[(index + distance) % len(DISPLAY_SEQUENCE)]
+            self.settings = self.settings.with_display_mode(mode)
+            self._apply_display_mode()
+        else:
+            return
+        self._build_settings_window(selected_key=key)
+
+    def _apply_se_volume(self) -> None:
+        if len(pyxel.channels) > ALERT_CHANNEL:
+            pyxel.channels[ALERT_CHANNEL].gain = SE_VOLUME_GAINS[
+                self.settings.se_volume
+            ]
+
+    def _apply_display_mode(self) -> None:
+        pyxel.screen_mode(1 if self.settings.display_mode is DisplayMode.SMOOTH else 0)
+
+    def _start_confirmation(self, action: str) -> None:
+        if action not in ("return_title", "quit"):
+            raise ValueError(f"unsupported settings action: {action}")
+        if self.settings_cursor is None:
+            return
+        self.settings_cursor.active = False
+        self.pending_settings_action = action
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        confirmation_key = f"settings.confirm.{action}"
+        confirmation_texts = tuple(
+            self.localized_texts.create(
+                line,
+                4,
+                2 + index * 3,
+            )
+            for index, line in enumerate(self.localized[confirmation_key].splitlines())
+        )
+        self.confirmation_window = windows.create(
+            *CONFIRMATION_WINDOW_GRID,
+            (
+                *confirmation_texts,
+                self.localized_texts.create(
+                    self.localized["settings.yes"],
+                    6,
+                    CONFIRMATION_YES_Y,
+                ),
+                self.localized_texts.create(
+                    self.localized["settings.no"],
+                    6,
+                    CONFIRMATION_NO_Y,
+                ),
+            ),
+        )
+        self.confirmation_cursor = self.confirmation_window.set_cursor(
+            (
+                CursorTarget(
+                    CONFIRMATION_CURSOR_X,
+                    CONFIRMATION_YES_Y,
+                    key="yes",
+                ),
+                CursorTarget(
+                    CONFIRMATION_CURSOR_X,
+                    CONFIRMATION_NO_Y,
+                    key="no",
+                ),
+            )
+        )
+
+    def _cancel_confirmation(self) -> None:
+        self.confirmation_window = None
+        self.confirmation_cursor = None
+        self.pending_settings_action = None
+        if self.settings_cursor is not None:
+            self.settings_cursor.active = True
+
+    def _restart_mock(self) -> None:
+        os.environ[MENU_MOCK_SETTINGS_ENV] = json.dumps(
+            self.settings.to_dict(),
+            ensure_ascii=True,
+        )
+        os.environ.pop(pyxel.WINDOW_STATE_ENV, None)
+        pyxel.reset()
 
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+
+        if self.confirmation_cursor is not None:
+            if input_state.cancel.triggered:
+                self._cancel_confirmation()
+                return
+            if input_state.confirm.triggered:
+                if self.confirmation_cursor.selected_key == "yes":
+                    action = self.pending_settings_action
+                    if action == "return_title":
+                        self._restart_mock()
+                    elif action == "quit":
+                        pyxel.quit()
+                    return
+                self._cancel_confirmation()
+                return
+            self.confirmation_window.update(input_state.navigation)
+            return
+
+        if self.settings_cursor is not None:
+            if input_state.cancel.triggered:
+                self._finish_settings()
+                return
+            if input_state.navigation in (Direction.LEFT, Direction.RIGHT):
+                self._change_setting(
+                    -1 if input_state.navigation is Direction.LEFT else 1
+                )
+                return
+            if input_state.confirm.triggered:
+                key = self.settings_cursor.selected_key
+                if key in ("return_title", "quit"):
+                    self._start_confirmation(key)
+                return
+            if self.settings_window.update(input_state.navigation):
+                self._build_settings_window(
+                    selected_key=self.settings_cursor.selected_key
+                )
+            return
 
         if self.party_cursor is not None:
             if input_state.cancel.triggered:
@@ -473,15 +805,19 @@ class MenuScreenMock:
         if input_state.cancel.triggered:
             pyxel.quit()
             return
+        if input_state.confirm.triggered and self.command_cursor.selected_key == "sort":
+            self._start_sort()
+            return
         if (
             input_state.confirm.triggered
-            and self.command_cursor.selected_key == "sort"
+            and self.command_cursor.selected_key == "config"
         ):
-            self._start_sort()
+            self._start_settings()
             return
         self.command_window.update(input_state.navigation)
 
     def draw(self) -> None:
+        pyxel.cls(0)
         pyxel.camera(self.alert.camera_x, 0)
         try:
             self.party_window.draw()
@@ -504,6 +840,10 @@ class MenuScreenMock:
                 self.party_cursor.draw()
             for window in self.windows[1:]:
                 window.draw()
+            if self.settings_window is not None:
+                self.settings_window.draw()
+            if self.confirmation_window is not None:
+                self.confirmation_window.draw()
         finally:
             pyxel.camera()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import Mock, call, patch
 
@@ -16,6 +17,7 @@ from tools.screen_mocks.menu import (
     FORMATION_ARROW_WIDTH,
     FORMATION_ARROW_Y,
     MENU_COMMANDS,
+    MENU_MOCK_SETTINGS_ENV,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
     PARTY_FACE_Y,
@@ -25,6 +27,11 @@ from tools.screen_mocks.menu import (
     PARTY_RECOVERY_TEXT_X,
     PARTY_TEXT_X,
     PARTY_WINDOW_GRID,
+    SE_PREVIEW_SOUND_ID,
+    SETTINGS_GUIDE_Y,
+    SETTINGS_LABEL_X,
+    SETTINGS_VALUE_X,
+    SETTINGS_WINDOW_GRID,
     SORT_SOURCE_CURSOR_X_OFFSET,
     MenuAlertEffect,
     MenuScreenMock,
@@ -34,7 +41,7 @@ from tools.screen_mocks.menu import (
 )
 from input import Direction, InputButton, InputState
 from member import FormationRow
-from state import Language
+from state import DisplayMode, Language, SaveData, Settings
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
@@ -78,7 +85,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock = MenuScreenMock()
 
         initialize.assert_called_once_with(
-            "Dungeon Antiqua ZERO Menu Screen Mock"
+            "Dungeon Antiqua ZERO Menu Screen Mock",
+            display_scale=3,
         )
         self.assertIs(mock.input_reader, create_input_reader.return_value)
         self.assertIsInstance(mock.alert, MenuAlertEffect)
@@ -88,6 +96,7 @@ class MenuScreenMockTest(unittest.TestCase):
             fonts.font_for.call_args_list,
             [
                 call(Language.JAPANESE),
+                call(Language.ENGLISH),
                 call(Language.JAPANESE),
             ],
         )
@@ -161,6 +170,11 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.party_cursor)
         self.assertIsNone(mock.sort_source_index)
         self.assertIsNone(mock.sort_source_cursor)
+        self.assertIsNone(mock.settings_window)
+        self.assertIsNone(mock.settings_cursor)
+        self.assertIsNone(mock.confirmation_window)
+        self.assertIsNone(mock.confirmation_cursor)
+        self.assertIsNone(mock.pending_settings_action)
         self.assertIs(mock.party_window, party_window)
         self.assertIs(mock.info_window, info_window)
         self.assertIs(mock.close_guide_window, close_guide_window)
@@ -225,8 +239,115 @@ class MenuScreenMockTest(unittest.TestCase):
             chinese["menu.close_guide"],
             "%CANCEL%：关闭",
         )
+        self.assertEqual(japanese["settings.se.label"], "ＳＥおんりょう")
+        self.assertEqual(
+            japanese["settings.guide.language.1"].narrow_spans,
+            ((0, 33),),
+        )
+        self.assertEqual(english["settings.display.smooth"], "Ｓｍｏｏｔｈｅｄ")
+        self.assertEqual(chinese["settings.return_title"], "返回标题界面")
         self.assertEqual(set(japanese), set(english))
         self.assertEqual(set(japanese), set(chinese))
+
+    def test_restart_settings_are_restored_from_environment(self) -> None:
+        settings = Settings(
+            language=Language.SIMPLIFIED_CHINESE,
+            se_volume=1,
+            screen_scale=4,
+            display_mode=DisplayMode.SMOOTH,
+        )
+        with patch.dict(
+            "tools.screen_mocks.menu.os.environ",
+            {MENU_MOCK_SETTINGS_ENV: json.dumps(settings.to_dict())},
+            clear=True,
+        ):
+            restored = MenuScreenMock._settings_from_environment()
+
+        self.assertEqual(restored, settings)
+
+    @patch("tools.screen_mocks.menu.WindowFactory")
+    def test_builds_da2_settings_rows_and_language_guide(
+        self,
+        window_factory_class: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings()
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.localized = localized_menu_texts(
+            mock.texts,
+            Language.JAPANESE,
+        )
+        mock.fonts = Mock()
+        mock.localized_texts = Mock()
+        mock.localized_texts.create.side_effect = (
+            lambda text, x, y, **_kwargs: Mock(text=text, x=x, y=y)
+        )
+        factory = window_factory_class.return_value
+        window = factory.create.return_value
+        cursor = window.set_cursor.return_value
+        cursor.selected_key = "language"
+
+        mock._build_settings_window()
+
+        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 3, 56, 45))
+        self.assertEqual(factory.create.call_args.args[:4], SETTINGS_WINDOW_GRID)
+        placements = {
+            (text.x, text.y): text.text for text in factory.create.call_args.args[4]
+        }
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 2)], "Ｌａｎｇｕａｇｅ")
+        self.assertEqual(placements[(28, 2)], "：")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 2)], "にほんご")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 5)], "ＳＥおんりょう")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 5)], "３")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 8)], "７６８×７２０")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 11)], "ピクセル")
+        self.assertEqual(
+            placements[(SETTINGS_LABEL_X, 17)],
+            "タイトルがめんへ　もどる",
+        )
+        self.assertEqual(
+            placements[(SETTINGS_LABEL_X, 20)],
+            "ゲームを　しゅうりょうする",
+        )
+        self.assertEqual(
+            placements[(SETTINGS_LABEL_X, SETTINGS_GUIDE_Y)],
+            "げんごを　きりかえられます",
+        )
+
+    @patch("tools.screen_mocks.menu.WindowFactory")
+    def test_english_return_confirmation_is_split_across_two_lines(
+        self,
+        window_factory_class: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings(language=Language.ENGLISH)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.localized = localized_menu_texts(
+            mock.texts,
+            Language.ENGLISH,
+        )
+        mock.fonts = Mock()
+        mock.localized_texts = Mock()
+        mock.localized_texts.create.side_effect = (
+            lambda text, x, y, **_kwargs: Mock(text=text, x=x, y=y)
+        )
+        mock.settings_cursor = Mock(active=True)
+        factory = window_factory_class.return_value
+        factory.create.return_value.set_cursor.return_value = Mock()
+
+        mock._start_confirmation("return_title")
+
+        placements = [
+            (text.text, text.x, text.y)
+            for text in factory.create.call_args.args[4]
+        ]
+        self.assertEqual(
+            placements[:2],
+            [
+                ("Ｒｅｔｕｒｎ　ｔｏ　ｔｉｔｌｅ", 4, 4),
+                ("ｓｃｒｅｅｎ，　ＯＫ？", 4, 7),
+            ],
+        )
 
     def test_update_passes_logical_navigation_to_command_window(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
@@ -239,6 +360,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.command_cursor = Mock(selected_key="item")
         mock.party_cursor = None
         mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
 
         mock.update()
 
@@ -300,6 +423,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.command_cursor = Mock(selected_key="item")
         mock.party_cursor = None
         mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
 
         with patch("tools.screen_mocks.menu.pyxel.quit") as quit_game:
             mock.update()
@@ -307,12 +432,14 @@ class MenuScreenMockTest(unittest.TestCase):
         quit_game.assert_called_once_with()
         mock.command_window.update.assert_not_called()
 
+    @patch("tools.screen_mocks.menu.pyxel.cls")
     @patch("tools.screen_mocks.menu.pyxel.camera")
     @patch("tools.screen_mocks.menu.pyxel.blt")
     def test_draws_windows_and_offsets_back_row_faces(
         self,
         blt: Mock,
         camera: Mock,
+        clear_screen: Mock,
     ) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         party_window = Mock()
@@ -322,6 +449,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.party_cursor = None
         mock.sort_source_cursor = None
         mock.alert = Mock(camera_x=0)
+        mock.settings_window = None
+        mock.confirmation_window = None
         mock.faces = object()
         front = Mock(
             is_front_row=True,
@@ -337,6 +466,7 @@ class MenuScreenMockTest(unittest.TestCase):
 
         party_window.draw.assert_called_once_with()
         side_window.draw.assert_called_once_with()
+        clear_screen.assert_called_once_with(0)
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
         self.assertEqual(
             blt.call_args_list,
@@ -379,6 +509,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.sort_source_index = None
         mock.sort_source_cursor = None
         mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
 
         mock.update()
 
@@ -487,6 +619,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.sort_source_index = 2
         mock.sort_source_cursor = Mock()
         mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
 
         mock.update()
 
@@ -599,6 +733,170 @@ class MenuScreenMockTest(unittest.TestCase):
         mock._draw_formation_arrow()
 
         blt.assert_not_called()
+
+    def test_confirming_settings_command_opens_settings_window(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="config", active=True)
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock._start_settings = Mock()
+
+        mock.update()
+
+        mock._start_settings.assert_called_once_with()
+        mock.command_window.update.assert_not_called()
+
+    def test_language_setting_cycles_like_da2_and_rebuilds_windows(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings()
+        mock.settings_cursor = Mock(selected_key="language")
+        mock.command_cursor = Mock(active=True)
+        mock._build_main_windows = Mock()
+        mock._build_settings_window = Mock()
+
+        mock._change_setting(-1)
+
+        self.assertIs(mock.settings.language, Language.ENGLISH)
+        mock._build_main_windows.assert_called_once_with(
+            selected_command="config"
+        )
+        self.assertFalse(mock.command_cursor.active)
+        mock._build_settings_window.assert_called_once_with(
+            selected_key="language"
+        )
+
+    @patch("tools.screen_mocks.menu.pyxel.play")
+    def test_se_setting_wraps_and_plays_da2_preview_sound(self, play: Mock) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings(se_volume=4)
+        mock.settings_cursor = Mock(selected_key="se")
+        mock._apply_se_volume = Mock()
+        mock._build_settings_window = Mock()
+
+        mock._change_setting(1)
+
+        self.assertEqual(mock.settings.se_volume, 0)
+        mock._apply_se_volume.assert_called_once_with()
+        play.assert_called_once_with(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
+        mock._build_settings_window.assert_called_once_with(selected_key="se")
+
+    def test_screen_size_and_display_settings_wrap_in_both_directions(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings(screen_scale=1)
+        mock.settings_cursor = Mock(selected_key="screen_size")
+        mock._build_settings_window = Mock()
+
+        mock._change_setting(-1)
+
+        self.assertEqual(mock.settings.screen_scale, 5)
+
+        mock.settings_cursor.selected_key = "display"
+        mock._apply_display_mode = Mock()
+        mock._change_setting(1)
+
+        self.assertIs(mock.settings.display_mode, DisplayMode.SMOOTH)
+        mock._apply_display_mode.assert_called_once_with()
+
+    @patch("tools.screen_mocks.menu.pyxel.reset")
+    def test_return_to_title_restarts_mock_with_settings(
+        self,
+        reset: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings(
+            language=Language.ENGLISH,
+            screen_scale=5,
+        )
+        with patch.dict(
+            "tools.screen_mocks.menu.os.environ",
+            {"PYXEL_WINDOW_STATE": "old"},
+            clear=True,
+        ) as environment:
+            with patch(
+                "tools.screen_mocks.menu.pyxel.WINDOW_STATE_ENV",
+                "PYXEL_WINDOW_STATE",
+            ):
+                mock._restart_mock()
+
+            self.assertNotIn("PYXEL_WINDOW_STATE", environment)
+            self.assertEqual(
+                json.loads(environment[MENU_MOCK_SETTINGS_ENV]),
+                mock.settings.to_dict(),
+            )
+        reset.assert_called_once_with()
+
+    @patch("tools.screen_mocks.menu.pyxel.quit")
+    def test_confirmed_quit_exits_the_mock(self, quit_game: Mock) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.confirmation_cursor = Mock(selected_key="yes")
+        mock.pending_settings_action = "quit"
+
+        mock.update()
+
+        quit_game.assert_called_once_with()
+
+    def test_confirmed_return_to_title_resets_the_mock(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.confirmation_cursor = Mock(selected_key="yes")
+        mock.pending_settings_action = "return_title"
+        mock._restart_mock = Mock()
+
+        mock.update()
+
+        mock._restart_mock.assert_called_once_with()
+
+    def test_cancel_closes_settings_and_reactivates_command_cursor(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            cancel=InputButton(triggered=True, held=True)
+        )
+        mock.command_cursor = Mock(active=False)
+        mock.settings_window = Mock()
+        mock.settings_cursor = Mock()
+        mock.confirmation_cursor = None
+
+        mock.update()
+
+        self.assertIsNone(mock.settings_window)
+        self.assertIsNone(mock.settings_cursor)
+        self.assertTrue(mock.command_cursor.active)
+
+    def test_declining_confirmation_returns_to_settings(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.confirmation_cursor = Mock(selected_key="no")
+        mock.settings_cursor = Mock(active=False)
+        mock.confirmation_window = Mock()
+        mock.pending_settings_action = "return_title"
+
+        mock.update()
+
+        self.assertIsNone(mock.confirmation_cursor)
+        self.assertIsNone(mock.pending_settings_action)
+        self.assertTrue(mock.settings_cursor.active)
 
 
 if __name__ == "__main__":

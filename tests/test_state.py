@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.state import (
+    DisplayMode,
     Difficulty,
     Language,
     SaveData,
@@ -19,7 +20,15 @@ class SettingsTest(unittest.TestCase):
     def test_language_round_trips_through_json_compatible_data(self) -> None:
         settings = Settings(language=Language.SIMPLIFIED_CHINESE)
 
-        self.assertEqual(settings.to_dict(), {"language": "zhcn"})
+        self.assertEqual(
+            settings.to_dict(),
+            {
+                "language": "zhcn",
+                "se_volume": 3,
+                "screen_scale": 3,
+                "display_mode": "pixel",
+            },
+        )
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
 
     def test_language_change_returns_a_new_settings_snapshot(self) -> None:
@@ -37,6 +46,31 @@ class SettingsTest(unittest.TestCase):
     def test_settings_require_a_language_value(self) -> None:
         with self.assertRaises(TypeError):
             Settings(language="ja")  # type: ignore[arg-type]
+
+    def test_da2_desktop_settings_round_trip(self) -> None:
+        settings = Settings(
+            se_volume=4,
+            screen_scale=5,
+            display_mode=DisplayMode.SMOOTH,
+        )
+
+        self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
+        self.assertEqual(settings.with_se_volume(0).se_volume, 0)
+        self.assertEqual(settings.with_screen_scale(1).screen_scale, 1)
+        self.assertIs(
+            settings.with_display_mode(DisplayMode.PIXEL).display_mode,
+            DisplayMode.PIXEL,
+        )
+
+    def test_invalid_da2_desktop_settings_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            Settings(se_volume=5)
+        with self.assertRaises(ValueError):
+            Settings(screen_scale=0)
+        with self.assertRaises(TypeError):
+            Settings(display_mode="pixel")  # type: ignore[arg-type]
+        with self.assertRaises(SettingsDataError):
+            Settings.from_dict({"display_mode": "crt"})
 
 
 class SaveDataTest(unittest.TestCase):

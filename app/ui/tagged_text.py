@@ -24,6 +24,26 @@ class TextIcon:
     v: int
 
 
+@dataclass(frozen=True)
+class TextFontSpan:
+    """Apply one font and baseline offset to a source text range."""
+
+    start: int
+    end: int
+    font: Any
+    text_y_offset: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.start, int) or not isinstance(self.end, int):
+            raise TypeError("font span positions must be integers")
+        if self.start < 0 or self.end <= self.start:
+            raise ValueError("font span must be a non-empty forward range")
+        if self.font is None:
+            raise ValueError("font span font must not be None")
+        if not isinstance(self.text_y_offset, int):
+            raise TypeError("font span text_y_offset must be an integer")
+
+
 _ICON_COORDINATES = {
     "FIRE": (0, 16),
     "FREEZE": (8, 16),
@@ -94,16 +114,32 @@ def split_tagged_text(text: str) -> tuple[str | TextIcon, ...]:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
 
-    parts: list[str | TextIcon] = []
+    return tuple(
+        part for part, _start, _end in _split_tagged_text_with_offsets(text)
+    )
+
+
+def _split_tagged_text_with_offsets(
+    text: str,
+) -> tuple[tuple[str | TextIcon, int, int], ...]:
+    parts: list[tuple[str | TextIcon, int, int]] = []
     position = 0
     for match in _TAG_PATTERN.finditer(text):
         icon = TEXT_ICONS.get(match.group())
         if icon is None:
             continue
-        _append_literal(parts, text[position : match.start()])
-        parts.append(icon)
+        if position < match.start():
+            parts.append(
+                (
+                    text[position : match.start()],
+                    position,
+                    match.start(),
+                )
+            )
+        parts.append((icon, match.start(), match.end()))
         position = match.end()
-    _append_literal(parts, text[position:])
+    if position < len(text):
+        parts.append((text[position:], position, len(text)))
     return tuple(parts)
 
 
@@ -116,13 +152,13 @@ def draw_tagged_text(
     *,
     shadow_color: int | None = 0,
     text_y_offset: int = 0,
+    font_spans: tuple[TextFontSpan, ...] = (),
 ) -> None:
     """Draw text and icons, vertically offsetting only text glyphs."""
 
     cursor_x = x
-    text_y = y + text_y_offset
-    parts = split_tagged_text(text)
-    for index, part in enumerate(parts):
+    parts = _split_tagged_text_with_offsets(text)
+    for part_index, (part, start, end) in enumerate(parts):
         if isinstance(part, TextIcon):
             pyxel.blt(
                 cursor_x,
@@ -137,20 +173,49 @@ def draw_tagged_text(
             cursor_x += ICON_SIZE
             continue
 
-        if shadow_color is not None:
-            pyxel.text(cursor_x, text_y + 1, part, shadow_color, font)
-        pyxel.text(cursor_x, text_y, part, color, font)
-        if index < len(parts) - 1:
-            cursor_x += _text_width(part, font)
+        styled_runs = _styled_text_runs(
+            text,
+            start,
+            end,
+            font,
+            text_y_offset,
+            font_spans,
+        )
+        for run_index, (run, run_font, run_y_offset) in enumerate(styled_runs):
+            text_y = y + run_y_offset
+            if shadow_color is not None:
+                pyxel.text(cursor_x, text_y + 1, run, shadow_color, run_font)
+            pyxel.text(cursor_x, text_y, run, color, run_font)
+            if run_index < len(styled_runs) - 1 or part_index < len(parts) - 1:
+                cursor_x += _text_width(run, run_font)
 
 
-def _append_literal(parts: list[str | TextIcon], text: str) -> None:
-    if not text:
-        return
-    if parts and isinstance(parts[-1], str):
-        parts[-1] += text
-    else:
-        parts.append(text)
+def _styled_text_runs(
+    text: str,
+    start: int,
+    end: int,
+    default_font: Any | None,
+    default_y_offset: int,
+    font_spans: tuple[TextFontSpan, ...],
+) -> tuple[tuple[str, Any | None, int], ...]:
+    runs: list[tuple[str, Any | None, int]] = []
+    run_start = start
+    run_style: tuple[Any | None, int] | None = None
+    for index in range(start, end):
+        style = (default_font, default_y_offset)
+        for span in font_spans:
+            if span.start <= index < span.end:
+                style = (span.font, span.text_y_offset)
+                break
+        if run_style is None:
+            run_style = style
+        elif style != run_style:
+            runs.append((text[run_start:index], *run_style))
+            run_start = index
+            run_style = style
+    if run_style is not None:
+        runs.append((text[run_start:end], *run_style))
+    return tuple(runs)
 
 
 def _text_width(text: str, font: Any | None) -> int:

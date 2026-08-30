@@ -8,6 +8,7 @@ from app.ui.tagged_text import (
     ICON_COLKEY,
     ICON_SIZE,
     TEXT_ICONS,
+    TextFontSpan,
     TextIcon,
     draw_tagged_text,
     split_tagged_text,
@@ -180,6 +181,29 @@ class TaggedTextTest(unittest.TestCase):
 
         self.assertEqual(blt.call_args.args[1], 23)
         self.assertEqual(text.call_args.args, (18, 23, "X", 5, font))
+
+    def test_font_span_draws_ascii_origin_with_narrow_font(self) -> None:
+        wide_font = StubFont()
+        narrow_font = StubFont()
+
+        with patch("app.ui.tagged_text.pyxel.text") as text:
+            draw_tagged_text(
+                10,
+                20,
+                "ＳＥおんりょう",
+                5,
+                wide_font,
+                shadow_color=None,
+                font_spans=(TextFontSpan(0, 2, narrow_font, 3),),
+            )
+
+        self.assertEqual(
+            [call.args for call in text.call_args_list],
+            [
+                (10, 23, "ＳＥ", 5, narrow_font),
+                (22, 20, "おんりょう", 5, wide_font),
+            ],
+        )
 
     def test_icon_value_is_a_frozen_description(self) -> None:
         self.assertEqual(

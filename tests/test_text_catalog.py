@@ -36,7 +36,7 @@ class TextCatalogTest(unittest.TestCase):
                 Localizer(Language.JAPANESE),
                 default="?",
             ),
-            "?",
+            "？",
         )
 
     def test_english_default_is_normalized_for_display(self) -> None:

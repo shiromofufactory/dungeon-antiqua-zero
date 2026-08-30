@@ -22,6 +22,13 @@ class Difficulty(StrEnum):
     HARD = "hard"
 
 
+class DisplayMode(StrEnum):
+    """Stable desktop rendering styles used by Pyxel."""
+
+    PIXEL = "pixel"
+    SMOOTH = "smooth"
+
+
 class SettingsDataError(ValueError):
     """Raised when persisted settings cannot be interpreted safely."""
 
@@ -31,15 +38,39 @@ class Settings:
     """Device and player preferences stored separately from game progress."""
 
     language: Language = Language.JAPANESE
+    se_volume: int = 3
+    screen_scale: int = 3
+    display_mode: DisplayMode = DisplayMode.PIXEL
 
     def __post_init__(self) -> None:
         if not isinstance(self.language, Language):
             raise TypeError("language must be a Language")
+        if isinstance(self.se_volume, bool) or not isinstance(
+            self.se_volume,
+            int,
+        ):
+            raise TypeError("se_volume must be an integer")
+        if not 0 <= self.se_volume <= 4:
+            raise ValueError("se_volume must be from 0 to 4")
+        if isinstance(self.screen_scale, bool) or not isinstance(
+            self.screen_scale,
+            int,
+        ):
+            raise TypeError("screen_scale must be an integer")
+        if not 1 <= self.screen_scale <= 5:
+            raise ValueError("screen_scale must be from 1 to 5")
+        if not isinstance(self.display_mode, DisplayMode):
+            raise TypeError("display_mode must be a DisplayMode")
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON-compatible representation of these settings."""
 
-        return {"language": self.language.value}
+        return {
+            "language": self.language.value,
+            "se_volume": self.se_volume,
+            "screen_scale": self.screen_scale,
+            "display_mode": self.display_mode.value,
+        }
 
     def with_language(self, language: Language) -> Settings:
         """Return updated settings without mutating the active snapshot."""
@@ -48,21 +79,58 @@ class Settings:
             raise TypeError("language must be a Language")
         return replace(self, language=language)
 
+    def with_se_volume(self, volume: int) -> Settings:
+        """Return updated settings after validating the DA2 volume range."""
+
+        return replace(self, se_volume=volume)
+
+    def with_screen_scale(self, scale: int) -> Settings:
+        """Return updated settings after validating the desktop scale."""
+
+        return replace(self, screen_scale=scale)
+
+    def with_display_mode(self, mode: DisplayMode) -> Settings:
+        """Return updated settings for the desktop rendering style."""
+
+        if not isinstance(mode, DisplayMode):
+            raise TypeError("mode must be a DisplayMode")
+        return replace(self, display_mode=mode)
+
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Settings:
-        """Build settings from persisted data, defaulting a missing language to ja."""
+        """Build settings from persisted data with DA2-compatible defaults."""
 
         if not isinstance(data, Mapping):
             raise SettingsDataError("settings must be an object")
 
-        value = data.get("language", Language.JAPANESE.value)
-        if not isinstance(value, str):
+        language_value = data.get("language", Language.JAPANESE.value)
+        if not isinstance(language_value, str):
             raise SettingsDataError("settings.language must be a string")
         try:
-            language = Language(value)
+            language = Language(language_value)
         except ValueError as error:
-            raise SettingsDataError(f"unsupported language: {value}") from error
-        return cls(language=language)
+            raise SettingsDataError(
+                f"unsupported language: {language_value}"
+            ) from error
+
+        display_value = data.get("display_mode", DisplayMode.PIXEL.value)
+        if not isinstance(display_value, str):
+            raise SettingsDataError("settings.display_mode must be a string")
+        try:
+            display_mode = DisplayMode(display_value)
+        except ValueError as error:
+            raise SettingsDataError(
+                f"unsupported display mode: {display_value}"
+            ) from error
+        try:
+            return cls(
+                language=language,
+                se_volume=data.get("se_volume", 3),
+                screen_scale=data.get("screen_scale", 3),
+                display_mode=display_mode,
+            )
+        except (TypeError, ValueError) as error:
+            raise SettingsDataError(str(error)) from error
 
 
 @dataclass
