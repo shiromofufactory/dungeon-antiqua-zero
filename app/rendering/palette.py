@@ -49,6 +49,7 @@ def mix_color(base_color: int, base_rate: float, target_color: int) -> int:
 @dataclass(frozen=True)
 class _PaletteVariant:
     offset: int
+    colors: tuple[int, ...]
 
 
 class PaletteShifter:
@@ -72,10 +73,28 @@ class PaletteShifter:
         for index, color in enumerate(self._base_colors):
             _validate_color(color, f"colors[{index}]")
         self._variants: dict[str, _PaletteVariant] = {}
+        self._global_base_rate = 1.0
+        self._global_target_color = MIN_COLOR
 
     @property
     def base_colors(self) -> tuple[int, ...]:
         return self._base_colors
+
+    @property
+    def global_base_rate(self) -> float:
+        return self._global_base_rate
+
+    def _globally_mixed(self, colors: Sequence[int]) -> tuple[int, ...]:
+        if self._global_base_rate == 1.0:
+            return tuple(colors)
+        return tuple(
+            mix_color(
+                color,
+                self._global_base_rate,
+                self._global_target_color,
+            )
+            for color in colors
+        )
 
     def define_variant(self, name: str, colors: Sequence[int]) -> None:
         """Add or replace one destination block for a named effect."""
@@ -90,13 +109,24 @@ class PaletteShifter:
 
         variant = self._variants.get(name)
         if variant is None:
-            variant = _PaletteVariant(offset=len(self._colors))
+            variant = _PaletteVariant(
+                offset=len(self._colors),
+                colors=variant_colors,
+            )
             self._variants[name] = variant
-            self._colors[:] = [*self._colors, *variant_colors]
+            self._colors[:] = [
+                *self._colors,
+                *self._globally_mixed(variant_colors),
+            ]
             return
+        variant = _PaletteVariant(
+            offset=variant.offset,
+            colors=variant_colors,
+        )
+        self._variants[name] = variant
         start = variant.offset
         end = start + len(self._base_colors)
-        self._colors[start:end] = list(variant_colors)
+        self._colors[start:end] = list(self._globally_mixed(variant_colors))
 
     def define_mix(
         self,
@@ -114,6 +144,38 @@ class PaletteShifter:
                 for color in self._base_colors
             ),
         )
+
+    def set_global_mix(
+        self,
+        *,
+        base_rate: float,
+        target_color: int,
+    ) -> None:
+        """Mix every registered palette block for a whole-screen effect.
+
+        Unlike ``shifted()``, this does not change color-number remapping. It
+        therefore composes with scoped variants such as a dimmed character.
+        The immutable source colors are always used, so repeated calls do not
+        accumulate rounding errors.
+        """
+
+        if isinstance(base_rate, bool) or not isinstance(
+            base_rate,
+            (int, float),
+        ):
+            raise TypeError("base_rate must be a number")
+        if not 0.0 <= base_rate <= 1.0:
+            raise ValueError("base_rate must be from 0.0 to 1.0")
+        target_color = _validate_color(target_color, "target_color")
+        self._global_base_rate = float(base_rate)
+        self._global_target_color = target_color
+
+        base_count = len(self._base_colors)
+        self._colors[:base_count] = list(self._globally_mixed(self._base_colors))
+        for variant in self._variants.values():
+            start = variant.offset
+            end = start + base_count
+            self._colors[start:end] = list(self._globally_mixed(variant.colors))
 
     @contextmanager
     def shifted(self, name: str) -> Iterator[None]:

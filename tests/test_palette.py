@@ -55,6 +55,55 @@ class PaletteShifterTest(unittest.TestCase):
             with shifter.shifted("missing"):
                 pass
 
+    def test_global_mix_updates_base_and_variant_without_accumulating(self) -> None:
+        colors = [0x204060, 0xFFFFFF]
+        shifter = PaletteShifter(colors, Mock())
+        shifter.define_variant("dimmed", (0x102030, 0x808080))
+
+        shifter.set_global_mix(base_rate=0.5, target_color=0x000000)
+
+        self.assertEqual(
+            colors,
+            [0x102030, 0x7F7F7F, 0x081018, 0x404040],
+        )
+        self.assertEqual(shifter.global_base_rate, 0.5)
+
+        shifter.set_global_mix(base_rate=1.0, target_color=0x000000)
+
+        self.assertEqual(
+            colors,
+            [0x204060, 0xFFFFFF, 0x102030, 0x808080],
+        )
+
+    def test_variant_defined_during_global_mix_uses_the_active_rate(self) -> None:
+        colors = [0x204060]
+        shifter = PaletteShifter(colors, Mock())
+        shifter.set_global_mix(base_rate=0.5, target_color=0x000000)
+
+        shifter.define_variant("flash", (0x80C040,))
+
+        self.assertEqual(colors, [0x102030, 0x406020])
+
+    def test_global_mix_validates_rate_and_target(self) -> None:
+        shifter = PaletteShifter([0x000000], Mock())
+
+        for base_rate in (True, "dark"):
+            with self.subTest(base_rate=base_rate):
+                with self.assertRaises(TypeError):
+                    shifter.set_global_mix(  # type: ignore[arg-type]
+                        base_rate=base_rate,
+                        target_color=0,
+                    )
+        for base_rate in (-0.1, 1.1):
+            with self.subTest(base_rate=base_rate):
+                with self.assertRaises(ValueError):
+                    shifter.set_global_mix(
+                        base_rate=base_rate,
+                        target_color=0,
+                    )
+        with self.assertRaises(ValueError):
+            shifter.set_global_mix(base_rate=1.0, target_color=0x1000000)
+
 
 if __name__ == "__main__":
     unittest.main()

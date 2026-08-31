@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from enum import Enum, auto
 
 import pyxel
 
@@ -40,6 +41,7 @@ from resources import (
     ImageResourceError,
     ImageResources,
 )
+from rendering import FadeEvent, FadeThroughBlack
 from skill import SkillDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
@@ -186,6 +188,17 @@ class MenuMockDataError(RuntimeError):
     """Raised when localized data required by the menu mock is unavailable."""
 
 
+class MenuScreenChange(Enum):
+    """Menu-screen replacement applied only while the fade is fully black."""
+
+    OPEN_ITEM = auto()
+    CLOSE_ITEM = auto()
+    OPEN_SPELL = auto()
+    CLOSE_SPELL = auto()
+    OPEN_STATUS = auto()
+    CLOSE_STATUS = auto()
+
+
 class MenuAlertEffect:
     """Reproduce DA2's short error sound and horizontal screen shake."""
 
@@ -266,6 +279,8 @@ class MenuScreenMock:
         self.confirmation_window = None
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
+        self.fade = FadeThroughBlack()
+        self.pending_screen_change: MenuScreenChange | None = None
         self.item_screen: ItemScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
         self.spell_screen: SpellScreenMock | None = None
@@ -742,9 +757,67 @@ class MenuScreenMock:
         self.status_screen = None
         if status_settings != self.settings:
             self.settings = status_settings
-            self._build_main_windows(selected_command="status")
+            self._build_main_windows(
+                selected_command="status",
+                animate=False,
+            )
         else:
             self.command_cursor.active = True
+
+    def _begin_screen_change(self, change: MenuScreenChange) -> None:
+        """Reserve one item/status replacement and begin fading out."""
+
+        if not isinstance(change, MenuScreenChange):
+            raise TypeError("menu screen change must be a MenuScreenChange")
+        if getattr(self, "pending_screen_change", None) is not None:
+            raise RuntimeError("menu screen change is already pending")
+        fade = getattr(self, "fade", None)
+        if fade is None:
+            fade = FadeThroughBlack()
+            self.fade = fade
+        self.pending_screen_change = change
+        if change in (
+            MenuScreenChange.OPEN_ITEM,
+            MenuScreenChange.OPEN_SPELL,
+            MenuScreenChange.OPEN_STATUS,
+        ):
+            self.command_cursor.active = False
+        fade.start()
+
+    def _apply_pending_screen_change(self) -> None:
+        """Apply the reserved replacement at the fully black midpoint."""
+
+        change = self.pending_screen_change
+        if change is None:
+            raise RuntimeError("fade midpoint has no pending menu screen change")
+        if change is MenuScreenChange.OPEN_ITEM:
+            self._start_item()
+        elif change is MenuScreenChange.CLOSE_ITEM:
+            self._finish_item()
+        elif change is MenuScreenChange.OPEN_SPELL:
+            self._start_spell()
+        elif change is MenuScreenChange.CLOSE_SPELL:
+            self._finish_spell()
+        elif change is MenuScreenChange.OPEN_STATUS:
+            self._start_status()
+        else:
+            self._finish_status()
+        self.pending_screen_change = None
+
+    def _update_fade(self) -> bool:
+        """Advance the active fade, update palette colors, and block input."""
+
+        fade = getattr(self, "fade", None)
+        if fade is None or not fade.is_active:
+            return False
+        event = fade.update()
+        self.palette_shifter.set_global_mix(
+            base_rate=fade.visible_rate,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+        if event is FadeEvent.COVERED:
+            self._apply_pending_screen_change()
+        return True
 
     def _start_spell(self) -> None:
         self.command_cursor.active = False
@@ -895,20 +968,22 @@ class MenuScreenMock:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        if self._update_fade():
+            return
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
             if item_screen.update(input_state):
-                self._finish_item()
+                self._begin_screen_change(MenuScreenChange.CLOSE_ITEM)
             return
         spell_screen = getattr(self, "spell_screen", None)
         if spell_screen is not None:
             if spell_screen.update(input_state):
-                self._finish_spell()
+                self._begin_screen_change(MenuScreenChange.CLOSE_SPELL)
             return
         status_screen = getattr(self, "status_screen", None)
         if status_screen is not None:
             if status_screen.update(input_state):
-                self._finish_status()
+                self._begin_screen_change(MenuScreenChange.CLOSE_STATUS)
             return
         if self._update_window_animations():
             return
@@ -972,19 +1047,19 @@ class MenuScreenMock:
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "item"
         ):
-            self._start_item()
+            self._begin_screen_change(MenuScreenChange.OPEN_ITEM)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "spell"
         ):
-            self._start_spell()
+            self._begin_screen_change(MenuScreenChange.OPEN_SPELL)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "status"
         ):
-            self._start_status()
+            self._begin_screen_change(MenuScreenChange.OPEN_STATUS)
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "sort":
             self._start_sort()

@@ -34,6 +34,7 @@ from tools.screen_mocks.menu import (
     SETTINGS_WINDOW_GRID,
     SORT_SOURCE_CURSOR_X_OFFSET,
     MenuAlertEffect,
+    MenuScreenChange,
     MenuScreenMock,
     TextCatalog,
     TRANSPARENT_INDEX,
@@ -41,6 +42,7 @@ from tools.screen_mocks.menu import (
 )
 from input import Direction, InputButton, InputState
 from member import FormationRow
+from rendering import DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
 from state import DisplayMode, Language, SaveData, Settings
 from ui import (
     DEFAULT_TEXT_COLOR,
@@ -627,13 +629,23 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.texts = Mock()
         mock.fonts = Mock()
         mock.faces = object()
-        mock.palette_shifter = object()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.party_cursor = None
         mock.settings_cursor = None
         mock.confirmation_cursor = None
         mock.item_screen = None
 
         mock.update()
+
+        item_screen_class.assert_not_called()
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.OPEN_ITEM,
+        )
+        self.assertTrue(mock.fade.is_active)
+        self.assertFalse(mock.command_cursor.active)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
 
         item_screen_class.assert_called_once_with(
             party=mock.party,
@@ -648,7 +660,7 @@ class MenuScreenMockTest(unittest.TestCase):
             on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.item_screen, item_screen_class.return_value)
-        self.assertFalse(mock.command_cursor.active)
+        self.assertIsNone(mock.pending_screen_change)
         mock.command_window.update.assert_not_called()
 
     def test_cancel_from_item_returns_to_selected_menu_command(self) -> None:
@@ -660,6 +672,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.input_reader.poll.return_value = input_state
         mock.alert = Mock()
         mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.item_screen = Mock()
         mock.item_screen.update.return_value = True
 
@@ -667,6 +680,14 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.update()
 
         item_screen.update.assert_called_once_with(input_state)
+        self.assertIs(mock.item_screen, item_screen)
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.CLOSE_ITEM,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
         self.assertIsNone(mock.item_screen)
         self.assertTrue(mock.command_cursor.active)
 
@@ -706,6 +727,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.texts = Mock()
         mock.fonts = Mock()
         mock.faces = object()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.selected_member_index = 3
         mock.party_cursor = None
         mock.settings_cursor = None
@@ -713,6 +735,16 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.status_screen = None
 
         mock.update()
+
+        status_screen_class.assert_not_called()
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.OPEN_STATUS,
+        )
+        self.assertTrue(mock.fade.is_active)
+        self.assertFalse(mock.command_cursor.active)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
 
         status_screen_class.assert_called_once_with(
             party=mock.party,
@@ -723,7 +755,7 @@ class MenuScreenMockTest(unittest.TestCase):
             member_index=3,
         )
         self.assertIs(mock.status_screen, status_screen_class.return_value)
-        self.assertFalse(mock.command_cursor.active)
+        self.assertIsNone(mock.pending_screen_change)
         mock.command_window.update.assert_not_called()
 
     def test_cancel_from_status_returns_to_selected_menu_command(self) -> None:
@@ -736,6 +768,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.alert = Mock()
         mock.settings = Settings()
         mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.selected_member_index = 0
         mock.status_screen = Mock(settings=mock.settings, member_index=3)
         mock.status_screen.update.return_value = True
@@ -744,9 +777,59 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.update()
 
         status_screen.update.assert_called_once_with(input_state)
+        self.assertIs(mock.status_screen, status_screen)
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.CLOSE_STATUS,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
         self.assertIsNone(mock.status_screen)
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 3)
+
+    def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.fade = FadeThroughBlack()
+        mock.fade.start()
+        mock.pending_screen_change = MenuScreenChange.OPEN_ITEM
+        mock._apply_pending_screen_change = Mock()
+        mock.item_screen = Mock()
+
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT * 2):
+            mock.update()
+
+        mock.item_screen.update.assert_not_called()
+        mock._apply_pending_screen_change.assert_called_once_with()
+        self.assertFalse(mock.fade.is_active)
+        self.assertEqual(
+            mock.palette_shifter.set_global_mix.call_args.kwargs,
+            {"base_rate": 1.0, "target_color": 0x000000},
+        )
+
+    def test_status_return_rebuilds_changed_language_without_window_animation(
+        self,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings()
+        changed_settings = Settings(language=Language.ENGLISH)
+        mock.status_screen = Mock(settings=changed_settings, member_index=2)
+        mock._build_main_windows = Mock()
+
+        mock._finish_status()
+
+        self.assertEqual(mock.settings, changed_settings)
+        self.assertEqual(mock.selected_member_index, 2)
+        self.assertIsNone(mock.status_screen)
+        mock._build_main_windows.assert_called_once_with(
+            selected_command="status",
+            animate=False,
+        )
 
     @patch("tools.screen_mocks.menu.pyxel.camera")
     @patch("tools.screen_mocks.menu.pyxel.cls")
@@ -785,6 +868,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.texts = Mock()
         mock.fonts = Mock()
         mock.faces = object()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.selected_member_index = 2
         mock.party_cursor = None
         mock.settings_cursor = None
@@ -792,6 +876,16 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.spell_screen = None
 
         mock.update()
+
+        spell_screen_class.assert_not_called()
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.OPEN_SPELL,
+        )
+        self.assertTrue(mock.fade.is_active)
+        self.assertFalse(mock.command_cursor.active)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
 
         spell_screen_class.assert_called_once_with(
             party=mock.party,
@@ -803,7 +897,7 @@ class MenuScreenMockTest(unittest.TestCase):
             member_index=2,
         )
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)
-        self.assertFalse(mock.command_cursor.active)
+        self.assertIsNone(mock.pending_screen_change)
         mock.command_window.update.assert_not_called()
 
     def test_cancel_from_spell_returns_to_selected_menu_command(self) -> None:
@@ -815,6 +909,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.input_reader.poll.return_value = input_state
         mock.alert = Mock()
         mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.selected_member_index = 0
         mock.spell_screen = Mock(member_index=2)
         mock.spell_screen.update.return_value = True
@@ -823,6 +918,14 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.update()
 
         spell_screen.update.assert_called_once_with(input_state)
+        self.assertIs(mock.spell_screen, spell_screen)
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.CLOSE_SPELL,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
         self.assertIsNone(mock.spell_screen)
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 2)

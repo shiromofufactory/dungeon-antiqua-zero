@@ -269,6 +269,9 @@ images.copy_region_to_bank(
 `PaletteShifter` を明示的に渡す。SceneやOverlayは対象と効果名だけを決め、Member、Item、
 SaveDataなどのDomain ModelはPyxelの色番号や `PaletteShifter` を保持しない。時間変化する
 効果は名前付き変換先を `define_mix()` で更新し、タイマー自体は所有元のSceneが進める。
+画面全体へ時間変化する色調を適用する場合は、外側を `shifted()` で囲まない。
+内側の局所効果が `pyxel.pal()` を解除すると外側の割り当ても失われるため、基準色と
+全派生色へ同じ変換を合成する `set_global_mix()` を使用する。
 
 ## 開発用中間プログラム
 
@@ -473,6 +476,24 @@ Sceneへ置かないものは次のとおり。
 - `QuitGame()`: 終了を要求する
 
 フェード、BGM切り替え、入力リリース待ちなど、Sceneをまたぐ共通処理はSceneManagerがTransition適用時に扱う。遷移先Sceneが、遷移元のWindow名や文字列キーを調べて復帰先を推測しない構造にする。
+
+### フェード遷移
+
+標準の画面切り替えフェードは、黒へのフェードアウト6フレームと黒からの
+フェードイン6フレームで構成する。`rendering.fade.FadeThroughBlack` は
+`IDLE`、`FADING_OUT`、`FADING_IN` の段階と経過フレームだけを保持し、
+フェードアウト完了時に `COVERED`、フェードイン完了時に `FINISHED` を返す。
+画面やOverlayの差し替えは `COVERED` を受け取ったSceneManagerが1回だけ適用し、
+フェード自身へコールバックや遷移先を保持させない。フェード中は通常入力をSceneやOverlayへ
+渡さない。開発用画面モックでは、そのComposition RootがSceneManagerと同じ調停を担当する。
+イベント演出など標準よりゆっくり暗転させる場合は、生成時の `frame_count` に6より大きい
+正の整数を渡す。時間を指定しないメニューや通常のScene遷移は6フレームを既定値として使い、
+SceneやOverlayごとに独自のフェード速度計算を持たせない。
+
+画面全体の色変化は `PaletteShifter.set_global_mix()` を `update()` から更新する。
+基準パレットだけでなく `dimmed` など登録済みの派生パレットも不変の通常色から同じ割合で
+黒へ混合し、局所的な `pyxel.pal()` と画面全体フェードを合成できるようにする。
+フェードの進行やパレット更新を `draw()` で行わず、完了時は通常色へ厳密に復元する。
 
 ## OverlayとUI
 
