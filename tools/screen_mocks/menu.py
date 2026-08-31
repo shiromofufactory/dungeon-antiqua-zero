@@ -43,7 +43,7 @@ from resources import (
     ImageResourceError,
     ImageResources,
 )
-from rendering import FadeEvent, FadeThroughBlack
+from rendering import FadeEvent, FadePhase, FadeThroughBlack
 from skill import SkillDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
@@ -60,6 +60,7 @@ from ui import (
     WindowFactory,
     WindowCursor,
     WindowText,
+    WINDOW_ANIMATION_FRAME_COUNT,
     format_play_time,
     input_icon_tag,
     pad,
@@ -288,6 +289,7 @@ class MenuScreenMock:
         self.pending_settings_action: str | None = None
         self.fade = FadeThroughBlack()
         self.pending_screen_change: MenuScreenChange | None = None
+        self.animate_main_windows_with_fade = False
         self.showing_field = False
         self.item_screen: ItemScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
@@ -804,6 +806,7 @@ class MenuScreenMock:
         elif change is MenuScreenChange.SHOW_MENU:
             self.showing_field = False
             self.command_cursor.active = True
+            self._restart_main_windows_for_fade_in()
         elif change is MenuScreenChange.OPEN_ITEM:
             self._start_item()
         elif change is MenuScreenChange.CLOSE_ITEM:
@@ -818,12 +821,27 @@ class MenuScreenMock:
             self._finish_status()
         self.pending_screen_change = None
 
+    def _restart_main_windows_for_fade_in(self) -> None:
+        """Synchronize the eight-frame window opening with fade-in."""
+
+        for window in self.windows:
+            window.restart_opening()
+        hidden_frames = max(
+            0,
+            WINDOW_ANIMATION_FRAME_COUNT - self.fade.frame_count,
+        )
+        for _frame in range(hidden_frames):
+            for window in self.windows:
+                window.update()
+        self.animate_main_windows_with_fade = True
+
     def _update_fade(self) -> bool:
         """Advance the active fade, update palette colors, and block input."""
 
         fade = getattr(self, "fade", None)
         if fade is None or not fade.is_active:
             return False
+        was_fading_in = fade.phase is FadePhase.FADING_IN
         event = fade.update()
         self.palette_shifter.set_global_mix(
             base_rate=fade.visible_rate,
@@ -831,6 +849,14 @@ class MenuScreenMock:
         )
         if event is FadeEvent.COVERED:
             self._apply_pending_screen_change()
+        elif was_fading_in and getattr(
+            self,
+            "animate_main_windows_with_fade",
+            False,
+        ):
+            self._update_window_animations()
+            if event is FadeEvent.FINISHED:
+                self.animate_main_windows_with_fade = False
         return True
 
     def _start_spell(self) -> None:

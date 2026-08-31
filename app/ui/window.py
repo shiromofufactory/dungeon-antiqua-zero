@@ -329,6 +329,12 @@ class Window:
         if self._state in (WindowState.CLOSED, WindowState.CLOSING):
             self._state = WindowState.OPENING
 
+    def restart_opening(self) -> None:
+        """Restart opening from the center without replacing window contents."""
+
+        self._visible_height = 0
+        self._state = WindowState.OPENING
+
     def close(self) -> None:
         """Start closing from the window's current visible height."""
 

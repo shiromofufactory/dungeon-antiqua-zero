@@ -297,6 +297,24 @@ class WindowTest(unittest.TestCase):
         draw_gradient.assert_called_once_with()
         draw_frame.assert_called_once_with(top=16, height=8)
 
+    def test_restart_opening_preserves_contents_and_cursor(self) -> None:
+        text = WindowText("item", 2, 2)
+        window = Window(0, 0, 8, 8, (text,))
+        cursor = window.set_cursor((CursorTarget(1, 2, key="item"),))
+
+        window.restart_opening()
+
+        self.assertIs(window.state, WindowState.OPENING)
+        self.assertEqual(window.visible_height, 0)
+        self.assertEqual(window.texts, (text,))
+        self.assertIs(window.cursor, cursor)
+        self.assertEqual(cursor.selected_key, "item")
+
+        for _frame in range(WINDOW_ANIMATION_FRAME_COUNT):
+            window.update()
+
+        self.assertTrue(window.is_open)
+
     def test_open_window_closes_to_center_and_stops_drawing(self) -> None:
         window = Window(1, 2, 8, 6)
 

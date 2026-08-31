@@ -191,6 +191,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_window)
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
+        self.assertFalse(mock.animate_main_windows_with_fade)
         self.assertFalse(mock.showing_field)
         self.assertIsNone(mock.item_screen)
         self.assertIsNone(mock.status_screen)
@@ -519,6 +520,8 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.showing_field = True
         mock.alert = Mock()
+        window = Mock(is_animating=True)
+        mock.windows = (window,)
 
         mock.update()
 
@@ -533,6 +536,15 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.showing_field)
         self.assertTrue(mock.command_cursor.active)
         self.assertIsNone(mock.pending_screen_change)
+        window.restart_opening.assert_called_once_with()
+        self.assertEqual(window.update.call_count, 2)
+        self.assertTrue(mock.animate_main_windows_with_fade)
+
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        self.assertEqual(window.update.call_count, 8)
+        self.assertFalse(mock.animate_main_windows_with_fade)
 
     @patch("tools.screen_mocks.menu.pyxel.quit")
     def test_cancel_on_mock_field_still_exits_the_mock(self, quit_game: Mock) -> None:
