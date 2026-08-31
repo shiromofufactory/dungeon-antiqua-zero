@@ -61,14 +61,16 @@ class ItemScreenMockTest(unittest.TestCase):
             ),
             (
                 CATEGORY_WINDOW_GRID,
-                ITEM_LIST_WINDOW_GRID,
                 ITEM_INFO_WINDOW_GRID,
+                ITEM_LIST_WINDOW_GRID,
                 PARTY_WINDOW_GRID,
             ),
         )
+        self.assertIs(mock.windows[1], mock.item_info_window)
+        self.assertIs(mock.windows[2], mock.item_list_window)
         self.assertEqual(CATEGORY_WINDOW_GRID, (6, 0, 52, 5))
         self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 33, 39))
-        self.assertEqual(ITEM_INFO_WINDOW_GRID, (33, 5, 31, 39))
+        self.assertEqual(ITEM_INFO_WINDOW_GRID, (31, 5, 33, 39))
         self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24, 36))
         self.assertEqual(len(mock.items), 121)
         self.assertEqual(len(mock.inventory), len(mock.items))
@@ -138,7 +140,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(
             mock.item_info_window.pixel_x + ITEM_INFO_X * 4,
-            140,
+            132,
         )
 
     @staticmethod
@@ -164,7 +166,7 @@ class ItemScreenMockTest(unittest.TestCase):
                 "ラグナ　せんよう",
                 "こうげき　　：５６",
                 "めいちゅう　：１３０",
-                "ついかこうか：そくし",
+                "ついかこうか：%DEATH%そくし",
                 "%DEATH%そくしを　ふせぐ",
                 "すばやさ　＋２",
                 "きょじん　に　つよい",
@@ -204,14 +206,28 @@ class ItemScreenMockTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
         )
 
-    def test_wraps_long_tagged_use_description_within_the_info_window(self) -> None:
+    def test_preserves_authored_spell_description_lines_without_wrapping(self) -> None:
         mock = ItemScreenMock()
 
         self.select_item(mock, "BOOK of FIRE")
         lines = [text.text for text in mock.item_info_window.texts]
         self.assertIn("つかうと%MYSTIC%ファイア１", lines)
-        self.assertIn("てき１たいに", lines)
-        self.assertIn("%FIRE%ほのおぞくせいの", lines)
+        self.assertIn("てき１たいに%FIRE%ほのおぞくせいの", lines)
+        self.assertNotIn("てき１たいに", lines)
+        description = next(
+            text
+            for text in mock.item_info_window.texts
+            if text.text == "てき１たいに%FIRE%ほのおぞくせいの"
+        )
+        spell_name = next(
+            text
+            for text in mock.item_info_window.texts
+            if text.text == "つかうと%MYSTIC%ファイア１"
+        )
+        self.assertEqual(
+            description.y - spell_name.y,
+            ITEM_INFO_ROW_HEIGHT * 2,
+        )
 
         for item in mock.inventory:
             with self.subTest(item=item.key):
@@ -319,6 +335,12 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertLess(
             lines.index("ぞくせい　　：%DARK%やみ"),
             lines.index("ついかこうか：きゅうしゅう"),
+        )
+
+        self.select_item(mock, "MAGE MASHER")
+        self.assertIn(
+            "ついかこうか：%SILENCE%ちんもく",
+            [text.text for text in mock.item_info_window.texts],
         )
 
     def test_displays_defense_down_and_every_monster_tribe(self) -> None:

@@ -70,6 +70,8 @@ class ItemDetailTest(unittest.TestCase):
 
         self.assertIn("つかうと%MYSTIC%ファイア１", lines)
         self.assertIn("てき１たいに%FIRE%ほのおぞくせいの", lines)
+        description_index = lines.index("てき１たいに%FIRE%ほのおぞくせいの")
+        self.assertEqual(lines[description_index - 1], "")
         self.assertNotIn("（こわれる）", lines)
 
     def test_equipment_shows_icon_and_spell_name_without_effect_description(self) -> None:
@@ -158,7 +160,7 @@ class ItemDetailTest(unittest.TestCase):
             (
                 "ぞくせい　　：%DARK%やみ",
                 "ついかこうか：きゅうしゅう",
-                "%DARK%やみのちからを　ふせぐ",
+                "%DARK%やみを　ふせぐ",
             ),
         )
 
@@ -173,6 +175,77 @@ class ItemDetailTest(unittest.TestCase):
             ),
         )
         self.assertLess(lines.index("%DEATH%そくしを　ふせぐ"), len(lines) - 2)
+
+    def test_common_condition_term_is_used_by_effect_and_resistance_templates(self) -> None:
+        records = load_record_array("texts.json")
+        for record in records:
+            if record.get("text_key") == "term.condition.POISON":
+                record["text_ja"] = "%POISON%きょうつう"
+        texts = TextCatalog.from_records(records)
+
+        effect = build_item_detail(
+            self.items["MACE of SNAKE"],
+            self.spells,
+            self.localizer,
+            texts,
+        )
+        resistance = build_item_detail(
+            self.items["EAN SI MANTLE"],
+            self.spells,
+            self.localizer,
+            texts,
+        )
+
+        self.assertIn("ついかこうか：%POISON%きょうつう", effect.lines)
+        self.assertIn("%POISON%きょうつうを　ふせぐ", resistance.lines)
+
+    def test_additional_effects_use_shared_terms_with_available_icons(self) -> None:
+        expected = {
+            "SLEEP BLADE": "ついかこうか：%SLEEP%ねむり",
+            "TYRFING": "ついかこうか：%CONFUSE%こんらん",
+            "ELIKA": "ついかこうか：%DEATH%そくし",
+            "MAGE MASHER": "ついかこうか：%SILENCE%ちんもく",
+            "MACE of SNAKE": "ついかこうか：%POISON%どく",
+        }
+
+        for item_key, effect_line in expected.items():
+            with self.subTest(item=item_key):
+                self.assertIn(effect_line, self.detail(item_key).lines)
+
+    def test_repeated_item_detail_sentences_are_templates_not_per_term_keys(self) -> None:
+        keys = {
+            record["text_key"] for record in load_record_array("texts.json")
+        }
+
+        self.assertIn("item.detail.attribute", keys)
+        self.assertIn("item.detail.additional_effect", keys)
+        self.assertIn("item.detail.resistance", keys)
+        self.assertIn("item.detail.effective_tribe", keys)
+        self.assertIn("item.detail.requirement.only", keys)
+        self.assertIn("item.detail.requirement.excludes", keys)
+        self.assertFalse(
+            any(
+                key.startswith(
+                    (
+                        "item.detail.attribute.",
+                        "item.detail.additional_effect.",
+                        "item.detail.resistance.",
+                        "item.detail.tribe.",
+                    )
+                )
+                for key in keys
+            )
+        )
+        self.assertFalse(
+            any(
+                key.startswith("item.detail.requirement.ONLY_")
+                and key != "item.detail.requirement.ONLY_RAGNA"
+                for key in keys
+            )
+        )
+        self.assertFalse(
+            any(key.startswith("item.detail.requirement.NO_") for key in keys)
+        )
 
     def test_price_and_source_are_exposed_only_to_shop_context(self) -> None:
         menu = self.detail("POTION")
@@ -192,7 +265,7 @@ class ItemDetailTest(unittest.TestCase):
 
         self.assertNotIn("ほのおのしょ", battle.lines)
         self.assertNotIn("どうぐ", battle.lines)
-        self.assertEqual(battle.lines, menu.lines[-3:])
+        self.assertEqual(battle.lines, menu.lines[-4:])
 
     def test_rejects_undefined_use_spell(self) -> None:
         item = Item.from_record(

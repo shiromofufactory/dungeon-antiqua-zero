@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from enum import Enum, StrEnum
-import re
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
@@ -17,7 +16,7 @@ from tools.screen_mocks._party_status import PartyStatusPanel
 from input import InputState
 from item import Item
 from item_detail import item_detail_lines
-from localization import LocalizedText, Localizer, format_number
+from localization import Localizer, format_number
 from member import Member
 from rendering import PaletteShifter
 from resources import FontResources, ImageResources
@@ -28,8 +27,6 @@ from text_catalog import TextCatalog
 from ui import (
     CursorTarget,
     LocalizedWindowTextFactory,
-    TEXT_COLORS,
-    TEXT_ICONS,
     WindowCursor,
     WindowFactory,
     WindowText,
@@ -38,8 +35,8 @@ from ui import (
 
 FACES_IMAGE_ID = "faces/faces_pc"
 CATEGORY_WINDOW_GRID = (6, 0, 52, 5)
-ITEM_LIST_WINDOW_GRID = (0, 5, 33, 39)
-ITEM_INFO_WINDOW_GRID = (33, 5, 31, 39)
+ITEM_LIST_WINDOW_GRID = (0, 5, 32, 39)
+ITEM_INFO_WINDOW_GRID = (31, 5, 33, 39)
 
 CATEGORY_TEXT_KEYS = {
     "use": "item.category.use",
@@ -53,7 +50,7 @@ CATEGORY_TEXT_Y = 1
 
 ITEM_VISIBLE_COUNT = 12
 ITEM_TEXT_X = 4
-ITEM_COUNT_X = 28
+ITEM_COUNT_X = 27
 ITEM_FIRST_Y = 2
 ITEM_ROW_HEIGHT = 3
 ITEM_CURSOR_X = ITEM_TEXT_X - 2
@@ -61,10 +58,9 @@ ITEM_INFO_X = 2
 ITEM_INFO_Y = 2
 ITEM_INFO_ROW_HEIGHT = 3
 ITEM_NAME_MAX_LENGTH = 11
-ITEM_INFO_MAX_CELLS = 13
 ITEM_INFO_MAX_ROWS = 12
 ITEM_INVENTORY_MAX = 255
-ITEM_SUMMARY_VALUE_X = 15
+ITEM_SUMMARY_VALUE_X = 13
 ITEM_SUMMARY_COUNT_LABEL_Y = 2
 ITEM_SUMMARY_COUNT_VALUE_Y = 5
 ITEM_SUMMARY_RECORDED_LABEL_Y = 8
@@ -78,70 +74,14 @@ DROP_CONFIRM_CURSOR_X = 2
 DROP_CONFIRM_YES_Y = 2
 DROP_CONFIRM_NO_Y = 5
 
-_DISPLAY_TAG_PATTERN = re.compile(r"%[A-Z][A-Z0-9_]*%")
 
+def _validate_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
+    """Keep authored line boundaries and reject details that exceed the window."""
 
-def _localized_slice(text: str, start: int, end: int) -> str:
-    sliced = text[start:end]
-    if not isinstance(text, LocalizedText):
-        return sliced
-    narrow_spans = tuple(
-        (max(span_start, start) - start, min(span_end, end) - start)
-        for span_start, span_end in text.narrow_spans
-        if span_start < end and span_end > start
-    )
-    return LocalizedText(
-        sliced,
-        prefers_wide_font=text.prefers_wide_font,
-        narrow_spans=narrow_spans,
-    )
+    if len(lines) > ITEM_INFO_MAX_ROWS:
+        raise ItemMockDataError(f"アイテム詳細が{ITEM_INFO_MAX_ROWS}行を超えています")
+    return lines
 
-
-def _item_info_display_cells(text: str) -> int:
-    cells = 0
-    position = 0
-    for match in _DISPLAY_TAG_PATTERN.finditer(text):
-        tag = match.group()
-        if tag not in TEXT_ICONS and tag not in TEXT_COLORS:
-            continue
-        cells += match.start() - position
-        if tag in TEXT_ICONS:
-            cells += 1
-        position = match.end()
-    return cells + len(text) - position
-
-
-def _fit_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
-    """Wrap long tagged descriptions and keep the item window within 12 rows."""
-
-    fitted: list[str] = []
-    for line in lines:
-        split_at = None
-        if _item_info_display_cells(line) > ITEM_INFO_MAX_CELLS:
-            split_at = next(
-                (
-                    match.start()
-                    for match in _DISPLAY_TAG_PATTERN.finditer(line)
-                    if match.start() > 0 and match.group() in TEXT_ICONS
-                ),
-                None,
-            )
-        if split_at is None:
-            fitted.append(line)
-        else:
-            fitted.extend(
-                (
-                    _localized_slice(line, 0, split_at),
-                    _localized_slice(line, split_at, len(line)),
-                )
-            )
-    if len(fitted) > ITEM_INFO_MAX_ROWS and "" in fitted:
-        fitted.remove("")
-    if len(fitted) > ITEM_INFO_MAX_ROWS:
-        raise ItemMockDataError(
-            f"アイテム詳細が{ITEM_INFO_MAX_ROWS}行を超えています"
-        )
-    return tuple(fitted)
 
 class ItemCategory(StrEnum):
     """DA2-style tabs shown at the top of the item screen."""
@@ -394,7 +334,7 @@ class ItemScreenMock:
                     ITEM_INFO_Y + row * ITEM_INFO_ROW_HEIGHT,
                 )
                 for row, text in enumerate(
-                    _fit_item_info_lines(
+                    _validate_item_info_lines(
                         item_detail_lines(
                             selected,
                             self.spells,
@@ -411,8 +351,8 @@ class ItemScreenMock:
         )
         self.windows = (
             self.category_window,
-            self.item_list_window,
             self.item_info_window,
+            self.item_list_window,
             self.party_window,
         )
 
@@ -443,9 +383,7 @@ class ItemScreenMock:
         recorded_count = self.inventory_system.recorded_count
         catalog_count = self.inventory_system.catalog_count
         recorded_total = (
-            pad(catalog_count, 3)
-            if recorded_count == catalog_count
-            else "　？？"
+            pad(catalog_count, 3) if recorded_count == catalog_count else "　？？"
         )
         placements.extend(
             (
@@ -543,7 +481,7 @@ class ItemScreenMock:
         prompt = self.texts.formatted_text(
             "item.drop.confirm",
             self.localizer,
-            raw_name,
+            {"ITEM": raw_name},
         )
         yes = self.texts.text("settings.yes", self.localizer)
         no = self.texts.text("settings.no", self.localizer)

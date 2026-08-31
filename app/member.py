@@ -1040,13 +1040,13 @@ class Member:
         if self.hp <= 0:
             text_key = "status.dead"
         elif self.paralyzed:
-            text_key = "status.paralyzed"
+            text_key = "term.condition.PARALIZE"
         elif self.sleeping:
-            text_key = "status.sleeping"
+            text_key = "term.condition.SLEEP"
         elif self.confused:
-            text_key = "status.confused"
+            text_key = "term.condition.CONFUSE"
         elif self.poisoned:
-            text_key = "status.poisoned"
+            text_key = "term.condition.POISON"
         elif show_ok:
             text_key = "status.ok"
 

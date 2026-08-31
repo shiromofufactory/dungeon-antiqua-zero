@@ -7,12 +7,30 @@ from app.localization import (
     LocalizedText,
     ascii_to_fullwidth,
     format_number,
+    format_text_template,
     language_candidates,
 )
 from app.state import Language
 
 
 class LocalizationTest(unittest.TestCase):
+    def test_formats_named_text_placeholders(self) -> None:
+        self.assertEqual(
+            format_text_template(
+                "$TARGET$に$ATTRIBUTE$ダメージ",
+                {"TARGET": "てき", "ATTRIBUTE": "%FIRE%ほのお"},
+            ),
+            "てきに%FIRE%ほのおダメージ",
+        )
+
+    def test_rejects_missing_or_invalid_text_placeholder_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "value is missing: ITEM"):
+            format_text_template("Drop $ITEM$?", {})
+        with self.assertRaisesRegex(ValueError, "uppercase snake case"):
+            format_text_template("$ITEM$", {"item": "Potion"})
+        with self.assertRaisesRegex(TypeError, "values must be strings"):
+            format_text_template("$ITEM$", {"ITEM": 1})  # type: ignore[dict-item]
+
     def test_display_numbers_are_always_fullwidth(self) -> None:
         self.assertEqual(format_number(0), "０")
         self.assertEqual(format_number(123), "１２３")

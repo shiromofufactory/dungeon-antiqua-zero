@@ -107,18 +107,17 @@ ITEM_SUBTYPE_TEXT_KEYS = {
     )
 }
 ITEM_REQUIREMENT_TEXT_KEYS = {
-    requirement: f"item.detail.requirement.{requirement}"
-    for requirement in (
-        "LV9",
-        "NO_DRAGONS",
-        "NO_FAIRYS",
-        "ONLY_DRAGON",
-        "ONLY_FAIRYS",
-        "ONLY_FEMALE",
-        "ONLY_MALE",
-        "ONLY_RAGNA",
-        "ONLY_ROBO",
-    )
+    "LV9": "item.detail.requirement.LV9",
+    "ONLY_RAGNA": "item.detail.requirement.ONLY_RAGNA",
+}
+ITEM_REQUIREMENT_FORMAT_KEYS = {
+    "NO_DRAGONS": ("item.detail.requirement.excludes", "race.DRAGONEWT"),
+    "NO_FAIRYS": ("item.detail.requirement.excludes", "race.FAIRY"),
+    "ONLY_DRAGON": ("item.detail.requirement.only", "race.DRAGONEWT"),
+    "ONLY_FAIRYS": ("item.detail.requirement.only", "race.FAIRY"),
+    "ONLY_FEMALE": ("item.detail.requirement.only", "gender.FEMALE"),
+    "ONLY_MALE": ("item.detail.requirement.only", "gender.MALE"),
+    "ONLY_ROBO": ("item.detail.requirement.only", "race.ROBOT"),
 }
 ITEM_STAT_ROWS = (
     ("attack", "item.detail.attack"),
@@ -132,24 +131,39 @@ ITEM_ABILITY_ROWS = (
     ("agility_modifier", "status.agility"),
     ("magic_modifier", "status.magic"),
 )
-ITEM_ATTACK_ATTRIBUTE_TEXT_KEYS = {
-    attribute: f"item.detail.attribute.{attribute.value}"
+ITEM_ATTACK_ATTRIBUTE_TERM_KEYS = {
+    attribute: f"term.attribute.{attribute.value}"
     for attribute in AttackAttribute
 }
-ITEM_ADDITIONAL_EFFECT_TEXT_KEYS = {
-    effect: f"item.detail.additional_effect.{effect.value}"
-    for effect in AdditionalEffect
+ITEM_ADDITIONAL_EFFECT_TERM_KEYS = {
+    AdditionalEffect.SLEEP: "term.condition.SLEEP",
+    AdditionalEffect.CONFUSE: "term.condition.CONFUSE",
+    AdditionalEffect.DEATH: "term.condition.DEATH",
+    AdditionalEffect.SILENCE: "term.condition.SILENCE",
+    AdditionalEffect.DRAIN: "term.effect.DRAIN",
+    AdditionalEffect.STUN: "term.condition.STUN",
+    AdditionalEffect.POISON: "term.condition.POISON",
+    AdditionalEffect.PARALIZE: "term.condition.PARALIZE",
+    AdditionalEffect.DEFENSE_DOWN: "term.effect.DEFENSE_DOWN",
 }
 ITEM_SPECIAL_TEXT_KEYS = {
     special: f"item.detail.special.{special.value}" for special in ItemSpecial
 }
-ITEM_TRIBE_TEXT_KEYS = {
-    tribe: f"item.detail.tribe.{tribe.value}"
+ITEM_TRIBE_TERM_KEYS = {
+    tribe: f"term.monster_tribe.{tribe.value}"
     for tribe in MonsterTribe
 }
-ITEM_RESISTANCE_TEXT_KEYS = {
-    resistance: f"item.detail.resistance.{resistance.value}"
-    for resistance in ResistanceType
+ITEM_RESISTANCE_TERM_KEYS = {
+    ResistanceType.FIRE: "term.attribute.FIRE",
+    ResistanceType.FREEZE: "term.attribute.FREEZE",
+    ResistanceType.DARK: "term.attribute.DARK",
+    ResistanceType.SLEEP: "term.condition.SLEEP",
+    ResistanceType.POISON: "term.condition.POISON",
+    ResistanceType.PARALIZE: "term.condition.PARALIZE",
+    ResistanceType.CONFUSE: "term.condition.CONFUSE",
+    ResistanceType.SILENCE: "term.condition.SILENCE",
+    ResistanceType.DEATH: "term.condition.DEATH",
+    ResistanceType.STUN: "term.condition.STUN",
 }
 ITEM_TYPE_ICON_TAGS = {
     ItemEquipType.LEFT: "%SHIELD%",
@@ -179,6 +193,19 @@ def _required_catalog_lines(
     if not lines:
         raise ItemDetailError(f"アイテム詳細用テキストが見つかりません: {key}")
     return lines
+
+
+def _required_catalog_format(
+    texts: TextCatalog,
+    key: str,
+    localizer: Localizer,
+    value_keys: Mapping[str, str],
+) -> str:
+    text = texts.formatted_text_from_keys(key, localizer, value_keys)
+    if not text:
+        keys = ", ".join((key, *value_keys.values()))
+        raise ItemDetailError(f"アイテム詳細用テキストが見つかりません: {keys}")
+    return text
 
 
 def _composed_text(localizer: Localizer, *parts: str) -> str:
@@ -243,11 +270,19 @@ def _item_requirement_line(
 ) -> str:
     if not item.requirement:
         return ""
-    try:
-        key = ITEM_REQUIREMENT_TEXT_KEYS[item.requirement]
-    except KeyError as error:
-        raise ItemDetailError(f"未対応の装備条件です: {item.requirement}") from error
-    return _required_catalog_text(texts, key, localizer)
+    text_key = ITEM_REQUIREMENT_TEXT_KEYS.get(item.requirement)
+    if text_key is not None:
+        return _required_catalog_text(texts, text_key, localizer)
+    format_keys = ITEM_REQUIREMENT_FORMAT_KEYS.get(item.requirement)
+    if format_keys is not None:
+        template_key, term_key = format_keys
+        return _required_catalog_format(
+            texts,
+            template_key,
+            localizer,
+            {"TARGET": term_key},
+        )
+    raise ItemDetailError(f"未対応の装備条件です: {item.requirement}")
 
 
 def _signed_modifier(value: int) -> str:
@@ -278,7 +313,10 @@ def _item_use_lines(
             _composed_text(localizer, label, spell.localized_display_name(localizer))
         )
     if item.equip_type is ItemEquipType.ITEM:
-        lines.extend(spell.localized_description(localizer))
+        description = spell.localized_description(localizer)
+        if description:
+            lines.append("")
+            lines.extend(description)
     if item.breaks_on_use and item.equip_type is not ItemEquipType.ITEM:
         lines.append(_required_catalog_text(texts, "item.detail.breaks_on_use", localizer))
     return tuple(lines)
@@ -310,6 +348,8 @@ def build_item_detail(
 
     use_lines = _item_use_lines(item, spells, localizer, texts)
     if context is ItemDetailContext.BATTLE:
+        if use_lines[:1] == ("",):
+            use_lines = use_lines[1:]
         return ItemDetailView(lines=use_lines)
 
     lines = [item.localized_name(localizer), _item_type_line(item, localizer, texts)]
@@ -325,34 +365,37 @@ def build_item_detail(
             details.append(_composed_text(localizer, label, "：", format_number(value)))
 
     if item.attack_attribute is not None:
-        label = _required_catalog_text(texts, "item.detail.attribute.label", localizer)
-        value = _required_catalog_text(
-            texts,
-            ITEM_ATTACK_ATTRIBUTE_TEXT_KEYS[item.attack_attribute],
-            localizer,
+        details.append(
+            _required_catalog_format(
+                texts,
+                "item.detail.attribute",
+                localizer,
+                {
+                    "ATTRIBUTE": ITEM_ATTACK_ATTRIBUTE_TERM_KEYS[
+                        item.attack_attribute
+                    ]
+                },
+            )
         )
-        details.append(_composed_text(localizer, label, value))
 
     if item.additional_effect is not None:
-        label = _required_catalog_text(
-            texts,
-            "item.detail.additional_effect.label",
-            localizer,
+        details.append(
+            _required_catalog_format(
+                texts,
+                "item.detail.additional_effect",
+                localizer,
+                {"EFFECT": ITEM_ADDITIONAL_EFFECT_TERM_KEYS[item.additional_effect]},
+            )
         )
-        value = _required_catalog_text(
-            texts,
-            ITEM_ADDITIONAL_EFFECT_TEXT_KEYS[item.additional_effect],
-            localizer,
-        )
-        details.append(_composed_text(localizer, label, value))
 
     for resistance in ResistanceType:
         if resistance in item.resistances:
             details.append(
-                _required_catalog_text(
+                _required_catalog_format(
                     texts,
-                    ITEM_RESISTANCE_TEXT_KEYS[resistance],
+                    "item.detail.resistance",
                     localizer,
+                    {"RESISTANCE": ITEM_RESISTANCE_TERM_KEYS[resistance]},
                 )
             )
 
@@ -371,10 +414,11 @@ def build_item_detail(
 
     if item.effective_tribe is not None:
         details.append(
-            _required_catalog_text(
+            _required_catalog_format(
                 texts,
-                ITEM_TRIBE_TEXT_KEYS[item.effective_tribe],
+                "item.detail.effective_tribe",
                 localizer,
+                {"TRIBE": ITEM_TRIBE_TERM_KEYS[item.effective_tribe]},
             )
         )
 
@@ -398,7 +442,8 @@ def build_item_detail(
             if line
         )
     if details:
-        lines.append("")
+        if details[0] != "":
+            lines.append("")
         lines.extend(details)
 
     is_shop = context is ItemDetailContext.SHOP

@@ -8,10 +8,10 @@ from types import MappingProxyType
 from typing import Iterable, Mapping
 
 if __package__ == "":
-    from localization import Localizer
+    from localization import Localizer, format_text_template
     from resources.data import DataResourceError, load_record_array
 else:
-    from .localization import Localizer
+    from .localization import Localizer, format_text_template
     from .resources.data import DataResourceError, load_record_array
 
 
@@ -109,17 +109,17 @@ class TextCatalog:
         self,
         key: str,
         localizer: Localizer,
-        *values: str,
+        values: Mapping[str, str],
         default: str = "",
     ) -> str:
-        """Resolve a DA2-style ``&1`` template and localize the result."""
+        """Resolve named ``$NAME$`` placeholders and localize the result."""
 
         if not isinstance(key, str) or not key:
             raise ValueError("key must be a non-empty string")
         if not isinstance(localizer, Localizer):
             raise TypeError("localizer must be a Localizer")
-        if not all(isinstance(value, str) for value in values):
-            raise TypeError("formatted text values must be strings")
+        if not isinstance(values, Mapping):
+            raise TypeError("formatted text values must be a mapping")
         if not isinstance(default, str):
             raise TypeError("default must be a string")
 
@@ -127,12 +127,55 @@ class TextCatalog:
         template = localizer.value(record, "text", default)
         if not isinstance(template, str):
             raise TextCatalogError(f"localized text must be a string: {key}")
-        for index, value in enumerate(values, start=1):
-            template = template.replace(f"&{index}", value)
+        template = format_text_template(template, values)
         return localizer.text(
             {f"text_{localizer.language.value}": template},
             "text",
             default,
+        )
+
+    def formatted_text_from_keys(
+        self,
+        key: str,
+        localizer: Localizer,
+        value_keys: Mapping[str, str],
+        default: str = "",
+    ) -> str:
+        """Format one template with raw localized values from other keys."""
+
+        if not isinstance(key, str) or not key:
+            raise ValueError("key must be a non-empty string")
+        if not isinstance(localizer, Localizer):
+            raise TypeError("localizer must be a Localizer")
+        if not isinstance(default, str):
+            raise TypeError("default must be a string")
+        if not isinstance(value_keys, Mapping):
+            raise TypeError("formatted text value keys must be a mapping")
+        if not all(
+            isinstance(name, str)
+            and name
+            and isinstance(value_key, str)
+            and value_key
+            for name, value_key in value_keys.items()
+        ):
+            raise ValueError("formatted text value keys must be non-empty strings")
+
+        values: dict[str, str] = {}
+        for name, value_key in value_keys.items():
+            record = self._records.get(value_key, {})
+            value = localizer.value(record, "text", "")
+            if not isinstance(value, str):
+                raise TextCatalogError(
+                    f"localized text must be a string: {value_key}"
+                )
+            if not value:
+                return localizer.text({}, "text", default)
+            values[name] = value
+        return self.formatted_text(
+            key,
+            localizer,
+            values,
+            default=default,
         )
 
     def lines(

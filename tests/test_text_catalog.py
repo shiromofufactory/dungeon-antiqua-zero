@@ -49,14 +49,14 @@ class TextCatalogTest(unittest.TestCase):
             "Ｕｎｋｎｏｗｎ？",
         )
 
-    def test_formats_da2_numbered_placeholders_before_display_normalization(self) -> None:
+    def test_formats_named_placeholders_before_display_normalization(self) -> None:
         catalog = TextCatalog.from_records(
             [
                 {
                     "text_key": "item.drop.confirm",
-                    "text_ja": "&1 を すてますか？",
-                    "text_en": "Drop &1?",
-                    "text_zhcn": "要丢弃&1吗？",
+                    "text_ja": "$ITEM$ を すてますか？",
+                    "text_en": "Drop $ITEM$?",
+                    "text_zhcn": "要丢弃$ITEM$吗？",
                 }
             ]
         )
@@ -65,7 +65,7 @@ class TextCatalogTest(unittest.TestCase):
             catalog.formatted_text(
                 "item.drop.confirm",
                 Localizer(Language.JAPANESE),
-                "ポーション",
+                {"ITEM": "ポーション"},
             ),
             "ポーション　を　すてますか？",
         )
@@ -73,9 +73,34 @@ class TextCatalogTest(unittest.TestCase):
             catalog.formatted_text(
                 "item.drop.confirm",
                 Localizer(Language.ENGLISH),
-                "Potion",
+                {"ITEM": "Potion"},
             ),
             "Ｄｒｏｐ　Ｐｏｔｉｏｎ？",
+        )
+
+    def test_formats_template_with_raw_localized_values_from_shared_keys(self) -> None:
+        catalog = TextCatalog.from_records(
+            [
+                {
+                    "text_key": "item.detail.resistance",
+                    "text_ja": "$RESISTANCE$を ふせぐ",
+                    "text_en": "$RESISTANCE$ tolerance",
+                },
+                {
+                    "text_key": "term.condition.POISON",
+                    "text_ja": "%POISON%どく",
+                    "text_en": "%POISON%Poison",
+                },
+            ]
+        )
+
+        self.assertEqual(
+            catalog.formatted_text_from_keys(
+                "item.detail.resistance",
+                Localizer(Language.JAPANESE),
+                {"RESISTANCE": "term.condition.POISON"},
+            ),
+            "%POISON%どくを　ふせぐ",
         )
 
     def test_resolves_one_or_more_lines_from_string_or_array(self) -> None:

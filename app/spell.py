@@ -9,10 +9,20 @@ from types import MappingProxyType
 from typing import Mapping
 
 if __package__ == "":
-    from localization import LocalizedText, Localizer, format_number
+    from localization import (
+        LocalizedText,
+        Localizer,
+        format_number,
+        format_text_template,
+    )
     from member import Member, ProficiencyKind
 else:
-    from .localization import LocalizedText, Localizer, format_number
+    from .localization import (
+        LocalizedText,
+        Localizer,
+        format_number,
+        format_text_template,
+    )
     from .member import Member, ProficiencyKind
 
 
@@ -167,7 +177,10 @@ class Spell:
         intensity = format_number(self.intensity)
         for index in range(line_count):
             record = {
-                field: lines[index].replace("$INTENSITY$", intensity)
+                field: format_text_template(
+                    lines[index],
+                    {"INTENSITY": intensity},
+                )
                 for field, lines in self.descriptions.items()
                 if index < len(lines)
             }

@@ -26,6 +26,7 @@ _LANGUAGE_FALLBACKS = MappingProxyType(
     }
 )
 _DISPLAY_TAG_PATTERN = re.compile(r"%[A-Z][A-Z0-9_]*%")
+_TEXT_PLACEHOLDER_PATTERN = re.compile(r"\$([A-Z][A-Z0-9_]*)\$")
 
 
 class LocalizedText(str):
@@ -137,6 +138,42 @@ def format_number(value: int) -> str:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError("display number must be an integer")
     return ascii_to_fullwidth(str(value))
+
+
+def format_text_template(
+    template: str,
+    values: Mapping[str, str],
+) -> str:
+    """Substitute named ``$NAME$`` placeholders in authored text."""
+
+    if not isinstance(template, str):
+        raise TypeError("text template must be a string")
+    if not isinstance(values, Mapping):
+        raise TypeError("text template values must be a mapping")
+
+    normalized: dict[str, str] = {}
+    for name, value in values.items():
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[A-Z][A-Z0-9_]*", name) is None
+        ):
+            raise ValueError(
+                "text template value names must use uppercase snake case"
+            )
+        if not isinstance(value, str):
+            raise TypeError("text template values must be strings")
+        normalized[name] = value
+
+    def substitute(match: re.Match[str]) -> str:
+        name = match.group(1)
+        try:
+            return normalized[name]
+        except KeyError as error:
+            raise ValueError(
+                f"text template value is missing: {name}"
+            ) from error
+
+    return _TEXT_PLACEHOLDER_PATTERN.sub(substitute, template)
 
 
 def language_candidates(language: Language) -> tuple[Language, ...]:

@@ -74,27 +74,27 @@ class MemberTest(unittest.TestCase):
                     "text_zhcn": "死亡",
                 },
                 {
-                    "text_key": "status.paralyzed",
-                    "text_ja": "まひ",
-                    "text_en": "Paralyze",
+                    "text_key": "term.condition.PARALIZE",
+                    "text_ja": "%PARALIZE%まひ",
+                    "text_en": "%PARALIZE%Paralyze",
                     "text_zhcn": "麻痹",
                 },
                 {
-                    "text_key": "status.sleeping",
-                    "text_ja": "ねむり",
-                    "text_en": "Asleep",
+                    "text_key": "term.condition.SLEEP",
+                    "text_ja": "%SLEEP%ねむり",
+                    "text_en": "%SLEEP%Sleep",
                     "text_zhcn": "睡眠",
                 },
                 {
-                    "text_key": "status.confused",
-                    "text_ja": "らん",
-                    "text_en": "Confused",
+                    "text_key": "term.condition.CONFUSE",
+                    "text_ja": "%CONFUSE%こんらん",
+                    "text_en": "%CONFUSE%Confuse",
                     "text_zhcn": "混乱",
                 },
                 {
-                    "text_key": "status.poisoned",
-                    "text_ja": "どく",
-                    "text_en": "Poisoned",
+                    "text_key": "term.condition.POISON",
+                    "text_ja": "%POISON%どく",
+                    "text_en": "%POISON%Poison",
                     "text_zhcn": "中毒",
                 },
             ]
@@ -764,7 +764,7 @@ class MemberTest(unittest.TestCase):
 
         self.assertEqual(
             self.member.status(localizer, self.texts, show_ok=True),
-            "Ｐａｒａｌｙｚｅ",
+            "%PARALIZE%Ｐａｒａｌｙｚｅ",
         )
 
         self.member.hp = 0
@@ -773,13 +773,13 @@ class MemberTest(unittest.TestCase):
             "Ｄｅａｄ",
         )
 
-    def test_each_condition_has_da2_localized_text(self) -> None:
+    def test_each_condition_uses_shared_condition_term(self) -> None:
         localizer = Localizer(Language.JAPANESE)
         cases = (
-            ({"paralyzed": True}, "まひ"),
-            ({"sleeping": 2}, "ねむり"),
-            ({"confused": 2}, "らん"),
-            ({"poisoned": True}, "どく"),
+            ({"paralyzed": True}, "%PARALIZE%まひ"),
+            ({"sleeping": 2}, "%SLEEP%ねむり"),
+            ({"confused": 2}, "%CONFUSE%こんらん"),
+            ({"poisoned": True}, "%POISON%どく"),
         )
 
         for values, expected in cases:

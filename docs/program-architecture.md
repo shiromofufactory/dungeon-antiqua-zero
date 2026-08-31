@@ -320,6 +320,16 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 「ぞくせい：🔥ほのお」形式とし、闇属性は「ぞくせい：🌙やみ」と表示する。追加効果
 `吸` は属性とは別に「ついかこうか：きゅうしゅう」と表示する。
 追加効果 `止` は次の行動を封じる「スタン」、`破` は「ぼうぎょダウン」とする。
+属性、状態、種族など複数画面で使う語は `term.attribute.*`、`term.condition.*`、
+`term.effect.*`、`term.monster_tribe.*` の共通キーで保持する。アイコンがある属性・状態は
+共通語自体へアイコンタグを含める。アイテム画面は `item.detail.attribute`、
+`item.detail.additional_effect`、`item.detail.resistance`、
+`item.detail.effective_tribe` の `$ATTRIBUTE$`、`$EFFECT$`、`$RESISTANCE$`、`$TRIBE$`
+へ共通語を代入し、属性・状態・種族ごとの完成文を個別キーとして重複保持しない。
+装備条件の「専用」「除外」も
+`item.detail.requirement.only` / `item.detail.requirement.excludes` の `$TARGET$` へ
+`race.*` または `gender.*` の共通語を代入する。Memberの状態表示も同じ
+`term.condition.*` を参照する。
 種族特効は `ANIMAL`、`UNDEAD`、`GOBLIN`、`HUMAN`、`MAGE`、`GIANT`、
 `DRAGON`、`ANIMATED`、`DEMON` の9種とし、旧スペル `DEAMON` は受理しない。
 耐性は `ResistanceType` の定義順で1耐性につき1行を表示する。対応アイコンがない
@@ -347,6 +357,9 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 本は「つかうと アイコン＋呪文名」に続けて参照先Spellのdescriptionを表示する。それ以外の
 消耗品は参照先が通常呪文でも呪文名を出さず、descriptionだけを表示する。装備品は
 「つかうと アイコン＋呪文名」だけを表示し、descriptionは表示しない。
+呪文descriptionの直前には空行を1行置く。画面側はdescriptionを表示幅で自動改行せず、
+`spells.json` の配列で指定された行境界をそのまま使う。この方針は他の表示テキストにも
+共通とし、必要な改行は正本データで明示する。
 `break=1` でも `type1=ITEM` の消耗品には
 破損・消費表記を出さない。装備品の `break=1` は「（こわれる）」を表示し、現行データで
 該当するのは「てんいのゆびわ」だけである。
