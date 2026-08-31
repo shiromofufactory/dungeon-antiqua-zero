@@ -211,6 +211,7 @@ class SpellScreenMock:
                 ),
             ),
             horizontal_navigation=len(self.party) > 1,
+            active=self.phase is SpellSelectionPhase.CASTER,
         )
         self.caster_cursor = WindowCursor(
             self.member_window,
@@ -339,12 +340,14 @@ class SpellScreenMock:
             return
         self.phase = SpellSelectionPhase.SPELL
         self.caster_cursor.active = False
+        self.member_window.active = False
         self.spell_cursor.active = True
         self._refresh_guide()
 
     def _return_to_caster_selection(self) -> None:
         self.phase = SpellSelectionPhase.CASTER
         self.caster_cursor.active = True
+        self.member_window.active = True
         self.spell_cursor.active = False
         self._refresh_guide()
 

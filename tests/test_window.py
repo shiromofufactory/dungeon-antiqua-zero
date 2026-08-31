@@ -522,6 +522,29 @@ class WindowTest(unittest.TestCase):
 
         self.assertEqual(draw_order, ["navigation", "texts"])
 
+    def test_inactive_window_hides_horizontal_navigation_indicators(self) -> None:
+        window = Window(
+            0,
+            0,
+            8,
+            6,
+            horizontal_navigation=True,
+            vertical_navigation=True,
+            active=False,
+        )
+
+        with (
+            patch.object(window, "_draw_gradient"),
+            patch.object(window, "_draw_frame"),
+            patch.object(window, "_draw_horizontal_navigation") as horizontal,
+            patch.object(window, "_draw_vertical_navigation") as vertical,
+            patch.object(window, "_draw_texts"),
+        ):
+            window.draw()
+
+        horizontal.assert_not_called()
+        vertical.assert_called_once_with()
+
     def test_vertical_navigation_draws_da2_style_scroll_indicators(self) -> None:
         window = Window(2, 3, 20, 10, vertical_navigation=True)
 

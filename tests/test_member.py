@@ -7,6 +7,7 @@ from app.localization import Localizer
 from app.member import (
     AdjustedAbilities,
     BaseAbilities,
+    CharacterType,
     EquipmentSet,
     EquipmentSlot,
     FacePosition,
@@ -27,7 +28,12 @@ from app.text_catalog import TextCatalog
 
 PROFICIENCY_FIELDS = {kind.value: 0 for kind in ProficiencyKind}
 FACE_FIELDS = {"face_x": 0, "face_y": 0}
-GROWTH_FIELDS = {"lv_diff": 0, "base_hp": 44, "base_mp": 27}
+GROWTH_FIELDS = {
+    "type": "SUB",
+    "lv_diff": 0,
+    "base_hp": 44,
+    "base_mp": 27,
+}
 
 
 class MemberTest(unittest.TestCase):
@@ -161,6 +167,7 @@ class MemberTest(unittest.TestCase):
         return Skill.from_record({"name_en": key, "name_ja": key})
 
     def test_normalizes_stable_race_and_gender_values(self) -> None:
+        self.assertEqual(self.member.definition.character_type, CharacterType.SUB)
         self.assertEqual(self.member.definition.race, Race.FAIRY)
         self.assertEqual(self.member.definition.gender, Gender.FEMALE)
 
@@ -425,6 +432,7 @@ class MemberTest(unittest.TestCase):
     def test_other_member_joining_state_uses_fiora_level_and_difference(self) -> None:
         record = {
             "name_en": "Cerion",
+            "type": "SUB",
             "race": "FAIRY",
             "gender": "MALE",
             "lv_diff": 2,
@@ -464,6 +472,7 @@ class MemberTest(unittest.TestCase):
     def test_joining_internal_level_is_capped_at_99(self) -> None:
         record = {
             "name_en": "Cerion",
+            "type": "SUB",
             "race": "FAIRY",
             "gender": "MALE",
             "lv_diff": 2,

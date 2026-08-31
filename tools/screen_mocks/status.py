@@ -117,6 +117,8 @@ RESISTANCE_POSITIONS = tuple(
         )
     )
 )
+ATTACK_VALUE_X = 46
+DUAL_ATTACK_VALUE_X = ATTACK_VALUE_X - 2
 
 
 class StatusMockDataError(RuntimeError):
@@ -142,12 +144,12 @@ def proficiency_display(member: Member, kind: ProficiencyKind) -> str:
 
 
 def attack_display(stats: BattleStats) -> str:
-    """Format one- or two-weapon attack values for the status screen."""
+    """Format one- or two-weapon attack values."""
 
     right = pad(stats.attack_right, 2)
     if stats.attack_left is None:
         return right
-    return f"{right}　－　{pad(stats.attack_left, 2)}"
+    return f"{pad(stats.attack_right, 3)}－{pad(stats.attack_left, 3)}"
 
 
 def hit_display(stats: BattleStats) -> str:
@@ -270,7 +272,15 @@ class StatusScreenMock:
                 localized_texts.create(localized["equipment.head"], 30, 17),
                 localized_texts.create(localized["equipment.arm"], 30, 20),
                 localized_texts.create(localized["label.attack"], 30, 26),
-                WindowText(attack_display(battle_stats), 46, 26),
+                WindowText(
+                    attack_display(battle_stats),
+                    (
+                        DUAL_ATTACK_VALUE_X
+                        if battle_stats.attack_left is not None
+                        else ATTACK_VALUE_X
+                    ),
+                    26,
+                ),
                 localized_texts.create(localized["label.hit"], 30, 29),
                 WindowText(hit_display(battle_stats), 44, 29),
                 localized_texts.create(localized["label.defense"], 30, 32),

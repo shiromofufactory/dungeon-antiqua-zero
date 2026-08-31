@@ -194,6 +194,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.animate_main_windows_with_fade)
         self.assertFalse(mock.showing_field)
         self.assertIsNone(mock.item_screen)
+        self.assertIsNone(mock.equipment_screen)
         self.assertIsNone(mock.status_screen)
         self.assertIsNone(mock.spell_screen)
         self.assertEqual(len(mock.spells), 38)
@@ -812,6 +813,100 @@ class MenuScreenMockTest(unittest.TestCase):
         clear_screen.assert_called_once_with(0)
         mock.item_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(-1, 0), call()])
+
+    @patch("tools.screen_mocks.menu.EquipmentScreenMock")
+    def test_confirming_equipment_command_opens_connected_equipment_screen(
+        self,
+        equipment_screen_class: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(confirm=InputButton(triggered=True, held=True))
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="equip", active=True)
+        mock.party = (Mock(),)
+        mock.items = {"DAGGER": Mock()}
+        mock.spells = {"FIRE1": Mock()}
+        mock.inventory_system = Mock()
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.faces = object()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.selected_member_index = 2
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock.equipment_screen = None
+
+        mock.update()
+
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.OPEN_EQUIPMENT,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+        equipment_screen_class.assert_called_once_with(
+            party=mock.party,
+            items=mock.items,
+            spells=mock.spells,
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+            faces=mock.faces,
+            inventory_system=mock.inventory_system,
+            member_index=2,
+            on_invalid_action=mock.alert.start,
+        )
+        self.assertIs(mock.equipment_screen, equipment_screen_class.return_value)
+
+    def test_cancel_from_equipment_returns_to_menu_and_keeps_member(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(cancel=InputButton(triggered=True, held=True))
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.selected_member_index = 0
+        mock.equipment_screen = Mock(member_index=3)
+        mock.equipment_screen.update.return_value = True
+        mock._refresh_party_window_texts = Mock()
+
+        equipment_screen = mock.equipment_screen
+        mock.update()
+
+        equipment_screen.update.assert_called_once_with(input_state)
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.CLOSE_EQUIPMENT,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+        self.assertIsNone(mock.equipment_screen)
+        self.assertEqual(mock.selected_member_index, 3)
+        self.assertTrue(mock.command_cursor.active)
+        mock._refresh_party_window_texts.assert_called_once_with()
+
+    @patch("tools.screen_mocks.menu.pyxel.camera")
+    @patch("tools.screen_mocks.menu.pyxel.cls")
+    def test_draw_uses_equipment_screen_while_equipment_is_active(
+        self,
+        clear_screen: Mock,
+        camera: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.equipment_screen = Mock()
+        mock.alert = Mock(camera_x=0)
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        mock.equipment_screen.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     @patch("tools.screen_mocks.menu.StatusScreenMock")
     def test_confirming_status_command_opens_connected_status_screen(

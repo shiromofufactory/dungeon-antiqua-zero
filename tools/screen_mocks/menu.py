@@ -24,6 +24,10 @@ from tools.screen_mocks._runtime import (
     create_mock_input_reader,
     initialize_screen_mock,
 )
+from tools.screen_mocks.equipment import (
+    EquipmentMockDataError,
+    EquipmentScreenMock,
+)
 from tools.screen_mocks.item import ItemMockDataError, ItemScreenMock
 from tools.screen_mocks.status import StatusMockDataError, StatusScreenMock
 from tools.screen_mocks.spell import SpellMockDataError, SpellScreenMock
@@ -201,6 +205,8 @@ class MenuScreenChange(Enum):
     CLOSE_ITEM = auto()
     OPEN_SPELL = auto()
     CLOSE_SPELL = auto()
+    OPEN_EQUIPMENT = auto()
+    CLOSE_EQUIPMENT = auto()
     OPEN_STATUS = auto()
     CLOSE_STATUS = auto()
 
@@ -292,6 +298,7 @@ class MenuScreenMock:
         self.animate_main_windows_with_fade = False
         self.showing_field = False
         self.item_screen: ItemScreenMock | None = None
+        self.equipment_screen: EquipmentScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
         self.spell_screen: SpellScreenMock | None = None
         self.selected_member_index = 0
@@ -759,6 +766,29 @@ class MenuScreenMock:
         self.item_screen = None
         self.command_cursor.active = True
 
+    def _start_equipment(self) -> None:
+        self.command_cursor.active = False
+        self.equipment_screen = EquipmentScreenMock(
+            party=self.party,
+            items=self.items,
+            spells=self.spells,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+            inventory_system=self.inventory_system,
+            member_index=self.selected_member_index,
+            on_invalid_action=self.alert.start,
+        )
+
+    def _finish_equipment(self) -> None:
+        if self.equipment_screen is None:
+            return
+        self.selected_member_index = self.equipment_screen.member_index
+        self.equipment_screen = None
+        self._refresh_party_window_texts()
+        self.command_cursor.active = True
+
     def _finish_status(self) -> None:
         if self.status_screen is None:
             return
@@ -790,6 +820,7 @@ class MenuScreenMock:
             MenuScreenChange.SHOW_FIELD,
             MenuScreenChange.OPEN_ITEM,
             MenuScreenChange.OPEN_SPELL,
+            MenuScreenChange.OPEN_EQUIPMENT,
             MenuScreenChange.OPEN_STATUS,
         ):
             self.command_cursor.active = False
@@ -815,6 +846,10 @@ class MenuScreenMock:
             self._start_spell()
         elif change is MenuScreenChange.CLOSE_SPELL:
             self._finish_spell()
+        elif change is MenuScreenChange.OPEN_EQUIPMENT:
+            self._start_equipment()
+        elif change is MenuScreenChange.CLOSE_EQUIPMENT:
+            self._finish_equipment()
         elif change is MenuScreenChange.OPEN_STATUS:
             self._start_status()
         else:
@@ -1026,6 +1061,11 @@ class MenuScreenMock:
             if spell_screen.update(input_state):
                 self._begin_screen_change(MenuScreenChange.CLOSE_SPELL)
             return
+        equipment_screen = getattr(self, "equipment_screen", None)
+        if equipment_screen is not None:
+            if equipment_screen.update(input_state):
+                self._begin_screen_change(MenuScreenChange.CLOSE_EQUIPMENT)
+            return
         status_screen = getattr(self, "status_screen", None)
         if status_screen is not None:
             if status_screen.update(input_state):
@@ -1103,6 +1143,12 @@ class MenuScreenMock:
             return
         if (
             input_state.confirm.triggered
+            and self.command_cursor.selected_key == "equip"
+        ):
+            self._begin_screen_change(MenuScreenChange.OPEN_EQUIPMENT)
+            return
+        if (
+            input_state.confirm.triggered
             and self.command_cursor.selected_key == "status"
         ):
             self._begin_screen_change(MenuScreenChange.OPEN_STATUS)
@@ -1140,6 +1186,10 @@ class MenuScreenMock:
             spell_screen = getattr(self, "spell_screen", None)
             if spell_screen is not None:
                 spell_screen.draw()
+                return
+            equipment_screen = getattr(self, "equipment_screen", None)
+            if equipment_screen is not None:
+                equipment_screen.draw()
                 return
             status_screen = getattr(self, "status_screen", None)
             if status_screen is not None:
@@ -1212,6 +1262,7 @@ def main() -> int:
         MenuScreenMock,
         expected_errors=(
             DataResourceError,
+            EquipmentMockDataError,
             FontResourceError,
             ImageResourceError,
             ItemDataError,

@@ -159,6 +159,7 @@ class Window:
         thin_frame: bool = False,
         horizontal_navigation: bool = False,
         vertical_navigation: bool = False,
+        active: bool = True,
         opened: bool = True,
     ) -> None:
         values = (x, y, width, height)
@@ -177,6 +178,8 @@ class Window:
             raise TypeError("horizontal_navigation must be a boolean")
         if not isinstance(vertical_navigation, bool):
             raise TypeError("vertical_navigation must be a boolean")
+        if not isinstance(active, bool):
+            raise TypeError("window active must be a boolean")
         if not isinstance(opened, bool):
             raise TypeError("opened must be a boolean")
 
@@ -189,6 +192,7 @@ class Window:
         self.thin_frame = thin_frame
         self.horizontal_navigation = horizontal_navigation
         self.vertical_navigation = vertical_navigation
+        self.active = active
         self.vertical_navigation_pressed = 0
         self._texts: list[WindowText] = []
         self._cursor: WindowCursor | None = None
@@ -408,7 +412,7 @@ class Window:
         if not self.transparent:
             self._draw_gradient()
             self._draw_frame()
-        if self.horizontal_navigation:
+        if self.horizontal_navigation and self.active:
             self._draw_horizontal_navigation()
         if self.vertical_navigation:
             self._draw_vertical_navigation()
@@ -708,6 +712,7 @@ class WindowFactory:
         thin_frame: bool = False,
         horizontal_navigation: bool = False,
         vertical_navigation: bool = False,
+        active: bool = True,
         opened: bool = True,
     ) -> Window:
         """Create a Window, using the factory font unless one is supplied."""
@@ -723,6 +728,7 @@ class WindowFactory:
             thin_frame=thin_frame,
             horizontal_navigation=horizontal_navigation,
             vertical_navigation=vertical_navigation,
+            active=active,
             opened=opened,
         )
 

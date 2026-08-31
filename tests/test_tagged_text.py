@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from app.ui.colors import BLUE_TEXT_COLOR
+from app.ui.colors import BLUE_TEXT_COLOR, POSITIVE_COLOR
 from app.ui.tagged_text import (
     ICON_BANK,
     ICON_COLKEY,
@@ -182,8 +182,29 @@ class TaggedTextTest(unittest.TestCase):
             [call.args for call in text.call_args_list],
             [
                 (10, 20, "A", 7, font),
-                (16, 20, "B", 13, font),
+                (16, 20, "B", BLUE_TEXT_COLOR, font),
                 (22, 20, "C", 5, font),
+            ],
+        )
+
+    def test_positive_color_tag_changes_only_text_after_colon(self) -> None:
+        font = StubFont()
+
+        with patch("app.ui.tagged_text.pyxel.text") as text:
+            draw_tagged_text(
+                10,
+                20,
+                "：%COL_POSITIVE%FIXED",
+                5,
+                font,
+                shadow_color=None,
+            )
+
+        self.assertEqual(
+            [call.args for call in text.call_args_list],
+            [
+                (10, 20, "：", 5, font),
+                (16, 20, "FIXED", POSITIVE_COLOR, font),
             ],
         )
 
@@ -252,11 +273,14 @@ class TaggedTextTest(unittest.TestCase):
         self.assertEqual(
             TEXT_COLORS,
             {
-                "%COL_BLUE%": TextColor("%COL_BLUE%", 13),
+                "%COL_BLUE%": TextColor("%COL_BLUE%", BLUE_TEXT_COLOR),
+                "%COL_POSITIVE%": TextColor(
+                    "%COL_POSITIVE%",
+                    POSITIVE_COLOR,
+                ),
                 "%COL_END%": TextColor("%COL_END%", 5),
             },
         )
-        self.assertEqual(BLUE_TEXT_COLOR, 13)
 
 
 if __name__ == "__main__":

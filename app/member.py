@@ -44,6 +44,14 @@ class Gender(StrEnum):
     NONE = "NONE"
 
 
+class CharacterType(StrEnum):
+    """Stable participation type used by party and equipment rules."""
+
+    MAIN = "MAIN"
+    SUB = "SUB"
+    NPC = "NPC"
+
+
 class EquipmentSlot(StrEnum):
     """Named physical slots used by a member's current equipment."""
 
@@ -369,6 +377,20 @@ class EquipmentSet:
             raise TypeError("slot must be an EquipmentSlot")
         return self._items[slot]
 
+    def replaced(
+        self,
+        replacements: Mapping[EquipmentSlot, Item | None],
+    ) -> EquipmentSet:
+        """Return a validated copy with explicit slot replacements."""
+
+        if not isinstance(replacements, Mapping):
+            raise TypeError("replacements must be a mapping")
+        if not all(isinstance(slot, EquipmentSlot) for slot in replacements):
+            raise TypeError("replacement keys must be EquipmentSlot values")
+        copied = dict(self._items)
+        copied.update(replacements)
+        return EquipmentSet(copied)
+
     def equipped_items(self) -> tuple[Item, ...]:
         """Return equipped items in the stable screen and save-data order."""
 
@@ -493,6 +515,7 @@ class CharacterDefinition:
 
     key: str
     names: Mapping[str, object]
+    character_type: CharacterType
     race: Race
     gender: Gender
     face_position: FacePosition
@@ -529,6 +552,7 @@ class CharacterDefinition:
         if not key:
             raise MemberDataError("character.name_en must be a non-empty string")
 
+        character_type = cls._enum_value(record, "type", CharacterType)
         race = cls._enum_value(record, "race", Race)
         gender = cls._enum_value(record, "gender", Gender)
         level_difference = _validate_integer_value(
@@ -556,6 +580,7 @@ class CharacterDefinition:
         return cls(
             key,
             MappingProxyType(names),
+            character_type,
             race,
             gender,
             face_position,
@@ -799,6 +824,24 @@ class Member:
         return self.formation_row is FormationRow.FRONT
 
     @property
+    def is_npc(self) -> bool:
+        """Return whether this member uses the NPC equipment rules."""
+
+        return self.definition.character_type is CharacterType.NPC
+
+    def is_equipment_fixed(self, slot: EquipmentSlot) -> bool:
+        """Return whether the NPC's initial item still occupies ``slot``."""
+
+        if not isinstance(slot, EquipmentSlot):
+            raise TypeError("slot must be an EquipmentSlot")
+        current = self.equipment.item_at(slot)
+        return (
+            self.is_npc
+            and current is not None
+            and current.key == self.definition.initial_equipment_keys[slot]
+        )
+
+    @property
     def healing(self) -> int:
         """Return field HP recovery supplied by currently equipped items."""
 
@@ -914,6 +957,29 @@ class Member:
         if requirement == "ONLY_MALE":
             return self.definition.gender is Gender.MALE
         raise MemberDataError(f"unsupported equipment requirement: {requirement}")
+
+    def can_equip_at(self, item: Item, slot: EquipmentSlot) -> bool:
+        """Return intrinsic eligibility for an item in one physical slot.
+
+        Inventory availability and conflicts with already occupied slots are
+        handled by ``InventorySystem`` because they can return displaced items.
+        """
+
+        if not isinstance(item, Item):
+            raise TypeError("item must be an Item")
+        if not isinstance(slot, EquipmentSlot):
+            raise TypeError("slot must be an EquipmentSlot")
+        if not self.can_equip(item):
+            return False
+        if item.equip_type not in _EQUIPMENT_TYPES_BY_SLOT[slot]:
+            return False
+        if (
+            slot is EquipmentSlot.LEFT
+            and item.equip_type is ItemEquipType.RIGHT
+            and not self.has_skill("Dual-Wield")
+        ):
+            return False
+        return True
 
     @staticmethod
     def _weapon_proficiency_kind(weapon: Item) -> ProficiencyKind:

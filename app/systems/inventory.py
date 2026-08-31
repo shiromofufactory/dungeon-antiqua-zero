@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from types import MappingProxyType
 
 if __package__ == "systems":
-    from item import Item
+    from item import Item, ItemEquipType
+    from member import EquipmentSet, EquipmentSlot, Member
 else:
-    from ..item import Item
+    from ..item import Item, ItemEquipType
+    from ..member import EquipmentSet, EquipmentSlot, Member
 
 
 class InventorySystem:
@@ -126,6 +128,248 @@ class InventorySystem:
         else:
             del self._quantities[key]
         return True
+
+    def can_equip(
+        self,
+        member: Member,
+        slot: EquipmentSlot,
+        item: Item | None,
+    ) -> bool:
+        """Return whether one inventory-backed equipment change is legal."""
+
+        self._validate_equipment_arguments(member, slot, item)
+        current = member.equipment.item_at(slot)
+        if member.is_equipment_fixed(slot):
+            return False
+        if item is None:
+            return current is not None
+        if self.quantity(item) <= 0 or not member.can_equip_at(item, slot):
+            return False
+
+        if slot is EquipmentSlot.RIGHT and item.equip_type is ItemEquipType.TWO_HANDS:
+            left = member.equipment.item_at(EquipmentSlot.LEFT)
+            if left is not None and member.is_equipment_fixed(
+                EquipmentSlot.LEFT
+            ):
+                return False
+        if slot is EquipmentSlot.LEFT:
+            right = member.equipment.item_at(EquipmentSlot.RIGHT)
+            if (
+                member.is_equipment_fixed(EquipmentSlot.RIGHT)
+                and right is not None
+                and right.equip_type is ItemEquipType.TWO_HANDS
+            ):
+                return False
+        return True
+
+    def equip(
+        self,
+        member: Member,
+        slot: EquipmentSlot,
+        item: Item | None,
+    ) -> bool:
+        """Exchange one equipped item with inventory, honoring NPC locks."""
+
+        if not self.can_equip(member, slot, item):
+            return False
+
+        replacements = self._equipment_replacements(member, slot, item)
+        displaced: list[Item] = []
+        current = member.equipment.item_at(slot)
+        if current is not None:
+            displaced.append(current)
+
+        if item is not None:
+            if (
+                slot is EquipmentSlot.RIGHT
+                and item.equip_type is ItemEquipType.TWO_HANDS
+            ):
+                left = member.equipment.item_at(EquipmentSlot.LEFT)
+                if left is not None:
+                    displaced.append(left)
+            elif slot is EquipmentSlot.LEFT:
+                right = member.equipment.item_at(EquipmentSlot.RIGHT)
+                if (
+                    right is not None
+                    and right.equip_type is ItemEquipType.TWO_HANDS
+                ):
+                    displaced.append(right)
+
+        next_equipment = member.equipment.replaced(replacements)
+        if item is not None:
+            self._decrease(item.key)
+        for replaced_item in displaced:
+            self._increase(replaced_item.key)
+        member.equipment = next_equipment
+        return True
+
+    def preview_equipment(
+        self,
+        member: Member,
+        slot: EquipmentSlot,
+        item: Item | None,
+    ) -> EquipmentSet | None:
+        """Return the equipment set produced by a legal change without applying it."""
+
+        if not self.can_equip(member, slot, item):
+            return None
+        return member.equipment.replaced(
+            self._equipment_replacements(member, slot, item)
+        )
+
+    def auto_equip(self, member: Member) -> bool:
+        """Apply DA2-style equipment scoring to one member.
+
+        NPC initial equipment is never removed or replaced. Equipment added
+        later follows the same replacement rules as player-character gear.
+        """
+
+        if not isinstance(member, Member):
+            raise TypeError("member must be a Member")
+        changed = False
+        for slot in EquipmentSlot:
+            if (
+                member.equipment.item_at(slot) is not None
+                and not member.is_equipment_fixed(slot)
+            ):
+                changed = self.equip(member, slot, None) or changed
+
+        if member.equipment.item_at(EquipmentSlot.RIGHT) is None:
+            weapon = self._best_item(
+                member,
+                EquipmentSlot.RIGHT,
+                score=lambda item: self._weapon_score(member, item),
+            )
+            if weapon is not None:
+                changed = self.equip(member, EquipmentSlot.RIGHT, weapon) or changed
+
+        if member.equipment.item_at(EquipmentSlot.LEFT) is None:
+            if member.has_skill("Dual-Wield"):
+                second_weapon = self._best_item(
+                    member,
+                    EquipmentSlot.LEFT,
+                    score=lambda item: (
+                        self._weapon_score(member, item)
+                        if item.equip_type is ItemEquipType.RIGHT
+                        else -1
+                    ),
+                    accepted_type=ItemEquipType.RIGHT,
+                )
+                if second_weapon is not None:
+                    changed = (
+                        self.equip(member, EquipmentSlot.LEFT, second_weapon)
+                        or changed
+                    )
+            if member.equipment.item_at(EquipmentSlot.LEFT) is None:
+                shield = self._best_item(
+                    member,
+                    EquipmentSlot.LEFT,
+                    score=self._armor_score,
+                    accepted_type=ItemEquipType.LEFT,
+                )
+                if shield is not None:
+                    changed = self.equip(member, EquipmentSlot.LEFT, shield) or changed
+
+        for slot in (
+            EquipmentSlot.BODY,
+            EquipmentSlot.HEAD,
+            EquipmentSlot.ARM,
+        ):
+            if member.equipment.item_at(slot) is not None:
+                continue
+            armor = self._best_item(
+                member,
+                slot,
+                score=self._armor_score,
+            )
+            if armor is not None:
+                changed = self.equip(member, slot, armor) or changed
+        return changed
+
+    def _best_item(
+        self,
+        member: Member,
+        slot: EquipmentSlot,
+        *,
+        score: Callable[[Item], float | int],
+        accepted_type: ItemEquipType | None = None,
+    ) -> Item | None:
+        candidates = (
+            item
+            for item in self.items
+            if (accepted_type is None or item.equip_type is accepted_type)
+            and self.can_equip(member, slot, item)
+        )
+        return max(candidates, key=score, default=None)
+
+    @staticmethod
+    def _weapon_score(member: Member, item: Item) -> float:
+        base = item.attack * item.hit
+        ranged = item.reach >= 2
+        if member.is_front_row:
+            return -1 if ranged else base
+        if ranged:
+            return base + 2000
+        return base * (1 + len(item.resistances)) / 60
+
+    @staticmethod
+    def _armor_score(item: Item) -> float:
+        return (
+            0.01
+            + item.defense
+            + (item.evasion + item.spell_resistance) / 5
+            + len(item.resistances) * 1.3
+        )
+
+    def _increase(self, key: str) -> None:
+        self._quantities[key] = self._quantities.get(key, 0) + 1
+        self._recorded_keys = self._recorded_keys | {key}
+
+    def _decrease(self, key: str) -> None:
+        quantity = self._quantities.get(key, 0)
+        if quantity <= 0:
+            raise ValueError(f"inventory item is not owned: {key!r}")
+        if quantity == 1:
+            del self._quantities[key]
+        else:
+            self._quantities[key] = quantity - 1
+
+    def _validate_equipment_arguments(
+        self,
+        member: Member,
+        slot: EquipmentSlot,
+        item: Item | None,
+    ) -> None:
+        if not isinstance(member, Member):
+            raise TypeError("member must be a Member")
+        if not isinstance(slot, EquipmentSlot):
+            raise TypeError("slot must be an EquipmentSlot")
+        if item is not None and not isinstance(item, Item):
+            raise TypeError("item must be an Item or None")
+        if item is not None and item.key not in self._items:
+            raise ValueError(f"unknown inventory item key: {item.key!r}")
+
+    @staticmethod
+    def _equipment_replacements(
+        member: Member,
+        slot: EquipmentSlot,
+        item: Item | None,
+    ) -> dict[EquipmentSlot, Item | None]:
+        replacements: dict[EquipmentSlot, Item | None] = {slot: item}
+        if (
+            item is not None
+            and slot is EquipmentSlot.RIGHT
+            and item.equip_type is ItemEquipType.TWO_HANDS
+        ):
+            replacements[EquipmentSlot.LEFT] = None
+        elif item is not None and slot is EquipmentSlot.LEFT:
+            right = member.equipment.item_at(EquipmentSlot.RIGHT)
+            if (
+                right is not None
+                and right.equip_type is ItemEquipType.TWO_HANDS
+            ):
+                replacements[EquipmentSlot.RIGHT] = None
+        return replacements
 
     def _item_key(self, item: Item | str) -> str:
         if isinstance(item, Item):

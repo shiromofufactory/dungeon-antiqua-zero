@@ -10,6 +10,8 @@ from app.resources import load_record_array
 from app.ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 from tools.screen_mocks._fixtures import MOCK_PARTY_CHARACTER_KEYS
 from tools.screen_mocks.status import (
+    ATTACK_VALUE_X,
+    DUAL_ATTACK_VALUE_X,
     LOCALIZED_POSITIONS,
     RESISTANCE_POSITIONS,
     Direction,
@@ -280,7 +282,7 @@ class StatusScreenMockTest(unittest.TestCase):
             spell_resistance=0,
         )
 
-        self.assertEqual(attack_display(stats), "４０　－　３２")
+        self.assertEqual(attack_display(stats), "　４０－　３２")
         self.assertEqual(hit_display(stats), "１０８（＋１７）")
 
         narrow_stats = BattleStats(
@@ -298,6 +300,35 @@ class StatusScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(attack_display(narrow_stats), "　８")
         self.assertEqual(hit_display(narrow_stats), "　　８（＋　１）")
+
+    def test_dual_wield_attack_is_eight_pixels_left_of_single_attack(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            single = StatusScreenMock(member_index=0)
+            dual = StatusScreenMock(member_index=3)
+
+        self.assertIsNone(single.member.battle_stats.attack_left)
+        self.assertIsNotNone(dual.member.battle_stats.attack_left)
+        single_attack = next(
+            text
+            for text in single.windows[0].texts
+            if text.text == attack_display(single.member.battle_stats)
+            and text.y == 26
+        )
+        dual_attack = next(
+            text
+            for text in dual.windows[0].texts
+            if text.text == attack_display(dual.member.battle_stats)
+            and text.y == 26
+        )
+        self.assertEqual(single_attack.x, ATTACK_VALUE_X)
+        self.assertEqual(dual_attack.x, DUAL_ATTACK_VALUE_X)
+        self.assertEqual((single_attack.x - dual_attack.x) * 4, 8)
 
     def test_resistance_icon_uses_enabled_and_disabled_variants(self) -> None:
         member = Mock(
@@ -425,15 +456,15 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(6, 38)], "Ｓｋｉｌｌ：")
         self.assertEqual(
             texts[(30, 8)],
-            "%RIGHT%：%KNIFE%ＤＡＧＧＥＲ",
+            "Ｒｉｇｈｔ：%KNIFE%ＤＡＧＧＥＲ",
         )
-        self.assertEqual(texts[(30, 11)], "%LEFT%：")
-        self.assertEqual(texts[(30, 14)], "%BODY%：ＲＯＢＥ")
-        self.assertEqual(texts[(30, 17)], "%HEAD%：")
+        self.assertEqual(texts[(30, 11)], "Ｌｅｆｔ：")
+        self.assertEqual(texts[(30, 14)], "Ｂｏｄｙ：ＲＯＢＥ")
+        self.assertEqual(texts[(30, 17)], "Ｈｅａｄ：")
         arm = mock.member.equipment.item_at(EquipmentSlot.ARM)
         self.assertEqual(
             texts[(30, 20)],
-            "%ARM%："
+            "Ａｒｍ："
             + (
                 arm.localized_name(Localizer(Language.ENGLISH))
                 if arm is not None

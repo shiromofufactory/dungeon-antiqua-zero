@@ -57,7 +57,6 @@ ITEM_CURSOR_X = ITEM_TEXT_X - 2
 ITEM_INFO_X = 2
 ITEM_INFO_Y = 2
 ITEM_INFO_ROW_HEIGHT = 3
-ITEM_NAME_MAX_LENGTH = 11
 ITEM_INFO_MAX_ROWS = 12
 ITEM_INVENTORY_MAX = 255
 ITEM_SUMMARY_VALUE_X = 13
@@ -289,7 +288,7 @@ class ItemScreenMock:
             y = ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT
             list_texts.append(
                 self.localized_texts.create(
-                    str(item.localized_name(self.localizer))[:ITEM_NAME_MAX_LENGTH],
+                    str(item.localized_name(self.localizer)),
                     ITEM_TEXT_X,
                     y,
                 )
@@ -310,6 +309,7 @@ class ItemScreenMock:
             tuple(list_texts),
             horizontal_navigation=scrollable,
             vertical_navigation=scrollable,
+            active=self.phase is ItemSelectionPhase.ITEM,
         )
         self.item_cursor = WindowCursor(
             self.item_list_window,
@@ -490,6 +490,7 @@ class ItemScreenMock:
 
         self.phase = ItemSelectionPhase.CONFIRMATION
         self.item_cursor.active = False
+        self.item_list_window.active = False
         self.pending_drop_item = item
         self.drop_confirmation_window = self._window_factory.create(
             *DROP_CONFIRM_WINDOW_GRID,

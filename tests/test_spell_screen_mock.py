@@ -150,6 +150,7 @@ class SpellScreenMockTest(unittest.TestCase):
 
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
         self.assertFalse(mock.caster_cursor.active)
+        self.assertFalse(mock.member_window.active)
         self.assertTrue(mock.spell_cursor.active)
         self.assertEqual(mock.selected_spell.key, "POISON1")
         self.assertEqual(
@@ -181,6 +182,7 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.update(InputState(cancel=InputButton(True, True))))
         self.assertIs(mock.phase, SpellSelectionPhase.CASTER)
         self.assertTrue(mock.caster_cursor.active)
+        self.assertTrue(mock.member_window.active)
         self.assertFalse(mock.spell_cursor.active)
         self.assertEqual(mock.guide_window.texts, ())
         self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))

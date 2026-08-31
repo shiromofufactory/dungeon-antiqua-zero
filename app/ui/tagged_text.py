@@ -9,7 +9,7 @@ from typing import Any
 
 import pyxel
 
-from .colors import BLUE_TEXT_COLOR
+from .colors import BLUE_TEXT_COLOR, POSITIVE_COLOR
 
 ICON_BANK = 0
 ICON_SIZE = 8
@@ -113,6 +113,7 @@ TEXT_ICONS = MappingProxyType(
 TEXT_COLORS = MappingProxyType(
     {
         "%COL_BLUE%": TextColor("%COL_BLUE%", BLUE_TEXT_COLOR),
+        "%COL_POSITIVE%": TextColor("%COL_POSITIVE%", POSITIVE_COLOR),
         "%COL_END%": TextColor("%COL_END%", 5),
     }
 )

@@ -564,7 +564,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.item_cursor.selected_key, mock.selected_item.key)
         self.assertGreaterEqual(len(mock.item_info_window.texts), 2)
 
-    def test_longest_japanese_item_name_is_not_truncated_in_the_list(self) -> None:
+    def test_japanese_item_name_is_fully_displayed_in_the_list(self) -> None:
         mock = ItemScreenMock()
         mock.phase = ItemSelectionPhase.ITEM
         mock.category_cursor.active = False
@@ -582,9 +582,27 @@ class ItemScreenMockTest(unittest.TestCase):
             if text.x == ITEM_TEXT_X
         )
         self.assertEqual(name.text, "こおりのくさりかたびら")
-        self.assertLess(
-            ITEM_TEXT_X + len(name.text) * 2,
-            ITEM_COUNT_X,
+
+    def test_english_item_name_is_fully_displayed_in_the_list(self) -> None:
+        mock = ItemScreenMock(settings=Settings(language=Language.ENGLISH))
+        mock.phase = ItemSelectionPhase.ITEM
+        mock.category_cursor.active = False
+        mock.selected_item_index = next(
+            index
+            for index, item in enumerate(mock.inventory)
+            if item.key == "LILITH’S CIRCLET"
+        )
+        mock.scroll_offset = mock.selected_item_index
+        mock._build_item_windows()
+
+        name = next(
+            text
+            for text in mock.item_list_window.texts
+            if text.x == ITEM_TEXT_X
+        )
+        self.assertEqual(
+            name.text,
+            str(mock.selected_item.localized_name(mock.localizer)),
         )
 
     def test_important_items_stay_empty_and_cannot_enter_item_selection(self) -> None:
@@ -613,6 +631,7 @@ class ItemScreenMockTest(unittest.TestCase):
         mock.update(InputState(confirm=InputButton(True, True)))
 
         self.assertIs(mock.phase, ItemSelectionPhase.CONFIRMATION)
+        self.assertFalse(mock.item_list_window.active)
         self.assertFalse(mock.item_cursor.active)
         self.assertEqual(
             (
@@ -648,6 +667,7 @@ class ItemScreenMockTest(unittest.TestCase):
         mock.update(InputState(confirm=InputButton(True, True)))
 
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertTrue(mock.item_list_window.active)
         self.assertNotIn(discarded, mock.inventory)
         self.assertEqual(mock.inventory_system.quantity(discarded), 0)
         self.assertIsNone(mock.drop_confirmation_window)
