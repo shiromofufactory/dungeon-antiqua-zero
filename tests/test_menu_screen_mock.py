@@ -9,6 +9,7 @@ from tools.screen_mocks.menu import (
     ALERT_CHANNEL,
     ALERT_SOUND_ID,
     FACES_IMAGE_ID,
+    FIELD_BACKGROUND_IMAGE_ID,
     FORMATION_ARROW_COLKEY,
     FORMATION_ARROW_FRAME_DURATION,
     FORMATION_ARROW_HEIGHT,
@@ -83,6 +84,12 @@ class MenuScreenMockTest(unittest.TestCase):
             close_guide_window,
         )
         cursor = command_window.set_cursor.return_value
+        face_image = object()
+        field_background = object()
+        images_class.return_value.image.side_effect = (
+            face_image,
+            field_background,
+        )
 
         mock = MenuScreenMock()
 
@@ -92,8 +99,15 @@ class MenuScreenMockTest(unittest.TestCase):
         )
         self.assertIs(mock.input_reader, create_input_reader.return_value)
         self.assertIsInstance(mock.alert, MenuAlertEffect)
-        images_class.return_value.image.assert_called_once_with(FACES_IMAGE_ID)
-        self.assertIs(mock.faces, images_class.return_value.image.return_value)
+        self.assertEqual(
+            images_class.return_value.image.call_args_list,
+            [
+                call(FACES_IMAGE_ID),
+                call(FIELD_BACKGROUND_IMAGE_ID),
+            ],
+        )
+        self.assertIs(mock.faces, face_image)
+        self.assertIs(mock.field_background, field_background)
         self.assertEqual(
             fonts.font_for.call_args_list,
             [
@@ -177,6 +191,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_window)
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
+        self.assertFalse(mock.showing_field)
         self.assertIsNone(mock.item_screen)
         self.assertIsNone(mock.status_screen)
         self.assertIsNone(mock.spell_screen)
@@ -464,24 +479,102 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertEqual(POSITIVE_COLOR, 29)
         self.assertEqual(NEGATIVE_COLOR, 45)
 
-    def test_cancel_quits_before_updating_command_window(self) -> None:
+    def test_cancel_fades_from_main_menu_to_mock_field(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             cancel=InputButton(triggered=True, held=True)
         )
         mock.command_window = Mock()
-        mock.command_cursor = Mock(selected_key="item")
+        mock.command_cursor = Mock(selected_key="item", active=True)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.showing_field = False
         mock.party_cursor = None
         mock.alert = Mock()
         mock.settings_cursor = None
         mock.confirmation_cursor = None
 
-        with patch("tools.screen_mocks.menu.pyxel.quit") as quit_game:
-            mock.update()
+        mock.update()
+
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.SHOW_FIELD,
+        )
+        self.assertFalse(mock.command_cursor.active)
+        self.assertFalse(mock.showing_field)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        self.assertTrue(mock.showing_field)
+        self.assertIsNone(mock.pending_screen_change)
+        mock.command_window.update.assert_not_called()
+
+    def test_menu_button_fades_from_mock_field_back_to_menu(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            menu=InputButton(triggered=True, held=True)
+        )
+        mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.showing_field = True
+        mock.alert = Mock()
+
+        mock.update()
+
+        self.assertIs(
+            mock.pending_screen_change,
+            MenuScreenChange.SHOW_MENU,
+        )
+        self.assertTrue(mock.showing_field)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        self.assertFalse(mock.showing_field)
+        self.assertTrue(mock.command_cursor.active)
+        self.assertIsNone(mock.pending_screen_change)
+
+    @patch("tools.screen_mocks.menu.pyxel.quit")
+    def test_cancel_on_mock_field_still_exits_the_mock(self, quit_game: Mock) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            cancel=InputButton(triggered=True, held=True)
+        )
+        mock.showing_field = True
+        mock.alert = Mock()
+
+        mock.update()
 
         quit_game.assert_called_once_with()
-        mock.command_window.update.assert_not_called()
+
+    @patch("tools.screen_mocks.menu.pyxel.cls")
+    @patch("tools.screen_mocks.menu.pyxel.camera")
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_draw_uses_full_screen_mock_field_background(
+        self,
+        blt: Mock,
+        camera: Mock,
+        clear_screen: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.showing_field = True
+        mock.field_background = object()
+        mock.alert = Mock(camera_x=0)
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        blt.assert_called_once_with(
+            0,
+            0,
+            mock.field_background,
+            0,
+            0,
+            256,
+            240,
+        )
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     @patch("tools.screen_mocks.menu.pyxel.cls")
     @patch("tools.screen_mocks.menu.pyxel.camera")

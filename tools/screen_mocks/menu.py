@@ -19,6 +19,8 @@ from tools.screen_mocks._fixtures import (
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
     FPS,
+    SCREEN_HEIGHT,
+    SCREEN_WIDTH,
     create_mock_input_reader,
     initialize_screen_mock,
 )
@@ -143,6 +145,7 @@ LANGUAGE_SEQUENCE = (
 DISPLAY_SEQUENCE = (DisplayMode.PIXEL, DisplayMode.SMOOTH)
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
+FIELD_BACKGROUND_IMAGE_ID = "mock/bg_field"
 PARTY_WINDOW_GRID = (0, 0, 48, 60)
 PARTY_MEMBER_ROW_HEIGHT = 11
 PARTY_FACE_X = {
@@ -191,6 +194,8 @@ class MenuMockDataError(RuntimeError):
 class MenuScreenChange(Enum):
     """Menu-screen replacement applied only while the fade is fully black."""
 
+    SHOW_FIELD = auto()
+    SHOW_MENU = auto()
     OPEN_ITEM = auto()
     CLOSE_ITEM = auto()
     OPEN_SPELL = auto()
@@ -273,7 +278,9 @@ class MenuScreenMock:
         self.party = load_mock_party(self.items, self.skills)
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         self.fonts = FontResources()
-        self.faces = ImageResources().image(FACES_IMAGE_ID)
+        images = ImageResources()
+        self.faces = images.image(FACES_IMAGE_ID)
+        self.field_background = images.image(FIELD_BACKGROUND_IMAGE_ID)
         self.settings_window = None
         self.settings_cursor: WindowCursor | None = None
         self.confirmation_window = None
@@ -281,6 +288,7 @@ class MenuScreenMock:
         self.pending_settings_action: str | None = None
         self.fade = FadeThroughBlack()
         self.pending_screen_change: MenuScreenChange | None = None
+        self.showing_field = False
         self.item_screen: ItemScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
         self.spell_screen: SpellScreenMock | None = None
@@ -765,7 +773,7 @@ class MenuScreenMock:
             self.command_cursor.active = True
 
     def _begin_screen_change(self, change: MenuScreenChange) -> None:
-        """Reserve one item/status replacement and begin fading out."""
+        """Reserve one menu-related screen replacement and begin fading out."""
 
         if not isinstance(change, MenuScreenChange):
             raise TypeError("menu screen change must be a MenuScreenChange")
@@ -777,6 +785,7 @@ class MenuScreenMock:
             self.fade = fade
         self.pending_screen_change = change
         if change in (
+            MenuScreenChange.SHOW_FIELD,
             MenuScreenChange.OPEN_ITEM,
             MenuScreenChange.OPEN_SPELL,
             MenuScreenChange.OPEN_STATUS,
@@ -790,7 +799,12 @@ class MenuScreenMock:
         change = self.pending_screen_change
         if change is None:
             raise RuntimeError("fade midpoint has no pending menu screen change")
-        if change is MenuScreenChange.OPEN_ITEM:
+        if change is MenuScreenChange.SHOW_FIELD:
+            self.showing_field = True
+        elif change is MenuScreenChange.SHOW_MENU:
+            self.showing_field = False
+            self.command_cursor.active = True
+        elif change is MenuScreenChange.OPEN_ITEM:
             self._start_item()
         elif change is MenuScreenChange.CLOSE_ITEM:
             self._finish_item()
@@ -970,6 +984,12 @@ class MenuScreenMock:
         input_state = self.input_reader.poll()
         if self._update_fade():
             return
+        if getattr(self, "showing_field", False):
+            if input_state.menu.triggered:
+                self._begin_screen_change(MenuScreenChange.SHOW_MENU)
+            elif input_state.cancel.triggered:
+                pyxel.quit()
+            return
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
             if item_screen.update(input_state):
@@ -1041,7 +1061,7 @@ class MenuScreenMock:
             return
 
         if input_state.cancel.triggered:
-            pyxel.quit()
+            self._begin_screen_change(MenuScreenChange.SHOW_FIELD)
             return
         if (
             input_state.confirm.triggered
@@ -1076,6 +1096,17 @@ class MenuScreenMock:
         pyxel.cls(0)
         pyxel.camera(self.alert.camera_x, 0)
         try:
+            if getattr(self, "showing_field", False):
+                pyxel.blt(
+                    0,
+                    0,
+                    self.field_background,
+                    0,
+                    0,
+                    SCREEN_WIDTH,
+                    SCREEN_HEIGHT,
+                )
+                return
             item_screen = getattr(self, "item_screen", None)
             if item_screen is not None:
                 item_screen.draw()
