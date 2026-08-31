@@ -621,6 +621,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.command_cursor = Mock(selected_key="item", active=True)
         mock.party = (Mock(),)
         mock.items = {"POTION": Mock()}
+        mock.inventory_system = Mock()
         mock.spells = {"POTION": Mock()}
         mock.settings = Settings()
         mock.texts = Mock()
@@ -643,6 +644,8 @@ class MenuScreenMockTest(unittest.TestCase):
             fonts=mock.fonts,
             faces=mock.faces,
             palette_shifter=mock.palette_shifter,
+            inventory_system=mock.inventory_system,
+            on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.item_screen, item_screen_class.return_value)
         self.assertFalse(mock.command_cursor.active)
@@ -667,18 +670,22 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.item_screen)
         self.assertTrue(mock.command_cursor.active)
 
+    @patch("tools.screen_mocks.menu.pyxel.camera")
     @patch("tools.screen_mocks.menu.pyxel.cls")
     def test_draw_uses_item_screen_while_item_is_active(
         self,
         clear_screen: Mock,
+        camera: Mock,
     ) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         mock.item_screen = Mock()
+        mock.alert = Mock(camera_x=-1)
 
         mock.draw()
 
         clear_screen.assert_called_once_with(0)
         mock.item_screen.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(-1, 0), call()])
 
     @patch("tools.screen_mocks.menu.StatusScreenMock")
     def test_confirming_status_command_opens_connected_status_screen(
@@ -741,18 +748,22 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 3)
 
+    @patch("tools.screen_mocks.menu.pyxel.camera")
     @patch("tools.screen_mocks.menu.pyxel.cls")
     def test_draw_uses_status_screen_while_status_is_active(
         self,
         clear_screen: Mock,
+        camera: Mock,
     ) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         mock.status_screen = Mock()
+        mock.alert = Mock(camera_x=0)
 
         mock.draw()
 
         clear_screen.assert_called_once_with(0)
         mock.status_screen.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     @patch("tools.screen_mocks.menu.SpellScreenMock")
     def test_confirming_spell_command_opens_connected_spell_screen(
@@ -816,18 +827,22 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 2)
 
+    @patch("tools.screen_mocks.menu.pyxel.camera")
     @patch("tools.screen_mocks.menu.pyxel.cls")
     def test_draw_uses_spell_screen_while_spell_is_active(
         self,
         clear_screen: Mock,
+        camera: Mock,
     ) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         mock.spell_screen = Mock()
+        mock.alert = Mock(camera_x=0)
 
         mock.draw()
 
         clear_screen.assert_called_once_with(0)
         mock.spell_screen.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     @patch("tools.screen_mocks.menu.WindowCursor")
     def test_selecting_two_members_swaps_their_order(

@@ -125,7 +125,7 @@ ITEM_STAT_ROWS = (
     ("hit", "item.detail.hit"),
     ("defense", "item.detail.defense"),
     ("evasion", "item.detail.evasion"),
-    ("spell_resistance", "status.spell_resistance"),
+    ("spell_resistance", "item.detail.spell_resistance"),
 )
 ITEM_ABILITY_ROWS = (
     ("strength_modifier", "status.strength"),

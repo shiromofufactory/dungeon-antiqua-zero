@@ -22,6 +22,10 @@ from tools.screen_mocks.item import (
     CATEGORY_TEXT_X,
     CATEGORY_TEXT_Y,
     CATEGORY_WINDOW_GRID,
+    DROP_CONFIRM_CHOICE_WINDOW_GRID,
+    DROP_CONFIRM_NO_Y,
+    DROP_CONFIRM_WINDOW_GRID,
+    DROP_CONFIRM_YES_Y,
     ITEM_COUNT_X,
     ITEM_CURSOR_X,
     ITEM_FIRST_Y,
@@ -31,6 +35,11 @@ from tools.screen_mocks.item import (
     ITEM_INFO_ROW_HEIGHT,
     ITEM_LIST_WINDOW_GRID,
     ITEM_ROW_HEIGHT,
+    ITEM_SUMMARY_COUNT_LABEL_Y,
+    ITEM_SUMMARY_COUNT_VALUE_Y,
+    ITEM_SUMMARY_RECORDED_LABEL_Y,
+    ITEM_SUMMARY_RECORDED_VALUE_Y,
+    ITEM_SUMMARY_VALUE_X,
     ITEM_TEXT_X,
     ITEM_VISIBLE_COUNT,
     ItemCategory,
@@ -38,6 +47,7 @@ from tools.screen_mocks.item import (
     ItemSelectionPhase,
 )
 from state import Language, Settings
+from systems import InventorySystem
 
 
 class ItemScreenMockTest(unittest.TestCase):
@@ -108,10 +118,10 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(
             [text.text for text in mock.item_info_window.texts],
             [
-                "きずぐすり",
-                "どうぐ",
-                "みかたひとりの　きずを",
-                "かいふく（ばいりつ：３０）",
+                "アイテムしょじすう：",
+                "１２１／２５５",
+                "きろくずみ：",
+                "１２１／１２１",
             ],
         )
         self.assertEqual(
@@ -120,10 +130,10 @@ class ItemScreenMockTest(unittest.TestCase):
                 for text in mock.item_info_window.texts
             ],
             [
-                (ITEM_INFO_X, ITEM_INFO_Y),
-                (ITEM_INFO_X, ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT),
-                (ITEM_INFO_X, ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 3),
-                (ITEM_INFO_X, ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 4),
+                (ITEM_INFO_X, ITEM_SUMMARY_COUNT_LABEL_Y),
+                (ITEM_SUMMARY_VALUE_X, ITEM_SUMMARY_COUNT_VALUE_Y),
+                (ITEM_INFO_X, ITEM_SUMMARY_RECORDED_LABEL_Y),
+                (ITEM_SUMMARY_VALUE_X, ITEM_SUMMARY_RECORDED_VALUE_Y),
             ],
         )
         self.assertEqual(
@@ -152,8 +162,8 @@ class ItemScreenMockTest(unittest.TestCase):
                 "エリカ",
                 "かたてぶき　／　%SWORD%けん",
                 "ラグナ　せんよう",
-                "こうげき：５６",
-                "めいちゅう：１３０",
+                "こうげき　　：５６",
+                "めいちゅう　：１３０",
                 "ついかこうか：そくし",
                 "%DEATH%そくしを　ふせぐ",
                 "すばやさ　＋２",
@@ -228,8 +238,8 @@ class ItemScreenMockTest(unittest.TestCase):
             [
                 "てつのよろい",
                 "%BODY%からだ　／　おもいぼうぐ",
-                "ぼうぎょ：１２",
-                "かいひりつ：－５",
+                "ぼうぎょ　　　：１２",
+                "かいひりつ　　：－５",
             ],
         )
 
@@ -243,15 +253,15 @@ class ItemScreenMockTest(unittest.TestCase):
             "りょうてぶき　／　%SPEAR%やり",
         )
         self.assertIn("こうれつから　こうげきかのう", fire_spear_lines)
-        self.assertIn("ぞくせい：%FIRE%ほのお", fire_spear_lines)
+        self.assertIn("ぞくせい　　：%FIRE%ほのお", fire_spear_lines)
         self.assertIn("ついかこうか：スタン", fire_spear_lines)
         self.assertIn("%FIRE%ほのおを　ふせぐ", fire_spear_lines)
         self.assertLess(
-            fire_spear_lines.index("めいちゅう：９５"),
-            fire_spear_lines.index("ぞくせい：%FIRE%ほのお"),
+            fire_spear_lines.index("めいちゅう　：９５"),
+            fire_spear_lines.index("ぞくせい　　：%FIRE%ほのお"),
         )
         self.assertLess(
-            fire_spear_lines.index("ぞくせい：%FIRE%ほのお"),
+            fire_spear_lines.index("ぞくせい　　：%FIRE%ほのお"),
             fire_spear_lines.index("ついかこうか：スタン"),
         )
         self.assertLess(
@@ -304,10 +314,10 @@ class ItemScreenMockTest(unittest.TestCase):
         self.select_item(mock, "CHIZAKURA!")
         lines = [text.text for text in mock.item_info_window.texts]
 
-        self.assertIn("ぞくせい：%DARK%やみ", lines)
+        self.assertIn("ぞくせい　　：%DARK%やみ", lines)
         self.assertIn("ついかこうか：きゅうしゅう", lines)
         self.assertLess(
-            lines.index("ぞくせい：%DARK%やみ"),
+            lines.index("ぞくせい　　：%DARK%やみ"),
             lines.index("ついかこうか：きゅうしゅう"),
         )
 
@@ -474,6 +484,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
         self.assertFalse(mock.category_cursor.active)
         self.assertTrue(mock.item_cursor.active)
+        self.assertEqual(mock.item_info_window.texts[0].text, "きずぐすり")
 
         for _ in range(ITEM_VISIBLE_COUNT - 1):
             mock.update(InputState(navigation=Direction.DOWN))
@@ -570,12 +581,153 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
         self.assertTrue(mock.category_cursor.active)
 
+    def test_drop_confirmation_uses_da2_text_and_discards_one_item(self) -> None:
+        mock = ItemScreenMock()
+        discarded = mock.inventory[0]
+
+        mock.update(InputState(navigation=Direction.RIGHT))
+        self.assertIs(mock.category, ItemCategory.DROP)
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.CONFIRMATION)
+        self.assertFalse(mock.item_cursor.active)
+        self.assertEqual(
+            (
+                mock.drop_confirmation_window.x,
+                mock.drop_confirmation_window.y,
+                mock.drop_confirmation_window.width,
+                mock.drop_confirmation_window.height,
+            ),
+            DROP_CONFIRM_WINDOW_GRID,
+        )
+        self.assertEqual(
+            (
+                mock.drop_confirmation_choice_window.x,
+                mock.drop_confirmation_choice_window.y,
+                mock.drop_confirmation_choice_window.width,
+                mock.drop_confirmation_choice_window.height,
+            ),
+            DROP_CONFIRM_CHOICE_WINDOW_GRID,
+        )
+        self.assertEqual(
+            mock.drop_confirmation_window.texts[0].text,
+            "きずぐすり　を　すてますか？",
+        )
+        self.assertEqual(
+            [text.text for text in mock.drop_confirmation_choice_window.texts],
+            ["はい", "いいえ"],
+        )
+        self.assertEqual(
+            [target.y for target in mock.drop_confirmation_cursor.targets],
+            [DROP_CONFIRM_YES_Y, DROP_CONFIRM_NO_Y],
+        )
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertNotIn(discarded, mock.inventory)
+        self.assertEqual(mock.inventory_system.quantity(discarded), 0)
+        self.assertIsNone(mock.drop_confirmation_window)
+
+        mock.update(InputState(cancel=InputButton(True, True)))
+        mock.update(InputState(navigation=Direction.RIGHT))
+        self.assertIs(mock.category, ItemCategory.INDEX)
+        self.assertIn(discarded, mock.category_items)
+
+    def test_category_summary_updates_owned_count_but_keeps_recorded_count(self) -> None:
+        mock = ItemScreenMock()
+        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(cancel=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
+        self.assertEqual(
+            [text.text for text in mock.item_info_window.texts],
+            [
+                "アイテムしょじすう：",
+                "１２０／２５５",
+                "きろくずみ：",
+                "１２１／１２１",
+            ],
+        )
+
+    def test_recorded_total_stays_unknown_until_every_item_is_recorded(self) -> None:
+        items = ItemScreenMock().items
+        first_key = next(iter(items))
+        inventory = InventorySystem(items, {first_key: 1})
+        mock = ItemScreenMock(items=items, inventory_system=inventory)
+
+        self.assertEqual(
+            [text.text for text in mock.item_info_window.texts],
+            [
+                "アイテムしょじすう：",
+                "　　１／２５５",
+                "きろくずみ：",
+                "　　１／　？？",
+            ],
+        )
+
+    def test_drop_confirmation_no_and_cancel_keep_the_item(self) -> None:
+        mock = ItemScreenMock()
+        item = mock.inventory[0]
+        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        mock.update(InputState(navigation=Direction.DOWN))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(mock.inventory_system.quantity(item), 1)
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.CONFIRMATION)
+        mock.update(InputState(cancel=InputButton(True, True)))
+        self.assertEqual(mock.inventory_system.quantity(item), 1)
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+
+    def test_price_zero_item_triggers_invalid_action_without_confirmation(self) -> None:
+        invalid_action = Mock()
+        mock = ItemScreenMock(on_invalid_action=invalid_action)
+        mock.update(InputState(navigation=Direction.RIGHT))
+        self.select_item(mock, "ELIKA")
+        protected = mock.selected_item
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(protected.price, 0)
+        self.assertEqual(mock.inventory_system.quantity(protected), 1)
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertIsNone(mock.drop_confirmation_window)
+        invalid_action.assert_called_once_with()
+
+    def test_drop_decrements_quantity_before_removing_item_type(self) -> None:
+        items = ItemScreenMock().items
+        first_key = next(iter(items))
+        inventory = InventorySystem(items, {first_key: 2})
+        mock = ItemScreenMock(items=items, inventory_system=inventory)
+        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(inventory.quantity(first_key), 1)
+        self.assertEqual(mock.inventory, (items[first_key],))
+        self.assertEqual(mock.item_counts[first_key], 1)
+
     def test_cancel_returns_to_category_then_to_main_menu(self) -> None:
         mock = ItemScreenMock()
 
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertFalse(mock.update(InputState(cancel=InputButton(True, True))))
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
+        self.assertEqual(
+            mock.item_info_window.texts[0].text,
+            "アイテムしょじすう：",
+        )
         self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))
 
 

@@ -105,6 +105,36 @@ class TextCatalog:
                 f"localized text must be a string: {key}"
             ) from error
 
+    def formatted_text(
+        self,
+        key: str,
+        localizer: Localizer,
+        *values: str,
+        default: str = "",
+    ) -> str:
+        """Resolve a DA2-style ``&1`` template and localize the result."""
+
+        if not isinstance(key, str) or not key:
+            raise ValueError("key must be a non-empty string")
+        if not isinstance(localizer, Localizer):
+            raise TypeError("localizer must be a Localizer")
+        if not all(isinstance(value, str) for value in values):
+            raise TypeError("formatted text values must be strings")
+        if not isinstance(default, str):
+            raise TypeError("default must be a string")
+
+        record = self._records.get(key, {})
+        template = localizer.value(record, "text", default)
+        if not isinstance(template, str):
+            raise TextCatalogError(f"localized text must be a string: {key}")
+        for index, value in enumerate(values, start=1):
+            template = template.replace(f"&{index}", value)
+        return localizer.text(
+            {f"text_{localizer.language.value}": template},
+            "text",
+            default,
+        )
+
     def lines(
         self,
         key: str,

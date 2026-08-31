@@ -49,6 +49,35 @@ class TextCatalogTest(unittest.TestCase):
             "Ｕｎｋｎｏｗｎ？",
         )
 
+    def test_formats_da2_numbered_placeholders_before_display_normalization(self) -> None:
+        catalog = TextCatalog.from_records(
+            [
+                {
+                    "text_key": "item.drop.confirm",
+                    "text_ja": "&1 を すてますか？",
+                    "text_en": "Drop &1?",
+                    "text_zhcn": "要丢弃&1吗？",
+                }
+            ]
+        )
+
+        self.assertEqual(
+            catalog.formatted_text(
+                "item.drop.confirm",
+                Localizer(Language.JAPANESE),
+                "ポーション",
+            ),
+            "ポーション　を　すてますか？",
+        )
+        self.assertEqual(
+            catalog.formatted_text(
+                "item.drop.confirm",
+                Localizer(Language.ENGLISH),
+                "Potion",
+            ),
+            "Ｄｒｏｐ　Ｐｏｔｉｏｎ？",
+        )
+
     def test_resolves_one_or_more_lines_from_string_or_array(self) -> None:
         catalog = TextCatalog.from_records(
             [

@@ -102,6 +102,25 @@ class ItemDetailTest(unittest.TestCase):
             with self.subTest(item=key):
                 self.assertNotIn("（こわれる）", self.detail(key).lines)
 
+    def test_spell_resistance_uses_item_detail_text_key(self) -> None:
+        records = load_record_array("texts.json")
+        for record in records:
+            if record.get("text_key") == "item.detail.spell_resistance":
+                record["text_ja"] = "アイテムせんよう"
+            elif record.get("text_key") == "status.spell_resistance":
+                record["text_ja"] = "ステータスせんよう"
+        texts = TextCatalog.from_records(records)
+
+        detail = build_item_detail(
+            self.items["EAN SI MANTLE"],
+            self.spells,
+            self.localizer,
+            texts,
+        )
+
+        self.assertIn("アイテムせんよう：１０", detail.lines)
+        self.assertNotIn("ステータスせんよう：１０", detail.lines)
+
     def test_defined_special_texts_are_shown_with_converted_color_tags(self) -> None:
         expected = {
             "ORDEAL RING": (
@@ -137,7 +156,7 @@ class ItemDetailTest(unittest.TestCase):
         self.assertEqual(
             lines[5:8],
             (
-                "ぞくせい：%DARK%やみ",
+                "ぞくせい　　：%DARK%やみ",
                 "ついかこうか：きゅうしゅう",
                 "%DARK%やみのちからを　ふせぐ",
             ),

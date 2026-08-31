@@ -43,6 +43,7 @@ from resources import (
 from skill import SkillDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
+from systems import InventorySystem
 
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -253,6 +254,7 @@ class MenuScreenMock:
             self._apply_display_mode()
         self.save_data = SaveData()
         self.items = load_mock_items()
+        self.inventory_system = InventorySystem.with_one_each(self.items)
         self.skills = load_mock_skills()
         self.spells = load_mock_spells()
         self.party = load_mock_party(self.items, self.skills)
@@ -711,6 +713,10 @@ class MenuScreenMock:
 
     def _start_item(self) -> None:
         self.command_cursor.active = False
+        inventory_system = getattr(self, "inventory_system", None)
+        if inventory_system is None:
+            inventory_system = InventorySystem.with_one_each(self.items)
+            self.inventory_system = inventory_system
         self.item_screen = ItemScreenMock(
             party=self.party,
             items=self.items,
@@ -720,6 +726,8 @@ class MenuScreenMock:
             fonts=self.fonts,
             faces=self.faces,
             palette_shifter=self.palette_shifter,
+            inventory_system=inventory_system,
+            on_invalid_action=self.alert.start,
         )
 
     def _finish_item(self) -> None:
@@ -991,20 +999,20 @@ class MenuScreenMock:
 
     def draw(self) -> None:
         pyxel.cls(0)
-        item_screen = getattr(self, "item_screen", None)
-        if item_screen is not None:
-            item_screen.draw()
-            return
-        spell_screen = getattr(self, "spell_screen", None)
-        if spell_screen is not None:
-            spell_screen.draw()
-            return
-        status_screen = getattr(self, "status_screen", None)
-        if status_screen is not None:
-            status_screen.draw()
-            return
         pyxel.camera(self.alert.camera_x, 0)
         try:
+            item_screen = getattr(self, "item_screen", None)
+            if item_screen is not None:
+                item_screen.draw()
+                return
+            spell_screen = getattr(self, "spell_screen", None)
+            if spell_screen is not None:
+                spell_screen.draw()
+                return
+            status_screen = getattr(self, "status_screen", None)
+            if status_screen is not None:
+                status_screen.draw()
+                return
             self.party_window.draw()
             if self.party_window.is_open:
                 for index, member in enumerate(self.party):
