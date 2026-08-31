@@ -113,6 +113,7 @@ class MemberTest(unittest.TestCase):
         spell_resistance: int = 0,
         healing: int = 0,
         tolerance: str = "",
+        requirements: str = "",
     ) -> Item:
         return Item.from_record(
             {
@@ -127,6 +128,31 @@ class MemberTest(unittest.TestCase):
                 "rst": spell_resistance,
                 "healing": healing,
                 "tolerance": tolerance,
+                "requirements": requirements,
+            }
+        )
+
+    @staticmethod
+    def build_member(
+        key: str,
+        *,
+        race: str = "HUMAN",
+        gender: str = "MALE",
+        **aptitudes: int,
+    ) -> Member:
+        return Member.from_record(
+            {
+                "name_en": key,
+                "name_ja": key,
+                "race": race,
+                "gender": gender,
+                "base_str": 20,
+                "base_agi": 20,
+                "base_mag": 20,
+                **GROWTH_FIELDS,
+                **FACE_FIELDS,
+                **PROFICIENCY_FIELDS,
+                **aptitudes,
             }
         )
 
@@ -148,6 +174,90 @@ class MemberTest(unittest.TestCase):
         self.member.formation_row = FormationRow.BACK
 
         self.assertFalse(self.member.is_front_row)
+
+    def test_equipment_eligibility_uses_aptitude_and_armor_class(self) -> None:
+        fighter = self.build_member("Fighter", eq_sword=2, eq_shield=1)
+        mage = self.build_member("Mage", gender="FEMALE", sp_mystic=1)
+        sword = self.item("SWORD", "RIGHT", "SWORD")
+        wand = self.item("WAND", "RIGHT", "WAND")
+        general = self.item("LEATHER", "BODY", "GENERAL")
+        heavy = self.item("PLATE", "BODY", "HEAVY")
+        magical = self.item("ROBE", "BODY", "MAGICAL")
+        consumable = self.item("HERB", "ITEM", "ITEM")
+
+        self.assertTrue(fighter.can_equip(sword))
+        self.assertFalse(mage.can_equip(sword))
+        self.assertFalse(fighter.can_equip(wand))
+        self.assertTrue(fighter.can_equip(general))
+        self.assertTrue(mage.can_equip(general))
+        self.assertTrue(fighter.can_equip(heavy))
+        self.assertFalse(mage.can_equip(heavy))
+        self.assertFalse(fighter.can_equip(magical))
+        self.assertTrue(mage.can_equip(magical))
+        self.assertFalse(fighter.can_equip(consumable))
+
+    def test_equipment_eligibility_applies_every_current_requirement(self) -> None:
+        ragna = self.build_member("Ragna", eq_sword=2)
+        fairy = self.build_member(
+            "Fairy",
+            race="FAIRY",
+            gender="FEMALE",
+            eq_sword=2,
+        )
+        dragon = self.build_member("Dragon", race="DRAGONEWT", eq_sword=2)
+        robot = self.build_member(
+            "Robot",
+            race="ROBOT",
+            gender="NONE",
+            eq_sword=2,
+        )
+        woman = self.build_member("Woman", gender="FEMALE", eq_sword=2)
+        def sword(requirement: str) -> Item:
+            return self.item(
+                requirement,
+                "RIGHT",
+                "SWORD",
+                requirements=requirement,
+            )
+
+        self.assertTrue(ragna.can_equip(sword("ONLY_RAGNA")))
+        self.assertFalse(woman.can_equip(sword("ONLY_RAGNA")))
+        self.assertTrue(fairy.can_equip(sword("ONLY_FAIRYS")))
+        self.assertFalse(ragna.can_equip(sword("ONLY_FAIRYS")))
+        self.assertFalse(fairy.can_equip(sword("NO_FAIRYS")))
+        self.assertTrue(ragna.can_equip(sword("NO_FAIRYS")))
+        self.assertFalse(dragon.can_equip(sword("NO_DRAGONS")))
+        self.assertTrue(ragna.can_equip(sword("NO_DRAGONS")))
+        self.assertTrue(dragon.can_equip(sword("ONLY_DRAGON")))
+        self.assertFalse(ragna.can_equip(sword("ONLY_DRAGON")))
+        self.assertTrue(robot.can_equip(sword("ONLY_ROBO")))
+        self.assertFalse(ragna.can_equip(sword("ONLY_ROBO")))
+        self.assertTrue(woman.can_equip(sword("ONLY_FEMALE")))
+        self.assertFalse(ragna.can_equip(sword("ONLY_FEMALE")))
+        self.assertTrue(ragna.can_equip(sword("ONLY_MALE")))
+        self.assertFalse(woman.can_equip(sword("ONLY_MALE")))
+
+    def test_lv9_requirement_uses_the_selected_weapon_proficiency(self) -> None:
+        member = self.build_member("Master", eq_sword=2, eq_knife=2)
+        member.proficiencies[ProficiencyKind.SWORD] = Proficiency(
+            ProficiencyAptitude.FAVORED,
+            level=9,
+        )
+        sword = self.item(
+            "ULTIMATE SWORD",
+            "RIGHT",
+            "SWORD",
+            requirements="LV9",
+        )
+        knife = self.item(
+            "ULTIMATE KNIFE",
+            "RIGHT",
+            "KNIFE",
+            requirements="LV9",
+        )
+
+        self.assertTrue(member.can_equip(sword))
+        self.assertFalse(member.can_equip(knife))
 
     def test_rejects_unstable_formation_value(self) -> None:
         with self.assertRaisesRegex(TypeError, "formation_row"):

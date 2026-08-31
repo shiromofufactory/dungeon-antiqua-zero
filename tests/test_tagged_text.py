@@ -3,11 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from app.ui.colors import BLUE_TEXT_COLOR
 from app.ui.tagged_text import (
     ICON_BANK,
     ICON_COLKEY,
     ICON_SIZE,
+    TEXT_COLORS,
     TEXT_ICONS,
+    TextColor,
     TextFontSpan,
     TextIcon,
     draw_tagged_text,
@@ -95,6 +98,18 @@ class TaggedTextTest(unittest.TestCase):
             ("操作：", TEXT_ICONS["%KEY_X%"], "：とじる"),
         )
 
+    def test_color_tags_are_split_from_literal_text(self) -> None:
+        self.assertEqual(
+            split_tagged_text("白%COL_BLUE%青%COL_END%白"),
+            (
+                "白",
+                TEXT_COLORS["%COL_BLUE%"],
+                "青",
+                TEXT_COLORS["%COL_END%"],
+                "白",
+            ),
+        )
+
     def test_unknown_tags_and_percent_signs_remain_literal(self) -> None:
         self.assertEqual(
             split_tagged_text("100% %UNKNOWN% %fire%"),
@@ -149,6 +164,28 @@ class TaggedTextTest(unittest.TestCase):
 
         self.assertEqual(text.call_count, 0)
         self.assertEqual([call.args[0] for call in blt.call_args_list], [3, 11])
+
+    def test_color_tags_change_color_without_advancing_and_end_restores_white(self) -> None:
+        font = StubFont()
+
+        with patch("app.ui.tagged_text.pyxel.text") as text:
+            draw_tagged_text(
+                10,
+                20,
+                "A%COL_BLUE%B%COL_END%C",
+                7,
+                font,
+                shadow_color=None,
+            )
+
+        self.assertEqual(
+            [call.args for call in text.call_args_list],
+            [
+                (10, 20, "A", 7, font),
+                (16, 20, "B", 13, font),
+                (22, 20, "C", 5, font),
+            ],
+        )
 
     def test_icon_advance_is_eight_pixels_with_six_pixel_font(self) -> None:
         font = StubFont()
@@ -210,6 +247,16 @@ class TaggedTextTest(unittest.TestCase):
             TEXT_ICONS["%FAVORED%"],
             TextIcon("%FAVORED%", 152, 24),
         )
+
+    def test_color_values_are_frozen_descriptions(self) -> None:
+        self.assertEqual(
+            TEXT_COLORS,
+            {
+                "%COL_BLUE%": TextColor("%COL_BLUE%", 13),
+                "%COL_END%": TextColor("%COL_END%", 5),
+            },
+        )
+        self.assertEqual(BLUE_TEXT_COLOR, 13)
 
 
 if __name__ == "__main__":

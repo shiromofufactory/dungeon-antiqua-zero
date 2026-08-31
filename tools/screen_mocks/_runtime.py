@@ -6,6 +6,7 @@ import pyxel
 
 from tools._bootstrap import APP_ROOT
 from input import InputBindings, PyxelInputReader
+from rendering import PaletteShifter, create_default_palette_shifter
 
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
@@ -16,7 +17,7 @@ def initialize_screen_mock(
     title: str,
     *,
     display_scale: int | None = None,
-) -> None:
+) -> PaletteShifter:
     """Initialize Pyxel and load the common bank and palette resources."""
 
     if not isinstance(title, str) or not title:
@@ -33,6 +34,7 @@ def initialize_screen_mock(
     pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT, **init_options)
     pyxel.load(str(APP_ROOT / "assets.pyxres"))
     pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
+    return create_default_palette_shifter()
 
 
 def create_mock_input_reader() -> PyxelInputReader:

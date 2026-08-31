@@ -237,7 +237,7 @@ def localized_menu_texts(
 class MenuScreenMock:
     def __init__(self) -> None:
         self.settings = self._settings_from_environment()
-        initialize_screen_mock(
+        self.palette_shifter = initialize_screen_mock(
             "Dungeon Antiqua ZERO Menu Screen Mock",
             display_scale=(
                 None if self.settings.screen_scale == 5 else self.settings.screen_scale
@@ -714,10 +714,12 @@ class MenuScreenMock:
         self.item_screen = ItemScreenMock(
             party=self.party,
             items=self.items,
+            spells=self.spells,
             settings=self.settings,
             texts=self.texts,
             fonts=self.fonts,
             faces=self.faces,
+            palette_shifter=self.palette_shifter,
         )
 
     def _finish_item(self) -> None:

@@ -22,8 +22,11 @@ class ScreenMockRuntimeTest(unittest.TestCase):
             patch("tools.screen_mocks._runtime.pyxel.init") as init,
             patch("tools.screen_mocks._runtime.pyxel.load") as load,
             patch("tools.screen_mocks._runtime.pyxel.load_pal") as load_pal,
+            patch(
+                "tools.screen_mocks._runtime.create_default_palette_shifter"
+            ) as create_palette_shifter,
         ):
-            initialize_screen_mock("Example Mock")
+            palette_shifter = initialize_screen_mock("Example Mock")
 
         init.assert_called_once_with(
             SCREEN_WIDTH,
@@ -33,6 +36,8 @@ class ScreenMockRuntimeTest(unittest.TestCase):
         )
         load.assert_called_once_with(str(APP_ROOT / "assets.pyxres"))
         load_pal.assert_called_once_with(str(APP_ROOT / "assets.pyxpal"))
+        create_palette_shifter.assert_called_once_with()
+        self.assertIs(palette_shifter, create_palette_shifter.return_value)
 
     def test_common_input_reader_adds_q_to_cancel(self) -> None:
         reader = create_mock_input_reader()
@@ -45,6 +50,7 @@ class ScreenMockRuntimeTest(unittest.TestCase):
             patch("tools.screen_mocks._runtime.pyxel.init") as init,
             patch("tools.screen_mocks._runtime.pyxel.load"),
             patch("tools.screen_mocks._runtime.pyxel.load_pal"),
+            patch("tools.screen_mocks._runtime.create_default_palette_shifter"),
         ):
             initialize_screen_mock("Scaled Mock", display_scale=4)
 

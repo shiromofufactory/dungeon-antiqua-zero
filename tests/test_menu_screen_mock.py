@@ -621,10 +621,12 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.command_cursor = Mock(selected_key="item", active=True)
         mock.party = (Mock(),)
         mock.items = {"POTION": Mock()}
+        mock.spells = {"POTION": Mock()}
         mock.settings = Settings()
         mock.texts = Mock()
         mock.fonts = Mock()
         mock.faces = object()
+        mock.palette_shifter = object()
         mock.party_cursor = None
         mock.settings_cursor = None
         mock.confirmation_cursor = None
@@ -635,10 +637,12 @@ class MenuScreenMockTest(unittest.TestCase):
         item_screen_class.assert_called_once_with(
             party=mock.party,
             items=mock.items,
+            spells=mock.spells,
             settings=mock.settings,
             texts=mock.texts,
             fonts=mock.fonts,
             faces=mock.faces,
+            palette_shifter=mock.palette_shifter,
         )
         self.assertIs(mock.item_screen, item_screen_class.return_value)
         self.assertFalse(mock.command_cursor.active)

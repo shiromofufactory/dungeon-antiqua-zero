@@ -1,10 +1,12 @@
 """Reusable user-interface drawing components."""
 
-from .colors import DISABLED_COLOR, NEGATIVE_COLOR, POSITIVE_COLOR
+from .colors import BLUE_TEXT_COLOR, DISABLED_COLOR, NEGATIVE_COLOR, POSITIVE_COLOR
 from .localized_text import LocalizedWindowTextFactory
 from .input_icons import input_icon_tag
 from .tagged_text import (
+    TEXT_COLORS,
     TEXT_ICONS,
+    TextColor,
     TextFontSpan,
     TextIcon,
     draw_tagged_text,
@@ -25,6 +27,7 @@ from .window import (
 
 
 __all__ = [
+    "BLUE_TEXT_COLOR",
     "CursorTarget",
     "DEFAULT_TEXT_COLOR",
     "DISABLED_COLOR",
@@ -32,7 +35,9 @@ __all__ = [
     "NEGATIVE_COLOR",
     "TEXT_GRID_X",
     "TEXT_GRID_Y",
+    "TEXT_COLORS",
     "TEXT_ICONS",
+    "TextColor",
     "TextIcon",
     "TextFontSpan",
     "POSITIVE_COLOR",

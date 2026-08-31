@@ -9,10 +9,10 @@ from types import MappingProxyType
 from typing import Mapping
 
 if __package__ == "":
-    from localization import Localizer, format_number
+    from localization import LocalizedText, Localizer, format_number
     from member import Member, ProficiencyKind
 else:
-    from .localization import Localizer, format_number
+    from .localization import LocalizedText, Localizer, format_number
     from .member import Member, ProficiencyKind
 
 
@@ -34,6 +34,13 @@ SPELL_PROFICIENCY_BY_TYPE = MappingProxyType(
         SpellType.MYSTIC: ProficiencyKind.MYSTIC,
         SpellType.SACRED: ProficiencyKind.SACRED,
         SpellType.NETHER: ProficiencyKind.NETHER,
+    }
+)
+SPELL_TYPE_ICON_TAGS = MappingProxyType(
+    {
+        SpellType.MYSTIC: "%MYSTIC%",
+        SpellType.SACRED: "%SACRED%",
+        SpellType.NETHER: "%NETHER%",
     }
 )
 
@@ -134,6 +141,22 @@ class Spell:
             raise SpellDataError(f"localized spell name is missing: {self.key}")
         return name
 
+    def localized_display_name(self, localizer: Localizer) -> str:
+        """Return the standard spell name prefixed by its school icon."""
+
+        name = self.localized_name(localizer)
+        icon = SPELL_TYPE_ICON_TAGS.get(self.type, "")
+        if not icon:
+            return name
+        return LocalizedText(
+            f"{icon}{name}",
+            prefers_wide_font=name.prefers_wide_font,
+            narrow_spans=tuple(
+                (start + len(icon), end + len(icon))
+                for start, end in name.narrow_spans
+            ),
+        )
+
     def localized_description(self, localizer: Localizer) -> tuple[str, ...]:
         """Return localized description lines with the intensity substituted."""
 
@@ -176,6 +199,7 @@ class Spell:
 
 __all__ = [
     "SPELL_PROFICIENCY_BY_TYPE",
+    "SPELL_TYPE_ICON_TAGS",
     "Spell",
     "SpellDataError",
     "SpellType",

@@ -4,24 +4,30 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import Enum, StrEnum
+import re
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
     load_mock_skills,
+    load_mock_spells,
 )
 from tools.screen_mocks._party_status import PartyStatusPanel
 from input import InputState
-from item import Item, ItemEquipType
+from item import Item
+from item_detail import item_detail_lines
 from localization import LocalizedText, Localizer, format_number
 from member import Member
+from rendering import PaletteShifter
 from resources import FontResources, ImageResources
+from spell import Spell
 from state import Language, Settings
 from text_catalog import TextCatalog
 from ui import (
     CursorTarget,
     LocalizedWindowTextFactory,
+    TEXT_COLORS,
     TEXT_ICONS,
     WindowCursor,
     WindowFactory,
@@ -53,76 +59,73 @@ ITEM_INFO_X = 2
 ITEM_INFO_Y = 2
 ITEM_INFO_ROW_HEIGHT = 3
 ITEM_NAME_MAX_LENGTH = 11
+ITEM_INFO_MAX_CELLS = 13
+ITEM_INFO_MAX_ROWS = 12
 
-ITEM_TYPE_TEXT_KEYS = {
-    ItemEquipType.ITEM: "item.detail.type.ITEM",
-    ItemEquipType.RIGHT: "item.detail.type.RIGHT",
-    ItemEquipType.LEFT: "item.detail.type.LEFT",
-    ItemEquipType.TWO_HANDS: "item.detail.type.TWO_HANDS",
-    ItemEquipType.BODY: "item.detail.type.BODY",
-    ItemEquipType.HEAD: "item.detail.type.HEAD",
-    ItemEquipType.ARM: "item.detail.type.ARM",
-}
-ITEM_TYPES_WITH_SUBTYPE = frozenset(
-    (
-        ItemEquipType.RIGHT,
-        ItemEquipType.TWO_HANDS,
-        ItemEquipType.BODY,
-        ItemEquipType.HEAD,
-        ItemEquipType.ARM,
-    )
-)
-ITEM_SUBTYPE_TEXT_KEYS = {
-    subtype: f"item.detail.subtype.{subtype}"
-    for subtype in (
-        "ITEM",
-        "SWORD",
-        "KNIFE",
-        "KATANA",
-        "SPEAR",
-        "HAMMER",
-        "AXE",
-        "THROWING",
-        "ROD",
-        "WAND",
-        "SHIELD",
-        "GENERAL",
-        "HEAVY",
-        "MAGICAL",
-    )
-}
-ITEM_REQUIREMENT_TEXT_KEYS = {
-    requirement: f"item.detail.requirement.{requirement}"
-    for requirement in (
-        "LV9",
-        "NO_DRAGONS",
-        "NO_FAIRYS",
-        "ONLY_DRAGON",
-        "ONLY_FAIRYS",
-        "ONLY_FEMALE",
-        "ONLY_MALE",
-        "ONLY_RAGNA",
-        "ONLY_ROBO",
-    )
-}
-ITEM_STAT_ROWS = (
-    ("attack", "item.detail.attack"),
-    ("hit", "item.detail.hit"),
-    ("defense", "item.detail.defense"),
-    ("evasion", "item.detail.evasion"),
-    ("spell_resistance", "status.spell_resistance"),
-)
-ITEM_ABILITY_ROWS = (
-    ("strength_modifier", "status.strength"),
-    ("agility_modifier", "status.agility"),
-    ("magic_modifier", "status.magic"),
-)
-ITEM_TYPE_ICON_TAGS = {
-    ItemEquipType.HEAD: "%HEAD%",
-    ItemEquipType.BODY: "%BODY%",
-    ItemEquipType.ARM: "%ARM%",
-}
+_DISPLAY_TAG_PATTERN = re.compile(r"%[A-Z][A-Z0-9_]*%")
 
+
+def _localized_slice(text: str, start: int, end: int) -> str:
+    sliced = text[start:end]
+    if not isinstance(text, LocalizedText):
+        return sliced
+    narrow_spans = tuple(
+        (max(span_start, start) - start, min(span_end, end) - start)
+        for span_start, span_end in text.narrow_spans
+        if span_start < end and span_end > start
+    )
+    return LocalizedText(
+        sliced,
+        prefers_wide_font=text.prefers_wide_font,
+        narrow_spans=narrow_spans,
+    )
+
+
+def _item_info_display_cells(text: str) -> int:
+    cells = 0
+    position = 0
+    for match in _DISPLAY_TAG_PATTERN.finditer(text):
+        tag = match.group()
+        if tag not in TEXT_ICONS and tag not in TEXT_COLORS:
+            continue
+        cells += match.start() - position
+        if tag in TEXT_ICONS:
+            cells += 1
+        position = match.end()
+    return cells + len(text) - position
+
+
+def _fit_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
+    """Wrap long tagged descriptions and keep the item window within 12 rows."""
+
+    fitted: list[str] = []
+    for line in lines:
+        split_at = None
+        if _item_info_display_cells(line) > ITEM_INFO_MAX_CELLS:
+            split_at = next(
+                (
+                    match.start()
+                    for match in _DISPLAY_TAG_PATTERN.finditer(line)
+                    if match.start() > 0 and match.group() in TEXT_ICONS
+                ),
+                None,
+            )
+        if split_at is None:
+            fitted.append(line)
+        else:
+            fitted.extend(
+                (
+                    _localized_slice(line, 0, split_at),
+                    _localized_slice(line, split_at, len(line)),
+                )
+            )
+    if len(fitted) > ITEM_INFO_MAX_ROWS and "" in fitted:
+        fitted.remove("")
+    if len(fitted) > ITEM_INFO_MAX_ROWS:
+        raise ItemMockDataError(
+            f"アイテム詳細が{ITEM_INFO_MAX_ROWS}行を超えています"
+        )
+    return tuple(fitted)
 
 class ItemCategory(StrEnum):
     """DA2-style tabs shown at the top of the item screen."""
@@ -144,162 +147,18 @@ class ItemMockDataError(RuntimeError):
     """Raised when data required by the item mock is unavailable."""
 
 
-def _required_catalog_text(
-    texts: TextCatalog,
-    key: str,
-    localizer: Localizer,
-) -> str:
-    text = texts.text(key, localizer)
-    if not text:
-        raise ItemMockDataError(f"モック用テキストが見つかりません: {key}")
-    return text
-
-
-def _required_catalog_lines(
-    texts: TextCatalog,
-    key: str,
-    localizer: Localizer,
-) -> tuple[str, ...]:
-    lines = texts.lines(key, localizer)
-    if not lines:
-        raise ItemMockDataError(f"モック用テキストが見つかりません: {key}")
-    return lines
-
-
-def _composed_text(localizer: Localizer, *parts: str) -> str:
-    text = "".join(str(part) for part in parts)
-    if localizer.language is not Language.ENGLISH:
-        return text
-    return LocalizedText(
-        text,
-        prefers_wide_font=any(
-            isinstance(part, LocalizedText) and part.prefers_wide_font for part in parts
-        ),
-    )
-
-
-def _item_type_line(
-    item: Item,
-    localizer: Localizer,
-    texts: TextCatalog,
-) -> str:
-    try:
-        type_key = ITEM_TYPE_TEXT_KEYS[item.equip_type]
-    except KeyError as error:
-        raise ItemMockDataError(
-            f"未対応のアイテム種別です: {item.equip_type}"
-        ) from error
-    type_text = _required_catalog_text(texts, type_key, localizer)
-    type_icon = ITEM_TYPE_ICON_TAGS.get(item.equip_type, "")
-    if type_icon:
-        if type_icon not in TEXT_ICONS:
-            raise ItemMockDataError(f"未対応の種別アイコンです: {type_icon}")
-        type_text = _composed_text(localizer, type_icon, type_text)
-    if item.equip_type not in ITEM_TYPES_WITH_SUBTYPE:
-        return type_text
-
-    try:
-        subtype_key = ITEM_SUBTYPE_TEXT_KEYS[item.subtype]
-    except KeyError as error:
-        raise ItemMockDataError(
-            f"未対応のアイテム副種別です: {item.subtype}"
-        ) from error
-    subtype_text = _required_catalog_text(texts, subtype_key, localizer)
-    if item.equip_type in (ItemEquipType.RIGHT, ItemEquipType.TWO_HANDS):
-        subtype_icon = f"%{item.subtype}%"
-        if subtype_icon not in TEXT_ICONS:
-            raise ItemMockDataError(f"未対応の武器種別アイコンです: {item.subtype}")
-        subtype_text = _composed_text(localizer, subtype_icon, subtype_text)
-    separator = "/" if localizer.language is Language.ENGLISH else " / "
-    return _composed_text(localizer, type_text, separator, subtype_text)
-
-
-def _item_requirement_line(
-    item: Item,
-    localizer: Localizer,
-    texts: TextCatalog,
-) -> str:
-    if not item.requirement:
-        return ""
-    try:
-        key = ITEM_REQUIREMENT_TEXT_KEYS[item.requirement]
-    except KeyError as error:
-        raise ItemMockDataError(f"未対応の装備条件です: {item.requirement}") from error
-    return _required_catalog_text(texts, key, localizer)
-
-
-def _signed_modifier(value: int) -> str:
-    sign = "＋" if value > 0 else "－"
-    return f"{sign}{format_number(abs(value))}"
-
-
-def item_detail_lines(
-    item: Item,
-    localizer: Localizer,
-    texts: TextCatalog,
-) -> tuple[str, ...]:
-    """Build the currently specified DA2-style item information rows."""
-
-    lines = [
-        item.localized_name(localizer),
-        _item_type_line(item, localizer, texts),
-    ]
-    requirement = _item_requirement_line(item, localizer, texts)
-    if requirement:
-        lines.append(requirement)
-
-    details: list[str] = []
-    for attribute, text_key in ITEM_STAT_ROWS:
-        value = getattr(item, attribute)
-        if value:
-            label = _required_catalog_text(texts, text_key, localizer)
-            details.append(_composed_text(localizer, label, "：", format_number(value)))
-
-    for attribute, text_key in ITEM_ABILITY_ROWS:
-        value = getattr(item, attribute)
-        if value:
-            label = _required_catalog_text(texts, text_key, localizer)
-            details.append(
-                _composed_text(localizer, label, " ", _signed_modifier(value))
-            )
-
-    if item.healing:
-        healing_key = (
-            "item.detail.healing.positive"
-            if item.healing > 0
-            else "item.detail.healing.negative"
-        )
-        details.append(_required_catalog_text(texts, healing_key, localizer))
-
-    if item.reach == 2:
-        details.extend(
-            _required_catalog_lines(
-                texts,
-                "item.detail.reach.2",
-                localizer,
-            )
-        )
-    elif item.reach == 3:
-        details.append(_required_catalog_text(texts, "item.detail.reach.3", localizer))
-    elif item.reach not in (0, 1):
-        raise ItemMockDataError(f"未対応の射程です: {item.reach}")
-
-    if details:
-        lines.append("")
-        lines.extend(details)
-    return tuple(lines)
-
-
 class ItemScreenMock:
     def __init__(
         self,
         *,
         party: tuple[Member, ...] | None = None,
         items: Mapping[str, Item] | None = None,
+        spells: Mapping[str, Spell] | None = None,
         settings: Settings | None = None,
         texts: TextCatalog | None = None,
         fonts: FontResources | None = None,
         faces: object | None = None,
+        palette_shifter: PaletteShifter | None = None,
     ) -> None:
         """Build the DA2-style item view from menu-owned state."""
 
@@ -309,6 +168,12 @@ class ItemScreenMock:
             for key, item in item_catalog.items()
         ):
             raise TypeError("items must map each string key to its matching Item")
+        spell_catalog = load_mock_spells() if spells is None else spells
+        if not isinstance(spell_catalog, Mapping) or not all(
+            isinstance(key, str) and isinstance(spell, Spell) and key == spell.key
+            for key, spell in spell_catalog.items()
+        ):
+            raise TypeError("spells must map each string key to its matching Spell")
         if party is None:
             skills = load_mock_skills()
             party = load_mock_party(dict(item_catalog), skills)
@@ -317,6 +182,7 @@ class ItemScreenMock:
 
         self.party = party
         self.items = dict(item_catalog)
+        self.spells = dict(spell_catalog)
         self.item_counts = {key: 1 for key in self.items}
         self.inventory = tuple(self.items.values())
         self.important_items: tuple[Item, ...] = ()
@@ -330,6 +196,7 @@ class ItemScreenMock:
         self.faces = (
             faces if faces is not None else ImageResources().image(FACES_IMAGE_ID)
         )
+        self.palette_shifter = palette_shifter
         self.phase = ItemSelectionPhase.CATEGORY
         self.selected_item_index = 0
         self.scroll_offset = 0
@@ -354,6 +221,21 @@ class ItemScreenMock:
         if not items:
             return None
         return items[self.selected_item_index]
+
+    @property
+    def dimmed_member_indexes(self) -> frozenset[int]:
+        """Return party positions unable to equip the selected equipment."""
+
+        if self.phase is not ItemSelectionPhase.ITEM:
+            return frozenset()
+        item = self.selected_item
+        if item is None or not item.is_equipment:
+            return frozenset()
+        return frozenset(
+            index
+            for index, member in enumerate(self.party)
+            if not member.can_equip(item)
+        )
 
     @property
     def page_index(self) -> int:
@@ -406,6 +288,7 @@ class ItemScreenMock:
             text_factory=self.localized_texts,
             window_factory=windows,
             faces=self.faces,
+            palette_shifter=self.palette_shifter,
         )
         self.party_window = self.party_panel.window
         self._window_factory = windows
@@ -462,7 +345,14 @@ class ItemScreenMock:
                     ITEM_INFO_Y + row * ITEM_INFO_ROW_HEIGHT,
                 )
                 for row, text in enumerate(
-                    item_detail_lines(selected, self.localizer, self.texts)
+                    _fit_item_info_lines(
+                        item_detail_lines(
+                            selected,
+                            self.spells,
+                            self.localizer,
+                            self.texts,
+                        )
+                    )
                 )
                 if text
             )
@@ -601,7 +491,7 @@ class ItemScreenMock:
     def draw(self) -> None:
         for window in self.windows:
             window.draw()
-        self.party_panel.draw_faces()
+        self.party_panel.draw_faces(self.dimmed_member_indexes)
         self.category_cursor.draw()
         if self.phase is ItemSelectionPhase.ITEM:
             self.item_cursor.draw()

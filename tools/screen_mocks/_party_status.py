@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import pyxel
 
 from tools._bootstrap import APP_ROOT as _APP_ROOT  # Initialize app imports.
 from localization import Localizer
 from member import Member
+from rendering import DIMMED_PALETTE, PaletteShifter
 from resources import TRANSPARENT_INDEX
 from text_catalog import TextCatalog
 from ui import (
@@ -41,12 +44,14 @@ class PartyStatusPanel:
         text_factory: LocalizedWindowTextFactory,
         window_factory: WindowFactory,
         faces: object,
+        palette_shifter: PaletteShifter | None = None,
         cursor_active: bool = False,
     ) -> None:
         if not party:
             raise ValueError("party must contain at least one member")
         self.party = party
         self.faces = faces
+        self.palette_shifter = palette_shifter
         self.window = window_factory.create(
             *PARTY_WINDOW_GRID,
             self._party_texts(localizer, texts, text_factory),
@@ -92,21 +97,40 @@ class PartyStatusPanel:
             )
         return tuple(placements)
 
-    def draw_faces(self) -> None:
-        """Draw every member face above the HP fields."""
+    def draw_faces(self, dimmed_member_indexes: Iterable[int] = ()) -> None:
+        """Draw faces, optionally dimming selected members by palette shift."""
+
+        try:
+            dimmed = frozenset(dimmed_member_indexes)
+        except TypeError as error:
+            raise TypeError("dimmed member indexes must be iterable") from error
+        if any(
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or not 0 <= index < len(self.party)
+            for index in dimmed
+        ):
+            raise ValueError("dimmed member index is outside the party")
 
         for index, member in enumerate(self.party):
             face_position = member.face_position
-            pyxel.blt(
-                PARTY_FACE_X + index * PARTY_COLUMN_WIDTH * 4,
-                PARTY_FACE_Y,
-                self.faces,
-                face_position.x,
-                face_position.y,
-                PARTY_FACE_SIZE,
-                PARTY_FACE_SIZE,
-                TRANSPARENT_INDEX,
-            )
+            if index in dimmed and self.palette_shifter is not None:
+                with self.palette_shifter.shifted(DIMMED_PALETTE):
+                    self._draw_face(index, face_position.x, face_position.y)
+            else:
+                self._draw_face(index, face_position.x, face_position.y)
+
+    def _draw_face(self, index: int, source_x: int, source_y: int) -> None:
+        pyxel.blt(
+            PARTY_FACE_X + index * PARTY_COLUMN_WIDTH * 4,
+            PARTY_FACE_Y,
+            self.faces,
+            source_x,
+            source_y,
+            PARTY_FACE_SIZE,
+            PARTY_FACE_SIZE,
+            TRANSPARENT_INDEX,
+        )
 
 
 __all__ = [

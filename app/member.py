@@ -147,6 +147,12 @@ SPELL_PROFICIENCY_KINDS = frozenset(
 _WEAPON_PROFICIENCY_BY_SUBTYPE = MappingProxyType(
     {kind.name: kind for kind in WEAPON_PROFICIENCY_KINDS}
 )
+_EQUIPMENT_PROFICIENCY_BY_SUBTYPE = MappingProxyType(
+    {
+        **_WEAPON_PROFICIENCY_BY_SUBTYPE,
+        "SHIELD": ProficiencyKind.SHIELD,
+    }
+)
 _TWO_HANDED_SKILL_KEY = "Two-Handed"
 _TWO_HANDED_SKILL_KINDS = frozenset(
     (
@@ -841,6 +847,73 @@ class Member:
         if not isinstance(key, str) or not key:
             raise ValueError("key must be a non-empty string")
         return any(skill.key == key for skill in self.skills)
+
+    def can_equip(self, item: Item) -> bool:
+        """Return intrinsic eligibility for one equipment item.
+
+        Slot conflicts and inventory exchange are intentionally outside this
+        check. This method covers aptitude, equipment class, and the stable
+        requirements currently present in ``items.json``.
+        """
+
+        if not isinstance(item, Item):
+            raise TypeError("item must be an Item")
+        if not item.is_equipment:
+            return False
+
+        proficiency_kind = _EQUIPMENT_PROFICIENCY_BY_SUBTYPE.get(item.subtype)
+        if proficiency_kind is not None:
+            if (
+                self.proficiency(proficiency_kind).aptitude
+                is ProficiencyAptitude.DISABLED
+            ):
+                return False
+        elif item.subtype == "GENERAL":
+            pass
+        elif item.subtype == "HEAVY":
+            if (
+                self.proficiency(ProficiencyKind.SHIELD).aptitude
+                is ProficiencyAptitude.DISABLED
+            ):
+                return False
+        elif item.subtype == "MAGICAL":
+            if not any(
+                self.proficiency(kind).aptitude
+                is not ProficiencyAptitude.DISABLED
+                for kind in SPELL_PROFICIENCY_KINDS
+            ):
+                return False
+        else:
+            raise MemberDataError(
+                f"unsupported equipment subtype: {item.subtype}"
+            )
+
+        requirement = item.requirement
+        if not requirement:
+            return True
+        if requirement == "LV9":
+            if proficiency_kind is None:
+                raise MemberDataError(
+                    f"LV9 requires a proficiency subtype: {item.subtype}"
+                )
+            return self.proficiency(proficiency_kind).level >= 9
+        if requirement == "ONLY_RAGNA":
+            return self.definition.key == "Ragna"
+        if requirement == "NO_FAIRYS":
+            return self.definition.race is not Race.FAIRY
+        if requirement == "ONLY_FAIRYS":
+            return self.definition.race is Race.FAIRY
+        if requirement == "NO_DRAGONS":
+            return self.definition.race is not Race.DRAGONEWT
+        if requirement == "ONLY_DRAGON":
+            return self.definition.race is Race.DRAGONEWT
+        if requirement == "ONLY_ROBO":
+            return self.definition.race is Race.ROBOT
+        if requirement == "ONLY_FEMALE":
+            return self.definition.gender is Gender.FEMALE
+        if requirement == "ONLY_MALE":
+            return self.definition.gender is Gender.MALE
+        raise MemberDataError(f"unsupported equipment requirement: {requirement}")
 
     @staticmethod
     def _weapon_proficiency_kind(weapon: Item) -> ProficiencyKind:

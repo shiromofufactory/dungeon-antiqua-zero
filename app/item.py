@@ -5,13 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, TypeVar
 
 if __package__ == "":
     from localization import Localizer
+    from monster import MonsterTribe
     from resistance import ResistanceType, resistances_from_tolerance
 else:
     from .localization import Localizer
+    from .monster import MonsterTribe
     from .resistance import ResistanceType, resistances_from_tolerance
 
 
@@ -59,6 +61,18 @@ def _optional_non_negative_stat(
     return value
 
 
+def _optional_flag(
+    record: Mapping[str, object],
+    field: str,
+    *,
+    default: int = 0,
+) -> bool:
+    value = record.get(field, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value not in (0, 1):
+        raise ItemDataError(f"item.{field} must be 0 or 1")
+    return bool(value)
+
+
 def _optional_string(
     record: Mapping[str, object],
     field: str,
@@ -83,6 +97,101 @@ class ItemEquipType(StrEnum):
     ARM = "ARM"
 
 
+class AttackAttribute(StrEnum):
+    """Stable elemental attributes applied by weapon attacks."""
+
+    FIRE = "FIRE"
+    FREEZE = "FREEZE"
+    DARK = "DARK"
+
+
+class AdditionalEffect(StrEnum):
+    """Stable status effects that a weapon attack can add."""
+
+    SLEEP = "SLEEP"
+    CONFUSE = "CONFUSE"
+    DEATH = "DEATH"
+    SILENCE = "SILENCE"
+    DRAIN = "DRAIN"
+    STUN = "STUN"
+    POISON = "POISON"
+    PARALIZE = "PARALIZE"
+    DEFENSE_DOWN = "DEFENSE_DOWN"
+
+
+class ItemSpecial(StrEnum):
+    """Stable identifiers for item-specific traits."""
+
+    ATK_REDUCE_WT = "ATK_REDUCE_WT"
+    COUNTER_STUN = "COUNTER_STUN"
+    DUAL_WIELD = "DUAL_WIELD"
+    GAIN_TWICE = "GAIN_TWICE"
+    LURE = "LURE"
+    POWER_HIT = "POWER_HIT"
+    REFLECT = "REFLECT"
+    SPL_REDUCE_WT = "SPL_REDUCE_WT"
+    TWO_HANDED = "TWO_HANDED"
+    VIGILANCE = "VIGILANCE"
+
+
+_ATTACK_ATTRIBUTE_BY_CHARACTER = MappingProxyType(
+    {
+        "炎": AttackAttribute.FIRE,
+        "冷": AttackAttribute.FREEZE,
+        "闇": AttackAttribute.DARK,
+    }
+)
+_ADDITIONAL_EFFECT_BY_CHARACTER = MappingProxyType(
+    {
+        "眠": AdditionalEffect.SLEEP,
+        "乱": AdditionalEffect.CONFUSE,
+        "死": AdditionalEffect.DEATH,
+        "黙": AdditionalEffect.SILENCE,
+        "吸": AdditionalEffect.DRAIN,
+        "止": AdditionalEffect.STUN,
+        "毒": AdditionalEffect.POISON,
+        "麻": AdditionalEffect.PARALIZE,
+        "破": AdditionalEffect.DEFENSE_DOWN,
+    }
+)
+
+Code = TypeVar("Code")
+
+
+def _optional_code(
+    record: Mapping[str, object],
+    field: str,
+    values: Mapping[str, Code],
+) -> Code | None:
+    value = _optional_string(record, field)
+    if not value:
+        return None
+    try:
+        return values[value]
+    except KeyError as error:
+        raise ItemDataError(f"unsupported item.{field}: {value}") from error
+
+
+def _optional_monster_tribe(record: Mapping[str, object]) -> MonsterTribe | None:
+    value = _optional_string(record, "race")
+    if not value:
+        return None
+    try:
+        return MonsterTribe(value)
+    except ValueError as error:
+        raise ItemDataError(f"unsupported item.race: {value}") from error
+
+
+def _optional_item_special(record: Mapping[str, object]) -> ItemSpecial | None:
+    value = _optional_string(record, "special")
+    if not value:
+        return None
+    try:
+        return ItemSpecial(value)
+    except ValueError as error:
+        raise ItemDataError(f"unsupported item.special: {value}") from error
+
+
 @dataclass(frozen=True)
 class Item:
     """Item identity, equipment category, and battle status values."""
@@ -92,6 +201,14 @@ class Item:
     equip_type: ItemEquipType
     subtype: str
     requirement: str
+    attack_attribute: AttackAttribute | None
+    additional_effect: AdditionalEffect | None
+    special: ItemSpecial | None
+    effective_tribe: MonsterTribe | None
+    price: int
+    use_spell_key: str
+    breaks_on_use: bool
+    source: str
     attack: int
     hit: int
     reach: int
@@ -148,6 +265,22 @@ class Item:
             equip_type=equip_type,
             subtype=subtype,
             requirement=_optional_string(record, "requirements"),
+            attack_attribute=_optional_code(
+                record,
+                "attr",
+                _ATTACK_ATTRIBUTE_BY_CHARACTER,
+            ),
+            additional_effect=_optional_code(
+                record,
+                "extra",
+                _ADDITIONAL_EFFECT_BY_CHARACTER,
+            ),
+            special=_optional_item_special(record),
+            effective_tribe=_optional_monster_tribe(record),
+            price=_optional_non_negative_stat(record, "price"),
+            use_spell_key=_optional_string(record, "use"),
+            breaks_on_use=_optional_flag(record, "break"),
+            source=_optional_string(record, "source"),
             attack=_non_negative_stat(record, "atk"),
             hit=_non_negative_stat(record, "hit"),
             reach=_optional_non_negative_stat(record, "reach"),
@@ -169,6 +302,18 @@ class Item:
             ItemEquipType.RIGHT,
             ItemEquipType.TWO_HANDS,
         )
+
+    @property
+    def is_equipment(self) -> bool:
+        """Return whether this item can occupy an equipment slot."""
+
+        return self.equip_type is not ItemEquipType.ITEM
+
+    @property
+    def is_spell_book(self) -> bool:
+        """Return whether this consumable is explicitly classified as a spell book."""
+
+        return self.equip_type is ItemEquipType.ITEM and self.subtype == "BOOK"
 
     @property
     def is_armor(self) -> bool:

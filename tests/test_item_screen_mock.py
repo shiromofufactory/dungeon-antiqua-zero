@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import unittest
 from unittest.mock import Mock, call, patch
 
 from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
+from app.rendering import DIMMED_PALETTE
 from tools.screen_mocks._party_status import (
     PARTY_COLUMN_WIDTH,
     PARTY_FACE_SIZE,
@@ -105,7 +107,12 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.item_list_window.vertical_navigation)
         self.assertEqual(
             [text.text for text in mock.item_info_window.texts],
-            ["きずぐすり", "どうぐ"],
+            [
+                "きずぐすり",
+                "どうぐ",
+                "みかたひとりの　きずを",
+                "かいふく（ばいりつ：３０）",
+            ],
         )
         self.assertEqual(
             [
@@ -115,6 +122,8 @@ class ItemScreenMockTest(unittest.TestCase):
             [
                 (ITEM_INFO_X, ITEM_INFO_Y),
                 (ITEM_INFO_X, ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT),
+                (ITEM_INFO_X, ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 3),
+                (ITEM_INFO_X, ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 4),
             ],
         )
         self.assertEqual(
@@ -142,10 +151,13 @@ class ItemScreenMockTest(unittest.TestCase):
             [
                 "エリカ",
                 "かたてぶき　／　%SWORD%けん",
-                "ラグナのみ",
+                "ラグナ　せんよう",
                 "こうげき：５６",
                 "めいちゅう：１３０",
+                "ついかこうか：そくし",
+                "%DEATH%そくしを　ふせぐ",
                 "すばやさ　＋２",
+                "きょじん　に　つよい",
             ],
         )
         self.assertEqual(
@@ -157,6 +169,9 @@ class ItemScreenMockTest(unittest.TestCase):
                 ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 4,
                 ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 5,
                 ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 6,
+                ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 7,
+                ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 8,
+                ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 9,
             ],
         )
 
@@ -169,7 +184,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.select_item(mock, "DWARVEN VEST")
         self.assertEqual(
             mock.item_info_window.texts[1].text,
-            "%BODY%からだ　／　だれでも",
+            "%BODY%からだ　／　かるいぼうぐ",
         )
         self.assertEqual(mock.item_info_window.texts[2].text, "ようせいをのぞく")
 
@@ -178,6 +193,30 @@ class ItemScreenMockTest(unittest.TestCase):
             "じゅつぼうぎょ：１０",
             [text.text for text in mock.item_info_window.texts],
         )
+
+    def test_wraps_long_tagged_use_description_within_the_info_window(self) -> None:
+        mock = ItemScreenMock()
+
+        self.select_item(mock, "BOOK of FIRE")
+        lines = [text.text for text in mock.item_info_window.texts]
+        self.assertIn("つかうと%MYSTIC%ファイア１", lines)
+        self.assertIn("てき１たいに", lines)
+        self.assertIn("%FIRE%ほのおぞくせいの", lines)
+
+        for item in mock.inventory:
+            with self.subTest(item=item.key):
+                self.select_item(mock, item.key)
+                self.assertLessEqual(len(mock.item_info_window.texts), 12)
+                self.assertLessEqual(
+                    max((text.y for text in mock.item_info_window.texts), default=0),
+                    ITEM_INFO_Y + ITEM_INFO_ROW_HEIGHT * 11,
+                )
+
+        self.select_item(mock, "ROD of DISCORD")
+        discord_lines = [text.text for text in mock.item_info_window.texts]
+        self.assertIn("つかうと%NETHER%コンフュージョン", discord_lines)
+        self.assertNotIn("つかうと", discord_lines)
+        self.assertNotIn("%NETHER%コンフュージョン", discord_lines)
 
     def test_omits_zero_stats_and_keeps_negative_sign(self) -> None:
         mock = ItemScreenMock()
@@ -203,26 +242,127 @@ class ItemScreenMockTest(unittest.TestCase):
             fire_spear_lines[1],
             "りょうてぶき　／　%SPEAR%やり",
         )
-        self.assertEqual(fire_spear_lines[-1], "こうれつから　こうげきかのう")
-
-        self.select_item(mock, "SHURIKENS")
-        self.assertEqual(
-            mock.item_info_window.texts[-1].text,
-            "えんきょりこうげき　かのう",
+        self.assertIn("こうれつから　こうげきかのう", fire_spear_lines)
+        self.assertIn("ぞくせい：%FIRE%ほのお", fire_spear_lines)
+        self.assertIn("ついかこうか：スタン", fire_spear_lines)
+        self.assertIn("%FIRE%ほのおを　ふせぐ", fire_spear_lines)
+        self.assertLess(
+            fire_spear_lines.index("めいちゅう：９５"),
+            fire_spear_lines.index("ぞくせい：%FIRE%ほのお"),
+        )
+        self.assertLess(
+            fire_spear_lines.index("ぞくせい：%FIRE%ほのお"),
+            fire_spear_lines.index("ついかこうか：スタン"),
+        )
+        self.assertLess(
+            fire_spear_lines.index("ついかこうか：スタン"),
+            fire_spear_lines.index("こうれつから　こうげきかのう"),
         )
 
-    def test_displays_equipment_slot_icons_before_head_body_and_arm(self) -> None:
+        self.select_item(mock, "SHURIKENS")
+        self.assertIn(
+            "えんきょりこうげき　かのう",
+            [text.text for text in mock.item_info_window.texts],
+        )
+
+    def test_displays_equipment_slot_icons_before_each_armor_type(self) -> None:
         mock = ItemScreenMock()
 
         expected = {
+            "IRON SHIELD": "%SHIELD%たて",
             "IRON HELM": "%HEAD%あたま　／　おもいぼうぐ",
             "IRON ARMOR": "%BODY%からだ　／　おもいぼうぐ",
-            "DEATH RING": "%ARM%うで　／　だれでも",
+            "DEATH RING": "%ARM%うで　／　かるいぼうぐ",
         }
         for item_key, type_line in expected.items():
             with self.subTest(item_key=item_key):
                 self.select_item(mock, item_key)
                 self.assertEqual(mock.item_info_window.texts[1].text, type_line)
+
+    def test_displays_only_requirements_as_dedicated_equipment(self) -> None:
+        mock = ItemScreenMock()
+
+        expected = {
+            "DRAGON HOOD": "ドラゴニュート　せんよう",
+            "DAYBRINGER": "ようせい　せんよう",
+            "GOLD HAIRPIN": "おんな　せんよう",
+            "TYRFING": "おとこ　せんよう",
+            "ELIKA": "ラグナ　せんよう",
+            "MANA STUNGUN": "ロボット　せんよう",
+        }
+        for item_key, requirement_line in expected.items():
+            with self.subTest(item_key=item_key):
+                self.select_item(mock, item_key)
+                self.assertEqual(
+                    mock.item_info_window.texts[2].text,
+                    requirement_line,
+                )
+
+    def test_displays_dark_attribute_and_drain_effect_separately(self) -> None:
+        mock = ItemScreenMock()
+
+        self.select_item(mock, "CHIZAKURA!")
+        lines = [text.text for text in mock.item_info_window.texts]
+
+        self.assertIn("ぞくせい：%DARK%やみ", lines)
+        self.assertIn("ついかこうか：きゅうしゅう", lines)
+        self.assertLess(
+            lines.index("ぞくせい：%DARK%やみ"),
+            lines.index("ついかこうか：きゅうしゅう"),
+        )
+
+    def test_displays_defense_down_and_every_monster_tribe(self) -> None:
+        mock = ItemScreenMock()
+
+        self.select_item(mock, "LABRYS")
+        self.assertIn(
+            "ついかこうか：ぼうぎょダウン",
+            [text.text for text in mock.item_info_window.texts],
+        )
+
+        expected = {
+            "MACE of SNAKE": "どうぶつ　に　つよい",
+            "ZOMBIE HEWER": "アンデッド　に　つよい",
+            "GOBLIN SLAYER": "ゴブリン　に　つよい",
+            "MURASAME!": "にんげん　に　つよい",
+            "MAGE MASHER": "まじゅつし　に　つよい",
+            "ELIKA": "きょじん　に　つよい",
+            "DRAGON HEWER": "ドラゴン　に　つよい",
+            "SOUL SLAYER": "まほうせいぶつ　に　つよい",
+            "EXCALIBUR": "あくま　に　つよい",
+        }
+        for item_key, tribe_line in expected.items():
+            with self.subTest(item_key=item_key):
+                self.select_item(mock, item_key)
+                self.assertIn(
+                    tribe_line,
+                    [text.text for text in mock.item_info_window.texts],
+                )
+
+    def test_displays_each_resistance_on_its_own_line(self) -> None:
+        mock = ItemScreenMock()
+
+        self.select_item(mock, "EAN SI MANTLE")
+        resistance_lines = [
+            text.text
+            for text in mock.item_info_window.texts
+            if "ふせぐ" in text.text
+        ]
+        self.assertEqual(
+            resistance_lines,
+            [
+                "%SLEEP%ねむりを　ふせぐ",
+                "%POISON%どくを　ふせぐ",
+                "%PARALIZE%まひを　ふせぐ",
+                "%CONFUSE%こんらんを　ふせぐ",
+            ],
+        )
+
+        self.select_item(mock, "AEGIS")
+        self.assertIn(
+            "スタンを　ふせぐ",
+            [text.text for text in mock.item_info_window.texts],
+        )
 
     def test_uses_da2_field_healing_wording_for_either_sign(self) -> None:
         mock = ItemScreenMock()
@@ -269,6 +409,27 @@ class ItemScreenMockTest(unittest.TestCase):
                 for index, member in enumerate(mock.party)
             ],
         )
+
+    def test_dims_only_members_who_cannot_equip_selected_equipment(self) -> None:
+        palette_shifter = Mock()
+        palette_shifter.shifted.side_effect = lambda _name: nullcontext()
+        mock = ItemScreenMock(palette_shifter=palette_shifter)
+
+        self.assertEqual(mock.dimmed_member_indexes, frozenset())
+        self.select_item(mock, "ELIKA")
+        self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 1, 2, 3)))
+
+        with patch("tools.screen_mocks._party_status.pyxel.blt") as blt:
+            mock.party_panel.draw_faces(mock.dimmed_member_indexes)
+
+        self.assertEqual(blt.call_count, len(mock.party))
+        self.assertEqual(
+            palette_shifter.shifted.call_args_list,
+            [call(DIMMED_PALETTE)] * 4,
+        )
+
+        self.select_item(mock, "POTION")
+        self.assertEqual(mock.dimmed_member_indexes, frozenset())
 
     def test_category_spacing_fits_japanese_and_english_inside_the_frame(self) -> None:
         japanese = ItemScreenMock()

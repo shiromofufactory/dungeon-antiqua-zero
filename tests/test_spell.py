@@ -31,6 +31,10 @@ class SpellTest(unittest.TestCase):
             "ファイア１",
         )
         self.assertEqual(
+            spell.localized_display_name(Localizer(Language.JAPANESE)),
+            "%MYSTIC%ファイア１",
+        )
+        self.assertEqual(
             spell.localized_description(Localizer(Language.JAPANESE)),
             (
                 "てき１たいに%FIRE%ほのおぞくせいの",
@@ -57,6 +61,27 @@ class SpellTest(unittest.TestCase):
 
     def test_item_effect_records_are_not_member_spells(self) -> None:
         self.assertFalse(self.spells["POTION"].is_learned_by(self.party[0]))
+        self.assertEqual(
+            self.spells["POTION"].localized_display_name(
+                Localizer(Language.JAPANESE)
+            ),
+            "－",
+        )
+
+    def test_standard_display_name_uses_each_spell_school_icon(self) -> None:
+        localizer = Localizer(Language.JAPANESE)
+        expected = {
+            "FIRE1": "%MYSTIC%ファイア１",
+            "HEALING1": "%SACRED%ヒーリング１",
+            "SLEEP": "%NETHER%スリープ",
+        }
+
+        for key, display_name in expected.items():
+            with self.subTest(spell=key):
+                self.assertEqual(
+                    self.spells[key].localized_display_name(localizer),
+                    display_name,
+                )
 
     def test_rejects_legacy_numeric_spell_type(self) -> None:
         record = dict(load_record_array("spells.json")[0])

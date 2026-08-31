@@ -9,6 +9,8 @@ from typing import Any
 
 import pyxel
 
+from .colors import BLUE_TEXT_COLOR
+
 ICON_BANK = 0
 ICON_SIZE = 8
 ICON_COLKEY = 1
@@ -22,6 +24,14 @@ class TextIcon:
     tag: str
     u: int
     v: int
+
+
+@dataclass(frozen=True)
+class TextColor:
+    """Change the text color without consuming display width."""
+
+    tag: str
+    color: int
 
 
 @dataclass(frozen=True)
@@ -100,12 +110,18 @@ TEXT_ICONS = MappingProxyType(
         for name, (u, v) in _ICON_COORDINATES.items()
     }
 )
+TEXT_COLORS = MappingProxyType(
+    {
+        "%COL_BLUE%": TextColor("%COL_BLUE%", BLUE_TEXT_COLOR),
+        "%COL_END%": TextColor("%COL_END%", 5),
+    }
+)
 
 _TAG_PATTERN = re.compile(r"%[A-Z][A-Z0-9_]*%")
 
 
-def split_tagged_text(text: str) -> tuple[str | TextIcon, ...]:
-    """Split text into literal text and known icon tags.
+def split_tagged_text(text: str) -> tuple[str | TextIcon | TextColor, ...]:
+    """Split text into literal text and known icon or color tags.
 
     Unknown and malformed tags remain literal so ordinary percent signs and
     future content do not disappear from the screen.
@@ -121,12 +137,12 @@ def split_tagged_text(text: str) -> tuple[str | TextIcon, ...]:
 
 def _split_tagged_text_with_offsets(
     text: str,
-) -> tuple[tuple[str | TextIcon, int, int], ...]:
-    parts: list[tuple[str | TextIcon, int, int]] = []
+) -> tuple[tuple[str | TextIcon | TextColor, int, int], ...]:
+    parts: list[tuple[str | TextIcon | TextColor, int, int]] = []
     position = 0
     for match in _TAG_PATTERN.finditer(text):
-        icon = TEXT_ICONS.get(match.group())
-        if icon is None:
+        tag = TEXT_ICONS.get(match.group()) or TEXT_COLORS.get(match.group())
+        if tag is None:
             continue
         if position < match.start():
             parts.append(
@@ -136,7 +152,7 @@ def _split_tagged_text_with_offsets(
                     match.start(),
                 )
             )
-        parts.append((icon, match.start(), match.end()))
+        parts.append((tag, match.start(), match.end()))
         position = match.end()
     if position < len(text):
         parts.append((text[position:], position, len(text)))
@@ -157,6 +173,7 @@ def draw_tagged_text(
     """Draw text and icons, vertically offsetting only text glyphs."""
 
     cursor_x = x
+    current_color = color
     parts = _split_tagged_text_with_offsets(text)
     for part_index, (part, start, end) in enumerate(parts):
         if isinstance(part, TextIcon):
@@ -172,6 +189,9 @@ def draw_tagged_text(
             )
             cursor_x += ICON_SIZE
             continue
+        if isinstance(part, TextColor):
+            current_color = part.color
+            continue
 
         styled_runs = _styled_text_runs(
             text,
@@ -185,7 +205,7 @@ def draw_tagged_text(
             text_y = y + run_y_offset
             if shadow_color is not None:
                 pyxel.text(cursor_x, text_y + 1, run, shadow_color, run_font)
-            pyxel.text(cursor_x, text_y, run, color, run_font)
+            pyxel.text(cursor_x, text_y, run, current_color, run_font)
             if run_index < len(styled_runs) - 1 or part_index < len(parts) - 1:
                 cursor_x += _text_width(run, run_font)
 

@@ -279,8 +279,7 @@ class SpellScreenMock:
                 )
                 texts.append(
                     self.localized_texts.create(
-                        f"%{spell_type.name}%"
-                        f"{spell.localized_name(self.localizer)}",
+                        spell.localized_display_name(self.localizer),
                         SPELL_TEXT_X[column],
                         y,
                         color=color,
