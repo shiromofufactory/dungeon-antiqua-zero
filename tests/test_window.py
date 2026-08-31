@@ -22,6 +22,16 @@ from app.ui.window import (
     HORIZONTAL_NAVIGATION_WIDTH,
     HORIZONTAL_NAVIGATION_X,
     HORIZONTAL_NAVIGATION_Y,
+    VERTICAL_NAVIGATION_BANK,
+    VERTICAL_NAVIGATION_BOTTOM_OFFSET,
+    VERTICAL_NAVIGATION_COLKEY,
+    VERTICAL_NAVIGATION_FRAME_OVERLAP_X,
+    VERTICAL_NAVIGATION_HEIGHT,
+    VERTICAL_NAVIGATION_PRESSED_X_OFFSET,
+    VERTICAL_NAVIGATION_TOP_OFFSET,
+    VERTICAL_NAVIGATION_WIDTH,
+    VERTICAL_NAVIGATION_X,
+    VERTICAL_NAVIGATION_Y,
     WINDOW_ANIMATION_FRAME_COUNT,
     Window,
     WindowCursor,
@@ -493,6 +503,126 @@ class WindowTest(unittest.TestCase):
             window.draw()
 
         self.assertEqual(draw_order, ["navigation", "texts"])
+
+    def test_vertical_navigation_draws_da2_style_scroll_indicators(self) -> None:
+        window = Window(2, 3, 20, 10, vertical_navigation=True)
+
+        with patch("app.ui.window.pyxel.blt") as blt:
+            window._draw_vertical_navigation()
+
+        x = (
+            window.pixel_x
+            + window.pixel_width
+            - 8
+            - VERTICAL_NAVIGATION_FRAME_OVERLAP_X
+        )
+        frame_top = window.pixel_y + FRAME_Y_OFFSET
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    x,
+                    frame_top + VERTICAL_NAVIGATION_TOP_OFFSET,
+                    VERTICAL_NAVIGATION_BANK,
+                    VERTICAL_NAVIGATION_X,
+                    VERTICAL_NAVIGATION_Y,
+                    VERTICAL_NAVIGATION_WIDTH,
+                    VERTICAL_NAVIGATION_HEIGHT,
+                    VERTICAL_NAVIGATION_COLKEY,
+                ),
+                call(
+                    x,
+                    frame_top
+                    + window.pixel_height
+                    - VERTICAL_NAVIGATION_BOTTOM_OFFSET,
+                    VERTICAL_NAVIGATION_BANK,
+                    VERTICAL_NAVIGATION_X + VERTICAL_NAVIGATION_WIDTH,
+                    VERTICAL_NAVIGATION_Y,
+                    VERTICAL_NAVIGATION_WIDTH,
+                    VERTICAL_NAVIGATION_HEIGHT,
+                    VERTICAL_NAVIGATION_COLKEY,
+                ),
+            ],
+        )
+
+    def test_vertical_navigation_uses_pressed_pattern_for_input_direction(
+        self,
+    ) -> None:
+        window = Window(0, 0, 8, 6, vertical_navigation=True)
+
+        for direction, expected_sources in (
+            (
+                -1,
+                (
+                    VERTICAL_NAVIGATION_X
+                    + VERTICAL_NAVIGATION_PRESSED_X_OFFSET,
+                    VERTICAL_NAVIGATION_X + VERTICAL_NAVIGATION_WIDTH,
+                ),
+            ),
+            (
+                1,
+                (
+                    VERTICAL_NAVIGATION_X,
+                    VERTICAL_NAVIGATION_X
+                    + VERTICAL_NAVIGATION_WIDTH
+                    + VERTICAL_NAVIGATION_PRESSED_X_OFFSET,
+                ),
+            ),
+            (
+                0,
+                (
+                    VERTICAL_NAVIGATION_X,
+                    VERTICAL_NAVIGATION_X + VERTICAL_NAVIGATION_WIDTH,
+                ),
+            ),
+        ):
+            with self.subTest(direction=direction):
+                window.set_vertical_navigation_pressed(direction)
+                with patch("app.ui.window.pyxel.blt") as blt:
+                    window._draw_vertical_navigation()
+                self.assertEqual(
+                    tuple(item.args[3] for item in blt.call_args_list),
+                    expected_sources,
+                )
+
+        for invalid_direction in (True, -2, 2):
+            with self.subTest(invalid_direction=invalid_direction):
+                with self.assertRaises(ValueError):
+                    window.set_vertical_navigation_pressed(invalid_direction)
+
+    def test_both_navigation_indicators_draw_before_text(self) -> None:
+        window = Window(
+            0,
+            0,
+            8,
+            6,
+            horizontal_navigation=True,
+            vertical_navigation=True,
+        )
+        draw_order: list[str] = []
+
+        with (
+            patch.object(window, "_draw_gradient"),
+            patch.object(window, "_draw_frame"),
+            patch.object(
+                window,
+                "_draw_horizontal_navigation",
+                side_effect=lambda: draw_order.append("horizontal"),
+            ),
+            patch.object(
+                window,
+                "_draw_vertical_navigation",
+                side_effect=lambda: draw_order.append("vertical"),
+            ),
+            patch.object(
+                window,
+                "_draw_texts",
+                side_effect=lambda: draw_order.append("texts"),
+            ),
+        ):
+            window.draw()
+
+        self.assertEqual(draw_order, ["horizontal", "vertical", "texts"])
 
     def test_minimum_window_size_is_enforced(self) -> None:
         with self.assertRaises(ValueError):

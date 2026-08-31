@@ -47,6 +47,17 @@ HORIZONTAL_NAVIGATION_WIDTH = 8
 HORIZONTAL_NAVIGATION_HEIGHT = 16
 HORIZONTAL_NAVIGATION_COLKEY = 1
 
+VERTICAL_NAVIGATION_BANK = 0
+VERTICAL_NAVIGATION_X = 192
+VERTICAL_NAVIGATION_Y = 16
+VERTICAL_NAVIGATION_WIDTH = 4
+VERTICAL_NAVIGATION_HEIGHT = 8
+VERTICAL_NAVIGATION_PRESSED_X_OFFSET = 8
+VERTICAL_NAVIGATION_COLKEY = 1
+VERTICAL_NAVIGATION_FRAME_OVERLAP_X = 2
+VERTICAL_NAVIGATION_TOP_OFFSET = 10
+VERTICAL_NAVIGATION_BOTTOM_OFFSET = 14
+
 WINDOW_ANIMATION_FRAME_COUNT = 8
 
 
@@ -147,6 +158,7 @@ class Window:
         transparent: bool = False,
         thin_frame: bool = False,
         horizontal_navigation: bool = False,
+        vertical_navigation: bool = False,
         opened: bool = True,
     ) -> None:
         values = (x, y, width, height)
@@ -163,6 +175,8 @@ class Window:
             raise TypeError("thin_frame must be a boolean")
         if not isinstance(horizontal_navigation, bool):
             raise TypeError("horizontal_navigation must be a boolean")
+        if not isinstance(vertical_navigation, bool):
+            raise TypeError("vertical_navigation must be a boolean")
         if not isinstance(opened, bool):
             raise TypeError("opened must be a boolean")
 
@@ -174,6 +188,8 @@ class Window:
         self.transparent = transparent
         self.thin_frame = thin_frame
         self.horizontal_navigation = horizontal_navigation
+        self.vertical_navigation = vertical_navigation
+        self.vertical_navigation_pressed = 0
         self._texts: list[WindowText] = []
         self._cursor: WindowCursor | None = None
         self._state = WindowState.OPEN if opened else WindowState.CLOSED
@@ -300,6 +316,13 @@ class Window:
     def clear_cursor(self) -> None:
         self._cursor = None
 
+    def set_vertical_navigation_pressed(self, direction: int = 0) -> None:
+        """Select the normal, pressed-up, or pressed-down arrow pattern."""
+
+        if isinstance(direction, bool) or direction not in (-1, 0, 1):
+            raise ValueError("vertical navigation direction must be -1, 0, or 1")
+        self.vertical_navigation_pressed = direction
+
     def open(self) -> None:
         """Start opening from the window's current visible height."""
 
@@ -381,6 +404,8 @@ class Window:
             self._draw_frame()
         if self.horizontal_navigation:
             self._draw_horizontal_navigation()
+        if self.vertical_navigation:
+            self._draw_vertical_navigation()
         self._draw_texts()
         if self._cursor is not None:
             self._cursor.draw()
@@ -614,6 +639,47 @@ class Window:
             HORIZONTAL_NAVIGATION_COLKEY,
         )
 
+    def _draw_vertical_navigation(self) -> None:
+        """Draw DA2-style up/down scroll indicators on the right frame."""
+
+        x = (
+            self.pixel_x
+            + self.pixel_width
+            - FRAME_TILE_SIZE
+            - VERTICAL_NAVIGATION_FRAME_OVERLAP_X
+        )
+        frame_top = self.pixel_y + FRAME_Y_OFFSET
+        up_x = VERTICAL_NAVIGATION_X + (
+            VERTICAL_NAVIGATION_PRESSED_X_OFFSET
+            if self.vertical_navigation_pressed < 0
+            else 0
+        )
+        down_x = VERTICAL_NAVIGATION_X + VERTICAL_NAVIGATION_WIDTH + (
+            VERTICAL_NAVIGATION_PRESSED_X_OFFSET
+            if self.vertical_navigation_pressed > 0
+            else 0
+        )
+        pyxel.blt(
+            x,
+            frame_top + VERTICAL_NAVIGATION_TOP_OFFSET,
+            VERTICAL_NAVIGATION_BANK,
+            up_x,
+            VERTICAL_NAVIGATION_Y,
+            VERTICAL_NAVIGATION_WIDTH,
+            VERTICAL_NAVIGATION_HEIGHT,
+            VERTICAL_NAVIGATION_COLKEY,
+        )
+        pyxel.blt(
+            x,
+            frame_top + self.pixel_height - VERTICAL_NAVIGATION_BOTTOM_OFFSET,
+            VERTICAL_NAVIGATION_BANK,
+            down_x,
+            VERTICAL_NAVIGATION_Y,
+            VERTICAL_NAVIGATION_WIDTH,
+            VERTICAL_NAVIGATION_HEIGHT,
+            VERTICAL_NAVIGATION_COLKEY,
+        )
+
 
 class WindowFactory:
     """Create windows that share one language-specific default font."""
@@ -635,6 +701,7 @@ class WindowFactory:
         transparent: bool = False,
         thin_frame: bool = False,
         horizontal_navigation: bool = False,
+        vertical_navigation: bool = False,
         opened: bool = True,
     ) -> Window:
         """Create a Window, using the factory font unless one is supplied."""
@@ -649,6 +716,7 @@ class WindowFactory:
             transparent=transparent,
             thin_frame=thin_frame,
             horizontal_navigation=horizontal_navigation,
+            vertical_navigation=vertical_navigation,
             opened=opened,
         )
 

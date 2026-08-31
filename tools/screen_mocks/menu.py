@@ -21,6 +21,7 @@ from tools.screen_mocks._runtime import (
     create_mock_input_reader,
     initialize_screen_mock,
 )
+from tools.screen_mocks.item import ItemMockDataError, ItemScreenMock
 from tools.screen_mocks.status import StatusMockDataError, StatusScreenMock
 from tools.screen_mocks.spell import SpellMockDataError, SpellScreenMock
 from input import (
@@ -263,6 +264,7 @@ class MenuScreenMock:
         self.confirmation_window = None
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
+        self.item_screen: ItemScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
         self.spell_screen: SpellScreenMock | None = None
         self.selected_member_index = 0
@@ -707,6 +709,21 @@ class MenuScreenMock:
             member_index=self.selected_member_index,
         )
 
+    def _start_item(self) -> None:
+        self.command_cursor.active = False
+        self.item_screen = ItemScreenMock(
+            party=self.party,
+            items=self.items,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+        )
+
+    def _finish_item(self) -> None:
+        self.item_screen = None
+        self.command_cursor.active = True
+
     def _finish_status(self) -> None:
         if self.status_screen is None:
             return
@@ -868,6 +885,11 @@ class MenuScreenMock:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        item_screen = getattr(self, "item_screen", None)
+        if item_screen is not None:
+            if item_screen.update(input_state):
+                self._finish_item()
+            return
         spell_screen = getattr(self, "spell_screen", None)
         if spell_screen is not None:
             if spell_screen.update(input_state):
@@ -938,6 +960,12 @@ class MenuScreenMock:
             return
         if (
             input_state.confirm.triggered
+            and self.command_cursor.selected_key == "item"
+        ):
+            self._start_item()
+            return
+        if (
+            input_state.confirm.triggered
             and self.command_cursor.selected_key == "spell"
         ):
             self._start_spell()
@@ -961,6 +989,10 @@ class MenuScreenMock:
 
     def draw(self) -> None:
         pyxel.cls(0)
+        item_screen = getattr(self, "item_screen", None)
+        if item_screen is not None:
+            item_screen.draw()
+            return
         spell_screen = getattr(self, "spell_screen", None)
         if spell_screen is not None:
             spell_screen.draw()
@@ -1041,6 +1073,7 @@ def main() -> int:
             FontResourceError,
             ImageResourceError,
             ItemDataError,
+            ItemMockDataError,
             MemberDataError,
             MenuMockDataError,
             MockFixtureError,

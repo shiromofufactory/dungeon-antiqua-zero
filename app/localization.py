@@ -172,8 +172,12 @@ class Localizer:
 
         for language in language_candidates(self.language):
             field = f"{key}_{language.value}"
-            if field in record and record[field] != "":
-                return record[field]
+            if field not in record:
+                continue
+            value = record[field]
+            if value == "" or value == [] or value == ():
+                continue
+            return value
         return default
 
     def text(

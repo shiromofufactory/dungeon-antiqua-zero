@@ -14,6 +14,17 @@ from tools.screen_mocks._fixtures import (
     load_mock_skills,
     load_mock_spells,
 )
+from tools.screen_mocks._party_status import (
+    PARTY_COLUMN_WIDTH,
+    PARTY_CURSOR_Y,
+    PARTY_FACE_X,
+    PARTY_FACE_Y,
+    PARTY_HP_Y,
+    PARTY_MAX_HP_Y,
+    PARTY_TEXT_X,
+    PARTY_WINDOW_GRID,
+    PartyStatusPanel,
+)
 from input import InputState
 from localization import Localizer
 from member import Member
@@ -26,7 +37,6 @@ from ui import (
     DISABLED_COLOR,
     CursorTarget,
     LocalizedWindowTextFactory,
-    Window,
     WindowCursor,
     WindowFactory,
     WindowText,
@@ -37,8 +47,6 @@ FACES_IMAGE_ID = "faces/faces_pc"
 MEMBER_WINDOW_GRID = (0, 0, 28, 12)
 GUIDE_WINDOW_GRID = (28, 0, 36, 12)
 SPELL_WINDOW_GRID = (0, 12, 64, 33)
-PARTY_WINDOW_GRID = (0, 44, 64, 16)
-
 MEMBER_FACE_X = 8
 MEMBER_FACE_Y = 8
 MEMBER_TEXT_X = 12
@@ -58,15 +66,6 @@ SPELL_TEXT_X = (4, 24, 44)
 SPELL_CURSOR_X = (2, 22, 42)
 SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
-
-PARTY_COLUMN_WIDTH = 12
-PARTY_FACE_X = 16
-PARTY_FACE_Y = PARTY_WINDOW_GRID[1] * 4 + 4
-PARTY_TEXT_X = 3
-PARTY_HP_Y = 9
-PARTY_MAX_HP_Y = 12
-PARTY_CURSOR_Y = 1
-
 
 class SpellSelectionPhase(Enum):
     """Selection stage used by the DA2-style spell menu."""
@@ -237,22 +236,17 @@ class SpellScreenMock:
             *GUIDE_WINDOW_GRID,
             self._guide_texts(),
         )
-        self.party_window = windows.create(
-            *PARTY_WINDOW_GRID,
-            self._party_texts(),
+        self.party_panel = PartyStatusPanel(
+            party=self.party,
+            localizer=self.localizer,
+            texts=self.texts,
+            text_factory=self.localized_texts,
+            window_factory=windows,
+            faces=self.faces,
+            cursor_active=self.phase is SpellSelectionPhase.TARGET,
         )
-        self.member_cursor = WindowCursor(
-            self.party_window,
-            tuple(
-                CursorTarget(
-                    PARTY_TEXT_X + index * PARTY_COLUMN_WIDTH,
-                    PARTY_CURSOR_Y,
-                    key=index,
-                )
-                for index in range(len(self.party))
-            ),
-            active=self.phase is SpellSelectionPhase.TARGET,
-        )
+        self.party_window = self.party_panel.window
+        self.member_cursor = self.party_panel.cursor
         self.windows = (
             self.member_window,
             self.guide_window,
@@ -319,27 +313,6 @@ class SpellScreenMock:
                 8,
             )
         )
-        return tuple(texts)
-
-    def _party_texts(self) -> tuple[WindowText, ...]:
-        texts: list[WindowText] = []
-        hp_label = self.labels["menu.member.hp"]
-        for index, member in enumerate(self.party):
-            x = PARTY_TEXT_X + index * PARTY_COLUMN_WIDTH
-            texts.extend(
-                (
-                    self.localized_texts.create(
-                        f"{hp_label}{pad(member.hp, 3)}",
-                        x,
-                        PARTY_HP_Y,
-                    ),
-                    self.localized_texts.create(
-                        f"／{pad(member.max_hp, 3)}",
-                        x + 2,
-                        PARTY_MAX_HP_Y,
-                    ),
-                )
-            )
         return tuple(texts)
 
     def _refresh_guide(self) -> None:
@@ -445,18 +418,7 @@ class SpellScreenMock:
             FACE_SIZE,
             TRANSPARENT_INDEX,
         )
-        for index, member in enumerate(self.party):
-            face_position = member.face_position
-            pyxel.blt(
-                PARTY_FACE_X + index * PARTY_COLUMN_WIDTH * 4,
-                PARTY_FACE_Y,
-                self.faces,
-                face_position.x,
-                face_position.y,
-                FACE_SIZE,
-                FACE_SIZE,
-                TRANSPARENT_INDEX,
-            )
+        self.party_panel.draw_faces()
         self.caster_cursor.draw()
         if self.phase in (
             SpellSelectionPhase.SPELL,

@@ -47,6 +47,30 @@ def _optional_integer_stat(
     return value
 
 
+def _optional_non_negative_stat(
+    record: Mapping[str, object],
+    field: str,
+    *,
+    default: int = 0,
+) -> int:
+    value = _optional_integer_stat(record, field, default=default)
+    if value < 0:
+        raise ItemDataError(f"item.{field} must not be negative")
+    return value
+
+
+def _optional_string(
+    record: Mapping[str, object],
+    field: str,
+    *,
+    default: str = "",
+) -> str:
+    value = record.get(field, default)
+    if not isinstance(value, str):
+        raise ItemDataError(f"item.{field} must be a string")
+    return value
+
+
 class ItemEquipType(StrEnum):
     """Stable item categories used to validate equipment slots."""
 
@@ -67,11 +91,16 @@ class Item:
     names: Mapping[str, str]
     equip_type: ItemEquipType
     subtype: str
+    requirement: str
     attack: int
     hit: int
+    reach: int
     defense: int
     evasion: int
     spell_resistance: int
+    strength_modifier: int
+    agility_modifier: int
+    magic_modifier: int
     healing: int
     resistances: frozenset[ResistanceType]
 
@@ -118,11 +147,16 @@ class Item:
             names=MappingProxyType(names),
             equip_type=equip_type,
             subtype=subtype,
+            requirement=_optional_string(record, "requirements"),
             attack=_non_negative_stat(record, "atk"),
             hit=_non_negative_stat(record, "hit"),
+            reach=_optional_non_negative_stat(record, "reach"),
             defense=_non_negative_stat(record, "dfc"),
             evasion=_integer_stat(record, "eva"),
             spell_resistance=_non_negative_stat(record, "rst"),
+            strength_modifier=_optional_integer_stat(record, "str"),
+            agility_modifier=_optional_integer_stat(record, "agi"),
+            magic_modifier=_optional_integer_stat(record, "mag"),
             healing=_optional_integer_stat(record, "healing"),
             resistances=resistances_from_tolerance(tolerance),
         )

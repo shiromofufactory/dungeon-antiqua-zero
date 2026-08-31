@@ -65,6 +65,17 @@ class LocalizationTest(unittest.TestCase):
             "Sword",
         )
 
+    def test_empty_translation_array_uses_fallback_language(self) -> None:
+        localizer = Localizer(Language.ENGLISH)
+
+        self.assertEqual(
+            localizer.value(
+                {"text_ja": ["1ぎょうめ"], "text_en": []},
+                "text",
+            ),
+            ["1ぎょうめ"],
+        )
+
     def test_missing_translation_returns_explicit_default(self) -> None:
         localizer = Localizer(Language.ENGLISH)
 

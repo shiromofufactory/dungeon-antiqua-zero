@@ -50,13 +50,20 @@ class TextCatalog:
             if key in indexed:
                 raise TextCatalogError(f"duplicate text_key: {key}")
 
+            normalized = dict(record)
             for field, value in record.items():
                 if field.startswith("text_") and field != "text_key":
-                    if not isinstance(value, str):
+                    if isinstance(value, str):
+                        continue
+                    if not isinstance(value, (list, tuple)) or not all(
+                        isinstance(line, str) for line in value
+                    ):
                         raise TextCatalogError(
-                            f"texts[{index}].{field} must be a string"
+                            f"texts[{index}].{field} must be a string "
+                            "or an array of strings"
                         )
-            indexed[key] = MappingProxyType(dict(record))
+                    normalized[field] = tuple(value)
+            indexed[key] = MappingProxyType(normalized)
 
         return cls(MappingProxyType(indexed))
 
@@ -97,3 +104,40 @@ class TextCatalog:
             raise TextCatalogError(
                 f"localized text must be a string: {key}"
             ) from error
+
+    def lines(
+        self,
+        key: str,
+        localizer: Localizer,
+        *,
+        default: tuple[str, ...] = (),
+    ) -> tuple[str, ...]:
+        """Return one or more localized lines from a string or string array."""
+
+        if not isinstance(key, str) or not key:
+            raise ValueError("key must be a non-empty string")
+        if not isinstance(localizer, Localizer):
+            raise TypeError("localizer must be a Localizer")
+        if not isinstance(default, tuple) or not all(
+            isinstance(line, str) for line in default
+        ):
+            raise TypeError("default must be a tuple of strings")
+
+        record = self._records.get(key, {})
+        value = localizer.value(record, "text", default)
+        if isinstance(value, str):
+            source_lines = (value,)
+        elif isinstance(value, (list, tuple)) and all(
+            isinstance(line, str) for line in value
+        ):
+            source_lines = tuple(value)
+        else:
+            raise TextCatalogError(
+                f"localized text must be a string or array of strings: {key}"
+            )
+
+        selected_field = f"text_{localizer.language.value}"
+        return tuple(
+            localizer.text({selected_field: line}, "text")
+            for line in source_lines
+        )

@@ -175,6 +175,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_window)
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
+        self.assertIsNone(mock.item_screen)
         self.assertIsNone(mock.status_screen)
         self.assertIsNone(mock.spell_screen)
         self.assertEqual(len(mock.spells), 38)
@@ -603,6 +604,77 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIs(mock.party_cursor, party_cursor)
         self.assertFalse(mock.command_cursor.active)
         mock.command_window.update.assert_not_called()
+
+    @patch("tools.screen_mocks.menu.ItemScreenMock")
+    def test_confirming_item_command_opens_connected_item_screen(
+        self,
+        item_screen_class: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="item", active=True)
+        mock.party = (Mock(),)
+        mock.items = {"POTION": Mock()}
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.faces = object()
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock.item_screen = None
+
+        mock.update()
+
+        item_screen_class.assert_called_once_with(
+            party=mock.party,
+            items=mock.items,
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+            faces=mock.faces,
+        )
+        self.assertIs(mock.item_screen, item_screen_class.return_value)
+        self.assertFalse(mock.command_cursor.active)
+        mock.command_window.update.assert_not_called()
+
+    def test_cancel_from_item_returns_to_selected_menu_command(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        input_state = InputState(
+            cancel=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = input_state
+        mock.alert = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.item_screen = Mock()
+        mock.item_screen.update.return_value = True
+
+        item_screen = mock.item_screen
+        mock.update()
+
+        item_screen.update.assert_called_once_with(input_state)
+        self.assertIsNone(mock.item_screen)
+        self.assertTrue(mock.command_cursor.active)
+
+    @patch("tools.screen_mocks.menu.pyxel.cls")
+    def test_draw_uses_item_screen_while_item_is_active(
+        self,
+        clear_screen: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.item_screen = Mock()
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        mock.item_screen.draw.assert_called_once_with()
 
     @patch("tools.screen_mocks.menu.StatusScreenMock")
     def test_confirming_status_command_opens_connected_status_screen(
