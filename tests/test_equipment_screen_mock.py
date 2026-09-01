@@ -639,16 +639,26 @@ class EquipmentScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.inventory_system.quantity("DAGGER"), 2)
 
     def test_member_switch_wraps_and_auto_equipment_is_selectable(self) -> None:
-        mock = self.build_mock()
+        mock = self.build_mock(member_index=5)
         mock.selected_main_key = AUTO_KEY
         mock._rebuild()
 
         mock.update(InputState(next_page=InputButton(triggered=True, held=True)))
 
-        self.assertEqual(mock.member_index, 1)
+        self.assertEqual(mock.member_index, 0)
         self.assertEqual(mock.selected_main_key, AUTO_KEY)
         mock.update(InputState(previous_page=InputButton(triggered=True, held=True)))
-        self.assertEqual(mock.member_index, 0)
+        self.assertEqual(mock.member_index, 5)
+        self.assertEqual(mock.member.definition.key, "Dain")
+
+    def test_reserve_replaces_formation_text(self) -> None:
+        mock = self.build_mock(member_index=5)
+        placed = {(text.x, text.y): text for text in mock.main_window.texts}
+
+        self.assertEqual(
+            placed[(HEADER_TEXT_X, HEADER_FORMATION_Y)].text,
+            "（ひかえ）",
+        )
 
     def test_horizontal_navigation_switches_member_in_main_phase(self) -> None:
         mock = self.build_mock()

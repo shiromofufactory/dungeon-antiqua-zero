@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import unittest
 from unittest.mock import Mock, call, patch
@@ -26,9 +27,12 @@ from tools.screen_mocks.menu import (
     PARTY_CURSOR_X,
     PARTY_CURSOR_Y,
     PARTY_MEMBER_ROW_HEIGHT,
+    PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE,
+    PARTY_NAME_TEXT_X,
+    PARTY_POINT_TEXT_X,
     PARTY_RECOVERY_TEXT_X,
-    PARTY_TEXT_X,
     PARTY_WINDOW_GRID,
+    RESERVE_MEMBER_Y_OFFSET_GRID,
     SE_PREVIEW_SOUND_ID,
     SETTINGS_GUIDE_Y,
     SETTINGS_LABEL_X,
@@ -44,14 +48,15 @@ from tools.screen_mocks.menu import (
     localized_menu_texts,
 )
 from input import Direction, InputButton, InputState
-from member import FormationRow
-from rendering import DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
+from member import BATTLE_PARTY_MEMBER_COUNT, FormationRow
+from rendering import DIMMED_PALETTE, DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
 from state import DisplayMode, Language, SaveData, Settings
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
+    RESERVE_MEMBER_TEXT_COLOR,
 )
 
 
@@ -63,7 +68,7 @@ class MenuScreenMockTest(unittest.TestCase):
     @patch("tools.screen_mocks.menu.WindowFactory")
     @patch("tools.screen_mocks.menu.ImageResources")
     @patch("tools.screen_mocks.menu.FontResources")
-    def test_creates_five_member_main_window_and_da2_side_windows(
+    def test_creates_six_slot_main_window_and_da2_side_windows(
         self,
         fonts_class: Mock,
         images_class: Mock,
@@ -131,7 +136,11 @@ class MenuScreenMockTest(unittest.TestCase):
         party_texts = {(text.x, text.y): text for text in party_args[4]}
         self.assertEqual(
             [member.definition.key for member in mock.party],
-            ["Fiora", "Cerion", "Alvan", "Elika", "Ragna"],
+            ["Fiora", "Cerion", "Alvan", "Elika", "Ragna", "Dain"],
+        )
+        self.assertEqual(
+            [member.definition.key for member in mock._main_menu_members()],
+            ["Fiora", "Cerion", "Alvan", "Elika", "Ragna", "Dain"],
         )
         self.assertEqual(
             [member.formation_row for member in mock.party],
@@ -141,24 +150,68 @@ class MenuScreenMockTest(unittest.TestCase):
                 FormationRow.FRONT,
                 FormationRow.BACK,
                 FormationRow.FRONT,
+                FormationRow.FRONT,
             ],
         )
-        self.assertEqual(party_texts[(PARTY_TEXT_X, 2)].text, "フィオラ")
+        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 2)].text, "フィオラ")
         self.assertEqual(
-            party_texts[(PARTY_TEXT_X, 5)].text,
+            party_texts[(PARTY_POINT_TEXT_X, 5)].text,
             "ＨＰ　　４４／　４４",
         )
         self.assertEqual(
-            party_texts[(PARTY_TEXT_X, 8)].text,
+            party_texts[(PARTY_POINT_TEXT_X, 8)].text,
             "ＭＰ　　１２／　１２",
         )
-        self.assertEqual(party_texts[(PARTY_TEXT_X, 13)].text, "セリオン")
-        self.assertEqual(party_texts[(PARTY_TEXT_X, 24)].text, "アルヴァン")
-        self.assertEqual(party_texts[(PARTY_TEXT_X, 35)].text, "エリカ")
-        self.assertEqual(party_texts[(PARTY_TEXT_X, 46)].text, "ラグナ")
+        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 11)].text, "セリオン")
+        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 20)].text, "アルヴァン")
+        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 29)].text, "エリカ")
+        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 38)].text, "ラグナ")
         self.assertEqual(
-            party_texts[(PARTY_TEXT_X, 52)].color,
+            party_texts[(PARTY_POINT_TEXT_X, 44)].color,
             DISABLED_COLOR,
+        )
+        self.assertEqual(
+            party_texts[(PARTY_NAME_TEXT_X, 49)].text,
+            "ダイン（ひかえ）",
+        )
+        self.assertEqual(
+            party_texts[(PARTY_NAME_TEXT_X, 49)].color,
+            RESERVE_MEMBER_TEXT_COLOR,
+        )
+        self.assertEqual(
+            party_texts[(PARTY_POINT_TEXT_X, 52)].color,
+            RESERVE_MEMBER_TEXT_COLOR,
+        )
+        self.assertEqual(
+            party_texts[(PARTY_POINT_TEXT_X, 55)].color,
+            RESERVE_MEMBER_TEXT_COLOR,
+        )
+        self.assertEqual(
+            [target.key for target in mock._sort_cursor_targets()],
+            list(range(6)),
+        )
+        self.assertEqual(
+            mock._sort_cursor_targets()[-1].y,
+            PARTY_CURSOR_Y
+            + 5 * PARTY_MEMBER_ROW_HEIGHT
+            + RESERVE_MEMBER_Y_OFFSET_GRID,
+        )
+        five_member_texts = mock._party_window_texts(
+            mock.party[:5],
+            mock.localized,
+            mock.localized_texts,
+        )
+        five_member_names = [
+            text.y
+            for text in five_member_texts
+            if text.x == PARTY_NAME_TEXT_X
+        ]
+        self.assertEqual(
+            five_member_names,
+            [
+                2 + index * PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE
+                for index in range(5)
+            ],
         )
 
         args = factory.create.call_args_list[1].args
@@ -275,6 +328,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertEqual(japanese["menu.info.experience"], "けいけんち")
         self.assertEqual(japanese["menu.member.hp"], "ＨＰ")
         self.assertEqual(japanese["menu.member.mp"], "ＭＰ")
+        self.assertEqual(japanese["term.formation.reserve"], "（ひかえ）")
         self.assertEqual(
             japanese["menu.close_guide"],
             "%CANCEL%：とじる",
@@ -288,8 +342,13 @@ class MenuScreenMockTest(unittest.TestCase):
             english["menu.close_guide"],
             "%CANCEL%：Ｃｌｏｓｅ",
         )
+        self.assertEqual(
+            english["term.formation.reserve"],
+            "（Ｒｅｓｅｒｖｅ）",
+        )
         self.assertEqual(chinese["menu.command.item"], "道具")
         self.assertEqual(chinese["menu.info.experience"], "经验值")
+        self.assertEqual(chinese["term.formation.reserve"], "（替补）")
         self.assertEqual(
             chinese["menu.close_guide"],
             "%CANCEL%：关闭",
@@ -500,6 +559,7 @@ class MenuScreenMockTest(unittest.TestCase):
 
     def test_shared_semantic_color_numbers_match_palette_roles(self) -> None:
         self.assertEqual(DISABLED_COLOR, 3)
+        self.assertEqual(RESERVE_MEMBER_TEXT_COLOR, 4)
         self.assertEqual(POSITIVE_COLOR, 29)
         self.assertEqual(NEGATIVE_COLOR, 45)
 
@@ -631,15 +691,20 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.settings_window = None
         mock.confirmation_window = None
         mock.faces = object()
-        front = Mock(
-            is_front_row=True,
-            face_position=Mock(x=0, y=0),
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
+        front_members = tuple(
+            Mock(
+                is_front_row=True,
+                face_position=Mock(x=index * 32, y=0),
+            )
+            for index in range(5)
         )
         back = Mock(
             is_front_row=False,
-            face_position=Mock(x=32, y=0),
+            face_position=Mock(x=160, y=0),
         )
-        mock.party = (front, back)
+        mock.party = (*front_members, back)
 
         mock.draw()
 
@@ -650,27 +715,56 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
-                call(
-                    PARTY_FACE_X[True],
-                    PARTY_FACE_Y,
-                    mock.faces,
-                    0,
-                    0,
-                    PARTY_FACE_SIZE,
-                    PARTY_FACE_SIZE,
-                    TRANSPARENT_INDEX,
+                *(
+                    call(
+                        PARTY_FACE_X[True],
+                        PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
+                        mock.faces,
+                        index * 32,
+                        0,
+                        PARTY_FACE_SIZE,
+                        PARTY_FACE_SIZE,
+                        TRANSPARENT_INDEX,
+                    )
+                    for index in range(5)
                 ),
                 call(
                     PARTY_FACE_X[False],
-                    PARTY_FACE_Y + PARTY_MEMBER_ROW_HEIGHT * 4,
+                    PARTY_FACE_Y
+                    + 5 * PARTY_MEMBER_ROW_HEIGHT * 4
+                    + RESERVE_MEMBER_Y_OFFSET_GRID * 4,
                     mock.faces,
-                    32,
+                    160,
                     0,
                     PARTY_FACE_SIZE,
                     PARTY_FACE_SIZE,
                     TRANSPARENT_INDEX,
                 ),
             ],
+        )
+        mock.palette_shifter.shifted.assert_called_once_with(DIMMED_PALETTE)
+
+    @patch("tools.screen_mocks.menu.pyxel.blt")
+    def test_five_member_faces_keep_twelve_pixel_gaps(self, blt: Mock) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        member = Mock(
+            is_front_row=True,
+            face_position=Mock(x=32, y=0),
+        )
+        mock.party = tuple(member if index == 1 else Mock() for index in range(5))
+        mock.faces = object()
+
+        mock._draw_party_face(1, member)
+
+        blt.assert_called_once_with(
+            PARTY_FACE_X[True],
+            PARTY_FACE_Y + PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE * 4,
+            mock.faces,
+            32,
+            0,
+            PARTY_FACE_SIZE,
+            PARTY_FACE_SIZE,
+            TRANSPARENT_INDEX,
         )
 
     @patch("tools.screen_mocks.menu.pyxel.cls")
@@ -725,7 +819,8 @@ class MenuScreenMockTest(unittest.TestCase):
             [
                 (
                     PARTY_CURSOR_X,
-                    PARTY_CURSOR_Y + index * PARTY_MEMBER_ROW_HEIGHT,
+                    PARTY_CURSOR_Y
+                    + index * PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE,
                     index,
                 )
                 for index in range(5)
@@ -1170,24 +1265,29 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     @patch("tools.screen_mocks.menu.WindowCursor")
-    def test_selecting_two_members_swaps_their_order(
+    def test_selecting_fiora_and_reserve_swaps_their_order(
         self,
         window_cursor: Mock,
     ) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
-        mock.party = tuple(Mock(key=key) for key in ("a", "b", "c"))
+        mock.party = tuple(
+            Mock(key=key) for key in ("Fiora", "b", "c", "d", "e", "reserve")
+        )
         mock.sort_source_index = None
         mock.sort_source_cursor = None
         mock.alert = Mock()
         mock._refresh_party_window_texts = Mock()
 
         mock._confirm_sort_member()
-        mock.party_cursor.selected_key = 2
+        mock.party_cursor.selected_key = 5
         mock._confirm_sort_member()
 
-        self.assertEqual([member.key for member in mock.party], ["c", "b", "a"])
+        self.assertEqual(
+            [member.key for member in mock.party],
+            ["reserve", "b", "c", "d", "e", "Fiora"],
+        )
         self.assertIsNone(mock.sort_source_index)
         self.assertIsNone(mock.sort_source_cursor)
         mock._refresh_party_window_texts.assert_called_once_with()
@@ -1222,6 +1322,91 @@ class MenuScreenMockTest(unittest.TestCase):
 
         self.assertIs(front.formation_row, FormationRow.BACK)
         self.assertIsNone(mock.sort_source_index)
+
+    @patch("tools.screen_mocks.menu.WindowCursor")
+    def test_reserve_is_forced_front_across_two_swaps(
+        self,
+        _window_cursor: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.party_window = Mock()
+        mock.party_cursor = Mock()
+        front = Mock(
+            key="front",
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        back_members = tuple(
+            Mock(
+                key=f"back-{index}",
+                is_front_row=False,
+                formation_row=FormationRow.BACK,
+            )
+            for index in range(4)
+        )
+        reserve = Mock(
+            key="reserve",
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        mock.party = (front, *back_members, reserve)
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+        mock._refresh_party_window_texts = Mock()
+
+        mock.party_cursor.selected_key = 1
+        mock._confirm_sort_member()
+        mock.party_cursor.selected_key = 5
+        mock._confirm_sort_member()
+
+        self.assertEqual(mock.party[-1].key, "back-0")
+        self.assertIs(mock.party[-1].formation_row, FormationRow.FRONT)
+
+        for index, member in enumerate(mock.party[:5]):
+            member.formation_row = (
+                FormationRow.FRONT if index == 0 else FormationRow.BACK
+            )
+        mock.party_cursor.selected_key = 0
+        mock._confirm_sort_member()
+        mock.party_cursor.selected_key = 5
+        mock._confirm_sort_member()
+
+        self.assertEqual(mock.party[-1].key, "front")
+        self.assertIs(mock.party[-1].formation_row, FormationRow.FRONT)
+        self.assertTrue(
+            any(
+                member.formation_row is FormationRow.FRONT
+                for member in mock.party[:5]
+            )
+        )
+
+    @patch("tools.screen_mocks.menu.WindowCursor")
+    def test_reserve_cannot_be_changed_to_back(
+        self,
+        _window_cursor: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.party_window = Mock()
+        mock.party_cursor = Mock(selected_key=5)
+        active = tuple(
+            Mock(is_front_row=index == 0)
+            for index in range(BATTLE_PARTY_MEMBER_COUNT)
+        )
+        reserve = Mock(
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        mock.party = (*active, reserve)
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+
+        mock._confirm_sort_member()
+        mock._confirm_sort_member()
+
+        self.assertIs(reserve.formation_row, FormationRow.FRONT)
+        mock.alert.start.assert_called_once_with()
 
     @patch("tools.screen_mocks.menu.WindowCursor")
     def test_last_front_member_cannot_move_to_back(
@@ -1310,7 +1495,7 @@ class MenuScreenMockTest(unittest.TestCase):
         blt.assert_called_once_with(
             PARTY_FACE_X[False] - FORMATION_ARROW_WIDTH,
             PARTY_FACE_Y
-            + PARTY_MEMBER_ROW_HEIGHT * 4
+            + PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE * 4
             + (PARTY_FACE_SIZE - FORMATION_ARROW_HEIGHT) // 2,
             0,
             FORMATION_ARROW_LEFT_X[1],

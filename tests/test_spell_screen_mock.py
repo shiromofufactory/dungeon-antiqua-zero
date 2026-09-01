@@ -97,7 +97,12 @@ class SpellScreenMockTest(unittest.TestCase):
         mock = SpellScreenMock()
         placements = {(text.x, text.y): text.text for text in mock.party_window.texts}
 
-        self.assertEqual(len(mock.party), 5)
+        self.assertEqual(len(mock.party), 6)
+        self.assertEqual(len(mock.party_panel.party), 5)
+        self.assertEqual(
+            [target.key for target in mock.member_cursor.targets],
+            list(range(5)),
+        )
         self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
         self.assertEqual(placements[(PARTY_TEXT_X + 12, PARTY_HP_Y)], "ＨＰ　６４")
         self.assertEqual(placements[(PARTY_TEXT_X + 24, PARTY_HP_Y)], "ＨＰ２２０")
@@ -135,7 +140,7 @@ class SpellScreenMockTest(unittest.TestCase):
                 FACE_SIZE,
                 TRANSPARENT_INDEX,
             )
-            for index, member in enumerate(mock.party)
+            for index, member in enumerate(mock.party_panel.party)
         )
         self.assertEqual(blt.call_args_list, expected_faces)
         mock.caster_cursor.draw.assert_called_once_with()
@@ -191,13 +196,19 @@ class SpellScreenMockTest(unittest.TestCase):
         mock = SpellScreenMock()
 
         self.assertFalse(
+            mock.update(InputState(previous_page=InputButton(True, True)))
+        )
+        self.assertEqual(mock.member_index, 5)
+        self.assertEqual(mock.member.definition.key, "Dain")
+
+        self.assertFalse(
             mock.update(InputState(next_page=InputButton(True, True)))
         )
-        self.assertEqual(mock.member_index, 1)
-        self.assertEqual(mock.member.definition.key, "Cerion")
+        self.assertEqual(mock.member_index, 0)
+        self.assertEqual(mock.member.definition.key, "Fiora")
         self.assertEqual(
             [target.key for target in mock.spell_cursor.targets],
-            ["FIRE1", "HEALING1"],
+            ["FIRE1", "POISON1"],
         )
         self.assertTrue(
             mock.update(InputState(cancel=InputButton(True, True)))

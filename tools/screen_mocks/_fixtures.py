@@ -15,6 +15,7 @@ MOCK_PARTY_CHARACTER_KEYS = (
     "Alvan",
     "Elika",
     "Ragna",
+    "Dain",
 )
 MOCK_BACK_ROW_CHARACTER_KEYS = frozenset(("Cerion", "Elika"))
 

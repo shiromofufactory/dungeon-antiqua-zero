@@ -43,7 +43,7 @@ class SpellTest(unittest.TestCase):
         )
 
     def test_learning_uses_each_members_spell_proficiency_level(self) -> None:
-        fiora, cerion, alvan, _elika, ragna = self.party
+        fiora, cerion, alvan, _elika, ragna, _dain = self.party
 
         self.assertTrue(self.spells["FIRE1"].is_learned_by(fiora))
         self.assertTrue(self.spells["POISON1"].is_learned_by(fiora))

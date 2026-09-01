@@ -24,6 +24,7 @@ from item import Item, ItemEquipType
 from item_detail import item_detail_lines
 from localization import Localizer, format_number
 from member import (
+    BATTLE_PARTY_MEMBER_COUNT,
     BattleStats,
     EquipmentSlot,
     FormationRow,
@@ -142,6 +143,7 @@ EQUIPPABLE_ICON_ORDER = (
 EQUIPMENT_TEXT_KEYS = {
     "formation.front": "equip.formation.front",
     "formation.back": "equip.formation.back",
+    "formation.reserve": "term.formation.reserve",
     "slot.right": "equip.slot.right",
     "slot.left": "equip.slot.left",
     "slot.body": "equip.slot.body",
@@ -358,13 +360,16 @@ class EquipmentScreenMock:
         current_stats = self.member.battle_stats
         current_resistances = self.member.resistances
         identity = self.member.definition.localized_name(self.localizer)
-        formation = self.labels[
-            (
-                "formation.front"
-                if self.member.formation_row is FormationRow.FRONT
-                else "formation.back"
-            )
-        ]
+        if (
+            len(self.party) > BATTLE_PARTY_MEMBER_COUNT
+            and self.member_index == len(self.party) - 1
+        ):
+            formation_key = "formation.reserve"
+        elif self.member.formation_row is FormationRow.FRONT:
+            formation_key = "formation.front"
+        else:
+            formation_key = "formation.back"
+        formation = self.labels[formation_key]
         texts: list[WindowText] = [
             self.localized_texts.create(
                 identity,

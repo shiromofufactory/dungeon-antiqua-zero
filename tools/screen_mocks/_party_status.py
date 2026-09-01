@@ -8,7 +8,7 @@ import pyxel
 
 from tools._bootstrap import APP_ROOT as _APP_ROOT  # Initialize app imports.
 from localization import Localizer
-from member import Member
+from member import BATTLE_PARTY_MEMBER_COUNT, Member
 from rendering import DIMMED_PALETTE, PaletteShifter
 from resources import TRANSPARENT_INDEX
 from text_catalog import TextCatalog
@@ -49,7 +49,7 @@ class PartyStatusPanel:
     ) -> None:
         if not party:
             raise ValueError("party must contain at least one member")
-        self.party = party
+        self.party = party[:BATTLE_PARTY_MEMBER_COUNT]
         self.faces = faces
         self.palette_shifter = palette_shifter
         self.window = window_factory.create(
@@ -64,7 +64,7 @@ class PartyStatusPanel:
                     PARTY_CURSOR_Y,
                     key=index,
                 )
-                for index in range(len(party))
+                for index in range(len(self.party))
             ),
             active=cursor_active,
         )

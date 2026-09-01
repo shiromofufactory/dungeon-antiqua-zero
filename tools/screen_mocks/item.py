@@ -216,7 +216,7 @@ class ItemScreenMock:
             return frozenset()
         return frozenset(
             index
-            for index, member in enumerate(self.party)
+            for index, member in enumerate(self.party_panel.party)
             if not member.can_equip(item)
         )
 

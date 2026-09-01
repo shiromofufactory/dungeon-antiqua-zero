@@ -8,6 +8,7 @@ if __package__ == "systems":
     from item import Item
     from member import (
         FIORA_CHARACTER_KEY,
+        MAX_PARTY_MEMBER_COUNT,
         MAX_INTERNAL_LEVEL,
         MIN_INTERNAL_LEVEL,
         CharacterDefinition,
@@ -19,6 +20,7 @@ else:
     from ..item import Item
     from ..member import (
         FIORA_CHARACTER_KEY,
+        MAX_PARTY_MEMBER_COUNT,
         MAX_INTERNAL_LEVEL,
         MIN_INTERNAL_LEVEL,
         CharacterDefinition,
@@ -28,7 +30,7 @@ else:
     from ..skill import Skill
 
 MIN_OTHER_MEMBER_COUNT = 0
-MAX_OTHER_MEMBER_COUNT = 4
+MAX_OTHER_MEMBER_COUNT = MAX_PARTY_MEMBER_COUNT - 1
 
 
 class DebugPartyError(ValueError):
@@ -148,7 +150,7 @@ class DebugPartyEditor:
         }
 
     def toggle_member(self, character_key: str) -> None:
-        """Add or remove a member while keeping a 1-to-5-person party."""
+        """Add or remove a member while keeping a 1-to-6-person party."""
 
         self._definition(character_key)
         if character_key == FIORA_CHARACTER_KEY:
@@ -191,7 +193,8 @@ class DebugPartyEditor:
     def _validate_other_member_count(count: int) -> None:
         if not MIN_OTHER_MEMBER_COUNT <= count <= MAX_OTHER_MEMBER_COUNT:
             raise DebugPartyError(
-                "debug party must contain Fiora and from 1 to 5 total members"
+                "debug party must contain Fiora and from 1 to "
+                f"{MAX_PARTY_MEMBER_COUNT} total members"
             )
 
 

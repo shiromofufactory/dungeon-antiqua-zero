@@ -106,6 +106,8 @@ class ProficiencyAptitude(IntEnum):
 EnumValue = TypeVar("EnumValue", bound=StrEnum)
 
 FIORA_CHARACTER_KEY = "Fiora"
+BATTLE_PARTY_MEMBER_COUNT = 5
+MAX_PARTY_MEMBER_COUNT = 6
 MIN_INTERNAL_LEVEL = 1
 MAX_INTERNAL_LEVEL = 99
 MAX_HP = 999

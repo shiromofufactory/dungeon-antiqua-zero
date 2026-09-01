@@ -1,6 +1,12 @@
 """Reusable user-interface drawing components."""
 
-from .colors import BLUE_TEXT_COLOR, DISABLED_COLOR, NEGATIVE_COLOR, POSITIVE_COLOR
+from .colors import (
+    BLUE_TEXT_COLOR,
+    DISABLED_COLOR,
+    NEGATIVE_COLOR,
+    POSITIVE_COLOR,
+    RESERVE_MEMBER_TEXT_COLOR,
+)
 from .localized_text import LocalizedWindowTextFactory
 from .input_icons import input_icon_tag
 from .tagged_text import (
@@ -42,6 +48,7 @@ __all__ = [
     "TextIcon",
     "TextFontSpan",
     "POSITIVE_COLOR",
+    "RESERVE_MEMBER_TEXT_COLOR",
     "Window",
     "WINDOW_ANIMATION_FRAME_COUNT",
     "WindowCursor",

@@ -65,7 +65,7 @@ class DebugMenuScreenMockTest(unittest.TestCase):
             fonts=FontResources(),
             alert=self.alert,
         )
-        self.assertEqual(self.screen._member_count_text(), "フィオラ＋４にん")
+        self.assertEqual(self.screen._member_count_text(), "フィオラ＋５にん")
 
     @staticmethod
     def confirm() -> InputState:
@@ -163,25 +163,25 @@ class DebugMenuScreenMockTest(unittest.TestCase):
             self.editor.candidate_definitions[10].key,
         )
 
-    def test_fiora_and_sixth_total_member_are_rejected(self) -> None:
+    def test_fiora_and_seventh_total_member_are_rejected(self) -> None:
         self.screen._open_members()
         self.screen.update(self.confirm())
         self.alert.start.assert_called_once_with()
 
-        dain_index = next(
+        cress_index = next(
             index
             for index, definition in enumerate(self.editor.candidate_definitions)
-            if definition.key == "Dain"
+            if definition.key == "Cress"
         )
-        self.screen.member_index = dain_index
+        self.screen.member_index = cress_index
         self.screen._toggle_selected_member()
-        self.assertEqual(self.editor.other_member_count, 4)
+        self.assertEqual(self.editor.other_member_count, 5)
         self.assertEqual(self.alert.start.call_count, 2)
 
     def test_can_remove_every_member_except_fiora(self) -> None:
         self.screen._open_members()
 
-        for key in ("Cerion", "Alvan", "Ragna", "Elika"):
+        for key in ("Cerion", "Alvan", "Ragna", "Elika", "Dain"):
             self.screen.member_index = next(
                 index
                 for index, definition in enumerate(

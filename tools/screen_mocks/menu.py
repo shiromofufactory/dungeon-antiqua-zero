@@ -41,7 +41,12 @@ from input import (
 )
 from item import ItemDataError
 from localization import Localizer, format_number
-from member import FormationRow, Member, MemberDataError
+from member import (
+    BATTLE_PARTY_MEMBER_COUNT,
+    FormationRow,
+    Member,
+    MemberDataError,
+)
 from resources import (
     TRANSPARENT_INDEX,
     AudioResourceError,
@@ -52,7 +57,7 @@ from resources import (
     ImageResourceError,
     ImageResources,
 )
-from rendering import FadeEvent, FadePhase, FadeThroughBlack
+from rendering import DIMMED_PALETTE, FadeEvent, FadePhase, FadeThroughBlack
 from skill import SkillDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
@@ -66,6 +71,7 @@ from ui import (
     LocalizedWindowTextFactory,
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
+    RESERVE_MEMBER_TEXT_COLOR,
     WindowFactory,
     WindowCursor,
     WindowText,
@@ -99,6 +105,7 @@ MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
 MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
+    "term.formation.reserve",
 )
 SETTINGS_TEXT_KEYS = (
     "settings.language.label",
@@ -162,17 +169,20 @@ MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
 FIELD_BACKGROUND_IMAGE_ID = "mock/bg_field"
 PARTY_WINDOW_GRID = (0, 0, 48, 60)
-PARTY_MEMBER_ROW_HEIGHT = 11
+PARTY_MEMBER_ROW_HEIGHT = 9
+PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE = 11
 PARTY_FACE_X = {
     True: 20,
     False: 32,
 }
-PARTY_FACE_Y = 14
+PARTY_FACE_Y = 10
 PARTY_FACE_SIZE = 32
-PARTY_TEXT_X = 18
-PARTY_RECOVERY_TEXT_X = 38
+PARTY_NAME_TEXT_X = 17
+PARTY_POINT_TEXT_X = 19
+PARTY_RECOVERY_TEXT_X = 39
 PARTY_CURSOR_X = 3
 PARTY_CURSOR_Y = 5
+RESERVE_MEMBER_Y_OFFSET_GRID = 2
 SORT_SOURCE_CURSOR_X_OFFSET = 1
 FORMATION_ARROW_BANK = 0
 FORMATION_ARROW_LEFT_X = (96, 112)
@@ -296,6 +306,7 @@ class MenuScreenMock:
         self.skills = load_mock_skills()
         self.spells = load_mock_spells()
         self.party = load_mock_party(self.items, self.skills)
+        self._force_reserve_front()
         self.character_records = load_mock_character_records()
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         self.fonts = FontResources()
@@ -369,7 +380,7 @@ class MenuScreenMock:
         self.party_window = windows.create(
             *PARTY_WINDOW_GRID,
             self._party_window_texts(
-                self.party,
+                self._main_menu_members(),
                 localized,
                 localized_texts,
             ),
@@ -481,18 +492,34 @@ class MenuScreenMock:
         localized: dict[str, str],
         text_factory: LocalizedWindowTextFactory,
     ) -> tuple[WindowText, ...]:
-        """Build the five compact name/HP/MP rows for the main window."""
+        """Build up to six compact name/HP/MP rows for the main window."""
 
         localizer = Localizer(self.settings.language)
         texts: list[WindowText] = []
+        row_height = self._member_row_height_grid(len(party))
         for index, member in enumerate(party):
-            row_y = 2 + index * PARTY_MEMBER_ROW_HEIGHT
+            is_reserve = (
+                len(party) > BATTLE_PARTY_MEMBER_COUNT
+                and index == len(party) - 1
+            )
+            row_y = (
+                2
+                + index * row_height
+                + (RESERVE_MEMBER_Y_OFFSET_GRID if is_reserve else 0)
+            )
+            base_color = (
+                RESERVE_MEMBER_TEXT_COLOR if is_reserve else DEFAULT_TEXT_COLOR
+            )
+            name = member.definition.localized_name(localizer)
+            if is_reserve:
+                name += localized["term.formation.reserve"]
             texts.extend(
                 (
                     text_factory.create(
-                        member.definition.localized_name(localizer),
-                        PARTY_TEXT_X,
+                        name,
+                        PARTY_NAME_TEXT_X,
                         row_y,
+                        color=base_color,
                     ),
                     text_factory.create(
                         self._point_text(
@@ -500,8 +527,9 @@ class MenuScreenMock:
                             member.hp,
                             member.max_hp,
                         ),
-                        PARTY_TEXT_X,
+                        PARTY_POINT_TEXT_X,
                         row_y + 3,
+                        color=base_color,
                     ),
                     text_factory.create(
                         self._point_text(
@@ -509,10 +537,10 @@ class MenuScreenMock:
                             member.mp,
                             member.max_mp,
                         ),
-                        PARTY_TEXT_X,
+                        PARTY_POINT_TEXT_X,
                         row_y + 6,
                         color=(
-                            DISABLED_COLOR if member.max_mp == 0 else DEFAULT_TEXT_COLOR
+                            DISABLED_COLOR if member.max_mp == 0 else base_color
                         ),
                     ),
                 )
@@ -528,6 +556,7 @@ class MenuScreenMock:
                         condition,
                         PARTY_RECOVERY_TEXT_X,
                         row_y + 3,
+                        color=base_color,
                     )
                 )
                 continue
@@ -544,15 +573,46 @@ class MenuScreenMock:
                 )
         return tuple(texts)
 
+    def _main_menu_members(self) -> tuple[Member, ...]:
+        """Return all members, with the final member acting as reserve."""
+
+        return self.party
+
+    def _is_reserve_index(self, index: int) -> bool:
+        return (
+            len(self.party) > BATTLE_PARTY_MEMBER_COUNT
+            and index == len(self.party) - 1
+        )
+
+    def _member_y_offset_grid(self, index: int) -> int:
+        return RESERVE_MEMBER_Y_OFFSET_GRID if self._is_reserve_index(index) else 0
+
+    @staticmethod
+    def _member_row_height_grid(member_count: int) -> int:
+        return (
+            PARTY_MEMBER_ROW_HEIGHT
+            if member_count > BATTLE_PARTY_MEMBER_COUNT
+            else PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE
+        )
+
+    def _force_reserve_front(self) -> None:
+        """Keep the reserve ready to enter an all-back active party safely."""
+
+        if len(self.party) > BATTLE_PARTY_MEMBER_COUNT:
+            self.party[-1].formation_row = FormationRow.FRONT
+
     @staticmethod
     def _point_text(label: str, current: int, maximum: int) -> str:
         return f"{label}　{pad(current, 3)}／{pad(maximum, 3)}"
 
     def _sort_cursor_targets(self) -> tuple[CursorTarget, ...]:
+        row_height = self._member_row_height_grid(len(self.party))
         return tuple(
             CursorTarget(
                 PARTY_CURSOR_X,
-                PARTY_CURSOR_Y + index * PARTY_MEMBER_ROW_HEIGHT,
+                PARTY_CURSOR_Y
+                + index * row_height
+                + self._member_y_offset_grid(index),
                 key=index,
             )
             for index in range(len(self.party))
@@ -584,9 +644,18 @@ class MenuScreenMock:
         self.sort_source_cursor = None
 
     def _can_change_formation(self, member: Member) -> bool:
+        if (
+            self._is_reserve_index(len(self.party) - 1)
+            and self.party[-1] is member
+        ):
+            return not member.is_front_row
         return (
             not member.is_front_row
-            or sum(party_member.is_front_row for party_member in self.party) > 1
+            or sum(
+                party_member.is_front_row
+                for party_member in self.party[:BATTLE_PARTY_MEMBER_COUNT]
+            )
+            > 1
         )
 
     def _confirm_sort_member(self) -> None:
@@ -622,13 +691,14 @@ class MenuScreenMock:
                 party[source_index],
             )
             self.party = tuple(party)
+            self._force_reserve_front()
             self._refresh_party_window_texts()
         self._clear_sort_source()
 
     def _refresh_party_window_texts(self) -> None:
         self.party_window.clear_texts()
         for placement in self._party_window_texts(
-            self.party,
+            self._main_menu_members(),
             self.localized,
             self.localized_texts,
         ):
@@ -698,9 +768,7 @@ class MenuScreenMock:
                 )
             else:
                 text_factory = (
-                    self.debug_texts
-                    if key == "debug"
-                    else self.localized_texts
+                    self.debug_texts if key == "debug" else self.localized_texts
                 )
                 text = (
                     DEBUG_TEXT.settings_menu
@@ -713,9 +781,7 @@ class MenuScreenMock:
                         SETTINGS_LABEL_X,
                         y,
                         color=(
-                            NEGATIVE_COLOR
-                            if key == "debug"
-                            else DEFAULT_TEXT_COLOR
+                            NEGATIVE_COLOR if key == "debug" else DEFAULT_TEXT_COLOR
                         ),
                     )
                 )
@@ -743,8 +809,7 @@ class MenuScreenMock:
         )
         self.settings_cursor = self.settings_window.set_cursor(
             tuple(
-                CursorTarget(SETTINGS_CURSOR_X, y, key=key)
-                for key, y in SETTINGS_ROWS
+                CursorTarget(SETTINGS_CURSOR_X, y, key=key) for key, y in SETTINGS_ROWS
             )
         )
         self._select_cursor_key(self.settings_cursor, selected_key)
@@ -792,6 +857,7 @@ class MenuScreenMock:
         if self.debug_screen is None:
             return
         self.party = self.debug_screen.party
+        self._force_reserve_front()
         self.debug_screen = None
         self.selected_member_index = min(
             self.selected_member_index,
@@ -1106,9 +1172,7 @@ class MenuScreenMock:
 
     def _update_window_animations(self) -> bool:
         animating = tuple(
-            window
-            for window in self._visible_windows()
-            if window.is_animating is True
+            window for window in self._visible_windows() if window.is_animating is True
         )
         for window in animating:
             window.update()
@@ -1210,10 +1274,7 @@ class MenuScreenMock:
         if input_state.cancel.triggered:
             self._begin_screen_change(MenuScreenChange.SHOW_FIELD)
             return
-        if (
-            input_state.confirm.triggered
-            and self.command_cursor.selected_key == "item"
-        ):
+        if input_state.confirm.triggered and self.command_cursor.selected_key == "item":
             self._begin_screen_change(MenuScreenChange.OPEN_ITEM)
             return
         if (
@@ -1282,18 +1343,17 @@ class MenuScreenMock:
                 return
             self.party_window.draw()
             if self.party_window.is_open:
-                for index, member in enumerate(self.party):
-                    face_position = member.face_position
-                    pyxel.blt(
-                        PARTY_FACE_X[member.is_front_row],
-                        PARTY_FACE_Y + index * PARTY_MEMBER_ROW_HEIGHT * 4,
-                        self.faces,
-                        face_position.x,
-                        face_position.y,
-                        PARTY_FACE_SIZE,
-                        PARTY_FACE_SIZE,
-                        TRANSPARENT_INDEX,
-                    )
+                main_menu_members = self._main_menu_members()
+                for index, member in enumerate(main_menu_members):
+                    if self._is_reserve_index(index):
+                        with self.palette_shifter.shifted(DIMMED_PALETTE):
+                            self._draw_party_face(
+                                index,
+                                member,
+                                y_offset=self._member_y_offset_grid(index) * 4,
+                            )
+                    else:
+                        self._draw_party_face(index, member)
                 if self.party_cursor is not None:
                     if self.sort_source_cursor is not None:
                         self.sort_source_cursor.draw()
@@ -1307,6 +1367,26 @@ class MenuScreenMock:
                 self.confirmation_window.draw()
         finally:
             pyxel.camera()
+
+    def _draw_party_face(
+        self,
+        index: int,
+        member: Member,
+        *,
+        y_offset: int = 0,
+    ) -> None:
+        face_position = member.face_position
+        row_height = self._member_row_height_grid(len(self.party))
+        pyxel.blt(
+            PARTY_FACE_X[member.is_front_row],
+            PARTY_FACE_Y + index * row_height * 4 + y_offset,
+            self.faces,
+            face_position.x,
+            face_position.y,
+            PARTY_FACE_SIZE,
+            PARTY_FACE_SIZE,
+            TRANSPARENT_INDEX,
+        )
 
     def _draw_formation_arrow(self) -> None:
         if (
@@ -1326,7 +1406,10 @@ class MenuScreenMock:
             source_x = FORMATION_ARROW_LEFT_X
         y = (
             PARTY_FACE_Y
-            + self.sort_source_index * PARTY_MEMBER_ROW_HEIGHT * 4
+            + self.sort_source_index
+            * self._member_row_height_grid(len(self.party))
+            * 4
+            + self._member_y_offset_grid(self.sort_source_index) * 4
             + (PARTY_FACE_SIZE - FORMATION_ARROW_HEIGHT) // 2
         )
         frame = (pyxel.frame_count // FORMATION_ARROW_FRAME_DURATION) % 2

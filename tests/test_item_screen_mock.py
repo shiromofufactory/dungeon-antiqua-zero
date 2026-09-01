@@ -438,7 +438,7 @@ class ItemScreenMockTest(unittest.TestCase):
                     PARTY_FACE_SIZE,
                     TRANSPARENT_INDEX,
                 )
-                for index, member in enumerate(mock.party)
+            for index, member in enumerate(mock.party_panel.party)
             ],
         )
 
@@ -454,7 +454,7 @@ class ItemScreenMockTest(unittest.TestCase):
         with patch("tools.screen_mocks._party_status.pyxel.blt") as blt:
             mock.party_panel.draw_faces(mock.dimmed_member_indexes)
 
-        self.assertEqual(blt.call_count, len(mock.party))
+        self.assertEqual(blt.call_count, len(mock.party_panel.party))
         self.assertEqual(
             palette_shifter.shifted.call_args_list,
             [call(DIMMED_PALETTE)] * 4,

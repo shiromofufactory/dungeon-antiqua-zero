@@ -61,6 +61,7 @@ class DebugPartyEditorTest(unittest.TestCase):
         self.editor.set_baseline_level(50)
         self.editor.toggle_member("Cerion")
         self.editor.toggle_member("Dain")
+        self.editor.toggle_member("Dain")
 
         dain = next(
             member
@@ -71,7 +72,7 @@ class DebugPartyEditorTest(unittest.TestCase):
         self.assertEqual(dain.hp, dain.max_hp)
         self.assertEqual(dain.mp, dain.max_mp)
 
-    def test_allows_fiora_only_and_rejects_a_sixth_total_member(self) -> None:
+    def test_allows_fiora_only_and_rejects_a_seventh_total_member(self) -> None:
         with self.assertRaisesRegex(DebugPartyError, "Fiora"):
             self.editor.toggle_member("Fiora")
 
@@ -79,6 +80,7 @@ class DebugPartyEditorTest(unittest.TestCase):
         self.editor.toggle_member("Alvan")
         self.editor.toggle_member("Ragna")
         self.editor.toggle_member("Elika")
+        self.editor.toggle_member("Dain")
         self.assertEqual(self.editor.other_member_count, 0)
         self.assertEqual(
             [member.definition.key for member in self.editor.party],
@@ -89,7 +91,8 @@ class DebugPartyEditorTest(unittest.TestCase):
         self.editor.toggle_member("Alvan")
         self.editor.toggle_member("Ragna")
         self.editor.toggle_member("Dain")
-        with self.assertRaisesRegex(DebugPartyError, "1 to 5 total"):
+        self.editor.toggle_member("Elika")
+        with self.assertRaisesRegex(DebugPartyError, "1 to 6 total"):
             self.editor.toggle_member("Cress")
 
 

@@ -109,11 +109,12 @@ class StatusScreenMockTest(unittest.TestCase):
                 (18, 220, 30),
                 (8, 115, 15),
                 (11, 171, 0),
+                (11, 174, 19),
             ],
         )
         self.assertEqual(
             [member.battle_stats.evasion for member in mock.party],
-            [10, 4, 12, 0, 0],
+            [10, 4, 12, 0, 0, 0],
         )
         self.assertEqual(mock.member_index, 0)
         self.assertIs(mock.phase, StatusSelectionPhase.STATUS)
@@ -475,10 +476,10 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.skill_guide_window)
         self.assertIsNone(mock.skill_description_window)
 
-    def test_right_navigation_wraps_from_ragna_to_fiora(self) -> None:
+    def test_right_navigation_wraps_from_dain_to_fiora(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
-        mock.member_index = 4
+        mock.member_index = 5
         mock.settings = Settings()
         mock.phase = StatusSelectionPhase.STATUS
         mock.input_reader = Mock()
@@ -494,7 +495,7 @@ class StatusScreenMockTest(unittest.TestCase):
         mock._rebuild_window.assert_called_once_with()
         self.assertFalse(returned)
 
-    def test_left_navigation_wraps_from_fiora_to_ragna(self) -> None:
+    def test_left_navigation_wraps_from_fiora_to_dain(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
         mock.member_index = 0
@@ -508,8 +509,8 @@ class StatusScreenMockTest(unittest.TestCase):
 
         returned = mock.update(mock.input_reader.poll.return_value)
 
-        self.assertEqual(mock.member_index, 4)
-        self.assertIs(mock.member, mock.party[4])
+        self.assertEqual(mock.member_index, 5)
+        self.assertIs(mock.member, mock.party[5])
         self.assertFalse(returned)
 
     def test_lr_page_buttons_switch_party_members(self) -> None:
