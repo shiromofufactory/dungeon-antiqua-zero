@@ -16,11 +16,13 @@ from tools.screen_mocks.equipment import (
     ITEM_FIRST_Y,
     ITEM_INFO_WINDOW_GRID,
     ITEM_LIST_WINDOW_GRID,
+    ITEM_COUNT_X,
     ITEM_ROW_HEIGHT,
     ITEM_TEXT_X,
     ITEM_VISIBLE_COUNT,
     MAIN_WINDOW_GRID,
     MAIN_TEXT_X,
+    REMOVE_KEY,
     STAT_LABEL_X,
     STAT_VALUE_X,
     STAT_Y,
@@ -31,9 +33,10 @@ from tools.screen_mocks.equipment import (
     EquipmentSelectionPhase,
 )
 from input import Direction, InputButton, InputState
+from item import ItemEquipType
 from member import BattleStats, EquipmentSlot, HandHit
 from state import Language, Settings
-from ui import DEFAULT_TEXT_COLOR
+from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 
 
 class EquipmentScreenMockTest(unittest.TestCase):
@@ -198,7 +201,8 @@ class EquipmentScreenMockTest(unittest.TestCase):
             self.assertIn("：%COL_POSITIVE%", placement.text)
             self.assertNotIn("%COL_POSITIVE%：", placement.text)
         self.assertEqual(mock.selected_slot, EquipmentSlot.RIGHT)
-        self.assertEqual(mock.candidates, ())
+        self.assertTrue(mock.candidates)
+        self.assertFalse(mock.equippable_candidate_indexes)
 
         mock.selected_main_key = EquipmentSlot.HEAD
         mock._rebuild()
@@ -297,21 +301,164 @@ class EquipmentScreenMockTest(unittest.TestCase):
         self.assertTrue(all(not name.startswith("%") for name in armor_names))
 
         mock.settings = Settings(language=Language.ENGLISH)
-        mock.scroll_offset = 7
-        mock.selected_item_index = 10
         mock.selected_main_key = EquipmentSlot.RIGHT
-        mock._rebuild()
         poison_wand = mock.items["WAND of POISON"]
+        poison_index = mock.candidates.index(poison_wand)
+        mock.scroll_offset = max(0, poison_index - 3)
+        mock.selected_item_index = poison_index
+        mock._rebuild()
         name = next(
             text
             for text in mock.item_list_window.texts
             if text.x == ITEM_TEXT_X
-            and text.y == ITEM_FIRST_Y + 3 * ITEM_ROW_HEIGHT
+            and text.y
+            == ITEM_FIRST_Y
+            + (poison_index - mock.scroll_offset) * ITEM_ROW_HEIGHT
         )
         self.assertEqual(
             name.text,
             f"%WAND%{poison_wand.localized_name(mock.localizer)}",
         )
+
+    def test_ineligible_items_sort_last_but_remain_cursorable(self) -> None:
+        on_invalid_action = Mock()
+        mock = self.build_mock(on_invalid_action=on_invalid_action)
+        equippable = tuple(
+            mock._candidate_is_equippable(index)
+            for index in range(len(mock.candidates))
+        )
+        self.assertEqual(equippable, tuple(sorted(equippable, reverse=True)))
+        source_order = tuple(
+            item
+            for item in mock.inventory_system.items
+            if mock._is_item_for_slot(item, EquipmentSlot.RIGHT)
+        )
+        expected_order = tuple(
+            item
+            for expected_equippable in (True, False)
+            for item in source_order
+            if mock.inventory_system.can_equip(
+                mock.member,
+                EquipmentSlot.RIGHT,
+                item,
+            )
+            is expected_equippable
+        )
+        self.assertEqual(
+            tuple(item for item in mock.candidates if item is not None),
+            expected_order,
+        )
+
+        disabled_item = mock.items["IRON SWORD"]
+        disabled_index = mock.candidates.index(disabled_item)
+        self.assertFalse(mock._candidate_is_equippable(disabled_index))
+        mock.phase = EquipmentSelectionPhase.ITEM
+        mock.selected_item_index = disabled_index
+        mock.scroll_offset = disabled_index
+        mock._rebuild()
+
+        name = next(
+            text
+            for text in mock.item_list_window.texts
+            if text.x == ITEM_TEXT_X and text.y == ITEM_FIRST_Y
+        )
+        count = next(
+            text
+            for text in mock.item_list_window.texts
+            if text.x == ITEM_COUNT_X and text.y == ITEM_FIRST_Y
+        )
+        self.assertEqual(name.color, DISABLED_COLOR)
+        self.assertEqual(count.color, DISABLED_COLOR)
+        self.assertTrue(mock.item_cursor.targets[0].selectable)
+        self.assertEqual(mock.item_cursor.selected_key, disabled_item.key)
+        self.assertTrue(mock.item_info_window.texts)
+
+        stat_values = tuple(
+            text.text
+            for text in mock.main_window.texts
+            if text.y in STAT_Y.values() and text.x == STAT_VALUE_X["attack"]
+        )
+        self.assertFalse(any("→" in value for value in stat_values))
+        hit = next(
+            text.text
+            for text in mock.main_window.texts
+            if text.x == STAT_VALUE_X["hit"] and text.y == STAT_Y["hit"]
+        )
+        self.assertIn("（", hit)
+        self.assertFalse(
+            any(
+                text.y == TOLERANCE_PREVIEW_Y
+                for text in mock.main_window.texts
+            )
+        )
+
+        before = mock.member.equipment.item_at(EquipmentSlot.RIGHT)
+        mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
+        self.assertIs(mock.member.equipment.item_at(EquipmentSlot.RIGHT), before)
+        self.assertEqual(mock.phase, EquipmentSelectionPhase.ITEM)
+        on_invalid_action.assert_called_once_with()
+
+    def test_left_hides_one_hand_weapons_without_dual_wield(self) -> None:
+        mock = self.build_mock()
+        self.assertFalse(mock.member.has_skill("Dual-Wield"))
+        mock.selected_main_key = EquipmentSlot.LEFT
+        mock._rebuild()
+
+        items = tuple(item for item in mock.candidates if item is not None)
+        self.assertTrue(items)
+        self.assertTrue(
+            all(item.equip_type is ItemEquipType.LEFT for item in items)
+        )
+
+        mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
+        self.assertEqual(mock.phase, EquipmentSelectionPhase.ITEM)
+        self.assertEqual(mock.selected_item_index, 0)
+        self.assertIsNotNone(mock.item_cursor.selected_target)
+        self.assertFalse(mock.equippable_candidate_indexes)
+        before = mock.member.equipment.item_at(EquipmentSlot.LEFT)
+        mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
+        self.assertIs(mock.member.equipment.item_at(EquipmentSlot.LEFT), before)
+
+    def test_left_shows_one_hand_weapons_with_dual_wield(self) -> None:
+        mock = self.build_mock()
+        dual_wield = next(
+            skill
+            for member in mock.party
+            for skill in member.skills
+            if skill.key == "Dual-Wield"
+        )
+        mock.member.skills.append(dual_wield)
+        mock.selected_main_key = EquipmentSlot.LEFT
+        mock._rebuild()
+
+        item_types = {
+            item.equip_type for item in mock.candidates if item is not None
+        }
+        self.assertIn(ItemEquipType.LEFT, item_types)
+        self.assertIn(ItemEquipType.RIGHT, item_types)
+        self.assertNotIn(ItemEquipType.TWO_HANDS, item_types)
+
+    def test_page_movement_keeps_cursor_on_disabled_pages(self) -> None:
+        mock = self.build_mock()
+        mock.phase = EquipmentSelectionPhase.ITEM
+        mock.selected_item_index = 0
+        mock.scroll_offset = 0
+        mock._rebuild()
+
+        for _page in range(
+            (len(mock.candidates) + ITEM_VISIBLE_COUNT - 1)
+            // ITEM_VISIBLE_COUNT
+        ):
+            self.assertIsNotNone(mock.item_cursor.selected_target)
+            self.assertEqual(
+                mock.item_cursor.selected_key,
+                (
+                    REMOVE_KEY
+                    if mock.selected_candidate is None
+                    else mock.selected_candidate.key
+                ),
+            )
+            mock._move_page(1)
 
     def test_resistance_preview_shows_only_da2_style_changes(self) -> None:
         mock = self.build_mock()

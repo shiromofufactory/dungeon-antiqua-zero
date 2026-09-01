@@ -145,14 +145,8 @@ class InputBindings:
                 pyxel.GAMEPAD1_BUTTON_B,
             ),
             menu=(pyxel.KEY_S, pyxel.KEY_TAB, pyxel.GAMEPAD1_BUTTON_X),
-            previous_page=(
-                pyxel.KEY_LSHIFT,
-                pyxel.GAMEPAD1_BUTTON_LEFTSHOULDER,
-            ),
-            next_page=(
-                pyxel.KEY_RSHIFT,
-                pyxel.GAMEPAD1_BUTTON_RIGHTSHOULDER,
-            ),
+            previous_page=(pyxel.GAMEPAD1_BUTTON_LEFTSHOULDER,),
+            next_page=(pyxel.GAMEPAD1_BUTTON_RIGHTSHOULDER,),
         )
 
     def with_cancel(self, *buttons: int) -> InputBindings:

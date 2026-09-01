@@ -20,7 +20,7 @@ from tools.screen_mocks.status import (
     hit_display,
 )
 from input import InputState
-from item import Item
+from item import Item, ItemEquipType
 from item_detail import item_detail_lines
 from localization import Localizer, format_number
 from member import (
@@ -39,6 +39,7 @@ from systems import InventorySystem
 from text_catalog import TextCatalog
 from ui import (
     DEFAULT_TEXT_COLOR,
+    DISABLED_COLOR,
     TEXT_ICONS,
     CursorTarget,
     LocalizedWindowTextFactory,
@@ -246,12 +247,54 @@ class EquipmentScreenMock:
         values: list[Item | None] = []
         if self.inventory_system.can_equip(self.member, slot, None):
             values.append(None)
-        values.extend(
+        items = [
             item
             for item in self.inventory_system.items
-            if self.inventory_system.can_equip(self.member, slot, item)
+            if self._is_item_for_slot(item, slot)
+        ]
+        items.sort(
+            key=lambda item: not self.inventory_system.can_equip(
+                self.member,
+                slot,
+                item,
+            )
         )
+        values.extend(items)
         return tuple(values)
+
+    def _is_item_for_slot(self, item: Item, slot: EquipmentSlot) -> bool:
+        if slot is EquipmentSlot.RIGHT:
+            return item.equip_type in (
+                ItemEquipType.RIGHT,
+                ItemEquipType.TWO_HANDS,
+            )
+        if slot is EquipmentSlot.LEFT:
+            return item.equip_type is ItemEquipType.LEFT or (
+                item.equip_type is ItemEquipType.RIGHT
+                and self.member.has_skill("Dual-Wield")
+            )
+        return item.equip_type.value == slot.value
+
+    def _candidate_is_equippable(self, index: int) -> bool:
+        candidates = self.candidates
+        slot = self.selected_slot
+        return (
+            slot is not None
+            and 0 <= index < len(candidates)
+            and self.inventory_system.can_equip(
+                self.member,
+                slot,
+                candidates[index],
+            )
+        )
+
+    @property
+    def equippable_candidate_indexes(self) -> tuple[int, ...]:
+        return tuple(
+            index
+            for index in range(len(self.candidates))
+            if self._candidate_is_equippable(index)
+        )
 
     @property
     def selected_candidate(self) -> Item | None:
@@ -336,7 +379,10 @@ class EquipmentScreenMock:
             )
         )
 
-        previewing = self.phase is EquipmentSelectionPhase.ITEM
+        previewing = (
+            self.phase is EquipmentSelectionPhase.ITEM
+            and self._candidate_is_equippable(self.selected_item_index)
+        )
         current_values = self._stat_displays(
             current_stats,
             include_hit_bonus=not previewing,
@@ -453,6 +499,8 @@ class EquipmentScreenMock:
     def _preview_values(self) -> tuple[BattleStats, frozenset[ResistanceType]]:
         if self.phase is not EquipmentSelectionPhase.ITEM:
             return self.member.battle_stats, self.member.resistances
+        if not self._candidate_is_equippable(self.selected_item_index):
+            return self.member.battle_stats, self.member.resistances
         slot = self.selected_slot
         if slot is None:
             return self.member.battle_stats, self.member.resistances
@@ -478,6 +526,8 @@ class EquipmentScreenMock:
         list_texts: list[WindowText] = []
         targets: list[CursorTarget] = []
         for row, item in enumerate(visible):
+            candidate_index = self.scroll_offset + row
+            equippable = self._candidate_is_equippable(candidate_index)
             y = ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT
             if item is None:
                 name = self.labels["remove"]
@@ -488,16 +538,31 @@ class EquipmentScreenMock:
                     icon = ""
                 name = icon + str(item.localized_name(self.localizer))
                 key = item.key
-            list_texts.append(self.localized_texts.create(name, ITEM_TEXT_X, y))
+            color = DEFAULT_TEXT_COLOR if equippable else DISABLED_COLOR
+            list_texts.append(
+                self.localized_texts.create(
+                    name,
+                    ITEM_TEXT_X,
+                    y,
+                    color=color,
+                )
+            )
             if item is not None:
                 list_texts.append(
                     self.localized_texts.create(
                         format_number(self.inventory_system.quantity(item)),
                         ITEM_COUNT_X,
                         y,
+                        color=color,
                     )
                 )
-            targets.append(CursorTarget(ITEM_CURSOR_X, y, key=key))
+            targets.append(
+                CursorTarget(
+                    ITEM_CURSOR_X,
+                    y,
+                    key=key,
+                )
+            )
 
         scrollable = len(candidates) > ITEM_VISIBLE_COUNT
         self.item_list_window = self._window_factory.create(
@@ -514,8 +579,10 @@ class EquipmentScreenMock:
         )
         selected = self.selected_candidate
         selected_key = REMOVE_KEY if selected is None else selected.key
-        if candidates and self.item_cursor.active:
-            while self.item_cursor.selected_key != selected_key:
+        if self.item_cursor.active and candidates:
+            for _target in self.item_cursor.targets:
+                if self.item_cursor.selected_key == selected_key:
+                    break
                 self.item_cursor.move_down()
 
         detail_item = selected
@@ -705,6 +772,10 @@ class EquipmentScreenMock:
                 self._move_page(-1 if input_state.navigation.dx < 0 else 1)
             return False
         if input_state.confirm.triggered:
+            if not self._candidate_is_equippable(self.selected_item_index):
+                if self.on_invalid_action is not None:
+                    self.on_invalid_action()
+                return False
             slot = self.selected_slot
             if slot is not None:
                 self.inventory_system.equip(

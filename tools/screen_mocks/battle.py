@@ -28,9 +28,7 @@ MONSTERS_IMAGE_IDS = ["monsters/1"]
 
 class BattleScreenMock:
     def __init__(self) -> None:
-        initialize_screen_mock(
-            "Dungeon Antiqua ZERO Battle Screen Mock"
-        )
+        initialize_screen_mock("Dungeon Antiqua ZERO Battle Screen Mock")
         self.input_reader = create_mock_input_reader()
 
         resources = ImageResources()
@@ -62,6 +60,7 @@ class BattleScreenMock:
                 WindowText("じゅもん", 4, 8),
                 WindowText("にげる", 18, 2),
                 WindowText("アイテム", 18, 5),
+                WindowText("こうたい", 18, 8),
             ),
             thin_frame=True,
             opened=False,
@@ -74,6 +73,7 @@ class BattleScreenMock:
                 CursorTarget(2, 8, key="spell"),
                 CursorTarget(16, 2, key="escape"),
                 CursorTarget(16, 5, key="item"),
+                CursorTarget(16, 8, key="formation"),
             )
         )
         self.selected_command: str | None = None

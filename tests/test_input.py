@@ -119,23 +119,21 @@ class PyxelInputReaderTest(unittest.TestCase):
         self.assertFalse(second.previous_page.triggered)
         self.assertFalse(second.next_page.triggered)
 
-    def test_default_page_buttons_match_da2_lr_controls(self) -> None:
+    def test_default_page_buttons_use_gamepad_shoulders_without_shift_keys(
+        self,
+    ) -> None:
         bindings = InputBindings.default()
 
         self.assertEqual(
             bindings.previous_page,
-            (
-                pyxel.KEY_LSHIFT,
-                pyxel.GAMEPAD1_BUTTON_LEFTSHOULDER,
-            ),
+            (pyxel.GAMEPAD1_BUTTON_LEFTSHOULDER,),
         )
         self.assertEqual(
             bindings.next_page,
-            (
-                pyxel.KEY_RSHIFT,
-                pyxel.GAMEPAD1_BUTTON_RIGHTSHOULDER,
-            ),
+            (pyxel.GAMEPAD1_BUTTON_RIGHTSHOULDER,),
         )
+        self.assertNotIn(pyxel.KEY_LSHIFT, bindings.previous_page)
+        self.assertNotIn(pyxel.KEY_RSHIFT, bindings.next_page)
 
     def test_analog_axis_uses_deadzone_and_logical_repeat(self) -> None:
         backend = FakePyxelInput()
