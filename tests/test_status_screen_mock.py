@@ -8,7 +8,10 @@ from app.member import BattleStats, HandHit
 from app.resistance import ResistanceType
 from app.resources import load_record_array
 from app.ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
-from tools.screen_mocks._fixtures import MOCK_PARTY_CHARACTER_KEYS
+from tools.screen_mocks._fixtures import (
+    MOCK_PARTY_CHARACTER_KEYS,
+    load_mock_items,
+)
 from tools.screen_mocks.status import (
     ATTACK_VALUE_X,
     DUAL_ATTACK_VALUE_X,
@@ -205,6 +208,27 @@ class StatusScreenMockTest(unittest.TestCase):
         ):
             self.assertEqual(placements[position].color, DEFAULT_TEXT_COLOR)
         self.assertNotIn("%FAVORED%", (item.text for item in texts))
+
+    def test_displays_abilities_increased_by_equipment(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock()
+
+        flower_crown = load_mock_items()["FLOWER CROWN"]
+        mock.member.equipment = mock.member.equipment.replaced(
+            {EquipmentSlot.HEAD: flower_crown}
+        )
+        mock._rebuild_window()
+
+        placed = {(text.x, text.y): text.text for text in mock.windows[0].texts}
+        self.assertEqual(placed[(20, 26)], "１８")
+        self.assertEqual(placed[(20, 29)], "２６")
+        self.assertEqual(placed[(20, 32)], "２５")
 
     def test_starts_from_supplied_member_without_opening_animation(self) -> None:
         with (
@@ -456,15 +480,15 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(6, 38)], "Ｓｋｉｌｌ：")
         self.assertEqual(
             texts[(30, 8)],
-            "Ｒｉｇｈｔ：%KNIFE%ＤＡＧＧＥＲ",
+            "Ｒｉｇｈｔ　：%KNIFE%ＤＡＧＧＥＲ",
         )
-        self.assertEqual(texts[(30, 11)], "Ｌｅｆｔ：")
-        self.assertEqual(texts[(30, 14)], "Ｂｏｄｙ：ＲＯＢＥ")
-        self.assertEqual(texts[(30, 17)], "Ｈｅａｄ：")
+        self.assertEqual(texts[(30, 11)], "Ｌｅｆｔ　　：")
+        self.assertEqual(texts[(30, 14)], "Ｂｏｄｙ　　：ＲＯＢＥ")
+        self.assertEqual(texts[(30, 17)], "Ｈｅａｄ　　：")
         arm = mock.member.equipment.item_at(EquipmentSlot.ARM)
         self.assertEqual(
             texts[(30, 20)],
-            "Ａｒｍ："
+            "Ａｒｍ　　　："
             + (
                 arm.localized_name(Localizer(Language.ENGLISH))
                 if arm is not None

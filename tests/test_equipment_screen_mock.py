@@ -10,6 +10,11 @@ from tools.screen_mocks.equipment import (
     FACE_X,
     FACE_Y,
     HEADER_EQUIPMENT_TYPES_Y,
+    HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH,
+    HEADER_EQUIPMENT_ICON_GAP,
+    HEADER_EQUIPMENT_ICON_PIXEL_Y,
+    HEADER_EQUIPMENT_LEVEL_PIXEL_Y,
+    HEADER_EQUIPMENT_LEVEL_RIGHT_OFFSET,
     HEADER_FORMATION_Y,
     HEADER_NAME_Y,
     HEADER_TEXT_X,
@@ -34,7 +39,7 @@ from tools.screen_mocks.equipment import (
 )
 from input import Direction, InputButton, InputState
 from item import ItemEquipType
-from member import BattleStats, EquipmentSlot, HandHit
+from member import BattleStats, EquipmentSlot, HandHit, ProficiencyKind
 from state import Language, Settings
 from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 
@@ -75,9 +80,8 @@ class EquipmentScreenMockTest(unittest.TestCase):
             placed[(HEADER_TEXT_X, HEADER_FORMATION_Y)].text,
             "ぜんえい",
         )
-        self.assertEqual(
-            placed[(HEADER_TEXT_X, HEADER_EQUIPMENT_TYPES_Y)].text,
-            "%KNIFE%%THROWING%%WAND%",
+        self.assertFalse(
+            any(text.y == HEADER_EQUIPMENT_TYPES_Y for text in mock.main_window.texts)
         )
         self.assertEqual(len(EQUIPPABLE_ICON_ORDER), 10)
         self.assertEqual(
@@ -125,6 +129,80 @@ class EquipmentScreenMockTest(unittest.TestCase):
             TOLERANCE_LABEL_Y - STAT_Y["spell_resistance"],
             3,
         )
+
+    @patch("tools.screen_mocks.equipment.pyxel.blt")
+    def test_equipment_icons_use_two_pixel_gaps(self, blt: Mock) -> None:
+        mock = self.build_mock(member_index=4)
+        kinds = mock._equippable_proficiency_kinds()
+
+        mock._draw_equipment_icons()
+
+        calls = blt.call_args_list
+        self.assertEqual(len(calls), len(kinds))
+        self.assertEqual(
+            tuple(call_args.args[0] for call_args in calls),
+            tuple(
+                mock.main_window.pixel_x
+                + HEADER_TEXT_X * 4
+                + index * HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH
+                for index in range(len(kinds))
+            ),
+        )
+        self.assertTrue(
+            all(
+                right.args[0] - left.args[0] - 8
+                == HEADER_EQUIPMENT_ICON_GAP
+                for left, right in zip(calls, calls[1:])
+            )
+        )
+        self.assertTrue(
+            all(
+                call_args.args[1]
+                == mock.main_window.pixel_y + HEADER_EQUIPMENT_ICON_PIXEL_Y
+                for call_args in calls
+            )
+        )
+
+    @patch("tools.screen_mocks.equipment.pyxel.text")
+    def test_weapon_levels_use_right_aligned_pyxel_text_below_icons(
+        self,
+        text: Mock,
+    ) -> None:
+        mock = self.build_mock(member_index=4)
+        kinds = mock._equippable_proficiency_kinds()
+        self.assertIn(ProficiencyKind.SHIELD, kinds)
+        mock._draw_equipment_levels()
+
+        self.assertEqual(
+            text.call_args_list,
+            [
+                call(
+                    mock.main_window.pixel_x
+                    + HEADER_TEXT_X * 4
+                    + index * HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH
+                    + HEADER_EQUIPMENT_LEVEL_RIGHT_OFFSET,
+                    mock.main_window.pixel_y + HEADER_EQUIPMENT_LEVEL_PIXEL_Y,
+                    "-"
+                    if kind is ProficiencyKind.SHIELD
+                    else str(mock.member.proficiency(kind).level),
+                    DEFAULT_TEXT_COLOR,
+                )
+                for index, kind in enumerate(kinds)
+            ],
+        )
+        for args, (index, _kind) in zip(
+            text.call_args_list,
+            enumerate(kinds),
+            strict=True,
+        ):
+            icon_right = (
+                mock.main_window.pixel_x
+                + HEADER_TEXT_X * 4
+                + index * HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH
+                + 8
+            )
+            self.assertEqual(args.args[0] + 3, icon_right)
+            self.assertEqual(len(args.args), 4)
 
     def test_equipment_stats_use_three_digit_values_and_compact_dual_attack(
         self,
@@ -188,6 +266,30 @@ class EquipmentScreenMockTest(unittest.TestCase):
                 self.assertEqual(placed[(MAIN_TEXT_X, 14)], expected_right)
                 self.assertEqual(placed[(MAIN_TEXT_X, 20)], expected_body)
                 self.assertEqual(mock.labels["slot.both"], expected_both)
+
+    def test_empty_weapon_slots_do_not_display_bare_hand_text(self) -> None:
+        mock = self.build_mock()
+        mock.member.equipment = mock.member.equipment.replaced(
+            {
+                EquipmentSlot.RIGHT: None,
+                EquipmentSlot.LEFT: None,
+            }
+        )
+
+        for language, expected_right, expected_left in (
+            (Language.JAPANESE, "%RIGHT%：", "%LEFT%："),
+            (Language.ENGLISH, "%RIGHT%：", "%LEFT%："),
+            (Language.SIMPLIFIED_CHINESE, "右手：", "左手："),
+        ):
+            with self.subTest(language=language):
+                mock.settings = Settings(language=language)
+                mock._rebuild()
+                placed = {
+                    (text.x, text.y): text.text
+                    for text in mock.main_window.texts
+                }
+                self.assertEqual(placed[(MAIN_TEXT_X, 14)], expected_right)
+                self.assertEqual(placed[(MAIN_TEXT_X, 17)], expected_left)
 
     def test_only_npc_initial_equipment_is_fixed_and_positive(self) -> None:
         mock = self.build_mock(member_index=2)
@@ -513,7 +615,7 @@ class EquipmentScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(preview[1].x, current_paralysis.x)
 
-    def test_confirm_equips_candidate_then_advances_to_next_slot(self) -> None:
+    def test_confirm_equips_candidate_and_keeps_source_slot_selected(self) -> None:
         mock = self.build_mock()
         mock.phase = EquipmentSelectionPhase.ITEM
         mock.selected_item_index = next(
@@ -528,7 +630,7 @@ class EquipmentScreenMockTest(unittest.TestCase):
 
         self.assertFalse(closed)
         self.assertEqual(mock.phase, EquipmentSelectionPhase.MAIN)
-        self.assertEqual(mock.selected_main_key, EquipmentSlot.LEFT)
+        self.assertEqual(mock.selected_main_key, EquipmentSlot.RIGHT)
         self.assertEqual(
             mock.member.equipment.item_at(EquipmentSlot.RIGHT).key,
             "SILVER KNIFE",
@@ -567,8 +669,9 @@ class EquipmentScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.main_window.active)
         self.assertTrue(mock.item_list_window.active)
 
+    @patch("tools.screen_mocks.equipment.pyxel.text")
     @patch("tools.screen_mocks.equipment.pyxel.blt")
-    def test_draws_current_member_face(self, blt) -> None:
+    def test_draws_current_member_face(self, blt, _text) -> None:
         mock = self.build_mock(member_index=1)
         for window in mock.windows:
             window.draw = Mock()
@@ -591,10 +694,12 @@ class EquipmentScreenMockTest(unittest.TestCase):
             blt.call_args_list,
         )
 
+    @patch("tools.screen_mocks.equipment.pyxel.text")
     @patch("tools.screen_mocks.equipment.pyxel.blt")
     def test_item_selection_draws_inactive_source_and_active_item_cursors(
         self,
         _blt,
+        _text,
     ) -> None:
         mock = self.build_mock()
         mock.update(InputState(confirm=InputButton(triggered=True, held=True)))

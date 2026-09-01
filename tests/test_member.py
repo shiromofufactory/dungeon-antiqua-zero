@@ -117,6 +117,9 @@ class MemberTest(unittest.TestCase):
         defense: int = 0,
         evasion: int = 0,
         spell_resistance: int = 0,
+        strength_modifier: int = 0,
+        agility_modifier: int = 0,
+        magic_modifier: int = 0,
         healing: int = 0,
         tolerance: str = "",
         requirements: str = "",
@@ -132,6 +135,9 @@ class MemberTest(unittest.TestCase):
                 "dfc": defense,
                 "eva": evasion,
                 "rst": spell_resistance,
+                "str": strength_modifier,
+                "agi": agility_modifier,
+                "mag": magic_modifier,
                 "healing": healing,
                 "tolerance": tolerance,
                 "requirements": requirements,
@@ -320,6 +326,38 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(
             self.member.adjusted_abilities,
             AdjustedAbilities(strength=17, agility=25, magic=24),
+        )
+
+    def test_adjusted_abilities_include_equipment_modifiers_and_cap_at_32(
+        self,
+    ) -> None:
+        flower_crown = self.item(
+            "FLOWER CROWN",
+            "HEAD",
+            strength_modifier=1,
+            agility_modifier=1,
+            magic_modifier=1,
+        )
+        magic_ring = self.item(
+            "MAGIC RING",
+            "ARM",
+            strength_modifier=20,
+            magic_modifier=-2,
+        )
+        self.member.equipment = EquipmentSet(
+            {
+                EquipmentSlot.HEAD: flower_crown,
+                EquipmentSlot.ARM: magic_ring,
+            }
+        )
+
+        self.assertEqual(
+            self.member.adjusted_abilities,
+            AdjustedAbilities(strength=32, agility=26, magic=23),
+        )
+        self.assertEqual(
+            self.member.definition.base_abilities,
+            BaseAbilities(strength=17, agility=25, magic=24),
         )
 
     def test_fiora_initial_growth_state_uses_level_one_formulas(self) -> None:

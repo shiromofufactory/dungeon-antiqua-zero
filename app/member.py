@@ -110,6 +110,7 @@ MIN_INTERNAL_LEVEL = 1
 MAX_INTERNAL_LEVEL = 99
 MAX_HP = 999
 MAX_MP = 255
+MAX_ABILITY = 32
 EQUIPMENT_RECORD_FIELDS = MappingProxyType(
     {
         EquipmentSlot.RIGHT: "equip_right",
@@ -805,10 +806,23 @@ class Member:
         """Return current abilities without mutating their master-data base."""
 
         base = self.definition.base_abilities
+        equipment = self.equipment.equipped_items()
         return AdjustedAbilities(
-            strength=base.strength,
-            agility=base.agility,
-            magic=base.magic,
+            strength=min(
+                MAX_ABILITY,
+                base.strength
+                + sum(item.strength_modifier for item in equipment),
+            ),
+            agility=min(
+                MAX_ABILITY,
+                base.agility
+                + sum(item.agility_modifier for item in equipment),
+            ),
+            magic=min(
+                MAX_ABILITY,
+                base.magic
+                + sum(item.magic_modifier for item in equipment),
+            ),
         )
 
     @property

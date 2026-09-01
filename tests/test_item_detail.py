@@ -97,12 +97,17 @@ class ItemDetailTest(unittest.TestCase):
 
         self.assertIn("つかうと%MYSTIC%テレポート", teleport)
         self.assertFalse(any("まほうじん" in line for line in teleport))
-        self.assertIn("（こわれる）", teleport)
+        self.assertTrue(any("（こわれる）" in line for line in teleport))
         for key, item in self.items.items():
             if item.equip_type.value == "ITEM" or key == "TELEPORT RING":
                 continue
             with self.subTest(item=key):
-                self.assertNotIn("（こわれる）", self.detail(key).lines)
+                self.assertFalse(
+                    any(
+                        "（こわれる）" in line
+                        for line in self.detail(key).lines
+                    )
+                )
 
     def test_spell_resistance_uses_item_detail_text_key(self) -> None:
         records = load_record_array("texts.json")

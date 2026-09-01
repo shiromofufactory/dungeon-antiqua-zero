@@ -40,6 +40,8 @@ from text_catalog import TextCatalog
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
+    TEXT_GRID_X,
+    TEXT_GRID_Y,
     TEXT_ICONS,
     CursorTarget,
     LocalizedWindowTextFactory,
@@ -47,6 +49,12 @@ from ui import (
     WindowFactory,
     WindowText,
     pad,
+)
+from ui.tagged_text import (
+    ICON_BANK,
+    ICON_COLKEY,
+    ICON_SIZE,
+    ICON_Y_OFFSET,
 )
 
 FACES_IMAGE_ID = "faces/faces_pc"
@@ -62,6 +70,12 @@ HEADER_TEXT_X = 12
 HEADER_NAME_Y = 2
 HEADER_FORMATION_Y = 5
 HEADER_EQUIPMENT_TYPES_Y = 8
+HEADER_EQUIPMENT_ICON_GAP = 2
+HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH = ICON_SIZE + HEADER_EQUIPMENT_ICON_GAP
+HEADER_EQUIPMENT_ICON_PIXEL_Y = HEADER_EQUIPMENT_TYPES_Y * TEXT_GRID_Y + ICON_Y_OFFSET
+PYXEL_TEXT_GLYPH_WIDTH = 3
+HEADER_EQUIPMENT_LEVEL_RIGHT_OFFSET = ICON_SIZE - PYXEL_TEXT_GLYPH_WIDTH
+HEADER_EQUIPMENT_LEVEL_PIXEL_Y = HEADER_EQUIPMENT_ICON_PIXEL_Y + ICON_SIZE + 1
 
 EQUIPMENT_SLOTS = (
     EquipmentSlot.RIGHT,
@@ -134,7 +148,6 @@ EQUIPMENT_TEXT_KEYS = {
     "slot.head": "equip.slot.head",
     "slot.arm": "equip.slot.arm",
     "slot.both": "equip.slot.both",
-    "none": "equip.none",
     "auto": "equip.auto",
     "remove": "equip.remove",
     "stat.attack": "status.attack",
@@ -363,11 +376,6 @@ class EquipmentScreenMock:
                 HEADER_TEXT_X,
                 HEADER_FORMATION_Y,
             ),
-            WindowText(
-                self._equippable_icon_tags(),
-                HEADER_TEXT_X,
-                HEADER_EQUIPMENT_TYPES_Y,
-            ),
         ]
         for slot in EQUIPMENT_SLOTS:
             texts.append(self._equipment_text(slot))
@@ -456,13 +464,7 @@ class EquipmentScreenMock:
                 if icon not in TEXT_ICONS:
                     icon = ""
                 name = icon + item.localized_name(self.localizer)
-            elif slot is EquipmentSlot.RIGHT:
-                name = self.labels["none"]
-            color_tag = (
-                "%COL_POSITIVE%"
-                if self.member.is_equipment_fixed(slot)
-                else ""
-            )
+            color_tag = "%COL_POSITIVE%" if self.member.is_equipment_fixed(slot) else ""
             text = self.labels[label_key] + color_tag + name
         return self.localized_texts.create(
             text,
@@ -470,9 +472,9 @@ class EquipmentScreenMock:
             SLOT_Y[slot],
         )
 
-    def _equippable_icon_tags(self) -> str:
-        return "".join(
-            f"%{kind.name}%"
+    def _equippable_proficiency_kinds(self) -> tuple[ProficiencyKind, ...]:
+        return tuple(
+            kind
             for kind in EQUIPPABLE_ICON_ORDER
             if self.member.proficiency(kind).aptitude
             is not ProficiencyAptitude.DISABLED
@@ -784,7 +786,6 @@ class EquipmentScreenMock:
                     self.selected_candidate,
                 )
             self.phase = EquipmentSelectionPhase.MAIN
-            self._advance_main()
             self.selected_item_index = 0
             self.scroll_offset = 0
             self._rebuild()
@@ -793,6 +794,8 @@ class EquipmentScreenMock:
     def draw(self) -> None:
         for window in self.windows:
             window.draw()
+        self._draw_equipment_icons()
+        self._draw_equipment_levels()
         face_position = self.member.face_position
         pyxel.blt(
             FACE_X,
@@ -807,6 +810,40 @@ class EquipmentScreenMock:
         self.main_cursor.draw()
         if self.phase is EquipmentSelectionPhase.ITEM:
             self.item_cursor.draw()
+
+    def _draw_equipment_icons(self) -> None:
+        origin_x = self.main_window.pixel_x + HEADER_TEXT_X * TEXT_GRID_X
+        y = self.main_window.pixel_y + HEADER_EQUIPMENT_ICON_PIXEL_Y
+        for index, kind in enumerate(self._equippable_proficiency_kinds()):
+            icon = TEXT_ICONS[f"%{kind.name}%"]
+            pyxel.blt(
+                origin_x + index * HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH,
+                y,
+                ICON_BANK,
+                icon.u,
+                icon.v,
+                ICON_SIZE,
+                ICON_SIZE,
+                ICON_COLKEY,
+            )
+
+    def _draw_equipment_levels(self) -> None:
+        icon_origin_x = self.main_window.pixel_x + HEADER_TEXT_X * TEXT_GRID_X
+        y = self.main_window.pixel_y + HEADER_EQUIPMENT_LEVEL_PIXEL_Y
+        for index, kind in enumerate(self._equippable_proficiency_kinds()):
+            level_text = (
+                "-"
+                if kind is ProficiencyKind.SHIELD
+                else str(self.member.proficiency(kind).level)
+            )
+            pyxel.text(
+                icon_origin_x
+                + index * HEADER_EQUIPMENT_COLUMN_PIXEL_WIDTH
+                + HEADER_EQUIPMENT_LEVEL_RIGHT_OFFSET,
+                y,
+                level_text,
+                DEFAULT_TEXT_COLOR,
+            )
 
 
 __all__ = [

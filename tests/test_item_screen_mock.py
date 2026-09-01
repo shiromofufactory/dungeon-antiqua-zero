@@ -69,7 +69,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertIs(mock.windows[1], mock.item_info_window)
         self.assertIs(mock.windows[2], mock.item_list_window)
         self.assertEqual(CATEGORY_WINDOW_GRID, (6, 0, 52, 5))
-        self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 33, 39))
+        self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 32, 39))
         self.assertEqual(ITEM_INFO_WINDOW_GRID, (31, 5, 33, 39))
         self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24, 36))
         self.assertEqual(len(mock.items), 121)
