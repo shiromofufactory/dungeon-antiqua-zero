@@ -41,6 +41,8 @@ from localization import Localizer, format_number
 from member import FormationRow, Member, MemberDataError
 from resources import (
     TRANSPARENT_INDEX,
+    AudioResourceError,
+    BgmPlayer,
     DataResourceError,
     FontResourceError,
     FontResources,
@@ -100,6 +102,7 @@ SETTINGS_TEXT_KEYS = (
     "settings.language.ja",
     "settings.language.en",
     "settings.language.zhcn",
+    "settings.bgm.label",
     "settings.se.label",
     "settings.screen_size.label",
     "settings.screen_size.fullscreen",
@@ -110,6 +113,8 @@ SETTINGS_TEXT_KEYS = (
     "settings.quit",
     "settings.guide.language.0",
     "settings.guide.language.1",
+    "settings.guide.bgm.0",
+    "settings.guide.bgm.1",
     "settings.guide.se.0",
     "settings.guide.se.1",
     "settings.guide.screen_size.0",
@@ -123,17 +128,19 @@ SETTINGS_TEXT_KEYS = (
 )
 SETTINGS_ROWS = (
     ("language", 2),
-    ("se", 5),
-    ("screen_size", 8),
-    ("display", 11),
-    ("return_title", 17),
-    ("quit", 20),
+    ("bgm", 5),
+    ("se", 8),
+    ("screen_size", 11),
+    ("display", 14),
+    ("return_title", 20),
+    ("quit", 23),
 )
 SETTINGS_GUIDE_KEYS = {
     "language": (
         "settings.guide.language.0",
         "settings.guide.language.1",
     ),
+    "bgm": ("settings.guide.bgm.0", "settings.guide.bgm.1"),
     "se": ("settings.guide.se.0", "settings.guide.se.1"),
     "screen_size": (
         "settings.guide.screen_size.0",
@@ -180,7 +187,7 @@ SETTINGS_LABEL_X = 4
 SETTINGS_VALUE_X = 30
 SETTINGS_CURSOR_X = 2
 SETTINGS_GUIDE_X = 4
-SETTINGS_GUIDE_Y = 26
+SETTINGS_GUIDE_Y = 29
 SETTINGS_GUIDE_ROW_HEIGHT = 3
 CONFIRMATION_WINDOW_GRID = (8, 22, 48, 16)
 CONFIRMATION_CURSOR_X = 4
@@ -189,6 +196,7 @@ CONFIRMATION_NO_Y = 11
 SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
 MENU_MOCK_SETTINGS_ENV = "DA0_MENU_MOCK_SETTINGS"
+MENU_BGM_ID = "da3-field"
 
 
 class MenuMockDataError(RuntimeError):
@@ -274,6 +282,8 @@ class MenuScreenMock:
         self.alert = MenuAlertEffect()
 
         self._apply_se_volume()
+        self.bgm = BgmPlayer(volume=self.settings.bgm_volume)
+        self.bgm.play(MENU_BGM_ID)
         if self.settings.display_mode is DisplayMode.SMOOTH:
             self._apply_display_mode()
         self.save_data = SaveData()
@@ -626,6 +636,8 @@ class MenuScreenMock:
     def _settings_value(self, key: str) -> str:
         if key == "language":
             return self.localized[f"settings.language.{self.settings.language.value}"]
+        if key == "bgm":
+            return format_number(self.settings.bgm_volume)
         if key == "se":
             return format_number(self.settings.se_volume)
         if key == "screen_size":
@@ -648,6 +660,7 @@ class MenuScreenMock:
         texts: list[WindowText] = []
         label_keys = {
             "language": "settings.language.label",
+            "bgm": "settings.bgm.label",
             "se": "settings.se.label",
             "screen_size": "settings.screen_size.label",
             "display": "settings.display.label",
@@ -930,6 +943,10 @@ class MenuScreenMock:
                 animate=False,
             )
             self.command_cursor.active = False
+        elif key == "bgm":
+            volume = (self.settings.bgm_volume + distance) % 5
+            self.settings = self.settings.with_bgm_volume(volume)
+            self.bgm.set_volume(volume)
         elif key == "se":
             volume = (self.settings.se_volume + distance) % 5
             self.settings = self.settings.with_se_volume(volume)
@@ -1260,6 +1277,7 @@ def main() -> int:
     return run_screen_mock(
         MenuScreenMock,
         expected_errors=(
+            AudioResourceError,
             DataResourceError,
             EquipmentMockDataError,
             FontResourceError,

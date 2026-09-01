@@ -24,6 +24,7 @@ class SettingsTest(unittest.TestCase):
             settings.to_dict(),
             {
                 "language": "zhcn",
+                "bgm_volume": 3,
                 "se_volume": 3,
                 "screen_scale": 3,
                 "display_mode": "pixel",
@@ -49,12 +50,14 @@ class SettingsTest(unittest.TestCase):
 
     def test_da2_desktop_settings_round_trip(self) -> None:
         settings = Settings(
+            bgm_volume=2,
             se_volume=4,
             screen_scale=5,
             display_mode=DisplayMode.SMOOTH,
         )
 
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
+        self.assertEqual(settings.with_bgm_volume(0).bgm_volume, 0)
         self.assertEqual(settings.with_se_volume(0).se_volume, 0)
         self.assertEqual(settings.with_screen_scale(1).screen_scale, 1)
         self.assertIs(
@@ -63,6 +66,8 @@ class SettingsTest(unittest.TestCase):
         )
 
     def test_invalid_da2_desktop_settings_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            Settings(bgm_volume=5)
         with self.assertRaises(ValueError):
             Settings(se_volume=5)
         with self.assertRaises(ValueError):

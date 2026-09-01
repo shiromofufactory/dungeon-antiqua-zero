@@ -18,6 +18,7 @@ from tools.screen_mocks.menu import (
     FORMATION_ARROW_WIDTH,
     FORMATION_ARROW_Y,
     MENU_COMMANDS,
+    MENU_BGM_ID,
     MENU_MOCK_SETTINGS_ENV,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
@@ -54,6 +55,7 @@ from ui import (
 
 
 class MenuScreenMockTest(unittest.TestCase):
+    @patch("tools.screen_mocks.menu.BgmPlayer")
     @patch("tools.screen_mocks.menu.pyxel.run")
     @patch("tools.screen_mocks.menu.create_mock_input_reader")
     @patch("tools.screen_mocks.menu.initialize_screen_mock")
@@ -68,6 +70,7 @@ class MenuScreenMockTest(unittest.TestCase):
         initialize: Mock,
         create_input_reader: Mock,
         _run: Mock,
+        bgm_player_class: Mock,
     ) -> None:
         fonts = fonts_class.return_value
         font = fonts.font_for.return_value
@@ -99,6 +102,9 @@ class MenuScreenMockTest(unittest.TestCase):
         )
         self.assertIs(mock.input_reader, create_input_reader.return_value)
         self.assertIsInstance(mock.alert, MenuAlertEffect)
+        bgm_player_class.assert_called_once_with(volume=3)
+        self.assertIs(mock.bgm, bgm_player_class.return_value)
+        mock.bgm.play.assert_called_once_with(MENU_BGM_ID)
         self.assertEqual(
             images_class.return_value.image.call_args_list,
             [
@@ -285,6 +291,7 @@ class MenuScreenMockTest(unittest.TestCase):
             chinese["menu.close_guide"],
             "%CANCEL%：关闭",
         )
+        self.assertEqual(japanese["settings.bgm.label"], "ＢＧＭおんりょう")
         self.assertEqual(japanese["settings.se.label"], "ＳＥおんりょう")
         self.assertEqual(
             japanese["settings.guide.language.1"].narrow_spans,
@@ -298,6 +305,7 @@ class MenuScreenMockTest(unittest.TestCase):
     def test_restart_settings_are_restored_from_environment(self) -> None:
         settings = Settings(
             language=Language.SIMPLIFIED_CHINESE,
+            bgm_volume=2,
             se_volume=1,
             screen_scale=4,
             display_mode=DisplayMode.SMOOTH,
@@ -345,16 +353,18 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertEqual(placements[(SETTINGS_LABEL_X, 2)], "Ｌａｎｇｕａｇｅ")
         self.assertEqual(placements[(28, 2)], "：")
         self.assertEqual(placements[(SETTINGS_VALUE_X, 2)], "にほんご")
-        self.assertEqual(placements[(SETTINGS_LABEL_X, 5)], "ＳＥおんりょう")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 5)], "ＢＧＭおんりょう")
         self.assertEqual(placements[(SETTINGS_VALUE_X, 5)], "３")
-        self.assertEqual(placements[(SETTINGS_VALUE_X, 8)], "７６８×７２０")
-        self.assertEqual(placements[(SETTINGS_VALUE_X, 11)], "ピクセル")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 8)], "ＳＥおんりょう")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 8)], "３")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 11)], "７６８×７２０")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 14)], "ピクセル")
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 17)],
+            placements[(SETTINGS_LABEL_X, 20)],
             "タイトルがめんへ　もどる",
         )
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 20)],
+            placements[(SETTINGS_LABEL_X, 23)],
             "ゲームを　しゅうりょうする",
         )
         self.assertEqual(
@@ -1403,6 +1413,24 @@ class MenuScreenMockTest(unittest.TestCase):
         mock._apply_se_volume.assert_called_once_with()
         play.assert_called_once_with(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
         mock._refresh_settings_window.assert_called_once_with(selected_key="se")
+
+    @patch("tools.screen_mocks.menu.pyxel.play")
+    def test_bgm_setting_wraps_and_immediately_changes_volume(
+        self,
+        play: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.settings = Settings(bgm_volume=4)
+        mock.settings_cursor = Mock(selected_key="bgm")
+        mock.bgm = Mock()
+        mock._refresh_settings_window = Mock()
+
+        mock._change_setting(1)
+
+        self.assertEqual(mock.settings.bgm_volume, 0)
+        mock.bgm.set_volume.assert_called_once_with(0)
+        play.assert_not_called()
+        mock._refresh_settings_window.assert_called_once_with(selected_key="bgm")
 
     def test_screen_size_and_display_settings_wrap_in_both_directions(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)

@@ -7,3 +7,4 @@ scripts/node_modules
 scripts/package-lock.json
 tmp
 output
+tools/audio_wav

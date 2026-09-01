@@ -38,6 +38,7 @@ class Settings:
     """Device and player preferences stored separately from game progress."""
 
     language: Language = Language.JAPANESE
+    bgm_volume: int = 3
     se_volume: int = 3
     screen_scale: int = 3
     display_mode: DisplayMode = DisplayMode.PIXEL
@@ -45,6 +46,13 @@ class Settings:
     def __post_init__(self) -> None:
         if not isinstance(self.language, Language):
             raise TypeError("language must be a Language")
+        if isinstance(self.bgm_volume, bool) or not isinstance(
+            self.bgm_volume,
+            int,
+        ):
+            raise TypeError("bgm_volume must be an integer")
+        if not 0 <= self.bgm_volume <= 4:
+            raise ValueError("bgm_volume must be from 0 to 4")
         if isinstance(self.se_volume, bool) or not isinstance(
             self.se_volume,
             int,
@@ -67,6 +75,7 @@ class Settings:
 
         return {
             "language": self.language.value,
+            "bgm_volume": self.bgm_volume,
             "se_volume": self.se_volume,
             "screen_scale": self.screen_scale,
             "display_mode": self.display_mode.value,
@@ -83,6 +92,11 @@ class Settings:
         """Return updated settings after validating the DA2 volume range."""
 
         return replace(self, se_volume=volume)
+
+    def with_bgm_volume(self, volume: int) -> Settings:
+        """Return updated settings after validating the DA2 volume range."""
+
+        return replace(self, bgm_volume=volume)
 
     def with_screen_scale(self, scale: int) -> Settings:
         """Return updated settings after validating the desktop scale."""
@@ -125,6 +139,7 @@ class Settings:
         try:
             return cls(
                 language=language,
+                bgm_volume=data.get("bgm_volume", 3),
                 se_volume=data.get("se_volume", 3),
                 screen_scale=data.get("screen_scale", 3),
                 display_mode=display_mode,

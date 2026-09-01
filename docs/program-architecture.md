@@ -65,6 +65,7 @@ app/
 │   ├── text_format.py        # 数値やプレイ時間の共通表示形式
 │   └── window.py             # 枠、文字、カーソル、標準フォント付き生成
 ├── resources/
+│   ├── audio.py              # 外部BGMの読込、音量、再生状態
 │   ├── data.py               # 生成済みJSON配列の読込と構造検証
 │   ├── fonts.py              # 言語別フォントの読込とキャッシュ
 │   └── images.py             # 生成済み画像bundleの本番用loader
@@ -77,6 +78,7 @@ app/
 │   ├── spells.json
 │   └── texts.json            # 安定キーを持つ共通表示語彙
 ├── images/                    # content/imagesから生成する実行時画像データ
+├── audio/                     # WAVから生成する実行時OGG
 └── fonts/
     ├── fusion-pixel-12px-monospaced-zh_hans.bdf
     ├── k6x8_gothic.bdf
@@ -95,10 +97,13 @@ docs/
 
 scripts/
 ├── sync-content.mjs        # submoduleからapp/dataを生成
-└── build-images.py         # PNGをパレット番号へ変換してapp/imagesを生成
+├── build-images.py         # PNGをパレット番号へ変換してapp/imagesを生成
+└── build-audio.py          # WAVをPyxel向けOGGへ変換してapp/audioを生成
 
 tools/
 ├── README.md               # 開発用プログラムの配置基準と操作方法
+├── audio_player.py         # 本番用BGMの再生確認
+├── audio_wav/              # 現段階のBGM変換元WAV
 ├── image_viewer.py         # 本番用画像をPyxelで確認するviewer
 └── screen_mocks/
     ├── _runtime.py         # Pyxel初期化、共通資産、モック入力
@@ -116,6 +121,11 @@ tools/
 `content/data` は共有JSONの正本である。`app/data` は `npm run content:sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
 
 `content/images` はゲームとスタッフポータルで共有するPNG/GIF画像の正本である。`app/images` は `npm run images:build` で作るGit管理対象外の実行時データであり、直接編集しない。画像のパレット変換はビルド時に行い、実行時は生成済みの1ピクセル1バイトのパレット番号を読み込む。
+
+現段階のBGM変換元WAVは `tools/audio_wav` に置き、`npm run audio:build` で
+`app/audio` の同名OGGへ変換する。ゲームと再生確認ツールはWAVを直接読まず、生成済みOGGを
+`app.resources.audio.BgmPlayer` から読む。スタッフ共有や納品用マスターの運用が必要になった
+時点で `content/audio` への移管と同期手順を別途定める。
 
 Google Sheetsとの双方向同期とポータル生成は共有コンテンツsubmoduleの責務とし、ゲーム本体の `scripts/` へ混在させない。`app/fonts` は引き続きゲーム本体の既存資産として扱う。
 
@@ -149,11 +159,13 @@ app/
 │   └── save.py              # SaveDataと保存形式の変換・入出力
 │
 ├── resources/
+│   ├── audio.py             # 外部BGMの読込、音量、再生状態
 │   └── images.py            # manifestと画像bundleの読込・検証
 ├── rendering/
 │   └── palette.py           # 一時パレットシフトと色変換
 │
 ├── data/                    # content/dataから生成するJSON
+├── audio/                   # 22.05kHz・モノラルの実行時OGG
 ├── images/                  # content/imagesから生成するmanifestと画像バイナリ
 ├── fonts/                   # フォント資産
 ├── member.py
@@ -255,6 +267,29 @@ images.copy_region_to_bank(
 いずれも転送元または転送先が範囲外ならエラーとし、暗黙のクリッピングは行わない。転送はScene開始、敵出現、装備変更など画像が変わったタイミングで行い、`draw()` ではバンクからの描画だけを行う。バンク番号と配置座標はSceneやRenderer側の一時的な表示設計であり、Domain Modelや画像manifestへ保存しない。
 
 パレット番号1の `#FF0080` は、ZERO全体で画像の透過色として予約する。画像ビルドではPNGの完全透明ピクセル、GIFの論理背景色と完全透明ピクセルを番号1へ変換し、半透明ピクセルはエラーとする。透過付き画像を描画するRendererは `blt()` / `bltm()` の `colkey` に1を指定する。番号1を通常の表示色として使わず、透過番号をSceneや個別画像ごとに変更しない。GIFは静止画だけを扱い、アニメーションGIFは専用の実行時仕様を定めるまで変換しない。
+
+## 音声リソースの責務
+
+外部BGMは編集用WAVとゲーム用OGGを同じものとして扱わない。
+
+- `tools/audio_wav`: 現段階の変換元WAV
+- `app/audio`: `npm run audio:build` で生成するゲーム用Ogg Vorbis
+- `app/resources/audio.py`: BGM IDの解決、PCM読込、音量、再生状態
+- Pyxelチャンネル2: BGM専用チャンネル
+
+`scripts/build-audio.py` は変換元の相対パスを維持し、22,050Hz・モノラル・Vorbis quality 4
+へ変換する。拡張子を除いた `app/audio` からの相対パスを安定したBGM IDとして使い、
+`da3-field.ogg` は `da3-field`、`dungeon/floor1.ogg` は `dungeon/floor1` とする。
+
+`BgmPlayer` はPyxel初期化と `assets.pyxres` 読込の後にComposition Rootが生成し、
+SceneManagerへ明示的に渡す。BGMには `pyxel.Sound()` の独立インスタンスを使い、
+`assets.pyxres` 内の効果音Sound番号を上書きしない。同じBGM IDが継続するScene遷移では
+再読込・再スタートせず、異なるIDへの切り替えと停止だけをチャンネル2へ適用する。
+`Sound.pcm()` は同期デコードのため `draw()` から呼ばず、起動時またはScene遷移時に呼ぶ。
+
+現段階ではデスクトップ版のPyxel音声経路だけを対象とする。DA2のAndroid用HTML Audio、
+画面非表示からのモバイル復帰、曲長JSON、次曲予約は導入しない。イントロ付きループや
+戦闘前位置への復帰が必要になった時点で、`start_sec` と曲構成データを追加する。
 
 ### 一時パレットシフト
 
@@ -655,8 +690,9 @@ guide.draw()
 ### Settings
 
 端末やプレイヤー設定。BGM、SE、言語、表示倍率、表示方式、キー配置などを持つ。
-ゲーム進行とは別に保存する。現段階の`Settings`は言語、SE音量0〜4、画面倍率1〜5、
-`DisplayMode.PIXEL` / `DisplayMode.SMOOTH`を保持し、DA2と同じ初期値3・3・ピクセル表示を使う。
+ゲーム進行とは別に保存する。現段階の`Settings`は言語、BGM音量0〜4、SE音量0〜4、
+画面倍率1〜5、`DisplayMode.PIXEL` / `DisplayMode.SMOOTH`を保持し、BGM・SE・画面倍率は
+DA2と同じ初期値3・3・3、表示方式はピクセル表示を使う。
 
 言語は `Language` で表し、保存値と共有JSONの接尾辞には `ja`、`en`、`zhcn` を使う。初期値は `ja` とする。フォントファイル名に含まれる `zh_hans` はアセット名であり、保存値やデータキーには使用しない。
 
@@ -890,7 +926,8 @@ DA2同様に増減表示より状態名を優先する。
 
 設定画面で言語を変更した場合は `Settings.with_language()` で新しい設定スナップショットを作って保存し、新しい `Localizer` と標準フォントで表示中のWindowを再構築する。既存Windowがグローバルな言語変更を監視したり、フォントだけを後から差し替えたりしない。翻訳後の文字幅が言語ごとに異なるため、必要なレイアウト変更もWindow再構築時に反映する。
 
-メニューの設定Overlayでは左右入力で言語、SE音量、画面倍率、表示方式を循環変更する。
+メニューの設定OverlayではDA2と同じ順序で、左右入力により言語、BGM音量、SE音量、
+画面倍率、表示方式を循環変更する。
 設定項目、アクション、ガイドは4pxグリッド上で3単位、すなわち通常の12px行間へ揃え、
 項目群の区切りだけ空行を1行置く。
 メニューモックで初めて表示するメイン、設定、確認の各Windowは閉じた状態で生成し、既存の
@@ -906,6 +943,8 @@ DA2同様に増減表示より状態名を優先する。
 暗転中にWindowを2フレーム分進め、残り6フレームをフェードインと並行して両方を同時に
 完了させる。Windowのテキスト、カーソル対象、現在の選択位置は再生成しない。
 開発用の終了操作として、仮フィールドでのキャンセル入力は従来どおりプロセスを終了する。
+メニューモックはPyxel初期化後に `BgmPlayer` で `da3-field` をループ再生し、メニューと
+仮フィールドの往復では再スタートしない。BGM音量変更は再生中のチャンネル2へ即時反映する。
 SE音量変更時はチャンネル利得を更新して確認音を鳴らし、表示方式は`pyxel.screen_mode()`へ
 即時反映する。画面倍率はDA2同様に次回リセット時へ反映し、倍率5をフルスクリーンとする。
 「タイトルがめんへ もどる」と「ゲームを しゅうりょうする」は、翻訳済みの確認文と
