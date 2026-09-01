@@ -759,6 +759,22 @@ class WindowTest(unittest.TestCase):
         self.assertIsNotNone(cursor.selected_target)
         self.assertIsNone(cursor.selected_key)
 
+    def test_cursor_can_select_registered_key_across_grid_rows(self) -> None:
+        window = Window(0, 0, 12, 12)
+        cursor = window.set_cursor(
+            (
+                CursorTarget(2, 2, key="zero"),
+                CursorTarget(7, 2, key="delete"),
+                CursorTarget(7, 6, key="confirm"),
+            )
+        )
+
+        cursor.select_key("confirm")
+
+        self.assertEqual(cursor.selected_key, "confirm")
+        with self.assertRaisesRegex(ValueError, "missing"):
+            cursor.select_key("missing")
+
     def test_cursor_with_no_selectable_targets_is_not_drawn(self) -> None:
         window = Window(0, 0, 8, 8)
         cursor = window.set_cursor(

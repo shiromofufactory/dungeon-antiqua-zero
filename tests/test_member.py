@@ -507,6 +507,64 @@ class MemberTest(unittest.TestCase):
             (1, 14),
         )
 
+    def test_recreates_fiora_at_explicit_internal_level(self) -> None:
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            **GROWTH_FIELDS,
+            **FACE_FIELDS,
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 2,
+            "eq_knife": 1,
+        }
+
+        member = Member.from_record_at_internal_level(record, 50)
+
+        self.assertEqual(member.internal_level, 50)
+        self.assertEqual((member.hp, member.max_hp), (475, 475))
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.SWORD).level,
+                member.proficiency(ProficiencyKind.SWORD).progress,
+            ),
+            (5, 60),
+        )
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.KNIFE).level,
+                member.proficiency(ProficiencyKind.KNIFE).progress,
+            ),
+            (4, 43),
+        )
+
+    def test_explicit_level_one_keeps_fiora_starting_proficiencies(self) -> None:
+        record = {
+            "name_en": "Fiora",
+            "race": "FAIRY",
+            "gender": "FEMALE",
+            "base_str": 17,
+            "base_agi": 25,
+            "base_mag": 24,
+            **GROWTH_FIELDS,
+            **FACE_FIELDS,
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 2,
+        }
+
+        member = Member.from_record_at_internal_level(record, 1)
+
+        self.assertEqual(
+            (
+                member.proficiency(ProficiencyKind.SWORD).level,
+                member.proficiency(ProficiencyKind.SWORD).progress,
+            ),
+            (1, 0),
+        )
+
     def test_joining_internal_level_is_capped_at_99(self) -> None:
         record = {
             "name_en": "Cerion",

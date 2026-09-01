@@ -801,6 +801,55 @@ class Member:
             equipment=equipment,
         )
 
+    @classmethod
+    def from_record_at_internal_level(
+        cls,
+        record: Mapping[str, object],
+        internal_level: int,
+        *,
+        items: Mapping[str, Item] | None = None,
+        skills: Mapping[str, Skill] | None = None,
+    ) -> Member:
+        """Recreate initial member state at one explicit internal level.
+
+        This is intentionally separate from :meth:`from_record`: normal
+        recruitment derives a member's level from Fiora and always starts
+        Fiora at level 1.  Restore, migration, and debug tooling sometimes
+        need to construct the same master-data-backed state at a known level.
+        """
+
+        if (
+            isinstance(internal_level, bool)
+            or not isinstance(internal_level, int)
+        ):
+            raise TypeError("internal_level must be an integer")
+        if not MIN_INTERNAL_LEVEL <= internal_level <= MAX_INTERNAL_LEVEL:
+            raise ValueError(
+                f"internal_level must be from {MIN_INTERNAL_LEVEL} "
+                f"to {MAX_INTERNAL_LEVEL}"
+            )
+
+        member = cls.from_record(record, items=items, skills=skills)
+        is_fiora_start = (
+            member.definition.key == FIORA_CHARACTER_KEY
+            and internal_level == MIN_INTERNAL_LEVEL
+        )
+        proficiencies = {
+            kind: Proficiency.for_joining_member(
+                aptitude,
+                internal_level,
+                is_fiora=is_fiora_start,
+            )
+            for kind, aptitude in member.definition.proficiency_aptitudes.items()
+        }
+        return cls(
+            member.definition,
+            internal_level=internal_level,
+            skills=member.skills,
+            equipment=member.equipment,
+            proficiencies=proficiencies,
+        )
+
     @property
     def adjusted_abilities(self) -> AdjustedAbilities:
         """Return current abilities without mutating their master-data base."""

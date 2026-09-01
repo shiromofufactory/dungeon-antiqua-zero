@@ -11,11 +11,14 @@ import pyxel
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
     MockFixtureError,
+    load_mock_character_records,
     load_mock_items,
     load_mock_party,
     load_mock_skills,
     load_mock_spells,
 )
+from tools.screen_mocks.debug_menu import DebugMenuScreenMock
+from tools.screen_mocks.debug_text import DEBUG_TEXT
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
     FPS,
@@ -53,7 +56,7 @@ from rendering import FadeEvent, FadePhase, FadeThroughBlack
 from skill import SkillDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
-from systems import InventorySystem
+from systems import DebugPartyEditor, DebugPartyError, InventorySystem
 
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -132,6 +135,7 @@ SETTINGS_ROWS = (
     ("se", 8),
     ("screen_size", 11),
     ("display", 14),
+    ("debug", 17),
     ("return_title", 20),
     ("quit", 23),
 )
@@ -292,6 +296,7 @@ class MenuScreenMock:
         self.skills = load_mock_skills()
         self.spells = load_mock_spells()
         self.party = load_mock_party(self.items, self.skills)
+        self.character_records = load_mock_character_records()
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         self.fonts = FontResources()
         images = ImageResources()
@@ -310,6 +315,7 @@ class MenuScreenMock:
         self.equipment_screen: EquipmentScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
         self.spell_screen: SpellScreenMock | None = None
+        self.debug_screen: DebugMenuScreenMock | None = None
         self.selected_member_index = 0
         self._build_main_windows()
 
@@ -355,6 +361,10 @@ class MenuScreenMock:
         )
         self.localized = localized
         self.localized_texts = localized_texts
+        self.debug_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            Language.JAPANESE,
+        )
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
         self.party_window = windows.create(
             *PARTY_WINDOW_GRID,
@@ -687,11 +697,26 @@ class MenuScreenMock:
                     )
                 )
             else:
+                text_factory = (
+                    self.debug_texts
+                    if key == "debug"
+                    else self.localized_texts
+                )
+                text = (
+                    DEBUG_TEXT.settings_menu
+                    if key == "debug"
+                    else self.localized[action_keys[key]]
+                )
                 texts.append(
-                    self.localized_texts.create(
-                        self.localized[action_keys[key]],
+                    text_factory.create(
+                        text,
                         SETTINGS_LABEL_X,
                         y,
+                        color=(
+                            NEGATIVE_COLOR
+                            if key == "debug"
+                            else DEFAULT_TEXT_COLOR
+                        ),
                     )
                 )
         guide_keys = SETTINGS_GUIDE_KEYS.get(selected_key, ())
@@ -718,7 +743,8 @@ class MenuScreenMock:
         )
         self.settings_cursor = self.settings_window.set_cursor(
             tuple(
-                CursorTarget(SETTINGS_CURSOR_X, y, key=key) for key, y in SETTINGS_ROWS
+                CursorTarget(SETTINGS_CURSOR_X, y, key=key)
+                for key, y in SETTINGS_ROWS
             )
         )
         self._select_cursor_key(self.settings_cursor, selected_key)
@@ -743,6 +769,38 @@ class MenuScreenMock:
     def _start_settings(self) -> None:
         self.command_cursor.active = False
         self._build_settings_window()
+
+    def _start_debug_menu(self) -> None:
+        if self.settings_cursor is None:
+            return
+        self.settings_cursor.active = False
+        editor = DebugPartyEditor(
+            self.character_records,
+            items=self.items,
+            skills=self.skills,
+            party=self.party,
+        )
+        self.debug_screen = DebugMenuScreenMock(
+            editor=editor,
+            save_data=self.save_data,
+            settings=self.settings,
+            fonts=self.fonts,
+            alert=self.alert,
+        )
+
+    def _finish_debug_menu(self) -> None:
+        if self.debug_screen is None:
+            return
+        self.party = self.debug_screen.party
+        self.debug_screen = None
+        self.selected_member_index = min(
+            self.selected_member_index,
+            len(self.party) - 1,
+        )
+        self._build_main_windows(selected_command="config", animate=False)
+        self.command_cursor.active = False
+        if self.settings_cursor is not None:
+            self.settings_cursor.active = True
 
     def _start_status(self) -> None:
         self.command_cursor.active = False
@@ -1087,6 +1145,11 @@ class MenuScreenMock:
             if status_screen.update(input_state):
                 self._begin_screen_change(MenuScreenChange.CLOSE_STATUS)
             return
+        debug_screen = getattr(self, "debug_screen", None)
+        if debug_screen is not None:
+            if debug_screen.update(input_state):
+                self._finish_debug_menu()
+            return
         if self._update_window_animations():
             return
 
@@ -1118,7 +1181,9 @@ class MenuScreenMock:
                 return
             if input_state.confirm.triggered:
                 key = self.settings_cursor.selected_key
-                if key in ("return_title", "quit"):
+                if key == "debug":
+                    self._start_debug_menu()
+                elif key in ("return_title", "quit"):
                     self._start_confirmation(key)
                 return
             if self.settings_window.update(input_state.navigation):
@@ -1211,6 +1276,10 @@ class MenuScreenMock:
             if status_screen is not None:
                 status_screen.draw()
                 return
+            debug_screen = getattr(self, "debug_screen", None)
+            if debug_screen is not None:
+                debug_screen.draw()
+                return
             self.party_window.draw()
             if self.party_window.is_open:
                 for index, member in enumerate(self.party):
@@ -1279,6 +1348,7 @@ def main() -> int:
         expected_errors=(
             AudioResourceError,
             DataResourceError,
+            DebugPartyError,
             EquipmentMockDataError,
             FontResourceError,
             ImageResourceError,

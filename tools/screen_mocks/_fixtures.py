@@ -23,6 +23,12 @@ class MockFixtureError(RuntimeError):
     """Raised when shared mock fixture data is missing or ambiguous."""
 
 
+def load_mock_character_records() -> tuple[dict[str, object], ...]:
+    """Load character records in their stable shared-data order."""
+
+    return tuple(load_record_array("characters.json", APP_ROOT / "data"))
+
+
 def load_mock_items() -> dict[str, Item]:
     """Load and index item models by their stable current data keys."""
 
@@ -67,7 +73,7 @@ def load_mock_party(
 
     records_by_key = {
         key: record
-        for record in load_record_array("characters.json", APP_ROOT / "data")
+        for record in load_mock_character_records()
         if isinstance(key := record.get("name_en"), str)
     }
     party: list[Member] = []
@@ -86,6 +92,7 @@ __all__ = [
     "MOCK_PARTY_CHARACTER_KEYS",
     "MOCK_BACK_ROW_CHARACTER_KEYS",
     "MockFixtureError",
+    "load_mock_character_records",
     "load_mock_items",
     "load_mock_party",
     "load_mock_skills",

@@ -829,6 +829,16 @@ class WindowCursor:
     def move_right(self) -> bool:
         return self.move(dx=1)
 
+    def select_key(self, key: Any) -> None:
+        """Select one registered selectable target by its stable key."""
+
+        for index, target in enumerate(self._targets):
+            if target.key == key and target.selectable:
+                self._selected_index = index
+                self._animation_frame = 0
+                return
+        raise ValueError(f"selectable cursor key is not registered: {key!r}")
+
     def move(self, *, dx: int = 0, dy: int = 0) -> bool:
         """Move to the next selectable target in one cardinal direction."""
 

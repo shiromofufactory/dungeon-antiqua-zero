@@ -32,6 +32,7 @@ from tools.screen_mocks.menu import (
     SE_PREVIEW_SOUND_ID,
     SETTINGS_GUIDE_Y,
     SETTINGS_LABEL_X,
+    SETTINGS_ROWS,
     SETTINGS_VALUE_X,
     SETTINGS_WINDOW_GRID,
     SORT_SOURCE_CURSOR_X_OFFSET,
@@ -117,6 +118,8 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertEqual(
             fonts.font_for.call_args_list,
             [
+                call(Language.JAPANESE),
+                call(Language.ENGLISH),
                 call(Language.JAPANESE),
                 call(Language.ENGLISH),
                 call(Language.JAPANESE),
@@ -336,6 +339,10 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.localized_texts.create.side_effect = (
             lambda text, x, y, **_kwargs: Mock(text=text, x=x, y=y)
         )
+        mock.debug_texts = Mock()
+        mock.debug_texts.create.side_effect = (
+            lambda text, x, y, **_kwargs: Mock(text=text, x=x, y=y)
+        )
         factory = window_factory_class.return_value
         window = factory.create.return_value
         cursor = window.set_cursor.return_value
@@ -367,6 +374,12 @@ class MenuScreenMockTest(unittest.TestCase):
             placements[(SETTINGS_LABEL_X, 23)],
             "ゲームを　しゅうりょうする",
         )
+        debug_text_call = next(
+            text_call
+            for text_call in mock.debug_texts.create.call_args_list
+            if text_call.args[0] == "デバッグメニュー"
+        )
+        self.assertEqual(debug_text_call.kwargs["color"], NEGATIVE_COLOR)
         self.assertEqual(
             placements[(SETTINGS_LABEL_X, SETTINGS_GUIDE_Y)],
             "げんごを　きりかえられます",
@@ -1378,6 +1391,30 @@ class MenuScreenMockTest(unittest.TestCase):
 
         mock._start_settings.assert_called_once_with()
         mock.command_window.update.assert_not_called()
+
+    def test_debug_settings_row_is_always_available_in_mock(self) -> None:
+        self.assertIn(("debug", 17), SETTINGS_ROWS)
+
+    def test_confirming_debug_setting_opens_debug_menu(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.alert = Mock()
+        mock.windows = ()
+        mock.command_cursor = Mock(active=False)
+        mock.party_cursor = None
+        mock.settings_cursor = Mock(selected_key="debug")
+        mock.settings_window = Mock(is_animating=False)
+        mock.confirmation_cursor = None
+        mock.confirmation_window = None
+        mock.debug_screen = None
+        mock._start_debug_menu = Mock()
+
+        mock.update()
+
+        mock._start_debug_menu.assert_called_once_with()
 
     def test_language_setting_cycles_like_da2_and_rebuilds_windows(self) -> None:
         mock = MenuScreenMock.__new__(MenuScreenMock)
