@@ -153,7 +153,7 @@ class MenuScreenMockTest(unittest.TestCase):
         )
 
         args = factory.create.call_args_list[1].args
-        self.assertEqual(args[:4], (48, 0, 16, 30))
+        self.assertEqual(args[:4], (48, 0, 16, 27))
         self.assertEqual(
             [(text.text, text.x, text.y) for text in args[4]],
             [
@@ -163,7 +163,6 @@ class MenuScreenMockTest(unittest.TestCase):
                         "アイテム",
                         "じゅもん",
                         "そうび",
-                        "スキル",
                         "ステータス",
                         "ならびかえ",
                         "じょうほう",
@@ -215,7 +214,7 @@ class MenuScreenMockTest(unittest.TestCase):
         for window in mock.windows:
             window.open.assert_called_once_with()
         info_args = factory.create.call_args_list[2].args
-        self.assertEqual(info_args[:4], (48, 30, 16, 27))
+        self.assertEqual(info_args[:4], (48, 27, 16, 27))
         self.assertEqual(
             [(text.text, text.x, text.y) for text in info_args[4]],
             [

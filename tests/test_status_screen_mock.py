@@ -17,16 +17,18 @@ from tools.screen_mocks.status import (
     DUAL_ATTACK_VALUE_X,
     LOCALIZED_POSITIONS,
     RESISTANCE_POSITIONS,
+    SKILL_DESCRIPTION_WINDOW_GRID,
+    SKILL_GUIDE_WINDOW_GRID,
     Direction,
     EquipmentSlot,
     Language,
     Localizer,
     TRANSPARENT_INDEX,
     Settings,
+    StatusSelectionPhase,
     StatusScreenMock,
     attack_display,
     hit_display,
-    next_language,
     pad,
     resistance_icon_tag,
 )
@@ -80,17 +82,6 @@ class StatusScreenMockTest(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
-    def test_language_sequence_wraps_after_simplified_chinese(self) -> None:
-        self.assertEqual(next_language(Language.JAPANESE), Language.ENGLISH)
-        self.assertEqual(
-            next_language(Language.ENGLISH),
-            Language.SIMPLIFIED_CHINESE,
-        )
-        self.assertEqual(
-            next_language(Language.SIMPLIFIED_CHINESE),
-            Language.JAPANESE,
-        )
-
     def test_first_three_lines_use_localized_member_identity(self) -> None:
         with (
             patch("tools.screen_mocks.status.ImageResources") as images,
@@ -125,6 +116,10 @@ class StatusScreenMockTest(unittest.TestCase):
             [10, 4, 12, 0, 0],
         )
         self.assertEqual(mock.member_index, 0)
+        self.assertIs(mock.phase, StatusSelectionPhase.STATUS)
+        self.assertIsNone(mock.skill_guide_window)
+        self.assertIsNone(mock.skill_cursor.selected_key)
+        self.assertEqual(mock.windows, [mock.status_window])
         self.assertNotIn("opened", factory.return_value.create.call_args.kwargs)
         self.assertTrue(
             factory.return_value.create.call_args.kwargs[
@@ -235,6 +230,7 @@ class StatusScreenMockTest(unittest.TestCase):
             patch("tools.screen_mocks.status.ImageResources") as images,
             patch("tools.screen_mocks.status.FontResources") as fonts,
             patch("tools.screen_mocks.status.WindowFactory") as factory,
+            patch("tools.screen_mocks.status.WindowCursor"),
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
@@ -370,24 +366,121 @@ class StatusScreenMockTest(unittest.TestCase):
             "%FREEZE_DISABLED%",
         )
 
-    def test_confirm_cycles_language_and_rebuilds_localized_window(self) -> None:
-        mock = StatusScreenMock.__new__(StatusScreenMock)
-        mock.settings = Settings()
-        mock.input_reader = Mock()
-        mock.input_reader.poll.return_value = input_state(confirm=True)
-        mock._rebuild_window = Mock()
+    def test_member_with_skills_has_confirm_guide_and_skill_targets(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock(member_index=4)
 
-        returned = mock.update(mock.input_reader.poll.return_value)
+        self.assertEqual(
+            (
+                mock.skill_guide_window.x,
+                mock.skill_guide_window.y,
+                mock.skill_guide_window.width,
+                mock.skill_guide_window.height,
+            ),
+            SKILL_GUIDE_WINDOW_GRID,
+        )
+        self.assertTrue(mock.skill_guide_window.transparent)
+        self.assertEqual(
+            [text.text for text in mock.skill_guide_window.texts],
+            ["%KEY_Z%：スキル"],
+        )
+        self.assertEqual(
+            [target.key for target in mock.skill_cursor.targets],
+            ["Aim", "Focus"],
+        )
+        self.assertFalse(mock.skill_cursor.active)
 
-        self.assertEqual(mock.settings.language, Language.ENGLISH)
-        mock._rebuild_window.assert_called_once_with()
-        self.assertFalse(returned)
+    def test_confirm_selects_skills_and_updates_bottom_description(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock(member_index=4)
+
+        self.assertFalse(mock.update(input_state(confirm=True)))
+
+        self.assertIs(mock.phase, StatusSelectionPhase.SKILL)
+        self.assertTrue(mock.skill_cursor.active)
+        self.assertFalse(mock.status_window.active)
+        self.assertNotIn(mock.skill_guide_window, mock.windows)
+        description = mock.skill_description_window
+        self.assertEqual(
+            (description.x, description.y, description.width, description.height),
+            SKILL_DESCRIPTION_WINDOW_GRID,
+        )
+        self.assertEqual(
+            [text.text for text in description.texts],
+            [
+                "こうげきが　かならず　ヒットするが",
+                "つぎの　こうどうが　おくれる",
+            ],
+        )
+
+        self.assertFalse(mock.update(input_state(navigation=Direction.DOWN)))
+
+        self.assertEqual(mock.selected_skill.key, "Focus")
+        self.assertEqual(
+            [text.text for text in mock.skill_description_window.texts],
+            [
+                "ちからを　ためて",
+                "つぎの　こうげきの　いりょくを　あげる",
+            ],
+        )
+
+        member_index = mock.member_index
+        self.assertFalse(mock.update(input_state(navigation=Direction.RIGHT)))
+        self.assertFalse(mock.update(input_state(next_page=True)))
+        self.assertEqual(mock.member_index, member_index)
+
+    def test_cancel_leaves_skill_selection_before_returning_to_menu(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock(member_index=1)
+
+        mock.update(input_state(confirm=True))
+        self.assertFalse(mock.update(input_state(cancel=True)))
+        self.assertIs(mock.phase, StatusSelectionPhase.STATUS)
+        self.assertFalse(mock.skill_cursor.active)
+        self.assertTrue(mock.status_window.active)
+        self.assertIsNone(mock.skill_description_window)
+        self.assertIn(mock.skill_guide_window, mock.windows)
+        self.assertTrue(mock.update(input_state(cancel=True)))
+
+    def test_fiora_cannot_enter_skill_selection(self) -> None:
+        with (
+            patch("tools.screen_mocks.status.ImageResources") as images,
+            patch("tools.screen_mocks.status.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusScreenMock(member_index=0)
+
+        self.assertFalse(mock.update(input_state(confirm=True)))
+        self.assertIs(mock.phase, StatusSelectionPhase.STATUS)
+        self.assertIsNone(mock.skill_guide_window)
+        self.assertIsNone(mock.skill_description_window)
 
     def test_right_navigation_wraps_from_ragna_to_fiora(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
         mock.member_index = 4
         mock.settings = Settings()
+        mock.phase = StatusSelectionPhase.STATUS
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = input_state(
             navigation=Direction.RIGHT
@@ -406,6 +499,7 @@ class StatusScreenMockTest(unittest.TestCase):
         mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
         mock.member_index = 0
         mock.settings = Settings()
+        mock.phase = StatusSelectionPhase.STATUS
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = input_state(
             navigation=Direction.LEFT
@@ -429,6 +523,7 @@ class StatusScreenMockTest(unittest.TestCase):
                 mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
                 mock.member_index = start
                 mock.settings = Settings()
+                mock.phase = StatusSelectionPhase.STATUS
                 mock.input_reader = Mock()
                 mock.input_reader.poll.return_value = input_state(
                     **{button_name: True},
@@ -568,6 +663,7 @@ class StatusScreenMockTest(unittest.TestCase):
     def test_cancel_returns_to_menu_without_changing_language(self) -> None:
         mock = StatusScreenMock.__new__(StatusScreenMock)
         mock.settings = Settings()
+        mock.phase = StatusSelectionPhase.STATUS
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = input_state(cancel=True)
         mock._rebuild_window = Mock()
@@ -583,6 +679,7 @@ class StatusScreenMockTest(unittest.TestCase):
         mock.faces = object()
         mock.party = (Mock(face_position=Mock(x=64, y=96)),)
         mock.member_index = 0
+        mock.phase = StatusSelectionPhase.STATUS
         first_window = Mock(is_open=True)
         second_window = Mock()
         mock.windows = (first_window, second_window)

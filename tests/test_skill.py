@@ -14,6 +14,11 @@ class SkillTest(unittest.TestCase):
                 "name_en": "Two-Handed",
                 "name_ja": "りょうてもち",
                 "command": "",
+                "description_ja": [
+                    "%COL_BLUE%こうげき%COL_END%を つよくする",
+                    "りょうてが あいているときに ゆうこう",
+                ],
+                "description_en": ["Raise attack"],
             }
         )
 
@@ -37,6 +42,34 @@ class SkillTest(unittest.TestCase):
     def test_rejects_missing_lookup_key(self) -> None:
         with self.assertRaises(SkillDataError):
             Skill.from_record({"name_ja": "りょうてもち"})
+
+    def test_returns_localized_description_with_per_line_fallback(self) -> None:
+        self.assertEqual(
+            self.skill.localized_description(Localizer(Language.JAPANESE)),
+            (
+                "%COL_BLUE%こうげき%COL_END%を　つよくする",
+                "りょうてが　あいているときに　ゆうこう",
+            ),
+        )
+        self.assertEqual(
+            self.skill.localized_description(Localizer(Language.ENGLISH)),
+            (
+                "Ｒａｉｓｅ　ａｔｔａｃｋ",
+                "りょうてが　あいているときに　ゆうこう",
+            ),
+        )
+
+    def test_rejects_non_string_description_lines(self) -> None:
+        with self.assertRaisesRegex(
+            SkillDataError,
+            "description_ja must be an array of strings",
+        ):
+            Skill.from_record(
+                {
+                    "name_en": "Broken",
+                    "description_ja": ["ok", 1],
+                }
+            )
 
 
 if __name__ == "__main__":

@@ -74,7 +74,6 @@ MENU_COMMANDS = (
     ("item", "menu.command.item"),
     ("spell", "menu.command.spell"),
     ("equip", "menu.command.equip"),
-    ("skill", "menu.command.skill"),
     ("status", "menu.command.status"),
     ("sort", "menu.command.sort"),
     ("info", "menu.command.info"),
@@ -368,7 +367,7 @@ class MenuScreenMock:
             48,
             0,
             16,
-            30,
+            27,
             command_texts,
             opened=not animate,
         )
@@ -385,7 +384,7 @@ class MenuScreenMock:
         self.sort_source_cursor: WindowCursor | None = None
         self.info_window = windows.create(
             48,
-            30,
+            27,
             16,
             27,
             (

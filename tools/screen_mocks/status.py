@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 import pyxel
 
 from tools._bootstrap import APP_ROOT
@@ -10,7 +12,7 @@ from tools.screen_mocks._fixtures import (
     load_mock_party,
     load_mock_skills,
 )
-from input import Direction, InputState
+from input import Direction, InputAction, InputDevice, InputState
 from localization import Localizer
 from member import (
     BattleStats,
@@ -26,16 +28,20 @@ from resources import (
     FontResources,
     ImageResources,
 )
+from skill import Skill
 from state import Language, Settings
 from text_catalog import TextCatalog
 from ui import (
+    CursorTarget,
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
     TEXT_ICONS,
     LocalizedWindowTextFactory,
     Window,
+    WindowCursor,
     WindowFactory,
     WindowText,
+    input_icon_tag,
     pad,
 )
 
@@ -82,11 +88,6 @@ LOCALIZED_POSITIONS = {
     (30, 38): "label.spell_resistance",
     (30, 41): "label.tolerance",
 }
-LANGUAGE_SEQUENCE = (
-    Language.JAPANESE,
-    Language.ENGLISH,
-    Language.SIMPLIFIED_CHINESE,
-)
 PROFICIENCY_POSITIONS = (
     (ProficiencyKind.SWORD, "%SWORD%", 6, 49),
     (ProficiencyKind.KATANA, "%KATANA%", 20, 49),
@@ -119,19 +120,26 @@ RESISTANCE_POSITIONS = tuple(
 )
 ATTACK_VALUE_X = 46
 DUAL_ATTACK_VALUE_X = ATTACK_VALUE_X - 2
+STATUS_WINDOW_GRID = (0, 0, 64, 60)
+SKILL_GUIDE_WINDOW_GRID = (48, 1, 16, 4)
+SKILL_DESCRIPTION_WINDOW_GRID = (0, 50, 64, 10)
+SKILL_TEXT_X = 8
+SKILL_CURSOR_X = 6
+SKILL_FIRST_Y = 41
+SKILL_ROW_HEIGHT = 3
+DISPLAYED_SKILL_COUNT = 2
+MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
+
+
+class StatusSelectionPhase(Enum):
+    """Current interaction layer of the status screen."""
+
+    STATUS = "status"
+    SKILL = "skill"
 
 
 class StatusMockDataError(RuntimeError):
     """Raised when localized data required by the status view is unavailable."""
-
-
-def next_language(language: Language) -> Language:
-    """Return the next language used by the status mock."""
-
-    if not isinstance(language, Language):
-        raise TypeError("language must be a Language")
-    index = LANGUAGE_SEQUENCE.index(language)
-    return LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
 
 
 def proficiency_display(member: Member, kind: ProficiencyKind) -> str:
@@ -206,17 +214,31 @@ class StatusScreenMock:
         self.member_index = member_index
         self.fonts = fonts if fonts is not None else FontResources()
         self.faces = (
-            faces
-            if faces is not None
-            else ImageResources().image(FACES_IMAGE_ID)
+            faces if faces is not None else ImageResources().image(FACES_IMAGE_ID)
         )
-        self.windows = [self._build_window()]
+        self.phase = StatusSelectionPhase.STATUS
+        self._build_windows()
 
     @property
     def member(self) -> Member:
         """Return the party member currently shown by the status mock."""
 
         return self.party[self.member_index]
+
+    @property
+    def displayed_skills(self) -> tuple[Skill, ...]:
+        """Return the skills that fit in the status screen's two rows."""
+
+        return tuple(self.member.skills[:DISPLAYED_SKILL_COUNT])
+
+    @property
+    def selected_skill(self) -> Skill | None:
+        """Return the displayed skill currently selected by the cursor."""
+
+        selected_index = self.skill_cursor.selected_index
+        if selected_index is None:
+            return None
+        return self.displayed_skills[selected_index]
 
     def _build_window(self) -> Window:
         """Build the complete status window for the current member."""
@@ -232,10 +254,7 @@ class StatusScreenMock:
 
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
         return windows.create(
-            0,
-            0,
-            64,
-            60,
+            *STATUS_WINDOW_GRID,
             (
                 localized_texts.create(localized["member.name"], 14, 2),
                 localized_texts.create(localized["member.race"], 14, 5),
@@ -264,8 +283,16 @@ class StatusScreenMock:
                 localized_texts.create(localized["label.magic"], 6, 32),
                 WindowText(pad(abilities.magic, 2), 20, 32),
                 localized_texts.create(localized["label.skill"], 6, 38),
-                localized_texts.create(localized["skill.0"], 8, 41),
-                localized_texts.create(localized["skill.1"], 8, 44),
+                localized_texts.create(
+                    localized["skill.0"],
+                    SKILL_TEXT_X,
+                    SKILL_FIRST_Y,
+                ),
+                localized_texts.create(
+                    localized["skill.1"],
+                    SKILL_TEXT_X,
+                    SKILL_FIRST_Y + SKILL_ROW_HEIGHT,
+                ),
                 localized_texts.create(localized["equipment.right"], 30, 8),
                 localized_texts.create(localized["equipment.left"], 30, 11),
                 localized_texts.create(localized["equipment.body"], 30, 14),
@@ -324,7 +351,98 @@ class StatusScreenMock:
                 ),
             ),
             horizontal_navigation=len(self.party) > 1,
+            active=self.phase is StatusSelectionPhase.STATUS,
         )
+
+    def _build_skill_guide_window(self) -> Window | None:
+        """Build the discoverability guide only for members with skills."""
+
+        if not self.displayed_skills:
+            return None
+        localizer = Localizer(self.settings.language)
+        guide = self.texts.text("status.skill_guide", localizer)
+        if not guide:
+            raise StatusMockDataError(
+                "モック用テキストが見つかりません: status.skill_guide"
+            )
+        localized_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        return windows.create(
+            *SKILL_GUIDE_WINDOW_GRID,
+            (
+                localized_texts.create(
+                    guide.replace(
+                        "%CONFIRM%",
+                        input_icon_tag(InputAction.CONFIRM, MOCK_INPUT_DEVICE),
+                    ),
+                    2,
+                    0,
+                ),
+            ),
+            transparent=True,
+        )
+
+    def _build_skill_description_window(self) -> Window:
+        """Build the DA2-style bottom guide for the selected skill."""
+
+        localized_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+        skill = self.selected_skill
+        lines = (
+            ()
+            if skill is None
+            else skill.localized_description(Localizer(self.settings.language))
+        )
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        return windows.create(
+            *SKILL_DESCRIPTION_WINDOW_GRID,
+            tuple(
+                localized_texts.create(line, 2, 2 + index * 3)
+                for index, line in enumerate(lines[:2])
+            ),
+        )
+
+    def _build_windows(self) -> None:
+        """Build status, guide, cursor, and any active description window."""
+
+        self.status_window = self._build_window()
+        self.skill_cursor = WindowCursor(
+            self.status_window,
+            tuple(
+                CursorTarget(
+                    SKILL_CURSOR_X,
+                    SKILL_FIRST_Y + index * SKILL_ROW_HEIGHT,
+                    key=skill.key,
+                )
+                for index, skill in enumerate(self.displayed_skills)
+            ),
+            active=self.phase is StatusSelectionPhase.SKILL,
+        )
+        self.skill_guide_window = self._build_skill_guide_window()
+        self.skill_description_window = (
+            self._build_skill_description_window()
+            if self.phase is StatusSelectionPhase.SKILL
+            else None
+        )
+        self._refresh_visible_windows()
+
+    def _refresh_visible_windows(self) -> None:
+        """Keep overlays ordered above the full-screen status window."""
+
+        windows = [self.status_window]
+        if (
+            self.phase is StatusSelectionPhase.STATUS
+            and self.skill_guide_window is not None
+        ):
+            windows.append(self.skill_guide_window)
+        if self.skill_description_window is not None:
+            windows.append(self.skill_description_window)
+        self.windows = windows
 
     def _localized_texts(self, localizer: Localizer) -> dict[str, str]:
         """Resolve all names and labels currently switched by this mock."""
@@ -335,7 +453,7 @@ class StatusScreenMock:
             "member.race": identity.race,
             "member.gender": identity.gender,
         }
-        for index in range(2):
+        for index in range(DISPLAYED_SKILL_COUNT):
             localized[f"skill.{index}"] = (
                 self.member.skills[index].localized_name(localizer)
                 if index < len(self.member.skills)
@@ -372,7 +490,33 @@ class StatusScreenMock:
     def _rebuild_window(self) -> None:
         """Rebuild all values for the current member and language."""
 
-        self.windows = [self._build_window()]
+        self._build_windows()
+
+    def _enter_skill_selection(self) -> None:
+        """Focus the first displayed skill and show its description."""
+
+        if not self.displayed_skills:
+            return
+        self.phase = StatusSelectionPhase.SKILL
+        self.status_window.active = False
+        self.skill_cursor.active = True
+        self.skill_description_window = self._build_skill_description_window()
+        self._refresh_visible_windows()
+
+    def _leave_skill_selection(self) -> None:
+        """Return focus to the member-level status view."""
+
+        self.phase = StatusSelectionPhase.STATUS
+        self.status_window.active = True
+        self.skill_cursor.active = False
+        self.skill_description_window = None
+        self._refresh_visible_windows()
+
+    def _refresh_skill_description(self) -> None:
+        """Replace the bottom guide after the skill cursor moves."""
+
+        self.skill_description_window = self._build_skill_description_window()
+        self._refresh_visible_windows()
 
     def _switch_member(self, distance: int) -> None:
         """Move through the mock party, wrapping at both ends."""
@@ -384,6 +528,14 @@ class StatusScreenMock:
 
     def update(self, input_state: InputState) -> bool:
         """Update the view and report whether it should return to the menu."""
+
+        if self.phase is StatusSelectionPhase.SKILL:
+            if input_state.cancel.triggered:
+                self._leave_skill_selection()
+                return False
+            if self.skill_cursor.update(input_state.navigation):
+                self._refresh_skill_description()
+            return False
 
         if input_state.cancel.triggered:
             return True
@@ -398,9 +550,7 @@ class StatusScreenMock:
         ):
             self._switch_member(1)
         elif input_state.confirm.triggered:
-            language = next_language(self.settings.language)
-            self.settings = self.settings.with_language(language)
-            self._rebuild_window()
+            self._enter_skill_selection()
         return False
 
     def draw(self) -> None:
@@ -419,3 +569,5 @@ class StatusScreenMock:
             32,
             TRANSPARENT_INDEX,
         )
+        if self.phase is StatusSelectionPhase.SKILL:
+            self.skill_cursor.draw()
