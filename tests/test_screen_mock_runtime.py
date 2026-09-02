@@ -33,6 +33,7 @@ class ScreenMockRuntimeTest(unittest.TestCase):
             SCREEN_HEIGHT,
             title="Example Mock",
             fps=FPS,
+            quit_key=pyxel.KEY_NONE,
         )
         load.assert_called_once_with(str(APP_ROOT / "assets.pyxres"))
         load_pal.assert_called_once_with(str(APP_ROOT / "assets.pyxpal"))
@@ -59,6 +60,7 @@ class ScreenMockRuntimeTest(unittest.TestCase):
             SCREEN_HEIGHT,
             title="Scaled Mock",
             fps=FPS,
+            quit_key=pyxel.KEY_NONE,
             display_scale=4,
         )
 

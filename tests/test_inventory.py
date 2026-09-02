@@ -127,6 +127,53 @@ class InventorySystemTest(unittest.TestCase):
         self.assertFalse(inventory.can_discard(self.potion))
         self.assertFalse(inventory.discard(self.potion))
 
+    def test_item_and_equipment_stack_limits_are_enforced(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE")
+
+        consumables = InventorySystem(self.items, {self.potion.key: 99})
+        equipment_inventory = InventorySystem({dagger.key: dagger}, {dagger.key: 9})
+
+        self.assertFalse(consumables.add(self.potion))
+        self.assertFalse(equipment_inventory.add(dagger))
+        with self.assertRaises(ValueError):
+            InventorySystem(self.items, {self.potion.key: 100})
+        with self.assertRaises(ValueError):
+            InventorySystem({dagger.key: dagger}, {dagger.key: 10})
+
+    def test_multiple_add_and_remove_are_atomic(self) -> None:
+        inventory = InventorySystem(self.items, {self.potion.key: 95})
+
+        self.assertTrue(inventory.add(self.potion, 4))
+        self.assertEqual(inventory.quantity(self.potion), 99)
+        self.assertFalse(inventory.add(self.potion, 2))
+        self.assertEqual(inventory.quantity(self.potion), 99)
+        self.assertTrue(inventory.remove(self.potion, 98))
+        self.assertEqual(inventory.quantity(self.potion), 1)
+        self.assertFalse(inventory.remove(self.potion, 2))
+        self.assertEqual(inventory.quantity(self.potion), 1)
+
+    def test_equipped_copies_count_toward_equipment_limit(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE")
+        actor = member(initial={EquipmentSlot.RIGHT: dagger})
+        inventory = InventorySystem({dagger.key: dagger}, {dagger.key: 8})
+
+        self.assertEqual(inventory.equipped_quantity(dagger, (actor,)), 1)
+        self.assertEqual(inventory.total_quantity(dagger, (actor,)), 9)
+        self.assertEqual(inventory.remaining_capacity(dagger, (actor,)), 0)
+        self.assertFalse(inventory.add(dagger, members=(actor,)))
+
+        self.assertTrue(inventory.equip(actor, EquipmentSlot.RIGHT, None))
+        self.assertEqual(inventory.quantity(dagger), 9)
+        self.assertEqual(inventory.total_quantity(dagger, (actor,)), 9)
+
+    def test_loaded_total_quantity_rejects_inventory_plus_equipment_over_limit(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE")
+        actor = member(initial={EquipmentSlot.RIGHT: dagger})
+        inventory = InventorySystem({dagger.key: dagger}, {dagger.key: 9})
+
+        with self.assertRaises(ValueError):
+            inventory.validate_total_quantities((actor,))
+
     def test_equipment_exchange_returns_old_item_to_inventory(self) -> None:
         dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=100)
         sword = equipment("SWORD", "RIGHT", "SWORD", attack=20, hit=100)

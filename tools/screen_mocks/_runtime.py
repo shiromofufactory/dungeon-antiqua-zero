@@ -28,7 +28,10 @@ def initialize_screen_mock(
         or display_scale <= 0
     ):
         raise ValueError("display_scale must be a positive integer or None")
-    init_options = {"title": title, "fps": FPS}
+    # Esc is a logical cancel input in the screen mocks.  Let each mock decide
+    # whether cancel closes an overlay or exits instead of Pyxel terminating the
+    # process before the update callback can handle it.
+    init_options = {"title": title, "fps": FPS, "quit_key": pyxel.KEY_NONE}
     if display_scale is not None:
         init_options["display_scale"] = display_scale
     pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT, **init_options)

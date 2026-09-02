@@ -58,7 +58,6 @@ ITEM_INFO_X = 2
 ITEM_INFO_Y = 2
 ITEM_INFO_ROW_HEIGHT = 3
 ITEM_INFO_MAX_ROWS = 12
-ITEM_INVENTORY_MAX = 255
 ITEM_SUMMARY_VALUE_X = 13
 ITEM_SUMMARY_COUNT_LABEL_Y = 2
 ITEM_SUMMARY_COUNT_VALUE_Y = 5
@@ -373,7 +372,7 @@ class ItemScreenMock:
                         ITEM_SUMMARY_COUNT_LABEL_Y,
                     ),
                     self.localized_texts.create(
-                        f"{pad(owned_count, 3)}／{format_number(ITEM_INVENTORY_MAX)}",
+                        pad(owned_count, 3),
                         ITEM_SUMMARY_VALUE_X,
                         ITEM_SUMMARY_COUNT_VALUE_Y,
                     ),

@@ -7,6 +7,7 @@ from item import Item
 from member import FormationRow, Member, MemberDataError
 from resources import load_record_array
 from skill import Skill
+from shop import Shop
 from spell import Spell
 
 MOCK_PARTY_CHARACTER_KEYS = (
@@ -66,6 +67,22 @@ def load_mock_spells() -> dict[str, Spell]:
     return spells
 
 
+def load_mock_shops(items: dict[str, Item]) -> tuple[Shop, ...]:
+    """Load shops in shared-data order and resolve their fixed products."""
+
+    shops: list[Shop] = []
+    seen: set[str] = set()
+    for record in load_record_array("shops.json", APP_ROOT / "data"):
+        shop = Shop.from_record(record, items)
+        if shop.key in seen:
+            raise MockFixtureError(f"ショップキーが重複しています: {shop.key}")
+        seen.add(shop.key)
+        shops.append(shop)
+    if not shops:
+        raise MockFixtureError("ショップデータがありません")
+    return tuple(shops)
+
+
 def load_mock_party(
     items: dict[str, Item],
     skills: dict[str, Skill],
@@ -97,5 +114,6 @@ __all__ = [
     "load_mock_items",
     "load_mock_party",
     "load_mock_skills",
+    "load_mock_shops",
     "load_mock_spells",
 ]

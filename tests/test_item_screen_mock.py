@@ -121,7 +121,7 @@ class ItemScreenMockTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "１２１／２５５",
+                "１２１",
                 "きろくずみ：",
                 "１２１／１２１",
             ],
@@ -690,7 +690,7 @@ class ItemScreenMockTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "１２０／２５５",
+                "１２０",
                 "きろくずみ：",
                 "１２１／１２１",
             ],
@@ -706,7 +706,7 @@ class ItemScreenMockTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "　　１／２５５",
+                "　　１",
                 "きろくずみ：",
                 "　　１／　？？",
             ],

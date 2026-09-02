@@ -40,6 +40,11 @@ class InventorySystem:
                 raise TypeError("item quantity must be an integer")
             if quantity < 0:
                 raise ValueError("item quantity must not be negative")
+            limit = self.stack_limit(items[key])
+            if quantity > limit:
+                raise ValueError(
+                    f"item quantity exceeds stack limit {limit}: {key!r}"
+                )
             if quantity:
                 normalized[key] = quantity
 
@@ -107,6 +112,111 @@ class InventorySystem:
         key = self._item_key(item)
         return self._quantities.get(key, 0)
 
+    @staticmethod
+    def stack_limit(item: Item) -> int:
+        """Return ZERO's per-item ownership limit."""
+
+        if not isinstance(item, Item):
+            raise TypeError("item must be an Item")
+        return 99 if item.equip_type is ItemEquipType.ITEM else 9
+
+    def equipped_quantity(
+        self,
+        item: Item | str,
+        members: Iterable[Member],
+    ) -> int:
+        """Count matching copies currently equipped by the supplied party."""
+
+        key = self._item_key(item)
+        try:
+            party = tuple(members)
+        except TypeError as error:
+            raise TypeError("members must be an iterable of Member") from error
+        if not all(isinstance(member, Member) for member in party):
+            raise TypeError("members must contain only Member values")
+        return sum(
+            equipped.key == key
+            for member in party
+            for equipped in member.equipment.equipped_items()
+        )
+
+    def total_quantity(
+        self,
+        item: Item | str,
+        members: Iterable[Member] = (),
+    ) -> int:
+        """Return inventory plus equipped copies without duplicating save state."""
+
+        key = self._item_key(item)
+        return self.quantity(key) + self.equipped_quantity(key, members)
+
+    def remaining_capacity(
+        self,
+        item: Item | str,
+        members: Iterable[Member] = (),
+    ) -> int:
+        """Return how many more copies may be acquired."""
+
+        key = self._item_key(item)
+        return max(
+            0,
+            self.stack_limit(self._items[key]) - self.total_quantity(key, members),
+        )
+
+    def can_add(
+        self,
+        item: Item | str,
+        quantity: int = 1,
+        *,
+        members: Iterable[Member] = (),
+    ) -> bool:
+        """Return whether an acquisition respects the shared ownership limit."""
+
+        self._validate_positive_quantity(quantity)
+        return quantity <= self.remaining_capacity(item, members)
+
+    def add(
+        self,
+        item: Item | str,
+        quantity: int = 1,
+        *,
+        members: Iterable[Member] = (),
+    ) -> bool:
+        """Add multiple copies atomically when the ownership limit permits it."""
+
+        key = self._item_key(item)
+        if not self.can_add(key, quantity, members=members):
+            return False
+        self._increase(key, quantity)
+        return True
+
+    def can_remove(self, item: Item | str, quantity: int = 1) -> bool:
+        """Return whether the inventory contains the requested loose copies."""
+
+        self._validate_positive_quantity(quantity)
+        return quantity <= self.quantity(item)
+
+    def remove(self, item: Item | str, quantity: int = 1) -> bool:
+        """Remove multiple inventory copies atomically."""
+
+        key = self._item_key(item)
+        if not self.can_remove(key, quantity):
+            return False
+        self._decrease(key, quantity)
+        return True
+
+    def validate_total_quantities(self, members: Iterable[Member]) -> None:
+        """Reject loaded state whose inventory plus equipment exceeds a limit."""
+
+        party = tuple(members)
+        for key, item in self._items.items():
+            total = self.total_quantity(key, party)
+            limit = self.stack_limit(item)
+            if total > limit:
+                raise ValueError(
+                    f"total item quantity exceeds stack limit {limit}: {key!r}"
+                )
+
     def can_discard(self, item: Item | str) -> bool:
         """Return whether one owned item may be discarded.
 
@@ -122,12 +232,7 @@ class InventorySystem:
         key = self._item_key(item)
         if not self.can_discard(key):
             return False
-        remaining = self._quantities[key] - 1
-        if remaining:
-            self._quantities[key] = remaining
-        else:
-            del self._quantities[key]
-        return True
+        return self.remove(key)
 
     def can_equip(
         self,
@@ -321,18 +426,25 @@ class InventorySystem:
             + len(item.resistances) * 1.3
         )
 
-    def _increase(self, key: str) -> None:
-        self._quantities[key] = self._quantities.get(key, 0) + 1
+    def _increase(self, key: str, quantity: int = 1) -> None:
+        self._quantities[key] = self._quantities.get(key, 0) + quantity
         self._recorded_keys = self._recorded_keys | {key}
 
-    def _decrease(self, key: str) -> None:
+    def _decrease(self, key: str, amount: int = 1) -> None:
         quantity = self._quantities.get(key, 0)
-        if quantity <= 0:
+        if quantity < amount:
             raise ValueError(f"inventory item is not owned: {key!r}")
-        if quantity == 1:
+        if quantity == amount:
             del self._quantities[key]
         else:
-            self._quantities[key] = quantity - 1
+            self._quantities[key] = quantity - amount
+
+    @staticmethod
+    def _validate_positive_quantity(quantity: int) -> None:
+        if isinstance(quantity, bool) or not isinstance(quantity, int):
+            raise TypeError("quantity must be an integer")
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
 
     def _validate_equipment_arguments(
         self,

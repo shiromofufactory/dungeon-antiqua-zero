@@ -14,6 +14,7 @@ from tools.screen_mocks._fixtures import (
     load_mock_character_records,
     load_mock_items,
     load_mock_party,
+    load_mock_shops,
     load_mock_skills,
     load_mock_spells,
 )
@@ -34,6 +35,7 @@ from tools.screen_mocks.equipment import (
 from tools.screen_mocks.item import ItemMockDataError, ItemScreenMock
 from tools.screen_mocks.status import StatusMockDataError, StatusScreenMock
 from tools.screen_mocks.spell import SpellMockDataError, SpellScreenMock
+from tools.screen_mocks.shop import ShopMockDataError, ShopScreenMock
 from input import (
     Direction,
     InputAction,
@@ -59,9 +61,16 @@ from resources import (
 )
 from rendering import DIMMED_PALETTE, FadeEvent, FadePhase, FadeThroughBlack
 from skill import SkillDataError
+from shop import ShopDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
-from systems import DebugPartyEditor, DebugPartyError, InventorySystem
+from systems import (
+    MAX_GOLD,
+    DebugPartyEditor,
+    DebugPartyError,
+    InventorySystem,
+    ShopSystem,
+)
 
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -211,6 +220,11 @@ SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
 MENU_MOCK_SETTINGS_ENV = "DA0_MENU_MOCK_SETTINGS"
 MENU_BGM_ID = "da3-field"
+SHOP_SELECTOR_WINDOW_GRID = (4, 7, 56, 46)
+SHOP_SELECTOR_TEXT_X = 4
+SHOP_SELECTOR_CURSOR_X = 2
+SHOP_SELECTOR_FIRST_Y = 2
+SHOP_SELECTOR_ROW_HEIGHT = 3
 
 
 class MenuMockDataError(RuntimeError):
@@ -230,6 +244,8 @@ class MenuScreenChange(Enum):
     CLOSE_EQUIPMENT = auto()
     OPEN_STATUS = auto()
     CLOSE_STATUS = auto()
+    OPEN_SHOP = auto()
+    CLOSE_SHOP = auto()
 
 
 class MenuAlertEffect:
@@ -300,12 +316,19 @@ class MenuScreenMock:
         self.bgm.play(MENU_BGM_ID)
         if self.settings.display_mode is DisplayMode.SMOOTH:
             self._apply_display_mode()
-        self.save_data = SaveData()
+        self.save_data = SaveData(gold=MAX_GOLD)
         self.items = load_mock_items()
         self.inventory_system = InventorySystem.with_one_each(self.items)
         self.skills = load_mock_skills()
         self.spells = load_mock_spells()
         self.party = load_mock_party(self.items, self.skills)
+        self.shops = load_mock_shops(self.items)
+        self.shop_system = ShopSystem(
+            shops=self.shops,
+            inventory=self.inventory_system,
+            party=self.party,
+            save_data=self.save_data,
+        )
         self._force_reserve_front()
         self.character_records = load_mock_character_records()
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
@@ -321,11 +344,15 @@ class MenuScreenMock:
         self.fade = FadeThroughBlack()
         self.pending_screen_change: MenuScreenChange | None = None
         self.animate_main_windows_with_fade = False
-        self.showing_field = False
+        self.showing_field = True
         self.item_screen: ItemScreenMock | None = None
         self.equipment_screen: EquipmentScreenMock | None = None
         self.status_screen: StatusScreenMock | None = None
         self.spell_screen: SpellScreenMock | None = None
+        self.shop_screen: ShopScreenMock | None = None
+        self.shop_selector_window = None
+        self.shop_selector_cursor: WindowCursor | None = None
+        self.pending_shop = None
         self.debug_screen: DebugMenuScreenMock | None = None
         self.selected_member_index = 0
         self._build_main_windows()
@@ -988,6 +1015,12 @@ class MenuScreenMock:
             self._finish_equipment()
         elif change is MenuScreenChange.OPEN_STATUS:
             self._start_status()
+        elif change is MenuScreenChange.OPEN_SHOP:
+            self.showing_field = False
+            self._start_shop()
+        elif change is MenuScreenChange.CLOSE_SHOP:
+            self._finish_shop()
+            self.showing_field = True
         else:
             self._finish_status()
         self.pending_screen_change = None
@@ -1048,6 +1081,66 @@ class MenuScreenMock:
         self.selected_member_index = self.spell_screen.member_index
         self.spell_screen = None
         self.command_cursor.active = True
+
+    def _start_shop_selector(self) -> None:
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        self.shop_selector_window = windows.create(
+            *SHOP_SELECTOR_WINDOW_GRID,
+            tuple(
+                self.localized_texts.create(
+                    shop.key,
+                    SHOP_SELECTOR_TEXT_X,
+                    SHOP_SELECTOR_FIRST_Y + index * SHOP_SELECTOR_ROW_HEIGHT,
+                )
+                for index, shop in enumerate(self.shops)
+            ),
+        )
+        self.shop_selector_cursor = WindowCursor(
+            self.shop_selector_window,
+            tuple(
+                CursorTarget(
+                    SHOP_SELECTOR_CURSOR_X,
+                    SHOP_SELECTOR_FIRST_Y + index * SHOP_SELECTOR_ROW_HEIGHT,
+                    key=shop.key,
+                )
+                for index, shop in enumerate(self.shops)
+            ),
+        )
+
+    def _close_shop_selector(self) -> None:
+        self.shop_selector_window = None
+        self.shop_selector_cursor = None
+        self.pending_shop = None
+
+    def _start_shop(self) -> None:
+        shop = self.pending_shop
+        if shop is None:
+            raise MenuMockDataError("選択されたショップがありません")
+        self.shop_system = ShopSystem(
+            shops=self.shops,
+            inventory=self.inventory_system,
+            party=self.party,
+            save_data=self.save_data,
+        )
+        self.shop_screen = ShopScreenMock(
+            shop=shop,
+            shop_system=self.shop_system,
+            party=self.party,
+            inventory_system=self.inventory_system,
+            save_data=self.save_data,
+            spells=self.spells,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            on_invalid_action=self.alert.start,
+        )
+        self.pending_shop = None
+        self._close_shop_selector()
+
+    def _finish_shop(self) -> None:
+        self.shop_screen = None
+        self.pending_shop = None
+        self._close_shop_selector()
 
     def _finish_settings(self) -> None:
         self.settings_window = None
@@ -1183,8 +1276,33 @@ class MenuScreenMock:
         input_state = self.input_reader.poll()
         if self._update_fade():
             return
+        shop_screen = getattr(self, "shop_screen", None)
+        if shop_screen is not None:
+            if shop_screen.update(input_state):
+                self._begin_screen_change(MenuScreenChange.CLOSE_SHOP)
+            return
         if getattr(self, "showing_field", False):
-            if input_state.menu.triggered:
+            shop_selector_cursor = getattr(self, "shop_selector_cursor", None)
+            if shop_selector_cursor is not None:
+                if input_state.cancel.triggered:
+                    self._close_shop_selector()
+                    return
+                if input_state.confirm.triggered:
+                    selected_key = shop_selector_cursor.selected_key
+                    self.pending_shop = next(
+                        (shop for shop in self.shops if shop.key == selected_key),
+                        None,
+                    )
+                    if self.pending_shop is None:
+                        raise MenuMockDataError(
+                            f"選択されたショップが見つかりません: {selected_key!r}"
+                        )
+                    self._begin_screen_change(MenuScreenChange.OPEN_SHOP)
+                    return
+                shop_selector_cursor.update(input_state.navigation)
+            elif input_state.confirm.triggered:
+                self._start_shop_selector()
+            elif input_state.menu.triggered:
                 self._begin_screen_change(MenuScreenChange.SHOW_MENU)
             elif input_state.cancel.triggered:
                 pyxel.quit()
@@ -1310,6 +1428,10 @@ class MenuScreenMock:
         pyxel.cls(0)
         pyxel.camera(self.alert.camera_x, 0)
         try:
+            shop_screen = getattr(self, "shop_screen", None)
+            if shop_screen is not None:
+                shop_screen.draw()
+                return
             if getattr(self, "showing_field", False):
                 pyxel.blt(
                     0,
@@ -1320,6 +1442,12 @@ class MenuScreenMock:
                     SCREEN_WIDTH,
                     SCREEN_HEIGHT,
                 )
+                shop_selector_window = getattr(self, "shop_selector_window", None)
+                if shop_selector_window is not None:
+                    shop_selector_window.draw()
+                shop_selector_cursor = getattr(self, "shop_selector_cursor", None)
+                if shop_selector_cursor is not None:
+                    shop_selector_cursor.draw()
                 return
             item_screen = getattr(self, "item_screen", None)
             if item_screen is not None:
@@ -1443,6 +1571,8 @@ def main() -> int:
             SkillDataError,
             SpellDataError,
             SpellMockDataError,
+            ShopMockDataError,
+            ShopDataError,
             StatusMockDataError,
             TextCatalogError,
         ),

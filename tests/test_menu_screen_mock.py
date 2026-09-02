@@ -253,7 +253,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
         self.assertFalse(mock.animate_main_windows_with_fade)
-        self.assertFalse(mock.showing_field)
+        self.assertTrue(mock.showing_field)
         self.assertIsNone(mock.item_screen)
         self.assertIsNone(mock.equipment_screen)
         self.assertIsNone(mock.status_screen)
@@ -281,7 +281,7 @@ class MenuScreenMockTest(unittest.TestCase):
             [(text.text, text.x, text.y) for text in info_args[4]],
             [
                 ("Ｇｏｌｄ", 2, 2),
-                ("　　　　　０", 2, 5),
+                ("９９９９９９", 2, 5),
                 ("けいけんち", 2, 8),
                 ("　　　　　０", 2, 11),
                 ("なんいど", 2, 14),
@@ -1263,6 +1263,83 @@ class MenuScreenMockTest(unittest.TestCase):
         clear_screen.assert_called_once_with(0)
         mock.spell_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
+
+    def test_field_confirm_opens_shop_key_selector(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock(
+            poll=Mock(
+                return_value=InputState(confirm=InputButton(triggered=True))
+            )
+        )
+        mock.fade = FadeThroughBlack()
+        mock.shop_screen = None
+        mock.shop_selector_cursor = None
+        mock.showing_field = True
+        mock._start_shop_selector = Mock()
+
+        mock.update()
+
+        mock._start_shop_selector.assert_called_once_with()
+
+    @patch("tools.screen_mocks.menu.pyxel.quit")
+    def test_cancel_closes_shop_selector_and_restores_field_input(
+        self,
+        quit_game: Mock,
+    ) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        mock.alert = Mock()
+        mock.input_reader = Mock(
+            poll=Mock(
+                side_effect=(
+                    InputState(cancel=InputButton(triggered=True, held=True)),
+                    InputState(menu=InputButton(triggered=True, held=True)),
+                )
+            )
+        )
+        mock.fade = FadeThroughBlack()
+        mock.pending_screen_change = None
+        mock.shop_screen = None
+        mock.shop_selector_window = Mock()
+        selector_cursor = Mock()
+        mock.shop_selector_cursor = selector_cursor
+        mock.pending_shop = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.showing_field = True
+
+        mock.update()
+
+        self.assertIsNone(mock.shop_selector_window)
+        self.assertIsNone(mock.shop_selector_cursor)
+        self.assertIsNone(mock.pending_shop)
+        selector_cursor.update.assert_not_called()
+        quit_game.assert_not_called()
+
+        mock.update()
+
+        self.assertIs(mock.pending_screen_change, MenuScreenChange.SHOW_MENU)
+        quit_game.assert_not_called()
+
+    def test_shop_selector_reserves_selected_shop_for_fade_transition(self) -> None:
+        mock = MenuScreenMock.__new__(MenuScreenMock)
+        selected_shop = Mock(key="TEST_SHOP")
+        mock.alert = Mock()
+        mock.input_reader = Mock(
+            poll=Mock(
+                return_value=InputState(confirm=InputButton(triggered=True))
+            )
+        )
+        mock.fade = FadeThroughBlack()
+        mock.pending_screen_change = None
+        mock.shop_screen = None
+        mock.shop_selector_cursor = Mock(selected_key="TEST_SHOP")
+        mock.shops = (selected_shop,)
+        mock.showing_field = True
+
+        mock.update()
+
+        self.assertIs(mock.pending_shop, selected_shop)
+        self.assertIs(mock.pending_screen_change, MenuScreenChange.OPEN_SHOP)
 
     @patch("tools.screen_mocks.menu.WindowCursor")
     def test_selecting_fiora_and_reserve_swaps_their_order(
