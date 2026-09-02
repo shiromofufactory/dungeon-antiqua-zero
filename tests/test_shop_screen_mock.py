@@ -482,6 +482,20 @@ class ShopScreenMockTest(unittest.TestCase):
             self.screen.selected_item
         )
 
+    def test_equipped_marker_uses_fullwidth_japanese_glyph(self) -> None:
+        with (
+            patch("tools.screen_mocks._shop_party.pyxel.blt"),
+            patch("tools.screen_mocks._shop_party.pyxel.text") as draw_text,
+        ):
+            self.screen.party_panel.draw(self.items["DAGGER"])
+
+        draw_text.assert_called_once()
+        self.assertEqual(draw_text.call_args.args[2], "Ｅ")
+        self.assertIs(
+            draw_text.call_args.args[4],
+            self.screen.party_panel.japanese_font,
+        )
+
     def test_item_counts_are_right_aligned_without_moving_one_digit_count(
         self,
     ) -> None:

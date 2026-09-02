@@ -23,7 +23,7 @@ SHOP_PARTY_COLUMN_WIDTH = 42
 SHOP_PARTY_ICON_Y = SHOP_PARTY_WINDOW_GRID[1] * 4 + 6
 SHOP_PARTY_FACE_Y = SHOP_PARTY_ICON_Y + 8
 SHOP_PARTY_ICON_RIGHT_OFFSET = 24
-SHOP_PARTY_E_RIGHT_OFFSET = 26
+SHOP_PARTY_E_RIGHT_OFFSET = 24
 SHOP_PARTY_ICON_BANK = 0
 SHOP_PARTY_ICON_SIZE = 8
 SHOP_PARTY_UP_SOURCE = (192, 24)
@@ -54,7 +54,7 @@ class ShopPartyPanel:
         self.party = party[:SHOP_PARTY_MEMBER_COUNT]
         self.faces = faces
         self.palette_shifter = palette_shifter
-        self.english_font = fonts.font_for(Language.ENGLISH)
+        self.japanese_font = fonts.font_for(Language.JAPANESE)
         self.window: Window = window_factory.create(*SHOP_PARTY_WINDOW_GRID, ())
 
     @staticmethod
@@ -133,10 +133,10 @@ class ShopPartyPanel:
         if marker is ShopEquipmentMarker.EQUIPPED:
             pyxel.text(
                 face_x + SHOP_PARTY_E_RIGHT_OFFSET,
-                SHOP_PARTY_ICON_Y,
-                "E",
+                SHOP_PARTY_ICON_Y - 3,
+                "Ｅ",
                 DEFAULT_TEXT_COLOR,
-                self.english_font,
+                self.japanese_font,
             )
             return
         source = {
