@@ -8,7 +8,7 @@
 
 ### ゲーム本体リポジトリ（main）
 
-- Pyxelゲーム本体とプログラム設計文書を管理する。
+- Pyxelゲーム本体、機能ごとの詳細仕様、プログラム設計文書を管理する。
 - `content` 自体を共有コンテンツリポジトリのGit submoduleとして固定する。
 - `app/data` はsubmoduleから生成する実行時コピーとし、Git管理しない。
 - `app/images` は `content/images` から生成する実行時画像データとし、Git管理しない。
@@ -17,7 +17,7 @@
 ### 共有コンテンツリポジトリ（sub）
 
 - privateリポジトリ `shiromofufactory/dungeon-antiqua-zero-content` として独立した履歴を持つ。
-- `data/*.json` と `docs/da0.md` の正本を管理する。
+- `data/*.json` と、制作スタッフ向けの企画文書 `docs/da0.md` の正本を管理する。
 - ゲームとポータルで共有するPNG/GIF画像の正本を `images/` で管理する。
 - JSONの検証、Google Sheetsとの同期、スタッフポータルの生成と配備を担当する。
 - このリポジトリ単独でもスタッフが編集・レビューできる。
@@ -196,7 +196,16 @@ npm run content:put-data
 
 ## スタッフポータル
 
-ポータルは `docs/da0.md`、`data/*.json`、`images/` から生成するWebサイトである。JSON由来の表と画像リファレンスはMarkdownへ手作業で転記せず、`docs/da0.md` 内の `portal:` マーカーへビルド時に挿入する。
+ポータルはイラスト、PVなどを含む制作スタッフとの情報共有を目的とし、`docs/da0.md`、
+`data/*.json`、`images/` から生成する。ゲーム本体側の `docs/features/` に置く画面座標、Window寸法、
+カーソル挙動、文言キーなどの実装向け詳細仕様はポータルへ掲載しない。
+
+`docs/da0.md` には世界観、シナリオ、ゲーム体験、主要なゲームルールを記載する。機能単位の
+詳細仕様を同じファイルへ埋め込んだり、ポータル生成時だけ非表示にしたりせず、ゲーム本体側の
+`docs/features/` へ物理的に分離する。実際の表示文言は `data/texts.json` を正本とする。
+
+JSON由来の表と画像リファレンスはMarkdownへ手作業で転記せず、`docs/da0.md` 内の
+`portal:` マーカーへビルド時に挿入する。
 
 キャラクター表では `face_x`、`face_y` の座標値を列として表示せず、表の左端に
 `images/faces/faces_pc.png` から該当する32×32pxの顔を切り出して表示する。
