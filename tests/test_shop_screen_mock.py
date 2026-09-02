@@ -11,6 +11,11 @@ from tools.screen_mocks._fixtures import (
     load_mock_skills,
     load_mock_spells,
 )
+from tools.screen_mocks._shop_party import (
+    SHOP_PARTY_WINDOW_GRID,
+    ShopEquipmentMarker,
+    ShopPartyPanel,
+)
 from tools.screen_mocks.shop import (
     QUANTITY_ARROW_HEIGHT,
     QUANTITY_ARROW_LEFT_X,
@@ -19,12 +24,19 @@ from tools.screen_mocks.shop import (
     QUANTITY_ARROW_RIGHT_SOURCE,
     QUANTITY_ARROW_WIDTH,
     QUANTITY_ARROW_Y_ADJUSTMENT,
+    QUANTITY_FIRST_Y,
     QUANTITY_GUIDE_Y,
     QUANTITY_NUMBER_RIGHT_X,
     QUANTITY_PRICE_FIELD_WIDTH,
     QUANTITY_TEXT_HEIGHT,
     QUANTITY_TOTAL_VALUE_X,
     QUANTITY_TOTAL_Y,
+    RARE_CHOICE_WINDOW_GRID,
+    SHOP_BUY_LIST_VISIBLE_COUNT,
+    SHOP_BUY_OWNED_X,
+    SHOP_BUY_OWNED_Y,
+    SHOP_BUY_PRICE_X,
+    SHOP_BUY_PRICE_Y,
     SHOP_COMMAND_WINDOW_GRID,
     SHOP_COMMAND_TEXT_X,
     SHOP_GOLD_WINDOW_GRID,
@@ -129,8 +141,18 @@ class ShopScreenMockTest(unittest.TestCase):
         self.assertEqual(SHOP_GREETING_ROW_HEIGHT * 4, 12)
         self.assertEqual(self.screen.item_list_window.texts, ())
         self.assertEqual(self.screen.info_window.texts, ())
-        self.assertFalse(hasattr(self.screen, "party_panel"))
-        self.assertFalse(hasattr(self.screen, "party_window"))
+        self.assertEqual(len(self.screen.party_panel.party), 6)
+        self.assertEqual(self.screen.party_window.texts, ())
+        self.assertEqual(
+            (
+                self.screen.party_window.x,
+                self.screen.party_window.y,
+                self.screen.party_window.width,
+                self.screen.party_window.height,
+            ),
+            SHOP_PARTY_WINDOW_GRID,
+        )
+        self.assertNotIn(self.screen.party_window, self.screen.windows)
         self.assertEqual(SHOP_MESSAGE_WINDOW_GRID, (0, 47, 64, 13))
         self.assertEqual(
             [item.key for item in self.screen.shop.items],
@@ -165,20 +187,56 @@ class ShopScreenMockTest(unittest.TestCase):
         self.assertIs(self.screen.phase, ShopPhase.ITEM)
         self.assertEqual(self.inventory.quantity("POTION"), before_count + 3)
         self.assertEqual(self.save_data.gold, before_gold - 150)
-        self.assertIsNotNone(self.screen.purchase_message_window)
+        self.assertIsNotNone(self.screen.completion_message_window)
         self.assertIs(
             self.screen.windows[-1],
-            self.screen.purchase_message_window,
+            self.screen.completion_message_window,
         )
         self.assertEqual(
-            [text.text for text in self.screen.purchase_message_window.texts],
+            [text.text for text in self.screen.completion_message_window.texts],
             ["「ありがとね！　ほかにもどう？"],
         )
 
         self.screen.update(InputState(navigation=Direction.DOWN))
 
-        self.assertIsNone(self.screen.purchase_message_window)
-        self.assertIs(self.screen.windows[-1], self.screen.greeting_window)
+        self.assertIsNone(self.screen.completion_message_window)
+        self.assertIs(self.screen.windows[-1], self.screen.party_window)
+
+    def test_sell_shows_da2_completion_message(self) -> None:
+        self.screen.update(InputState(navigation=Direction.RIGHT))
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+        sold_item = self.screen.selected_item
+        before_count = self.inventory.quantity(sold_item)
+
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+
+        self.assertIs(self.screen.phase, ShopPhase.ITEM)
+        self.assertEqual(self.inventory.quantity(sold_item), before_count - 1)
+        self.assertIsNotNone(self.screen.completion_message_window)
+        self.assertIs(
+            self.screen.windows[-1],
+            self.screen.completion_message_window,
+        )
+        self.assertIsNone(self.screen.sell_price_window)
+        self.assertEqual(
+            [text.text for text in self.screen.completion_message_window.texts],
+            ["「オッケー！　ほかにも　うりたいものはある？"],
+        )
+
+        self.screen.update(InputState(navigation=Direction.DOWN))
+
+        self.assertIsNotNone(self.screen.completion_message_window)
+        self.assertIs(
+            self.screen.windows[-1],
+            self.screen.completion_message_window,
+        )
+        self.assertIsNone(self.screen.sell_price_window)
+
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+
+        self.assertIs(self.screen.phase, ShopPhase.QUANTITY)
+        self.assertIsNone(self.screen.completion_message_window)
 
     @patch("tools.screen_mocks.shop.Window.draw")
     def test_selected_command_keeps_an_inactive_cursor(
@@ -209,6 +267,27 @@ class ShopScreenMockTest(unittest.TestCase):
             self.screen.update(InputState(cancel=InputButton(triggered=True)))
             self.assertIs(self.screen.phase, ShopPhase.ITEM)
 
+    @patch("tools.screen_mocks.shop.Window.draw")
+    def test_quantity_selection_keeps_inactive_item_cursor(
+        self,
+        _draw_window: Mock,
+    ) -> None:
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+        self.screen.update(InputState(navigation=Direction.DOWN))
+        selected_key = self.screen.selected_item.key
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+
+        self.assertIs(self.screen.phase, ShopPhase.QUANTITY)
+        self.assertEqual(self.screen.item_cursor.selected_key, selected_key)
+        self.assertFalse(self.screen.item_cursor.active)
+        self.screen.item_cursor.draw = Mock()
+        self.screen.command_cursor.draw = Mock()
+        self.screen._draw_quantity_arrows = Mock()
+
+        self.screen.draw()
+
+        self.screen.item_cursor.draw.assert_called_once_with()
+
     @patch("tools.screen_mocks.shop.pyxel.blt")
     def test_quantity_window_shows_current_total_guide_and_inline_arrows(
         self,
@@ -221,8 +300,8 @@ class ShopScreenMockTest(unittest.TestCase):
         self.assertEqual(
             [(text.text, text.y) for text in texts],
             [
-                ("こすう", 4),
-                ("１", 4),
+                ("こすう", QUANTITY_FIRST_Y),
+                ("１", QUANTITY_FIRST_Y),
                 ("ごうけい", QUANTITY_TOTAL_Y),
                 ("　　　　５０　Ｇｏｌｄ", QUANTITY_TOTAL_Y),
                 (
@@ -323,10 +402,10 @@ class ShopScreenMockTest(unittest.TestCase):
             arrow_positions_at_nine,
         )
 
-    def test_item_list_uses_all_rows_for_names_and_owned_counts(self) -> None:
+    def test_buy_list_uses_eight_name_rows_and_selected_item_summary(self) -> None:
         self.screen.update(InputState(confirm=InputButton(triggered=True)))
 
-        self.assertIs(self.screen.windows[-1], self.screen.greeting_window)
+        self.assertIs(self.screen.windows[-1], self.screen.party_window)
         self.assertLess(
             self.screen.windows.index(self.screen.info_window),
             self.screen.windows.index(self.screen.item_list_window),
@@ -340,17 +419,92 @@ class ShopScreenMockTest(unittest.TestCase):
             "きずぐすり",
         )
         self.assertEqual(
-            list_texts[(SHOP_ITEM_COUNT_X, 2)],
-            "１",
+            list_texts[(SHOP_BUY_PRICE_X, SHOP_BUY_PRICE_Y)],
+            "　　　　５０　Ｇｏｌｄ",
         )
         self.assertEqual(
+            list_texts[(SHOP_BUY_OWNED_X, SHOP_BUY_OWNED_Y)],
+            "１こ　もっています",
+        )
+        self.assertNotIn((SHOP_ITEM_COUNT_X, SHOP_ITEM_FIRST_Y), list_texts)
+        self.assertEqual(
             len(self.screen.item_list_window.texts),
-            len(self.screen.shop.items) * 2,
+            len(self.screen.shop.items) + 2,
         )
-        self.assertFalse(
-            any("Ｇｏｌｄ" in text.text for text in self.screen.item_list_window.texts)
-        )
+        self.assertEqual(self.screen.visible_item_count, SHOP_BUY_LIST_VISIBLE_COUNT)
+        self.assertEqual(SHOP_BUY_LIST_VISIBLE_COUNT, 8)
         self.assertEqual(SHOP_LIST_VISIBLE_COUNT, 12)
+
+        self.screen.update(InputState(navigation=Direction.DOWN))
+        self.screen.update(InputState(navigation=Direction.DOWN))
+
+        summary = {
+            (text.x, text.y): text.text
+            for text in self.screen.item_list_window.texts
+        }
+        self.assertEqual(
+            summary[(SHOP_BUY_PRICE_X, SHOP_BUY_PRICE_Y)],
+            "　　　　２０　Ｇｏｌｄ",
+        )
+        self.assertEqual(
+            summary[(SHOP_BUY_OWNED_X, SHOP_BUY_OWNED_Y)],
+            "２こ　もっています",
+        )
+
+    def test_buy_uses_six_member_equipment_preview(self) -> None:
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+
+        self.assertIs(self.screen.windows[-1], self.screen.party_window)
+        self.assertEqual(len(self.screen.party_panel.party), 6)
+        self.assertIs(
+            ShopPartyPanel.marker_for(self.party[0], self.items["DAGGER"]),
+            ShopEquipmentMarker.EQUIPPED,
+        )
+        self.assertIs(
+            ShopPartyPanel.marker_for(self.party[1], self.items["DAGGER"]),
+            ShopEquipmentMarker.DOWN,
+        )
+        self.assertIs(
+            ShopPartyPanel.marker_for(self.party[0], self.items["LEATHER CAP"]),
+            ShopEquipmentMarker.UP,
+        )
+        self.assertIsNone(
+            ShopPartyPanel.marker_for(self.party[1], self.items["WAND of POISON"])
+        )
+
+        self.screen.party_panel.draw = Mock()
+        self.screen.command_cursor.draw = Mock()
+        self.screen.item_cursor.draw = Mock()
+        with patch("tools.screen_mocks.shop.Window.draw"):
+            self.screen.draw()
+
+        self.screen.party_panel.draw.assert_called_once_with(
+            self.screen.selected_item
+        )
+
+    def test_item_counts_are_right_aligned_without_moving_one_digit_count(
+        self,
+    ) -> None:
+        self.screen.update(InputState(navigation=Direction.RIGHT))
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+        one_digit_text = self.screen.item_list_window.texts[1]
+        one_digit_right = (
+            one_digit_text.x * 4
+            + one_digit_text.font.text_width(one_digit_text.text)
+        )
+
+        self.assertTrue(self.inventory.add("POTION", 9, members=self.party))
+        self.screen._refresh_trade_windows()
+        two_digit_text = self.screen.item_list_window.texts[1]
+
+        self.assertEqual(one_digit_text.x, SHOP_ITEM_COUNT_X)
+        self.assertEqual(two_digit_text.text, "１０")
+        self.assertEqual(
+            two_digit_text.x * 4
+            + two_digit_text.font.text_width(two_digit_text.text),
+            one_digit_right,
+        )
+        self.assertEqual(self.screen.visible_item_count, SHOP_LIST_VISIBLE_COUNT)
 
     def test_sell_overlays_unit_price_on_shopkeeper_message(self) -> None:
         self.screen.update(InputState(navigation=Direction.RIGHT))
@@ -364,7 +518,11 @@ class ShopScreenMockTest(unittest.TestCase):
             SHOP_ITEM_FIRST_Y + 11 * SHOP_ITEM_ROW_HEIGHT,
         )
         self.assertIsNotNone(self.screen.sell_price_window)
-        self.assertIs(self.screen.windows[-2], self.screen.greeting_window)
+        self.assertIs(self.screen.windows[-2], self.screen.sale_start_window)
+        self.assertEqual(
+            [text.text for text in self.screen.sale_start_window.texts],
+            ["「なにを　かいとればいいかな？"],
+        )
         self.assertIs(self.screen.windows[-1], self.screen.sell_price_window)
         self.assertEqual(
             (
@@ -410,16 +568,70 @@ class ShopScreenMockTest(unittest.TestCase):
         self.screen.update(InputState(confirm=InputButton(triggered=True)))
 
         self.assertIs(self.screen.phase, ShopPhase.RARE_CONFIRMATION)
+        self.assertEqual(
+            (
+                self.screen.rare_window.x,
+                self.screen.rare_window.y,
+                self.screen.rare_window.width,
+                self.screen.rare_window.height,
+            ),
+            SHOP_MESSAGE_WINDOW_GRID,
+        )
         self.assertIn(
             "「ウチでは　うれない　しなものだけど",
             [text.text for text in self.screen.rare_window.texts],
         )
+        self.assertEqual(
+            [text.y for text in self.screen.rare_window.texts],
+            [SHOP_GREETING_Y, SHOP_GREETING_Y + SHOP_GREETING_ROW_HEIGHT],
+        )
+        self.assertEqual(
+            (
+                self.screen.rare_choice_window.x,
+                self.screen.rare_choice_window.y,
+                self.screen.rare_choice_window.width,
+                self.screen.rare_choice_window.height,
+            ),
+            RARE_CHOICE_WINDOW_GRID,
+        )
+        self.assertEqual(self.screen.item_cursor.selected_key, rare_item.key)
+        self.assertFalse(self.screen.item_cursor.active)
+        self.screen.item_cursor.draw = Mock()
+        self.screen.command_cursor.draw = Mock()
+        self.screen.rare_cursor.draw = Mock()
+        with patch("tools.screen_mocks.shop.Window.draw"):
+            self.screen.draw()
+        self.screen.item_cursor.draw.assert_called_once_with()
         self.screen.update(InputState(confirm=InputButton(triggered=True)))
         self.assertIs(self.screen.phase, ShopPhase.ITEM)
         self.assertEqual(self.inventory.quantity(rare_item), before_count - 1)
         self.assertNotIn(rare_item, self.screen.shop.items)
 
-    def test_horizontal_input_does_nothing_in_item_list(self) -> None:
+    def test_sell_list_counts_only_unequipped_inventory(self) -> None:
+        self.assertEqual(self.inventory.quantity("DAGGER"), 1)
+        self.assertEqual(
+            self.inventory.equipped_quantity("DAGGER", self.party),
+            1,
+        )
+
+        self.screen.update(InputState(navigation=Direction.RIGHT))
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+
+        dagger_index = next(
+            index
+            for index, item in enumerate(self.screen.available_items)
+            if item.key == "DAGGER"
+        )
+        self.screen.selected_item_index = dagger_index
+        self.screen.scroll_offset = dagger_index
+        self.screen._refresh_trade_windows()
+        texts = list(self.screen.item_list_window.texts)
+        dagger_name_index = next(
+            index for index, text in enumerate(texts) if text.text == "ダガー"
+        )
+        self.assertEqual(texts[dagger_name_index + 1].text, "１")
+
+    def test_horizontal_input_does_nothing_in_buy_item_list(self) -> None:
         self.screen.update(InputState(confirm=InputButton(triggered=True)))
         dagger_index = next(
             index
@@ -443,6 +655,25 @@ class ShopScreenMockTest(unittest.TestCase):
             [text.text for text in self.screen.info_window.texts],
             lines,
         )
+
+    def test_horizontal_input_moves_one_page_in_sell_item_list(self) -> None:
+        self.screen.update(InputState(navigation=Direction.RIGHT))
+        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+
+        self.assertTrue(self.screen.item_list_window.horizontal_navigation)
+        first_key = self.screen.selected_item.key
+
+        self.screen.update(InputState(navigation=Direction.RIGHT))
+
+        self.assertEqual(self.screen.selected_item_index, SHOP_LIST_VISIBLE_COUNT)
+        self.assertEqual(self.screen.scroll_offset, SHOP_LIST_VISIBLE_COUNT)
+        self.assertNotEqual(self.screen.selected_item.key, first_key)
+
+        self.screen.update(InputState(navigation=Direction.LEFT))
+
+        self.assertEqual(self.screen.selected_item_index, 0)
+        self.assertEqual(self.screen.scroll_offset, 0)
+        self.assertEqual(self.screen.selected_item.key, first_key)
 
     def test_leave_command_closes_shop(self) -> None:
         self.screen.update(InputState(navigation=Direction.RIGHT))

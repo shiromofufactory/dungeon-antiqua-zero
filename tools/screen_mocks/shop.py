@@ -8,12 +8,15 @@ from enum import Enum, StrEnum
 import pyxel
 
 from tools._bootstrap import APP_ROOT
+from tools.screen_mocks._shop_party import ShopPartyPanel
+from tools.screen_mocks._text_layout import right_aligned_grid_x
 from input import InputAction, InputDevice, InputState
 from item import Item
 from item_detail import ItemDetailContext, build_item_detail
 from localization import Localizer, format_number
 from member import Member
-from resources import FontResources
+from rendering import PaletteShifter
+from resources import FontResources, ImageResources
 from shop import Shop
 from spell import Spell
 from state import Language, SaveData, Settings
@@ -44,12 +47,17 @@ SHOP_COMMAND_CURSOR_X = tuple(x - 2 for x in SHOP_COMMAND_TEXT_X)
 SHOP_COMMAND_Y = 2
 SHOP_GOLD_X = 4
 SHOP_GOLD_Y = 2
+SHOP_BUY_LIST_VISIBLE_COUNT = 8
 SHOP_LIST_VISIBLE_COUNT = 12
 SHOP_ITEM_TEXT_X = 4
 SHOP_ITEM_COUNT_X = 27
 SHOP_ITEM_CURSOR_X = 2
 SHOP_ITEM_FIRST_Y = 2
 SHOP_ITEM_ROW_HEIGHT = 3
+SHOP_BUY_PRICE_X = 4
+SHOP_BUY_PRICE_Y = 29
+SHOP_BUY_OWNED_X = 4
+SHOP_BUY_OWNED_Y = 32
 SHOP_INFO_X = 2
 SHOP_INFO_Y = 2
 SHOP_INFO_ROW_HEIGHT = 3
@@ -83,13 +91,12 @@ QUANTITY_ARROW_RIGHT_X = 32
 QUANTITY_TEXT_HEIGHT = 12
 QUANTITY_ARROW_Y_ADJUSTMENT = 2
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
-RARE_WINDOW_GRID = (4, 13, 56, 22)
-RARE_TEXT_X = 4
-RARE_TEXT_Y = 3
-RARE_CHOICE_X = 40
-RARE_CURSOR_X = 38
-RARE_YES_Y = 11
-RARE_NO_Y = 15
+RARE_CHOICE_WINDOW_GRID = (50, 47, 14, 10)
+RARE_CHOICE_X = 4
+RARE_CURSOR_X = 2
+RARE_YES_Y = 2
+RARE_NO_Y = 5
+FACES_IMAGE_ID = "faces/faces_pc"
 
 
 class ShopMode(StrEnum):
@@ -129,6 +136,8 @@ class ShopScreenMock:
         settings: Settings,
         texts: TextCatalog,
         fonts: FontResources,
+        faces: object | None = None,
+        palette_shifter: PaletteShifter | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         if not isinstance(shop, Shop):
@@ -160,6 +169,10 @@ class ShopScreenMock:
         self.settings = settings
         self.texts = texts
         self.fonts = fonts
+        self.faces = (
+            faces if faces is not None else ImageResources().image(FACES_IMAGE_ID)
+        )
+        self.palette_shifter = palette_shifter
         self.on_invalid_action = on_invalid_action
         self.phase = ShopPhase.COMMAND
         self.mode = ShopMode.BUY
@@ -169,9 +182,10 @@ class ShopScreenMock:
         self.trade_max_quantity = 0
         self.quantity_window = None
         self.quantity_value_text: WindowText | None = None
-        self.purchase_message_window = None
+        self.completion_message_window = None
         self.sell_price_window = None
         self.rare_window = None
+        self.rare_choice_window = None
         self.rare_cursor: WindowCursor | None = None
         self._build_windows()
 
@@ -205,6 +219,14 @@ class ShopScreenMock:
             else self.shop_system.sale_unit_price(item)
         )
 
+    @property
+    def visible_item_count(self) -> int:
+        return (
+            SHOP_BUY_LIST_VISIBLE_COUNT
+            if self.mode is ShopMode.BUY
+            else SHOP_LIST_VISIBLE_COUNT
+        )
+
     def _build_windows(self) -> None:
         self.localizer = Localizer(self.settings.language)
         self.localized_texts = LocalizedWindowTextFactory.from_language(
@@ -215,6 +237,17 @@ class ShopScreenMock:
         self.greeting_window = self._build_shopkeeper_message_window(
             "shop.greeting"
         )
+        self.sale_start_window = self._build_shopkeeper_message_window(
+            "shop.sale.start"
+        )
+        self.party_panel = ShopPartyPanel(
+            party=self.party,
+            window_factory=self._window_factory,
+            faces=self.faces,
+            fonts=self.fonts,
+            palette_shifter=self.palette_shifter,
+        )
+        self.party_window = self.party_panel.window
         self._build_trade_windows()
 
     def _build_shopkeeper_message_window(self, text_key: str) -> Window:
@@ -285,7 +318,11 @@ class ShopScreenMock:
         )
 
     def _build_sell_price_window(self) -> Window | None:
-        if self.phase is ShopPhase.COMMAND or self.mode is not ShopMode.SELL:
+        if (
+            self.phase is ShopPhase.COMMAND
+            or self.mode is not ShopMode.SELL
+            or self.completion_message_window is not None
+        ):
             return None
         if self.selected_item is None:
             return None
@@ -313,38 +350,43 @@ class ShopScreenMock:
             ()
             if self.phase is ShopPhase.COMMAND
             else items[
-                self.scroll_offset : self.scroll_offset + SHOP_LIST_VISIBLE_COUNT
+                self.scroll_offset : self.scroll_offset + self.visible_item_count
             ]
         )
         list_texts: list[WindowText] = []
         targets: list[CursorTarget] = []
         for row, item in enumerate(visible):
             y = SHOP_ITEM_FIRST_Y + row * SHOP_ITEM_ROW_HEIGHT
-            list_texts.extend(
-                (
-                    self.localized_texts.create(
-                        str(item.localized_name(self.localizer)),
-                        SHOP_ITEM_TEXT_X,
-                        y,
-                    ),
-                    self.localized_texts.create(
-                        format_number(
-                            self.inventory_system.total_quantity(
-                                item,
-                                self.party,
-                            )
-                        ),
-                        SHOP_ITEM_COUNT_X,
-                        y,
-                    ),
+            list_texts.append(
+                self.localized_texts.create(
+                    str(item.localized_name(self.localizer)),
+                    SHOP_ITEM_TEXT_X,
+                    y,
                 )
             )
+            if self.mode is ShopMode.SELL:
+                count_text = format_number(self.inventory_system.quantity(item))
+                list_texts.append(
+                    self.localized_texts.create(
+                        count_text,
+                        right_aligned_grid_x(
+                            count_text,
+                            reference_text=format_number(0),
+                            reference_x=SHOP_ITEM_COUNT_X,
+                            font=self.localized_texts.font,
+                        ),
+                        y,
+                    )
+                )
             targets.append(CursorTarget(SHOP_ITEM_CURSOR_X, y, key=item.key))
 
         selected = (
             None if self.phase is ShopPhase.COMMAND else self.selected_item
         )
-        scrollable = len(items) > SHOP_LIST_VISIBLE_COUNT
+        if self.mode is ShopMode.BUY and selected is not None:
+            list_texts.extend(self._buy_summary_texts(selected))
+
+        scrollable = len(items) > self.visible_item_count
         self.item_list_window = self._window_factory.create(
             *SHOP_LIST_WINDOW_GRID,
             tuple(list_texts),
@@ -365,9 +407,19 @@ class ShopScreenMock:
             self._info_texts(selected),
         )
         message_window = (
-            self.purchase_message_window
-            if self.purchase_message_window is not None
-            else self.greeting_window
+            self.completion_message_window
+            if self.completion_message_window is not None
+            else (
+                self.party_window
+                if self.mode is ShopMode.BUY
+                and self.phase is not ShopPhase.COMMAND
+                else (
+                    self.sale_start_window
+                    if self.mode is ShopMode.SELL
+                    and self.phase is not ShopPhase.COMMAND
+                    else self.greeting_window
+                )
+            )
         )
         self.sell_price_window = self._build_sell_price_window()
         windows = (
@@ -381,6 +433,38 @@ class ShopScreenMock:
             windows
             if self.sell_price_window is None
             else (*windows, self.sell_price_window)
+        )
+
+    def _buy_summary_texts(self, item: Item) -> tuple[WindowText, ...]:
+        price_text = self.texts.formatted_text(
+            "shop.price_display",
+            self.localizer,
+            {"PRICE": pad(item.price, 6)},
+        )
+        owned_text = self.texts.formatted_text(
+            "shop.owned_display",
+            self.localizer,
+            {
+                "COUNT": format_number(
+                    self.inventory_system.total_quantity(item, self.party)
+                )
+            },
+        )
+        if not price_text:
+            raise ShopMockDataError("shop.price_displayが見つかりません")
+        if not owned_text:
+            raise ShopMockDataError("shop.owned_displayが見つかりません")
+        return (
+            self.localized_texts.create(
+                price_text,
+                SHOP_BUY_PRICE_X,
+                SHOP_BUY_PRICE_Y,
+            ),
+            self.localized_texts.create(
+                owned_text,
+                SHOP_BUY_OWNED_X,
+                SHOP_BUY_OWNED_Y,
+            ),
         )
 
     def _info_texts(self, item: Item | None) -> tuple[WindowText, ...]:
@@ -418,7 +502,7 @@ class ShopScreenMock:
         self.mode = ShopMode(command.value)
         self.selected_item_index = 0
         self.scroll_offset = 0
-        self.purchase_message_window = None
+        self.completion_message_window = None
         if not self.available_items:
             self._invalid_action()
             return
@@ -429,8 +513,9 @@ class ShopScreenMock:
         self.phase = ShopPhase.COMMAND
         self.quantity_window = None
         self.quantity_value_text = None
-        self.purchase_message_window = None
+        self.completion_message_window = None
         self.rare_window = None
+        self.rare_choice_window = None
         self.rare_cursor = None
         self._refresh_trade_windows()
 
@@ -443,29 +528,31 @@ class ShopScreenMock:
         if self.selected_item_index == 0 and previous == len(items) - 1:
             self.scroll_offset = 0
         elif self.selected_item_index == len(items) - 1 and previous == 0:
-            self.scroll_offset = max(0, len(items) - SHOP_LIST_VISIBLE_COUNT)
+            self.scroll_offset = max(0, len(items) - self.visible_item_count)
         elif self.selected_item_index < self.scroll_offset:
             self.scroll_offset = self.selected_item_index
-        elif self.selected_item_index >= self.scroll_offset + SHOP_LIST_VISIBLE_COUNT:
-            self.scroll_offset = self.selected_item_index - SHOP_LIST_VISIBLE_COUNT + 1
-        self.purchase_message_window = None
+        elif self.selected_item_index >= self.scroll_offset + self.visible_item_count:
+            self.scroll_offset = self.selected_item_index - self.visible_item_count + 1
+        if self.mode is ShopMode.BUY:
+            self.completion_message_window = None
         self._refresh_trade_windows()
 
     def _move_page(self, distance: int) -> None:
         items = self.available_items
         if not items:
             return
-        next_index = self.selected_item_index + distance * SHOP_LIST_VISIBLE_COUNT
+        next_index = self.selected_item_index + distance * self.visible_item_count
         if next_index < 0:
             next_index = len(items) - 1
         elif next_index >= len(items):
             next_index = 0
         self.selected_item_index = next_index
         self.scroll_offset = min(
-            (next_index // SHOP_LIST_VISIBLE_COUNT) * SHOP_LIST_VISIBLE_COUNT,
-            max(0, len(items) - SHOP_LIST_VISIBLE_COUNT),
+            (next_index // self.visible_item_count) * self.visible_item_count,
+            max(0, len(items) - self.visible_item_count),
         )
-        self.purchase_message_window = None
+        if self.mode is ShopMode.BUY:
+            self.completion_message_window = None
         self._refresh_trade_windows()
 
     def _trade_max(self, item: Item) -> int:
@@ -486,7 +573,7 @@ class ShopScreenMock:
         self.phase = ShopPhase.QUANTITY
         self.trade_quantity = 1
         self.trade_max_quantity = maximum
-        self.purchase_message_window = None
+        self.completion_message_window = None
         self._refresh_trade_windows()
         self._build_quantity_window()
 
@@ -565,33 +652,22 @@ class ShopScreenMock:
         self._finish_transaction()
 
     def _start_rare_confirmation(self) -> None:
-        lines = self.texts.lines("shop.rare.confirm", self.localizer)
         yes = self._required_text("settings.yes")
         no = self._required_text("settings.no")
-        if not lines:
-            raise ShopMockDataError("shop.rare.confirmが見つかりません")
-        texts = [
-            self.localized_texts.create(
-                line,
-                RARE_TEXT_X,
-                RARE_TEXT_Y + row * SHOP_INFO_ROW_HEIGHT,
-            )
-            for row, line in enumerate(lines)
-        ]
-        texts.extend(
+        self.phase = ShopPhase.RARE_CONFIRMATION
+        self.quantity_window = None
+        self.rare_window = self._build_shopkeeper_message_window(
+            "shop.rare.confirm"
+        )
+        self.rare_choice_window = self._window_factory.create(
+            *RARE_CHOICE_WINDOW_GRID,
             (
                 self.localized_texts.create(yes, RARE_CHOICE_X, RARE_YES_Y),
                 self.localized_texts.create(no, RARE_CHOICE_X, RARE_NO_Y),
-            )
-        )
-        self.phase = ShopPhase.RARE_CONFIRMATION
-        self.quantity_window = None
-        self.rare_window = self._window_factory.create(
-            *RARE_WINDOW_GRID,
-            tuple(texts),
+            ),
         )
         self.rare_cursor = WindowCursor(
-            self.rare_window,
+            self.rare_choice_window,
             (
                 CursorTarget(RARE_CURSOR_X, RARE_YES_Y, key="yes"),
                 CursorTarget(RARE_CURSOR_X, RARE_NO_Y, key="no"),
@@ -612,21 +688,25 @@ class ShopScreenMock:
             self.phase = ShopPhase.ITEM
         else:
             self.phase = ShopPhase.ITEM
-            self.purchase_message_window = (
-                self._build_shopkeeper_message_window("shop.purchase.complete")
+            completion_key = (
+                "shop.purchase.complete"
                 if self.mode is ShopMode.BUY
-                else None
+                else "shop.sale.complete"
+            )
+            self.completion_message_window = (
+                self._build_shopkeeper_message_window(completion_key)
             )
         self.quantity_window = None
         self.quantity_value_text = None
         self.rare_window = None
+        self.rare_choice_window = None
         self.rare_cursor = None
         items = self.available_items
         if items:
             self.selected_item_index = min(self.selected_item_index, len(items) - 1)
             self.scroll_offset = min(
                 self.scroll_offset,
-                max(0, len(items) - SHOP_LIST_VISIBLE_COUNT),
+                max(0, len(items) - self.visible_item_count),
             )
         else:
             self._return_to_commands()
@@ -636,6 +716,7 @@ class ShopScreenMock:
     def _cancel_rare_confirmation(self) -> None:
         self.phase = ShopPhase.ITEM
         self.rare_window = None
+        self.rare_choice_window = None
         self.rare_cursor = None
         self._refresh_trade_windows()
 
@@ -707,7 +788,9 @@ class ShopScreenMock:
             return False
         navigation = input_state.navigation
         if navigation is not None:
-            if navigation.dy < 0:
+            if navigation.dx and self.mode is ShopMode.SELL:
+                self._move_page(-1 if navigation.dx < 0 else 1)
+            elif navigation.dy < 0:
                 self._move_item(-1)
                 self.item_list_window.set_vertical_navigation_pressed(-1)
             elif navigation.dy > 0:
@@ -718,14 +801,18 @@ class ShopScreenMock:
     def draw(self) -> None:
         for window in self.windows:
             window.draw()
+        if self.party_window in self.windows:
+            self.party_panel.draw(self.selected_item)
         self.command_cursor.draw()
-        if self.phase is ShopPhase.ITEM:
+        if self.phase is not ShopPhase.COMMAND:
             self.item_cursor.draw()
         if self.quantity_window is not None:
             self.quantity_window.draw()
             self._draw_quantity_arrows()
         if self.rare_window is not None:
             self.rare_window.draw()
+        if self.rare_choice_window is not None:
+            self.rare_choice_window.draw()
         if self.rare_cursor is not None:
             self.rare_cursor.draw()
 

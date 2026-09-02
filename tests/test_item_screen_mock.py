@@ -143,6 +143,23 @@ class ItemScreenMockTest(unittest.TestCase):
             132,
         )
 
+    def test_item_counts_are_right_aligned_without_moving_one_digit_count(
+        self,
+    ) -> None:
+        items = ItemScreenMock().items
+        first_key = next(iter(items))
+        inventory = InventorySystem(items, {first_key: 10})
+        mock = ItemScreenMock(items=items, inventory_system=inventory)
+
+        count_text = mock.item_list_window.texts[1]
+        one_digit_width = count_text.font.text_width("１")
+
+        self.assertEqual(count_text.text, "１０")
+        self.assertEqual(
+            count_text.x * 4 + count_text.font.text_width(count_text.text),
+            ITEM_COUNT_X * 4 + one_digit_width,
+        )
+
     @staticmethod
     def select_item(mock: ItemScreenMock, key: str) -> None:
         mock.phase = ItemSelectionPhase.ITEM
@@ -633,6 +650,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.CONFIRMATION)
         self.assertFalse(mock.item_list_window.active)
         self.assertFalse(mock.item_cursor.active)
+        self.assertEqual(mock.item_cursor.selected_key, discarded.key)
         self.assertEqual(
             (
                 mock.drop_confirmation_window.x,
@@ -651,6 +669,13 @@ class ItemScreenMockTest(unittest.TestCase):
             ),
             DROP_CONFIRM_CHOICE_WINDOW_GRID,
         )
+        mock.item_cursor.draw = Mock()
+        mock.category_cursor.draw = Mock()
+        mock.drop_confirmation_cursor.draw = Mock()
+        mock.party_panel.draw_faces = Mock()
+        with patch("ui.window.Window.draw"):
+            mock.draw()
+        mock.item_cursor.draw.assert_called_once_with()
         self.assertEqual(
             mock.drop_confirmation_window.texts[0].text,
             "きずぐすり　を　すてますか？",

@@ -1132,6 +1132,8 @@ class MenuScreenMock:
             settings=self.settings,
             texts=self.texts,
             fonts=self.fonts,
+            faces=self.faces,
+            palette_shifter=self.palette_shifter,
             on_invalid_action=self.alert.start,
         )
         self.pending_shop = None

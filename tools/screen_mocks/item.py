@@ -13,6 +13,7 @@ from tools.screen_mocks._fixtures import (
     load_mock_spells,
 )
 from tools.screen_mocks._party_status import PartyStatusPanel
+from tools.screen_mocks._text_layout import right_aligned_grid_x
 from input import InputState
 from item import Item
 from item_detail import item_detail_lines
@@ -293,10 +294,16 @@ class ItemScreenMock:
                 )
             )
             if show_count:
+                count_text = format_number(self.item_counts[item.key])
                 list_texts.append(
                     self.localized_texts.create(
-                        format_number(self.item_counts[item.key]),
-                        ITEM_COUNT_X,
+                        count_text,
+                        right_aligned_grid_x(
+                            count_text,
+                            reference_text=format_number(0),
+                            reference_x=ITEM_COUNT_X,
+                            font=self.localized_texts.font,
+                        ),
                         y,
                     )
                 )
@@ -634,7 +641,7 @@ class ItemScreenMock:
             window.draw()
         self.party_panel.draw_faces(self.dimmed_member_indexes)
         self.category_cursor.draw()
-        if self.phase is ItemSelectionPhase.ITEM:
+        if self.phase is not ItemSelectionPhase.CATEGORY:
             self.item_cursor.draw()
         if self.drop_confirmation_window is not None:
             self.drop_confirmation_window.draw()
