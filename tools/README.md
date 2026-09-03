@@ -66,6 +66,28 @@ npm run tools:mapchip-metadata -- --no-browser
 対話UIは `tools/mapchip_metadata/`、UIから独立した検証処理は `scripts/map_pipeline/` に置く。
 後続のマップエディタも同じ検証処理を利用する。
 
+## Map Editor
+
+タイルセットメタデータを使って地面とオブジェクトを配置し、制作用マップとゲーム用生成物を
+同時に保存するローカルWebツールである。仕様は
+[`docs/features/map-editor.md`](../docs/features/map-editor.md)を参照する。
+
+```sh
+npm run tools:map-editor
+```
+
+既定では `worldmap` マップを開く。`content/maps/sources/worldmap.json` がなければ、
+32×24セルの海で埋めた新規マップとして開始し、保存するまでファイルは作成しない。
+別マップを作る場合は、マップID、タイルセット、profileを指定する。
+
+```sh
+npm run tools:map-editor -- --map field_01 --tileset dungeon --profile dungeon
+```
+
+保存時に `content/maps/sources/<map_id>.json` と、Git管理外の
+`app/maps/<map_id>.json`、`app/maps/<map_id>.bin` を生成する。全マップを再生成する場合は
+`npm run maps:build` を使う。
+
 ## Screen Mocks
 
 画面モックの起動処理と疑似状態は `tools/screen_mocks/` に置く。仕様が確定して本編でも使う画面は `app/ui/` のOverlay／表示部品とし、モックから同じ実装へ疑似状態を渡す。

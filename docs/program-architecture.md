@@ -289,8 +289,9 @@ images.copy_region_to_bank(
 ## マップリソースの責務
 
 マップチップ画像、タイルセットメタデータ、制作用マップ、ゲーム用生成物を同じものとして
-扱わない。形式と制作手順の詳細は
-[`features/map-chip-metadata-tool.md`](./features/map-chip-metadata-tool.md) を参照する。
+扱わない。タイルセット形式は
+[`features/map-chip-metadata-tool.md`](./features/map-chip-metadata-tool.md)、マップ制作と生成形式は
+[`features/map-editor.md`](./features/map-editor.md)を参照する。
 
 - `content/images/mapchips`: 編集元となるマップチップ画像
 - `content/maps/tilesets`: 地面、境界、表示候補、オブジェクト、通行設定の正本

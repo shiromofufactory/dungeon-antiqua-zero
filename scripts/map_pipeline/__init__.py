@@ -12,6 +12,17 @@ from .tileset import (
     select_boundary_rule,
     validate_tileset,
 )
+from .map_source import (
+    CompiledMap,
+    MapSourceError,
+    compile_map,
+    initial_map_source,
+    load_map_source,
+    resolve_map,
+    save_compiled_map,
+    save_map_source,
+    validate_map_source,
+)
 
 __all__ = (
     "Diagnostic",
@@ -24,4 +35,13 @@ __all__ = (
     "save_tileset",
     "select_boundary_rule",
     "validate_tileset",
+    "CompiledMap",
+    "MapSourceError",
+    "compile_map",
+    "initial_map_source",
+    "load_map_source",
+    "resolve_map",
+    "save_compiled_map",
+    "save_map_source",
+    "validate_map_source",
 )

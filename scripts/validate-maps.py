@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate map tileset authoring metadata without starting the editor."""
+"""Validate tilesets and authoring-time map sources without starting editors."""
 
 from __future__ import annotations
 
@@ -8,7 +8,13 @@ import os
 from pathlib import Path
 import sys
 
-from map_pipeline import load_tileset, resolve_source_image, validate_tileset
+from map_pipeline import (
+    load_map_source,
+    load_tileset,
+    resolve_source_image,
+    validate_map_source,
+    validate_tileset,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +32,7 @@ def parse_args() -> argparse.Namespace:
         "--tileset",
         help="指定したタイルセットIDだけを検証します。",
     )
+    parser.add_argument("--map", dest="map_id", help="指定した制作用マップIDだけを検証します。")
     return parser.parse_args()
 
 
@@ -46,6 +53,18 @@ def tileset_paths(content_root: Path, tileset_id: str | None) -> list[Path]:
     return paths
 
 
+def map_paths(content_root: Path, map_id: str | None) -> list[Path]:
+    source_dir = content_root / "maps" / "sources"
+    if map_id is not None:
+        if not map_id or not map_id.replace("_", "a").isalnum():
+            raise ValueError("マップIDが不正です。")
+        path = source_dir / f"{map_id}.json"
+        if not path.is_file():
+            raise ValueError(f"制作用マップが見つかりません: {path}")
+        return [path]
+    return sorted(source_dir.glob("*.json")) if source_dir.is_dir() else []
+
+
 def main() -> int:
     args = parse_args()
     content_root = args.content_root.resolve()
@@ -54,8 +73,11 @@ def main() -> int:
     warnings = 0
     try:
         paths = tileset_paths(content_root, args.tileset)
+        loaded_tilesets = {}
         for path in paths:
             data = load_tileset(path)
+            if isinstance(data.get("tileset_id"), str):
+                loaded_tilesets[data["tileset_id"]] = data
             image_id = data.get("source_image_id")
             image_path = (
                 resolve_source_image(content_root, image_id)
@@ -73,11 +95,35 @@ def main() -> int:
                     errors += 1
                 else:
                     warnings += 1
+        sources = map_paths(content_root, args.map_id)
+        for path in sources:
+            data = load_map_source(path)
+            tileset_id = data.get("tileset_id")
+            tileset = loaded_tilesets.get(tileset_id)
+            if tileset is None and isinstance(tileset_id, str):
+                tileset_path = content_root / "maps" / "tilesets" / f"{tileset_id}.json"
+                if tileset_path.is_file():
+                    tileset = load_tileset(tileset_path)
+            print(path.relative_to(content_root).as_posix())
+            if tileset is None:
+                print(f"  ERROR tileset_id: タイルセットが見つかりません: {tileset_id}")
+                errors += 1
+                continue
+            diagnostics = validate_map_source(data, tileset)
+            if not diagnostics:
+                print("  OK")
+            for diagnostic in diagnostics:
+                label = "ERROR" if diagnostic.severity == "error" else "WARNING"
+                print(f"  {label} {diagnostic.path}: {diagnostic.message}")
+                if diagnostic.severity == "error":
+                    errors += 1
+                else:
+                    warnings += 1
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
 
-    print(f"検証完了: {len(paths)} tileset, {errors} error, {warnings} warning")
+    print(f"検証完了: {len(paths)} tileset, {len(sources)} map, {errors} error, {warnings} warning")
     return 1 if errors else 0
 
 
