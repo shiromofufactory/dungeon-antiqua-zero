@@ -1,4 +1,4 @@
-"""Debug menu view used by the connected menu-screen mock."""
+"""Debug menu view used by the connected field mock."""
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ class NumericEntry:
 
 
 class DebugMenuScreenMock:
-    """Edit level, gold, and party membership inside the menu mock."""
+    """Edit level, gold, and party membership inside the field mock."""
 
     def __init__(
         self,

@@ -254,6 +254,16 @@ def _resolve_visual(
     }
 
 
+def _object_draw_key(
+    instance: Mapping[str, Any],
+    definitions: Mapping[str, Mapping[str, Any]],
+) -> tuple[int, int, int, str]:
+    """Sort back-to-front by lower edge, then use authoring order for ties."""
+    definition = definitions[instance["definition_id"]]
+    bottom_y = instance["origin"][1] + definition["size"][1] - 1
+    return bottom_y, instance["order"], instance["origin"][0], instance["id"]
+
+
 def resolve_map(
     data: Mapping[str, Any],
     tileset: Mapping[str, Any],
@@ -297,7 +307,7 @@ def resolve_map(
     definitions = {item["id"]: item for item in tileset.get("objects", [])}
     sorted_instances = sorted(
         data["objects"],
-        key=lambda item: (item["order"], item["origin"][1], item["origin"][0], item["id"]),
+        key=lambda item: _object_draw_key(item, definitions),
     )
     object_cells: list[dict[str, Any]] = []
     collision = [grounds_by_id[data["grounds"][y][x]]["collision"] == "blocked" for y in range(height) for x in range(width)]

@@ -15,6 +15,15 @@ from .images import (
     ImageResourceError,
     ImageResources,
 )
+from .maps import (
+    MAP_TILE_SIZE,
+    CompiledMap,
+    MapAnimation,
+    MapAnimationFrame,
+    MapObjectTile,
+    MapResourceError,
+    MapResources,
+)
 
 
 __all__ = [
@@ -30,6 +39,13 @@ __all__ = [
     "ImageEntry",
     "ImageResourceError",
     "ImageResources",
+    "MAP_TILE_SIZE",
+    "CompiledMap",
+    "MapAnimation",
+    "MapAnimationFrame",
+    "MapObjectTile",
+    "MapResourceError",
+    "MapResources",
     "load_record_array",
     "list_bgm_ids",
 ]

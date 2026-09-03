@@ -21,7 +21,7 @@
     "tools:mapchip-metadata": "python3 -B -m tools.mapchip_metadata",
     "tools:map-editor": "python3 -B -m tools.map_editor",
     "tools:screen-mock:battle": "python3 -B -m tools.screen_mocks.battle",
-    "tools:screen-mock:menu": "python3 -B -m tools.screen_mocks.menu",
+    "tools:screen-mock:field": "python3 -B -m tools.screen_mocks.field",
     "portal:build": "npm --prefix content run portal:build",
     "portal:serve": "npm --prefix content run portal:serve",
     "portal:preview": "npm --prefix content run portal:preview"

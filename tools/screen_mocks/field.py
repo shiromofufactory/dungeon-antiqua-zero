@@ -1,4 +1,4 @@
-"""Display the current menu-screen layout mock."""
+"""Run the connected field-movement and menu-screen mock."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ from ui.spell_menu import (
     SpellMenuOverlay,
 )
 from ui.shop import ShopOverlay, ShopUiDataError
+from field import FieldMovement, FieldPosition
 from input import (
     Direction,
     InputAction,
@@ -67,8 +68,16 @@ from resources import (
     FontResources,
     ImageResourceError,
     ImageResources,
+    MapResourceError,
+    MapResources,
 )
-from rendering import DIMMED_PALETTE, FadeEvent, FadePhase, FadeThroughBlack
+from rendering import (
+    DIMMED_PALETTE,
+    FadeEvent,
+    FadePhase,
+    FadeThroughBlack,
+    FieldRenderer,
+)
 from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
@@ -185,7 +194,8 @@ LANGUAGE_SEQUENCE = (
 DISPLAY_SEQUENCE = (DisplayMode.PIXEL, DisplayMode.SMOOTH)
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
-FIELD_BACKGROUND_IMAGE_ID = "mock/bg_field"
+WORLD_MAP_ID = "worldmap"
+WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
 PARTY_WINDOW_GRID = (0, 0, 48, 60)
 PARTY_MEMBER_ROW_HEIGHT = 9
 PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE = 11
@@ -227,8 +237,8 @@ CONFIRMATION_YES_Y = 8
 CONFIRMATION_NO_Y = 11
 SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
-MENU_MOCK_SETTINGS_ENV = "DA0_MENU_MOCK_SETTINGS"
-MENU_BGM_ID = "da3-field"
+FIELD_MOCK_SETTINGS_ENV = "DA0_FIELD_MOCK_SETTINGS"
+FIELD_BGM_ID = "da3-field"
 SHOP_SELECTOR_WINDOW_GRID = (4, 7, 56, 46)
 SHOP_SELECTOR_TEXT_X = 4
 SHOP_SELECTOR_CURSOR_X = 2
@@ -236,12 +246,12 @@ SHOP_SELECTOR_FIRST_Y = 2
 SHOP_SELECTOR_ROW_HEIGHT = 3
 
 
-class MenuMockDataError(RuntimeError):
-    """Raised when localized data required by the menu mock is unavailable."""
+class FieldMockDataError(RuntimeError):
+    """Raised when localized data required by the field mock is unavailable."""
 
 
-class MenuScreenChange(Enum):
-    """Menu-screen replacement applied only while the fade is fully black."""
+class FieldScreenChange(Enum):
+    """Field-mock screen replacement applied only while fully black."""
 
     SHOW_FIELD = auto()
     SHOW_MENU = auto()
@@ -297,20 +307,20 @@ def localized_menu_texts(
     for key in keys:
         text = catalog.text(key, localizer)
         if not text:
-            raise MenuMockDataError(f"メニューモック用テキストが見つかりません: {key}")
+            raise FieldMockDataError(f"フィールドモック用テキストが見つかりません: {key}")
         localized[key] = text
 
     close_guide = localized[MENU_CLOSE_GUIDE_TEXT_KEY]
     if close_guide.count("%CANCEL%") != 1:
-        raise MenuMockDataError(f"{MENU_CLOSE_GUIDE_TEXT_KEY}には%CANCEL%が1つ必要です")
+        raise FieldMockDataError(f"{MENU_CLOSE_GUIDE_TEXT_KEY}には%CANCEL%が1つ必要です")
     return localized
 
 
-class MenuScreenMock:
+class FieldScreenMock:
     def __init__(self) -> None:
         self.settings = self._settings_from_environment()
         self.palette_shifter = initialize_screen_mock(
-            "Dungeon Antiqua ZERO Menu Screen Mock",
+            "Dungeon Antiqua ZERO Field Mock",
             display_scale=(
                 None if self.settings.screen_scale == 5 else self.settings.screen_scale
             ),
@@ -322,7 +332,7 @@ class MenuScreenMock:
 
         self._apply_se_volume()
         self.bgm = BgmPlayer(volume=self.settings.bgm_volume)
-        self.bgm.play(MENU_BGM_ID)
+        self.bgm.play(FIELD_BGM_ID)
         if self.settings.display_mode is DisplayMode.SMOOTH:
             self._apply_display_mode()
         self.save_data = SaveData(gold=MAX_GOLD)
@@ -344,14 +354,23 @@ class MenuScreenMock:
         self.fonts = FontResources()
         images = ImageResources()
         self.faces = images.image(FACES_IMAGE_ID)
-        self.field_background = images.image(FIELD_BACKGROUND_IMAGE_ID)
+        self.world_map = MapResources().map(WORLD_MAP_ID)
+        self.field = FieldMovement(
+            self.world_map,
+            start=WORLD_MAP_START_POSITION,
+        )
+        self.field_renderer = FieldRenderer(
+            self.world_map,
+            screen_width=SCREEN_WIDTH,
+            screen_height=SCREEN_HEIGHT,
+        )
         self.settings_window = None
         self.settings_cursor: WindowCursor | None = None
         self.confirmation_window = None
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
         self.fade = FadeThroughBlack()
-        self.pending_screen_change: MenuScreenChange | None = None
+        self.pending_screen_change: FieldScreenChange | None = None
         self.animate_main_windows_with_fade = False
         self.showing_field = True
         self.item_screen: ItemMenuOverlay | None = None
@@ -370,14 +389,14 @@ class MenuScreenMock:
 
     @staticmethod
     def _settings_from_environment() -> Settings:
-        serialized = os.environ.get(MENU_MOCK_SETTINGS_ENV)
+        serialized = os.environ.get(FIELD_MOCK_SETTINGS_ENV)
         if serialized is None:
             return Settings()
         try:
             data = json.loads(serialized)
             return Settings.from_dict(data)
         except (json.JSONDecodeError, TypeError, ValueError):
-            os.environ.pop(MENU_MOCK_SETTINGS_ENV, None)
+            os.environ.pop(FIELD_MOCK_SETTINGS_ENV, None)
             return Settings()
 
     @staticmethod
@@ -976,24 +995,24 @@ class MenuScreenMock:
         else:
             self.command_cursor.active = True
 
-    def _begin_screen_change(self, change: MenuScreenChange) -> None:
+    def _begin_screen_change(self, change: FieldScreenChange) -> None:
         """Reserve one menu-related screen replacement and begin fading out."""
 
-        if not isinstance(change, MenuScreenChange):
-            raise TypeError("menu screen change must be a MenuScreenChange")
+        if not isinstance(change, FieldScreenChange):
+            raise TypeError("field screen change must be a FieldScreenChange")
         if getattr(self, "pending_screen_change", None) is not None:
-            raise RuntimeError("menu screen change is already pending")
+            raise RuntimeError("field screen change is already pending")
         fade = getattr(self, "fade", None)
         if fade is None:
             fade = FadeThroughBlack()
             self.fade = fade
         self.pending_screen_change = change
         if change in (
-            MenuScreenChange.SHOW_FIELD,
-            MenuScreenChange.OPEN_ITEM,
-            MenuScreenChange.OPEN_SPELL,
-            MenuScreenChange.OPEN_EQUIPMENT,
-            MenuScreenChange.OPEN_STATUS,
+            FieldScreenChange.SHOW_FIELD,
+            FieldScreenChange.OPEN_ITEM,
+            FieldScreenChange.OPEN_SPELL,
+            FieldScreenChange.OPEN_EQUIPMENT,
+            FieldScreenChange.OPEN_STATUS,
         ):
             self.command_cursor.active = False
         fade.start()
@@ -1003,31 +1022,31 @@ class MenuScreenMock:
 
         change = self.pending_screen_change
         if change is None:
-            raise RuntimeError("fade midpoint has no pending menu screen change")
-        if change is MenuScreenChange.SHOW_FIELD:
+            raise RuntimeError("fade midpoint has no pending field screen change")
+        if change is FieldScreenChange.SHOW_FIELD:
             self.showing_field = True
-        elif change is MenuScreenChange.SHOW_MENU:
+        elif change is FieldScreenChange.SHOW_MENU:
             self.showing_field = False
             self.command_cursor.active = True
             self._restart_main_windows_for_fade_in()
-        elif change is MenuScreenChange.OPEN_ITEM:
+        elif change is FieldScreenChange.OPEN_ITEM:
             self._start_item()
-        elif change is MenuScreenChange.CLOSE_ITEM:
+        elif change is FieldScreenChange.CLOSE_ITEM:
             self._finish_item()
-        elif change is MenuScreenChange.OPEN_SPELL:
+        elif change is FieldScreenChange.OPEN_SPELL:
             self._start_spell()
-        elif change is MenuScreenChange.CLOSE_SPELL:
+        elif change is FieldScreenChange.CLOSE_SPELL:
             self._finish_spell()
-        elif change is MenuScreenChange.OPEN_EQUIPMENT:
+        elif change is FieldScreenChange.OPEN_EQUIPMENT:
             self._start_equipment()
-        elif change is MenuScreenChange.CLOSE_EQUIPMENT:
+        elif change is FieldScreenChange.CLOSE_EQUIPMENT:
             self._finish_equipment()
-        elif change is MenuScreenChange.OPEN_STATUS:
+        elif change is FieldScreenChange.OPEN_STATUS:
             self._start_status()
-        elif change is MenuScreenChange.OPEN_SHOP:
+        elif change is FieldScreenChange.OPEN_SHOP:
             self.showing_field = False
             self._start_shop()
-        elif change is MenuScreenChange.CLOSE_SHOP:
+        elif change is FieldScreenChange.CLOSE_SHOP:
             self._finish_shop()
             self.showing_field = True
         else:
@@ -1124,7 +1143,7 @@ class MenuScreenMock:
     def _start_shop(self) -> None:
         shop = self.pending_shop
         if shop is None:
-            raise MenuMockDataError("選択されたショップがありません")
+            raise FieldMockDataError("選択されたショップがありません")
         self.shop_system = ShopSystem(
             shops=self.shops,
             inventory=self.inventory_system,
@@ -1259,7 +1278,7 @@ class MenuScreenMock:
             self.settings_cursor.active = True
 
     def _restart_mock(self) -> None:
-        os.environ[MENU_MOCK_SETTINGS_ENV] = json.dumps(
+        os.environ[FIELD_MOCK_SETTINGS_ENV] = json.dumps(
             self.settings.to_dict(),
             ensure_ascii=True,
         )
@@ -1290,7 +1309,7 @@ class MenuScreenMock:
         shop_screen = getattr(self, "shop_screen", None)
         if shop_screen is not None:
             if shop_screen.update(input_state):
-                self._begin_screen_change(MenuScreenChange.CLOSE_SHOP)
+                self._begin_screen_change(FieldScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
             shop_selector_cursor = getattr(self, "shop_selector_cursor", None)
@@ -1305,38 +1324,40 @@ class MenuScreenMock:
                         None,
                     )
                     if self.pending_shop is None:
-                        raise MenuMockDataError(
+                        raise FieldMockDataError(
                             f"選択されたショップが見つかりません: {selected_key!r}"
                         )
-                    self._begin_screen_change(MenuScreenChange.OPEN_SHOP)
+                    self._begin_screen_change(FieldScreenChange.OPEN_SHOP)
                     return
                 shop_selector_cursor.update(input_state.navigation)
             elif input_state.confirm.triggered:
                 self._start_shop_selector()
             elif input_state.menu.triggered:
-                self._begin_screen_change(MenuScreenChange.SHOW_MENU)
+                self._begin_screen_change(FieldScreenChange.SHOW_MENU)
             elif input_state.cancel.triggered:
                 pyxel.quit()
+            else:
+                self.field.update(input_state.held_direction)
             return
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
             if item_screen.update(input_state):
-                self._begin_screen_change(MenuScreenChange.CLOSE_ITEM)
+                self._begin_screen_change(FieldScreenChange.CLOSE_ITEM)
             return
         spell_screen = getattr(self, "spell_screen", None)
         if spell_screen is not None:
             if spell_screen.update(input_state):
-                self._begin_screen_change(MenuScreenChange.CLOSE_SPELL)
+                self._begin_screen_change(FieldScreenChange.CLOSE_SPELL)
             return
         equipment_screen = getattr(self, "equipment_screen", None)
         if equipment_screen is not None:
             if equipment_screen.update(input_state):
-                self._begin_screen_change(MenuScreenChange.CLOSE_EQUIPMENT)
+                self._begin_screen_change(FieldScreenChange.CLOSE_EQUIPMENT)
             return
         status_screen = getattr(self, "status_screen", None)
         if status_screen is not None:
             if status_screen.update(input_state):
-                self._begin_screen_change(MenuScreenChange.CLOSE_STATUS)
+                self._begin_screen_change(FieldScreenChange.CLOSE_STATUS)
             return
         debug_screen = getattr(self, "debug_screen", None)
         if debug_screen is not None:
@@ -1401,28 +1422,28 @@ class MenuScreenMock:
             return
 
         if input_state.cancel.triggered:
-            self._begin_screen_change(MenuScreenChange.SHOW_FIELD)
+            self._begin_screen_change(FieldScreenChange.SHOW_FIELD)
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "item":
-            self._begin_screen_change(MenuScreenChange.OPEN_ITEM)
+            self._begin_screen_change(FieldScreenChange.OPEN_ITEM)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "spell"
         ):
-            self._begin_screen_change(MenuScreenChange.OPEN_SPELL)
+            self._begin_screen_change(FieldScreenChange.OPEN_SPELL)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "equip"
         ):
-            self._begin_screen_change(MenuScreenChange.OPEN_EQUIPMENT)
+            self._begin_screen_change(FieldScreenChange.OPEN_EQUIPMENT)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "status"
         ):
-            self._begin_screen_change(MenuScreenChange.OPEN_STATUS)
+            self._begin_screen_change(FieldScreenChange.OPEN_STATUS)
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "sort":
             self._start_sort()
@@ -1444,15 +1465,7 @@ class MenuScreenMock:
                 shop_screen.draw()
                 return
             if getattr(self, "showing_field", False):
-                pyxel.blt(
-                    0,
-                    0,
-                    self.field_background,
-                    0,
-                    0,
-                    SCREEN_WIDTH,
-                    SCREEN_HEIGHT,
-                )
+                self.field_renderer.draw(self.field)
                 shop_selector_window = getattr(self, "shop_selector_window", None)
                 if shop_selector_window is not None:
                     shop_selector_window.draw()
@@ -1566,7 +1579,7 @@ class MenuScreenMock:
 
 def main() -> int:
     return run_screen_mock(
-        MenuScreenMock,
+        FieldScreenMock,
         expected_errors=(
             AudioResourceError,
             DataResourceError,
@@ -1574,10 +1587,11 @@ def main() -> int:
             EquipmentMenuDataError,
             FontResourceError,
             ImageResourceError,
+            MapResourceError,
             ItemDataError,
             ItemMenuDataError,
             MemberDataError,
-            MenuMockDataError,
+            FieldMockDataError,
             MockFixtureError,
             SkillDataError,
             SpellDataError,

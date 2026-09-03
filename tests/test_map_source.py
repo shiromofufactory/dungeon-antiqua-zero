@@ -86,6 +86,30 @@ class MapSourceTest(unittest.TestCase):
         self.assertTrue(resolved["collision"][2 * 6 + 3])
         self.assertFalse(resolved["collision"][2 * 6 + 4])
 
+    def test_draws_object_with_lower_bottom_edge_in_front_regardless_of_order(self) -> None:
+        tileset = deepcopy(self.tileset)
+        tileset["objects"][0]["size"] = [2, 2]
+        tileset["objects"][0]["cells"] = [
+            {"offset": [0, 0], "collision": "passable", "tile": [0, 0]},
+            {"offset": [1, 0], "collision": "passable", "tile": [1, 0]},
+            {"offset": [0, 1], "collision": "passable", "tile": [0, 1]},
+            {"offset": [1, 1], "collision": "passable", "tile": [1, 1]},
+        ]
+        source = initial_map_source("test_world", tileset, "world", 6, 6)
+        source["objects"] = [
+            {"id": "rock_upper", "definition_id": "rock", "origin": [2, 1], "order": 100},
+            {"id": "rock_lower", "definition_id": "rock", "origin": [2, 2], "order": -100},
+        ]
+
+        resolved = resolve_map(source, tileset)
+        overlapping = [
+            cell["instance_id"]
+            for cell in resolved["object_cells"]
+            if cell["position"] == [2, 2]
+        ]
+
+        self.assertEqual(overlapping, ["rock_upper", "rock_lower"])
+
     def test_compiles_rules_and_choices_to_runtime_atlas(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 6, 5)
         source["grounds"][2][2] = "plain"

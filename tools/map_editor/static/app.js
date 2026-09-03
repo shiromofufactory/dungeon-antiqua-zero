@@ -15,14 +15,16 @@ const state = {
   tab: "ground",
   groundId: null,
   objectId: null,
-  objectTool: "place",
   selectedInstanceId: null,
+  resizeHorizontal: "right",
+  resizeVertical: "down",
   zoom: 2,
   showGrid: true,
   showCollision: false,
   paused: false,
   animationStartedAt: performance.now(),
   pointerStroke: null,
+  pointerDrag: null,
   resolveTimer: null,
   resolveRevision: 0,
 };
@@ -207,13 +209,9 @@ function renderPalette() {
   } else {
     container.innerHTML = `
       <div class="section">
-        <div class="section-title"><h2>オブジェクト</h2><span class="subtle">異なる起点なら重ねられます</span></div>
-        <div class="tool-switch">
-          <button class="button ghost small ${state.objectTool === "place" ? "active" : ""}" type="button" data-action="object-tool" data-tool="place">配置</button>
-          <button class="button ghost small ${state.objectTool === "select" ? "active" : ""}" type="button" data-action="object-tool" data-tool="select">選択</button>
-        </div>
+        <div class="section-title"><h2>オブジェクト</h2><span class="subtle">左クリックで配置・右クリック／ドラッグで選択・移動</span></div>
         <div class="palette-list">${state.tileset.objects.map((object, index) => `
-          <button class="palette-item ${object.id === state.objectId && state.objectTool === "place" ? "active" : ""}" type="button" data-action="select-object-definition" data-id="${escapeHtml(object.id)}">
+          <button class="palette-item ${object.id === state.objectId ? "active" : ""}" type="button" data-action="select-object-definition" data-id="${escapeHtml(object.id)}">
             <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>
           </button>`).join("") || `<div class="empty-state">オブジェクト定義がありません。</div>`}</div>
       </div>`;
@@ -251,6 +249,8 @@ function renderInspector() {
       <div class="form-grid">
         <div class="field"><label>幅</label><input id="map-width" type="number" min="1" max="512" value="${width}"></div>
         <div class="field"><label>高さ</label><input id="map-height" type="number" min="1" max="512" value="${height}"></div>
+        <div class="field"><label>横方向</label><select id="resize-horizontal"><option value="left" ${state.resizeHorizontal === "left" ? "selected" : ""}>左側を増減</option><option value="right" ${state.resizeHorizontal === "right" ? "selected" : ""}>右側を増減</option></select></div>
+        <div class="field"><label>縦方向</label><select id="resize-vertical"><option value="up" ${state.resizeVertical === "up" ? "selected" : ""}>上側を増減</option><option value="down" ${state.resizeVertical === "down" ? "selected" : ""}>下側を増減</option></select></div>
         <div class="field full"><label>表示seed</label><input id="visual-seed" type="number" min="0" value="${state.data.visual_seed}" disabled></div>
       </div>
       <div class="row between" style="margin-top:9px">
@@ -261,11 +261,11 @@ function renderInspector() {
     <div class="section">
       <div class="section-title"><h2>選択オブジェクト</h2><span class="subtle">配置数 ${state.data.objects.length}</span></div>
       ${instance ? `
-        <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / 描画順: ${instance.order}</div>
+        <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / 同一下端内の順序: ${instance.order}</div>
         <div class="row between" style="margin-top:9px">
           <div class="row"><button class="button ghost small" type="button" data-action="object-back">背面へ</button><button class="button ghost small" type="button" data-action="object-front">前面へ</button></div>
           <button class="button danger small" type="button" data-action="delete-instance">配置を削除</button>
-        </div>` : `<div class="empty-state">オブジェクトの「選択」で、マップ上の配置をクリックしてください。</div>`}
+        </div>` : `<div class="empty-state">マップ上のオブジェクトを右クリックすると選択できます。</div>`}
     </div>
     <div class="section"><div class="section-title"><h2>出力</h2></div><p class="subtle">保存時に制作用JSONとゲーム用マップを同時生成します。</p></div>`;
 }
@@ -363,8 +363,7 @@ function animationLoop(now) {
 function updateToolStatus() {
   if (!state.data) return;
   if (state.tab === "ground") byId("tool-status").textContent = `地面ブラシ: ${state.groundId || "—"}`;
-  else if (state.objectTool === "select") byId("tool-status").textContent = "オブジェクト配置を選択";
-  else byId("tool-status").textContent = `オブジェクト配置: ${state.objectId || "—"}`;
+  else byId("tool-status").textContent = `左: ${state.objectId || "—"}を配置 / 右: 選択・移動 / 選択後は左ドラッグでも移動`;
 }
 
 function mapCellFromPointer(event) {
@@ -400,7 +399,6 @@ function placeObject(x, y) {
   const sameOrigin = state.data.objects.find((instance) => instance.origin[0] === x && instance.origin[1] === y);
   if (sameOrigin) {
     state.selectedInstanceId = sameOrigin.id;
-    state.objectTool = "select";
     renderAll();
     showToast("同じ起点には配置できないため、既存の配置を選択しました。", true);
     return;
@@ -413,14 +411,66 @@ function placeObject(x, y) {
   });
 }
 
+function objectDefinition(instance) {
+  return state.tileset.objects.find((object) => object.id === instance?.definition_id) || null;
+}
+
+function objectBottom(instance) {
+  const definition = objectDefinition(instance);
+  return definition ? instance.origin[1] + definition.size[1] - 1 : instance.origin[1];
+}
+
+function compareObjectsBackToFront(left, right) {
+  return objectBottom(left) - objectBottom(right)
+    || left.order - right.order
+    || left.origin[0] - right.origin[0]
+    || left.id.localeCompare(right.id);
+}
+
+function instanceOccupies(instance, x, y) {
+  const definition = objectDefinition(instance);
+  return Boolean(definition?.cells.some((cell) => instance.origin[0] + cell.offset[0] === x && instance.origin[1] + cell.offset[1] === y));
+}
+
 function instanceAt(x, y) {
-  const definitions = new Map(state.tileset.objects.map((object) => [object.id, object]));
   return [...state.data.objects]
-    .sort((left, right) => right.order - left.order || right.origin[1] - left.origin[1] || right.origin[0] - left.origin[0])
-    .find((instance) => {
-      const definition = definitions.get(instance.definition_id);
-      return definition && definition.cells.some((cell) => instance.origin[0] + cell.offset[0] === x && instance.origin[1] + cell.offset[1] === y);
-    }) || null;
+    .sort((left, right) => compareObjectsBackToFront(right, left))
+    .find((instance) => instanceOccupies(instance, x, y)) || null;
+}
+
+function validObjectOrigin(instance, x, y) {
+  const definition = objectDefinition(instance);
+  if (!definition || x < 0 || y < 0 || x + definition.size[0] > state.data.size[0] || y + definition.size[1] > state.data.size[1]) return false;
+  return !state.data.objects.some((item) => item.id !== instance.id && item.origin[0] === x && item.origin[1] === y);
+}
+
+function beginObjectDrag(event, cell) {
+  const instance = currentInstance();
+  if (!instance || !instanceOccupies(instance, ...cell)) return false;
+  beginChange();
+  state.pointerDrag = {
+    changed: false,
+    pointerId: event.pointerId,
+    grabOffset: [cell[0] - instance.origin[0], cell[1] - instance.origin[1]],
+    lastOrigin: [...instance.origin],
+  };
+  mapCanvas.setPointerCapture(event.pointerId);
+  return true;
+}
+
+function dragObjectTo(cell) {
+  const instance = currentInstance();
+  if (!instance || !state.pointerDrag) return;
+  const origin = [cell[0] - state.pointerDrag.grabOffset[0], cell[1] - state.pointerDrag.grabOffset[1]];
+  if (origin[0] === state.pointerDrag.lastOrigin[0] && origin[1] === state.pointerDrag.lastOrigin[1]) return;
+  if (!validObjectOrigin(instance, ...origin)) return;
+  instance.origin = origin;
+  state.pointerDrag.lastOrigin = [...origin];
+  state.pointerDrag.changed = true;
+  state.dirty = true;
+  renderInspector();
+  updateSaveState();
+  scheduleResolution(0);
 }
 
 function handlePaletteAction(element) {
@@ -430,11 +480,10 @@ function handlePaletteAction(element) {
     renderPalette();
   } else if (action === "select-object-definition") {
     state.objectId = element.dataset.id;
-    state.objectTool = "place";
+    state.selectedInstanceId = null;
     renderPalette();
-  } else if (action === "object-tool") {
-    state.objectTool = element.dataset.tool;
-    renderPalette();
+    renderInspector();
+    drawMap(performance.now());
   }
 }
 
@@ -446,10 +495,21 @@ function resizeMap() {
     return;
   }
   if (width === state.data.size[0] && height === state.data.size[1]) return;
+  const [previousWidth, previousHeight] = state.data.size;
+  const offsetX = state.resizeHorizontal === "left" ? width - previousWidth : 0;
+  const offsetY = state.resizeVertical === "up" ? height - previousHeight : 0;
   const rootGround = state.data.profile === "world" && state.tileset.grounds.some((ground) => ground.id === "sea") ? "sea" : state.tileset.grounds[0].id;
   commit(() => {
     const previous = state.data.grounds;
-    state.data.grounds = Array.from({ length: height }, (_unused, y) => Array.from({ length: width }, (_empty, x) => previous[y]?.[x] || rootGround));
+    state.data.grounds = Array.from({ length: height }, (_unused, y) => Array.from({ length: width }, (_empty, x) => {
+      const sourceX = x - offsetX;
+      const sourceY = y - offsetY;
+      return previous[sourceY]?.[sourceX] ?? rootGround;
+    }));
+    for (const instance of state.data.objects) {
+      instance.origin[0] += offsetX;
+      instance.origin[1] += offsetY;
+    }
     state.data.size = [width, height];
   });
 }
@@ -548,7 +608,6 @@ async function initialize() {
 
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => {
   state.tab = button.dataset.tab;
-  if (state.tab === "object") state.objectTool = "place";
   renderAll();
 }));
 byId("palette-content").addEventListener("click", (event) => {
@@ -558,6 +617,10 @@ byId("palette-content").addEventListener("click", (event) => {
 byId("inspector-content").addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]");
   if (target) handleInspectorAction(target);
+});
+byId("inspector-content").addEventListener("change", (event) => {
+  if (event.target.id === "resize-horizontal") state.resizeHorizontal = event.target.value;
+  else if (event.target.id === "resize-vertical") state.resizeVertical = event.target.value;
 });
 byId("undo-button").addEventListener("click", undo);
 byId("redo-button").addEventListener("click", redo);
@@ -577,6 +640,15 @@ const mapCanvas = byId("map-canvas");
 mapCanvas.addEventListener("pointerdown", (event) => {
   const cell = mapCellFromPointer(event);
   if (!cell) return;
+  if (event.button === 2) {
+    event.preventDefault();
+    state.selectedInstanceId = instanceAt(...cell)?.id || null;
+    state.tab = "object";
+    renderAll();
+    beginObjectDrag(event, cell);
+    return;
+  }
+  if (event.button !== 0) return;
   if (state.tab === "ground") {
     beginChange();
     state.pointerStroke = { changed: false, last: null, pointerId: event.pointerId };
@@ -584,15 +656,15 @@ mapCanvas.addEventListener("pointerdown", (event) => {
     state.pointerStroke.changed = paintGround(...cell);
     state.pointerStroke.last = cell.join(",");
     if (state.pointerStroke.changed) { state.dirty = true; scheduleResolution(); updateSaveState(); }
-  } else if (state.objectTool === "place") placeObject(...cell);
-  else {
-    state.selectedInstanceId = instanceAt(...cell)?.id || null;
-    renderAll();
-  }
+  } else if (!beginObjectDrag(event, cell)) placeObject(...cell);
 });
 mapCanvas.addEventListener("pointermove", (event) => {
   const cell = mapCellFromPointer(event);
   byId("cursor-status").textContent = cell ? `セル ${cell[0]}, ${cell[1]}` : "セル —";
+  if (cell && state.pointerDrag) {
+    dragObjectTo(cell);
+    return;
+  }
   if (!cell || !state.pointerStroke || state.pointerStroke.last === cell.join(",")) return;
   state.pointerStroke.last = cell.join(",");
   if (paintGround(...cell)) {
@@ -603,6 +675,14 @@ mapCanvas.addEventListener("pointermove", (event) => {
   }
 });
 mapCanvas.addEventListener("pointerup", (event) => {
+  if (state.pointerDrag) {
+    if (!state.pointerDrag.changed) state.history.pop();
+    state.pointerDrag = null;
+    if (mapCanvas.hasPointerCapture(event.pointerId)) mapCanvas.releasePointerCapture(event.pointerId);
+    renderAll();
+    scheduleResolution(0);
+    return;
+  }
   if (!state.pointerStroke) return;
   if (!state.pointerStroke.changed) state.history.pop();
   state.pointerStroke = null;
@@ -611,9 +691,12 @@ mapCanvas.addEventListener("pointerup", (event) => {
 });
 mapCanvas.addEventListener("pointercancel", () => {
   if (state.pointerStroke && !state.pointerStroke.changed) state.history.pop();
+  if (state.pointerDrag && !state.pointerDrag.changed) state.history.pop();
   state.pointerStroke = null;
+  state.pointerDrag = null;
   renderAll();
 });
+mapCanvas.addEventListener("contextmenu", (event) => event.preventDefault());
 mapCanvas.addEventListener("pointerleave", () => { byId("cursor-status").textContent = "セル —"; });
 
 window.addEventListener("keydown", (event) => {
