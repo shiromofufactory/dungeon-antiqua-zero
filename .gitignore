@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 app/data/
 app/images/
+app/maps/
 scripts/node_modules
 scripts/package-lock.json
 tmp

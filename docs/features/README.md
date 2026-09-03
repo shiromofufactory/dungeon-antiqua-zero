@@ -33,3 +33,4 @@
 ## 機能一覧
 
 - [ショップ](./shop.md)
+- [マップチップメタデータ設定ツール](./map-chip-metadata-tool.md)

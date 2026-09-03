@@ -28,14 +28,23 @@ from tools.screen_mocks._runtime import (
     create_mock_input_reader,
     initialize_screen_mock,
 )
-from tools.screen_mocks.equipment import (
-    EquipmentMockDataError,
-    EquipmentScreenMock,
+from ui.equipment_menu import (
+    EquipmentMenuDataError,
+    EquipmentMenuOverlay,
 )
-from tools.screen_mocks.item import ItemMockDataError, ItemScreenMock
-from tools.screen_mocks.status import StatusMockDataError, StatusScreenMock
-from tools.screen_mocks.spell import SpellMockDataError, SpellScreenMock
-from tools.screen_mocks.shop import ShopMockDataError, ShopScreenMock
+from ui.item_menu import (
+    ItemMenuDataError,
+    ItemMenuOverlay,
+)
+from ui.status_menu import (
+    StatusMenuDataError,
+    StatusMenuOverlay,
+)
+from ui.spell_menu import (
+    SpellMenuDataError,
+    SpellMenuOverlay,
+)
+from ui.shop import ShopOverlay, ShopUiDataError
 from input import (
     Direction,
     InputAction,
@@ -345,11 +354,11 @@ class MenuScreenMock:
         self.pending_screen_change: MenuScreenChange | None = None
         self.animate_main_windows_with_fade = False
         self.showing_field = True
-        self.item_screen: ItemScreenMock | None = None
-        self.equipment_screen: EquipmentScreenMock | None = None
-        self.status_screen: StatusScreenMock | None = None
-        self.spell_screen: SpellScreenMock | None = None
-        self.shop_screen: ShopScreenMock | None = None
+        self.item_screen: ItemMenuOverlay | None = None
+        self.equipment_screen: EquipmentMenuOverlay | None = None
+        self.status_screen: StatusMenuOverlay | None = None
+        self.spell_screen: SpellMenuOverlay | None = None
+        self.shop_screen: ShopOverlay | None = None
         self.shop_selector_window = None
         self.shop_selector_cursor: WindowCursor | None = None
         self.pending_shop = None
@@ -897,7 +906,7 @@ class MenuScreenMock:
 
     def _start_status(self) -> None:
         self.command_cursor.active = False
-        self.status_screen = StatusScreenMock(
+        self.status_screen = StatusMenuOverlay(
             party=self.party,
             settings=self.settings,
             texts=self.texts,
@@ -912,7 +921,7 @@ class MenuScreenMock:
         if inventory_system is None:
             inventory_system = InventorySystem.with_one_each(self.items)
             self.inventory_system = inventory_system
-        self.item_screen = ItemScreenMock(
+        self.item_screen = ItemMenuOverlay(
             party=self.party,
             items=self.items,
             spells=self.spells,
@@ -931,7 +940,7 @@ class MenuScreenMock:
 
     def _start_equipment(self) -> None:
         self.command_cursor.active = False
-        self.equipment_screen = EquipmentScreenMock(
+        self.equipment_screen = EquipmentMenuOverlay(
             party=self.party,
             items=self.items,
             spells=self.spells,
@@ -1065,7 +1074,7 @@ class MenuScreenMock:
 
     def _start_spell(self) -> None:
         self.command_cursor.active = False
-        self.spell_screen = SpellScreenMock(
+        self.spell_screen = SpellMenuOverlay(
             party=self.party,
             spells=self.spells,
             settings=self.settings,
@@ -1122,7 +1131,7 @@ class MenuScreenMock:
             party=self.party,
             save_data=self.save_data,
         )
-        self.shop_screen = ShopScreenMock(
+        self.shop_screen = ShopOverlay(
             shop=shop,
             shop_system=self.shop_system,
             party=self.party,
@@ -1562,20 +1571,20 @@ def main() -> int:
             AudioResourceError,
             DataResourceError,
             DebugPartyError,
-            EquipmentMockDataError,
+            EquipmentMenuDataError,
             FontResourceError,
             ImageResourceError,
             ItemDataError,
-            ItemMockDataError,
+            ItemMenuDataError,
             MemberDataError,
             MenuMockDataError,
             MockFixtureError,
             SkillDataError,
             SpellDataError,
-            SpellMockDataError,
-            ShopMockDataError,
+            SpellMenuDataError,
+            ShopUiDataError,
             ShopDataError,
-            StatusMockDataError,
+            StatusMenuDataError,
             TextCatalogError,
         ),
     )

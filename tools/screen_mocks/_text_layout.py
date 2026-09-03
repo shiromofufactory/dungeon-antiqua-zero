@@ -1,27 +1,11 @@
-"""Small text-placement helpers shared by screen mocks."""
+"""Compatibility import for production UI text-layout helpers."""
 
 from __future__ import annotations
 
-from typing import Protocol
+import sys
 
-from tools._bootstrap import APP_ROOT
-from ui import TEXT_GRID_X
-
-
-class TextWidthFont(Protocol):
-    def text_width(self, text: str) -> int: ...
+from tools._bootstrap import APP_ROOT as _APP_ROOT  # Initialize app imports.
+from ui import text_layout as _production_text_layout
 
 
-def right_aligned_grid_x(
-    text: str,
-    *,
-    reference_text: str,
-    reference_x: int,
-    font: TextWidthFont,
-) -> int:
-    """Align ``text`` to the right edge of reference text on the text grid."""
-
-    right_edge = reference_x * TEXT_GRID_X + font.text_width(reference_text)
-    return (
-        right_edge - font.text_width(text) + TEXT_GRID_X // 2
-    ) // TEXT_GRID_X
+sys.modules[__name__] = _production_text_layout

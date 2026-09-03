@@ -176,9 +176,10 @@
 
 - ドメインモデル: `app/shop.py`
 - 取引ルール: `app/systems/shop.py`
-- ショップ画面モック: `tools/screen_mocks/shop.py`
-- 購入時メンバー表示: `tools/screen_mocks/_shop_party.py`
-- 接続元: `tools/screen_mocks/menu.py`
+- ショップOverlay: `app/ui/shop.py`
+- 購入時メンバー表示: `app/ui/shop_party.py`
+- モックの接続元・仮フィールド: `tools/screen_mocks/menu.py`
+- モック互換アダプター: `tools/screen_mocks/shop.py`
 - 回帰テスト: `tests/test_shop_screen_mock.py`、`tests/test_shop_system.py`、`tests/test_shop.py`
 
 変更時は購入と売却を別々に確認し、少なくとも次を検証する。

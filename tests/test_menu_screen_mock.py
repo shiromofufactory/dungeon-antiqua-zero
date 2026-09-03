@@ -830,7 +830,7 @@ class MenuScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.command_cursor.active)
         mock.command_window.update.assert_not_called()
 
-    @patch("tools.screen_mocks.menu.ItemScreenMock")
+    @patch("tools.screen_mocks.menu.ItemMenuOverlay")
     def test_confirming_item_command_opens_connected_item_screen(
         self,
         item_screen_class: Mock,
@@ -931,7 +931,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.item_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(-1, 0), call()])
 
-    @patch("tools.screen_mocks.menu.EquipmentScreenMock")
+    @patch("tools.screen_mocks.menu.EquipmentMenuOverlay")
     def test_confirming_equipment_command_opens_connected_equipment_screen(
         self,
         equipment_screen_class: Mock,
@@ -1025,7 +1025,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.equipment_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
-    @patch("tools.screen_mocks.menu.StatusScreenMock")
+    @patch("tools.screen_mocks.menu.StatusMenuOverlay")
     def test_confirming_status_command_opens_connected_status_screen(
         self,
         status_screen_class: Mock,
@@ -1165,7 +1165,7 @@ class MenuScreenMockTest(unittest.TestCase):
         mock.status_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
-    @patch("tools.screen_mocks.menu.SpellScreenMock")
+    @patch("tools.screen_mocks.menu.SpellMenuOverlay")
     def test_confirming_spell_command_opens_connected_spell_screen(
         self,
         spell_screen_class: Mock,

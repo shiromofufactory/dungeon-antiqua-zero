@@ -12,6 +12,7 @@
 - `content` 自体を共有コンテンツリポジトリのGit submoduleとして固定する。
 - `app/data` はsubmoduleから生成する実行時コピーとし、Git管理しない。
 - `app/images` は `content/images` から生成する実行時画像データとし、Git管理しない。
+- `app/maps` は `content/maps` から生成する実行時マップデータとし、Git管理しない。
 - Google Sheetsやポータルへ直接接続しない。
 
 ### 共有コンテンツリポジトリ（sub）
@@ -19,6 +20,7 @@
 - privateリポジトリ `shiromofufactory/dungeon-antiqua-zero-content` として独立した履歴を持つ。
 - `data/*.json` と、制作スタッフ向けの企画文書 `docs/da0.md` の正本を管理する。
 - ゲームとポータルで共有するPNG/GIF画像の正本を `images/` で管理する。
+- タイルセットメタデータと制作用マップの正本を `maps/` で管理する。
 - JSONの検証、Google Sheetsとの同期、スタッフポータルの生成と配備を担当する。
 - このリポジトリ単独でもスタッフが編集・レビューできる。
 
@@ -49,6 +51,13 @@ Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象J
 共有リポジトリ images/**/*.{png,gif}
         ├──→ portal:build ──→ dist/images ──→ スタッフポータル
         └──→ images:build ──→ app/images ──→ Pyxelゲーム
+```
+
+マップの空間データはGoogle Sheetsと同期せず、次の経路で利用する。
+
+```text
+共有リポジトリ maps/tilesets + maps/sources
+        └──→ map compiler ──→ app/maps ──→ Pyxelゲーム
 ```
 
 `get-data.mjs` と `put-data.mjs` の双方向性は意図したものである。ただし自動マージや常時同期は行わず、いずれの向きもGit差分を人が確認する。
@@ -113,6 +122,25 @@ npm run images:build:force
 ```
 
 256×256を超える画像も入力できる。実行時にはmanifestから必要な矩形を読み、Scene開始時などに独立した `pyxel.Image` またはイメージバンクへ転送する。読み込みやバンク更新は `draw()` では行わない。フレーム分割とatlas生成は、具体的な画像仕様が決まった段階で同じビルド処理へ追加する。
+
+## マップ制作データとゲーム用データ生成
+
+`content/maps/tilesets` はマップチップメタデータ設定ツール、`content/maps/sources` は
+マップエディタが編集する正本とする。どちらもGoogle Sheets同期の対象にせず、空間構造を
+維持したJSONとしてGitでレビューする。地面、境界、表示候補、オブジェクト、通行設定の仕様は
+[`features/map-chip-metadata-tool.md`](./features/map-chip-metadata-tool.md) を参照する。
+
+ゲーム用の `app/maps` は、マップ保存時に同じ検証・コンパイル処理から生成する。境界選択、
+重み付き表示候補、地面合成、オブジェクト展開、通行グリッドを事前解決した生成物であり、
+直接編集またはGit管理しない。正式な生成コマンドはマップコンパイラ実装時に追加し、存在しない
+コマンドを先に運用手順へ記載しない。
+
+タイルセットメタデータだけを非対話で検証する場合は次を実行する。画像のパレット不一致は
+警告として表示され、メタデータの構造エラーがある場合だけ終了コードを失敗にする。
+
+```sh
+npm run maps:validate
+```
 
 ## Google Sheetsとの同期
 
