@@ -3,6 +3,7 @@
 const DIRECTIONS = ["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"];
 const NEIGHBOR_CYCLE = ["any", "same", "different"];
 const SESSION_CLIENT_HEADER = "mapchip-metadata-ui";
+const PREVIEW_SETTINGS_VERSION = 1;
 let token = new URLSearchParams(window.location.search).get("token") || "";
 
 const state = {
@@ -17,16 +18,15 @@ const state = {
   groundIndex: 0,
   boundaryIndex: 0,
   objectIndex: 0,
-  objectCell: [0, 0],
   choiceIndex: 0,
   frameIndex: 0,
   selection: { x: 0, y: 0, width: 1, height: 1 },
   zoom: 3,
   dragStart: null,
   previewGrounds: [],
+  previewShowCollision: false,
   previewPaused: false,
   previewStartedAt: performance.now(),
-  legacyTransparency: true,
   validateTimer: null,
 };
 
@@ -41,6 +41,44 @@ const escapeHtml = (value) => String(value)
   .replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;");
+
+function previewSettingsKey() {
+  const tilesetId = state.data?.tileset_id || "unknown";
+  return `da0.mapchip-metadata.preview.v${PREVIEW_SETTINGS_VERSION}:${tilesetId}`;
+}
+
+function savePreviewSettings() {
+  if (!state.data) return;
+  try {
+    window.localStorage.setItem(previewSettingsKey(), JSON.stringify({
+      grounds: state.previewGrounds,
+      showCollision: state.previewShowCollision,
+      paused: state.previewPaused,
+    }));
+  } catch (_error) {
+    // Preview settings are optional and must not block metadata editing.
+  }
+}
+
+function restorePreviewSettings() {
+  try {
+    const stored = window.localStorage.getItem(previewSettingsKey());
+    if (!stored) return;
+    const settings = JSON.parse(stored);
+    if (Array.isArray(settings.grounds) && settings.grounds.length === 9 && settings.grounds.every((id) => typeof id === "string")) {
+      state.previewGrounds = settings.grounds;
+    }
+    if (typeof settings.showCollision === "boolean") state.previewShowCollision = settings.showCollision;
+    if (typeof settings.paused === "boolean") state.previewPaused = settings.paused;
+  } catch (_error) {
+    // Ignore corrupt or unavailable browser storage and use the defaults.
+  }
+}
+
+function syncPreviewControls() {
+  byId("preview-collision").checked = state.previewShowCollision;
+  byId("preview-pause").textContent = state.previewPaused ? "再生" : "一時停止";
+}
 
 async function renewSessionToken() {
   try {
@@ -114,6 +152,7 @@ function commit(mutator) {
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
+  savePreviewSettings();
   scheduleValidation();
 }
 
@@ -124,6 +163,7 @@ function undo() {
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
+  savePreviewSettings();
   scheduleValidation();
 }
 
@@ -134,6 +174,7 @@ function redo() {
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
+  savePreviewSettings();
   scheduleValidation();
 }
 
@@ -167,17 +208,9 @@ function currentObject() {
   return state.data?.objects?.[state.objectIndex] || null;
 }
 
-function currentObjectCell() {
-  const object = currentObject();
-  if (!object) return null;
-  return object.cells.find((cell) => cell.offset[0] === state.objectCell[0] && cell.offset[1] === state.objectCell[1]) || null;
-}
-
 function currentVisual() {
   if (state.tab === "boundary") return currentBoundary()?.visual || null;
   if (state.tab === "ground") return currentGround()?.base_visual || null;
-  const cell = currentObjectCell();
-  if (cell?.visual) return cell.visual;
   return null;
 }
 
@@ -204,15 +237,13 @@ function prepareProcessedImage() {
   const context = processedImage.getContext("2d", { willReadFrequently: true });
   context.clearRect(0, 0, processedImage.width, processedImage.height);
   context.drawImage(rawImage, 0, 0);
-  if (state.legacyTransparency) {
-    const pixels = context.getImageData(0, 0, processedImage.width, processedImage.height);
-    for (let index = 0; index < pixels.data.length; index += 4) {
-      if (pixels.data[index] === 255 && pixels.data[index + 1] === 0 && pixels.data[index + 2] === 255) {
-        pixels.data[index + 3] = 0;
-      }
+  const pixels = context.getImageData(0, 0, processedImage.width, processedImage.height);
+  for (let index = 0; index < pixels.data.length; index += 4) {
+    if (pixels.data[index] === 255 && pixels.data[index + 1] === 0 && pixels.data[index + 2] === 128) {
+      pixels.data[index + 3] = 0;
     }
-    context.putImageData(pixels, 0, 0);
   }
+  context.putImageData(pixels, 0, 0);
   processedImageUrl = processedImage.toDataURL("image/png");
   drawSource();
   renderEditor();
@@ -281,13 +312,18 @@ function updateDragSelection(current) {
   drawSource();
 }
 
-function tileThumb(tile, active = false) {
+function tileThumbImage(tile) {
   const [column, row] = tile || [0, 0];
   const scale = 2;
   const style = processedImageUrl
     ? `background-image:url('${processedImageUrl}');background-size:${state.imageInfo.width * scale}px ${state.imageInfo.height * scale}px;background-position:${-column * 16 * scale}px ${-row * 16 * scale}px`
     : "";
-  return `<span class="tile-thumb" style="${style}"></span><span>${column},${row}</span>`;
+  return `<span class="tile-thumb" style="${style}"></span>`;
+}
+
+function tileThumb(tile) {
+  const [column, row] = tile || [0, 0];
+  return `${tileThumbImage(tile)}<span>${column},${row}</span>`;
 }
 
 function renderDefinitionList(items, activeIndex, action, addAction, addLabel) {
@@ -300,13 +336,14 @@ function renderDefinitionList(items, activeIndex, action, addAction, addLabel) {
 
 function renderBoundaryRuleList(items) {
   const rules = items.map((item, index) => `
-    <button type="button" class="boundary-order-item ${index === state.boundaryIndex ? "active" : ""}"
-      data-action="select-boundary" data-index="${index}">
-      <span class="boundary-order-number">${index + 1}</span>
-      <span>${escapeHtml(item.id || `#${index + 1}`)}</span>
+    <button type="button" role="tab" aria-selected="${index === state.boundaryIndex}" aria-label="境界ルール ${index + 1}"
+      class="boundary-rule-tab ${index === state.boundaryIndex ? "active" : ""}"
+      data-action="select-boundary" data-index="${index}" title="優先順位 ${index + 1}">
+      <span class="boundary-tab-number">${index + 1}</span>
+      ${tileThumbImage(item.visual?.choices?.[0]?.frames?.[0]?.tile)}
     </button>
   `).join("");
-  return `<div class="boundary-order-list">${rules}<button type="button" class="boundary-order-add" data-action="add-boundary">＋ ルール</button></div>`;
+  return `<div class="boundary-rule-tabs" role="tablist" aria-label="境界ルール（左ほど優先）">${rules}<button type="button" class="boundary-rule-add" data-action="add-boundary" aria-label="境界ルールを追加">＋</button></div>`;
 }
 
 function renderVisualEditor(visual) {
@@ -327,7 +364,7 @@ function renderVisualEditor(visual) {
     ${choices.map((choice, choiceIndex) => `
       <div class="choice-card ${choiceIndex === state.choiceIndex ? "active" : ""}">
         <div class="choice-head">
-          <div class="field"><label>候補ID</label><input type="text" value="${escapeHtml(choice.id)}" data-change="choice-id" data-choice="${choiceIndex}"></div>
+          <span class="choice-number">表示候補 ${choiceIndex + 1}</span>
           <div class="field"><label>重み</label><input type="number" min="0" value="${escapeHtml(choice.weight)}" data-change="choice-weight" data-choice="${choiceIndex}"></div>
           <button type="button" class="button danger small" data-action="delete-choice" data-choice="${choiceIndex}" ${choices.length <= 1 ? "disabled" : ""}>削除</button>
         </div>
@@ -335,7 +372,7 @@ function renderVisualEditor(visual) {
           ${(choice.frames || []).map((frame, frameIndex) => `
             <button type="button" class="frame-button ${choiceIndex === state.choiceIndex && frameIndex === state.frameIndex ? "active" : ""}"
               data-action="set-frame-tile" data-choice="${choiceIndex}" data-frame="${frameIndex}"
-              title="現在のソース選択で置き換える" aria-label="${escapeHtml(choice.id)}のフレーム ${frameIndex + 1} を現在のソース選択で置き換える">
+              title="現在のソース選択で置き換える" aria-label="表示候補 ${choiceIndex + 1} のフレーム ${frameIndex + 1} を現在のソース選択で置き換える">
               ${tileThumb(frame.tile)}
             </button>`).join("")}
           <button type="button" class="frame-button" data-action="add-frame" data-choice="${choiceIndex}">＋<span>frame</span></button>
@@ -384,12 +421,11 @@ function renderBoundaryEditor() {
       ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面")}
     </div>
     <div class="section">
-      <div class="section-title"><h3>境界ルール</h3><span class="subtle">上から順に最初の一致を採用</span></div>
+      <div class="section-title"><h3>境界ルール</h3><span class="subtle">左から順に最初の一致を採用</span></div>
       ${renderBoundaryRuleList(boundaries)}
       ${rule ? `
         <div class="divider"></div>
-        <div class="field"><label>ルールID</label><input type="text" value="${escapeHtml(rule.id)}" data-change="boundary-id"></div>
-        <div class="neighbor-grid" style="margin-top:11px">
+        <div class="neighbor-grid">
           ${DIRECTIONS.map((direction) => direction === "center"
             ? `<button type="button" class="neighbor-cell center" disabled>${escapeHtml(ground.id)}</button>`
             : `<button type="button" class="neighbor-cell ${rule.neighbors[direction]}" data-action="cycle-neighbor" data-direction="${direction}">${direction}<br>${rule.neighbors[direction]}</button>`
@@ -397,8 +433,8 @@ function renderBoundaryEditor() {
         </div>
         <div class="row between" style="margin-top:10px">
           <div class="row">
-            <button type="button" class="button ghost small" data-action="move-boundary-up" ${state.boundaryIndex <= 0 ? "disabled" : ""}>↑ 上へ</button>
-            <button type="button" class="button ghost small" data-action="move-boundary-down" ${state.boundaryIndex >= boundaries.length - 1 ? "disabled" : ""}>↓ 下へ</button>
+            <button type="button" class="button ghost small" data-action="move-boundary-left" ${state.boundaryIndex <= 0 ? "disabled" : ""}>← 左へ</button>
+            <button type="button" class="button ghost small" data-action="move-boundary-right" ${state.boundaryIndex >= boundaries.length - 1 ? "disabled" : ""}>右へ →</button>
           </div>
           <button type="button" class="button danger small" data-action="delete-boundary">ルールを削除</button>
         </div>
@@ -410,7 +446,6 @@ function renderBoundaryEditor() {
 function renderObjectEditor() {
   const objects = state.data.objects || [];
   const object = currentObject();
-  const cell = currentObjectCell();
   if (!object) return `
     <div class="section">
       <div class="section-title"><h3>オブジェクト定義</h3></div>
@@ -425,8 +460,15 @@ function renderObjectEditor() {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const item = cellsByOffset.get(`${x},${y}`);
-      const active = state.objectCell[0] === x && state.objectCell[1] === y;
-      grid.push(`<button type="button" class="footprint-cell ${item ? "occupied" : ""} ${item?.collision === "blocked" ? "blocked" : ""} ${active ? "active" : ""}" data-action="select-object-cell" data-x="${x}" data-y="${y}">${x},${y}<br>${item?.tile ? item.tile.join(",") : item?.visual ? "visual" : "—"}</button>`);
+      const collision = item?.collision === "blocked" ? "blocked" : "passable";
+      const collisionLabel = collision === "blocked" ? "通行不可" : "通行可";
+      const tileLabel = item?.tile ? item.tile.join(",") : item?.visual ? "visual" : "表示なし";
+      grid.push(`<button type="button" class="footprint-cell ${item ? "occupied" : "empty"} ${collision}"
+        data-action="toggle-object-cell-collision" data-x="${x}" data-y="${y}"
+        aria-label="セル ${x},${y}：${item ? `${collisionLabel}（クリックで切り替え）` : "構成なし"}"
+        title="${item ? `画像 ${tileLabel}・クリックで通行を切り替え` : "構成セルがありません"}" ${item ? "" : "disabled"}>
+        <span>${x},${y}</span><strong>${item ? collisionLabel : "構成なし"}</strong>
+      </button>`);
     }
   }
   return `
@@ -446,19 +488,8 @@ function renderObjectEditor() {
       </div>
     </div>
     <div class="section">
-      <div class="section-title"><h3>構成セル</h3><span class="subtle">赤枠は通行不可</span></div>
+      <div class="section-title"><h3>構成セル</h3><span class="subtle">クリックで通行可／不可を切替</span></div>
       <div class="footprint-grid" style="--object-columns:${width}">${grid.join("")}</div>
-      <div class="divider"></div>
-      ${cell ? `
-        <div class="form-grid">
-          <div class="field"><label>相対位置</label><input type="text" value="${cell.offset.join(", ")}" disabled></div>
-          <div class="field"><label>通行</label><select data-change="object-cell-collision"><option value="passable" ${cell.collision === "passable" ? "selected" : ""}>通行可</option><option value="blocked" ${cell.collision === "blocked" ? "selected" : ""}>通行不可</option></select></div>
-        </div>
-        <div class="row between" style="margin-top:9px">
-          <span>${cell.tile ? `チップ <code>${cell.tile.join(", ")}</code>` : cell.visual ? "表示候補あり" : "表示なし"}</span>
-          <div class="row"><button type="button" class="button ghost small" data-action="set-object-cell-tile">選択チップを設定</button><button type="button" class="button danger small" data-action="remove-object-cell">セルを空にする</button></div>
-        </div>
-      ` : `<div class="empty-state">空セルです。<button type="button" class="button ghost small" data-action="add-object-cell">選択チップで追加</button></div>`}
     </div>`;
 }
 
@@ -467,7 +498,15 @@ function renderEditor() {
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === state.tab));
   const content = byId("editor-content");
   if (state.tab === "ground") content.innerHTML = renderGroundEditor();
-  else if (state.tab === "boundary") content.innerHTML = renderBoundaryEditor();
+  else if (state.tab === "boundary") {
+    content.innerHTML = renderBoundaryEditor();
+    window.requestAnimationFrame(() => {
+      const strip = content.querySelector(".boundary-rule-tabs");
+      const active = strip?.querySelector(".boundary-rule-tab.active");
+      if (!strip || !active) return;
+      strip.scrollLeft = Math.max(0, active.offsetLeft - strip.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2);
+    });
+  }
   else content.innerHTML = renderObjectEditor();
 }
 
@@ -560,7 +599,7 @@ function drawGroundPreview(now) {
       drawTile(context, frame?.tile, x, y, 48);
     }
     const top = state.data.grounds.find((ground) => ground.id === state.previewGrounds[index]);
-    if (top?.collision === "blocked") {
+    if (state.previewShowCollision && top?.collision === "blocked") {
       context.strokeStyle = "rgba(239, 91, 80, .9)";
       context.lineWidth = 3;
       context.strokeRect(x + 1.5, y + 1.5, 45, 45);
@@ -598,7 +637,7 @@ function drawObjectPreview(now) {
       const frame = frameFor(cell.visual, choice, now);
       drawTile(context, frame?.tile, x, y, 48);
     }
-    if (cell.collision === "blocked") {
+    if (state.previewShowCollision && cell.collision === "blocked") {
       context.strokeStyle = "rgba(239, 91, 80, .9)";
       context.lineWidth = 3;
       context.strokeRect(x + 1.5, y + 1.5, 45, 45);
@@ -650,6 +689,7 @@ function renderIssues() {
 
 function renderAll() {
   normalizeSelectionIndexes();
+  syncPreviewControls();
   renderEditor();
   renderPreview();
   renderIssues();
@@ -779,9 +819,9 @@ function handleAction(element) {
       });
       state.boundaryIndex = boundaries.length - 1;
     });
-  } else if (action === "move-boundary-up" || action === "move-boundary-down") {
+  } else if (action === "move-boundary-left" || action === "move-boundary-right") {
     const boundaries = currentGround().boundaries;
-    const offset = action === "move-boundary-up" ? -1 : 1;
+    const offset = action === "move-boundary-left" ? -1 : 1;
     const destination = state.boundaryIndex + offset;
     if (destination < 0 || destination >= boundaries.length) return;
     commit(() => {
@@ -799,13 +839,11 @@ function handleAction(element) {
     });
   } else if (action === "select-object") {
     state.objectIndex = Number(element.dataset.index);
-    state.objectCell = [0, 0];
     renderAll();
   } else if (action === "add-object") {
     commit(() => {
       objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
       state.objectIndex = objects.length - 1;
-      state.objectCell = [0, 0];
     });
   } else if (action === "object-from-selection") {
     commit(() => {
@@ -822,34 +860,23 @@ function handleAction(element) {
           object.cells.push({ offset: [x, y], collision: "blocked", tile: [state.selection.x + x, state.selection.y + y] });
         }
       }
-      state.objectCell = [0, 0];
     });
   } else if (action === "delete-object") {
     if (!window.confirm(`オブジェクト ${currentObject().id} を削除しますか？`)) return;
     commit(() => objects.splice(state.objectIndex, 1));
-  } else if (action === "select-object-cell") {
-    state.objectCell = [Number(element.dataset.x), Number(element.dataset.y)];
-    renderAll();
-  } else if (action === "add-object-cell") {
-    commit(() => currentObject().cells.push({ offset: [...state.objectCell], collision: "blocked", tile: [state.selection.x, state.selection.y] }));
-  } else if (action === "set-object-cell-tile") {
-    commit(() => {
-      const cell = currentObjectCell();
-      delete cell.visual;
-      cell.tile = [state.selection.x, state.selection.y];
-    });
-  } else if (action === "remove-object-cell") {
-    commit(() => {
-      const object = currentObject();
-      const index = object.cells.findIndex((cell) => cell.offset[0] === state.objectCell[0] && cell.offset[1] === state.objectCell[1]);
-      object.cells.splice(index, 1);
-    });
+  } else if (action === "toggle-object-cell-collision") {
+    const x = Number(element.dataset.x);
+    const y = Number(element.dataset.y);
+    const cell = currentObject().cells.find((item) => item.offset[0] === x && item.offset[1] === y);
+    if (!cell) return;
+    commit(() => { cell.collision = cell.collision === "blocked" ? "passable" : "blocked"; });
   } else if (action === "cycle-preview-ground") {
     const index = Number(element.dataset.index);
     const ids = grounds.map((ground) => ground.id);
     const current = ids.indexOf(state.previewGrounds[index]);
     state.previewGrounds[index] = ids[(current + 1) % ids.length];
     renderPreview();
+    savePreviewSettings();
   }
 }
 
@@ -858,7 +885,6 @@ function handleChange(element) {
   if (!action) return;
   const value = element.value;
   const ground = currentGround();
-  const boundary = currentBoundary();
   const object = currentObject();
   const visual = currentVisual();
 
@@ -871,15 +897,12 @@ function handleChange(element) {
     });
   } else if (action === "ground-parent") commit(() => { ground.parent_id = value || null; });
   else if (action === "ground-collision") commit(() => { ground.collision = value; });
-  else if (action === "boundary-id") commit(() => { boundary.id = value; });
   else if (action === "visual-interval") commit(() => { visual.frame_interval = Number(value); });
-  else if (action === "choice-id") commit(() => { visual.choices[Number(element.dataset.choice)].id = value; });
   else if (action === "choice-weight") commit(() => { visual.choices[Number(element.dataset.choice)].weight = Number(value); });
   else if (action === "object-id") commit(() => { object.id = value; });
   else if (action === "object-width") commit(() => { object.size[0] = Number(value); });
   else if (action === "object-height") commit(() => { object.size[1] = Number(value); });
   else if (action === "object-group") commit(() => { object.default_draw_group = value; });
-  else if (action === "object-cell-collision") commit(() => { currentObjectCell().collision = value; });
 }
 
 async function initialize() {
@@ -897,12 +920,14 @@ async function initialize() {
     const fallback = state.data.grounds.some((ground) => ground.id === "plain") ? "plain" : state.data.grounds[0]?.id;
     state.previewGrounds = Array(9).fill(fallback);
     if (state.data.grounds.some((ground) => ground.id === "sand")) state.previewGrounds[4] = "sand";
+    restorePreviewSettings();
     byId("document-path").textContent = payload.metadata_path;
     byId("image-summary").textContent = `${state.imageInfo.width}×${state.imageInfo.height}px · ${state.imageInfo.columns}×${state.imageInfo.rows} cells · 16px`;
     rawImage.onload = prepareProcessedImage;
     rawImage.onerror = () => showToast("ソース画像を表示できません。", true);
     rawImage.src = state.imageUrl;
     renderAll();
+    savePreviewSettings();
     updateSaveState("saved", "保存済み");
   } catch (error) {
     showToast(error.message, true);
@@ -932,11 +957,16 @@ byId("validate-button").addEventListener("click", () => validate(true));
 byId("save-button").addEventListener("click", save);
 byId("zoom-in").addEventListener("click", () => { state.zoom = Math.min(6, state.zoom + 1); drawSource(); });
 byId("zoom-out").addEventListener("click", () => { state.zoom = Math.max(1, state.zoom - 1); drawSource(); });
-byId("legacy-transparency").addEventListener("change", (event) => { state.legacyTransparency = event.target.checked; prepareProcessedImage(); });
+byId("preview-collision").addEventListener("change", (event) => {
+  state.previewShowCollision = event.target.checked;
+  savePreviewSettings();
+  drawPreviews(performance.now());
+});
 byId("preview-pause").addEventListener("click", () => {
   state.previewPaused = !state.previewPaused;
-  byId("preview-pause").textContent = state.previewPaused ? "再生" : "一時停止";
   if (!state.previewPaused) state.previewStartedAt = performance.now();
+  syncPreviewControls();
+  savePreviewSettings();
   drawPreviews(performance.now());
 });
 

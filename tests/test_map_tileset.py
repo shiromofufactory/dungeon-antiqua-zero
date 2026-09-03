@@ -155,6 +155,14 @@ class MapTilesetTest(unittest.TestCase):
         self.assertEqual((info.columns, info.rows), (2, 1))
         self.assertIn("non_transparent_image_margin", {item.code for item in diagnostics})
 
+    def test_accepts_reserved_transparent_color_in_image_margin(self) -> None:
+        Image.new("RGBA", (33, 18), (255, 0, 128, 255)).save(self.image_path)
+
+        info, diagnostics = inspect_source_image(self.image_path)
+
+        self.assertEqual((info.columns, info.rows), (2, 1))
+        self.assertNotIn("non_transparent_image_margin", {item.code for item in diagnostics})
+
     def test_saves_stable_utf8_json(self) -> None:
         path = self.root / "maps" / "tilesets" / "worldmap.json"
         data = initial_worldmap_tileset()

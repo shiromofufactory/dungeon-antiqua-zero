@@ -37,10 +37,10 @@
           <button id="zoom-in" class="icon-button" type="button" title="拡大">＋</button>
         </div>
       </div>
-      <label class="legacy-toggle">
-        <input id="legacy-transparency" type="checkbox" checked>
-        修正前の <code>#FF00FF</code> をプレビューだけ仮透過
-      </label>
+      <div class="transparency-note">
+        <span class="transparency-swatch" aria-hidden="true"></span>
+        透過色 <code>#FF0080</code> を透明表示
+      </div>
       <div id="source-scroll" class="canvas-scroll">
         <canvas id="source-canvas" aria-label="マップチップ画像"></canvas>
       </div>
@@ -64,9 +64,15 @@
       <div class="panel-heading compact">
         <div>
           <h2>プレビュー</h2>
-          <p>60fps基準・通行不可は赤枠</p>
+          <p>60fps基準</p>
         </div>
-        <button id="preview-pause" class="button ghost small" type="button">一時停止</button>
+        <div class="preview-controls">
+          <label class="preview-collision-toggle">
+            <input id="preview-collision" type="checkbox">
+            通行不可を赤枠表示
+          </label>
+          <button id="preview-pause" class="button ghost small" type="button">一時停止</button>
+        </div>
       </div>
       <div id="preview-content" class="preview-content"></div>
 
