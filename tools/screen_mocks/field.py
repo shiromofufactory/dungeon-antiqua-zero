@@ -58,6 +58,7 @@ from item import ItemDataError
 from localization import Localizer, format_number
 from member import (
     BATTLE_PARTY_MEMBER_COUNT,
+    CharacterDefinition,
     FormationRow,
     Member,
     MemberDataError,
@@ -92,8 +93,12 @@ from systems import (
     DebugPartyEditor,
     DebugPartyError,
     InventorySystem,
+    SaveRepository,
+    SaveSlotSummary,
+    SaveSystemError,
     ShopSystem,
     TravelSystem,
+    create_save_document,
 )
 from world_sites import WorldSiteCatalog
 
@@ -106,6 +111,8 @@ from ui import (
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
     RESERVE_MEMBER_TEXT_COLOR,
+    SaveMenuDataError,
+    SaveMenuOverlay,
     WindowFactory,
     WindowCursor,
     WindowText,
@@ -287,6 +294,8 @@ class FieldScreenChange(Enum):
     CLOSE_EQUIPMENT = auto()
     OPEN_STATUS = auto()
     CLOSE_STATUS = auto()
+    OPEN_SAVE = auto()
+    CLOSE_SAVE = auto()
     OPEN_SHOP = auto()
     CLOSE_SHOP = auto()
     CHANGE_MAP = auto()
@@ -380,6 +389,19 @@ class FieldScreenMock:
         )
         self._force_reserve_front()
         self.character_records = load_mock_character_records()
+        self.character_states = {
+            member.definition.key: member for member in self.party
+        }
+        character_definitions = tuple(
+            CharacterDefinition.from_record(record)
+            for record in self.character_records
+        )
+        self.character_face_positions = {
+            definition.key: definition.face_position
+            for definition in character_definitions
+        }
+        self.save_repository = SaveRepository()
+        self.current_save_slot: int | None = None
         texts_path = (
             CONTENT_TEXTS_PATH
             if CONTENT_TEXTS_PATH.is_file()
@@ -416,6 +438,7 @@ class FieldScreenMock:
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
         self.spell_screen: SpellMenuOverlay | None = None
+        self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
         self.shop_selector_window = None
         self.shop_selector_cursor: WindowCursor | None = None
@@ -1144,6 +1167,11 @@ class FieldScreenMock:
         if self.debug_screen is None:
             return
         self.party = self.debug_screen.party
+        character_states = getattr(self, "character_states", {})
+        character_states.update(
+            (member.definition.key, member) for member in self.party
+        )
+        self.character_states = character_states
         self._force_reserve_front()
         self.debug_screen = None
         self.selected_member_index = min(
@@ -1264,6 +1292,7 @@ class FieldScreenMock:
             FieldScreenChange.OPEN_SPELL,
             FieldScreenChange.OPEN_EQUIPMENT,
             FieldScreenChange.OPEN_STATUS,
+            FieldScreenChange.OPEN_SAVE,
         ):
             self.command_cursor.active = False
         fade.start()
@@ -1294,6 +1323,12 @@ class FieldScreenMock:
             self._finish_equipment()
         elif change is FieldScreenChange.OPEN_STATUS:
             self._start_status()
+        elif change is FieldScreenChange.CLOSE_STATUS:
+            self._finish_status()
+        elif change is FieldScreenChange.OPEN_SAVE:
+            self._start_save()
+        elif change is FieldScreenChange.CLOSE_SAVE:
+            self._finish_save()
         elif change is FieldScreenChange.OPEN_SHOP:
             self.showing_field = False
             self._start_shop()
@@ -1305,7 +1340,7 @@ class FieldScreenMock:
         elif change is FieldScreenChange.TELEPORT:
             self._apply_pending_debug_teleport()
         else:
-            self._finish_status()
+            raise RuntimeError(f"unsupported field screen change: {change}")
         self.pending_screen_change = None
 
     def _restart_main_windows_for_fade_in(self) -> None:
@@ -1357,6 +1392,41 @@ class FieldScreenMock:
             faces=self.faces,
             member_index=self.selected_member_index,
         )
+
+    def _start_save(self) -> None:
+        self.command_cursor.active = False
+        self.save_screen = SaveMenuOverlay(
+            summaries=self.save_repository.summaries(),
+            current_slot=self.current_save_slot,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+            face_positions=self.character_face_positions,
+            on_save=self._save_to_slot,
+            on_invalid_action=self.alert.start,
+        )
+
+    def _finish_save(self) -> None:
+        self.save_screen = None
+        self.command_cursor.active = True
+
+    def _save_to_slot(self, slot: int) -> SaveSlotSummary | None:
+        try:
+            document = create_save_document(
+                save_data=self.save_data,
+                active_party=self.party,
+                character_states=self.character_states,
+                inventory=self.inventory_system,
+                map_id=self.current_map.map_id,
+                position=self.field.position,
+                facing=self.field.facing,
+            )
+            summary = self.save_repository.save(slot, document)
+        except (SaveSystemError, TypeError, ValueError):
+            return None
+        self.current_save_slot = slot
+        return summary
 
     def _finish_spell(self) -> None:
         if self.spell_screen is None:
@@ -1616,6 +1686,11 @@ class FieldScreenMock:
             if status_screen.update(input_state):
                 self._begin_screen_change(FieldScreenChange.CLOSE_STATUS)
             return
+        save_screen = getattr(self, "save_screen", None)
+        if save_screen is not None:
+            if save_screen.update(input_state):
+                self._begin_screen_change(FieldScreenChange.CLOSE_SAVE)
+            return
         debug_screen = getattr(self, "debug_screen", None)
         if debug_screen is not None:
             if debug_screen.update(input_state):
@@ -1711,6 +1786,9 @@ class FieldScreenMock:
         ):
             self._start_settings()
             return
+        if input_state.confirm.triggered and self.command_cursor.selected_key == "save":
+            self._begin_screen_change(FieldScreenChange.OPEN_SAVE)
+            return
         self.command_window.update(input_state.navigation)
 
     def draw(self) -> None:
@@ -1746,6 +1824,10 @@ class FieldScreenMock:
             status_screen = getattr(self, "status_screen", None)
             if status_screen is not None:
                 status_screen.draw()
+                return
+            save_screen = getattr(self, "save_screen", None)
+            if save_screen is not None:
+                save_screen.draw()
                 return
             debug_screen = getattr(self, "debug_screen", None)
             if debug_screen is not None:
@@ -1852,6 +1934,7 @@ def main() -> int:
             FieldMockDataError,
             MockFixtureError,
             SkillDataError,
+            SaveMenuDataError,
             SpellDataError,
             SpellMenuDataError,
             ShopUiDataError,

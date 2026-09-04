@@ -1490,6 +1490,134 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 3)
 
+    @patch("tools.screen_mocks.field.SaveMenuOverlay")
+    def test_confirming_save_command_opens_connected_save_screen(
+        self,
+        save_screen_class: Mock,
+    ) -> None:
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        input_state = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock(poll=Mock(return_value=input_state))
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="save", active=True)
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock.save_screen = None
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.save_repository = Mock()
+        mock.current_save_slot = None
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.faces = object()
+        mock.character_face_positions = {"Fiora": Mock()}
+
+        mock.update()
+
+        self.assertIs(
+            mock.pending_screen_change,
+            FieldScreenChange.OPEN_SAVE,
+        )
+        self.assertFalse(mock.command_cursor.active)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        save_screen_class.assert_called_once_with(
+            summaries=mock.save_repository.summaries.return_value,
+            current_slot=None,
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+            faces=mock.faces,
+            face_positions=mock.character_face_positions,
+            on_save=mock._save_to_slot,
+            on_invalid_action=mock.alert.start,
+        )
+        self.assertIs(mock.save_screen, save_screen_class.return_value)
+        self.assertIsNone(mock.pending_screen_change)
+
+    def test_cancel_from_save_returns_to_selected_menu_command(self) -> None:
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        input_state = InputState(cancel=InputButton(triggered=True, held=True))
+        mock.input_reader = Mock(poll=Mock(return_value=input_state))
+        mock.alert = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.save_screen = Mock()
+        mock.save_screen.update.return_value = True
+
+        save_screen = mock.save_screen
+        mock.update()
+
+        save_screen.update.assert_called_once_with(input_state)
+        self.assertIs(
+            mock.pending_screen_change,
+            FieldScreenChange.CLOSE_SAVE,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        self.assertIsNone(mock.save_screen)
+        self.assertTrue(mock.command_cursor.active)
+
+    @patch("tools.screen_mocks.field.pyxel.camera")
+    @patch("tools.screen_mocks.field.pyxel.cls")
+    def test_draw_uses_save_screen_while_save_is_active(
+        self,
+        clear_screen: Mock,
+        camera: Mock,
+    ) -> None:
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.save_screen = Mock()
+        mock.alert = Mock(camera_x=0)
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        mock.save_screen.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
+
+    @patch("tools.screen_mocks.field.create_save_document")
+    def test_save_slot_writes_current_field_and_all_known_characters(
+        self,
+        create_document: Mock,
+    ) -> None:
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.save_data = Mock()
+        mock.party = (Mock(),)
+        mock.character_states = {"Fiora": mock.party[0], "Cerion": Mock()}
+        mock.inventory_system = Mock()
+        mock.current_map = Mock(map_id="worldmap")
+        mock.field = Mock(
+            position=FieldPosition(17, 39),
+            facing=Direction.LEFT,
+        )
+        summary = Mock(slot=3)
+        mock.save_repository = Mock()
+        mock.save_repository.save.return_value = summary
+        mock.current_save_slot = None
+        document = {"format_version": 1}
+        create_document.return_value = document
+
+        result = mock._save_to_slot(3)
+
+        create_document.assert_called_once_with(
+            save_data=mock.save_data,
+            active_party=mock.party,
+            character_states=mock.character_states,
+            inventory=mock.inventory_system,
+            map_id="worldmap",
+            position=FieldPosition(17, 39),
+            facing=Direction.LEFT,
+        )
+        mock.save_repository.save.assert_called_once_with(3, document)
+        self.assertIs(result, summary)
+        self.assertEqual(mock.current_save_slot, 3)
+
     def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
         mock = FieldScreenMock.__new__(FieldScreenMock)
         mock.alert = Mock()

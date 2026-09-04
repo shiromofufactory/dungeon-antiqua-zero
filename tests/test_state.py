@@ -84,9 +84,14 @@ class SaveDataTest(unittest.TestCase):
 
         self.assertEqual(save_data.gold, 0)
         self.assertEqual(save_data.experience, 0)
+        self.assertEqual(save_data.battle_count, 0)
         self.assertEqual(save_data.difficulty, Difficulty.NORMAL)
         self.assertEqual(save_data.play_time_frames, 0)
+        self.assertEqual(save_data.event_flags, set())
         self.assertEqual(save_data.visited_site_ids, set())
+        self.assertEqual(save_data.opened_treasures, set())
+        self.assertEqual(save_data.monster_records, {})
+        self.assertEqual(save_data.logs, [])
 
     def test_remembers_visited_sites_once(self) -> None:
         save_data = SaveData()
@@ -108,10 +113,19 @@ class SaveDataTest(unittest.TestCase):
         invalid_values = (
             {"gold": -1},
             {"experience": True},
+            {"battle_count": -1},
             {"play_time_frames": "0"},
             {"difficulty": "normal"},
+            {"event_flags": ["prologue_complete"]},
+            {"event_flags": {""}},
             {"visited_site_ids": ["sample_town"]},
             {"visited_site_ids": {"Invalid Site"}},
+            {"opened_treasures": [("worldmap", "chest_1")]},
+            {"opened_treasures": {("", "chest_1")}},
+            {"monster_records": {"Giant Spider": ["profile"]}},
+            {"monster_records": {"": {"profile"}}},
+            {"logs": [{}]},
+            {"logs": [{"text_key": "event", "arguments": {"VALUE": []}}]},
         )
 
         for value in invalid_values:

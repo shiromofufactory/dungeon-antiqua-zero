@@ -158,12 +158,17 @@ class SaveData:
 
     gold: int = 0
     experience: int = 0
+    battle_count: int = 0
     difficulty: Difficulty = Difficulty.NORMAL
     play_time_frames: int = 0
+    event_flags: set[str] = field(default_factory=set)
     visited_site_ids: set[str] = field(default_factory=set)
+    opened_treasures: set[tuple[str, str]] = field(default_factory=set)
+    monster_records: dict[str, set[str]] = field(default_factory=dict)
+    logs: list[dict[str, object]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        for name in ("gold", "experience", "play_time_frames"):
+        for name in ("gold", "experience", "battle_count", "play_time_frames"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")
@@ -171,12 +176,53 @@ class SaveData:
                 raise ValueError(f"{name} must not be negative")
         if not isinstance(self.difficulty, Difficulty):
             raise TypeError("difficulty must be a Difficulty")
+        if not isinstance(self.event_flags, set) or not all(
+            isinstance(event_flag, str) and event_flag
+            for event_flag in self.event_flags
+        ):
+            raise TypeError("event_flags must be a set of non-empty strings")
         if not isinstance(self.visited_site_ids, set) or not all(
             isinstance(site_id, str)
             and _STABLE_ID_PATTERN.fullmatch(site_id) is not None
             for site_id in self.visited_site_ids
         ):
             raise TypeError("visited_site_ids must be a set of stable IDs")
+        if not isinstance(self.opened_treasures, set) or not all(
+            isinstance(value, tuple)
+            and len(value) == 2
+            and all(isinstance(part, str) and part for part in value)
+            for value in self.opened_treasures
+        ):
+            raise TypeError("opened_treasures must be a set of non-empty string pairs")
+        if not isinstance(self.monster_records, dict) or not all(
+            isinstance(monster_key, str)
+            and monster_key
+            and isinstance(field_keys, set)
+            and all(
+                isinstance(field_key, str) and field_key
+                for field_key in field_keys
+            )
+            for monster_key, field_keys in self.monster_records.items()
+        ):
+            raise TypeError(
+                "monster_records must map monster keys to sets of revealed fields"
+            )
+        if not isinstance(self.logs, list) or len(self.logs) > 20:
+            raise TypeError("logs must be a list containing at most 20 entries")
+        for entry in self.logs:
+            if not isinstance(entry, dict):
+                raise TypeError("logs must contain objects")
+            text_key = entry.get("text_key")
+            arguments = entry.get("arguments")
+            if not isinstance(text_key, str) or not text_key:
+                raise TypeError("log.text_key must be a non-empty string")
+            if not isinstance(arguments, dict) or not all(
+                isinstance(key, str)
+                and key
+                and (value is None or isinstance(value, (str, int, bool)))
+                for key, value in arguments.items()
+            ):
+                raise TypeError("log.arguments contains an unsupported value")
 
     def advance_play_time(self, frames: int = 1) -> None:
         """Add active gameplay frames to the persisted play time."""

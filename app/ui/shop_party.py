@@ -157,6 +157,7 @@ class ShopPartyPanel:
 
 
 __all__ = [
+    "SHOP_PARTY_COLUMN_WIDTH",
     "SHOP_PARTY_DOWN_SOURCE",
     "SHOP_PARTY_FACE_FIRST_X",
     "SHOP_PARTY_FACE_SIZE",

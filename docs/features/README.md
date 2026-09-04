@@ -32,6 +32,7 @@
 
 ## 機能一覧
 
+- [セーブデータ形式](./save-data.md)
 - [フィールドモック](./field-mock.md)
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)
