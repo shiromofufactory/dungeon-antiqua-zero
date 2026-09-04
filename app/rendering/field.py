@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 import pyxel
 
 if __package__ == "rendering":
-    from field import FieldMovement
+    from field import FieldActors, FieldMovement
     from input import Direction
     from resources.maps import CompiledMap
 else:
-    from ..field import FieldMovement
+    from ..field import FieldActors, FieldMovement
     from ..input import Direction
     from ..resources.maps import CompiledMap
 
@@ -54,7 +54,14 @@ class FieldRenderer:
         self.screen_height = screen_height
         self._pyxel = pyxel_api
 
-    def draw(self, field: FieldMovement, *, frame_count: int | None = None) -> None:
+    def draw(
+        self,
+        field: FieldMovement,
+        *,
+        actors: FieldActors | None = None,
+        actor_images: Mapping[str, Any] | None = None,
+        frame_count: int | None = None,
+    ) -> None:
         if not isinstance(field, FieldMovement):
             raise TypeError("field renderer requires a FieldMovement")
         if field.map_data is not self.map_data:
@@ -67,7 +74,24 @@ class FieldRenderer:
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
         self._draw_objects(camera_x, camera_y, frame_count)
-        self._draw_character(field, camera_x, camera_y, frame_count)
+        actor_images = {} if actor_images is None else actor_images
+        characters: list[tuple[int, FieldMovement, Any | None]] = [
+            (field.world_y, field, None)
+        ]
+        if actors is not None:
+            if actors.map_data is not self.map_data:
+                raise ValueError("field renderer and actors must use the same map data")
+            for actor in actors.actors:
+                image = actor_images.get(actor.appearance_id)
+                characters.append((actor.movement.world_y, actor.movement, image))
+        for _world_y, movement, image in sorted(characters, key=lambda item: item[0]):
+            self._draw_character(
+                movement,
+                camera_x,
+                camera_y,
+                frame_count,
+                image=image,
+            )
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:
         player_screen_x = (self.screen_width - FIELD_CHARACTER_SIZE) // 2
@@ -156,15 +180,18 @@ class FieldRenderer:
         camera_x: int,
         camera_y: int,
         frame_count: int,
+        *,
+        image: Any | None = None,
     ) -> None:
         frame = (frame_count // FIELD_CHARACTER_ANIMATION_INTERVAL) % 2
         row = FIELD_CHARACTER_FACING_ROWS[field.facing]
         self._pyxel.blt(
             field.world_x - camera_x,
             field.world_y - camera_y,
-            FIELD_CHARACTER_BANK,
+            FIELD_CHARACTER_BANK if image is None else image,
             FIELD_CHARACTER_SOURCE_X + frame * FIELD_CHARACTER_SIZE,
-            FIELD_CHARACTER_SOURCE_Y + row * FIELD_CHARACTER_SIZE,
+            (FIELD_CHARACTER_SOURCE_Y if image is None else 0)
+            + row * FIELD_CHARACTER_SIZE,
             FIELD_CHARACTER_SIZE,
             FIELD_CHARACTER_SIZE,
             FIELD_CHARACTER_COLKEY,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import pyxel
@@ -10,10 +12,43 @@ import pyxel
 
 BGM_CHANNEL = 2
 BGM_VOLUME_GAINS = (0.0, 0.2, 0.4, 0.6, 0.8)
+SE_CATALOG_PATH = Path(__file__).resolve().parents[1] / "audio" / "catalog.json"
 
 
 class AudioResourceError(RuntimeError):
     """Raised when a BGM asset cannot be resolved or decoded."""
+
+
+def _load_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioResourceError(
+            f"SEカタログを読み込めません: {path}: {error}"
+        ) from error
+    if not isinstance(document, dict) or document.get("format_version") != 1:
+        raise AudioResourceError("SEカタログのformat_versionが不正です。")
+    records = document.get("sound_effects")
+    if not isinstance(records, dict) or not records:
+        raise AudioResourceError("SEカタログのsound_effectsが不正です。")
+    loaded: dict[str, tuple[int, int]] = {}
+    for se_id, record in records.items():
+        if not isinstance(se_id, str) or not se_id or not isinstance(record, dict):
+            raise AudioResourceError("SEカタログのレコードが不正です。")
+        channel = record.get("channel")
+        sound = record.get("sound")
+        if not all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in (channel, sound)
+        ):
+            raise AudioResourceError(
+                f"SEカタログのchannelまたはsoundが不正です: {se_id}"
+            )
+        loaded[se_id] = (channel, sound)
+    return MappingProxyType(loaded)
+
+
+SE_CATALOG = _load_se_catalog()
 
 
 def list_bgm_ids(audio_dir: Path | None = None) -> tuple[str, ...]:
@@ -29,6 +64,22 @@ def list_bgm_ids(audio_dir: Path | None = None) -> tuple[str, ...]:
         and not path.name.startswith(".")
     }
     return tuple(sorted(ids))
+
+
+def list_se_ids() -> tuple[str, ...]:
+    return tuple(SE_CATALOG)
+
+
+def play_se(se_id: str, *, pyxel_api: Any = pyxel) -> None:
+    if not isinstance(se_id, str) or se_id not in SE_CATALOG:
+        raise AudioResourceError(f"未定義のSE IDです: {se_id}")
+    channel, sound = SE_CATALOG[se_id]
+    try:
+        pyxel_api.play(channel, sound)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as error:
+        raise AudioResourceError(f"SEを再生できません: {se_id}: {error}") from error
 
 
 class BgmPlayer:
@@ -170,7 +221,11 @@ class BgmPlayer:
 __all__ = [
     "BGM_CHANNEL",
     "BGM_VOLUME_GAINS",
+    "SE_CATALOG_PATH",
     "AudioResourceError",
     "BgmPlayer",
+    "SE_CATALOG",
     "list_bgm_ids",
+    "list_se_ids",
+    "play_se",
 ]

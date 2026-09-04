@@ -88,6 +88,25 @@ npm run tools:map-editor -- --map field_01 --tileset dungeon --profile dungeon
 `app/maps/<map_id>.json`、`app/maps/<map_id>.bin` を生成する。全マップを再生成する場合は
 `npm run maps:build` を使う。
 
+「イベント」タブではactorを配置し、cell、object、actorをアンカーにしたイベントトリガーを
+編集できる。イベント本文の作成は次のEvent Editorで行う。
+
+## Event Editor
+
+通常イベント、フラグ、条件分岐、メッセージ、音声、パーティ・actor移動などを構造化入力で
+作成するローカルWebツールである。仕様は
+[`docs/features/events.md`](../docs/features/events.md)を参照する。
+
+```sh
+npm run tools:event-editor
+npm run tools:event-editor -- --namespace fairy_village
+```
+
+保存時に `content/events/<namespace>.json` を検証し、成功した場合だけ原子的に保存して、
+Git管理外の `app/events/events.json` を再生成する。キャラクター、アイテム、文言、BGM、SE、
+宣言済みフラグは一覧から選択できる。JSONを手編集する場合も `npm run events:validate` と
+`npm run events:build` が同じ検証処理を使用する。
+
 ## Screen Mocks
 
 画面モックの起動処理と疑似状態は `tools/screen_mocks/` に置く。仕様が確定して本編でも使う画面は `app/ui/` のOverlay／表示部品とし、モックから同じ実装へ疑似状態を渡す。

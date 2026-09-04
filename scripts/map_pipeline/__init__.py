@@ -22,6 +22,7 @@ from .map_source import (
     save_compiled_map,
     save_map_source,
     validate_map_links,
+    validate_map_event_links,
     validate_map_source,
 )
 
@@ -45,5 +46,6 @@ __all__ = (
     "save_compiled_map",
     "save_map_source",
     "validate_map_links",
+    "validate_map_event_links",
     "validate_map_source",
 )

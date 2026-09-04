@@ -74,7 +74,9 @@ class MapEditorServerTest(unittest.TestCase):
     def test_serves_new_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
-        self.assertEqual(payload["data"]["format_version"], 2)
+        self.assertEqual(payload["data"]["format_version"], 3)
+        self.assertEqual(payload["data"]["actors"], [])
+        self.assertEqual(payload["data"]["event_triggers"], [])
         self.assertEqual(payload["data"]["size"], [6, 5])
         self.assertEqual(payload["data"]["sites"], [])
         self.assertEqual(payload["data"]["arrival_points"], [])
@@ -172,6 +174,52 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn(
             "missing_site_name_ja",
             {item["code"] for item in result["diagnostics"]},
+        )
+
+    def test_saves_actor_and_event_trigger_using_defined_event(self) -> None:
+        events_dir = self.application.content_root / "events"
+        events_dir.mkdir(parents=True)
+        (events_dir / "sample.json").write_text(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "namespace": "sample",
+                    "flags": [],
+                    "events": [{"id": "talk", "commands": []}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = self.get_json("/api/document?token=test-token")
+        data = payload["data"]
+        data["grounds"][2][2] = "plain"
+        data["actors"] = [
+            {
+                "id": "elder",
+                "position": [2, 2],
+                "facing": "down",
+                "appearance_id": "village_elder",
+            }
+        ]
+        data["event_triggers"] = [
+            {
+                "id": "elder_talk",
+                "event_id": "sample.talk",
+                "activations": ["touch", "interact"],
+                "anchor": {"kind": "actor", "actor_id": "elder"},
+                "offsets": [[0, 0]],
+            }
+        ]
+
+        result = self.post_json("/api/save", data)
+
+        self.assertEqual(payload["event_options"], ["sample.talk"])
+        self.assertTrue(result["saved"])
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(runtime["actors"][0]["id"], "elder")
+        self.assertEqual(
+            runtime["event_triggers"][0]["target"],
+            {"kind": "actor", "actor_id": "elder", "offsets": [[0, 0]]},
         )
 
     def test_rejects_invalid_world_edge_without_writing(self) -> None:

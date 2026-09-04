@@ -14,7 +14,13 @@ from map_pipeline import (
     resolve_source_image,
     validate_map_source,
     validate_map_links,
+    validate_map_event_links,
     validate_tileset,
+)
+from event_pipeline import (
+    compile_event_sources,
+    load_event_sources,
+    reference_catalogs,
 )
 
 
@@ -127,6 +133,14 @@ def main() -> int:
             if isinstance(map_id, str):
                 all_sources[map_id] = source
         link_diagnostics = validate_map_links(all_sources)
+        event_sources = load_event_sources(content_root)
+        event_catalog = compile_event_sources(
+            event_sources,
+            **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
+        )
+        link_diagnostics.extend(
+            validate_map_event_links(all_sources, event_catalog["events"])
+        )
         if link_diagnostics:
             print("map links")
         for diagnostic in link_diagnostics:

@@ -16,7 +16,13 @@ from map_pipeline import (
     save_compiled_map,
     validate_map_source,
     validate_map_links,
+    validate_map_event_links,
     validate_tileset,
+)
+from event_pipeline import (
+    compile_event_sources,
+    load_event_sources,
+    reference_catalogs,
 )
 
 
@@ -58,9 +64,16 @@ def main() -> int:
             map_id = source.get("map_id")
             if isinstance(map_id, str):
                 all_sources[map_id] = source
+        event_catalog = compile_event_sources(
+            load_event_sources(content_root),
+            **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
+        )
         link_errors = [
             item
-            for item in validate_map_links(all_sources)
+            for item in (
+                *validate_map_links(all_sources),
+                *validate_map_event_links(all_sources, event_catalog["events"]),
+            )
             if item.severity == "error"
         ]
         if link_errors:

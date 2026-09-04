@@ -13,11 +13,13 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAP_FACINGS = frozenset(("up", "right", "down", "left"))
+MAP_EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
+EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
 
 class MapResourceError(RuntimeError):
@@ -76,6 +78,24 @@ class MapArrivalPoint:
 
 
 @dataclass(frozen=True)
+class MapActor:
+    id: str
+    position: MapCell
+    facing: str
+    appearance_id: str
+
+
+@dataclass(frozen=True)
+class MapEventTrigger:
+    id: str
+    event_id: str
+    activations: frozenset[str]
+    cells: tuple[MapCell, ...] = ()
+    actor_id: str | None = None
+    offsets: tuple[MapCell, ...] = ()
+
+
+@dataclass(frozen=True)
 class MapDestination:
     map_id: str
     arrival_id: str
@@ -109,6 +129,10 @@ class CompiledMap:
     object_animations: Mapping[int, MapAnimation]
     sites: tuple[WorldSite, ...] = ()
     arrival_points: tuple[MapArrivalPoint, ...] = ()
+    actors: tuple[MapActor, ...] = ()
+    event_triggers: tuple[MapEventTrigger, ...] = ()
+    event_trigger_index: Mapping[str, Mapping[tuple[int, int], MapEventTrigger]] = MappingProxyType({})
+    actor_event_triggers: Mapping[str, tuple[MapEventTrigger, ...]] = MappingProxyType({})
 
     def is_blocked(self, x: int, y: int) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
@@ -146,6 +170,37 @@ class CompiledMap:
             )
         except StopIteration as error:
             raise KeyError(f"unknown arrival point: {arrival_id}") from error
+
+    def event_trigger_at(
+        self,
+        activation: str,
+        x: int,
+        y: int,
+        *,
+        actor_positions: Mapping[str, MapCell] | None = None,
+    ) -> MapEventTrigger | None:
+        """Return the sole trigger resolved for an activation and current cell."""
+
+        if activation not in MAP_EVENT_ACTIVATIONS:
+            raise ValueError(f"unsupported map event activation: {activation}")
+        trigger = self.event_trigger_index.get(activation, {}).get((x, y))
+        if trigger is not None:
+            return trigger
+        positions = {} if actor_positions is None else actor_positions
+        for actor_id, triggers in self.actor_event_triggers.items():
+            actor_position = positions.get(actor_id)
+            if actor_position is None:
+                continue
+            for candidate in triggers:
+                if activation not in candidate.activations:
+                    continue
+                if any(
+                    actor_position.x + offset.x == x
+                    and actor_position.y + offset.y == y
+                    for offset in candidate.offsets
+                ):
+                    return candidate
+        return None
 
 
 class MapResources:
@@ -279,6 +334,28 @@ class MapResources:
             height,
             collision_rows,
         )
+        actors = self._actors(
+            runtime.get("actors"), width, height, collision_rows
+        )
+        event_triggers = self._event_triggers(
+            runtime.get("event_triggers"), width, height, actors
+        )
+        static_index: dict[str, dict[tuple[int, int], MapEventTrigger]] = {
+            activation: {} for activation in MAP_EVENT_ACTIVATIONS
+        }
+        actor_index: dict[str, list[MapEventTrigger]] = {}
+        for trigger in event_triggers:
+            if trigger.actor_id is None:
+                for activation in trigger.activations:
+                    for cell in trigger.cells:
+                        key = (cell.x, cell.y)
+                        if key in static_index[activation]:
+                            raise MapResourceError(
+                                f"event triggerが{activation}の{key}で重複しています。"
+                            )
+                        static_index[activation][key] = trigger
+            else:
+                actor_index.setdefault(trigger.actor_id, []).append(trigger)
         return CompiledMap(
             map_id=map_id,
             profile=profile,
@@ -296,6 +373,17 @@ class MapResources:
             object_animations=MappingProxyType(object_animations),
             sites=sites,
             arrival_points=arrival_points,
+            actors=actors,
+            event_triggers=event_triggers,
+            event_trigger_index=MappingProxyType(
+                {
+                    activation: MappingProxyType(index)
+                    for activation, index in static_index.items()
+                }
+            ),
+            actor_event_triggers=MappingProxyType(
+                {actor_id: tuple(items) for actor_id, items in actor_index.items()}
+            ),
         )
 
     @staticmethod
@@ -565,6 +653,129 @@ class MapResources:
         return tuple(loaded)
 
     @classmethod
+    def _actors(
+        cls,
+        value: object,
+        width: int,
+        height: int,
+        collision_rows: tuple[str, ...],
+    ) -> tuple[MapActor, ...]:
+        if not isinstance(value, list):
+            raise MapResourceError("マップJSONのactorsは配列である必要があります。")
+        loaded = []
+        ids: set[str] = set()
+        positions: set[tuple[int, int]] = set()
+        for index, record in enumerate(value):
+            path = f"actors[{index}]"
+            if not isinstance(record, dict):
+                raise MapResourceError(f"{path}が不正です。")
+            actor_id = cls._stable_id(record.get("id"), f"{path}.id")
+            if actor_id in ids:
+                raise MapResourceError(f"{path}.idが重複しています。")
+            position = cls._map_cell(
+                record.get("position"), width, height, f"{path}.position"
+            )
+            point = (position.x, position.y)
+            if point in positions or collision_rows[position.y][position.x] == "1":
+                raise MapResourceError(f"{path}.positionが配置できないセルです。")
+            ids.add(actor_id)
+            positions.add(point)
+            loaded.append(
+                MapActor(
+                    id=actor_id,
+                    position=position,
+                    facing=cls._facing(record.get("facing"), f"{path}.facing"),
+                    appearance_id=cls._stable_id(
+                        record.get("appearance_id"), f"{path}.appearance_id"
+                    ),
+                )
+            )
+        return tuple(loaded)
+
+    @classmethod
+    def _event_triggers(
+        cls,
+        value: object,
+        width: int,
+        height: int,
+        actors: tuple[MapActor, ...],
+    ) -> tuple[MapEventTrigger, ...]:
+        if not isinstance(value, list):
+            raise MapResourceError(
+                "マップJSONのevent_triggersは配列である必要があります。"
+            )
+        loaded = []
+        ids: set[str] = set()
+        actor_ids = {actor.id for actor in actors}
+        for index, record in enumerate(value):
+            path = f"event_triggers[{index}]"
+            if not isinstance(record, dict):
+                raise MapResourceError(f"{path}が不正です。")
+            trigger_id = cls._stable_id(record.get("id"), f"{path}.id")
+            if trigger_id in ids:
+                raise MapResourceError(f"{path}.idが重複しています。")
+            ids.add(trigger_id)
+            event_id = record.get("event_id")
+            if not isinstance(event_id, str) or EVENT_ID_PATTERN.fullmatch(event_id) is None:
+                raise MapResourceError(f"{path}.event_idが不正です。")
+            activation_values = record.get("activations")
+            if (
+                not isinstance(activation_values, list)
+                or not activation_values
+                or len(activation_values) != len(set(activation_values))
+                or not all(item in MAP_EVENT_ACTIVATIONS for item in activation_values)
+            ):
+                raise MapResourceError(f"{path}.activationsが不正です。")
+            target = record.get("target")
+            if not isinstance(target, dict):
+                raise MapResourceError(f"{path}.targetが不正です。")
+            if target.get("kind") == "cells":
+                values = target.get("cells")
+                if not isinstance(values, list) or not values:
+                    raise MapResourceError(f"{path}.target.cellsが不正です。")
+                cells = tuple(
+                    cls._map_cell(cell, width, height, f"{path}.target.cells[{cell_index}]")
+                    for cell_index, cell in enumerate(values)
+                )
+                if len(cells) != len({(cell.x, cell.y) for cell in cells}):
+                    raise MapResourceError(f"{path}.target.cellsが重複しています。")
+                loaded.append(
+                    MapEventTrigger(
+                        trigger_id,
+                        event_id,
+                        frozenset(activation_values),
+                        cells=cells,
+                    )
+                )
+            elif target.get("kind") == "actor":
+                actor_id = cls._stable_id(
+                    target.get("actor_id"), f"{path}.target.actor_id"
+                )
+                if actor_id not in actor_ids:
+                    raise MapResourceError(f"{path}.target.actor_idが見つかりません。")
+                values = target.get("offsets")
+                if not isinstance(values, list) or not values:
+                    raise MapResourceError(f"{path}.target.offsetsが不正です。")
+                offsets = tuple(
+                    cls._offset(cell, f"{path}.target.offsets[{cell_index}]")
+                    for cell_index, cell in enumerate(values)
+                )
+                if len(offsets) != len({(cell.x, cell.y) for cell in offsets}):
+                    raise MapResourceError(f"{path}.target.offsetsが重複しています。")
+                loaded.append(
+                    MapEventTrigger(
+                        trigger_id,
+                        event_id,
+                        frozenset(activation_values),
+                        actor_id=actor_id,
+                        offsets=offsets,
+                    )
+                )
+            else:
+                raise MapResourceError(f"{path}.target.kindが不正です。")
+        return tuple(loaded)
+
+    @classmethod
     def _destination(cls, value: object, path: str) -> MapDestination:
         if not isinstance(value, dict):
             raise MapResourceError(f"{path}が不正です。")
@@ -617,6 +828,19 @@ class MapResources:
                 for item in value
             )
             or not (0 <= value[0] < width and 0 <= value[1] < height)
+        ):
+            raise MapResourceError(f"{path}が不正です。")
+        return MapCell(x=value[0], y=value[1])
+
+    @staticmethod
+    def _offset(value: object, path: str) -> MapCell:
+        if (
+            not isinstance(value, list)
+            or len(value) != 2
+            or not all(
+                isinstance(item, int) and not isinstance(item, bool)
+                for item in value
+            )
         ):
             raise MapResourceError(f"{path}が不正です。")
         return MapCell(x=value[0], y=value[1])
@@ -678,10 +902,13 @@ class MapResources:
 __all__ = [
     "CompiledMap",
     "MapArrivalPoint",
+    "MapActor",
     "MapAnimation",
     "MapAnimationFrame",
     "MapCell",
     "MapDestination",
+    "MapEventTrigger",
+    "MAP_EVENT_ACTIVATIONS",
     "MAP_FACINGS",
     "MAP_TILE_SIZE",
     "MapObjectTile",

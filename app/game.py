@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from enum import Enum, auto
 from pathlib import Path
 
@@ -37,7 +38,7 @@ from ui.spell_menu import (
     SpellMenuOverlay,
 )
 from ui.shop import ShopOverlay, ShopUiDataError
-from field import FieldMovement, FieldPosition
+from field import FieldActors, FieldMovement, FieldPosition
 from input import (
     Direction,
     InputAction,
@@ -59,7 +60,9 @@ from resources import (
     TRANSPARENT_INDEX,
     AudioResourceError,
     BgmPlayer,
+    CompiledMap,
     DataResourceError,
+    EventCatalog,
     FontResourceError,
     FontResources,
     FontRole,
@@ -68,6 +71,7 @@ from resources import (
     MapDestination,
     MapResourceError,
     MapResources,
+    play_se,
 )
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
@@ -83,10 +87,19 @@ from shop import ShopDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
 from systems import (
+    ChangeBgmEffect,
     DebugPartyEditor,
     DebugPartyError,
+    EventContext,
+    EventRunner,
+    EventRuntimeError,
     InventorySystem,
     LoadedGameState,
+    MessageEffect,
+    MoveActorEffect,
+    MovePartyEffect,
+    PartySystem,
+    PlaySeEffect,
     SaveRepository,
     SaveSlotSummary,
     SaveSystemError,
@@ -102,6 +115,8 @@ from ui import (
     CursorTarget,
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
+    EventMessageDataError,
+    EventMessageOverlay,
     LocalizedWindowTextFactory,
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
@@ -388,6 +403,13 @@ class Game:
         self.character_states = {
             member.definition.key: member for member in self.party
         }
+        self.party_system = PartySystem(
+            character_records=self.character_records,
+            items=self.items,
+            skills=self.skills,
+            active_party=self.party,
+            character_states=self.character_states,
+        )
         character_definitions = tuple(
             CharacterDefinition.from_record(record)
             for record in self.character_records
@@ -400,8 +422,9 @@ class Game:
         self.current_save_slot: int | None = None
         self.texts = TextCatalog.from_json(RUNTIME_TEXTS_PATH)
         self.fonts = FontResources()
-        images = ImageResources()
-        self.faces = images.image(FACES_IMAGE_ID)
+        self.images = ImageResources()
+        self.faces = self.images.image(FACES_IMAGE_ID)
+        self.event_catalog = EventCatalog.from_json()
         self.map_resources = MapResources()
         self.world_map = self.map_resources.map(WORLD_MAP_ID)
         self.current_map = self.world_map
@@ -416,6 +439,16 @@ class Game:
             screen_width=SCREEN_WIDTH,
             screen_height=SCREEN_HEIGHT,
         )
+        self.field_actors: FieldActors | None = None
+        self.field_actor_images: dict[str, object] = {}
+        self._reset_field_actors()
+        self.event_runner: EventRunner | None = None
+        self.event_effect = None
+        self.event_message: EventMessageOverlay | None = None
+        self.event_move_remaining = 0
+        self.event_release_direction: Direction | None = None
+        self.event_release_confirm = False
+        self.last_event_error: str | None = None
         self.settings_window = None
         self.settings_cursor: WindowCursor | None = None
         self.confirmation_window = None
@@ -666,6 +699,21 @@ class Game:
             0,
         )
 
+    def _reset_field_actors(self) -> None:
+        """Recreate transient actor movement whenever the active map changes."""
+
+        if not isinstance(getattr(self, "current_map", None), CompiledMap):
+            self.field_actors = None
+            self.field_actor_images = {}
+            return
+        self.field_actors = FieldActors(self.current_map)
+        image_ids = set(self.images.ids)
+        self.field_actor_images = {
+            actor.appearance_id: self.images.image(actor.appearance_id)
+            for actor in self.field_actors.actors
+            if actor.appearance_id in image_ids
+        }
+
     def _draw_site_name(self) -> None:
         """Draw the nearby-site name at a position fixed to the world map."""
 
@@ -755,6 +803,7 @@ class Game:
             screen_width=SCREEN_WIDTH,
             screen_height=SCREEN_HEIGHT,
         )
+        self._reset_field_actors()
         self.pending_target_map = None
         self.pending_target_arrival = None
         self._refresh_site_name_label(force=True)
@@ -1170,6 +1219,12 @@ class Game:
             (member.definition.key, member) for member in self.party
         )
         self.character_states = character_states
+        party_system = getattr(self, "party_system", None)
+        if party_system is not None:
+            party_system.replace(
+                self.party,
+                character_states=self.character_states,
+            )
         self._force_reserve_front()
         self.selected_member_index = min(
             self.selected_member_index,
@@ -1539,6 +1594,15 @@ class Game:
                 party=self.party,
                 save_data=self.save_data,
             )
+            if hasattr(self, "character_records"):
+                self.party_system = PartySystem(
+                    character_records=self.character_records,
+                    items=self.items,
+                    skills=self.skills,
+                    active_party=self.party,
+                    character_states=self.character_states,
+                )
+            self._reset_field_actors()
             self.selected_member_index = 0
             self._build_main_windows(animate=False)
         self.pending_loaded_state = None
@@ -1774,6 +1838,235 @@ class Game:
             window.update()
         return bool(animating)
 
+    def _actor_positions(self):
+        actors = getattr(self, "field_actors", None)
+        return {} if actors is None else actors.positions
+
+    def _start_field_event(
+        self,
+        event_id: str,
+        *,
+        release_direction: Direction | None = None,
+        release_confirm: bool = False,
+    ) -> bool:
+        """Start one map event and immediately run its synchronous prefix."""
+
+        if getattr(self, "event_runner", None) is not None:
+            return False
+        try:
+            self.party_system.replace(
+                self.party,
+                character_states=self.character_states,
+            )
+            self.event_runner = EventRunner.from_catalog(
+                self.event_catalog,
+                event_id,
+                context=EventContext.FIELD,
+                save_data=self.save_data,
+                party=self.party_system,
+                inventory=self.inventory_system,
+            )
+            self.event_release_direction = release_direction
+            self.event_release_confirm = release_confirm
+            self.last_event_error = None
+            self._continue_event()
+        except (KeyError, EventRuntimeError, EventMessageDataError, AudioResourceError, ValueError) as error:
+            self._abort_event(error)
+        return self.event_runner is not None or self.last_event_error is None
+
+    def _continue_event(self) -> None:
+        runner = self.event_runner
+        if runner is None:
+            return
+        while True:
+            effect = runner.advance()
+            self.party = self.party_system.active_party
+            self.character_states = self.party_system.character_states
+            if effect is None:
+                if runner.is_complete:
+                    self.event_runner = None
+                    self.event_effect = None
+                    self.event_message = None
+                    self.event_move_remaining = 0
+                    self.selected_member_index = min(
+                        self.selected_member_index,
+                        len(self.party) - 1,
+                    )
+                return
+            self.event_effect = effect
+            if isinstance(effect, PlaySeEffect):
+                play_se(effect.se_id)
+                runner.complete_effect(effect)
+                self.event_effect = None
+                continue
+            if isinstance(effect, ChangeBgmEffect):
+                self.bgm.play(effect.bgm_id)
+                runner.complete_effect(effect)
+                self.event_effect = None
+                continue
+            if isinstance(effect, MessageEffect):
+                self.event_message = EventMessageOverlay(
+                    text_key=effect.text_key,
+                    portrait_character_key=effect.portrait_character_key,
+                    settings=self.settings,
+                    texts=self.texts,
+                    fonts=self.fonts,
+                    faces=self.faces,
+                    face_positions=self.character_face_positions,
+                )
+                self.save_data.logs.append(
+                    {"text_key": effect.text_key, "arguments": {}}
+                )
+                del self.save_data.logs[:-20]
+                return
+            if isinstance(effect, (MovePartyEffect, MoveActorEffect)):
+                self.event_move_remaining = effect.steps
+                return
+            raise EventRuntimeError(runner.event_id, "effect", "unsupported event effect")
+
+    def _update_event(self, input_state: InputState) -> None:
+        runner = self.event_runner
+        effect = self.event_effect
+        if runner is None or effect is None:
+            return
+        try:
+            if isinstance(effect, MessageEffect):
+                if self.event_message is not None and self.event_message.update(input_state):
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    self.event_message = None
+                    self._continue_event()
+                return
+            if isinstance(effect, MovePartyEffect):
+                moved = self.field.update(
+                    effect.direction,
+                    blocked_positions=(
+                        ()
+                        if self.field_actors is None
+                        else self.field_actors.blocked_positions()
+                    ),
+                )
+                movement = self.field
+            elif isinstance(effect, MoveActorEffect):
+                if self.field_actors is None:
+                    raise EventRuntimeError(
+                        runner.event_id,
+                        "effect",
+                        f"actor is not available: {effect.actor_id}",
+                    )
+                moved = self.field_actors.update(
+                    effect.actor_id,
+                    effect.direction,
+                    party_position=self.field.position,
+                )
+                movement = self.field_actors.actor(effect.actor_id).movement
+            else:
+                raise EventRuntimeError(runner.event_id, "effect", "unsupported waiting effect")
+            if not moved and not movement.is_moving:
+                raise EventRuntimeError(
+                    runner.event_id,
+                    "effect",
+                    "controlled movement is blocked",
+                )
+            if movement.arrived_position is not None:
+                self.event_move_remaining -= 1
+                if self.event_move_remaining == 0:
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    self._continue_event()
+        except (KeyError, EventRuntimeError, EventMessageDataError, AudioResourceError, ValueError) as error:
+            self._abort_event(error)
+
+    def _abort_event(self, error: BaseException) -> None:
+        self.last_event_error = str(error)
+        print(f"イベントを中断しました: {error}", file=sys.stderr)
+        self.event_runner = None
+        self.event_effect = None
+        self.event_message = None
+        self.event_move_remaining = 0
+        self.alert.start()
+
+    def _release_latch_blocks_field(self, input_state: InputState) -> bool:
+        blocked = False
+        if getattr(self, "event_release_direction", None) is not None:
+            if input_state.held_direction is None:
+                self.event_release_direction = None
+            else:
+                blocked = True
+        if getattr(self, "event_release_confirm", False):
+            if not input_state.confirm.held:
+                self.event_release_confirm = False
+            else:
+                blocked = True
+        return blocked
+
+    def _try_field_trigger(
+        self,
+        activation: str,
+        x: int,
+        y: int,
+        *,
+        release_direction: Direction | None = None,
+        release_confirm: bool = False,
+    ) -> bool:
+        current_map = getattr(self, "current_map", None)
+        if not isinstance(current_map, CompiledMap):
+            return False
+        trigger = current_map.event_trigger_at(
+            activation,
+            x,
+            y,
+            actor_positions=self._actor_positions(),
+        )
+        if trigger is None:
+            return False
+        self._start_field_event(
+            trigger.event_id,
+            release_direction=release_direction,
+            release_confirm=release_confirm,
+        )
+        return True
+
+    def _update_field(self, input_state: InputState) -> None:
+        if self._release_latch_blocks_field(input_state):
+            self.field.update(None)
+            return
+        if input_state.menu.triggered:
+            self._begin_screen_change(GameScreenChange.SHOW_MENU)
+            return
+        if not self.field.is_moving and input_state.confirm.triggered:
+            x = self.field.position.x + self.field.facing.dx
+            y = self.field.position.y + self.field.facing.dy
+            if self._try_field_trigger(
+                "interact", x, y, release_confirm=True
+            ):
+                return
+        direction = input_state.held_direction
+        if not self.field.is_moving and direction is not None:
+            x = self.field.position.x + direction.dx
+            y = self.field.position.y + direction.dy
+            if self._try_field_trigger(
+                "touch", x, y, release_direction=direction
+            ):
+                return
+        if getattr(self, "field_actors", None) is None:
+            self.field.update(direction)
+        else:
+            self.field.update(
+                direction,
+                blocked_positions=self.field_actors.blocked_positions(),
+            )
+        arrived = self.field.arrived_position
+        if arrived is not None and self._try_field_trigger(
+            "step",
+            arrived.x,
+            arrived.y,
+            release_direction=direction,
+        ):
+            return
+        self._handle_arrived_site()
+        self._refresh_site_name_label()
+
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
@@ -1792,12 +2085,10 @@ class Game:
                 self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
-            if input_state.menu.triggered:
-                self._begin_screen_change(GameScreenChange.SHOW_MENU)
+            if getattr(self, "event_runner", None) is not None:
+                self._update_event(input_state)
             else:
-                self.field.update(input_state.held_direction)
-                self._handle_arrived_site()
-                self._refresh_site_name_label()
+                self._update_field(input_state)
             return
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
@@ -1937,8 +2228,18 @@ class Game:
                 shop_screen.draw()
                 return
             if getattr(self, "showing_field", False):
-                self.field_renderer.draw(self.field)
+                if isinstance(getattr(self, "field_actors", None), FieldActors):
+                    self.field_renderer.draw(
+                        self.field,
+                        actors=self.field_actors,
+                        actor_images=self.field_actor_images,
+                    )
+                else:
+                    self.field_renderer.draw(self.field)
                 self._draw_site_name()
+                event_message = getattr(self, "event_message", None)
+                if event_message is not None:
+                    event_message.draw()
                 return
             item_screen = getattr(self, "item_screen", None)
             if item_screen is not None:

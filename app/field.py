@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Mapping
 
 if __package__:
     from .input import Direction
-    from .resources.maps import CompiledMap
+    from .resources.maps import CompiledMap, MapActor, MapCell
 else:
     from input import Direction
-    from resources.maps import CompiledMap
+    from resources.maps import CompiledMap, MapActor, MapCell
 
 
 DEFAULT_FIELD_MOVE_SPEED = 1
@@ -97,11 +99,20 @@ class FieldMovement:
     def world_y(self) -> int:
         return self.position.y * self.map_data.tile_size + self.offset_y
 
-    def update(self, direction: Direction | None) -> bool:
+    def update(
+        self,
+        direction: Direction | None,
+        *,
+        blocked_positions: tuple[FieldPosition, ...] = (),
+    ) -> bool:
         """Advance one frame and return whether the character moved."""
 
         if direction is not None and not isinstance(direction, Direction):
             raise TypeError("field movement direction must be a Direction or None")
+        if not isinstance(blocked_positions, tuple) or not all(
+            isinstance(position, FieldPosition) for position in blocked_positions
+        ):
+            raise TypeError("blocked_positions must be a tuple of FieldPosition")
         self._moved_this_frame = False
         self._arrived_position = None
         if self._moving_direction is None:
@@ -110,7 +121,9 @@ class FieldMovement:
             self.facing = direction
             destination_x = self.position.x + direction.dx
             destination_y = self.position.y + direction.dy
-            if self.map_data.is_blocked(destination_x, destination_y):
+            if self.map_data.is_blocked(destination_x, destination_y) or FieldPosition(
+                destination_x, destination_y
+            ) in blocked_positions:
                 return False
             self._moving_direction = direction
 
@@ -134,8 +147,80 @@ class FieldMovement:
         return True
 
 
+@dataclass
+class FieldActor:
+    id: str
+    appearance_id: str
+    movement: FieldMovement
+
+
+class FieldActors:
+    """Own runtime movement state for map-defined field actors."""
+
+    def __init__(self, map_data: CompiledMap) -> None:
+        if not isinstance(map_data, CompiledMap):
+            raise TypeError("field actors require a CompiledMap")
+        self.map_data = map_data
+        self._actors = {
+            actor.id: FieldActor(
+                actor.id,
+                actor.appearance_id,
+                FieldMovement(
+                    map_data,
+                    start=FieldPosition(actor.position.x, actor.position.y),
+                    facing=Direction[actor.facing.upper()],
+                ),
+            )
+            for actor in map_data.actors
+        }
+
+    @property
+    def actors(self) -> tuple[FieldActor, ...]:
+        return tuple(self._actors.values())
+
+    @property
+    def positions(self) -> Mapping[str, MapCell]:
+        return MappingProxyType(
+            {
+                actor_id: MapCell(actor.movement.position.x, actor.movement.position.y)
+                for actor_id, actor in self._actors.items()
+            }
+        )
+
+    def actor(self, actor_id: str) -> FieldActor:
+        try:
+            return self._actors[actor_id]
+        except KeyError as error:
+            raise KeyError(f"unknown field actor: {actor_id}") from error
+
+    def blocked_positions(self, *, excluding: str | None = None) -> tuple[FieldPosition, ...]:
+        return tuple(
+            actor.movement.position
+            for actor_id, actor in self._actors.items()
+            if actor_id != excluding
+        )
+
+    def update(
+        self,
+        actor_id: str,
+        direction: Direction,
+        *,
+        party_position: FieldPosition,
+    ) -> bool:
+        actor = self.actor(actor_id)
+        return actor.movement.update(
+            direction,
+            blocked_positions=(
+                party_position,
+                *self.blocked_positions(excluding=actor_id),
+            ),
+        )
+
+
 __all__ = [
     "DEFAULT_FIELD_MOVE_SPEED",
     "FieldMovement",
     "FieldPosition",
+    "FieldActor",
+    "FieldActors",
 ]

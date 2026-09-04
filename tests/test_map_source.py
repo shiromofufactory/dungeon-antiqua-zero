@@ -12,6 +12,7 @@ from scripts.map_pipeline import (
     initial_map_source,
     initial_worldmap_tileset,
     resolve_map,
+    validate_map_event_links,
     validate_map_links,
     validate_map_source,
 )
@@ -52,6 +53,81 @@ class MapSourceTest(unittest.TestCase):
         self.assertFalse(first["collision"][2 * 6 + 2])
         self.assertEqual(first["sites"], [])
         self.assertEqual(first["arrival_points"], [])
+
+    def test_validates_and_compiles_actors_and_event_triggers(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source["grounds"][2][2] = "plain"
+        source["grounds"][2][3] = "plain"
+        source["actors"] = [
+            {
+                "id": "elder",
+                "position": [2, 2],
+                "facing": "down",
+                "appearance_id": "elder",
+            }
+        ]
+        source["event_triggers"] = [
+            {
+                "id": "notice",
+                "event_id": "sample.notice",
+                "activations": ["step"],
+                "anchor": {"kind": "cell", "position": [3, 2]},
+                "offsets": [[0, 0]],
+            },
+            {
+                "id": "talk_elder",
+                "event_id": "sample.talk_elder",
+                "activations": ["touch", "interact"],
+                "anchor": {"kind": "actor", "actor_id": "elder"},
+                "offsets": [[0, 0]],
+            },
+        ]
+
+        diagnostics = validate_map_source(source, self.tileset)
+        resolved = resolve_map(source, self.tileset)
+        compiled = compile_map(
+            source, self.tileset, self.image_path, self.palette_path
+        )
+
+        self.assertEqual(
+            [item for item in diagnostics if item.severity == "error"], []
+        )
+        self.assertEqual(resolved["actors"], source["actors"])
+        self.assertEqual(
+            resolved["event_triggers"][0]["target"],
+            {"kind": "cells", "cells": [[3, 2]]},
+        )
+        self.assertEqual(
+            resolved["event_triggers"][1]["target"],
+            {"kind": "actor", "actor_id": "elder", "offsets": [[0, 0]]},
+        )
+        self.assertEqual(compiled.runtime["actors"], source["actors"])
+
+    def test_rejects_invalid_actor_and_overlapping_actor_triggers(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source["actors"] = [
+            {
+                "id": "elder",
+                "position": [0, 0],
+                "facing": "down",
+                "appearance_id": "elder",
+            }
+        ]
+        source["event_triggers"] = [
+            {
+                "id": f"talk_{number}",
+                "event_id": f"sample.talk_{number}",
+                "activations": ["interact"],
+                "anchor": {"kind": "actor", "actor_id": "elder"},
+                "offsets": [[0, 0]],
+            }
+            for number in (1, 2)
+        ]
+
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+
+        self.assertIn("actor_on_blocked_cell", codes)
+        self.assertIn("overlapping_event_trigger", codes)
 
     def test_resolves_object_anchored_site_and_arrival_point(self) -> None:
         tileset = deepcopy(self.tileset)
@@ -321,6 +397,60 @@ class MapSourceTest(unittest.TestCase):
 
         self.assertIn("unknown_arrival_site_id", codes)
         self.assertIn("duplicate_site_teleport_arrival", codes)
+
+    def test_validates_event_and_moved_actor_links_for_each_map(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source["grounds"][2][2] = "plain"
+        source["event_triggers"] = [
+            {
+                "id": "meeting",
+                "event_id": "sample.meeting",
+                "activations": ["interact"],
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "offsets": [[0, 0]],
+            }
+        ]
+        events = {
+            "sample.meeting": {
+                "commands": [
+                    {
+                        "command": "branch",
+                        "condition": {"type": "flag_set", "flag_id": "sample.met"},
+                        "then": [
+                            {
+                                "command": "move_actor",
+                                "actor_id": "elder",
+                                "direction": "left",
+                                "steps": 1,
+                            }
+                        ],
+                        "else": [],
+                    }
+                ]
+            }
+        }
+
+        codes = {
+            item.code
+            for item in validate_map_event_links({"test_world": source}, events)
+        }
+
+        self.assertIn("unknown_event_actor_id", codes)
+        source["actors"] = [
+            {
+                "id": "elder",
+                "position": [2, 2],
+                "facing": "down",
+                "appearance_id": "elder",
+            }
+        ]
+        self.assertNotIn(
+            "unknown_event_actor_id",
+            {
+                item.code
+                for item in validate_map_event_links({"test_world": source}, events)
+            },
+        )
 
     def test_rejects_non_sea_world_edge_and_duplicate_object_origin(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 6, 5)

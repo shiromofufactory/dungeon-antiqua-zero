@@ -4,12 +4,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
 from app.resources.audio import (
     BGM_VOLUME_GAINS,
     AudioResourceError,
     BgmPlayer,
     list_bgm_ids,
+    list_se_ids,
+    play_se,
 )
 
 
@@ -73,6 +76,16 @@ class BgmPlayerTest(unittest.TestCase):
 
     def test_runtime_welcome_bgm_is_available(self) -> None:
         self.assertIn("da3-welcome", list_bgm_ids())
+
+    def test_plays_stable_se_id_from_shared_catalog(self) -> None:
+        pyxel = Mock()
+
+        play_se("confirm", pyxel_api=pyxel)
+
+        pyxel.play.assert_called_once_with(1, 9)
+        self.assertEqual(list_se_ids(), ("alert", "confirm", "teleport"))
+        with self.assertRaises(AudioResourceError):
+            play_se("missing", pyxel_api=pyxel)
 
     def test_loads_and_loops_bgm_on_dedicated_channel(self) -> None:
         player = BgmPlayer(

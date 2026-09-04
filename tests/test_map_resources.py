@@ -36,7 +36,7 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 2,
+            "format_version": 3,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
@@ -93,6 +93,32 @@ class MapResourcesTest(unittest.TestCase):
                     "site_id": "sample_town",
                 }
             ],
+            "actors": [
+                {
+                    "id": "elder",
+                    "position": [0, 1],
+                    "facing": "down",
+                    "appearance_id": "village_elder",
+                }
+            ],
+            "event_triggers": [
+                {
+                    "id": "sign",
+                    "event_id": "sample.sign",
+                    "activations": ["interact"],
+                    "target": {"kind": "cells", "cells": [[1, 0]]},
+                },
+                {
+                    "id": "elder_talk",
+                    "event_id": "sample.elder_talk",
+                    "activations": ["touch", "interact"],
+                    "target": {
+                        "kind": "actor",
+                        "actor_id": "elder",
+                        "offsets": [[0, 0]],
+                    },
+                },
+            ],
         }
         self._write_runtime()
         self.pyxel = FakePyxel()
@@ -133,6 +159,20 @@ class MapResourcesTest(unittest.TestCase):
             MapDestination("test_map", "from_world"),
         )
         self.assertIs(map_data.arrival_point("from_world"), map_data.arrival_points[0])
+        self.assertEqual(map_data.actors[0].id, "elder")
+        self.assertEqual(
+            map_data.event_trigger_at("interact", 1, 0).event_id,
+            "sample.sign",
+        )
+        self.assertEqual(
+            map_data.event_trigger_at(
+                "touch",
+                0,
+                1,
+                actor_positions={"elder": MapCell(0, 1)},
+            ).event_id,
+            "sample.elder_talk",
+        )
         self.assertEqual(
             [map_data.ground_tile_at(0, frame) for frame in range(6)],
             [0, 0, 1, 1, 1, 0],

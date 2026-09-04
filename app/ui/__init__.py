@@ -40,6 +40,7 @@ from .save_menu import SaveMenuDataError, SaveMenuOverlay, format_saved_at
 from .start_menu import StartMenuDataError, StartMenuOverlay
 from .spell_menu import SpellMenuDataError, SpellMenuOverlay
 from .status_menu import StatusMenuDataError, StatusMenuOverlay
+from .event_message import EventMessageDataError, EventMessageOverlay
 
 
 __all__ = [
@@ -49,6 +50,8 @@ __all__ = [
     "DISABLED_COLOR",
     "EquipmentMenuDataError",
     "EquipmentMenuOverlay",
+    "EventMessageDataError",
+    "EventMessageOverlay",
     "ItemCategory",
     "ItemMenuDataError",
     "ItemMenuOverlay",

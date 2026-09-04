@@ -26,9 +26,11 @@ from scripts.map_pipeline import (
     save_compiled_map,
     save_map_source,
     validate_map_links,
+    validate_map_event_links,
     validate_map_source,
     validate_tileset,
 )
+from scripts.event_pipeline import load_event_sources
 from scripts.map_pipeline.tileset import Diagnostic
 
 
@@ -164,6 +166,18 @@ class MapEditorApplication:
             }
         )
 
+    def event_options(self) -> list[str]:
+        return sorted(self.event_definitions())
+
+    def event_definitions(self) -> dict[str, Mapping[str, Any]]:
+        return {
+            f"{source.get('namespace')}.{event.get('id')}": event
+            for source in load_event_sources(self.content_root).values()
+            if isinstance(source.get("namespace"), str)
+            for event in source.get("events", [])
+            if isinstance(event, Mapping) and isinstance(event.get("id"), str)
+        }
+
     def load_text_records(self) -> list[dict[str, Any]]:
         if not self.texts_path.is_file():
             return []
@@ -262,6 +276,17 @@ class MapEditorApplication:
             if isinstance(data, dict)
             else []
         )
+        event_link_diagnostics = (
+            [
+                item
+                for item in validate_map_event_links(
+                    self.map_sources(data), self.event_definitions()
+                )
+                if item.path.startswith(f"{data.get('map_id')}.")
+            ]
+            if isinstance(data, dict)
+            else []
+        )
         if site_names_ja is None and isinstance(data, Mapping):
             site_names_ja = self.site_names_ja(data)
         name_diagnostics = self._site_name_diagnostics(data, site_names_ja)
@@ -269,6 +294,7 @@ class MapEditorApplication:
             *tileset_diagnostics,
             *map_diagnostics,
             *link_diagnostics,
+            *event_link_diagnostics,
             *name_diagnostics,
         ]
         resolved = None
@@ -289,6 +315,7 @@ class MapEditorApplication:
             "site_names_ja": site_names_ja,
             "destination_options": self.destination_options(data),
             "site_options": self.site_options(data),
+            "event_options": self.event_options(),
             "tileset": tileset,
             "diagnostics": diagnostics,
             "resolved": resolved,

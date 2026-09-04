@@ -24,13 +24,15 @@ from .tileset import (
 )
 
 
-SOURCE_FORMAT_VERSION = 2
-RUNTIME_FORMAT_VERSION = 2
+SOURCE_FORMAT_VERSION = 3
+RUNTIME_FORMAT_VERSION = 3
 MAX_MAP_DIMENSION = 512
 MAX_ANIMATION_PERIOD = 3600
 TRANSPARENT_INDEX = 1
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 CARDINAL_FACINGS = frozenset(("up", "right", "down", "left"))
+EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
+EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 DIRECTION_OFFSETS = {
     "n": (0, -1),
     "ne": (1, -1),
@@ -125,6 +127,8 @@ def initial_map_source(
         "objects": [],
         "sites": [],
         "arrival_points": [],
+        "actors": [],
+        "event_triggers": [],
     }
 
 
@@ -328,7 +332,190 @@ def validate_map_source(
         object_origins,
         collision,
     )
+    actor_positions = _validate_actors(
+        data.get("actors"),
+        diagnostics,
+        width,
+        height,
+        collision,
+    )
+    _validate_event_triggers(
+        data.get("event_triggers"),
+        diagnostics,
+        width,
+        height,
+        object_origins,
+        actor_positions,
+        collision,
+    )
     return diagnostics
+
+
+def _validate_actors(
+    value: object,
+    diagnostics: list[Diagnostic],
+    width: int,
+    height: int,
+    collision: Sequence[bool] | None,
+) -> dict[str, tuple[int, int]]:
+    if not isinstance(value, list):
+        _diagnostic(diagnostics, "error", "invalid_actors", "actors", "actorsは配列で指定してください。")
+        return {}
+    actors: dict[str, tuple[int, int]] = {}
+    occupied: set[tuple[int, int]] = set()
+    for index, actor in enumerate(value):
+        path = f"actors[{index}]"
+        if not isinstance(actor, dict):
+            _diagnostic(diagnostics, "error", "invalid_actor", path, "actorはobjectで指定してください。")
+            continue
+        actor_id = actor.get("id")
+        valid_actor_id = _valid_id(actor_id)
+        if not valid_actor_id:
+            _diagnostic(diagnostics, "error", "invalid_actor_id", f"{path}.id", "actor IDはlower_snake_caseで指定してください。")
+        elif actor_id in actors:
+            _diagnostic(diagnostics, "error", "duplicate_actor_id", f"{path}.id", f"actor IDが重複しています: {actor_id}")
+            valid_actor_id = False
+        position = actor.get("position")
+        valid_position = _valid_point(position)
+        if not valid_position:
+            _diagnostic(diagnostics, "error", "invalid_actor_position", f"{path}.position", "actor位置は[x, y]の整数2要素で指定してください。")
+        elif not _point_in_bounds(position, width, height):
+            _diagnostic(diagnostics, "error", "actor_out_of_bounds", f"{path}.position", "actorがマップ範囲外です。")
+            valid_position = False
+        else:
+            point = (position[0], position[1])
+            if collision is not None and collision[position[1] * width + position[0]]:
+                _diagnostic(diagnostics, "error", "actor_on_blocked_cell", f"{path}.position", "actorは通行可能セルに置いてください。")
+            if point in occupied:
+                _diagnostic(diagnostics, "error", "overlapping_actors", f"{path}.position", "同じセルに複数のactorを配置できません。")
+            occupied.add(point)
+        if actor.get("facing") not in CARDINAL_FACINGS:
+            _diagnostic(diagnostics, "error", "invalid_actor_facing", f"{path}.facing", "actorの向きはup、right、down、leftのいずれかです。")
+        if not _valid_id(actor.get("appearance_id")):
+            _diagnostic(diagnostics, "error", "invalid_appearance_id", f"{path}.appearance_id", "appearance_idはlower_snake_caseで指定してください。")
+        if valid_actor_id and valid_position:
+            actors[actor_id] = (position[0], position[1])
+    return actors
+
+
+def _validate_event_triggers(
+    value: object,
+    diagnostics: list[Diagnostic],
+    width: int,
+    height: int,
+    object_origins: Mapping[str, tuple[int, int]],
+    actor_positions: Mapping[str, tuple[int, int]],
+    collision: Sequence[bool] | None,
+) -> None:
+    if not isinstance(value, list):
+        _diagnostic(diagnostics, "error", "invalid_event_triggers", "event_triggers", "event_triggersは配列で指定してください。")
+        return
+    trigger_ids: set[str] = set()
+    occupied: dict[tuple[str, int, int], str] = {}
+    actor_occupied: dict[tuple[str, str, int, int], str] = {}
+    for index, trigger in enumerate(value):
+        path = f"event_triggers[{index}]"
+        if not isinstance(trigger, dict):
+            _diagnostic(diagnostics, "error", "invalid_event_trigger", path, "event triggerはobjectで指定してください。")
+            continue
+        trigger_id = trigger.get("id")
+        if not _valid_id(trigger_id):
+            _diagnostic(diagnostics, "error", "invalid_trigger_id", f"{path}.id", "trigger IDはlower_snake_caseで指定してください。")
+        elif trigger_id in trigger_ids:
+            _diagnostic(diagnostics, "error", "duplicate_trigger_id", f"{path}.id", f"trigger IDが重複しています: {trigger_id}")
+        else:
+            trigger_ids.add(trigger_id)
+        event_id = trigger.get("event_id")
+        if not isinstance(event_id, str) or EVENT_ID_PATTERN.fullmatch(event_id) is None:
+            _diagnostic(diagnostics, "error", "invalid_event_id", f"{path}.event_id", "event_idはnamespace.local_idで指定してください。")
+        activations_value = trigger.get("activations")
+        activations: tuple[str, ...] = ()
+        if (
+            not isinstance(activations_value, list)
+            or not activations_value
+            or not all(item in EVENT_ACTIVATIONS for item in activations_value)
+        ):
+            _diagnostic(diagnostics, "error", "invalid_activations", f"{path}.activations", "activationsにはstep、touch、interactを1件以上指定してください。")
+        elif len(activations_value) != len(set(activations_value)):
+            _diagnostic(diagnostics, "error", "duplicate_activation", f"{path}.activations", "同じactivationを重複して指定できません。")
+        else:
+            activations = tuple(activations_value)
+
+        anchor = trigger.get("anchor")
+        anchor_origin: tuple[int, int] | None = None
+        moving_actor = False
+        moving_actor_id: str | None = None
+        if not isinstance(anchor, dict):
+            _diagnostic(diagnostics, "error", "invalid_trigger_anchor", f"{path}.anchor", "trigger anchorはobjectで指定してください。")
+        elif anchor.get("kind") == "cell":
+            position = anchor.get("position")
+            if not _valid_point(position) or not _point_in_bounds(position, width, height):
+                _diagnostic(diagnostics, "error", "invalid_trigger_anchor_cell", f"{path}.anchor.position", "cell anchorはマップ内の[x, y]で指定してください。")
+            else:
+                anchor_origin = (position[0], position[1])
+        elif anchor.get("kind") == "object":
+            object_id = anchor.get("object_id")
+            if not _valid_id(object_id) or object_id not in object_origins:
+                _diagnostic(diagnostics, "error", "unknown_trigger_anchor_object", f"{path}.anchor.object_id", f"配置オブジェクトが見つかりません: {object_id}")
+            else:
+                anchor_origin = object_origins[object_id]
+        elif anchor.get("kind") == "actor":
+            actor_id = anchor.get("actor_id")
+            if not _valid_id(actor_id) or actor_id not in actor_positions:
+                _diagnostic(diagnostics, "error", "unknown_trigger_anchor_actor", f"{path}.anchor.actor_id", f"actorが見つかりません: {actor_id}")
+            else:
+                anchor_origin = actor_positions[actor_id]
+                moving_actor = True
+                moving_actor_id = actor_id
+        else:
+            _diagnostic(diagnostics, "error", "invalid_trigger_anchor_kind", f"{path}.anchor.kind", "anchor kindはcell、object、actorのいずれかです。")
+
+        offsets = trigger.get("offsets")
+        if not isinstance(offsets, list) or not offsets:
+            _diagnostic(diagnostics, "error", "invalid_trigger_offsets", f"{path}.offsets", "offsetsは[x, y]を1件以上含む配列で指定してください。")
+            continue
+        seen_offsets: set[tuple[int, int]] = set()
+        for offset_index, offset in enumerate(offsets):
+            offset_path = f"{path}.offsets[{offset_index}]"
+            if not _valid_point(offset):
+                _diagnostic(diagnostics, "error", "invalid_trigger_offset", offset_path, "offsetは[x, y]の整数2要素で指定してください。")
+                continue
+            offset_point = (offset[0], offset[1])
+            if offset_point in seen_offsets:
+                _diagnostic(diagnostics, "error", "duplicate_trigger_offset", offset_path, "同じoffsetが重複しています。")
+                continue
+            seen_offsets.add(offset_point)
+            if anchor_origin is None:
+                continue
+            position = (anchor_origin[0] + offset[0], anchor_origin[1] + offset[1])
+            if not _point_in_bounds(position, width, height):
+                _diagnostic(diagnostics, "error", "trigger_cell_out_of_bounds", offset_path, f"triggerセル{list(position)}がマップ範囲外です。")
+                continue
+            if "step" in activations and collision is not None and collision[position[1] * width + position[0]]:
+                _diagnostic(diagnostics, "error", "step_trigger_on_blocked_cell", offset_path, "step triggerは通行可能セルに置いてください。")
+            if moving_actor:
+                if moving_actor_id is not None:
+                    for activation in activations:
+                        key = (moving_actor_id, activation, *offset_point)
+                        previous = actor_occupied.get(key)
+                        if previous is not None:
+                            _diagnostic(
+                                diagnostics,
+                                "error",
+                                "overlapping_event_trigger",
+                                offset_path,
+                                f"{activation} triggerが{previous}と同じactor offsetで重複しています。",
+                            )
+                        elif isinstance(trigger_id, str):
+                            actor_occupied[key] = trigger_id
+                continue
+            for activation in activations:
+                key = (activation, *position)
+                previous = occupied.get(key)
+                if previous is not None:
+                    _diagnostic(diagnostics, "error", "overlapping_event_trigger", offset_path, f"{activation} triggerが{previous}と同じセルで重複しています。")
+                elif isinstance(trigger_id, str):
+                    occupied[key] = trigger_id
 
 
 def _validate_arrival_points(
@@ -825,6 +1012,82 @@ def validate_map_links(
     return diagnostics
 
 
+def validate_map_event_links(
+    sources: Mapping[str, Mapping[str, Any]],
+    events: Mapping[str, Mapping[str, Any]],
+) -> list[Diagnostic]:
+    """Reject missing events and actor commands invalid for their trigger maps."""
+
+    if not isinstance(sources, Mapping):
+        raise TypeError("map sources must be a mapping")
+    if not isinstance(events, Mapping) or not all(
+        isinstance(event_id, str) and isinstance(event, Mapping)
+        for event_id, event in events.items()
+    ):
+        raise TypeError("events must map event IDs to definitions")
+    diagnostics: list[Diagnostic] = []
+    checked_actor_links: set[tuple[str, str, str]] = set()
+    for map_id, source in sources.items():
+        actor_ids = {
+            actor.get("id")
+            for actor in source.get("actors", [])
+            if isinstance(actor, Mapping) and isinstance(actor.get("id"), str)
+        }
+        triggers = source.get("event_triggers")
+        if not isinstance(triggers, list):
+            continue
+        for index, trigger in enumerate(triggers):
+            if not isinstance(trigger, Mapping):
+                continue
+            event_id = trigger.get("event_id")
+            if (
+                isinstance(event_id, str)
+                and EVENT_ID_PATTERN.fullmatch(event_id) is not None
+                and event_id not in events
+            ):
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "unknown_event_id",
+                    f"{map_id}.event_triggers[{index}].event_id",
+                    f"イベント定義が見つかりません: {event_id}",
+                )
+                continue
+            if not isinstance(event_id, str) or event_id not in events:
+                continue
+            commands = events[event_id].get("commands")
+            for actor_id in _moved_actor_ids(commands):
+                link = (map_id, event_id, actor_id)
+                if actor_id in actor_ids or link in checked_actor_links:
+                    continue
+                checked_actor_links.add(link)
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "unknown_event_actor_id",
+                    f"{map_id}.event_triggers[{index}].event_id",
+                    f"イベント{event_id}が参照するactorがこのマップにありません: {actor_id}",
+                )
+    return diagnostics
+
+
+def _moved_actor_ids(commands: object) -> set[str]:
+    actor_ids: set[str] = set()
+    if not isinstance(commands, (list, tuple)):
+        return actor_ids
+    for command in commands:
+        if not isinstance(command, Mapping):
+            continue
+        if command.get("command") == "move_actor" and isinstance(
+            command.get("actor_id"), str
+        ):
+            actor_ids.add(command["actor_id"])
+        if command.get("command") == "branch":
+            actor_ids.update(_moved_actor_ids(command.get("then")))
+            actor_ids.update(_moved_actor_ids(command.get("else")))
+    return actor_ids
+
+
 def _resolve_visual(
     visual: Mapping[str, Any],
     seed_parts: Sequence[object],
@@ -865,6 +1128,42 @@ def _site_anchor_origin(
     else:
         origin = anchor["position"]
     return origin[0], origin[1]
+
+
+def _resolve_event_triggers(
+    triggers: Sequence[Mapping[str, Any]],
+    instances: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    resolved = []
+    for trigger in triggers:
+        anchor = trigger["anchor"]
+        if anchor["kind"] == "actor":
+            target = {
+                "kind": "actor",
+                "actor_id": anchor["actor_id"],
+                "offsets": [list(offset) for offset in trigger["offsets"]],
+            }
+        else:
+            if anchor["kind"] == "object":
+                origin = instances[anchor["object_id"]]["origin"]
+            else:
+                origin = anchor["position"]
+            target = {
+                "kind": "cells",
+                "cells": [
+                    [origin[0] + offset[0], origin[1] + offset[1]]
+                    for offset in trigger["offsets"]
+                ],
+            }
+        resolved.append(
+            {
+                "id": trigger["id"],
+                "event_id": trigger["event_id"],
+                "activations": list(trigger["activations"]),
+                "target": target,
+            }
+        )
+    return resolved
 
 
 def resolve_map(
@@ -966,6 +1265,10 @@ def resolve_map(
         "arrival_points": [
             dict(arrival) for arrival in data["arrival_points"]
         ],
+        "actors": [dict(actor) for actor in data["actors"]],
+        "event_triggers": _resolve_event_triggers(
+            data["event_triggers"], instances_by_id
+        ),
     }
 
 
@@ -1131,6 +1434,8 @@ def compile_map(
         ],
         "sites": resolved["sites"],
         "arrival_points": resolved["arrival_points"],
+        "actors": resolved["actors"],
+        "event_triggers": resolved["event_triggers"],
     }
     return CompiledMap(runtime=runtime, atlas=bytes(bundle))
 

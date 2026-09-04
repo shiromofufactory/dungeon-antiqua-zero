@@ -4,13 +4,13 @@ from types import MappingProxyType
 import unittest
 from unittest.mock import Mock, call
 
-from app.field import FieldMovement, FieldPosition
+from app.field import FieldActors, FieldMovement, FieldPosition
 from app.input import Direction
 from app.rendering.field import (
     FIELD_CHARACTER_ANIMATION_INTERVAL,
     FieldRenderer,
 )
-from app.resources.maps import CompiledMap, MapObjectTile
+from app.resources.maps import CompiledMap, MapActor, MapCell, MapObjectTile
 
 
 def compiled_map(
@@ -96,6 +96,36 @@ class FieldMovementTest(unittest.TestCase):
         self.assertIs(field.facing, Direction.RIGHT)
         self.assertFalse(field.is_walking)
 
+    def test_dynamic_blocker_prevents_entering_an_actor_cell(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+
+        self.assertFalse(
+            field.update(
+                Direction.RIGHT,
+                blocked_positions=(FieldPosition(2, 1),),
+            )
+        )
+        self.assertEqual(field.position, FieldPosition(1, 1))
+
+    def test_field_actor_moves_without_entering_party_cell(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("elder", MapCell(1, 1), "down", "elder"),),
+        )
+        actors = FieldActors(map_data)
+
+        self.assertFalse(
+            actors.update(
+                "elder",
+                Direction.RIGHT,
+                party_position=FieldPosition(2, 1),
+            )
+        )
+        self.assertEqual(actors.actor("elder").movement.position, FieldPosition(1, 1))
+
 
 class FieldRendererTest(unittest.TestCase):
     def test_draws_ground_objects_then_the_requested_character_frame(self) -> None:
@@ -158,6 +188,47 @@ class FieldRendererTest(unittest.TestCase):
 
         far_field = FieldMovement(map_data, start=FieldPosition(2, 2))
         self.assertEqual(renderer.camera_position(far_field), (16, 16))
+
+    def test_draws_actor_image_and_falls_back_to_field_character_bank(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (
+                MapActor("elder", MapCell(1, 0), "down", "elder"),
+                MapActor("guide", MapCell(2, 0), "left", "guide"),
+            ),
+        )
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        actors = FieldActors(map_data)
+        elder_image = object()
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=48,
+            screen_height=48,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            actors=actors,
+            actor_images={"elder": elder_image},
+        )
+
+        character_calls = pyxel.blt.call_args_list[-3:]
+        self.assertEqual(
+            character_calls[0],
+            call(16, 0, elder_image, 0, 32, 16, 16, 1),
+        )
+        self.assertEqual(
+            character_calls[1],
+            call(32, 0, 0, 0, 112, 16, 16, 1),
+        )
+        self.assertEqual(
+            character_calls[2],
+            call(16, 16, 0, 0, 96, 16, 16, 1),
+        )
 
 
 if __name__ == "__main__":

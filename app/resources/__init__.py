@@ -6,6 +6,8 @@ from .audio import (
     AudioResourceError,
     BgmPlayer,
     list_bgm_ids,
+    list_se_ids,
+    play_se,
 )
 from .data import DataResourceError, load_record_array
 from .fonts import (
@@ -16,6 +18,7 @@ from .fonts import (
     FontResources,
     FontRole,
 )
+from .events import EventCatalog, EventDefinition, EventResourceError
 from .images import (
     TRANSPARENT_INDEX,
     ImageEntry,
@@ -24,13 +27,16 @@ from .images import (
 )
 from .maps import (
     MAP_FACINGS,
+    MAP_EVENT_ACTIVATIONS,
     MAP_TILE_SIZE,
     CompiledMap,
     MapArrivalPoint,
+    MapActor,
     MapAnimation,
     MapAnimationFrame,
     MapCell,
     MapDestination,
+    MapEventTrigger,
     MapObjectTile,
     MapResourceError,
     MapResources,
@@ -47,6 +53,9 @@ __all__ = [
     "AudioResourceError",
     "BgmPlayer",
     "DataResourceError",
+    "EventCatalog",
+    "EventDefinition",
+    "EventResourceError",
     "FontDefinition",
     "FontResourceError",
     "FontResources",
@@ -55,17 +64,22 @@ __all__ = [
     "ImageResourceError",
     "ImageResources",
     "MAP_FACINGS",
+    "MAP_EVENT_ACTIVATIONS",
     "MAP_TILE_SIZE",
     "CompiledMap",
     "MapArrivalPoint",
+    "MapActor",
     "MapAnimation",
     "MapAnimationFrame",
     "MapCell",
     "MapDestination",
+    "MapEventTrigger",
     "MapObjectTile",
     "MapResourceError",
     "MapResources",
     "WorldSite",
     "load_record_array",
     "list_bgm_ids",
+    "list_se_ids",
+    "play_se",
 ]

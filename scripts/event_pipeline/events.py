@@ -1,0 +1,406 @@
+"""Validate, compile, and persist authoring-time event sources."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
+import re
+import tempfile
+from typing import Any, Iterable, Mapping, Sequence
+
+
+EVENT_SOURCE_FORMAT_VERSION = 1
+EVENT_RUNTIME_FORMAT_VERSION = 1
+MAX_BRANCH_DEPTH = 16
+LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+FULL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
+CHARACTER_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9 _+!&'\-]*$")
+CARDINAL_DIRECTIONS = frozenset(("up", "right", "down", "left"))
+
+
+class EventSourceError(ValueError):
+    """Raised when event source data cannot be compiled."""
+
+
+@dataclass(frozen=True)
+class EventDiagnostic:
+    severity: str
+    code: str
+    path: str
+    message: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "severity": self.severity,
+            "code": self.code,
+            "path": self.path,
+            "message": self.message,
+        }
+
+
+def _diagnostic(
+    diagnostics: list[EventDiagnostic],
+    severity: str,
+    code: str,
+    path: str,
+    message: str,
+) -> None:
+    diagnostics.append(EventDiagnostic(severity, code, path, message))
+
+
+def _is_positive_int(value: object, *, maximum: int | None = None) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value > 0
+        and (maximum is None or value <= maximum)
+    )
+
+
+def _known_fields(
+    value: Mapping[str, object],
+    allowed: set[str],
+    diagnostics: list[EventDiagnostic],
+    path: str,
+) -> None:
+    for field in value.keys() - allowed:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "unknown_field",
+            f"{path}.{field}",
+            f"未対応の属性です: {field}",
+        )
+
+
+def event_source_paths(content_root: Path) -> tuple[Path, ...]:
+    directory = content_root / "events"
+    return tuple(sorted(directory.glob("*.json"))) if directory.is_dir() else ()
+
+
+def load_event_source(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise EventSourceError(
+            f"イベントJSONを読み込めません: {path}: {error}"
+        ) from error
+    if not isinstance(value, dict):
+        raise EventSourceError("イベントJSONのルートはobjectである必要があります。")
+    return value
+
+
+def load_event_sources(content_root: Path) -> dict[str, dict[str, Any]]:
+    loaded: dict[str, dict[str, Any]] = {}
+    for path in event_source_paths(content_root):
+        source = load_event_source(path)
+        loaded[path.stem] = source
+    return loaded
+
+
+def _validate_condition(
+    value: object,
+    diagnostics: list[EventDiagnostic],
+    path: str,
+    *,
+    flag_ids: set[str],
+    character_keys: set[str],
+    item_keys: set[str],
+) -> None:
+    if not isinstance(value, Mapping):
+        _diagnostic(diagnostics, "error", "invalid_condition", path, "conditionはobjectで指定してください。")
+        return
+    condition_type = value.get("type")
+    if condition_type == "flag_set":
+        _known_fields(value, {"type", "flag_id"}, diagnostics, path)
+        flag_id = value.get("flag_id")
+        if not isinstance(flag_id, str) or flag_id not in flag_ids:
+            _diagnostic(diagnostics, "error", "unknown_flag", f"{path}.flag_id", f"宣言されていないフラグです: {flag_id}")
+    elif condition_type == "member_in_party":
+        _known_fields(value, {"type", "character_key"}, diagnostics, path)
+        key = value.get("character_key")
+        if not isinstance(key, str) or key not in character_keys:
+            _diagnostic(diagnostics, "error", "unknown_character", f"{path}.character_key", f"存在しないキャラクターです: {key}")
+    elif condition_type == "item_at_least":
+        _known_fields(value, {"type", "item_key", "quantity"}, diagnostics, path)
+        key = value.get("item_key")
+        if not isinstance(key, str) or key not in item_keys:
+            _diagnostic(diagnostics, "error", "unknown_item", f"{path}.item_key", f"存在しないアイテムです: {key}")
+        if not _is_positive_int(value.get("quantity")):
+            _diagnostic(diagnostics, "error", "invalid_quantity", f"{path}.quantity", "quantityは1以上の整数で指定してください。")
+    elif condition_type in ("all", "any"):
+        _known_fields(value, {"type", "conditions"}, diagnostics, path)
+        children = value.get("conditions")
+        if not isinstance(children, list) or not children:
+            _diagnostic(diagnostics, "error", "empty_condition_group", f"{path}.conditions", "conditionsは1件以上必要です。")
+        else:
+            for index, child in enumerate(children):
+                _validate_condition(
+                    child,
+                    diagnostics,
+                    f"{path}.conditions[{index}]",
+                    flag_ids=flag_ids,
+                    character_keys=character_keys,
+                    item_keys=item_keys,
+                )
+    elif condition_type == "not":
+        _known_fields(value, {"type", "condition"}, diagnostics, path)
+        _validate_condition(
+            value.get("condition"),
+            diagnostics,
+            f"{path}.condition",
+            flag_ids=flag_ids,
+            character_keys=character_keys,
+            item_keys=item_keys,
+        )
+    else:
+        _diagnostic(diagnostics, "error", "unknown_condition", f"{path}.type", f"未対応のconditionです: {condition_type}")
+
+
+def _validate_command_list(
+    value: object,
+    diagnostics: list[EventDiagnostic],
+    path: str,
+    *,
+    flag_ids: set[str],
+    character_keys: set[str],
+    item_keys: set[str],
+    text_keys: set[str],
+    bgm_ids: set[str],
+    se_ids: set[str],
+    depth: int = 0,
+) -> None:
+    if not isinstance(value, list):
+        _diagnostic(diagnostics, "error", "invalid_commands", path, "commandsは配列で指定してください。")
+        return
+    if not value:
+        _diagnostic(diagnostics, "warning", "empty_commands", path, "コマンド列が空です。")
+    for index, command in enumerate(value):
+        command_path = f"{path}[{index}]"
+        if not isinstance(command, Mapping):
+            _diagnostic(diagnostics, "error", "invalid_command", command_path, "commandはobjectで指定してください。")
+            continue
+        command_type = command.get("command")
+        if command_type == "set_flag":
+            _known_fields(command, {"command", "flag_id"}, diagnostics, command_path)
+            flag_id = command.get("flag_id")
+            if not isinstance(flag_id, str) or flag_id not in flag_ids:
+                _diagnostic(diagnostics, "error", "unknown_flag", f"{command_path}.flag_id", f"宣言されていないフラグです: {flag_id}")
+        elif command_type in ("join_party", "leave_party"):
+            _known_fields(command, {"command", "character_key"}, diagnostics, command_path)
+            key = command.get("character_key")
+            if not isinstance(key, str) or key not in character_keys:
+                _diagnostic(diagnostics, "error", "unknown_character", f"{command_path}.character_key", f"存在しないキャラクターです: {key}")
+            elif command_type == "leave_party" and key == "Fiora":
+                _diagnostic(diagnostics, "error", "cannot_remove_fiora", f"{command_path}.character_key", "フィオラをパーティから外すことはできません。")
+        elif command_type in ("give_item", "take_item"):
+            _known_fields(command, {"command", "item_key", "quantity"}, diagnostics, command_path)
+            key = command.get("item_key")
+            if not isinstance(key, str) or key not in item_keys:
+                _diagnostic(diagnostics, "error", "unknown_item", f"{command_path}.item_key", f"存在しないアイテムです: {key}")
+            if not _is_positive_int(command.get("quantity")):
+                _diagnostic(diagnostics, "error", "invalid_quantity", f"{command_path}.quantity", "quantityは1以上の整数で指定してください。")
+        elif command_type == "branch":
+            _known_fields(command, {"command", "condition", "then", "else"}, diagnostics, command_path)
+            if depth >= MAX_BRANCH_DEPTH:
+                _diagnostic(diagnostics, "error", "branch_too_deep", command_path, f"branchの入れ子は{MAX_BRANCH_DEPTH}段までです。")
+                continue
+            _validate_condition(command.get("condition"), diagnostics, f"{command_path}.condition", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys)
+            for branch_name in ("then", "else"):
+                branch = command.get(branch_name)
+                if branch_name == "else" and branch == []:
+                    continue
+                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, text_keys=text_keys, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1)
+        elif command_type == "message":
+            _known_fields(command, {"command", "text_key", "portrait_character_key"}, diagnostics, command_path)
+            text_key = command.get("text_key")
+            if not isinstance(text_key, str) or text_key not in text_keys:
+                _diagnostic(diagnostics, "error", "unknown_text", f"{command_path}.text_key", f"存在しない文言キーです: {text_key}")
+            portrait = command.get("portrait_character_key")
+            if portrait is not None and (not isinstance(portrait, str) or portrait not in character_keys):
+                _diagnostic(diagnostics, "error", "unknown_character", f"{command_path}.portrait_character_key", f"存在しない顔キャラクターです: {portrait}")
+        elif command_type == "play_se":
+            _known_fields(command, {"command", "se_id"}, diagnostics, command_path)
+            se_id = command.get("se_id")
+            if not isinstance(se_id, str) or se_id not in se_ids:
+                _diagnostic(diagnostics, "error", "unknown_se", f"{command_path}.se_id", f"存在しないSE IDです: {se_id}")
+        elif command_type == "change_bgm":
+            _known_fields(command, {"command", "bgm_id"}, diagnostics, command_path)
+            bgm_id = command.get("bgm_id")
+            if not isinstance(bgm_id, str) or bgm_id not in bgm_ids:
+                _diagnostic(diagnostics, "error", "unknown_bgm", f"{command_path}.bgm_id", f"存在しないBGM IDです: {bgm_id}")
+        elif command_type == "move_party":
+            _known_fields(command, {"command", "direction", "steps"}, diagnostics, command_path)
+            _validate_movement(command, diagnostics, command_path)
+        elif command_type == "move_actor":
+            _known_fields(command, {"command", "actor_id", "direction", "steps"}, diagnostics, command_path)
+            actor_id = command.get("actor_id")
+            if not isinstance(actor_id, str) or LOCAL_ID_PATTERN.fullmatch(actor_id) is None:
+                _diagnostic(diagnostics, "error", "invalid_actor_id", f"{command_path}.actor_id", "actor IDはlower_snake_caseで指定してください。")
+            _validate_movement(command, diagnostics, command_path)
+        else:
+            _diagnostic(diagnostics, "error", "unknown_command", f"{command_path}.command", f"未対応のcommandです: {command_type}")
+
+
+def _validate_movement(
+    command: Mapping[str, object],
+    diagnostics: list[EventDiagnostic],
+    path: str,
+) -> None:
+    if command.get("direction") not in CARDINAL_DIRECTIONS:
+        _diagnostic(diagnostics, "error", "invalid_direction", f"{path}.direction", "directionはup、right、down、leftのいずれかです。")
+    if not _is_positive_int(command.get("steps"), maximum=255):
+        _diagnostic(diagnostics, "error", "invalid_steps", f"{path}.steps", "stepsは1から255までの整数で指定してください。")
+
+
+def validate_event_sources(
+    sources: Mapping[str, Mapping[str, object]],
+    *,
+    character_keys: Iterable[str] = (),
+    item_keys: Iterable[str] = (),
+    text_keys: Iterable[str] = (),
+    bgm_ids: Iterable[str] = (),
+    se_ids: Iterable[str] = (),
+) -> list[EventDiagnostic]:
+    """Validate every source together so cross-file IDs are unambiguous."""
+
+    if not isinstance(sources, Mapping):
+        raise TypeError("event sources must be a mapping")
+    characters = set(character_keys)
+    items = set(item_keys)
+    texts = set(text_keys)
+    bgms = set(bgm_ids)
+    sounds = set(se_ids)
+    diagnostics: list[EventDiagnostic] = []
+    flag_ids: set[str] = set()
+    event_ids: set[str] = set()
+
+    for filename, source in sources.items():
+        root_path = filename
+        if not isinstance(source, Mapping):
+            _diagnostic(diagnostics, "error", "invalid_root", root_path, "イベントJSONのルートはobjectである必要があります。")
+            continue
+        _known_fields(source, {"format_version", "namespace", "flags", "events"}, diagnostics, root_path)
+        if source.get("format_version") != EVENT_SOURCE_FORMAT_VERSION:
+            _diagnostic(diagnostics, "error", "unsupported_format_version", f"{root_path}.format_version", f"対応するformat_versionは{EVENT_SOURCE_FORMAT_VERSION}です。")
+        namespace = source.get("namespace")
+        if not isinstance(namespace, str) or LOCAL_ID_PATTERN.fullmatch(namespace) is None:
+            _diagnostic(diagnostics, "error", "invalid_namespace", f"{root_path}.namespace", "namespaceはlower_snake_caseで指定してください。")
+            namespace = None
+        elif filename != namespace:
+            _diagnostic(diagnostics, "error", "namespace_filename_mismatch", f"{root_path}.namespace", "namespaceをファイル名と一致させてください。")
+
+        flags = source.get("flags")
+        if not isinstance(flags, list):
+            _diagnostic(diagnostics, "error", "invalid_flags", f"{root_path}.flags", "flagsは配列で指定してください。")
+        else:
+            local_ids: set[str] = set()
+            for index, flag in enumerate(flags):
+                path = f"{root_path}.flags[{index}]"
+                if not isinstance(flag, Mapping):
+                    _diagnostic(diagnostics, "error", "invalid_flag", path, "flagはobjectで指定してください。")
+                    continue
+                _known_fields(flag, {"id", "note"}, diagnostics, path)
+                local_id = flag.get("id")
+                if not isinstance(local_id, str) or LOCAL_ID_PATTERN.fullmatch(local_id) is None:
+                    _diagnostic(diagnostics, "error", "invalid_flag_id", f"{path}.id", "フラグIDはlower_snake_caseで指定してください。")
+                    continue
+                full_id = f"{namespace}.{local_id}" if namespace else local_id
+                if local_id in local_ids or full_id in flag_ids:
+                    _diagnostic(diagnostics, "error", "duplicate_flag_id", f"{path}.id", f"フラグIDが重複しています: {full_id}")
+                local_ids.add(local_id)
+                flag_ids.add(full_id)
+                if "note" in flag and not isinstance(flag.get("note"), str):
+                    _diagnostic(diagnostics, "error", "invalid_note", f"{path}.note", "noteは文字列で指定してください。")
+
+        events = source.get("events")
+        if not isinstance(events, list):
+            _diagnostic(diagnostics, "error", "invalid_events", f"{root_path}.events", "eventsは配列で指定してください。")
+        else:
+            local_ids = set()
+            for index, event in enumerate(events):
+                path = f"{root_path}.events[{index}]"
+                if not isinstance(event, Mapping):
+                    _diagnostic(diagnostics, "error", "invalid_event", path, "eventはobjectで指定してください。")
+                    continue
+                local_id = event.get("id")
+                if not isinstance(local_id, str) or LOCAL_ID_PATTERN.fullmatch(local_id) is None:
+                    _diagnostic(diagnostics, "error", "invalid_event_id", f"{path}.id", "イベントIDはlower_snake_caseで指定してください。")
+                    continue
+                full_id = f"{namespace}.{local_id}" if namespace else local_id
+                if local_id in local_ids or full_id in event_ids:
+                    _diagnostic(diagnostics, "error", "duplicate_event_id", f"{path}.id", f"イベントIDが重複しています: {full_id}")
+                local_ids.add(local_id)
+                event_ids.add(full_id)
+
+    for filename, source in sources.items():
+        if not isinstance(source, Mapping):
+            continue
+        events = source.get("events")
+        if not isinstance(events, list):
+            continue
+        for index, event in enumerate(events):
+            path = f"{filename}.events[{index}]"
+            if not isinstance(event, Mapping):
+                continue
+            _known_fields(event, {"id", "note", "commands"}, diagnostics, path)
+            if "note" in event and not isinstance(event.get("note"), str):
+                _diagnostic(diagnostics, "error", "invalid_note", f"{path}.note", "noteは文字列で指定してください。")
+            _validate_command_list(
+                event.get("commands"), diagnostics, f"{path}.commands",
+                flag_ids=flag_ids, character_keys=characters, item_keys=items,
+                text_keys=texts, bgm_ids=bgms, se_ids=sounds,
+            )
+    return diagnostics
+
+
+def compile_event_sources(
+    sources: Mapping[str, Mapping[str, object]],
+    **catalogs: Iterable[str],
+) -> dict[str, object]:
+    diagnostics = validate_event_sources(sources, **catalogs)
+    errors = [item for item in diagnostics if item.severity == "error"]
+    if errors:
+        raise EventSourceError(errors[0].message)
+    flags: list[str] = []
+    events: dict[str, dict[str, object]] = {}
+    for filename in sorted(sources):
+        source = sources[filename]
+        namespace = source["namespace"]
+        for flag in source["flags"]:
+            flags.append(f"{namespace}.{flag['id']}")
+        for event in source["events"]:
+            full_id = f"{namespace}.{event['id']}"
+            events[full_id] = {"commands": event["commands"]}
+    canonical = json.dumps(sources, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "format_version": EVENT_RUNTIME_FORMAT_VERSION,
+        "source_sha256": hashlib.sha256(canonical).hexdigest(),
+        "flags": sorted(flags),
+        "events": {key: events[key] for key in sorted(events)},
+    }
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, prefix=f".{path.name}.", delete=False) as temporary:
+            temporary.write(content)
+            temporary.flush()
+            temporary_path = Path(temporary.name)
+        temporary_path.replace(path)
+    except BaseException:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def save_event_source(path: Path, data: Mapping[str, object]) -> None:
+    _atomic_write(path, (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+
+
+def save_compiled_events(path: Path, data: Mapping[str, object]) -> None:
+    _atomic_write(path, (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))

@@ -159,7 +159,7 @@ npm run maps:build
 [`features/events.md`](./features/events.md) を参照する。
 
 ゲーム用の `app/events` は全イベントを完全IDで索引化した生成物であり、直接編集または
-Git管理しない。実装後は次のコマンドで非対話の検証と生成を行う。
+Git管理しない。次のコマンドで非対話の検証と生成を行う。
 
 ```sh
 npm run events:validate

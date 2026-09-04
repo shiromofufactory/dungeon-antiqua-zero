@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "sound_effects": {
+    "alert": {
+      "channel": 1,
+      "sound": 7
+    },
+    "confirm": {
+      "channel": 1,
+      "sound": 9
+    },
+    "teleport": {
+      "channel": 0,
+      "sound": 8
+    }
+  }
+}

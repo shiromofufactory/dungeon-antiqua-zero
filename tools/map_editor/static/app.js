@@ -10,6 +10,7 @@ const state = {
   siteNamesJa: {},
   destinationOptions: [],
   siteOptions: [],
+  eventOptions: [],
   resolved: null,
   diagnostics: [],
   dirty: false,
@@ -21,6 +22,9 @@ const state = {
   selectedInstanceId: null,
   selectedSiteId: null,
   selectedArrivalId: null,
+  selectedActorId: null,
+  selectedTriggerId: null,
+  eventTool: "select",
   travelTool: "select",
   resizeHorizontal: "right",
   resizeVertical: "down",
@@ -172,12 +176,16 @@ function normalizeSelections() {
   if (state.data) {
     if (!Array.isArray(state.data.sites)) state.data.sites = [];
     if (!Array.isArray(state.data.arrival_points)) state.data.arrival_points = [];
+    if (!Array.isArray(state.data.actors)) state.data.actors = [];
+    if (!Array.isArray(state.data.event_triggers)) state.data.event_triggers = [];
   }
   if (!grounds.some((ground) => ground.id === state.groundId)) state.groundId = grounds[0]?.id || null;
   if (!objects.some((object) => object.id === state.objectId)) state.objectId = objects[0]?.id || null;
   if (!state.data?.objects?.some((instance) => instance.id === state.selectedInstanceId)) state.selectedInstanceId = null;
   if (!state.data?.sites?.some((site) => site.id === state.selectedSiteId)) state.selectedSiteId = null;
   if (!state.data?.arrival_points?.some((arrival) => arrival.id === state.selectedArrivalId)) state.selectedArrivalId = null;
+  if (!state.data?.actors?.some((actor) => actor.id === state.selectedActorId)) state.selectedActorId = null;
+  if (!state.data?.event_triggers?.some((trigger) => trigger.id === state.selectedTriggerId)) state.selectedTriggerId = null;
 }
 
 function groundStack(groundId) {
@@ -239,7 +247,7 @@ function renderPalette() {
             <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group === "object_overlay" ? `<span class="palette-meta">前面パーツ</span>` : ""}
           </button>`).join("") || `<div class="empty-state">オブジェクト定義がありません。</div>`}</div>
         </div>`;
-  } else {
+  } else if (state.tab === "site") {
     container.innerHTML = `
       <div class="section">
         <div class="section-title"><h2>拠点</h2><span class="subtle">${state.data.sites.length}件</span></div>
@@ -258,6 +266,20 @@ function renderPalette() {
             <strong>${escapeHtml(arrival.id)}</strong>${arrival.position.join(", ")} / ${escapeHtml(arrival.facing)}${arrival.teleport_enabled ? " / テレポート対象" : ""}
           </button>`).join("") || `<div class="empty-state">到着地点がありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-arrival">到着地点を追加</button></div>
+      </div>`;
+  } else {
+    container.innerHTML = `
+      <div class="section">
+        <div class="section-title"><h2>actor</h2><span class="subtle">${state.data.actors.length}件</span></div>
+        <div class="travel-list">${state.data.actors.map((actor) => `
+          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.appearance_id)}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
+        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-actor">actorを配置</button></div>
+      </div>
+      <div class="section">
+        <div class="section-title"><h2>トリガー</h2><span class="subtle">${state.data.event_triggers.length}件</span></div>
+        <div class="travel-list">${state.data.event_triggers.map((trigger) => `
+          <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.id)}</strong>${escapeHtml(trigger.event_id)} / ${trigger.activations.join(", ")}</button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
+        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="add-actor-trigger" ${currentActor() ? "" : "disabled"}>選択actorのtrigger</button><button class="button ghost small" type="button" data-action="add-object-trigger" ${currentInstance() ? "" : "disabled"}>選択objectのtrigger</button></div>
       </div>`;
   }
   drawPaletteThumbs();
@@ -289,6 +311,32 @@ function currentSite() {
 
 function currentArrival() {
   return state.data?.arrival_points?.find((arrival) => arrival.id === state.selectedArrivalId) || null;
+}
+
+function currentActor() {
+  return state.data?.actors?.find((actor) => actor.id === state.selectedActorId) || null;
+}
+
+function currentTrigger() {
+  return state.data?.event_triggers?.find((trigger) => trigger.id === state.selectedTriggerId) || null;
+}
+
+function eventIdOptions(selected) {
+  const ids = [...state.eventOptions];
+  if (selected && !ids.includes(selected)) ids.push(selected);
+  return `<option value="" ${selected ? "" : "selected"}>イベントを選択</option>` + ids.map((id) => `<option value="${escapeHtml(id)}" ${id === selected ? "selected" : ""}>${escapeHtml(id)}${state.eventOptions.includes(id) ? "" : "（未定義）"}</option>`).join("");
+}
+
+function triggerAnchorPosition(trigger) {
+  if (trigger?.anchor?.kind === "cell") return trigger.anchor.position;
+  if (trigger?.anchor?.kind === "object") return state.data.objects.find((item) => item.id === trigger.anchor.object_id)?.origin || null;
+  if (trigger?.anchor?.kind === "actor") return state.data.actors.find((item) => item.id === trigger.anchor.actor_id)?.position || null;
+  return null;
+}
+
+function triggerPositions(trigger) {
+  const origin = triggerAnchorPosition(trigger);
+  return origin ? trigger.offsets.map((offset) => addPoint(origin, offset)) : [];
 }
 
 function siteForObject(objectId) {
@@ -347,6 +395,8 @@ function renderInspector() {
   const instance = currentInstance();
   const site = currentSite();
   const arrival = currentArrival();
+  const actor = currentActor();
+  const trigger = currentTrigger();
   const attachedSite = instance ? siteForObject(instance.id) : null;
   const objectInspector = `
     <div class="section">
@@ -394,6 +444,25 @@ function renderInspector() {
         <div class="row between" style="margin-top:9px"><button class="button ghost small" type="button" data-action="move-arrival">セルを移動</button><button class="button danger small" type="button" data-action="delete-arrival">到着地点を削除</button></div>
       ` : `<div class="empty-state">左の一覧またはキャンバスから到着地点を選択してください。</div>`}
     </div>`;
+  const eventInspector = `
+    <div class="section">
+      <div class="section-title"><h2>選択actor</h2><span class="subtle">${state.data.actors.length}件</span></div>
+      ${actor ? `<div class="instance-card"><strong>${escapeHtml(actor.id)}</strong>セル: ${actor.position.join(", ")}</div>
+        <div class="form-grid" style="margin-top:9px">
+          <div class="field full"><label>actor ID</label><input type="text" value="${escapeHtml(actor.id)}" data-actor-field="id"></div>
+          <div class="field full"><label>appearance ID</label><input type="text" value="${escapeHtml(actor.appearance_id)}" data-actor-field="appearance_id"></div>
+          <div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>
+        </div><div class="row between" style="margin-top:9px"><button class="button ghost small" data-action="move-actor">セルを移動</button><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
+    </div>
+    <div class="section">
+      <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${state.data.event_triggers.length}件</span></div>
+      ${trigger ? `<div class="instance-card"><strong>${escapeHtml(trigger.id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / 対象 ${trigger.offsets.length}セル</div>
+        <div class="form-grid" style="margin-top:9px">
+          <div class="field full"><label>trigger ID</label><input type="text" value="${escapeHtml(trigger.id)}" data-trigger-field="id"></div>
+          <div class="field full"><label>イベント</label><select data-trigger-field="event_id">${eventIdOptions(trigger.event_id)}</select></div>
+          <div class="field full"><label>発火方法</label><div class="row">${["step","touch","interact"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
+        </div><div class="row between" style="margin-top:9px"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
+    </div>`;
   byId("inspector-content").innerHTML = `
     <div class="section">
       <div class="section-title"><h2>マップ設定</h2><span class="subtle">${escapeHtml(state.data.profile)} / ${escapeHtml(state.data.tileset_id)}</span></div>
@@ -409,7 +478,7 @@ function renderInspector() {
         <button class="button secondary small" type="button" data-action="resize-map">寸法を反映</button>
       </div>
     </div>
-    ${state.tab === "site" ? siteInspector : objectInspector}
+    ${state.tab === "site" ? siteInspector : state.tab === "event" ? eventInspector : objectInspector}
     <div class="section"><div class="section-title"><h2>出力</h2></div><p class="subtle">保存時に制作用JSONとゲーム用マップを同時生成します。</p></div>`;
 }
 
@@ -423,6 +492,7 @@ function renderIssues() {
 }
 
 function renderAll() {
+  if (!state.data) return;
   normalizeSelections();
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === state.tab));
   byId("grid-toggle").checked = state.showGrid;
@@ -430,7 +500,7 @@ function renderAll() {
   byId("animation-toggle").textContent = state.paused ? "再生" : "一時停止";
   byId("zoom-label").textContent = `${state.zoom}×`;
   byId("map-title").textContent = state.data.map_id;
-  byId("map-summary").textContent = `${state.data.size[0]}×${state.data.size[1]} cells · ${state.data.objects.length} objects · ${state.data.sites.length} sites`;
+  byId("map-summary").textContent = `${state.data.size[0]}×${state.data.size[1]} cells · ${state.data.objects.length} objects · ${state.data.sites.length} sites · ${state.data.event_triggers.length} triggers`;
   renderPalette();
   renderInspector();
   renderIssues();
@@ -532,6 +602,29 @@ function drawTravelMarkers(context, scale) {
   }
 }
 
+function drawEventMarkers(context, scale) {
+  for (const trigger of state.data.event_triggers) {
+    const selected = trigger.id === state.selectedTriggerId;
+    context.fillStyle = selected ? "rgba(255,79,163,.42)" : "rgba(224,184,90,.22)";
+    context.strokeStyle = selected ? "#ff67bd" : "#d0a94e";
+    context.lineWidth = Math.max(selected ? 3 : 2, state.zoom);
+    for (const position of triggerPositions(trigger)) {
+      context.fillRect(position[0] * scale, position[1] * scale, scale, scale);
+      context.strokeRect(position[0] * scale + 2, position[1] * scale + 2, scale - 4, scale - 4);
+    }
+  }
+  for (const actor of state.data.actors) {
+    const selected = actor.id === state.selectedActorId;
+    const centerX = (actor.position[0] + .5) * scale;
+    const centerY = (actor.position[1] + .5) * scale;
+    context.fillStyle = selected ? "#ff67bd" : "#76d7c4";
+    context.beginPath();
+    context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
+    context.fill();
+    drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
+  }
+}
+
 function drawMap(now) {
   if (!state.data) return;
   const canvas = byId("map-canvas");
@@ -575,6 +668,7 @@ function drawMap(now) {
     }
   }
   drawTravelMarkers(context, scale);
+  drawEventMarkers(context, scale);
   if (state.showGrid) {
     context.strokeStyle = "rgba(238,233,215,.18)";
     context.lineWidth = 1;
@@ -594,7 +688,7 @@ function updateToolStatus() {
   if (!state.data) return;
   if (state.tab === "ground") byId("tool-status").textContent = `地面ブラシ: ${state.groundId || "—"}`;
   else if (state.tab === "object") byId("tool-status").textContent = `左: ${state.objectId || "—"}を配置 / 右: 選択・移動 / 選択後は左ドラッグでも移動`;
-  else {
+  else if (state.tab === "site") {
     const selectedSite = currentSite();
     const labels = {
       select: selectedSite?.anchor?.kind === "cell" ? "ピンクのアンカーを左ドラッグして移動" : "拠点または到着地点を選択",
@@ -604,6 +698,15 @@ function updateToolStatus() {
       move_arrival: "到着地点の新しいセルを選択",
     };
     byId("tool-status").textContent = labels[state.travelTool] || labels.select;
+  } else {
+    const labels = {
+      select: "actorまたはtriggerを選択",
+      create_actor: "actorを置くセルを選択",
+      create_trigger: "triggerの基準セルを選択",
+      move_actor: "actorの新しいセルを選択",
+      trigger_offsets: "trigger対象セルをクリックして追加・解除",
+    };
+    byId("tool-status").textContent = labels[state.eventTool] || labels.select;
   }
 }
 
@@ -742,6 +845,69 @@ function handleTravelCell(cell) {
     return;
   }
   selectTravelAt(cell);
+}
+
+function defaultTrigger(anchor) {
+  return {
+    id: uniqueRecordId("event_1", state.data.event_triggers),
+    event_id: state.eventOptions[0] || "",
+    activations: anchor.kind === "actor" ? ["touch", "interact"] : ["step"],
+    anchor,
+    offsets: [[0, 0]],
+  };
+}
+
+function createActor(position) {
+  const id = uniqueRecordId("actor_1", state.data.actors);
+  commit(() => {
+    state.data.actors.push({ id, position: [...position], facing: "down", appearance_id: id });
+    state.selectedActorId = id;
+    state.selectedTriggerId = null;
+    state.eventTool = "select";
+  });
+}
+
+function addAnchoredTrigger(anchor) {
+  commit(() => {
+    const trigger = defaultTrigger(anchor);
+    state.data.event_triggers.push(trigger);
+    state.selectedTriggerId = trigger.id;
+    state.eventTool = "select";
+  });
+}
+
+function triggerOffsetForCell(trigger, cell) {
+  const origin = triggerAnchorPosition(trigger);
+  return origin ? [cell[0] - origin[0], cell[1] - origin[1]] : null;
+}
+
+function selectEventAt(cell) {
+  const actor = state.data.actors.find((item) => item.position[0] === cell[0] && item.position[1] === cell[1]);
+  const trigger = state.data.event_triggers.find((item) => triggerPositions(item).some((position) => position[0] === cell[0] && position[1] === cell[1]));
+  state.selectedActorId = actor?.id || null;
+  state.selectedTriggerId = trigger?.id || null;
+  renderAll();
+}
+
+function handleEventCell(cell) {
+  if (state.eventTool === "create_actor") return createActor(cell);
+  if (state.eventTool === "create_trigger") return addAnchoredTrigger({ kind: "cell", position: [...cell] });
+  if (state.eventTool === "move_actor" && currentActor()) {
+    commit(() => { currentActor().position = [...cell]; state.eventTool = "select"; });
+    return;
+  }
+  if (state.eventTool === "trigger_offsets" && currentTrigger()) {
+    const offset = triggerOffsetForCell(currentTrigger(), cell);
+    if (!offset) return;
+    commit(() => {
+      const trigger = currentTrigger();
+      const index = trigger.offsets.findIndex((item) => item[0] === offset[0] && item[1] === offset[1]);
+      if (index >= 0 && trigger.offsets.length > 1) trigger.offsets.splice(index, 1);
+      else if (index < 0) trigger.offsets.push(offset);
+    });
+    return;
+  }
+  selectEventAt(cell);
 }
 
 function placeObject(x, y) {
@@ -901,6 +1067,29 @@ function handlePaletteAction(element) {
     state.selectedArrivalId = null;
     state.travelTool = "create_arrival";
     renderAll();
+  } else if (action === "select-actor") {
+    state.selectedActorId = element.dataset.id;
+    state.selectedTriggerId = null;
+    state.eventTool = "select";
+    renderAll();
+    centerMapOnPosition(currentActor()?.position);
+  } else if (action === "select-trigger") {
+    state.selectedTriggerId = element.dataset.id;
+    state.eventTool = "select";
+    renderAll();
+    centerMapOnPosition(triggerAnchorPosition(currentTrigger()));
+  } else if (action === "prepare-actor") {
+    state.selectedActorId = null;
+    state.eventTool = "create_actor";
+    renderAll();
+  } else if (action === "prepare-cell-trigger") {
+    state.selectedTriggerId = null;
+    state.eventTool = "create_trigger";
+    renderAll();
+  } else if (action === "add-actor-trigger" && currentActor()) {
+    addAnchoredTrigger({ kind: "actor", actor_id: currentActor().id });
+  } else if (action === "add-object-trigger" && currentInstance()) {
+    addAnchoredTrigger({ kind: "object", object_id: currentInstance().id });
   }
 }
 
@@ -935,6 +1124,15 @@ function resizeMap() {
     for (const arrival of state.data.arrival_points) {
       arrival.position[0] += offsetX;
       arrival.position[1] += offsetY;
+    }
+    for (const actor of state.data.actors) {
+      actor.position[0] += offsetX;
+      actor.position[1] += offsetY;
+    }
+    for (const trigger of state.data.event_triggers) {
+      if (trigger.anchor?.kind !== "cell") continue;
+      trigger.anchor.position[0] += offsetX;
+      trigger.anchor.position[1] += offsetY;
     }
     state.data.size = [width, height];
   });
@@ -984,6 +1182,27 @@ function handleInspectorAction(element) {
     if (index >= 0) state.data.arrival_points.splice(index, 1);
     state.selectedArrivalId = null;
     state.travelTool = "select";
+  });
+  else if (action === "move-actor") {
+    state.eventTool = "move_actor";
+    renderAll();
+  }
+  else if (action === "delete-actor") commit(() => {
+    const actorId = state.selectedActorId;
+    state.data.actors = state.data.actors.filter((actor) => actor.id !== actorId);
+    state.data.event_triggers = state.data.event_triggers.filter((trigger) => !(trigger.anchor?.kind === "actor" && trigger.anchor.actor_id === actorId));
+    state.selectedActorId = null;
+    state.selectedTriggerId = null;
+    state.eventTool = "select";
+  });
+  else if (action === "edit-trigger-offsets") {
+    state.eventTool = "trigger_offsets";
+    renderAll();
+  }
+  else if (action === "delete-trigger") commit(() => {
+    state.data.event_triggers = state.data.event_triggers.filter((trigger) => trigger.id !== state.selectedTriggerId);
+    state.selectedTriggerId = null;
+    state.eventTool = "select";
   });
 }
 
@@ -1041,6 +1260,30 @@ function updateArrivalField(path, value) {
       arrival.teleport_enabled = value;
       arrival.site_id = value ? (arrival.site_id || availableSiteIds()[0] || null) : null;
     } else if (path === "site_id") arrival.site_id = value || null;
+  });
+}
+
+function updateActorField(path, value) {
+  const actor = currentActor();
+  if (!actor) return;
+  commit(() => {
+    if (path === "id") {
+      const previousId = actor.id;
+      actor.id = value;
+      state.selectedActorId = value;
+      for (const trigger of state.data.event_triggers) {
+        if (trigger.anchor?.kind === "actor" && trigger.anchor.actor_id === previousId) trigger.anchor.actor_id = value;
+      }
+    } else actor[path] = value;
+  });
+}
+
+function updateTriggerField(path, value) {
+  const trigger = currentTrigger();
+  if (!trigger) return;
+  commit(() => {
+    if (path === "id") state.selectedTriggerId = value;
+    trigger[path] = value;
   });
 }
 
@@ -1106,6 +1349,7 @@ async function initialize() {
     state.siteNamesJa = payload.site_names_ja;
     state.destinationOptions = payload.destination_options;
     state.siteOptions = payload.site_options;
+    state.eventOptions = payload.event_options;
     state.resolved = payload.resolved;
     state.diagnostics = payload.diagnostics;
     state.dirty = payload.is_new;
@@ -1126,6 +1370,7 @@ async function initialize() {
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => {
   state.tab = button.dataset.tab;
   state.travelTool = "select";
+  state.eventTool = "select";
   renderAll();
 }));
 byId("palette-content").addEventListener("click", (event) => {
@@ -1148,6 +1393,14 @@ byId("inspector-content").addEventListener("change", (event) => {
   }
   else if (event.target.dataset.siteField) updateSiteField(event.target.dataset.siteField, event.target.value);
   else if (event.target.dataset.arrivalField) updateArrivalField(event.target.dataset.arrivalField, event.target.type === "checkbox" ? event.target.checked : event.target.value);
+  else if (event.target.dataset.actorField) updateActorField(event.target.dataset.actorField, event.target.value);
+  else if (event.target.dataset.triggerField) updateTriggerField(event.target.dataset.triggerField, event.target.value);
+  else if (event.target.dataset.triggerActivation) commit(() => {
+    const trigger = currentTrigger();
+    const activation = event.target.dataset.triggerActivation;
+    if (event.target.checked && !trigger.activations.includes(activation)) trigger.activations.push(activation);
+    else if (!event.target.checked) trigger.activations = trigger.activations.filter((item) => item !== activation);
+  });
 });
 byId("undo-button").addEventListener("click", undo);
 byId("redo-button").addEventListener("click", redo);
@@ -1174,6 +1427,11 @@ mapCanvas.addEventListener("pointerdown", (event) => {
       selectTravelAt(cell);
       return;
     }
+    if (state.tab === "event") {
+      state.eventTool = "select";
+      selectEventAt(cell);
+      return;
+    }
     state.selectedInstanceId = instanceAt(...cell)?.id || null;
     state.tab = "object";
     renderAll();
@@ -1190,7 +1448,8 @@ mapCanvas.addEventListener("pointerdown", (event) => {
     if (state.pointerStroke.changed) { state.dirty = true; scheduleResolution(); updateSaveState(); }
   } else if (state.tab === "object") {
     if (!beginObjectDrag(event, cell)) placeObject(...cell);
-  } else if (!beginSiteAnchorDrag(event, cell)) handleTravelCell(cell);
+  } else if (state.tab === "event") handleEventCell(cell);
+  else if (!beginSiteAnchorDrag(event, cell)) handleTravelCell(cell);
 });
 mapCanvas.addEventListener("pointermove", (event) => {
   const cell = mapCellFromPointer(event);
@@ -1246,6 +1505,12 @@ window.addEventListener("keydown", (event) => {
   } else if ((event.key === "Delete" || event.key === "Backspace") && state.tab === "site" && state.selectedArrivalId && event.target.tagName !== "INPUT") {
     event.preventDefault();
     handleInspectorAction({ dataset: { action: "delete-arrival" } });
+  } else if ((event.key === "Delete" || event.key === "Backspace") && state.tab === "event" && state.selectedTriggerId && event.target.tagName !== "INPUT") {
+    event.preventDefault();
+    handleInspectorAction({ dataset: { action: "delete-trigger" } });
+  } else if ((event.key === "Delete" || event.key === "Backspace") && state.tab === "event" && state.selectedActorId && event.target.tagName !== "INPUT") {
+    event.preventDefault();
+    handleInspectorAction({ dataset: { action: "delete-actor" } });
   }
 });
 window.addEventListener("beforeunload", (event) => {
