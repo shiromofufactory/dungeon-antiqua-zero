@@ -98,7 +98,8 @@ app/
 └── fonts/
     ├── fusion-pixel-12px-monospaced-zh_hans.bdf
     ├── k6x8_gothic.bdf
-    └── k8x12S.bdf
+    ├── k8x12S.bdf
+    └── umplus_j12r.bdf
 
 content/                    # 共有コンテンツsubmodule
 ├── data/                   # JSONの正本
@@ -775,13 +776,20 @@ DA2と同じ初期値3・3・3、表示方式はピクセル表示を使う。
 
 言語は `Language` で表し、保存値と共有JSONの接尾辞には `ja`、`en`、`zhcn` を使う。初期値は `ja` とする。フォントファイル名に含まれる `zh_hans` はアセット名であり、保存値やデータキーには使用しない。
 
-言語別の標準フォントは `FontResources` が所有する。フォントは必要になった言語から読み込み、同じ言語では生成済みの `pyxel.Font` を再利用する。
+言語別・表示用途別のフォントは `FontResources` が所有する。画面側はファイル名ではなく
+`FontRole.STANDARD`、`FontRole.LARGE` のような意味上の用途を指定する。フォントを変更する
+場合は用途と言語に対応する `FontDefinition`（ファイル名、ベースライン補正、行高）を差し替え、
+個々のSceneやOverlayへフォントファイル名や高さを持たせない。フォントは必要になった用途から
+読み込み、複数の用途や言語が同じファイルを使う場合も生成済みの `pyxel.Font` を再利用する。
 
-| 言語 | 標準フォント | ベースライン補正 |
-|---|---|---:|
-| `ja` | `k8x12S.bdf` | 0px |
-| `en` | `k6x8_gothic.bdf` | +3px |
-| `zhcn` | `fusion-pixel-12px-monospaced-zh_hans.bdf` | 0px |
+| 用途 | 言語 | フォント | ベースライン補正 | 行高 |
+|---|---|---|---:|---:|
+| 標準 | `ja` | `k8x12S.bdf` | 0px | 12px |
+| 標準 | `en` | `k6x8_gothic.bdf` | +3px | 8px |
+| 標準 | `zhcn` | `fusion-pixel-12px-monospaced-zh_hans.bdf` | 0px | 12px |
+| 大きい表示文字 | `ja` | `umplus_j12r.bdf` | 0px | 13px |
+| 大きい表示文字 | `en` | `k6x8_gothic.bdf` | +3px | 8px |
+| 大きい表示文字 | `zhcn` | `fusion-pixel-12px-monospaced-zh_hans.bdf` | 0px | 12px |
 
 フォント間のアセント差は `FontResources` のベースライン補正値として管理し、
 `WindowText` の文字グリフの描画Y座標へ加算する。英語フォントは日本語・簡体字
@@ -792,8 +800,8 @@ DA2と同じ初期値3・3・3、表示方式はピクセル表示を使う。
 タグ付きテキストのアイコンはフォントの文字幅によらず常に8px幅として扱う。
 アイコン描画後の文字送りにも `ICON_SIZE` の8pxを使用する。
 
-翻訳済み文字列をWindowへ配置するときは、`LocalizedWindowTextFactory` が選択言語の
-標準フォントとベースライン補正を束ねて `WindowText` を生成する。このファクトリは
+翻訳済み文字列をWindowへ配置するときは、`LocalizedWindowTextFactory` が選択言語と
+表示用途に対応するフォントとベースライン補正を束ねて `WindowText` を生成する。このファクトリは
 翻訳キーを解決せず、各SceneやOverlayが `TextCatalog`、Domain Modelから取得した
 表示文字列を渡す。キーの選択、複数の表示値の連結、座標は画面側の責務とする。
 

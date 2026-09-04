@@ -8,7 +8,14 @@ from .audio import (
     list_bgm_ids,
 )
 from .data import DataResourceError, load_record_array
-from .fonts import FONT_FILENAMES, FontResourceError, FontResources
+from .fonts import (
+    FONT_DEFINITIONS,
+    FONT_FILENAMES,
+    FontDefinition,
+    FontResourceError,
+    FontResources,
+    FontRole,
+)
 from .images import (
     TRANSPARENT_INDEX,
     ImageEntry,
@@ -34,13 +41,16 @@ from .maps import (
 __all__ = [
     "BGM_CHANNEL",
     "BGM_VOLUME_GAINS",
+    "FONT_DEFINITIONS",
     "FONT_FILENAMES",
     "TRANSPARENT_INDEX",
     "AudioResourceError",
     "BgmPlayer",
     "DataResourceError",
+    "FontDefinition",
     "FontResourceError",
     "FontResources",
+    "FontRole",
     "ImageEntry",
     "ImageResourceError",
     "ImageResources",

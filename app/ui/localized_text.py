@@ -7,11 +7,11 @@ from typing import Any
 
 if __package__ == "ui":
     from localization import LocalizedText, normalize_ascii_display_text
-    from resources import FontResources
+    from resources import FontResources, FontRole
     from state import Language
 else:
     from ..localization import LocalizedText, normalize_ascii_display_text
-    from ..resources import FontResources
+    from ..resources import FontResources, FontRole
     from ..state import Language
 
 from .window import (
@@ -61,30 +61,38 @@ class LocalizedWindowTextFactory:
         cls,
         fonts: FontResources,
         language: Language,
+        *,
+        role: FontRole = FontRole.STANDARD,
     ) -> LocalizedWindowTextFactory:
-        """Create a factory using the standard style for ``language``."""
+        """Create a factory using a semantic font role for ``language``."""
 
-        font = fonts.font_for(language)
-        baseline_offset = fonts.baseline_offset_for(language)
+        def font_for(selected_language: Language) -> Any:
+            if role is FontRole.STANDARD:
+                return fonts.font_for(selected_language)
+            return fonts.font_for(selected_language, role=role)
+
+        def baseline_offset_for(selected_language: Language) -> int:
+            if role is FontRole.STANDARD:
+                return fonts.baseline_offset_for(selected_language)
+            return fonts.baseline_offset_for(selected_language, role=role)
+
+        font = font_for(language)
+        baseline_offset = baseline_offset_for(language)
         if language is Language.JAPANESE:
             return cls(
                 font,
                 baseline_offset,
                 normalize_ascii=True,
-                narrow_font=fonts.font_for(Language.ENGLISH),
-                narrow_baseline_offset=fonts.baseline_offset_for(
-                    Language.ENGLISH
-                ),
+                narrow_font=font_for(Language.ENGLISH),
+                narrow_baseline_offset=baseline_offset_for(Language.ENGLISH),
             )
         if language is not Language.ENGLISH:
             return cls(font, baseline_offset)
         return cls(
             font,
             baseline_offset,
-            wide_font=fonts.font_for(Language.JAPANESE),
-            wide_baseline_offset=fonts.baseline_offset_for(
-                Language.JAPANESE
-            ),
+            wide_font=font_for(Language.JAPANESE),
+            wide_baseline_offset=baseline_offset_for(Language.JAPANESE),
             normalize_ascii=True,
         )
 

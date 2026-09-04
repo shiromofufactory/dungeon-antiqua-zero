@@ -377,7 +377,6 @@ function renderInspector() {
         </div>
         <div class="row" style="margin-top:9px">
           <button class="button ghost small" type="button" data-action="edit-site-entrances">入口セルを編集</button>
-          ${site.anchor.kind === "cell" ? `<button class="button ghost small" type="button" data-action="move-site-anchor">アンカーを移動</button>` : ""}
         </div>
         <div class="row end" style="margin-top:9px"><button class="button danger small" type="button" data-action="delete-site">拠点を削除</button></div>
       ` : `<div class="empty-state">左の一覧またはキャンバスから拠点を選択してください。</div>`}
@@ -462,6 +461,25 @@ function addPoint(origin, offset) {
 function siteEntrancePositions(site) {
   const origin = siteAnchorPosition(site);
   return origin ? site.entrance_offsets.map((offset) => addPoint(origin, offset)) : [];
+}
+
+function siteFocusPosition(site) {
+  const positions = siteEntrancePositions(site);
+  if (!positions.length) return siteAnchorPosition(site);
+  const xs = positions.map((position) => position[0]);
+  const ys = positions.map((position) => position[1]);
+  return [
+    (Math.min(...xs) + Math.max(...xs)) / 2,
+    (Math.min(...ys) + Math.max(...ys)) / 2,
+  ];
+}
+
+function centerMapOnPosition(position) {
+  if (!position) return;
+  const scroll = byId("map-scroll");
+  const scale = CELL_SIZE * state.zoom;
+  scroll.scrollLeft = (position[0] + .5) * scale - scroll.clientWidth / 2;
+  scroll.scrollTop = (position[1] + .5) * scale - scroll.clientHeight / 2;
 }
 
 function drawDirectionMarker(context, position, facing, scale, color) {
@@ -577,11 +595,11 @@ function updateToolStatus() {
   if (state.tab === "ground") byId("tool-status").textContent = `地面ブラシ: ${state.groundId || "—"}`;
   else if (state.tab === "object") byId("tool-status").textContent = `左: ${state.objectId || "—"}を配置 / 右: 選択・移動 / 選択後は左ドラッグでも移動`;
   else {
+    const selectedSite = currentSite();
     const labels = {
-      select: "拠点または到着地点を選択",
+      select: selectedSite?.anchor?.kind === "cell" ? "ピンクのアンカーを左ドラッグして移動" : "拠点または到着地点を選択",
       create_site: "座標アンカーにするセルを選択",
       entrance: "入口セルをクリックして追加・解除",
-      anchor: "新しいアンカーセルを選択",
       create_arrival: "到着地点にするセルを選択",
       move_arrival: "到着地点の新しいセルを選択",
     };
@@ -647,11 +665,8 @@ function attachSiteToObject() {
   const offsets = definition.cells.length
     ? [...new Map(definition.cells.map((cell) => [cell.offset.join(","), [...cell.offset]])).values()]
     : [[0, 0]];
-  const arrivalId = uniqueRecordId(`${siteId}_arrival`, state.data.arrival_points);
-  const arrivalPosition = addPoint(instance.origin, offsets[0]);
   commit(() => {
     state.data.sites.push(defaultSite(siteId, { kind: "object", object_id: instance.id }, offsets));
-    state.data.arrival_points.push({ id: arrivalId, position: arrivalPosition, facing: "down", teleport_enabled: true, site_id: siteId });
     state.siteNamesJa[siteId] = defaultSiteNameJa();
     state.selectedSiteId = siteId;
     state.selectedArrivalId = null;
@@ -662,10 +677,8 @@ function attachSiteToObject() {
 
 function createCellSite(position) {
   const siteId = uniqueRecordId("site_1", state.data.sites);
-  const arrivalId = uniqueRecordId(`${siteId}_arrival`, state.data.arrival_points);
   commit(() => {
     state.data.sites.push(defaultSite(siteId, { kind: "cell", position: [...position] }, [[0, 0]]));
-    state.data.arrival_points.push({ id: arrivalId, position: [...position], facing: "down", teleport_enabled: true, site_id: siteId });
     state.siteNamesJa[siteId] = defaultSiteNameJa();
     state.selectedSiteId = siteId;
     state.selectedArrivalId = null;
@@ -718,13 +731,6 @@ function handleTravelCell(cell) {
       const index = site.entrance_offsets.findIndex((item) => item[0] === offset[0] && item[1] === offset[1]);
       if (index >= 0 && site.entrance_offsets.length > 1) site.entrance_offsets.splice(index, 1);
       else if (index < 0) site.entrance_offsets.push(offset);
-    });
-    return;
-  }
-  if (state.travelTool === "anchor" && site?.anchor?.kind === "cell") {
-    commit(() => {
-      site.anchor.position = [...cell];
-      state.travelTool = "select";
     });
     return;
   }
@@ -803,6 +809,7 @@ function beginObjectDrag(event, cell) {
   if (!instance || !instanceOccupies(instance, ...cell)) return false;
   beginChange();
   state.pointerDrag = {
+    kind: "object",
     changed: false,
     pointerId: event.pointerId,
     grabOffset: [cell[0] - instance.origin[0], cell[1] - instance.origin[1]],
@@ -814,7 +821,7 @@ function beginObjectDrag(event, cell) {
 
 function dragObjectTo(cell) {
   const instance = currentInstance();
-  if (!instance || !state.pointerDrag) return;
+  if (!instance || state.pointerDrag?.kind !== "object") return;
   const origin = [cell[0] - state.pointerDrag.grabOffset[0], cell[1] - state.pointerDrag.grabOffset[1]];
   if (origin[0] === state.pointerDrag.lastOrigin[0] && origin[1] === state.pointerDrag.lastOrigin[1]) return;
   if (!validObjectOrigin(instance, ...origin)) return;
@@ -823,6 +830,40 @@ function dragObjectTo(cell) {
   state.pointerDrag.changed = true;
   state.dirty = true;
   renderInspector();
+  updateSaveState();
+  scheduleResolution(0);
+}
+
+function beginSiteAnchorDrag(event, cell) {
+  if (state.travelTool !== "select") return false;
+  const site = state.data.sites.find((item) => item.anchor?.kind === "cell"
+    && item.anchor.position[0] === cell[0]
+    && item.anchor.position[1] === cell[1]);
+  if (!site) return false;
+  state.selectedSiteId = site.id;
+  state.selectedArrivalId = null;
+  beginChange();
+  state.pointerDrag = {
+    kind: "site_anchor",
+    changed: false,
+    pointerId: event.pointerId,
+    lastPosition: [...site.anchor.position],
+  };
+  mapCanvas.setPointerCapture(event.pointerId);
+  renderAll();
+  return true;
+}
+
+function dragSiteAnchorTo(cell) {
+  const site = currentSite();
+  if (site?.anchor?.kind !== "cell" || state.pointerDrag?.kind !== "site_anchor") return;
+  if (cell[0] === state.pointerDrag.lastPosition[0] && cell[1] === state.pointerDrag.lastPosition[1]) return;
+  site.anchor.position = [...cell];
+  state.pointerDrag.lastPosition = [...cell];
+  state.pointerDrag.changed = true;
+  state.dirty = true;
+  renderInspector();
+  drawMap(performance.now());
   updateSaveState();
   scheduleResolution(0);
 }
@@ -843,11 +884,13 @@ function handlePaletteAction(element) {
     state.selectedArrivalId = null;
     state.travelTool = "select";
     renderAll();
+    centerMapOnPosition(siteFocusPosition(currentSite()));
   } else if (action === "select-arrival") {
     state.selectedArrivalId = element.dataset.id;
     state.selectedSiteId = null;
     state.travelTool = "select";
     renderAll();
+    centerMapOnPosition(currentArrival()?.position);
   } else if (action === "prepare-cell-site") {
     state.selectedSiteId = null;
     state.selectedArrivalId = null;
@@ -921,10 +964,6 @@ function handleInspectorAction(element) {
   }
   else if (action === "edit-site-entrances") {
     state.travelTool = "entrance";
-    renderAll();
-  }
-  else if (action === "move-site-anchor") {
-    state.travelTool = "anchor";
     renderAll();
   }
   else if (action === "delete-site") commit(() => {
@@ -1151,13 +1190,14 @@ mapCanvas.addEventListener("pointerdown", (event) => {
     if (state.pointerStroke.changed) { state.dirty = true; scheduleResolution(); updateSaveState(); }
   } else if (state.tab === "object") {
     if (!beginObjectDrag(event, cell)) placeObject(...cell);
-  } else handleTravelCell(cell);
+  } else if (!beginSiteAnchorDrag(event, cell)) handleTravelCell(cell);
 });
 mapCanvas.addEventListener("pointermove", (event) => {
   const cell = mapCellFromPointer(event);
   byId("cursor-status").textContent = cell ? `セル ${cell[0]}, ${cell[1]}` : "セル —";
   if (cell && state.pointerDrag) {
-    dragObjectTo(cell);
+    if (state.pointerDrag.kind === "object") dragObjectTo(cell);
+    else if (state.pointerDrag.kind === "site_anchor") dragSiteAnchorTo(cell);
     return;
   }
   if (!cell || !state.pointerStroke || state.pointerStroke.last === cell.join(",")) return;

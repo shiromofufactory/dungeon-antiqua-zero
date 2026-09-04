@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, call
 
 from app.localization import LocalizedText
-from app.resources import FontResources
+from app.resources import FontResources, FontRole
 from app.state import Language
 from app.ui import LocalizedWindowTextFactory, WindowText
 
@@ -35,6 +35,32 @@ class LocalizedWindowTextFactoryTest(unittest.TestCase):
             [
                 call(Language.ENGLISH),
                 call(Language.JAPANESE),
+            ],
+        )
+
+    def test_font_role_is_applied_to_language_and_mixed_text_fonts(self) -> None:
+        fonts = Mock(spec=FontResources)
+        fonts.font_for.side_effect = (object(), object())
+        fonts.baseline_offset_for.side_effect = (0, 3)
+
+        LocalizedWindowTextFactory.from_language(
+            fonts,
+            Language.JAPANESE,
+            role=FontRole.LARGE,
+        )
+
+        self.assertEqual(
+            fonts.font_for.call_args_list,
+            [
+                call(Language.JAPANESE, role=FontRole.LARGE),
+                call(Language.ENGLISH, role=FontRole.LARGE),
+            ],
+        )
+        self.assertEqual(
+            fonts.baseline_offset_for.call_args_list,
+            [
+                call(Language.JAPANESE, role=FontRole.LARGE),
+                call(Language.ENGLISH, role=FontRole.LARGE),
             ],
         )
 

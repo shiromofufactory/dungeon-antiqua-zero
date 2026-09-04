@@ -38,8 +38,8 @@ class WorldSiteCatalogTest(unittest.TestCase):
     def test_finds_entrance_and_nearest_site_name(self) -> None:
         self.assertIs(self.catalog.entrance_at(3, 3), self.village)
         self.assertIsNone(self.catalog.entrance_at(4, 4))
-        self.assertIs(self.catalog.nearby_site(4, 3), self.village)
-        self.assertIsNone(self.catalog.nearby_site(5, 3))
+        self.assertIs(self.catalog.nearby_site(6, 3), self.village)
+        self.assertIsNone(self.catalog.nearby_site(7, 3))
 
     def test_filters_teleport_candidates_in_catalog_order(self) -> None:
         self.assertEqual(

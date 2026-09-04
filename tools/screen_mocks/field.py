@@ -8,7 +8,7 @@ from enum import Enum, auto
 
 import pyxel
 
-from tools._bootstrap import APP_ROOT
+from tools._bootstrap import APP_ROOT, PROJECT_ROOT
 from tools.screen_mocks._fixtures import (
     MockFixtureError,
     load_mock_character_records,
@@ -66,12 +66,14 @@ from resources import (
     DataResourceError,
     FontResourceError,
     FontResources,
+    FontRole,
     ImageResourceError,
     ImageResources,
     MapResourceError,
     MapResources,
 )
 from rendering import (
+    DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
     FadeEvent,
     FadePhase,
@@ -105,6 +107,7 @@ from ui import (
     WindowCursor,
     WindowText,
     WINDOW_ANIMATION_FRAME_COUNT,
+    draw_tagged_text,
     format_play_time,
     input_icon_tag,
     pad,
@@ -198,8 +201,11 @@ MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
 WORLD_MAP_ID = "worldmap"
 WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
-SITE_NAME_WINDOW_GRID = (16, 2, 32, 7)
-SITE_NAME_TEXT_POSITION = (2, 2)
+CONTENT_TEXTS_PATH = PROJECT_ROOT / "content" / "data" / "texts.json"
+RUNTIME_TEXTS_PATH = APP_ROOT / "data" / "texts.json"
+SITE_MAP_FADE_FRAME_COUNT = 12
+SITE_NAME_FONT_ROLE = FontRole.LARGE
+SITE_NAME_LABEL_GAP = 1
 SITE_FACING_DIRECTIONS = {
     "up": Direction.UP,
     "right": Direction.RIGHT,
@@ -361,7 +367,12 @@ class FieldScreenMock:
         )
         self._force_reserve_front()
         self.character_records = load_mock_character_records()
-        self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        texts_path = (
+            CONTENT_TEXTS_PATH
+            if CONTENT_TEXTS_PATH.is_file()
+            else RUNTIME_TEXTS_PATH
+        )
+        self.texts = TextCatalog.from_json(texts_path)
         self.fonts = FontResources()
         images = ImageResources()
         self.faces = images.image(FACES_IMAGE_ID)
@@ -398,13 +409,14 @@ class FieldScreenMock:
         self.pending_shop = None
         self.debug_screen: DebugMenuScreenMock | None = None
         self.selected_member_index = 0
-        self.site_name_window = None
+        self.site_name_site = None
+        self.site_name_text: WindowText | None = None
         self._site_name_cache: tuple[str, Language] | None = None
         self.pending_site = None
         self.pending_target_map = None
         self.pending_target_arrival = None
         self._build_main_windows()
-        self._refresh_site_name_window()
+        self._refresh_site_name_label()
 
         pyxel.run(self.update, self.draw)
 
@@ -561,10 +573,10 @@ class FieldScreenMock:
         if animate:
             for window in self.windows:
                 window.open()
-        self._refresh_site_name_window(force=True)
+        self._refresh_site_name_label(force=True)
 
-    def _refresh_site_name_window(self, *, force: bool = False) -> None:
-        """Rebuild the nearby-site label only when its contents change."""
+    def _refresh_site_name_label(self, *, force: bool = False) -> None:
+        """Rebuild the map-anchored nearby-site label when its contents change."""
 
         catalog = getattr(self, "world_sites", None)
         field = getattr(self, "field", None)
@@ -576,12 +588,14 @@ class FieldScreenMock:
                 None,
             )
         ):
-            self.site_name_window = None
+            self.site_name_site = None
+            self.site_name_text = None
             self._site_name_cache = None
             return
         position = getattr(field, "position", None)
         if not isinstance(position, FieldPosition):
-            self.site_name_window = None
+            self.site_name_site = None
+            self.site_name_text = None
             self._site_name_cache = None
             return
         site = catalog.nearby_site(position.x, position.y)
@@ -590,7 +604,8 @@ class FieldScreenMock:
             return
         self._site_name_cache = cache
         if site is None:
-            self.site_name_window = None
+            self.site_name_site = None
+            self.site_name_text = None
             return
         name = self.texts.text(
             site.name_text_key,
@@ -600,16 +615,53 @@ class FieldScreenMock:
         text_factory = LocalizedWindowTextFactory.from_language(
             self.fonts,
             self.settings.language,
+            role=SITE_NAME_FONT_ROLE,
         )
-        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
-        self.site_name_window = windows.create(
-            *SITE_NAME_WINDOW_GRID,
-            (
-                text_factory.create(
-                    name,
-                    *SITE_NAME_TEXT_POSITION,
-                ),
-            ),
+        self.site_name_site = site
+        self.site_name_text = text_factory.create(
+            name,
+            0,
+            0,
+        )
+
+    def _draw_site_name(self) -> None:
+        """Draw the nearby-site name at a position fixed to the world map."""
+
+        site = getattr(self, "site_name_site", None)
+        text = getattr(self, "site_name_text", None)
+        if site is None or not isinstance(text, WindowText):
+            return
+        camera_x, camera_y = self.field_renderer.camera_position(self.field)
+        tile_size = self.current_map.tile_size
+        min_x = min(cell.x for cell in site.entrance_cells)
+        max_x = max(cell.x for cell in site.entrance_cells)
+        min_y = min(cell.y for cell in site.entrance_cells)
+        max_y = max(cell.y for cell in site.entrance_cells)
+        left = min_x * tile_size
+        right = (max_x + 1) * tile_size
+        text_width = (
+            text.font.text_width(text.text)
+            if text.font is not None
+            else pyxel.FONT_WIDTH * len(text.text)
+        )
+        x = (left + right - text_width) // 2 - camera_x
+        line_height = self.fonts.line_height_for(
+            self.settings.language,
+            role=SITE_NAME_FONT_ROLE,
+        )
+        if self.field.position.y < min_y:
+            y = (max_y + 1) * tile_size - camera_y + SITE_NAME_LABEL_GAP
+        else:
+            y = min_y * tile_size - camera_y - line_height - SITE_NAME_LABEL_GAP
+        draw_tagged_text(
+            x,
+            y,
+            text.text,
+            text.color,
+            text.font,
+            shadow_color=text.shadow_color,
+            text_y_offset=text.baseline_offset,
+            font_spans=text.font_spans,
         )
 
     def _handle_arrived_site(self) -> None:
@@ -656,7 +708,7 @@ class FieldScreenMock:
         self.pending_site = None
         self.pending_target_map = None
         self.pending_target_arrival = None
-        self._refresh_site_name_window(force=True)
+        self._refresh_site_name_label(force=True)
 
     def _party_window_texts(
         self,
@@ -1119,9 +1171,14 @@ class FieldScreenMock:
             raise TypeError("field screen change must be a FieldScreenChange")
         if getattr(self, "pending_screen_change", None) is not None:
             raise RuntimeError("field screen change is already pending")
+        frame_count = (
+            SITE_MAP_FADE_FRAME_COUNT
+            if change is FieldScreenChange.CHANGE_MAP
+            else DEFAULT_FADE_FRAME_COUNT
+        )
         fade = getattr(self, "fade", None)
-        if fade is None:
-            fade = FadeThroughBlack()
+        if fade is None or fade.frame_count != frame_count:
+            fade = FadeThroughBlack(frame_count)
             self.fade = fade
         self.pending_screen_change = change
         if change in (
@@ -1458,7 +1515,7 @@ class FieldScreenMock:
             else:
                 self.field.update(input_state.held_direction)
                 self._handle_arrived_site()
-                self._refresh_site_name_window()
+                self._refresh_site_name_label()
             return
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
@@ -1587,9 +1644,7 @@ class FieldScreenMock:
                 return
             if getattr(self, "showing_field", False):
                 self.field_renderer.draw(self.field)
-                site_name_window = getattr(self, "site_name_window", None)
-                if site_name_window is not None:
-                    site_name_window.draw()
+                self._draw_site_name()
                 shop_selector_window = getattr(self, "shop_selector_window", None)
                 if shop_selector_window is not None:
                     shop_selector_window.draw()

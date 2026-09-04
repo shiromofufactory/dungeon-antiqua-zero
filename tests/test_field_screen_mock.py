@@ -33,6 +33,9 @@ from tools.screen_mocks.field import (
     PARTY_WINDOW_GRID,
     RESERVE_MEMBER_Y_OFFSET_GRID,
     SE_PREVIEW_SOUND_ID,
+    SITE_MAP_FADE_FRAME_COUNT,
+    SITE_NAME_FONT_ROLE,
+    SITE_NAME_LABEL_GAP,
     SETTINGS_GUIDE_Y,
     SETTINGS_LABEL_X,
     SETTINGS_ROWS,
@@ -50,8 +53,10 @@ from tools.screen_mocks.field import (
 )
 from field import FieldPosition
 from input import Direction, InputButton, InputState
+from localization import Localizer
 from member import BATTLE_PARTY_MEMBER_COUNT, FormationRow
 from resources import (
+    FontRole,
     MapCell,
     MapResourceError,
     MapArrivalPoint,
@@ -66,6 +71,7 @@ from ui import (
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
     RESERVE_MEMBER_TEXT_COLOR,
+    WindowText,
 )
 from world_sites import WorldSiteCatalog
 
@@ -147,6 +153,14 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.world_map, world_map)
         self.assertIs(mock.current_map, world_map)
         self.assertEqual(mock.world_sites.sites, ())
+        self.assertEqual(
+            mock.texts.text(
+                "location.fairy_village",
+                Localizer(Language.JAPANESE),
+                default="fairy_village",
+            ),
+            "妖精の里",
+        )
         self.assertIs(mock.field, field_movement_class.return_value)
         self.assertIs(mock.field_renderer, field_renderer_class.return_value)
         self.assertEqual(
@@ -658,6 +672,15 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertEqual(window.update.call_count, 8)
         self.assertFalse(mock.animate_main_windows_with_fade)
 
+    def test_menu_screen_change_restores_standard_fade_speed(self) -> None:
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.fade = FadeThroughBlack(SITE_MAP_FADE_FRAME_COUNT)
+        mock.pending_screen_change = None
+
+        mock._begin_screen_change(FieldScreenChange.SHOW_MENU)
+
+        self.assertEqual(mock.fade.frame_count, DEFAULT_FADE_FRAME_COUNT)
+
     @patch("tools.screen_mocks.field.pyxel.quit")
     def test_cancel_on_mock_field_still_exits_the_mock(self, quit_game: Mock) -> None:
         mock = FieldScreenMock.__new__(FieldScreenMock)
@@ -708,10 +731,8 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.field.update.assert_called_once_with(Direction.LEFT)
 
     @patch("tools.screen_mocks.field.LocalizedWindowTextFactory")
-    @patch("tools.screen_mocks.field.WindowFactory")
     def test_nearby_site_name_uses_current_language_text(
         self,
-        window_factory_class: Mock,
         localized_factory_class: Mock,
     ) -> None:
         site = WorldSite(
@@ -729,24 +750,116 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.world_map = world_map
         mock.current_map = world_map
         mock.world_sites = WorldSiteCatalog((site,))
-        mock.field = Mock(position=FieldPosition(3, 2))
-        mock.site_name_window = None
+        mock.field = Mock(position=FieldPosition(5, 2))
+        mock.site_name_site = None
+        mock.site_name_text = None
         mock._site_name_cache = None
         localized_text = Mock()
         localized_factory_class.from_language.return_value.create.return_value = (
             localized_text
         )
-        site_name_window = window_factory_class.return_value.create.return_value
 
-        mock._refresh_site_name_window()
+        mock._refresh_site_name_label()
 
         mock.texts.text.assert_called_once()
         localized_factory_class.from_language.assert_called_once_with(
             mock.fonts,
             Language.JAPANESE,
+            role=SITE_NAME_FONT_ROLE,
         )
-        window_factory_class.return_value.create.assert_called_once()
-        self.assertIs(mock.site_name_window, site_name_window)
+        localized_factory_class.from_language.return_value.create.assert_called_once_with(
+            "サンプルの町",
+            0,
+            0,
+        )
+        self.assertIs(mock.site_name_site, site)
+        self.assertIs(mock.site_name_text, localized_text)
+
+    @patch("tools.screen_mocks.field.draw_tagged_text")
+    def test_draws_site_name_below_site_when_player_is_above(
+        self,
+        draw_text: Mock,
+    ) -> None:
+        site = WorldSite(
+            id="sample_town",
+            name_text_key="location.sample_town",
+            entrance_cells=(MapCell(4, 5), MapCell(5, 5)),
+            destination=MapDestination("sample_town", "from_world"),
+        )
+        font = Mock()
+        font.text_width.return_value = 48
+        text = WindowText(
+            "サンプルの町",
+            0,
+            0,
+            font=font,
+            baseline_offset=1,
+        )
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.site_name_site = site
+        mock.site_name_text = text
+        mock.current_map = Mock(tile_size=16)
+        mock.settings = Settings(language=Language.JAPANESE)
+        mock.fonts = Mock()
+        mock.fonts.line_height_for.return_value = 13
+        mock.field = Mock(position=FieldPosition(4, 4))
+        mock.field_renderer = Mock()
+        mock.field_renderer.camera_position.return_value = (32, 48)
+
+        mock._draw_site_name()
+
+        draw_text.assert_called_once_with(
+            (64 + 96 - 48) // 2 - 32,
+            96 - 48 + SITE_NAME_LABEL_GAP,
+            "サンプルの町",
+            text.color,
+            font,
+            shadow_color=text.shadow_color,
+            text_y_offset=1,
+            font_spans=(),
+        )
+        mock.fonts.line_height_for.assert_called_once_with(
+            Language.JAPANESE,
+            role=SITE_NAME_FONT_ROLE,
+        )
+
+    @patch("tools.screen_mocks.field.draw_tagged_text")
+    def test_draws_site_name_above_site_when_player_is_not_above(
+        self,
+        draw_text: Mock,
+    ) -> None:
+        site = WorldSite(
+            id="sample_town",
+            name_text_key="location.sample_town",
+            entrance_cells=(MapCell(4, 5), MapCell(5, 5)),
+            destination=MapDestination("sample_town", "from_world"),
+        )
+        font = Mock()
+        font.text_width.return_value = 48
+        text = WindowText("サンプルの町", 0, 0, font=font)
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.site_name_site = site
+        mock.site_name_text = text
+        mock.current_map = Mock(tile_size=16)
+        mock.settings = Settings(language=Language.JAPANESE)
+        mock.fonts = Mock()
+        mock.fonts.line_height_for.return_value = 13
+        mock.field = Mock(position=FieldPosition(4, 6))
+        mock.field_renderer = Mock()
+        mock.field_renderer.camera_position.return_value = (32, 48)
+
+        mock._draw_site_name()
+
+        draw_text.assert_called_once_with(
+            (64 + 96 - 48) // 2 - 32,
+            80 - 48 - 13 - SITE_NAME_LABEL_GAP,
+            "サンプルの町",
+            text.color,
+            font,
+            shadow_color=text.shadow_color,
+            text_y_offset=0,
+            font_spans=(),
+        )
 
     @patch("tools.screen_mocks.field.FieldRenderer")
     @patch("tools.screen_mocks.field.FieldMovement")
@@ -792,6 +905,7 @@ class FieldScreenMockTest(unittest.TestCase):
             mock.pending_screen_change,
             FieldScreenChange.CHANGE_MAP,
         )
+        self.assertEqual(mock.fade.frame_count, SITE_MAP_FADE_FRAME_COUNT)
         mock.travel_system.enter_site.assert_not_called()
         mock._apply_pending_screen_change()
         mock.travel_system.enter_site.assert_called_once_with(mock.save_data, site)

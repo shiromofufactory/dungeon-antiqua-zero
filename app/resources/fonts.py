@@ -1,7 +1,9 @@
-"""Load and cache the standard Pyxel font for each supported language."""
+"""Load and cache Pyxel fonts by language and display role."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable
@@ -14,20 +16,66 @@ else:
     from ..state import Language
 
 
+class FontRole(Enum):
+    """Semantic font roles selected by UI code."""
+
+    STANDARD = "standard"
+    LARGE = "large"
+
+
+@dataclass(frozen=True)
+class FontDefinition:
+    """Configurable font resource and its drawing metrics."""
+
+    filename: str
+    baseline_offset: int
+    line_height: int
+
+
+FONT_DEFINITIONS = MappingProxyType(
+    {
+        FontRole.STANDARD: MappingProxyType(
+            {
+                Language.JAPANESE: FontDefinition("k8x12S.bdf", 0, 12),
+                Language.ENGLISH: FontDefinition("k6x8_gothic.bdf", 3, 8),
+                Language.SIMPLIFIED_CHINESE: FontDefinition(
+                    "fusion-pixel-12px-monospaced-zh_hans.bdf",
+                    0,
+                    12,
+                ),
+            }
+        ),
+        FontRole.LARGE: MappingProxyType(
+            {
+                Language.JAPANESE: FontDefinition(
+                    "umplus_j12r.bdf",
+                    0,
+                    13,
+                ),
+                Language.ENGLISH: FontDefinition(
+                    "k6x8_gothic.bdf",
+                    3,
+                    8,
+                ),
+                Language.SIMPLIFIED_CHINESE: FontDefinition(
+                    "fusion-pixel-12px-monospaced-zh_hans.bdf",
+                    0,
+                    12,
+                ),
+            }
+        ),
+    }
+)
 FONT_FILENAMES = MappingProxyType(
     {
-        Language.JAPANESE: "k8x12S.bdf",
-        Language.ENGLISH: "k6x8_gothic.bdf",
-        Language.SIMPLIFIED_CHINESE: (
-            "fusion-pixel-12px-monospaced-zh_hans.bdf"
-        ),
+        language: definition.filename
+        for language, definition in FONT_DEFINITIONS[FontRole.STANDARD].items()
     }
 )
 FONT_BASELINE_OFFSETS = MappingProxyType(
     {
-        Language.JAPANESE: 0,
-        Language.ENGLISH: 3,
-        Language.SIMPLIFIED_CHINESE: 0,
+        language: definition.baseline_offset
+        for language, definition in FONT_DEFINITIONS[FontRole.STANDARD].items()
     }
 )
 
@@ -37,7 +85,7 @@ class FontResourceError(RuntimeError):
 
 
 class FontResources:
-    """Own language fonts and load each one only on first use."""
+    """Own language fonts and load each resource file only on first use."""
 
     def __init__(
         self,
@@ -48,19 +96,25 @@ class FontResources:
         app_dir = Path(__file__).resolve().parents[1]
         self.fonts_dir = (fonts_dir or app_dir / "fonts").resolve()
         self._loader = loader or pyxel.Font
-        self._cache: dict[Language, Any] = {}
+        self._cache: dict[Path, Any] = {}
+        self._loaded_languages: dict[Language, None] = {}
 
-    def font_for(self, language: Language) -> Any:
-        """Return the cached standard font for ``language``."""
+    def font_for(
+        self,
+        language: Language,
+        *,
+        role: FontRole = FontRole.STANDARD,
+    ) -> Any:
+        """Return the cached font for ``language`` and semantic ``role``."""
 
-        if not isinstance(language, Language):
-            raise TypeError("language must be a Language")
+        definition = self._definition_for(language, role)
+        path = self.fonts_dir / definition.filename
 
-        cached = self._cache.get(language)
+        cached = self._cache.get(path)
         if cached is not None:
+            self._loaded_languages.setdefault(language, None)
             return cached
 
-        path = self.fonts_dir / FONT_FILENAMES[language]
         if not path.is_file():
             raise FontResourceError(f"言語フォントがありません: {path}")
         try:
@@ -70,19 +124,43 @@ class FontResources:
                 f"言語フォントを読み込めません: {path}: {error}"
             ) from error
 
-        self._cache[language] = font
+        self._cache[path] = font
+        self._loaded_languages.setdefault(language, None)
         return font
 
     @staticmethod
-    def baseline_offset_for(language: Language) -> int:
+    def baseline_offset_for(
+        language: Language,
+        *,
+        role: FontRole = FontRole.STANDARD,
+    ) -> int:
         """Return the pixel offset that aligns the language font baseline."""
 
+        return FontResources._definition_for(language, role).baseline_offset
+
+    @staticmethod
+    def line_height_for(
+        language: Language,
+        *,
+        role: FontRole = FontRole.STANDARD,
+    ) -> int:
+        """Return the configured line height for the selected font."""
+
+        return FontResources._definition_for(language, role).line_height
+
+    @staticmethod
+    def _definition_for(
+        language: Language,
+        role: FontRole,
+    ) -> FontDefinition:
         if not isinstance(language, Language):
             raise TypeError("language must be a Language")
-        return FONT_BASELINE_OFFSETS[language]
+        if not isinstance(role, FontRole):
+            raise TypeError("role must be a FontRole")
+        return FONT_DEFINITIONS[role][language]
 
     @property
     def loaded_languages(self) -> tuple[Language, ...]:
         """Return languages whose fonts have already been constructed."""
 
-        return tuple(self._cache)
+        return tuple(self._loaded_languages)
