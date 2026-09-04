@@ -37,6 +37,7 @@ from .party_status import PartyStatusPanel
 from .shop import ShopCommand, ShopMode, ShopOverlay, ShopPhase, ShopUiDataError
 from .shop_party import ShopEquipmentMarker, ShopPartyPanel
 from .save_menu import SaveMenuDataError, SaveMenuOverlay, format_saved_at
+from .start_menu import StartMenuDataError, StartMenuOverlay
 from .spell_menu import SpellMenuDataError, SpellMenuOverlay
 from .status_menu import StatusMenuDataError, StatusMenuOverlay
 
@@ -65,6 +66,8 @@ __all__ = [
     "RESERVE_MEMBER_TEXT_COLOR",
     "SaveMenuDataError",
     "SaveMenuOverlay",
+    "StartMenuDataError",
+    "StartMenuOverlay",
     "ShopCommand",
     "ShopEquipmentMarker",
     "ShopMode",

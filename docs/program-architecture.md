@@ -54,7 +54,7 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 ```text
 app/
 ├── main.py                   # Pyxel初期化、共通資産読込、Game生成、pyxel.run
-├── game.py                   # 現在のフィールド起点フローとPyxelコールバック
+├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
@@ -65,9 +65,12 @@ app/
 ├── systems/
 │   ├── debug.py              # デバッグ時だけ使うパーティ状態の再生成
 │   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
+│   ├── save.py               # セーブv1の変換、検証、スロット永続化
 │   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
 ├── ui/
 │   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
+│   ├── start_menu.py         # 起動直後のロード・削除Overlay
+│   ├── save_menu.py          # プレイ中の手動セーブOverlay
 │   ├── item_menu.py          # アイテムメニューOverlay
 │   ├── equipment_menu.py     # 装備メニューOverlay
 │   ├── status_menu.py        # ステータスメニューOverlay
@@ -119,6 +122,7 @@ docs/
 │   ├── README.md
 │   ├── field.md
 │   ├── save-data.md
+│   ├── start-load.md
 │   ├── world-sites.md
 │   └── shop.md
 └── program-architecture.md
@@ -333,7 +337,8 @@ images.copy_region_to_bank(
 
 `scripts/build-audio.py` は変換元の相対パスを維持し、22,050Hz・モノラル・Vorbis quality 4
 へ変換する。拡張子を除いた `app/audio` からの相対パスを安定したBGM IDとして使い、
-`da3-field.ogg` は `da3-field`、`dungeon/floor1.ogg` は `dungeon/floor1` とする。
+`da3-welcome.ogg` は `da3-welcome`、`da3-field.ogg` は `da3-field`、
+`dungeon/floor1.ogg` は `dungeon/floor1` とする。
 
 `BgmPlayer` はPyxel初期化と `assets.pyxres` 読込の後にComposition Rootが生成し、
 SceneManagerへ明示的に渡す。BGMには `pyxel.Sound()` の独立インスタンスを使い、
@@ -471,8 +476,10 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 
 ショップOverlayは `app/ui/shop.py` が画面内のPhase、モード、カーソル、一時的な取引個数を
 所有する。購入時の顔と装備比較は `app/ui/shop_party.py` に分けるが、Domain ModelへPyxel描画を
-逆参照させない。現在のゲームはワールドマップから店選択Overlayを開き、選択結果、パーティ、
-共有状態をショップOverlayへ渡す接続を担当する。表示文言は `TextCatalog` の安定キーで参照する。
+逆参照させない。現在のゲームはデバッグメニューが全ショップの選択を所有し、選択結果だけを
+コールバックで `Game` へ返す。`Game` は選択されたShop、パーティ、共有状態を本番の
+ショップOverlayへ渡し、終了時はデバッグメニューのショップ一覧へ戻す。表示文言は
+`TextCatalog` の安定キーで参照する。
 
 `use` は `spells.json` の安定キーとして解決する。呪文名の標準表現は
 `Spell.localized_display_name()` が所有し、元素・神聖・暗黒の種別アイコンを名前の直前へ
@@ -1029,8 +1036,12 @@ DA2同様に増減表示より状態名を優先する。
 メインWindowは開いた状態で生成し、アニメーションを繰り返さない。いずれかのWindowが開閉中は入力を受け付けず、
 パーティの顔画像とカーソルも所属Windowが完全に開いてから表示する。
 フィールドと接続済み画面の詳細は [`features/field.md`](./features/field.md) を正本とする。
-現在のゲームは `MapResources` から生成済み `worldmap` を読み、`FieldMovement` と
-`FieldRenderer`を使ってワールドマップを表示した状態から開始する。メインメニューで
+現在のゲームは起動直後に `ui/start_menu.py` のロードOverlayを表示する。ニューゲームでは
+初期状態を、ロードでは `systems/save.py` が完全に検証・再構築した `LoadedGameState` と
+`MapResources` が解決した保存地点をフェード開始前に準備する。完全暗転時にだけ
+`Game` が状態一式を反映し、`FieldMovement` と `FieldRenderer` を使うフィールドへ切り替える。
+スタート画面のレイアウトと入力は [`features/start-load.md`](./features/start-load.md) を正本とする。
+メインメニューで
 キャンセルした場合もプロセスを終了せず、現在位置を維持してワールドマップへ戻る。
 メニューからワールドマップ、ワールドマップからメニューの
 どちらも標準フェードを使い、完全暗転時に表示対象を切り替える。ワールドマップでは論理
@@ -1039,16 +1050,23 @@ DA2同様に増減表示より状態名を優先する。
 中央からの開放を再開する。Window開放は8フレーム、フェードインは6フレームであるため、
 暗転中にWindowを2フレーム分進め、残り6フレームをフェードインと並行して両方を同時に
 完了させる。Windowのテキスト、カーソル対象、現在の選択位置は再生成しない。
-タイトルSceneを接続するまでの終了操作として、ワールドマップでのキャンセル入力はプロセスを終了する。
-現在のゲームはPyxel初期化後に `BgmPlayer` で `da3-field` をループ再生し、メニューと
+ワールドマップ上の決定とキャンセルには、現時点では操作を割り当てない。モック確認用だった
+決定によるショップ選択と、キャンセルによるプロセス終了は本編接続から撤廃する。
+現在のゲームはスタート・ロード画面で `BgmPlayer` により `da3-welcome` をループ再生する。
+フィールドへの切り替え成立時に `da3-field` へ切り替え、メニューと
 ワールドマップの往復では再スタートしない。BGM音量変更は再生中のチャンネル2へ即時反映する。
 SE音量変更時はチャンネル利得を更新して確認音を鳴らし、表示方式は`pyxel.screen_mode()`へ
-即時反映する。画面倍率はDA2同様に次回リセット時へ反映し、倍率5をフルスクリーンとする。
+即時反映する。画面倍率はDA2同様に次回のタイトル復帰時へ反映し、倍率5をフルスクリーンとする。
 「タイトルがめんへ もどる」と「ゲームを しゅうりょうする」は、翻訳済みの確認文と
-「はい／いいえ」を持つ確認Overlayを経由する。タイトル復帰は端末設定を環境変数へ退避し、
-Pyxelのウィンドウ状態を破棄して `pyxel.reset()` でゲームのプロセス自体を再起動する。
-再起動時は退避した画面倍率を `pyxel.init(display_scale=...)` へ渡し、倍率5ではフルスクリーンを
-有効化する。これによりSaveData、疑似パーティ、画面固有の一時状態を初期化しつつ端末設定を維持する。
+「はい／いいえ」を持つ確認Overlayを経由する。タイトル復帰は端末設定を環境変数へ退避する。
+確認で「はい」を決定した後は、表示中のメイン、設定、確認Windowを標準の8フレームで閉じる。
+閉じ終えるまでは入力を遮断し、閉じた後も決定、キャンセル、メニュー、前後ページの入力が
+すべて離されるまで待ってからGame所有状態を再生成する。これにより、再生成された
+`PyxelInputReader` が復帰を決定した押下をスタート・ロード画面の新規入力として検出しない。
+適用済みの画面倍率から変更がなければ、現在のPyxelウィンドウと `PaletteShifter` を維持したまま
+Game所有状態を再生成してスタート・ロード画面へ戻る。倍率が変わった場合だけPyxelの
+ウィンドウ状態を破棄して `pyxel.reset()` を実行し、再起動後の
+`pyxel.init(display_scale=...)` へ倍率を渡す。倍率5ではフルスクリーンを有効化する。
 
 ワールドマップ拠点の詳細は [`features/world-sites.md`](./features/world-sites.md) を正本とする。
 `resources.maps` は生成済みの拠点、遷移先参照、到着地点を不変の値として読み込む。拠点は
@@ -1083,6 +1101,12 @@ Scene切り替えはTransitionとして調停する。拠点名Windowやフェ�
 所有し、移動要求は注入されたコールバックでFieldへ返す。Fieldは
 `TravelSystem.teleport_destination()` で選択先を再検証し、通常のマップ遷移と同じ到着地点適用処理を
 使う。デバッグ画面は `MapResources`、`FieldMovement`、Scene遷移を直接参照しない。
+
+デバッグショップの候補は `Game` が読み込み済みのShopからデータ順に安定キーだけを抽出し、
+デバッグ画面へ渡す。候補表示と選択はデバッグ画面が所有し、選択結果をコールバックで `Game` へ
+返す。`Game` はデバッグ編集済みパーティを反映してから、通常と同じ標準フェードと
+`ShopOverlay` で店を開く。ショップ終了時はデバッグ画面を破棄せず、選択中だったショップ一覧へ
+戻す。フィールドSceneはこの開発用ショップ選択を知らない。
 
 パーティをまたぐデバッグ操作はPyxel非依存の `systems.debug.DebugPartyEditor` が担当する。
 フィオラを必須とし、フィオラを含むパーティ総数を1〜6名に制限する。
@@ -1195,6 +1219,8 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | ウィンドウ枠、文字、カーソル描画 | `ui/window.py` |
 | 確認結果を受けた後の処理 | ダイアログを開いたSceneまたはOverlay |
 | SaveDataとJSONの変換 | `systems/save.py` |
+| 起動時のスロット選択と削除確認 | `ui/start_menu.py` |
+| ロードJSONからの状態再構築と検証 | `systems/save.py` |
 | Scene切り替え、フェード、BGM調停 | `SceneManager` |
 
 配置に迷った場合は「どの状態を変更するか」「その状態の所有者は誰か」を先に決める。複数箇所から呼ばれるという理由だけで `util.py` へ移動しない。

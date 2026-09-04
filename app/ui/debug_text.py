@@ -20,6 +20,10 @@ class DebugText:
     teleport_destination: str = "テレポートさき"
     teleport_count_template: str = "{count}かしょ"
     no_teleport_destinations: str = "いどうさきが　ありません"
+    shop: str = "ショップ"
+    shop_selection: str = "ショップせんたく"
+    shop_count_template: str = "{count}けん"
+    no_shops: str = "ショップが　ありません"
     member_count_template: str = "フィオラ＋{count}にん"
     numeric_delete: str = "けす"
     numeric_confirm: str = "けってい"
@@ -34,6 +38,11 @@ class DebugText:
         """Format the number of currently available teleport destinations."""
 
         return self._format_count(count, self.teleport_count_template)
+
+    def shop_count(self, count: int) -> str:
+        """Format the number of selectable debug shops."""
+
+        return self._format_count(count, self.shop_count_template)
 
     @staticmethod
     def _format_count(count: int, template: str) -> str:

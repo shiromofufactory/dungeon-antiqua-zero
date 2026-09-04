@@ -11,10 +11,12 @@ from .save import (
     SAVE_DIRECTORY,
     SAVE_FORMAT_VERSION,
     SAVE_SLOT_COUNT,
+    LoadedGameState,
     SaveRepository,
     SaveSlotSummary,
     SaveSystemError,
     create_save_document,
+    restore_save_document,
 )
 from .shop import MAX_GOLD, ShopSystem
 from .travel import TravelSystem
@@ -24,6 +26,7 @@ __all__ = [
     "DebugPartyEditor",
     "DebugPartyError",
     "InventorySystem",
+    "LoadedGameState",
     "SAVE_DIRECTORY",
     "SAVE_FORMAT_VERSION",
     "SAVE_SLOT_COUNT",
@@ -36,4 +39,5 @@ __all__ = [
     "ShopSystem",
     "TravelSystem",
     "create_save_document",
+    "restore_save_document",
 ]

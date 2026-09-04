@@ -18,7 +18,7 @@ from game_data import (
     load_skills,
     load_spells,
 )
-from ui.debug_menu import DebugMenuOverlay, DebugTeleportTarget
+from ui.debug_menu import DebugMenuOverlay, DebugShopTarget, DebugTeleportTarget
 from ui.debug_text import DEBUG_TEXT
 from ui.equipment_menu import (
     EquipmentMenuDataError,
@@ -43,6 +43,7 @@ from input import (
     InputAction,
     InputBindings,
     InputDevice,
+    InputState,
     PyxelInputReader,
 )
 from item import ItemDataError
@@ -85,12 +86,14 @@ from systems import (
     DebugPartyEditor,
     DebugPartyError,
     InventorySystem,
+    LoadedGameState,
     SaveRepository,
     SaveSlotSummary,
     SaveSystemError,
     ShopSystem,
     TravelSystem,
     create_save_document,
+    restore_save_document,
 )
 from world_sites import WorldSiteCatalog
 
@@ -105,6 +108,8 @@ from ui import (
     RESERVE_MEMBER_TEXT_COLOR,
     SaveMenuDataError,
     SaveMenuOverlay,
+    StartMenuDataError,
+    StartMenuOverlay,
     WindowFactory,
     WindowCursor,
     WindowText,
@@ -263,14 +268,10 @@ CONFIRMATION_NO_Y = 11
 SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
 GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
+WELCOME_BGM_ID = "da3-welcome"
 FIELD_BGM_ID = "da3-field"
 INITIAL_GOLD = 100
 INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
-SHOP_SELECTOR_WINDOW_GRID = (4, 7, 56, 46)
-SHOP_SELECTOR_TEXT_X = 4
-SHOP_SELECTOR_CURSOR_X = 2
-SHOP_SELECTOR_FIRST_Y = 2
-SHOP_SELECTOR_ROW_HEIGHT = 3
 
 
 class GameScreenChange(Enum):
@@ -292,6 +293,7 @@ class GameScreenChange(Enum):
     CLOSE_SHOP = auto()
     CHANGE_MAP = auto()
     TELEPORT = auto()
+    START_GAME = auto()
 
 
 class MenuAlertEffect:
@@ -355,13 +357,14 @@ class Game:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
         self.settings = settings
+        self.applied_screen_scale = settings.screen_scale
         self.palette_shifter = palette_shifter
         self.input_reader = create_game_input_reader()
         self.alert = MenuAlertEffect()
 
         self._apply_se_volume()
         self.bgm = BgmPlayer(volume=self.settings.bgm_volume)
-        self.bgm.play(FIELD_BGM_ID)
+        self.bgm.play(WELCOME_BGM_ID)
         self.save_data = SaveData(gold=INITIAL_GOLD)
         self.items = load_items()
         self.inventory_system = InventorySystem(self.items)
@@ -418,19 +421,19 @@ class Game:
         self.confirmation_window = None
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
+        self._returning_to_start = False
         self.fade = FadeThroughBlack()
         self.pending_screen_change: GameScreenChange | None = None
         self.animate_main_windows_with_fade = False
-        self.showing_field = True
+        self.showing_field = False
         self.item_screen: ItemMenuOverlay | None = None
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
-        self.shop_selector_window = None
-        self.shop_selector_cursor: WindowCursor | None = None
         self.pending_shop = None
+        self.shop_return_to_debug = False
         self.debug_screen: DebugMenuOverlay | None = None
         self.selected_member_index = 0
         self.site_name_site = None
@@ -439,8 +442,25 @@ class Game:
         self.pending_site = None
         self.pending_target_map = None
         self.pending_target_arrival = None
+        self.pending_loaded_state: LoadedGameState | None = None
+        self.pending_loaded_map = None
+        self.pending_loaded_field: FieldMovement | None = None
+        self.pending_loaded_renderer: FieldRenderer | None = None
+        self.pending_load_slot: int | None = None
         self._build_main_windows()
         self._refresh_site_name_label()
+        self.start_screen: StartMenuOverlay | None = StartMenuOverlay(
+            summaries=self.save_repository.summaries(),
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+            face_positions=self.character_face_positions,
+            on_new_game=self._start_new_game,
+            on_load=self._load_from_slot,
+            on_delete=self._delete_save_slot,
+            on_invalid_action=self.alert.start,
+        )
 
     @staticmethod
     def settings_from_environment() -> Settings:
@@ -1114,6 +1134,8 @@ class Game:
             alert=self.alert,
             teleport_targets=self._debug_teleport_targets(),
             on_teleport=self._start_debug_teleport,
+            shop_targets=self._debug_shop_targets(),
+            on_shop=self._start_debug_shop,
         )
 
     def _debug_teleport_targets(self) -> tuple[DebugTeleportTarget, ...]:
@@ -1131,6 +1153,40 @@ class Game:
             )
             for site in self.travel_system.teleport_destinations(self.save_data)
         )
+
+    def _debug_shop_targets(self) -> tuple[DebugShopTarget, ...]:
+        """Expose every loaded shop to the development-only selector."""
+
+        return tuple(DebugShopTarget(shop.key, shop.key) for shop in self.shops)
+
+    def _apply_debug_party_changes(self) -> None:
+        """Commit editor state before another production overlay uses it."""
+
+        if self.debug_screen is None:
+            return
+        self.party = self.debug_screen.party
+        character_states = getattr(self, "character_states", {})
+        character_states.update(
+            (member.definition.key, member) for member in self.party
+        )
+        self.character_states = character_states
+        self._force_reserve_front()
+        self.selected_member_index = min(
+            self.selected_member_index,
+            len(self.party) - 1,
+        )
+
+    def _start_debug_shop(self, shop_key: str) -> bool:
+        """Stage a debug-selected shop and open the production shop overlay."""
+
+        shop = next((shop for shop in self.shops if shop.key == shop_key), None)
+        if shop is None:
+            return False
+        self._apply_debug_party_changes()
+        self.pending_shop = shop
+        self.shop_return_to_debug = True
+        self._begin_screen_change(GameScreenChange.OPEN_SHOP)
+        return True
 
     def _start_debug_teleport(self, site_id: str) -> bool:
         """Stage one visited teleport destination and begin fading out."""
@@ -1152,18 +1208,8 @@ class Game:
     def _finish_debug_menu(self, *, resume_settings: bool = True) -> None:
         if self.debug_screen is None:
             return
-        self.party = self.debug_screen.party
-        character_states = getattr(self, "character_states", {})
-        character_states.update(
-            (member.definition.key, member) for member in self.party
-        )
-        self.character_states = character_states
-        self._force_reserve_front()
+        self._apply_debug_party_changes()
         self.debug_screen = None
-        self.selected_member_index = min(
-            self.selected_member_index,
-            len(self.party) - 1,
-        )
         self._build_main_windows(selected_command="config", animate=False)
         self.command_cursor.active = not resume_settings
         if resume_settings:
@@ -1319,12 +1365,19 @@ class Game:
             self.showing_field = False
             self._start_shop()
         elif change is GameScreenChange.CLOSE_SHOP:
+            return_to_debug = (
+                getattr(self, "shop_return_to_debug", False)
+                and self.debug_screen is not None
+            )
             self._finish_shop()
-            self.showing_field = True
+            self.shop_return_to_debug = False
+            self.showing_field = not return_to_debug
         elif change is GameScreenChange.CHANGE_MAP:
             self._apply_pending_site_change()
         elif change is GameScreenChange.TELEPORT:
             self._apply_pending_debug_teleport()
+        elif change is GameScreenChange.START_GAME:
+            self._apply_start_game()
         else:
             raise RuntimeError(f"unsupported field screen change: {change}")
         self.pending_screen_change = None
@@ -1414,42 +1467,96 @@ class Game:
         self.current_save_slot = slot
         return summary
 
+    def _start_new_game(self) -> None:
+        """Fade from the opening selector into the initialized new game."""
+
+        self.pending_loaded_state = None
+        self.pending_load_slot = None
+        self._begin_screen_change(GameScreenChange.START_GAME)
+
+    def _load_from_slot(self, slot: int) -> bool:
+        """Validate and stage one slot before starting the screen transition."""
+
+        try:
+            document = self.save_repository.load(slot)
+            loaded = restore_save_document(
+                document,
+                character_records=self.character_records,
+                items=self.items,
+                skills=self.skills,
+            )
+            target_map = self.map_resources.map(loaded.map_id)
+            target_field = FieldMovement(
+                target_map,
+                start=loaded.position,
+                facing=loaded.facing,
+            )
+            target_renderer = FieldRenderer(
+                target_map,
+                screen_width=SCREEN_WIDTH,
+                screen_height=SCREEN_HEIGHT,
+            )
+        except (SaveSystemError, MapResourceError, TypeError, ValueError):
+            return False
+        self.pending_loaded_state = loaded
+        self.pending_loaded_map = target_map
+        self.pending_loaded_field = target_field
+        self.pending_loaded_renderer = target_renderer
+        self.pending_load_slot = slot
+        self._begin_screen_change(GameScreenChange.START_GAME)
+        return True
+
+    def _delete_save_slot(self, slot: int) -> bool:
+        try:
+            self.save_repository.delete(slot)
+        except (SaveSystemError, TypeError, ValueError):
+            return False
+        return True
+
+    def _apply_start_game(self) -> None:
+        """Commit staged loaded state at the fully black fade midpoint."""
+
+        loaded = self.pending_loaded_state
+        if loaded is not None:
+            if (
+                self.pending_loaded_map is None
+                or self.pending_loaded_field is None
+                or self.pending_loaded_renderer is None
+                or self.pending_load_slot is None
+            ):
+                raise RuntimeError("loaded game has incomplete staged field state")
+            self.save_data = loaded.save_data
+            self.party = loaded.active_party
+            self.character_states = loaded.character_states
+            self.inventory_system = loaded.inventory
+            self.current_map = self.pending_loaded_map
+            self.field = self.pending_loaded_field
+            self.field_renderer = self.pending_loaded_renderer
+            self.current_save_slot = self.pending_load_slot
+            self.shop_system = ShopSystem(
+                shops=self.shops,
+                inventory=self.inventory_system,
+                party=self.party,
+                save_data=self.save_data,
+            )
+            self.selected_member_index = 0
+            self._build_main_windows(animate=False)
+        self.pending_loaded_state = None
+        self.pending_loaded_map = None
+        self.pending_loaded_field = None
+        self.pending_loaded_renderer = None
+        self.pending_load_slot = None
+        self.start_screen = None
+        self.showing_field = True
+        self._refresh_site_name_label(force=True)
+        self.bgm.play(FIELD_BGM_ID)
+
     def _finish_spell(self) -> None:
         if self.spell_screen is None:
             return
         self.selected_member_index = self.spell_screen.member_index
         self.spell_screen = None
         self.command_cursor.active = True
-
-    def _start_shop_selector(self) -> None:
-        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
-        self.shop_selector_window = windows.create(
-            *SHOP_SELECTOR_WINDOW_GRID,
-            tuple(
-                self.localized_texts.create(
-                    shop.key,
-                    SHOP_SELECTOR_TEXT_X,
-                    SHOP_SELECTOR_FIRST_Y + index * SHOP_SELECTOR_ROW_HEIGHT,
-                )
-                for index, shop in enumerate(self.shops)
-            ),
-        )
-        self.shop_selector_cursor = WindowCursor(
-            self.shop_selector_window,
-            tuple(
-                CursorTarget(
-                    SHOP_SELECTOR_CURSOR_X,
-                    SHOP_SELECTOR_FIRST_Y + index * SHOP_SELECTOR_ROW_HEIGHT,
-                    key=shop.key,
-                )
-                for index, shop in enumerate(self.shops)
-            ),
-        )
-
-    def _close_shop_selector(self) -> None:
-        self.shop_selector_window = None
-        self.shop_selector_cursor = None
-        self.pending_shop = None
 
     def _start_shop(self) -> None:
         shop = self.pending_shop
@@ -1476,12 +1583,10 @@ class Game:
             on_invalid_action=self.alert.start,
         )
         self.pending_shop = None
-        self._close_shop_selector()
 
     def _finish_shop(self) -> None:
         self.shop_screen = None
         self.pending_shop = None
-        self._close_shop_selector()
 
     def _finish_settings(self) -> None:
         self.settings_window = None
@@ -1588,13 +1693,70 @@ class Game:
         if self.settings_cursor is not None:
             self.settings_cursor.active = True
 
-    def _restart_game(self) -> None:
+    def _begin_return_to_start(self) -> None:
+        """Close the current menu stack before recreating the start screen."""
+
+        self._returning_to_start = True
+        for cursor in (self.settings_cursor, self.confirmation_cursor):
+            if cursor is not None:
+                cursor.active = False
+        for window in self._visible_windows():
+            window.close()
+
+    @staticmethod
+    def _has_held_action_input(input_state: InputState) -> bool:
+        """Return whether an action could trigger on a newly created reader."""
+
+        if not isinstance(input_state, InputState):
+            raise TypeError("input_state must be an InputState")
+        return any(
+            button.held
+            for button in (
+                input_state.confirm,
+                input_state.cancel,
+                input_state.menu,
+                input_state.previous_page,
+                input_state.next_page,
+            )
+        )
+
+    def _update_return_to_start(self, input_state: InputState) -> None:
+        """Advance closing windows, then wait for action-button release."""
+
+        if not isinstance(input_state, InputState):
+            raise TypeError("input_state must be an InputState")
+        windows = self._visible_windows()
+        for window in windows:
+            if not window.is_closed:
+                window.update()
+        if any(not window.is_closed for window in windows):
+            return
+        if self._has_held_action_input(input_state):
+            return
+        self._returning_to_start = False
+        self._return_to_start_screen()
+
+    def _return_to_start_screen(self) -> None:
         os.environ[GAME_SETTINGS_ENV] = json.dumps(
             self.settings.to_dict(),
             ensure_ascii=True,
         )
-        os.environ.pop(pyxel.WINDOW_STATE_ENV, None)
-        pyxel.reset()
+        self.bgm.stop()
+        if self.applied_screen_scale != self.settings.screen_scale:
+            os.environ.pop(pyxel.WINDOW_STATE_ENV, None)
+            pyxel.reset()
+            return
+        self._return_to_start_without_window_restart()
+
+    def _return_to_start_without_window_restart(self) -> None:
+        """Recreate game-owned state while preserving the Pyxel window."""
+
+        settings = self.settings
+        palette_shifter = self.palette_shifter
+        self.__init__(
+            settings=settings,
+            palette_shifter=palette_shifter,
+        )
 
     def _visible_windows(self) -> tuple[object, ...]:
         windows = list(getattr(self, "windows", ()))
@@ -1615,7 +1777,14 @@ class Game:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        if getattr(self, "_returning_to_start", False):
+            self._update_return_to_start(input_state)
+            return
         if self._update_fade():
+            return
+        start_screen = getattr(self, "start_screen", None)
+        if start_screen is not None:
+            start_screen.update(input_state)
             return
         shop_screen = getattr(self, "shop_screen", None)
         if shop_screen is not None:
@@ -1623,30 +1792,8 @@ class Game:
                 self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
-            shop_selector_cursor = getattr(self, "shop_selector_cursor", None)
-            if shop_selector_cursor is not None:
-                if input_state.cancel.triggered:
-                    self._close_shop_selector()
-                    return
-                if input_state.confirm.triggered:
-                    selected_key = shop_selector_cursor.selected_key
-                    self.pending_shop = next(
-                        (shop for shop in self.shops if shop.key == selected_key),
-                        None,
-                    )
-                    if self.pending_shop is None:
-                        raise GameDataError(
-                            f"選択されたショップが見つかりません: {selected_key!r}"
-                        )
-                    self._begin_screen_change(GameScreenChange.OPEN_SHOP)
-                    return
-                shop_selector_cursor.update(input_state.navigation)
-            elif input_state.confirm.triggered:
-                self._start_shop_selector()
-            elif input_state.menu.triggered:
+            if input_state.menu.triggered:
                 self._begin_screen_change(GameScreenChange.SHOW_MENU)
-            elif input_state.cancel.triggered:
-                pyxel.quit()
             else:
                 self.field.update(input_state.held_direction)
                 self._handle_arrived_site()
@@ -1693,7 +1840,7 @@ class Game:
                 if self.confirmation_cursor.selected_key == "yes":
                     action = self.pending_settings_action
                     if action == "return_title":
-                        self._restart_game()
+                        self._begin_return_to_start()
                     elif action == "quit":
                         pyxel.quit()
                     return
@@ -1781,6 +1928,10 @@ class Game:
         pyxel.cls(0)
         pyxel.camera(self.alert.camera_x, 0)
         try:
+            start_screen = getattr(self, "start_screen", None)
+            if start_screen is not None:
+                start_screen.draw()
+                return
             shop_screen = getattr(self, "shop_screen", None)
             if shop_screen is not None:
                 shop_screen.draw()
@@ -1788,12 +1939,6 @@ class Game:
             if getattr(self, "showing_field", False):
                 self.field_renderer.draw(self.field)
                 self._draw_site_name()
-                shop_selector_window = getattr(self, "shop_selector_window", None)
-                if shop_selector_window is not None:
-                    shop_selector_window.draw()
-                shop_selector_cursor = getattr(self, "shop_selector_cursor", None)
-                if shop_selector_cursor is not None:
-                    shop_selector_cursor.draw()
                 return
             item_screen = getattr(self, "item_screen", None)
             if item_screen is not None:
@@ -1917,6 +2062,7 @@ GAME_ERRORS = (
     GameDataError,
     SkillDataError,
     SaveMenuDataError,
+    StartMenuDataError,
     SpellDataError,
     SpellMenuDataError,
     ShopUiDataError,

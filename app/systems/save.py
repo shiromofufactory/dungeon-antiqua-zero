@@ -15,11 +15,14 @@ if __package__ == "systems":
         BATTLE_PARTY_MEMBER_COUNT,
         FIORA_CHARACTER_KEY,
         MAX_PARTY_MEMBER_COUNT,
+        EquipmentSet,
         EquipmentSlot,
+        FormationRow,
         Member,
+        Proficiency,
         ProficiencyKind,
     )
-    from state import SaveData
+    from state import Difficulty, SaveData
     from systems.inventory import InventorySystem
 else:
     from ..field import FieldPosition
@@ -28,11 +31,14 @@ else:
         BATTLE_PARTY_MEMBER_COUNT,
         FIORA_CHARACTER_KEY,
         MAX_PARTY_MEMBER_COUNT,
+        EquipmentSet,
         EquipmentSlot,
+        FormationRow,
         Member,
+        Proficiency,
         ProficiencyKind,
     )
-    from ..state import SaveData
+    from ..state import Difficulty, SaveData
     from .inventory import InventorySystem
 
 
@@ -77,6 +83,379 @@ class SaveSlotSummary:
             self.saved_at is not None or self.party_character_keys
         ):
             raise ValueError("an empty save slot cannot contain preview values")
+
+
+@dataclass(frozen=True)
+class LoadedGameState:
+    """Fully validated gameplay state reconstructed from one save document."""
+
+    save_data: SaveData
+    active_party: tuple[Member, ...]
+    character_states: dict[str, Member]
+    inventory: InventorySystem
+    map_id: str
+    position: FieldPosition
+    facing: Direction
+
+
+def restore_save_document(
+    document: Mapping[str, object],
+    *,
+    character_records: Sequence[Mapping[str, object]],
+    items: Mapping[str, object],
+    skills: Mapping[str, object],
+) -> LoadedGameState:
+    """Validate and reconstruct version-1 state without mutating the game."""
+
+    if not isinstance(document, Mapping):
+        raise TypeError("save document must be a mapping")
+    if document.get("format_version") != SAVE_FORMAT_VERSION:
+        raise SaveSystemError("save document has an unsupported format version")
+    if isinstance(character_records, (str, bytes)) or not isinstance(
+        character_records, Sequence
+    ):
+        raise TypeError("character_records must be a sequence")
+
+    saved_at = _required_string(document, "saved_at", "save")
+    try:
+        timestamp = datetime.fromisoformat(saved_at)
+    except ValueError as error:
+        raise SaveSystemError("save document has an invalid timestamp") from error
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise SaveSystemError("save timestamp must include a UTC offset")
+
+    progress = _required_mapping(document, "progress", "save")
+    difficulty_value = _required_string(progress, "difficulty", "progress")
+    try:
+        difficulty = Difficulty(difficulty_value)
+    except ValueError as error:
+        raise SaveSystemError("save difficulty is unsupported") from error
+
+    save_data = SaveData(
+        gold=_non_negative_int(progress, "gold", "progress"),
+        experience=_non_negative_int(progress, "experience", "progress"),
+        battle_count=_non_negative_int(progress, "battle_count", "progress"),
+        difficulty=difficulty,
+        play_time_frames=_non_negative_int(
+            progress,
+            "play_time_frames",
+            "progress",
+        ),
+        event_flags=_string_set(document.get("event_flags"), "event_flags"),
+        visited_site_ids=_string_set(
+            document.get("visited_site_ids"),
+            "visited_site_ids",
+        ),
+        opened_treasures=_restore_opened_treasures(
+            document.get("opened_treasures")
+        ),
+        monster_records=_restore_monster_records(
+            document.get("monster_records")
+        ),
+        logs=_restore_logs(document.get("logs")),
+    )
+
+    records_by_key: dict[str, Mapping[str, object]] = {}
+    for record in character_records:
+        if not isinstance(record, Mapping):
+            raise TypeError("character_records must contain mappings")
+        key = record.get("name_en")
+        if not isinstance(key, str) or not key:
+            raise SaveSystemError("character data has no stable key")
+        if key in records_by_key:
+            raise SaveSystemError(f"character data key is duplicated: {key}")
+        records_by_key[key] = record
+
+    party_document = _required_mapping(document, "party", "save")
+    active_keys = _string_list(
+        party_document.get("active_character_keys"),
+        "party.active_character_keys",
+    )
+    if not active_keys:
+        raise SaveSystemError("active party must not be empty")
+    state_documents = _required_mapping(
+        party_document,
+        "character_states",
+        "party",
+    )
+    character_states: dict[str, Member] = {}
+    for key, state_document in state_documents.items():
+        if not isinstance(key, str) or not key:
+            raise SaveSystemError("character state keys must be non-empty strings")
+        record = records_by_key.get(key)
+        if record is None:
+            raise SaveSystemError(f"saved character is missing from data: {key}")
+        character_states[key] = _restore_member(
+            key,
+            record,
+            state_document,
+            items=items,
+            skills=skills,
+        )
+    try:
+        active_party = tuple(character_states[key] for key in active_keys)
+    except KeyError as error:
+        raise SaveSystemError(
+            f"active character has no saved state: {error.args[0]}"
+        ) from error
+
+    inventory_document = _required_mapping(document, "inventory", "save")
+    quantities = _required_mapping(inventory_document, "quantities", "inventory")
+    recorded_keys = _string_list(
+        inventory_document.get("recorded_item_keys"),
+        "inventory.recorded_item_keys",
+    )
+    if any(
+        isinstance(quantity, bool)
+        or not isinstance(quantity, int)
+        or quantity <= 0
+        for quantity in quantities.values()
+    ):
+        raise SaveSystemError("inventory quantities must be positive integers")
+    inventory = InventorySystem(items, quantities, recorded_keys)
+    required_recorded_keys = set(inventory.quantities)
+    required_recorded_keys.update(
+        item.key
+        for member in character_states.values()
+        for item in member.equipment.equipped_items()
+    )
+    missing_recorded_keys = required_recorded_keys - set(recorded_keys)
+    if missing_recorded_keys:
+        raise SaveSystemError(
+            "owned items are missing from recorded_item_keys: "
+            f"{sorted(missing_recorded_keys)}"
+        )
+
+    location = _required_mapping(document, "location", "save")
+    map_id = _required_string(location, "map_id", "location")
+    position = FieldPosition(
+        _non_negative_int(location, "x", "location"),
+        _non_negative_int(location, "y", "location"),
+    )
+    facing_value = _required_string(location, "facing", "location")
+    try:
+        facing = Direction[facing_value.upper()]
+    except KeyError as error:
+        raise SaveSystemError("save facing direction is unsupported") from error
+
+    # Reuse the writer's aggregate invariants after every value has been restored.
+    create_save_document(
+        save_data=save_data,
+        active_party=active_party,
+        character_states=character_states,
+        inventory=inventory,
+        map_id=map_id,
+        position=position,
+        facing=facing,
+        saved_at=timestamp,
+    )
+    return LoadedGameState(
+        save_data=save_data,
+        active_party=active_party,
+        character_states=character_states,
+        inventory=inventory,
+        map_id=map_id,
+        position=position,
+        facing=facing,
+    )
+
+
+def _restore_member(
+    key: str,
+    record: Mapping[str, object],
+    value: object,
+    *,
+    items: Mapping[str, object],
+    skills: Mapping[str, object],
+) -> Member:
+    state = _mapping(value, f"party.character_states.{key}")
+    internal_level = _non_negative_int(state, "internal_level", f"member {key}")
+    initial = Member.from_record_at_internal_level(
+        record,
+        internal_level,
+        items=items,
+        skills=skills,
+    )
+
+    skill_keys = _string_list(state.get("skill_keys"), f"member {key}.skill_keys")
+    try:
+        member_skills = [skills[skill_key] for skill_key in skill_keys]
+    except KeyError as error:
+        raise SaveSystemError(
+            f"saved skill is missing from data: {error.args[0]}"
+        ) from error
+
+    equipment_document = _required_mapping(state, "equipment", f"member {key}")
+    expected_equipment_keys = {slot.value for slot in EquipmentSlot}
+    if set(equipment_document) != expected_equipment_keys:
+        raise SaveSystemError(f"member {key} equipment slots are incomplete")
+    equipment_keys: dict[EquipmentSlot, str] = {}
+    for slot in EquipmentSlot:
+        item_key = equipment_document[slot.value]
+        if item_key is not None and not isinstance(item_key, str):
+            raise SaveSystemError(
+                f"member {key} equipment key must be a string or null"
+            )
+        equipment_keys[slot] = "" if item_key is None else item_key
+    equipment = EquipmentSet.from_keys(equipment_keys, items)
+
+    proficiency_document = _required_mapping(
+        state,
+        "proficiencies",
+        f"member {key}",
+    )
+    if set(proficiency_document) != {kind.value for kind in ProficiencyKind}:
+        raise SaveSystemError(f"member {key} proficiencies are incomplete")
+    proficiencies: dict[ProficiencyKind, Proficiency] = {}
+    for kind in ProficiencyKind:
+        current = _mapping(
+            proficiency_document[kind.value],
+            f"member {key}.proficiencies.{kind.value}",
+        )
+        proficiencies[kind] = Proficiency(
+            initial.definition.proficiency_aptitudes[kind],
+            level=_non_negative_int(current, "level", f"member {key} proficiency"),
+            progress=_non_negative_int(
+                current,
+                "progress",
+                f"member {key} proficiency",
+            ),
+        )
+
+    bonuses = _required_mapping(state, "ability_bonuses", f"member {key}")
+    if set(bonuses) != {"strength", "agility", "magic"} or any(
+        _non_negative_int(bonuses, name, f"member {key} ability bonuses") != 0
+        for name in ("strength", "agility", "magic")
+    ):
+        raise SaveSystemError("non-zero ability bonuses are not supported yet")
+    event_spell_keys = _string_list(
+        state.get("event_spell_keys"),
+        f"member {key}.event_spell_keys",
+    )
+    if event_spell_keys:
+        raise SaveSystemError("event spells are not supported yet")
+
+    formation_value = _required_string(state, "formation_row", f"member {key}")
+    try:
+        formation_row = FormationRow(formation_value)
+    except ValueError as error:
+        raise SaveSystemError(f"member {key} formation row is unsupported") from error
+    return Member(
+        initial.definition,
+        internal_level=internal_level,
+        hp=_non_negative_int(state, "hp", f"member {key}"),
+        max_hp=_non_negative_int(state, "max_hp", f"member {key}"),
+        mp=_non_negative_int(state, "mp", f"member {key}"),
+        max_mp=_non_negative_int(state, "max_mp", f"member {key}"),
+        formation_row=formation_row,
+        poisoned=_required_bool(state, "poisoned", f"member {key}"),
+        paralyzed=_required_bool(state, "paralyzed", f"member {key}"),
+        skills=member_skills,
+        equipment=equipment,
+        proficiencies=proficiencies,
+    )
+
+
+def _mapping(value: object, label: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise SaveSystemError(f"{label} must be an object")
+    return value
+
+
+def _required_mapping(
+    value: Mapping[str, object],
+    key: str,
+    label: str,
+) -> Mapping[str, object]:
+    return _mapping(value.get(key), f"{label}.{key}")
+
+
+def _required_string(value: Mapping[str, object], key: str, label: str) -> str:
+    current = value.get(key)
+    if not isinstance(current, str) or not current:
+        raise SaveSystemError(f"{label}.{key} must be a non-empty string")
+    return current
+
+
+def _required_bool(value: Mapping[str, object], key: str, label: str) -> bool:
+    current = value.get(key)
+    if not isinstance(current, bool):
+        raise SaveSystemError(f"{label}.{key} must be a boolean")
+    return current
+
+
+def _non_negative_int(value: Mapping[str, object], key: str, label: str) -> int:
+    current = value.get(key)
+    if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+        raise SaveSystemError(f"{label}.{key} must be a non-negative integer")
+    return current
+
+
+def _string_list(value: object, label: str) -> list[str]:
+    if not isinstance(value, list) or not all(
+        isinstance(key, str) and key for key in value
+    ):
+        raise SaveSystemError(f"{label} must be an array of non-empty strings")
+    if len(value) != len(set(value)):
+        raise SaveSystemError(f"{label} must not contain duplicates")
+    return value
+
+
+def _string_set(value: object, label: str) -> set[str]:
+    return set(_string_list(value, label))
+
+
+def _restore_opened_treasures(value: object) -> set[tuple[str, str]]:
+    if not isinstance(value, list):
+        raise SaveSystemError("opened_treasures must be an array")
+    restored: set[tuple[str, str]] = set()
+    for index, entry in enumerate(value):
+        current = _mapping(entry, f"opened_treasures[{index}]")
+        pair = (
+            _required_string(current, "map_id", f"opened_treasures[{index}]"),
+            _required_string(
+                current,
+                "treasure_id",
+                f"opened_treasures[{index}]",
+            ),
+        )
+        if pair in restored:
+            raise SaveSystemError("opened_treasures must not contain duplicates")
+        restored.add(pair)
+    return restored
+
+
+def _restore_monster_records(value: object) -> dict[str, set[str]]:
+    records = _mapping(value, "monster_records")
+    restored: dict[str, set[str]] = {}
+    for monster_key, entry in records.items():
+        if not isinstance(monster_key, str) or not monster_key:
+            raise SaveSystemError("monster record keys must be non-empty strings")
+        current = _mapping(entry, f"monster_records.{monster_key}")
+        restored[monster_key] = _string_set(
+            current.get("revealed_field_keys"),
+            f"monster_records.{monster_key}.revealed_field_keys",
+        )
+    return restored
+
+
+def _restore_logs(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise SaveSystemError("logs must be an array")
+    restored: list[dict[str, object]] = []
+    for index, entry in enumerate(value):
+        current = _mapping(entry, f"logs[{index}]")
+        text_key = _required_string(current, "text_key", f"logs[{index}]")
+        arguments = _required_mapping(current, "arguments", f"logs[{index}]")
+        if not all(
+            isinstance(argument_key, str)
+            and argument_key
+            and (argument is None or isinstance(argument, (str, int, bool)))
+            for argument_key, argument in arguments.items()
+        ):
+            raise SaveSystemError(f"logs[{index}].arguments contains invalid data")
+        restored.append({"text_key": text_key, "arguments": dict(arguments)})
+    return restored
 
 
 def create_save_document(
@@ -304,7 +683,7 @@ def _serialize_logs(logs: Sequence[Mapping[str, object]]) -> list[dict[str, obje
 
 
 class SaveRepository:
-    """Persist save documents and expose preview-only slot summaries."""
+    """Persist, read, delete, and preview save-slot documents."""
 
     def __init__(self, directory: Path = SAVE_DIRECTORY) -> None:
         if not isinstance(directory, Path):
@@ -362,6 +741,31 @@ class SaveRepository:
 
         return expected_summary
 
+    def load(self, slot: int) -> dict[str, object]:
+        """Read one version-supported save document without restoring it."""
+
+        path = self.slot_path(slot)
+        if not path.is_file():
+            raise SaveSystemError(f"save slot {slot} is empty")
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise SaveSystemError(f"failed to read save slot {slot}") from error
+        if not isinstance(document, dict):
+            raise SaveSystemError(f"save slot {slot} does not contain an object")
+        if document.get("format_version") != SAVE_FORMAT_VERSION:
+            raise SaveSystemError("save document has an unsupported format version")
+        return document
+
+    def delete(self, slot: int) -> None:
+        """Delete one slot file; deleting an empty slot is harmless."""
+
+        path = self.slot_path(slot)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            raise SaveSystemError(f"failed to delete save slot {slot}") from error
+
     @staticmethod
     def _document_summary(
         slot: int,
@@ -407,8 +811,10 @@ __all__ = [
     "SAVE_DIRECTORY",
     "SAVE_FORMAT_VERSION",
     "SAVE_SLOT_COUNT",
+    "LoadedGameState",
     "SaveRepository",
     "SaveSlotSummary",
     "SaveSystemError",
     "create_save_document",
+    "restore_save_document",
 ]

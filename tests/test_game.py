@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
-from ui.debug_menu import DebugTeleportTarget
+from ui.debug_menu import DebugShopTarget, DebugTeleportTarget
 from game import (
     ALERT_CHANNEL,
     ALERT_SOUND_ID,
@@ -48,6 +48,7 @@ from game import (
     SORT_SOURCE_CURSOR_X_OFFSET,
     TELEPORT_SOUND_CHANNEL,
     TELEPORT_SOUND_ID,
+    WELCOME_BGM_ID,
     WORLD_MAP_ID,
     WORLD_MAP_START_POSITION,
     MenuAlertEffect,
@@ -77,12 +78,15 @@ from ui import (
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
     RESERVE_MEMBER_TEXT_COLOR,
+    WINDOW_ANIMATION_FRAME_COUNT,
+    Window,
     WindowText,
 )
 from world_sites import WorldSiteCatalog
 
 
 class GameTest(unittest.TestCase):
+    @patch("game.StartMenuOverlay")
     @patch("game.BgmPlayer")
     @patch("game.create_game_input_reader")
     @patch("game.WindowFactory")
@@ -101,6 +105,7 @@ class GameTest(unittest.TestCase):
         window_factory_class: Mock,
         create_input_reader: Mock,
         bgm_player_class: Mock,
+        start_menu_class: Mock,
     ) -> None:
         fonts = fonts_class.return_value
         font = fonts.font_for.return_value
@@ -133,7 +138,7 @@ class GameTest(unittest.TestCase):
         self.assertIsInstance(mock.alert, MenuAlertEffect)
         bgm_player_class.assert_called_once_with(volume=3)
         self.assertIs(mock.bgm, bgm_player_class.return_value)
-        mock.bgm.play.assert_called_once_with(FIELD_BGM_ID)
+        mock.bgm.play.assert_called_once_with(WELCOME_BGM_ID)
         self.assertEqual(
             images_class.return_value.image.call_args_list,
             [call(FACES_IMAGE_ID)],
@@ -257,7 +262,8 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.confirmation_cursor)
         self.assertIsNone(mock.pending_settings_action)
         self.assertFalse(mock.animate_main_windows_with_fade)
-        self.assertTrue(mock.showing_field)
+        self.assertFalse(mock.showing_field)
+        self.assertIs(mock.start_screen, start_menu_class.return_value)
         self.assertIsNone(mock.item_screen)
         self.assertIsNone(mock.equipment_screen)
         self.assertIsNone(mock.status_screen)
@@ -643,7 +649,10 @@ class GameTest(unittest.TestCase):
         self.assertEqual(mock.fade.frame_count, DEFAULT_FADE_FRAME_COUNT)
 
     @patch("game.pyxel.quit")
-    def test_cancel_on_field_exits_the_game(self, quit_game: Mock) -> None:
+    def test_cancel_on_field_has_no_temporary_exit_action(
+        self,
+        quit_game: Mock,
+    ) -> None:
         mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -651,10 +660,14 @@ class GameTest(unittest.TestCase):
         )
         mock.showing_field = True
         mock.alert = Mock()
+        mock.field = Mock()
+        mock._handle_arrived_site = Mock()
+        mock._refresh_site_name_label = Mock()
 
         mock.update()
 
-        quit_game.assert_called_once_with()
+        quit_game.assert_not_called()
+        mock.field.update.assert_called_once_with(None)
 
     @patch("game.pyxel.cls")
     @patch("game.pyxel.camera")
@@ -683,7 +696,6 @@ class GameTest(unittest.TestCase):
         )
         mock.fade = FadeThroughBlack()
         mock.shop_screen = None
-        mock.shop_selector_cursor = None
         mock.showing_field = True
         mock.field = Mock()
 
@@ -1615,6 +1627,100 @@ class GameTest(unittest.TestCase):
         self.assertIs(result, summary)
         self.assertEqual(mock.current_save_slot, 3)
 
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
+    @patch("game.restore_save_document")
+    def test_load_slot_stages_validated_state_and_field_before_fade(
+        self,
+        restore_document: Mock,
+        field_movement_class: Mock,
+        field_renderer_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        document = {"format_version": 1}
+        mock.save_repository = Mock()
+        mock.save_repository.load.return_value = document
+        mock.character_records = (Mock(),)
+        mock.items = {"POTION": Mock()}
+        mock.skills = {"Two-Handed": Mock()}
+        loaded = Mock(
+            map_id="worldmap",
+            position=FieldPosition(17, 39),
+            facing=Direction.LEFT,
+        )
+        restore_document.return_value = loaded
+        target_map = Mock()
+        mock.map_resources = Mock()
+        mock.map_resources.map.return_value = target_map
+        mock._begin_screen_change = Mock()
+
+        result = mock._load_from_slot(4)
+
+        self.assertTrue(result)
+        mock.save_repository.load.assert_called_once_with(4)
+        restore_document.assert_called_once_with(
+            document,
+            character_records=mock.character_records,
+            items=mock.items,
+            skills=mock.skills,
+        )
+        field_movement_class.assert_called_once_with(
+            target_map,
+            start=FieldPosition(17, 39),
+            facing=Direction.LEFT,
+        )
+        field_renderer_class.assert_called_once_with(
+            target_map,
+            screen_width=256,
+            screen_height=240,
+        )
+        self.assertIs(mock.pending_loaded_state, loaded)
+        self.assertEqual(mock.pending_load_slot, 4)
+        mock._begin_screen_change.assert_called_once_with(
+            GameScreenChange.START_GAME
+        )
+
+    @patch("game.ShopSystem")
+    def test_start_game_commits_loaded_state_at_fade_midpoint(
+        self,
+        shop_system_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        loaded = Mock()
+        loaded.save_data = SaveData(gold=321)
+        loaded.active_party = (Mock(), Mock())
+        loaded.character_states = {"Fiora": loaded.active_party[0]}
+        loaded.inventory = Mock()
+        mock.pending_loaded_state = loaded
+        mock.pending_loaded_map = Mock()
+        mock.pending_loaded_field = Mock()
+        mock.pending_loaded_renderer = Mock()
+        mock.pending_load_slot = 4
+        mock.shops = (Mock(),)
+        mock._build_main_windows = Mock()
+        mock._refresh_site_name_label = Mock()
+        mock.bgm = Mock()
+        mock.start_screen = Mock()
+        mock.showing_field = False
+
+        mock._apply_start_game()
+
+        self.assertIs(mock.save_data, loaded.save_data)
+        self.assertIs(mock.party, loaded.active_party)
+        self.assertIs(mock.character_states, loaded.character_states)
+        self.assertIs(mock.inventory_system, loaded.inventory)
+        self.assertEqual(mock.current_save_slot, 4)
+        shop_system_class.assert_called_once_with(
+            shops=mock.shops,
+            inventory=loaded.inventory,
+            party=loaded.active_party,
+            save_data=loaded.save_data,
+        )
+        mock._build_main_windows.assert_called_once_with(animate=False)
+        self.assertIsNone(mock.start_screen)
+        self.assertTrue(mock.showing_field)
+        mock.bgm.play.assert_called_once_with(FIELD_BGM_ID)
+
     def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
         mock = Game.__new__(Game)
         mock.alert = Mock()
@@ -1773,7 +1879,7 @@ class GameTest(unittest.TestCase):
         mock.spell_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
-    def test_field_confirm_opens_shop_key_selector(self) -> None:
+    def test_field_confirm_has_no_temporary_shop_action(self) -> None:
         mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock(
@@ -1783,72 +1889,71 @@ class GameTest(unittest.TestCase):
         )
         mock.fade = FadeThroughBlack()
         mock.shop_screen = None
-        mock.shop_selector_cursor = None
         mock.showing_field = True
-        mock._start_shop_selector = Mock()
+        mock.field = Mock()
+        mock._handle_arrived_site = Mock()
+        mock._refresh_site_name_label = Mock()
 
         mock.update()
 
-        mock._start_shop_selector.assert_called_once_with()
+        mock.field.update.assert_called_once_with(None)
+        mock._handle_arrived_site.assert_called_once_with()
+        mock._refresh_site_name_label.assert_called_once_with()
 
-    @patch("game.pyxel.quit")
-    def test_cancel_closes_shop_selector_and_restores_field_input(
-        self,
-        quit_game: Mock,
-    ) -> None:
+    def test_debug_shop_targets_follow_loaded_shop_order(self) -> None:
         mock = Game.__new__(Game)
-        mock.alert = Mock()
-        mock.input_reader = Mock(
-            poll=Mock(
-                side_effect=(
-                    InputState(cancel=InputButton(triggered=True, held=True)),
-                    InputState(menu=InputButton(triggered=True, held=True)),
-                )
-            )
+        mock.shops = (
+            Mock(key="FAIRY_HAMLET_ITEMS"),
+            Mock(key="SILVALIA_ARMORY"),
         )
-        mock.fade = FadeThroughBlack()
-        mock.pending_screen_change = None
-        mock.shop_screen = None
-        mock.shop_selector_window = Mock()
-        selector_cursor = Mock()
-        mock.shop_selector_cursor = selector_cursor
-        mock.pending_shop = Mock()
-        mock.command_cursor = Mock(active=False)
-        mock.showing_field = True
 
-        mock.update()
+        self.assertEqual(
+            mock._debug_shop_targets(),
+            (
+                DebugShopTarget("FAIRY_HAMLET_ITEMS", "FAIRY_HAMLET_ITEMS"),
+                DebugShopTarget("SILVALIA_ARMORY", "SILVALIA_ARMORY"),
+            ),
+        )
 
-        self.assertIsNone(mock.shop_selector_window)
-        self.assertIsNone(mock.shop_selector_cursor)
-        self.assertIsNone(mock.pending_shop)
-        selector_cursor.update.assert_not_called()
-        quit_game.assert_not_called()
-
-        mock.update()
-
-        self.assertIs(mock.pending_screen_change, GameScreenChange.SHOW_MENU)
-        quit_game.assert_not_called()
-
-    def test_shop_selector_reserves_selected_shop_for_fade_transition(self) -> None:
+    def test_debug_shop_stages_selected_shop_for_fade_transition(self) -> None:
         mock = Game.__new__(Game)
         selected_shop = Mock(key="TEST_SHOP")
-        mock.alert = Mock()
-        mock.input_reader = Mock(
-            poll=Mock(
-                return_value=InputState(confirm=InputButton(triggered=True))
-            )
-        )
+        member = Mock()
+        member.definition.key = "Fiora"
+        mock.debug_screen = Mock(party=(member,))
+        mock.party = ()
+        mock.character_states = {}
+        mock._force_reserve_front = Mock()
+        mock.selected_member_index = 5
         mock.fade = FadeThroughBlack()
         mock.pending_screen_change = None
-        mock.shop_screen = None
-        mock.shop_selector_cursor = Mock(selected_key="TEST_SHOP")
         mock.shops = (selected_shop,)
-        mock.showing_field = True
 
-        mock.update()
+        result = mock._start_debug_shop("TEST_SHOP")
 
+        self.assertTrue(result)
         self.assertIs(mock.pending_shop, selected_shop)
+        self.assertTrue(mock.shop_return_to_debug)
         self.assertIs(mock.pending_screen_change, GameScreenChange.OPEN_SHOP)
+        self.assertEqual(mock.party, (member,))
+        self.assertIs(mock.character_states["Fiora"], member)
+        self.assertEqual(mock.selected_member_index, 0)
+
+    def test_closing_debug_shop_returns_to_debug_shop_list(self) -> None:
+        mock = Game.__new__(Game)
+        mock.pending_screen_change = GameScreenChange.CLOSE_SHOP
+        mock.shop_return_to_debug = True
+        mock.debug_screen = Mock()
+        mock._finish_shop = Mock()
+        mock.showing_field = False
+
+        mock._apply_pending_screen_change()
+
+        mock._finish_shop.assert_called_once_with()
+        self.assertIsNotNone(mock.debug_screen)
+        self.assertFalse(mock.showing_field)
+        self.assertFalse(mock.shop_return_to_debug)
+        self.assertIsNone(mock.pending_screen_change)
 
     @patch("game.WindowCursor")
     def test_selecting_fiora_and_reserve_swaps_their_order(
@@ -2313,7 +2418,7 @@ class GameTest(unittest.TestCase):
         mock.settings_window.open.assert_not_called()
 
     @patch("game.pyxel.reset")
-    def test_return_to_title_restarts_game_with_settings(
+    def test_return_to_title_restarts_pyxel_when_screen_scale_changed(
         self,
         reset: Mock,
     ) -> None:
@@ -2322,6 +2427,9 @@ class GameTest(unittest.TestCase):
             language=Language.ENGLISH,
             screen_scale=5,
         )
+        mock.applied_screen_scale = 3
+        mock.bgm = Mock()
+        mock._return_to_start_without_window_restart = Mock()
         with patch.dict(
             "game.os.environ",
             {"PYXEL_WINDOW_STATE": "old"},
@@ -2331,7 +2439,7 @@ class GameTest(unittest.TestCase):
                 "game.pyxel.WINDOW_STATE_ENV",
                 "PYXEL_WINDOW_STATE",
             ):
-                mock._restart_game()
+                mock._return_to_start_screen()
 
             self.assertNotIn("PYXEL_WINDOW_STATE", environment)
             self.assertEqual(
@@ -2339,6 +2447,108 @@ class GameTest(unittest.TestCase):
                 mock.settings.to_dict(),
             )
         reset.assert_called_once_with()
+        mock.bgm.stop.assert_called_once_with()
+        mock._return_to_start_without_window_restart.assert_not_called()
+
+    @patch("game.pyxel.reset")
+    def test_return_to_title_preserves_window_when_screen_scale_is_unchanged(
+        self,
+        reset: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings(
+            language=Language.ENGLISH,
+            screen_scale=3,
+        )
+        mock.applied_screen_scale = 3
+        mock.bgm = Mock()
+        mock._return_to_start_without_window_restart = Mock()
+        with patch.dict(
+            "game.os.environ",
+            {"PYXEL_WINDOW_STATE": "preserve"},
+            clear=True,
+        ) as environment:
+            with patch(
+                "game.pyxel.WINDOW_STATE_ENV",
+                "PYXEL_WINDOW_STATE",
+            ):
+                mock._return_to_start_screen()
+
+            self.assertEqual(environment["PYXEL_WINDOW_STATE"], "preserve")
+            self.assertEqual(
+                json.loads(environment[GAME_SETTINGS_ENV]),
+                mock.settings.to_dict(),
+            )
+        mock.bgm.stop.assert_called_once_with()
+        reset.assert_not_called()
+        mock._return_to_start_without_window_restart.assert_called_once_with()
+
+    def test_in_memory_title_return_reinitializes_same_game_object(self) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings(language=Language.ENGLISH, screen_scale=3)
+        mock.palette_shifter = Mock()
+        with patch.object(
+            Game,
+            "__init__",
+            autospec=True,
+            return_value=None,
+        ) as initialize:
+            Game._return_to_start_without_window_restart(mock)
+
+        initialize.assert_called_once_with(
+            mock,
+            settings=mock.settings,
+            palette_shifter=mock.palette_shifter,
+        )
+
+    def test_return_to_title_closes_all_menu_windows_and_disables_cursors(
+        self,
+    ) -> None:
+        mock = Game.__new__(Game)
+        main_window = Window(0, 0, 8, 8)
+        settings_window = Window(8, 0, 8, 8)
+        confirmation_window = Window(16, 0, 8, 8)
+        mock.windows = (main_window,)
+        mock.settings_window = settings_window
+        mock.confirmation_window = confirmation_window
+        mock.settings_cursor = Mock(active=True)
+        mock.confirmation_cursor = Mock(active=True)
+
+        mock._begin_return_to_start()
+
+        self.assertTrue(mock._returning_to_start)
+        self.assertFalse(mock.settings_cursor.active)
+        self.assertFalse(mock.confirmation_cursor.active)
+        for window in (main_window, settings_window, confirmation_window):
+            self.assertTrue(window.is_animating)
+
+    def test_return_to_title_waits_for_window_close_and_action_release(
+        self,
+    ) -> None:
+        mock = Game.__new__(Game)
+        window = Window(0, 0, 8, 8)
+        mock.windows = (window,)
+        mock.settings_window = None
+        mock.confirmation_window = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock._return_to_start_screen = Mock()
+        mock._begin_return_to_start()
+        held_confirm = InputState(
+            confirm=InputButton(triggered=False, held=True),
+        )
+
+        for _frame in range(WINDOW_ANIMATION_FRAME_COUNT):
+            mock._update_return_to_start(held_confirm)
+
+        self.assertTrue(window.is_closed)
+        mock._return_to_start_screen.assert_not_called()
+        self.assertTrue(mock._returning_to_start)
+
+        mock._update_return_to_start(InputState())
+
+        mock._return_to_start_screen.assert_called_once_with()
+        self.assertFalse(mock._returning_to_start)
 
     @patch("game.pyxel.quit")
     def test_confirmed_quit_exits_the_game(self, quit_game: Mock) -> None:
@@ -2355,7 +2565,7 @@ class GameTest(unittest.TestCase):
 
         quit_game.assert_called_once_with()
 
-    def test_confirmed_return_to_title_resets_the_game(self) -> None:
+    def test_confirmed_return_to_title_begins_window_close(self) -> None:
         mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
@@ -2364,11 +2574,11 @@ class GameTest(unittest.TestCase):
         )
         mock.confirmation_cursor = Mock(selected_key="yes")
         mock.pending_settings_action = "return_title"
-        mock._restart_game = Mock()
+        mock._begin_return_to_start = Mock()
 
         mock.update()
 
-        mock._restart_game.assert_called_once_with()
+        mock._begin_return_to_start.assert_called_once_with()
 
     def test_cancel_closes_settings_and_reactivates_command_cursor(self) -> None:
         mock = Game.__new__(Game)

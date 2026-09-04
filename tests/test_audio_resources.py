@@ -56,6 +56,7 @@ class BgmPlayerTest(unittest.TestCase):
         self.temporary = TemporaryDirectory()
         self.audio_dir = Path(self.temporary.name)
         (self.audio_dir / "da3-field.ogg").touch()
+        (self.audio_dir / "da3-welcome.ogg").touch()
         (self.audio_dir / "dungeon").mkdir()
         (self.audio_dir / "dungeon" / "floor1.ogg").touch()
         (self.audio_dir / ".temporary.ogg").touch()
@@ -67,8 +68,11 @@ class BgmPlayerTest(unittest.TestCase):
     def test_lists_stable_ids_without_extensions(self) -> None:
         self.assertEqual(
             list_bgm_ids(self.audio_dir),
-            ("da3-field", "dungeon/floor1"),
+            ("da3-field", "da3-welcome", "dungeon/floor1"),
         )
+
+    def test_runtime_welcome_bgm_is_available(self) -> None:
+        self.assertIn("da3-welcome", list_bgm_ids())
 
     def test_loads_and_loops_bgm_on_dedicated_channel(self) -> None:
         player = BgmPlayer(

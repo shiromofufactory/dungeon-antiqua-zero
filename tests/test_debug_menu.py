@@ -12,6 +12,7 @@ from tools.screen_mocks._fixtures import (
 from ui.debug_menu import (
     DebugMenuPhase,
     DebugMenuOverlay,
+    DebugShopTarget,
     DebugTeleportTarget,
     MAX_GOLD,
     NumericEntry,
@@ -278,11 +279,57 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertEqual(screen.teleport_cursor.selected_key, "site_10")
         self.assertEqual(len(screen.teleport_cursor.targets), 10)
 
+    def test_shop_list_opens_the_selected_production_shop(self) -> None:
+        on_shop = Mock(return_value=True)
+        screen = DebugMenuOverlay(
+            editor=self.editor,
+            save_data=self.save_data,
+            settings=Settings(),
+            fonts=FontResources(),
+            alert=self.alert,
+            shop_targets=(
+                DebugShopTarget("FAIRY_HAMLET_ITEMS", "FAIRY_HAMLET_ITEMS"),
+                DebugShopTarget("SILVALIA_ARMORY", "SILVALIA_ARMORY"),
+            ),
+            on_shop=on_shop,
+        )
+        screen.main_cursor.select_key("shop")
+
+        screen.update(self.confirm())
+
+        self.assertIs(screen.phase, DebugMenuPhase.SHOP)
+        self.assertEqual(screen.shop_cursor.selected_key, "FAIRY_HAMLET_ITEMS")
+        screen.update(
+            InputState(
+                navigation=Direction.DOWN,
+                held_direction=Direction.DOWN,
+            )
+        )
+        screen.update(self.confirm())
+
+        on_shop.assert_called_once_with("SILVALIA_ARMORY")
+        self.alert.start.assert_not_called()
+
+    def test_empty_shop_list_alerts_and_can_return_to_main(self) -> None:
+        self.screen.main_cursor.select_key("shop")
+        self.screen.update(self.confirm())
+
+        self.assertIs(self.screen.phase, DebugMenuPhase.SHOP)
+        self.assertIsNone(self.screen.shop_cursor)
+        self.screen.update(self.confirm())
+        self.alert.start.assert_called_once_with()
+
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+        self.assertEqual(self.screen.main_cursor.selected_key, "shop")
+
     def test_debug_text_is_japanese_only_and_formats_member_count(self) -> None:
         self.assertIsInstance(DEBUG_TEXT, DebugText)
         self.assertEqual(DEBUG_TEXT.title, "デバッグメニュー")
         self.assertEqual(DEBUG_TEXT.member_count(0), "フィオラ＋０にん")
         self.assertEqual(DEBUG_TEXT.teleport_count(2), "２かしょ")
+        self.assertEqual(DEBUG_TEXT.shop, "ショップ")
+        self.assertEqual(DEBUG_TEXT.shop_count(13), "１３けん")
 
 
 if __name__ == "__main__":

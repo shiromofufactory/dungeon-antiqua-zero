@@ -17,8 +17,10 @@ from systems import (
     SaveRepository,
     SaveSystemError,
     create_save_document,
+    restore_save_document,
 )
 from tools.screen_mocks._fixtures import (
+    load_mock_character_records,
     load_mock_items,
     load_mock_party,
     load_mock_skills,
@@ -176,6 +178,64 @@ class SaveSystemTest(unittest.TestCase):
             with self.assertRaises(SaveSystemError):
                 repository.save(1, {"format_version": 1})
             self.assertFalse(repository.slot_path(1).exists())
+
+    def test_restores_complete_state_and_round_trips_version_one(self) -> None:
+        document = self.save_document()
+
+        restored = restore_save_document(
+            document,
+            character_records=load_mock_character_records(),
+            items=self.items,
+            skills=self.skills,
+        )
+
+        self.assertEqual(restored.save_data.gold, 123)
+        self.assertEqual(restored.save_data.difficulty, Difficulty.HARD)
+        self.assertEqual(
+            [member.definition.key for member in restored.active_party],
+            ["Fiora", "Cerion"],
+        )
+        self.assertEqual(set(restored.character_states), {"Fiora", "Cerion", "Alvan"})
+        self.assertEqual(restored.map_id, "worldmap")
+        self.assertEqual(restored.position, FieldPosition(17, 39))
+        self.assertIs(restored.facing, Direction.LEFT)
+        round_tripped = create_save_document(
+            save_data=restored.save_data,
+            active_party=restored.active_party,
+            character_states=restored.character_states,
+            inventory=restored.inventory,
+            map_id=restored.map_id,
+            position=restored.position,
+            facing=restored.facing,
+            saved_at=datetime.fromisoformat(document["saved_at"]),
+        )
+        self.assertEqual(round_tripped, document)
+
+    def test_repository_loads_and_deletes_slot_document(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            document = self.save_document()
+            repository.save(3, document)
+
+            self.assertEqual(repository.load(3), document)
+            repository.delete(3)
+
+            self.assertFalse(repository.slot_path(3).exists())
+            self.assertFalse(repository.summary(3).occupied)
+            with self.assertRaises(SaveSystemError):
+                repository.load(3)
+
+    def test_restore_rejects_corrupt_member_before_returning_state(self) -> None:
+        document = self.save_document()
+        document["party"]["character_states"]["Fiora"]["hp"] = -1
+
+        with self.assertRaises(SaveSystemError):
+            restore_save_document(
+                document,
+                character_records=load_mock_character_records(),
+                items=self.items,
+                skills=self.skills,
+            )
 
 
 if __name__ == "__main__":
