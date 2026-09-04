@@ -197,11 +197,13 @@ app/
 │
 ├── resources/
 │   ├── audio.py             # 外部BGMの読込、音量、再生状態
+│   ├── events.py            # 生成済みイベントの読込、形式検証、ID索引
 │   └── images.py            # manifestと画像bundleの読込・検証
 ├── rendering/
 │   └── palette.py           # 一時パレットシフトと色変換
 │
 ├── data/                    # content/dataから生成するJSON
+├── events/                  # content/eventsから生成する実行時イベント
 ├── audio/                   # 22.05kHz・モノラルの実行時OGG
 ├── images/                  # content/imagesから生成するmanifestと画像バイナリ
 ├── fonts/                   # フォント資産
@@ -1156,34 +1158,15 @@ Systemへ単一の巨大なContextやAppを渡すと、再び暗黙の依存が�
 
 ZEROはフリーシナリオ、戦闘回数による敵の強化、魔力設備の停止、種族ごとの魔力減衰などを予定している。これらを1本の `start_event()` やイベントIDの巨大な `if` / `elif` へ追加し続けない。
 
-通常イベントは、可能な範囲でデータとして定義する。
+通常イベントは型付きのJSONコマンド列として定義する。詳細なsource形式、条件、初期コマンド、
+マップトリガー、イベントエディタ、実行時エラーは
+[`features/events.md`](./features/events.md) を正本とする。
 
-```json
-{
-  "id": "nectar_forest_entrance",
-  "conditions": [
-    ["flag_absent", "forest_opened"]
-  ],
-  "commands": [
-    ["message", "forest_entrance_1"],
-    ["set_flag", "forest_opened"],
-    ["start_battle", "forest_guardian"]
-  ]
-}
-```
-
-EventRunnerは、次のような小さな汎用コマンドを順に実行する。
-
-- メッセージ表示、選択肢
-- フラグの追加・削除
-- 仲間の加入・離脱
-- アイテムや所持金の増減
-- 戦闘開始
-- 場所移動
-- NPC移動
-- BGM、効果音、フェード
-
-複雑なカットシーンや固有ギミックだけをPythonの個別ハンドラーにする。汎用コマンドで無理にすべてを表現することも、すべてをPythonの条件分岐に戻すことも避ける。
+Sceneはトリガー検出、EventRunnerは条件評価とコマンド進行、既存のDomain Model／Systemは
+状態変更、Overlayはメッセージなどの入力待ちを担当する。RunnerはUIや具体的Sceneを直接参照せず、
+メッセージ、音声、移動、将来の戦闘開始をEventEffectとして呼び出し元へ返す。複雑なカットシーンや
+固有ギミックだけをPythonの個別ハンドラーにし、汎用コマンドで無理にすべてを表現することも、
+すべてをPythonの巨大な条件分岐に戻すことも避ける。
 
 ## 世界進行と魔力減衰
 

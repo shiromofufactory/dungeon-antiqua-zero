@@ -37,5 +37,6 @@
 - [フィールド・メニュー](./field.md)
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)
+- [イベント](./events.md)
 - [マップチップメタデータ設定ツール](./map-chip-metadata-tool.md)
 - [マップエディタ](./map-editor.md)

@@ -8,8 +8,9 @@
 [`map-chip-metadata-tool.md`](./map-chip-metadata-tool.md)を参照する。
 
 地面、オブジェクト、ワールドマップ拠点、マップ内到着地点を対象とする。拠点の詳細は
-[`world-sites.md`](./world-sites.md)を参照する。通常イベント、NPC、敵、宝箱状態などは後続の
-機能追加で制作用マップ形式を拡張して扱い、タイルセットメタデータへ埋め込まない。
+[`world-sites.md`](./world-sites.md)を参照する。通常イベントの定義、マップ上のトリガー、
+actorとの接続は [`events.md`](./events.md) で設計し、実装時に制作用マップ形式をversion 3へ
+拡張する。イベント本文や条件式はタイルセットメタデータへ埋め込まない。
 
 ## 結論
 

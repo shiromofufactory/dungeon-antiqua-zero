@@ -4,6 +4,7 @@ __pycache__/
 app/data/
 app/images/
 app/maps/
+app/events/
 scripts/node_modules
 scripts/package-lock.json
 tmp

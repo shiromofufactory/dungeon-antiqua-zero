@@ -13,6 +13,7 @@
 - `app/data` はsubmoduleから生成する実行時コピーとし、Git管理しない。
 - `app/images` は `content/images` から生成する実行時画像データとし、Git管理しない。
 - `app/maps` は `content/maps` から生成する実行時マップデータとし、Git管理しない。
+- `app/events` は `content/events` から生成する実行時イベントデータとし、Git管理しない。
 - Google Sheetsやポータルへ直接接続しない。
 
 ### 共有コンテンツリポジトリ（sub）
@@ -21,6 +22,7 @@
 - `data/*.json` と、制作スタッフ向けの企画文書 `docs/da0.md` の正本を管理する。
 - ゲームとポータルで共有するPNG/GIF画像の正本を `images/` で管理する。
 - タイルセットメタデータと制作用マップの正本を `maps/` で管理する。
+- 通常イベントとイベントフラグ宣言の正本を `events/` で管理する。
 - JSONの検証、Google Sheetsとの同期、スタッフポータルの生成と配備を担当する。
 - このリポジトリ単独でもスタッフが編集・レビューできる。
 
@@ -58,6 +60,13 @@ Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象J
 ```text
 共有リポジトリ maps/tilesets + maps/sources
         └──→ map compiler ──→ app/maps ──→ Pyxelゲーム
+```
+
+イベント定義もGoogle Sheetsとは同期せず、次の経路で利用する。
+
+```text
+共有リポジトリ events/*.json
+        └──→ event compiler ──→ app/events/events.json ──→ Pyxelゲーム
 ```
 
 `get-data.mjs` と `put-data.mjs` の双方向性は意図したものである。ただし自動マージや常時同期は行わず、いずれの向きもGit差分を人が確認する。
@@ -142,6 +151,24 @@ npm run images:build:force
 npm run maps:validate
 npm run maps:build
 ```
+
+## イベント制作データとゲーム用データ生成
+
+`content/events` はイベントエディタまたは人が編集する通常イベントとフラグ宣言の正本とする。
+コマンド列や条件分岐の入れ子を維持するためGoogle Sheetsとは同期しない。形式と編集操作は
+[`features/events.md`](./features/events.md) を参照する。
+
+ゲーム用の `app/events` は全イベントを完全IDで索引化した生成物であり、直接編集または
+Git管理しない。実装後は次のコマンドで非対話の検証と生成を行う。
+
+```sh
+npm run events:validate
+npm run events:build
+```
+
+イベント、宣言済みフラグ、マスターデータ、文言、音声、マップトリガー、actorの参照を横断して
+検証する。`content:validate` にも同じイベント検証を含め、エラー時は既存のゲーム用生成物を
+更新しない。
 
 ## Google Sheetsとの同期
 
