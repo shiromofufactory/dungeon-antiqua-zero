@@ -2,6 +2,12 @@
 
 const DIRECTIONS = ["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"];
 const NEIGHBOR_CYCLE = ["any", "same", "different"];
+const OBJECT_COLLISION_STATES = ["blocked", "passable", "passable_override"];
+const OBJECT_COLLISION_LABELS = {
+  blocked: "通行不可",
+  passable: "通行を妨げない",
+  passable_override: "通行可で上書き",
+};
 const SESSION_CLIENT_HEADER = "mapchip-metadata-ui";
 const PREVIEW_SETTINGS_VERSION = 1;
 let token = new URLSearchParams(window.location.search).get("token") || "";
@@ -460,13 +466,13 @@ function renderObjectEditor() {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const item = cellsByOffset.get(`${x},${y}`);
-      const collision = item?.collision === "blocked" ? "blocked" : "passable";
-      const collisionLabel = collision === "blocked" ? "通行不可" : "通行可";
+      const collision = OBJECT_COLLISION_STATES.includes(item?.collision) ? item.collision : "passable";
+      const collisionLabel = OBJECT_COLLISION_LABELS[collision];
       const tileLabel = item?.tile ? item.tile.join(",") : item?.visual ? "visual" : "表示なし";
       grid.push(`<button type="button" class="footprint-cell ${item ? "occupied" : "empty"} ${collision}"
         data-action="toggle-object-cell-collision" data-x="${x}" data-y="${y}"
-        aria-label="セル ${x},${y}：${item ? `${collisionLabel}（クリックで切り替え）` : "構成なし"}"
-        title="${item ? `画像 ${tileLabel}・クリックで通行を切り替え` : "構成セルがありません"}" ${item ? "" : "disabled"}>
+        aria-label="セル ${x},${y}：${item ? collisionLabel : "構成なし"}"
+        title="${item ? `画像 ${tileLabel}・左クリックで可／不可、右クリックで通行可上書き` : "構成セルがありません"}" ${item ? "" : "disabled"}>
         <span>${x},${y}</span><strong>${item ? collisionLabel : "構成なし"}</strong>
       </button>`);
     }
@@ -480,7 +486,7 @@ function renderObjectEditor() {
         <div class="field full"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
-        <div class="field full"><label>描画グループ</label><input type="text" value="${escapeHtml(object.default_draw_group)}" data-change="object-group"></div>
+        <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常より手前）</option></select></div>
       </div>
       <div class="row between" style="margin-top:10px">
         <button type="button" class="button secondary small" data-action="object-from-selection">選択矩形で置換</button>
@@ -488,7 +494,7 @@ function renderObjectEditor() {
       </div>
     </div>
     <div class="section">
-      <div class="section-title"><h3>構成セル</h3><span class="subtle">クリックで通行可／不可を切替</span></div>
+      <div class="section-title"><h3>構成セル</h3><span class="subtle">左: 可／不可・右: 通行可上書き</span></div>
       <div class="footprint-grid" style="--object-columns:${width}">${grid.join("")}</div>
     </div>`;
 }
@@ -639,6 +645,10 @@ function drawObjectPreview(now) {
     }
     if (state.previewShowCollision && cell.collision === "blocked") {
       context.strokeStyle = "rgba(239, 91, 80, .9)";
+      context.lineWidth = 3;
+      context.strokeRect(x + 1.5, y + 1.5, 45, 45);
+    } else if (state.previewShowCollision && cell.collision === "passable_override") {
+      context.strokeStyle = "rgba(75, 214, 190, .95)";
       context.lineWidth = 3;
       context.strokeRect(x + 1.5, y + 1.5, 45, 45);
     }
@@ -870,6 +880,12 @@ function handleAction(element) {
     const cell = currentObject().cells.find((item) => item.offset[0] === x && item.offset[1] === y);
     if (!cell) return;
     commit(() => { cell.collision = cell.collision === "blocked" ? "passable" : "blocked"; });
+  } else if (action === "toggle-object-cell-override") {
+    const x = Number(element.dataset.x);
+    const y = Number(element.dataset.y);
+    const cell = currentObject().cells.find((item) => item.offset[0] === x && item.offset[1] === y);
+    if (!cell) return;
+    commit(() => { cell.collision = cell.collision === "passable_override" ? "passable" : "passable_override"; });
   } else if (action === "cycle-preview-ground") {
     const index = Number(element.dataset.index);
     const ids = grounds.map((ground) => ground.id);
@@ -945,6 +961,12 @@ document.querySelectorAll(".tab").forEach((button) => button.addEventListener("c
 byId("editor-content").addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]");
   if (target) handleAction(target);
+});
+byId("editor-content").addEventListener("contextmenu", (event) => {
+  const target = event.target.closest('[data-action="toggle-object-cell-collision"]');
+  if (!target) return;
+  event.preventDefault();
+  handleAction({ dataset: { action: "toggle-object-cell-override", x: target.dataset.x, y: target.dataset.y } });
 });
 byId("editor-content").addEventListener("change", (event) => handleChange(event.target));
 byId("preview-content").addEventListener("click", (event) => {

@@ -55,12 +55,14 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 app/
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
-├── state.py                  # 言語を含む端末・プレイヤー設定
+├── world_sites.py            # ワールド拠点のセル検索と訪問済み候補の抽出
+├── state.py                  # SettingsとSaveData
 ├── localization.py           # 多言語フィールドの選択とフォールバック
 ├── item_detail.py            # メニュー・店・戦闘で共有するアイテム詳細表現
 ├── systems/
 │   ├── debug.py              # デバッグ時だけ使うパーティ状態の再生成
-│   └── inventory.py         # 所持数、破棄、装備交換を含むアイテム操作
+│   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
+│   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
 ├── ui/
 │   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
 │   ├── item_menu.py          # アイテムメニューOverlay
@@ -109,6 +111,7 @@ docs/
 ├── content-workflow.md
 ├── features/
 │   ├── README.md
+│   ├── world-sites.md
 │   └── shop.md
 └── program-architecture.md
 
@@ -156,6 +159,7 @@ app/
 ├── main.py                  # Pyxel初期化、リソース読込、Game生成、px.run
 ├── game.py                  # Pyxelコールバックとアプリケーション全体の調停
 ├── input.py                 # 1フレーム分の入力をInputStateへ変換
+├── world_sites.py           # ワールド拠点の不変カタログとセル索引
 ├── state.py                 # Settings、SaveDataなどの永続状態
 ├── scene.py                 # Scene、Transition、SceneManager
 │
@@ -179,6 +183,7 @@ app/
 │   ├── events.py            # イベント検索・条件評価・コマンド実行
 │   ├── progression.py       # 戦闘回数、魔力減衰、世界変化
 │   ├── inventory.py         # 所持、使用、装備にまたがる操作
+│   ├── travel.py            # 拠点への入場、テレポート候補と到着地点参照
 │   └── save.py              # SaveDataと保存形式の変換・入出力
 │
 ├── resources/
@@ -1029,6 +1034,17 @@ Pyxelのウィンドウ状態を破棄して `pyxel.reset()` でフィールド�
 再起動時は退避した画面倍率を `pyxel.init(display_scale=...)` へ渡し、倍率5ではフルスクリーンを
 有効化する。これによりSaveData、疑似パーティ、画面固有の一時状態を初期化しつつ端末設定を維持する。
 
+ワールドマップ拠点の詳細は [`features/world-sites.md`](./features/world-sites.md) を正本とする。
+`resources.maps` は生成済みの拠点、遷移先参照、到着地点を不変の値として読み込む。拠点は
+移動元として入口と参照だけを持ち、移動先の座標・向きは到着地点だけが所有する。
+`WorldSiteCatalog` は入口セルと拠点IDの索引、近隣拠点、訪問済み候補の抽出だけを担当し、
+SaveDataやUIを所有しない。`TravelSystem` は拠点への入場成立時の記録と、訪問済み拠点IDに
+紐づく `teleport_enabled` の到着地点解決を担当する。施設出口などの移動イベントも同じ
+`MapDestination` 参照形式を使う。
+Field Sceneは移動完了を受けて遷移を要求し、実際の
+Scene切り替えはTransitionとして調停する。拠点名Windowやフェードの状態をCatalogやSystemへ
+持たせない。
+
 本編のデバッグモードはComposition Rootが起動オプションから生成する実行時依存とする。
 プレイヤー設定やゲーム進行ではないため、`Settings`、`SaveData`、設定ファイル、セーブデータへ
 有効・無効を保存しない。通常起動では設定Overlayに入口自体を生成せず、デバッグ起動時だけ
@@ -1073,6 +1089,8 @@ SaveDataが所有する。難易度の保存値には表示文言から独立し
 `Difficulty.NORMAL` / `Difficulty.HARD` を使う。プレイ時間はフレーム数のまま保存し、
 プレイ中の `Game.update()` から加算する。表示文字列への変換は複数画面で共有する
 `ui.text_format.format_play_time()` が担当し、SaveDataや `draw()` は表示形式を持たない。
+一度入場した拠点は `visited_site_ids` に安定IDだけを集合として保存する。拠点名、入口、到着地点、
+遷移先はマップデータの責務であり、SaveDataへ複製しない。
 
 ### Scene固有状態
 
@@ -1138,6 +1156,9 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | フィールドで入力を受けた結果 | `FieldScene` |
 | フィールドや迷宮の移動ルール | `Field` または探索用System |
 | フィールドの描画 | `FieldScene` またはField専用Renderer |
+| 拠点のセル検索、近隣名表示候補 | `WorldSiteCatalog` |
+| 拠点入場、テレポート到着先参照 | `TravelSystem` |
+| 拠点名Window、マップ遷移要求 | `FieldScene` |
 | 戦闘コマンドの入力 | `BattleScene` |
 | ダメージ、命中、行動順の計算 | 戦闘ルール用Model/System |
 | 毒や回復によるMember自身の変化 | `Member` |

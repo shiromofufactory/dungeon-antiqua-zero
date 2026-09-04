@@ -16,13 +16,18 @@ from .images import (
     ImageResources,
 )
 from .maps import (
+    MAP_FACINGS,
     MAP_TILE_SIZE,
     CompiledMap,
+    MapArrivalPoint,
     MapAnimation,
     MapAnimationFrame,
+    MapCell,
+    MapDestination,
     MapObjectTile,
     MapResourceError,
     MapResources,
+    WorldSite,
 )
 
 
@@ -39,13 +44,18 @@ __all__ = [
     "ImageEntry",
     "ImageResourceError",
     "ImageResources",
+    "MAP_FACINGS",
     "MAP_TILE_SIZE",
     "CompiledMap",
+    "MapArrivalPoint",
     "MapAnimation",
     "MapAnimationFrame",
+    "MapCell",
+    "MapDestination",
     "MapObjectTile",
     "MapResourceError",
     "MapResources",
+    "WorldSite",
     "load_record_array",
     "list_bgm_ids",
 ]

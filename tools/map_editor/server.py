@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import sys
+import tempfile
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 import webbrowser
@@ -24,6 +25,7 @@ from scripts.map_pipeline import (
     resolve_source_image,
     save_compiled_map,
     save_map_source,
+    validate_map_links,
     validate_map_source,
     validate_tileset,
 )
@@ -36,6 +38,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8767
 SESSION_CLIENT_HEADER = "map-editor-ui"
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
+SITE_NAME_TEXT_PREFIX = "location."
 MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8",
@@ -96,6 +99,10 @@ class MapEditorApplication:
         self.runtime_path = (self.runtime_root / f"{map_id}.json").resolve()
         if self.runtime_root not in self.runtime_path.parents:
             raise ValueError("生成先がruntime root外です。")
+        self.texts_path = (self.content_root / "data" / "texts.json").resolve()
+        data_root = (self.content_root / "data").resolve()
+        if data_root not in self.texts_path.parents:
+            raise ValueError("文言パスがcontent/data外です。")
 
     def load_source(self) -> tuple[dict[str, Any], bool]:
         if self.source_path.is_file():
@@ -116,7 +123,125 @@ class MapEditorApplication:
             raise ValueError("source_image_idが不正です。")
         return resolve_source_image(self.content_root, image_id)
 
-    def validate(self, data: object) -> tuple[list[dict[str, str]], dict[str, Any] | None, dict[str, Any] | None]:
+    def map_sources(self, current: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+        source_dir = self.content_root / "maps" / "sources"
+        loaded: dict[str, Mapping[str, Any]] = {}
+        if source_dir.is_dir():
+            for path in sorted(source_dir.glob("*.json")):
+                source = load_map_source(path)
+                map_id = source.get("map_id")
+                if isinstance(map_id, str):
+                    loaded[map_id] = source
+        current_id = current.get("map_id")
+        if isinstance(current_id, str):
+            loaded[current_id] = current
+        return loaded
+
+    def destination_options(
+        self,
+        current: Mapping[str, Any],
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                "map_id": map_id,
+                "arrival_ids": [
+                    arrival.get("id")
+                    for arrival in source.get("arrival_points", [])
+                    if isinstance(arrival, Mapping)
+                    and isinstance(arrival.get("id"), str)
+                ],
+            }
+            for map_id, source in sorted(self.map_sources(current).items())
+        ]
+
+    def site_options(self, current: Mapping[str, Any]) -> list[str]:
+        return sorted(
+            {
+                site.get("id")
+                for source in self.map_sources(current).values()
+                for site in source.get("sites", [])
+                if isinstance(site, Mapping) and isinstance(site.get("id"), str)
+            }
+        )
+
+    def load_text_records(self) -> list[dict[str, Any]]:
+        if not self.texts_path.is_file():
+            return []
+        try:
+            value = json.loads(self.texts_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"文言JSONを読み込めません: {self.texts_path}: {error}"
+            ) from error
+        if not isinstance(value, list) or not all(
+            isinstance(record, dict) for record in value
+        ):
+            raise ValueError("content/data/texts.jsonはobjectの配列である必要があります。")
+        return value
+
+    @staticmethod
+    def site_name_text_key(site_id: str) -> str:
+        return f"{SITE_NAME_TEXT_PREFIX}{site_id}"
+
+    def site_names_ja(self, data: Mapping[str, Any]) -> dict[str, str]:
+        records = {
+            record.get("text_key"): record
+            for record in self.load_text_records()
+            if isinstance(record.get("text_key"), str)
+        }
+        names: dict[str, str] = {}
+        sites = data.get("sites")
+        if not isinstance(sites, list):
+            return names
+        for site in sites:
+            if not isinstance(site, Mapping) or not isinstance(site.get("id"), str):
+                continue
+            site_id = site["id"]
+            value = records.get(self.site_name_text_key(site_id), {}).get("text_ja", "")
+            names[site_id] = value if isinstance(value, str) else ""
+        return names
+
+    @staticmethod
+    def _site_name_diagnostics(
+        data: object,
+        site_names_ja: object,
+    ) -> list[Diagnostic]:
+        if not isinstance(data, Mapping):
+            return []
+        sites = data.get("sites")
+        if not isinstance(sites, list):
+            return []
+        if not isinstance(site_names_ja, Mapping):
+            return [
+                Diagnostic(
+                    "error",
+                    "invalid_site_names_ja",
+                    "site_names_ja",
+                    "拠点の日本語名が不正です。",
+                )
+            ]
+        diagnostics = []
+        for index, site in enumerate(sites):
+            if not isinstance(site, Mapping) or not isinstance(site.get("id"), str):
+                continue
+            site_id = site["id"]
+            name = site_names_ja.get(site_id)
+            if not isinstance(name, str) or not name.strip():
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "missing_site_name_ja",
+                        f"sites[{index}].name_ja",
+                        "拠点の日本語名を入力してください。",
+                    )
+                )
+        return diagnostics
+
+    def validate(
+        self,
+        data: object,
+        site_names_ja: object | None = None,
+    ) -> tuple[list[dict[str, str]], dict[str, Any] | None, dict[str, Any] | None]:
         if not isinstance(data, dict) or not isinstance(data.get("tileset_id"), str):
             issue = Diagnostic("error", "invalid_tileset_id", "tileset_id", "タイルセットIDが不正です。")
             return [issue.as_dict()], None, None
@@ -128,7 +253,24 @@ class MapEditorApplication:
             return [issue.as_dict()], None, None
         tileset_diagnostics, image_info = validate_tileset(tileset, image_path, self.palette_path)
         map_diagnostics = validate_map_source(data, tileset)
-        diagnostics = [*tileset_diagnostics, *map_diagnostics]
+        link_diagnostics = (
+            [
+                item
+                for item in validate_map_links(self.map_sources(data))
+                if item.path.startswith(f"{data.get('map_id')}.")
+            ]
+            if isinstance(data, dict)
+            else []
+        )
+        if site_names_ja is None and isinstance(data, Mapping):
+            site_names_ja = self.site_names_ja(data)
+        name_diagnostics = self._site_name_diagnostics(data, site_names_ja)
+        diagnostics = [
+            *tileset_diagnostics,
+            *map_diagnostics,
+            *link_diagnostics,
+            *name_diagnostics,
+        ]
         resolved = None
         if not any(item.severity == "error" for item in diagnostics):
             try:
@@ -140,9 +282,13 @@ class MapEditorApplication:
     def document_payload(self) -> dict[str, Any]:
         data, is_new = self.load_source()
         tileset = self.load_tileset(data["tileset_id"])
-        diagnostics, image_info, resolved = self.validate(data)
+        site_names_ja = self.site_names_ja(data)
+        diagnostics, image_info, resolved = self.validate(data, site_names_ja)
         return {
             "data": data,
+            "site_names_ja": site_names_ja,
+            "destination_options": self.destination_options(data),
+            "site_options": self.site_options(data),
             "tileset": tileset,
             "diagnostics": diagnostics,
             "resolved": resolved,
@@ -153,8 +299,12 @@ class MapEditorApplication:
             "runtime_path": self._display_path(self.runtime_path),
         }
 
-    def save(self, data: object) -> dict[str, Any]:
-        diagnostics, image_info, resolved = self.validate(data)
+    def save(
+        self,
+        data: object,
+        site_names_ja: object,
+    ) -> dict[str, Any]:
+        diagnostics, image_info, resolved = self.validate(data, site_names_ja)
         if any(item["severity"] == "error" for item in diagnostics) or not isinstance(data, dict):
             return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
         tileset = self.load_tileset(data["tileset_id"])
@@ -165,6 +315,7 @@ class MapEditorApplication:
             return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
         save_map_source(self.source_path, data)
         save_compiled_map(self.runtime_path, compiled)
+        self._save_site_names(data, site_names_ja)
         return {
             "saved": True,
             "diagnostics": diagnostics,
@@ -172,6 +323,64 @@ class MapEditorApplication:
             "resolved": resolved,
             "source_hash": compiled.runtime["source_hash"],
         }
+
+    def _save_site_names(
+        self,
+        data: Mapping[str, Any],
+        site_names_ja: object,
+    ) -> None:
+        if not isinstance(site_names_ja, Mapping):
+            raise ValueError("拠点の日本語名が不正です。")
+        sites = data.get("sites", [])
+        if not sites:
+            return
+        records = self.load_text_records()
+        by_key = {
+            record.get("text_key"): record
+            for record in records
+            if isinstance(record.get("text_key"), str)
+        }
+        for site in sites:
+            site_id = site["id"]
+            key = self.site_name_text_key(site_id)
+            name = site_names_ja[site_id].strip()
+            record = by_key.get(key)
+            if record is None:
+                record = {
+                    "text_key": key,
+                    "text_ja": name,
+                    "text_en": "",
+                    "text_zhcn": "",
+                }
+                records.append(record)
+                by_key[key] = record
+            else:
+                record["text_ja"] = name
+                record.setdefault("text_en", "")
+                record.setdefault("text_zhcn", "")
+                record.pop("pending", None)
+        content = (json.dumps(records, ensure_ascii=False, indent=2) + "\n").encode(
+            "utf-8"
+        )
+        if self.texts_path.is_file() and self.texts_path.read_bytes() == content:
+            return
+        self.texts_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self.texts_path.parent,
+                prefix=f".{self.texts_path.name}.",
+                delete=False,
+            ) as temporary:
+                temporary.write(content)
+                temporary.flush()
+                temporary_path = Path(temporary.name)
+            temporary_path.replace(self.texts_path)
+        except BaseException:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def _display_path(path: Path) -> str:
@@ -269,11 +478,19 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                 self._error(HTTPStatus.BAD_REQUEST, "JSONを読み込めません。")
                 return
             data = payload.get("data") if isinstance(payload, dict) else None
+            site_names_ja = (
+                payload.get("site_names_ja")
+                if isinstance(payload, dict)
+                else None
+            )
             try:
                 if parsed.path == "/api/save":
-                    response = application.save(data)
+                    response = application.save(data, site_names_ja)
                 else:
-                    diagnostics, image_info, resolved = application.validate(data)
+                    diagnostics, image_info, resolved = application.validate(
+                        data,
+                        site_names_ja,
+                    )
                     response = {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
                 self._send_json(response)
             except (OSError, ValueError) as error:

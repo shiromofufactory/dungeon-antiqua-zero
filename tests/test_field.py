@@ -6,7 +6,10 @@ from unittest.mock import Mock, call
 
 from app.field import FieldMovement, FieldPosition
 from app.input import Direction
-from app.rendering.field import FieldRenderer
+from app.rendering.field import (
+    FIELD_CHARACTER_ANIMATION_INTERVAL,
+    FieldRenderer,
+)
 from app.resources.maps import CompiledMap, MapObjectTile
 
 
@@ -57,26 +60,27 @@ class FieldMovementTest(unittest.TestCase):
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
 
         self.assertTrue(field.update(Direction.RIGHT))
-        self.assertEqual((field.world_x, field.world_y), (18, 16))
+        self.assertEqual((field.world_x, field.world_y), (16 + field.speed, 16))
         self.assertTrue(field.is_moving)
         self.assertTrue(field.is_walking)
         self.assertIs(field.facing, Direction.RIGHT)
-        for _frame in range(7):
+        for _frame in range(map_data.tile_size // field.speed - 1):
             field.update(None)
 
         self.assertEqual(field.position, FieldPosition(2, 1))
         self.assertEqual((field.offset_x, field.offset_y), (0, 0))
         self.assertFalse(field.is_moving)
-        self.assertEqual(field.animation_frame, 1)
+        self.assertEqual(field.arrived_position, FieldPosition(2, 1))
         field.update(None)
         self.assertFalse(field.is_walking)
+        self.assertIsNone(field.arrived_position)
 
     def test_ignores_a_new_direction_until_the_current_step_finishes(self) -> None:
         map_data = compiled_map(("11111", "10001", "10001", "11111"))
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
 
         field.update(Direction.RIGHT)
-        for _frame in range(7):
+        for _frame in range(map_data.tile_size // field.speed - 1):
             field.update(Direction.DOWN)
 
         self.assertEqual(field.position, FieldPosition(2, 1))
@@ -126,15 +130,19 @@ class FieldRendererTest(unittest.TestCase):
             call(8, 8, 0, 0, 96, 16, 16, 1),
         )
 
-        for _frame in range(8):
-            field.update(Direction.RIGHT)
-        pyxel.blt.reset_mock()
-        renderer.draw(field, frame_count=4)
-
-        self.assertEqual(
-            pyxel.blt.call_args_list[-1],
-            call(16, 8, 0, 16, 80, 16, 16, 1),
-        )
+        self.assertEqual(FIELD_CHARACTER_ANIMATION_INTERVAL, 16)
+        for frame_count, source_x in (
+            (FIELD_CHARACTER_ANIMATION_INTERVAL - 1, 0),
+            (FIELD_CHARACTER_ANIMATION_INTERVAL, 16),
+            (FIELD_CHARACTER_ANIMATION_INTERVAL * 2, 0),
+        ):
+            with self.subTest(frame_count=frame_count):
+                pyxel.blt.reset_mock()
+                renderer.draw(field, frame_count=frame_count)
+                self.assertEqual(
+                    pyxel.blt.call_args_list[-1],
+                    call(8, 8, 0, source_x, 96, 16, 16, 1),
+                )
 
     def test_clamps_camera_to_map_edges(self) -> None:
         map_data = compiled_map(("000", "000", "000"))

@@ -15,6 +15,7 @@ from map_pipeline import (
     resolve_source_image,
     save_compiled_map,
     validate_map_source,
+    validate_map_links,
     validate_tileset,
 )
 
@@ -51,6 +52,22 @@ def main() -> int:
     output_dir = args.output_dir.resolve()
     try:
         paths = source_paths(content_root, args.map_id)
+        all_sources = {}
+        for source_path in source_paths(content_root, None):
+            source = load_map_source(source_path)
+            map_id = source.get("map_id")
+            if isinstance(map_id, str):
+                all_sources[map_id] = source
+        link_errors = [
+            item
+            for item in validate_map_links(all_sources)
+            if item.severity == "error"
+        ]
+        if link_errors:
+            details = "\n".join(
+                f"- {item.path}: {item.message}" for item in link_errors
+            )
+            raise ValueError(f"マップ間参照を解決できません:\n{details}")
         for source_path in paths:
             data = load_map_source(source_path)
             tileset_id = data.get("tileset_id")

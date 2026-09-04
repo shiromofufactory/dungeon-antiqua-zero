@@ -15,6 +15,7 @@ from PIL import Image
 
 from .tileset import (
     Diagnostic,
+    OBJECT_DRAW_GROUP_ORDER,
     TILE_SIZE,
     TRANSPARENT_RGB,
     choose_visual_choice,
@@ -23,12 +24,13 @@ from .tileset import (
 )
 
 
-SOURCE_FORMAT_VERSION = 1
-RUNTIME_FORMAT_VERSION = 1
+SOURCE_FORMAT_VERSION = 2
+RUNTIME_FORMAT_VERSION = 2
 MAX_MAP_DIMENSION = 512
 MAX_ANIMATION_PERIOD = 3600
 TRANSPARENT_INDEX = 1
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+CARDINAL_FACINGS = frozenset(("up", "right", "down", "left"))
 DIRECTION_OFFSETS = {
     "n": (0, -1),
     "ne": (1, -1),
@@ -67,6 +69,18 @@ def _diagnostic(
 
 def _valid_id(value: object) -> bool:
     return isinstance(value, str) and ID_PATTERN.fullmatch(value) is not None
+
+
+def _valid_point(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(_is_int(item) for item in value)
+    )
+
+
+def _point_in_bounds(point: Sequence[int], width: int, height: int) -> bool:
+    return 0 <= point[0] < width and 0 <= point[1] < height
 
 
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -109,6 +123,8 @@ def initial_map_source(
         "visual_seed": 0,
         "grounds": [[fill for _x in range(width)] for _y in range(height)],
         "objects": [],
+        "sites": [],
+        "arrival_points": [],
     }
 
 
@@ -200,18 +216,22 @@ def validate_map_source(
 
     instance_ids: set[str] = set()
     origins: set[tuple[int, int]] = set()
+    valid_instances: list[tuple[int, Mapping[str, Any]]] = []
+    object_origins: dict[str, tuple[int, int]] = {}
     for index, instance in enumerate(instances):
         path = f"objects[{index}]"
         if not isinstance(instance, dict):
             _diagnostic(diagnostics, "error", "invalid_object_instance", path, "オブジェクト実体はobjectで指定してください。")
             continue
         instance_id = instance.get("id")
+        unique_instance_id = False
         if not _valid_id(instance_id):
             _diagnostic(diagnostics, "error", "invalid_id", f"{path}.id", "実体IDはlower_snake_caseで指定してください。")
         elif instance_id in instance_ids:
             _diagnostic(diagnostics, "error", "duplicate_object_id", f"{path}.id", f"実体IDが重複しています: {instance_id}")
         else:
             instance_ids.add(instance_id)
+            unique_instance_id = True
 
         definition_id = instance.get("definition_id")
         definition = objects_by_id.get(definition_id)
@@ -219,7 +239,8 @@ def validate_map_source(
             _diagnostic(diagnostics, "error", "unknown_object_definition", f"{path}.definition_id", f"未定義のオブジェクトです: {definition_id}")
 
         origin = instance.get("origin")
-        if not isinstance(origin, list) or len(origin) != 2 or not all(_is_int(value) for value in origin):
+        valid_origin = isinstance(origin, list) and len(origin) == 2 and all(_is_int(value) for value in origin)
+        if not valid_origin:
             _diagnostic(diagnostics, "error", "invalid_object_origin", f"{path}.origin", "起点は[x, y]の整数2要素で指定してください。")
         else:
             point = (origin[0], origin[1])
@@ -231,8 +252,576 @@ def validate_map_source(
                 if isinstance(object_size, list) and len(object_size) == 2:
                     if origin[0] < 0 or origin[1] < 0 or origin[0] + object_size[0] > width or origin[1] + object_size[1] > height:
                         _diagnostic(diagnostics, "error", "object_out_of_bounds", f"{path}.origin", "オブジェクトがマップ範囲外へはみ出しています。")
-        if not _is_int(instance.get("order")):
+        valid_order = _is_int(instance.get("order"))
+        if not valid_order:
             _diagnostic(diagnostics, "error", "invalid_object_order", f"{path}.order", "描画順は整数で指定してください。")
+        if definition is not None and valid_origin and valid_order:
+            valid_instances.append((index, instance))
+            if unique_instance_id:
+                object_origins[instance_id] = (origin[0], origin[1])
+
+    blocked_by_object: set[tuple[int, int]] = set()
+    collision: list[bool] | None = None
+    if (
+        rows_valid
+        and width > 0
+        and height > 0
+        and all(
+            isinstance(row, list)
+            and len(row) == width
+            and all(ground_id in ground_ids for ground_id in row)
+            for row in rows
+        )
+    ):
+        grounds_by_id = {
+            ground["id"]: ground
+            for ground in ground_definitions
+            if isinstance(ground, dict) and isinstance(ground.get("id"), str)
+        }
+        collision = [
+            grounds_by_id[rows[y][x]].get("collision") == "blocked"
+            for y in range(height)
+            for x in range(width)
+        ]
+    for source_index, instance in sorted(
+        valid_instances,
+        key=lambda item: _object_draw_key(item[1], objects_by_id),
+    ):
+        definition = objects_by_id[instance["definition_id"]]
+        for cell_index, cell in enumerate(definition.get("cells", [])):
+            if not isinstance(cell, dict):
+                continue
+            offset = cell.get("offset")
+            if not isinstance(offset, list) or len(offset) != 2 or not all(_is_int(value) for value in offset):
+                continue
+            position = (instance["origin"][0] + offset[0], instance["origin"][1] + offset[1])
+            if cell.get("collision") == "blocked":
+                blocked_by_object.add(position)
+                if collision is not None and _point_in_bounds(position, width, height):
+                    collision[position[1] * width + position[0]] = True
+            elif cell.get("collision") == "passable_override":
+                if position not in blocked_by_object:
+                    _diagnostic(
+                        diagnostics,
+                        "warning",
+                        "passable_override_without_blocked_object",
+                        f"objects[{source_index}]",
+                        f"通行可上書きセル{list(position)}の下に通行不可オブジェクトがありません。",
+                    )
+                blocked_by_object.discard(position)
+                if collision is not None and _point_in_bounds(position, width, height):
+                    collision[position[1] * width + position[0]] = False
+
+    _validate_arrival_points(
+        data.get("arrival_points"),
+        diagnostics,
+        width,
+        height,
+        collision,
+    )
+    _validate_sites(
+        data.get("sites"),
+        diagnostics,
+        profile,
+        width,
+        height,
+        object_origins,
+        collision,
+    )
+    return diagnostics
+
+
+def _validate_arrival_points(
+    value: object,
+    diagnostics: list[Diagnostic],
+    width: int,
+    height: int,
+    collision: Sequence[bool] | None,
+) -> None:
+    if not isinstance(value, list):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_arrival_points",
+            "arrival_points",
+            "arrival_pointsは配列で指定してください。",
+        )
+        return
+
+    arrival_ids: set[str] = set()
+    for index, arrival in enumerate(value):
+        path = f"arrival_points[{index}]"
+        if not isinstance(arrival, dict):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_arrival_point",
+                path,
+                "到着地点はobjectで指定してください。",
+            )
+            continue
+        arrival_id = arrival.get("id")
+        if not _valid_id(arrival_id):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_id",
+                f"{path}.id",
+                "到着地点IDはlower_snake_caseで指定してください。",
+            )
+        elif arrival_id in arrival_ids:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "duplicate_arrival_point_id",
+                f"{path}.id",
+                f"到着地点IDが重複しています: {arrival_id}",
+            )
+        else:
+            arrival_ids.add(arrival_id)
+
+        position = arrival.get("position")
+        if not _valid_point(position):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_arrival_point_position",
+                f"{path}.position",
+                "到着地点は[x, y]の整数2要素で指定してください。",
+            )
+        elif not _point_in_bounds(position, width, height):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "arrival_point_out_of_bounds",
+                f"{path}.position",
+                "到着地点がマップ範囲外です。",
+            )
+        elif collision is not None and collision[position[1] * width + position[0]]:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "arrival_point_blocked",
+                f"{path}.position",
+                "到着地点は通行可能セルに置いてください。",
+            )
+
+        if arrival.get("facing") not in CARDINAL_FACINGS:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_facing",
+                f"{path}.facing",
+                "向きはup、right、down、leftのいずれかで指定してください。",
+            )
+        teleport_enabled = arrival.get("teleport_enabled")
+        if not isinstance(teleport_enabled, bool):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_arrival_teleport_enabled",
+                f"{path}.teleport_enabled",
+                "テレポート対象フラグはbooleanで指定してください。",
+            )
+        site_id = arrival.get("site_id")
+        if teleport_enabled is True and not _valid_id(site_id):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_arrival_site_id",
+                f"{path}.site_id",
+                "テレポート対象の到着地点には対応する拠点IDを指定してください。",
+            )
+        elif teleport_enabled is False and site_id is not None:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "unexpected_arrival_site_id",
+                f"{path}.site_id",
+                "テレポート対象でない到着地点には拠点IDを指定できません。",
+            )
+
+
+def _validate_sites(
+    value: object,
+    diagnostics: list[Diagnostic],
+    profile: object,
+    width: int,
+    height: int,
+    object_origins: Mapping[str, tuple[int, int]],
+    collision: Sequence[bool] | None,
+) -> None:
+    if not isinstance(value, list):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_sites",
+            "sites",
+            "sitesは配列で指定してください。",
+        )
+        return
+    if value and profile != "world":
+        _diagnostic(
+            diagnostics,
+            "error",
+            "sites_require_world_profile",
+            "sites",
+            "拠点はworld profileのマップにだけ配置できます。",
+        )
+
+    site_ids: set[str] = set()
+    occupied_entrances: dict[tuple[int, int], str] = {}
+    for index, site in enumerate(value):
+        path = f"sites[{index}]"
+        if not isinstance(site, dict):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_site",
+                path,
+                "拠点はobjectで指定してください。",
+            )
+            continue
+
+        site_id = site.get("id")
+        if not _valid_id(site_id):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_id",
+                f"{path}.id",
+                "拠点IDはlower_snake_caseで指定してください。",
+            )
+        elif site_id in site_ids:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "duplicate_site_id",
+                f"{path}.id",
+                f"拠点IDが重複しています: {site_id}",
+            )
+        else:
+            site_ids.add(site_id)
+
+        if "name_text_key" in site:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "site_name_text_key_is_automatic",
+                f"{path}.name_text_key",
+                "拠点名の文言キーは拠点IDから自動生成されるため指定できません。",
+            )
+        if "teleport_destination" in site:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "deprecated_teleport_destination",
+                f"{path}.teleport_destination",
+                "移動先はdestinationだけで指定してください。",
+            )
+
+        anchor_origin = _validate_site_anchor(
+            site.get("anchor"),
+            diagnostics,
+            f"{path}.anchor",
+            width,
+            height,
+            object_origins,
+        )
+
+        offsets = site.get("entrance_offsets")
+        if not isinstance(offsets, list) or not offsets:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_site_entrances",
+                f"{path}.entrance_offsets",
+                "入口セルを1つ以上指定してください。",
+            )
+        else:
+            seen_offsets: set[tuple[int, int]] = set()
+            for offset_index, offset in enumerate(offsets):
+                offset_path = f"{path}.entrance_offsets[{offset_index}]"
+                if not _valid_point(offset):
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "invalid_site_entrance_offset",
+                        offset_path,
+                        "入口オフセットは[x, y]の整数2要素で指定してください。",
+                    )
+                    continue
+                offset_point = (offset[0], offset[1])
+                if offset_point in seen_offsets:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "duplicate_site_entrance_offset",
+                        offset_path,
+                        "同じ入口オフセットが重複しています。",
+                    )
+                    continue
+                seen_offsets.add(offset_point)
+                if anchor_origin is not None:
+                    position = (
+                        anchor_origin[0] + offset[0],
+                        anchor_origin[1] + offset[1],
+                    )
+                    _validate_site_cell(
+                        position,
+                        diagnostics,
+                        offset_path,
+                        "入口",
+                        width,
+                        height,
+                        collision,
+                    )
+                    previous_site = occupied_entrances.get(position)
+                    if previous_site is not None:
+                        _diagnostic(
+                            diagnostics,
+                            "error",
+                            "overlapping_site_entrance",
+                            offset_path,
+                            f"入口セル{list(position)}は拠点{previous_site}と重複しています。",
+                        )
+                    elif isinstance(site_id, str):
+                        occupied_entrances[position] = site_id
+
+        _validate_destination(
+            site.get("destination"),
+            diagnostics,
+            f"{path}.destination",
+            "移動先",
+        )
+
+
+def _validate_destination(
+    value: object,
+    diagnostics: list[Diagnostic],
+    path: str,
+    label: str,
+) -> None:
+    if not isinstance(value, dict):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_destination",
+            path,
+            f"{label}はobjectで指定してください。",
+        )
+        return
+    for key, field_label in (
+        ("map_id", "マップID"),
+        ("arrival_id", "到着地点ID"),
+    ):
+        field_value = value.get(key)
+        if field_value in (None, ""):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"missing_destination_{key}",
+                f"{path}.{key}",
+                f"{label}{field_label.removesuffix('ID')}を選択してください。",
+            )
+        elif not _valid_id(field_value):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"invalid_destination_{key}",
+                f"{path}.{key}",
+                f"{label}{field_label}が不正です。一覧から選択し直してください。",
+            )
+
+
+def _validate_site_anchor(
+    value: object,
+    diagnostics: list[Diagnostic],
+    path: str,
+    width: int,
+    height: int,
+    object_origins: Mapping[str, tuple[int, int]],
+) -> tuple[int, int] | None:
+    if not isinstance(value, dict):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_site_anchor",
+            path,
+            "拠点アンカーはobjectで指定してください。",
+        )
+        return None
+    kind = value.get("kind")
+    if kind == "object":
+        object_id = value.get("object_id")
+        if not _valid_id(object_id) or object_id not in object_origins:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "unknown_site_anchor_object",
+                f"{path}.object_id",
+                f"アンカーにする配置オブジェクトが見つかりません: {object_id}",
+            )
+            return None
+        return object_origins[object_id]
+    if kind == "cell":
+        position = value.get("position")
+        if not _valid_point(position):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_site_anchor_position",
+                f"{path}.position",
+                "座標アンカーは[x, y]の整数2要素で指定してください。",
+            )
+            return None
+        if not _point_in_bounds(position, width, height):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "site_anchor_out_of_bounds",
+                f"{path}.position",
+                "座標アンカーがマップ範囲外です。",
+            )
+            return None
+        return position[0], position[1]
+    _diagnostic(
+        diagnostics,
+        "error",
+        "invalid_site_anchor_kind",
+        f"{path}.kind",
+        "拠点アンカー種別はobjectまたはcellで指定してください。",
+    )
+    return None
+
+
+def _validate_site_cell(
+    position: tuple[int, int],
+    diagnostics: list[Diagnostic],
+    path: str,
+    label: str,
+    width: int,
+    height: int,
+    collision: Sequence[bool] | None,
+) -> None:
+    if not _point_in_bounds(position, width, height):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "site_cell_out_of_bounds",
+            path,
+            f"{label}セル{list(position)}がマップ範囲外です。",
+        )
+    elif collision is not None and collision[position[1] * width + position[0]]:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "site_cell_blocked",
+            path,
+            f"{label}セル{list(position)}は通行できません。",
+        )
+
+
+def validate_map_links(
+    sources: Mapping[str, Mapping[str, Any]],
+) -> list[Diagnostic]:
+    """Validate stable site IDs and destinations across map source files."""
+
+    if not isinstance(sources, Mapping):
+        raise TypeError("map sources must be a mapping")
+    diagnostics: list[Diagnostic] = []
+    site_occurrences: dict[str, list[tuple[str, int]]] = {}
+    for map_id, source in sources.items():
+        sites = source.get("sites")
+        if not isinstance(sites, list):
+            continue
+        for index, site in enumerate(sites):
+            if not isinstance(site, Mapping):
+                continue
+            site_id = site.get("id")
+            if isinstance(site_id, str):
+                site_occurrences.setdefault(site_id, []).append((map_id, index))
+
+            destination = site.get("destination")
+            if not isinstance(destination, Mapping):
+                continue
+            destination_map_id = destination.get("map_id")
+            destination_arrival_id = destination.get("arrival_id")
+            if not _valid_id(destination_map_id) or not _valid_id(
+                destination_arrival_id
+            ):
+                continue
+            target = sources.get(destination_map_id)
+            if target is None:
+                _diagnostic(
+                    diagnostics,
+                    "warning",
+                    "missing_destination_map",
+                    f"{map_id}.sites[{index}].destination.map_id",
+                    f"遷移先マップはまだ作成されていません: {destination_map_id}",
+                )
+                continue
+            arrival_points = target.get("arrival_points")
+            if not isinstance(arrival_points, list):
+                continue
+            arrival_ids = {
+                arrival.get("id")
+                for arrival in arrival_points
+                if isinstance(arrival, Mapping)
+            }
+            if destination_arrival_id not in arrival_ids:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "missing_destination_arrival",
+                    f"{map_id}.sites[{index}].destination.arrival_id",
+                    f"マップ{destination_map_id}に到着地点{destination_arrival_id}がありません。",
+                )
+
+    teleport_arrivals: dict[str, list[tuple[str, int]]] = {}
+    for map_id, source in sources.items():
+        arrival_points = source.get("arrival_points")
+        if not isinstance(arrival_points, list):
+            continue
+        for index, arrival in enumerate(arrival_points):
+            if not isinstance(arrival, Mapping) or arrival.get("teleport_enabled") is not True:
+                continue
+            site_id = arrival.get("site_id")
+            if not isinstance(site_id, str):
+                continue
+            teleport_arrivals.setdefault(site_id, []).append((map_id, index))
+            if site_id not in site_occurrences:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "unknown_arrival_site_id",
+                    f"{map_id}.arrival_points[{index}].site_id",
+                    f"テレポート対象に対応する拠点がありません: {site_id}",
+                )
+    for site_id, occurrences in teleport_arrivals.items():
+        if len(occurrences) <= 1:
+            continue
+        for map_id, index in occurrences:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "duplicate_site_teleport_arrival",
+                f"{map_id}.arrival_points[{index}].site_id",
+                f"拠点{site_id}のテレポート到着地点が重複しています。",
+            )
+    for site_id, occurrences in site_occurrences.items():
+        owner_maps = {map_id for map_id, _index in occurrences}
+        if len(owner_maps) <= 1:
+            continue
+        for map_id, index in occurrences:
+            other_maps = sorted(owner_maps - {map_id})
+            _diagnostic(
+                diagnostics,
+                "error",
+                "duplicate_global_site_id",
+                f"{map_id}.sites[{index}].id",
+                f"拠点IDはマップ{', '.join(other_maps)}でも使用されています: {site_id}",
+            )
     return diagnostics
 
 
@@ -257,11 +846,25 @@ def _resolve_visual(
 def _object_draw_key(
     instance: Mapping[str, Any],
     definitions: Mapping[str, Mapping[str, Any]],
-) -> tuple[int, int, int, str]:
-    """Sort back-to-front by lower edge, then use authoring order for ties."""
+) -> tuple[int, int, int, int, str]:
+    """Sort back-to-front by draw group, lower edge, and stable tie breakers."""
     definition = definitions[instance["definition_id"]]
+    draw_group = definition.get("default_draw_group", "object")
+    group_order = OBJECT_DRAW_GROUP_ORDER.get(draw_group, 0)
     bottom_y = instance["origin"][1] + definition["size"][1] - 1
-    return bottom_y, instance["order"], instance["origin"][0], instance["id"]
+    return group_order, bottom_y, instance["order"], instance["origin"][0], instance["id"]
+
+
+def _site_anchor_origin(
+    site: Mapping[str, Any],
+    instances: Mapping[str, Mapping[str, Any]],
+) -> tuple[int, int]:
+    anchor = site["anchor"]
+    if anchor["kind"] == "object":
+        origin = instances[anchor["object_id"]]["origin"]
+    else:
+        origin = anchor["position"]
+    return origin[0], origin[1]
 
 
 def resolve_map(
@@ -305,6 +908,7 @@ def resolve_map(
             ground_cells.append({"layers": layers})
 
     definitions = {item["id"]: item for item in tileset.get("objects", [])}
+    instances_by_id = {item["id"]: item for item in data["objects"]}
     sorted_instances = sorted(
         data["objects"],
         key=lambda item: _object_draw_key(item, definitions),
@@ -337,12 +941,31 @@ def resolve_map(
             object_cells.append(resolved_cell)
             if cell["collision"] == "blocked":
                 collision[y * width + x] = True
+            elif cell["collision"] == "passable_override":
+                collision[y * width + x] = False
+
+    resolved_sites = []
+    for site in data["sites"]:
+        anchor_x, anchor_y = _site_anchor_origin(site, instances_by_id)
+        resolved_sites.append({
+            "id": site["id"],
+            "name_text_key": f"location.{site['id']}",
+            "entrance_cells": [
+                [anchor_x + offset[0], anchor_y + offset[1]]
+                for offset in site["entrance_offsets"]
+            ],
+            "destination": dict(site["destination"]),
+        })
 
     return {
         "size": [width, height],
         "ground_cells": ground_cells,
         "object_cells": object_cells,
         "collision": collision,
+        "sites": resolved_sites,
+        "arrival_points": [
+            dict(arrival) for arrival in data["arrival_points"]
+        ],
     }
 
 
@@ -506,6 +1129,8 @@ def compile_map(
             "".join("1" if resolved["collision"][y * width + x] else "0" for x in range(width))
             for y in range(height)
         ],
+        "sites": resolved["sites"],
+        "arrival_points": resolved["arrival_points"],
     }
     return CompiledMap(runtime=runtime, atlas=bytes(bundle))
 

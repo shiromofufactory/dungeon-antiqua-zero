@@ -8,6 +8,7 @@ from .debug import (
 )
 from .inventory import InventorySystem
 from .shop import MAX_GOLD, ShopSystem
+from .travel import TravelSystem
 
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "MAX_OTHER_MEMBER_COUNT",
     "MIN_OTHER_MEMBER_COUNT",
     "ShopSystem",
+    "TravelSystem",
 ]

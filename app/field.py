@@ -12,7 +12,7 @@ else:
     from resources.maps import CompiledMap
 
 
-DEFAULT_FIELD_MOVE_SPEED = 2
+DEFAULT_FIELD_MOVE_SPEED = 1
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class FieldMovement:
         *,
         start: FieldPosition | None = None,
         speed: int = DEFAULT_FIELD_MOVE_SPEED,
+        facing: Direction = Direction.DOWN,
     ) -> None:
         if not isinstance(map_data, CompiledMap):
             raise TypeError("field map data must be a CompiledMap")
@@ -37,6 +38,8 @@ class FieldMovement:
             raise TypeError("field movement speed must be an integer")
         if speed <= 0 or map_data.tile_size % speed:
             raise ValueError("field movement speed must divide the map tile size")
+        if not isinstance(facing, Direction):
+            raise TypeError("field facing must be a Direction")
         if start is None:
             start = self._nearest_passable_position(map_data)
         if not isinstance(start, FieldPosition):
@@ -47,12 +50,12 @@ class FieldMovement:
         self.map_data = map_data
         self.position = start
         self.speed = speed
-        self.facing = Direction.DOWN
+        self.facing = facing
         self.offset_x = 0
         self.offset_y = 0
         self._moving_direction: Direction | None = None
-        self._walk_distance = 0
         self._moved_this_frame = False
+        self._arrived_position: FieldPosition | None = None
 
     @staticmethod
     def _nearest_passable_position(map_data: CompiledMap) -> FieldPosition:
@@ -67,7 +70,9 @@ class FieldMovement:
         try:
             _distance, y, x = min(candidates)
         except ValueError as error:
-            raise ValueError("field map must contain at least one passable cell") from error
+            raise ValueError(
+                "field map must contain at least one passable cell"
+            ) from error
         return FieldPosition(x=x, y=y)
 
     @property
@@ -79,8 +84,10 @@ class FieldMovement:
         return self._moved_this_frame
 
     @property
-    def animation_frame(self) -> int:
-        return (self._walk_distance // self.map_data.tile_size) % 2
+    def arrived_position(self) -> FieldPosition | None:
+        """Return the cell reached by the most recent update, if any."""
+
+        return self._arrived_position
 
     @property
     def world_x(self) -> int:
@@ -96,6 +103,7 @@ class FieldMovement:
         if direction is not None and not isinstance(direction, Direction):
             raise TypeError("field movement direction must be a Direction or None")
         self._moved_this_frame = False
+        self._arrived_position = None
         if self._moving_direction is None:
             if direction is None:
                 return False
@@ -109,7 +117,6 @@ class FieldMovement:
         active = self._moving_direction
         self.offset_x += active.dx * self.speed
         self.offset_y += active.dy * self.speed
-        self._walk_distance += self.speed
         self._moved_this_frame = True
         reached_next_cell = (
             abs(self.offset_x) == self.map_data.tile_size
@@ -123,6 +130,7 @@ class FieldMovement:
             self.offset_x = 0
             self.offset_y = 0
             self._moving_direction = None
+            self._arrived_position = self.position
         return True
 
 

@@ -21,6 +21,7 @@ FIELD_CHARACTER_SOURCE_X = 0
 FIELD_CHARACTER_SOURCE_Y = 64
 FIELD_CHARACTER_SIZE = 16
 FIELD_CHARACTER_COLKEY = 1
+FIELD_CHARACTER_ANIMATION_INTERVAL = 16
 FIELD_CHARACTER_FACING_ROWS = {
     Direction.UP: 0,
     Direction.RIGHT: 1,
@@ -66,7 +67,7 @@ class FieldRenderer:
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
         self._draw_objects(camera_x, camera_y, frame_count)
-        self._draw_character(field, camera_x, camera_y)
+        self._draw_character(field, camera_x, camera_y, frame_count)
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:
         player_screen_x = (self.screen_width - FIELD_CHARACTER_SIZE) // 2
@@ -154,8 +155,9 @@ class FieldRenderer:
         field: FieldMovement,
         camera_x: int,
         camera_y: int,
+        frame_count: int,
     ) -> None:
-        frame = field.animation_frame if field.is_walking else 0
+        frame = (frame_count // FIELD_CHARACTER_ANIMATION_INTERVAL) % 2
         row = FIELD_CHARACTER_FACING_ROWS[field.facing]
         self._pyxel.blt(
             field.world_x - camera_x,
@@ -170,6 +172,7 @@ class FieldRenderer:
 
 
 __all__ = [
+    "FIELD_CHARACTER_ANIMATION_INTERVAL",
     "FIELD_CHARACTER_BANK",
     "FIELD_CHARACTER_COLKEY",
     "FIELD_CHARACTER_FACING_ROWS",

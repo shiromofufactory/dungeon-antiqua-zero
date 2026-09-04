@@ -88,7 +88,9 @@ from systems import (
     DebugPartyError,
     InventorySystem,
     ShopSystem,
+    TravelSystem,
 )
+from world_sites import WorldSiteCatalog
 
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -196,6 +198,14 @@ MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
 WORLD_MAP_ID = "worldmap"
 WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
+SITE_NAME_WINDOW_GRID = (16, 2, 32, 7)
+SITE_NAME_TEXT_POSITION = (2, 2)
+SITE_FACING_DIRECTIONS = {
+    "up": Direction.UP,
+    "right": Direction.RIGHT,
+    "down": Direction.DOWN,
+    "left": Direction.LEFT,
+}
 PARTY_WINDOW_GRID = (0, 0, 48, 60)
 PARTY_MEMBER_ROW_HEIGHT = 9
 PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE = 11
@@ -265,6 +275,7 @@ class FieldScreenChange(Enum):
     CLOSE_STATUS = auto()
     OPEN_SHOP = auto()
     CLOSE_SHOP = auto()
+    CHANGE_MAP = auto()
 
 
 class MenuAlertEffect:
@@ -354,7 +365,11 @@ class FieldScreenMock:
         self.fonts = FontResources()
         images = ImageResources()
         self.faces = images.image(FACES_IMAGE_ID)
-        self.world_map = MapResources().map(WORLD_MAP_ID)
+        self.map_resources = MapResources()
+        self.world_map = self.map_resources.map(WORLD_MAP_ID)
+        self.current_map = self.world_map
+        self.world_sites = WorldSiteCatalog(self.world_map.sites)
+        self.travel_system = TravelSystem(self.world_sites, self.map_resources)
         self.field = FieldMovement(
             self.world_map,
             start=WORLD_MAP_START_POSITION,
@@ -383,7 +398,13 @@ class FieldScreenMock:
         self.pending_shop = None
         self.debug_screen: DebugMenuScreenMock | None = None
         self.selected_member_index = 0
+        self.site_name_window = None
+        self._site_name_cache: tuple[str, Language] | None = None
+        self.pending_site = None
+        self.pending_target_map = None
+        self.pending_target_arrival = None
         self._build_main_windows()
+        self._refresh_site_name_window()
 
         pyxel.run(self.update, self.draw)
 
@@ -540,6 +561,102 @@ class FieldScreenMock:
         if animate:
             for window in self.windows:
                 window.open()
+        self._refresh_site_name_window(force=True)
+
+    def _refresh_site_name_window(self, *, force: bool = False) -> None:
+        """Rebuild the nearby-site label only when its contents change."""
+
+        catalog = getattr(self, "world_sites", None)
+        field = getattr(self, "field", None)
+        if (
+            not isinstance(catalog, WorldSiteCatalog)
+            or getattr(self, "current_map", None) is not getattr(
+                self,
+                "world_map",
+                None,
+            )
+        ):
+            self.site_name_window = None
+            self._site_name_cache = None
+            return
+        position = getattr(field, "position", None)
+        if not isinstance(position, FieldPosition):
+            self.site_name_window = None
+            self._site_name_cache = None
+            return
+        site = catalog.nearby_site(position.x, position.y)
+        cache = None if site is None else (site.id, self.settings.language)
+        if not force and cache == getattr(self, "_site_name_cache", None):
+            return
+        self._site_name_cache = cache
+        if site is None:
+            self.site_name_window = None
+            return
+        name = self.texts.text(
+            site.name_text_key,
+            Localizer(self.settings.language),
+            default=site.id,
+        )
+        text_factory = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+        windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
+        self.site_name_window = windows.create(
+            *SITE_NAME_WINDOW_GRID,
+            (
+                text_factory.create(
+                    name,
+                    *SITE_NAME_TEXT_POSITION,
+                ),
+            ),
+        )
+
+    def _handle_arrived_site(self) -> None:
+        """Enter a site only after movement completes on an entrance cell."""
+
+        arrived = getattr(self.field, "arrived_position", None)
+        if not isinstance(arrived, FieldPosition) or self.current_map is not self.world_map:
+            return
+        site = self.world_sites.entrance_at(arrived.x, arrived.y)
+        if site is None:
+            return
+        destination = site.destination
+        try:
+            target_map = self.map_resources.map(destination.map_id)
+        except MapResourceError:
+            return
+        try:
+            arrival = target_map.arrival_point(destination.arrival_id)
+        except KeyError:
+            return
+        self.pending_site = site
+        self.pending_target_map = target_map
+        self.pending_target_arrival = arrival
+        self._begin_screen_change(FieldScreenChange.CHANGE_MAP)
+
+    def _apply_pending_site_change(self) -> None:
+        site = self.pending_site
+        target_map = self.pending_target_map
+        arrival = self.pending_target_arrival
+        if site is None or target_map is None or arrival is None:
+            raise RuntimeError("site map change has incomplete destination data")
+        self.travel_system.enter_site(self.save_data, site)
+        self.current_map = target_map
+        self.field = FieldMovement(
+            target_map,
+            start=FieldPosition(arrival.position.x, arrival.position.y),
+            facing=SITE_FACING_DIRECTIONS[arrival.facing],
+        )
+        self.field_renderer = FieldRenderer(
+            target_map,
+            screen_width=SCREEN_WIDTH,
+            screen_height=SCREEN_HEIGHT,
+        )
+        self.pending_site = None
+        self.pending_target_map = None
+        self.pending_target_arrival = None
+        self._refresh_site_name_window(force=True)
 
     def _party_window_texts(
         self,
@@ -1049,6 +1166,8 @@ class FieldScreenMock:
         elif change is FieldScreenChange.CLOSE_SHOP:
             self._finish_shop()
             self.showing_field = True
+        elif change is FieldScreenChange.CHANGE_MAP:
+            self._apply_pending_site_change()
         else:
             self._finish_status()
         self.pending_screen_change = None
@@ -1338,6 +1457,8 @@ class FieldScreenMock:
                 pyxel.quit()
             else:
                 self.field.update(input_state.held_direction)
+                self._handle_arrived_site()
+                self._refresh_site_name_window()
             return
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
@@ -1466,6 +1587,9 @@ class FieldScreenMock:
                 return
             if getattr(self, "showing_field", False):
                 self.field_renderer.draw(self.field)
+                site_name_window = getattr(self, "site_name_window", None)
+                if site_name_window is not None:
+                    site_name_window.draw()
                 shop_selector_window = getattr(self, "shop_selector_window", None)
                 if shop_selector_window is not None:
                     shop_selector_window.draw()

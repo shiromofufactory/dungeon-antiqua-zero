@@ -13,6 +13,7 @@ from map_pipeline import (
     load_tileset,
     resolve_source_image,
     validate_map_source,
+    validate_map_links,
     validate_tileset,
 )
 
@@ -119,6 +120,22 @@ def main() -> int:
                     errors += 1
                 else:
                     warnings += 1
+        all_sources = {}
+        for path in map_paths(content_root, None):
+            source = load_map_source(path)
+            map_id = source.get("map_id")
+            if isinstance(map_id, str):
+                all_sources[map_id] = source
+        link_diagnostics = validate_map_links(all_sources)
+        if link_diagnostics:
+            print("map links")
+        for diagnostic in link_diagnostics:
+            label = "ERROR" if diagnostic.severity == "error" else "WARNING"
+            print(f"  {label} {diagnostic.path}: {diagnostic.message}")
+            if diagnostic.severity == "error":
+                errors += 1
+            else:
+                warnings += 1
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1

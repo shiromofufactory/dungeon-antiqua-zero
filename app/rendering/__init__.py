@@ -7,6 +7,7 @@ from .fade import (
     FadeThroughBlack,
 )
 from .field import (
+    FIELD_CHARACTER_ANIMATION_INTERVAL,
     FIELD_CHARACTER_BANK,
     FIELD_CHARACTER_COLKEY,
     FIELD_CHARACTER_FACING_ROWS,
@@ -29,6 +30,7 @@ __all__ = [
     "FadeEvent",
     "FadePhase",
     "FadeThroughBlack",
+    "FIELD_CHARACTER_ANIMATION_INTERVAL",
     "FIELD_CHARACTER_BANK",
     "FIELD_CHARACTER_COLKEY",
     "FIELD_CHARACTER_FACING_ROWS",

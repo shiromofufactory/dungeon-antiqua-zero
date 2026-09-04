@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+import re
 from typing import Mapping
 
 
@@ -31,6 +32,9 @@ class DisplayMode(StrEnum):
 
 class SettingsDataError(ValueError):
     """Raised when persisted settings cannot be interpreted safely."""
+
+
+_STABLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,7 @@ class SaveData:
     experience: int = 0
     difficulty: Difficulty = Difficulty.NORMAL
     play_time_frames: int = 0
+    visited_site_ids: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         for name in ("gold", "experience", "play_time_frames"):
@@ -166,6 +171,12 @@ class SaveData:
                 raise ValueError(f"{name} must not be negative")
         if not isinstance(self.difficulty, Difficulty):
             raise TypeError("difficulty must be a Difficulty")
+        if not isinstance(self.visited_site_ids, set) or not all(
+            isinstance(site_id, str)
+            and _STABLE_ID_PATTERN.fullmatch(site_id) is not None
+            for site_id in self.visited_site_ids
+        ):
+            raise TypeError("visited_site_ids must be a set of stable IDs")
 
     def advance_play_time(self, frames: int = 1) -> None:
         """Add active gameplay frames to the persisted play time."""
@@ -175,3 +186,13 @@ class SaveData:
         if frames < 0:
             raise ValueError("frames must not be negative")
         self.play_time_frames += frames
+
+    def remember_site(self, site_id: str) -> None:
+        """Remember one entered site as a future teleport destination."""
+
+        if (
+            not isinstance(site_id, str)
+            or _STABLE_ID_PATTERN.fullmatch(site_id) is None
+        ):
+            raise ValueError("site ID must be lower_snake_case")
+        self.visited_site_ids.add(site_id)

@@ -24,7 +24,10 @@ TRANSPARENT_RGB = (255, 0, 128)
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DIRECTIONS = ("n", "ne", "e", "se", "s", "sw", "w", "nw")
 NEIGHBOR_STATES = frozenset(("same", "different", "any"))
-COLLISION_STATES = frozenset(("passable", "blocked"))
+GROUND_COLLISION_STATES = frozenset(("passable", "blocked"))
+OBJECT_COLLISION_STATES = frozenset(("passable", "blocked", "passable_override"))
+OBJECT_DRAW_GROUPS = frozenset(("object", "object_overlay"))
+OBJECT_DRAW_GROUP_ORDER = {"object": 0, "object_overlay": 1}
 SUPPORTED_PROFILES = frozenset(("world", "dungeon", "town"))
 SUPPORTED_IMAGE_SUFFIXES = (".png", ".gif")
 
@@ -334,7 +337,7 @@ def _validate_ground(
     parent_id = ground.get("parent_id")
     if parent_id is not None:
         _validate_id(parent_id, f"{path}.parent_id", diagnostics)
-    if ground.get("collision") not in COLLISION_STATES:
+    if ground.get("collision") not in GROUND_COLLISION_STATES:
         _diag(
             diagnostics,
             "error",
@@ -447,11 +450,20 @@ def _validate_object(
             f"{path}.size",
             "オブジェクト寸法は1以上の[幅, 高さ]で指定してください。",
         )
-    _validate_id(
-        object_value.get("default_draw_group"),
+    draw_group = object_value.get("default_draw_group")
+    valid_draw_group = _validate_id(
+        draw_group,
         f"{path}.default_draw_group",
         diagnostics,
     )
+    if valid_draw_group and draw_group not in OBJECT_DRAW_GROUPS:
+        _diag(
+            diagnostics,
+            "error",
+            "invalid_object_draw_group",
+            f"{path}.default_draw_group",
+            "描画グループはobjectまたはobject_overlayで指定してください。",
+        )
     cells = object_value.get("cells")
     if not isinstance(cells, list) or not cells:
         _diag(
@@ -511,13 +523,13 @@ def _validate_object(
                     "相対位置がオブジェクト寸法外です。",
                 )
 
-        if cell.get("collision") not in COLLISION_STATES:
+        if cell.get("collision") not in OBJECT_COLLISION_STATES:
             _diag(
                 diagnostics,
                 "error",
                 "invalid_collision",
                 f"{cell_path}.collision",
-                "通行設定はpassableまたはblockedで指定してください。",
+                "オブジェクトの通行設定はpassable、blocked、passable_overrideのいずれかで指定してください。",
             )
         has_tile = "tile" in cell
         has_visual = "visual" in cell
@@ -545,13 +557,16 @@ def _validate_object(
                 rows,
                 diagnostics,
             )
-        elif cell.get("collision") == "blocked":
+        elif cell.get("collision") in ("blocked", "passable_override"):
+            collision = cell.get("collision")
             _diag(
                 diagnostics,
                 "warning",
-                "invisible_blocked_cell",
+                "invisible_blocked_cell" if collision == "blocked" else "invisible_passable_override_cell",
                 cell_path,
-                "表示なしの通行不可セルです。意図した当たり判定か確認してください。",
+                "表示なしの通行不可セルです。意図した当たり判定か確認してください。"
+                if collision == "blocked"
+                else "表示なしの通行可上書きセルです。意図した判定か確認してください。",
             )
         else:
             _diag(

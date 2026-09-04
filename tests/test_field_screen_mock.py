@@ -48,8 +48,16 @@ from tools.screen_mocks.field import (
     TRANSPARENT_INDEX,
     localized_menu_texts,
 )
+from field import FieldPosition
 from input import Direction, InputButton, InputState
 from member import BATTLE_PARTY_MEMBER_COUNT, FormationRow
+from resources import (
+    MapCell,
+    MapResourceError,
+    MapArrivalPoint,
+    MapDestination,
+    WorldSite,
+)
 from rendering import DIMMED_PALETTE, DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
 from state import DisplayMode, Language, SaveData, Settings
 from ui import (
@@ -59,6 +67,7 @@ from ui import (
     POSITIVE_COLOR,
     RESERVE_MEMBER_TEXT_COLOR,
 )
+from world_sites import WorldSiteCatalog
 
 
 class FieldScreenMockTest(unittest.TestCase):
@@ -103,6 +112,7 @@ class FieldScreenMockTest(unittest.TestCase):
         face_image = object()
         images_class.return_value.image.return_value = face_image
         world_map = map_resources_class.return_value.map.return_value
+        world_map.sites = ()
 
         mock = FieldScreenMock()
 
@@ -135,6 +145,8 @@ class FieldScreenMockTest(unittest.TestCase):
             screen_height=240,
         )
         self.assertIs(mock.world_map, world_map)
+        self.assertIs(mock.current_map, world_map)
+        self.assertEqual(mock.world_sites.sites, ())
         self.assertIs(mock.field, field_movement_class.return_value)
         self.assertIs(mock.field_renderer, field_renderer_class.return_value)
         self.assertEqual(
@@ -694,6 +706,129 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.update()
 
         mock.field.update.assert_called_once_with(Direction.LEFT)
+
+    @patch("tools.screen_mocks.field.LocalizedWindowTextFactory")
+    @patch("tools.screen_mocks.field.WindowFactory")
+    def test_nearby_site_name_uses_current_language_text(
+        self,
+        window_factory_class: Mock,
+        localized_factory_class: Mock,
+    ) -> None:
+        site = WorldSite(
+            id="sample_town",
+            name_text_key="location.sample_town",
+            entrance_cells=(MapCell(2, 2),),
+            destination=MapDestination("sample_town", "from_world"),
+        )
+        world_map = object()
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.settings = Settings(language=Language.JAPANESE)
+        mock.texts = Mock()
+        mock.texts.text.return_value = "サンプルの町"
+        mock.fonts = Mock()
+        mock.world_map = world_map
+        mock.current_map = world_map
+        mock.world_sites = WorldSiteCatalog((site,))
+        mock.field = Mock(position=FieldPosition(3, 2))
+        mock.site_name_window = None
+        mock._site_name_cache = None
+        localized_text = Mock()
+        localized_factory_class.from_language.return_value.create.return_value = (
+            localized_text
+        )
+        site_name_window = window_factory_class.return_value.create.return_value
+
+        mock._refresh_site_name_window()
+
+        mock.texts.text.assert_called_once()
+        localized_factory_class.from_language.assert_called_once_with(
+            mock.fonts,
+            Language.JAPANESE,
+        )
+        window_factory_class.return_value.create.assert_called_once()
+        self.assertIs(mock.site_name_window, site_name_window)
+
+    @patch("tools.screen_mocks.field.FieldRenderer")
+    @patch("tools.screen_mocks.field.FieldMovement")
+    def test_arriving_at_site_changes_map_at_fade_midpoint(
+        self,
+        field_movement_class: Mock,
+        field_renderer_class: Mock,
+    ) -> None:
+        site = WorldSite(
+            id="sample_town",
+            name_text_key="location.sample_town",
+            entrance_cells=(MapCell(2, 2),),
+            destination=MapDestination("sample_town", "from_world"),
+        )
+        arrival = MapArrivalPoint(
+            "from_world",
+            MapCell(4, 5),
+            "left",
+            False,
+            None,
+        )
+        world_map = object()
+        target_map = Mock()
+        target_map.arrival_point.return_value = arrival
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.field = Mock(arrived_position=FieldPosition(2, 2))
+        mock.world_map = world_map
+        mock.current_map = world_map
+        mock.world_sites = WorldSiteCatalog((site,))
+        mock.map_resources = Mock()
+        mock.map_resources.map.return_value = target_map
+        mock.travel_system = Mock()
+        mock.save_data = SaveData()
+        mock.fade = FadeThroughBlack()
+        mock.pending_screen_change = None
+        mock.pending_site = None
+        mock.pending_target_map = None
+        mock.pending_target_arrival = None
+
+        mock._handle_arrived_site()
+
+        self.assertIs(
+            mock.pending_screen_change,
+            FieldScreenChange.CHANGE_MAP,
+        )
+        mock.travel_system.enter_site.assert_not_called()
+        mock._apply_pending_screen_change()
+        mock.travel_system.enter_site.assert_called_once_with(mock.save_data, site)
+        field_movement_class.assert_called_once_with(
+            target_map,
+            start=FieldPosition(4, 5),
+            facing=Direction.LEFT,
+        )
+        field_renderer_class.assert_called_once_with(
+            target_map,
+            screen_width=256,
+            screen_height=240,
+        )
+        self.assertIs(mock.current_map, target_map)
+
+    def test_missing_site_map_does_not_mark_site_visited(self) -> None:
+        site = WorldSite(
+            id="sample_town",
+            name_text_key="location.sample_town",
+            entrance_cells=(MapCell(2, 2),),
+            destination=MapDestination("missing_map", "from_world"),
+        )
+        world_map = object()
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.field = Mock(arrived_position=FieldPosition(2, 2))
+        mock.world_map = world_map
+        mock.current_map = world_map
+        mock.world_sites = WorldSiteCatalog((site,))
+        mock.map_resources = Mock()
+        mock.map_resources.map.side_effect = MapResourceError("missing")
+        mock.travel_system = Mock()
+        mock.pending_screen_change = None
+
+        mock._handle_arrived_site()
+
+        mock.travel_system.enter_site.assert_not_called()
+        self.assertIsNone(mock.pending_screen_change)
 
     @patch("tools.screen_mocks.field.pyxel.cls")
     @patch("tools.screen_mocks.field.pyxel.camera")

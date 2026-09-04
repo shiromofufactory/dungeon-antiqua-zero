@@ -13,10 +13,11 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+MAP_FACINGS = frozenset(("up", "right", "down", "left"))
 
 
 class MapResourceError(RuntimeError):
@@ -60,6 +61,35 @@ class MapObjectTile:
 
 
 @dataclass(frozen=True)
+class MapCell:
+    x: int
+    y: int
+
+
+@dataclass(frozen=True)
+class MapArrivalPoint:
+    id: str
+    position: MapCell
+    facing: str
+    teleport_enabled: bool
+    site_id: str | None
+
+
+@dataclass(frozen=True)
+class MapDestination:
+    map_id: str
+    arrival_id: str
+
+
+@dataclass(frozen=True)
+class WorldSite:
+    id: str
+    name_text_key: str
+    entrance_cells: tuple[MapCell, ...]
+    destination: MapDestination
+
+
+@dataclass(frozen=True)
 class CompiledMap:
     """Validated map data optimized for drawing and collision checks."""
 
@@ -77,6 +107,8 @@ class CompiledMap:
     collision_rows: tuple[str, ...]
     ground_animations: Mapping[int, MapAnimation]
     object_animations: Mapping[int, MapAnimation]
+    sites: tuple[WorldSite, ...] = ()
+    arrival_points: tuple[MapArrivalPoint, ...] = ()
 
     def is_blocked(self, x: int, y: int) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
@@ -102,6 +134,18 @@ class CompiledMap:
             if animation is None
             else animation.tile_at(frame_count)
         )
+
+    def arrival_point(self, arrival_id: str) -> MapArrivalPoint:
+        if not isinstance(arrival_id, str) or not arrival_id:
+            raise ValueError("arrival point ID must be a non-empty string")
+        try:
+            return next(
+                arrival
+                for arrival in self.arrival_points
+                if arrival.id == arrival_id
+            )
+        except StopIteration as error:
+            raise KeyError(f"unknown arrival point: {arrival_id}") from error
 
 
 class MapResources:
@@ -129,6 +173,36 @@ class MapResources:
         loaded = self._load(map_id)
         self._cache[map_id] = loaded
         return loaded
+
+    def map_ids(self) -> tuple[str, ...]:
+        """Return compiled map IDs available in the runtime directory."""
+
+        if not self.maps_dir.is_dir():
+            return ()
+        return tuple(
+            path.stem
+            for path in sorted(self.maps_dir.glob("*.json"))
+            if MAP_ID_PATTERN.fullmatch(path.stem) is not None
+        )
+
+    def teleport_destination(self, site_id: str) -> MapDestination:
+        """Find the sole teleport-enabled arrival linked to a world site."""
+
+        if not isinstance(site_id, str) or MAP_ID_PATTERN.fullmatch(site_id) is None:
+            raise ValueError("world site ID must be lower_snake_case")
+        matches = [
+            MapDestination(map_id, arrival.id)
+            for map_id in self.map_ids()
+            for arrival in self.map(map_id).arrival_points
+            if arrival.teleport_enabled and arrival.site_id == site_id
+        ]
+        if not matches:
+            raise KeyError(f"world site has no teleport arrival: {site_id}")
+        if len(matches) > 1:
+            raise MapResourceError(
+                f"拠点{site_id}のテレポート到着地点が重複しています。"
+            )
+        return matches[0]
 
     def _load(self, map_id: str) -> CompiledMap:
         runtime_path = self.maps_dir / f"{map_id}.json"
@@ -193,6 +267,18 @@ class MapResources:
             len(object_tiles),
             atlas_tile_count,
         )
+        sites = self._sites(
+            runtime.get("sites"),
+            width,
+            height,
+            collision_rows,
+        )
+        arrival_points = self._arrival_points(
+            runtime.get("arrival_points"),
+            width,
+            height,
+            collision_rows,
+        )
         return CompiledMap(
             map_id=map_id,
             profile=profile,
@@ -208,6 +294,8 @@ class MapResources:
             collision_rows=collision_rows,
             ground_animations=MappingProxyType(ground_animations),
             object_animations=MappingProxyType(object_animations),
+            sites=sites,
+            arrival_points=arrival_points,
         )
 
     @staticmethod
@@ -360,6 +448,180 @@ class MapResources:
         return tuple(value)
 
     @classmethod
+    def _sites(
+        cls,
+        value: object,
+        width: int,
+        height: int,
+        collision_rows: tuple[str, ...],
+    ) -> tuple[WorldSite, ...]:
+        if not isinstance(value, list):
+            raise MapResourceError("マップJSONのsitesは配列である必要があります。")
+        loaded: list[WorldSite] = []
+        site_ids: set[str] = set()
+        entrance_positions: set[tuple[int, int]] = set()
+        for index, record in enumerate(value):
+            path = f"sites[{index}]"
+            if not isinstance(record, dict):
+                raise MapResourceError(f"{path}が不正です。")
+            site_id = cls._stable_id(record.get("id"), f"{path}.id")
+            if site_id in site_ids:
+                raise MapResourceError(f"{path}.idが重複しています。")
+            site_ids.add(site_id)
+            name_text_key = record.get("name_text_key")
+            if not isinstance(name_text_key, str) or not name_text_key:
+                raise MapResourceError(f"{path}.name_text_keyが不正です。")
+
+            entrance_records = record.get("entrance_cells")
+            if not isinstance(entrance_records, list) or not entrance_records:
+                raise MapResourceError(f"{path}.entrance_cellsが不正です。")
+            entrance_cells = []
+            site_entrances: set[tuple[int, int]] = set()
+            for cell_index, cell_record in enumerate(entrance_records):
+                cell = cls._map_cell(
+                    cell_record,
+                    width,
+                    height,
+                    f"{path}.entrance_cells[{cell_index}]",
+                )
+                point = (cell.x, cell.y)
+                if point in site_entrances or point in entrance_positions:
+                    raise MapResourceError(
+                        f"{path}.entrance_cells[{cell_index}]が重複しています。"
+                    )
+                if collision_rows[cell.y][cell.x] == "1":
+                    raise MapResourceError(
+                        f"{path}.entrance_cells[{cell_index}]は通行できません。"
+                    )
+                site_entrances.add(point)
+                entrance_positions.add(point)
+                entrance_cells.append(cell)
+
+            destination = cls._destination(
+                record.get("destination"),
+                f"{path}.destination",
+            )
+            loaded.append(
+                WorldSite(
+                    id=site_id,
+                    name_text_key=name_text_key,
+                    entrance_cells=tuple(entrance_cells),
+                    destination=destination,
+                )
+            )
+        return tuple(loaded)
+
+    @classmethod
+    def _arrival_points(
+        cls,
+        value: object,
+        width: int,
+        height: int,
+        collision_rows: tuple[str, ...],
+    ) -> tuple[MapArrivalPoint, ...]:
+        if not isinstance(value, list):
+            raise MapResourceError(
+                "マップJSONのarrival_pointsは配列である必要があります。"
+            )
+        loaded = []
+        arrival_ids: set[str] = set()
+        for index, record in enumerate(value):
+            path = f"arrival_points[{index}]"
+            if not isinstance(record, dict):
+                raise MapResourceError(f"{path}が不正です。")
+            arrival_id = cls._stable_id(record.get("id"), f"{path}.id")
+            if arrival_id in arrival_ids:
+                raise MapResourceError(f"{path}.idが重複しています。")
+            arrival_ids.add(arrival_id)
+            position = cls._map_cell(
+                record.get("position"),
+                width,
+                height,
+                f"{path}.position",
+            )
+            if collision_rows[position.y][position.x] == "1":
+                raise MapResourceError(f"{path}.positionは通行できません。")
+            teleport_enabled = cls._boolean(
+                record.get("teleport_enabled"),
+                f"{path}.teleport_enabled",
+            )
+            site_id = cls._optional_stable_id(
+                record.get("site_id"),
+                f"{path}.site_id",
+            )
+            if teleport_enabled != (site_id is not None):
+                raise MapResourceError(
+                    f"{path}.site_idとteleport_enabledの組み合わせが不正です。"
+                )
+            loaded.append(
+                MapArrivalPoint(
+                    id=arrival_id,
+                    position=position,
+                    facing=cls._facing(record.get("facing"), f"{path}.facing"),
+                    teleport_enabled=teleport_enabled,
+                    site_id=site_id,
+                )
+            )
+        return tuple(loaded)
+
+    @classmethod
+    def _destination(cls, value: object, path: str) -> MapDestination:
+        if not isinstance(value, dict):
+            raise MapResourceError(f"{path}が不正です。")
+        return MapDestination(
+            map_id=cls._stable_id(value.get("map_id"), f"{path}.map_id"),
+            arrival_id=cls._stable_id(
+                value.get("arrival_id"),
+                f"{path}.arrival_id",
+            ),
+        )
+
+    @staticmethod
+    def _stable_id(value: object, path: str) -> str:
+        if not isinstance(value, str) or MAP_ID_PATTERN.fullmatch(value) is None:
+            raise MapResourceError(f"{path}が不正です。")
+        return value
+
+    @staticmethod
+    def _optional_stable_id(value: object, path: str) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or MAP_ID_PATTERN.fullmatch(value) is None:
+            raise MapResourceError(f"{path}が不正です。")
+        return value
+
+    @staticmethod
+    def _facing(value: object, path: str) -> str:
+        if not isinstance(value, str) or value not in MAP_FACINGS:
+            raise MapResourceError(f"{path}が不正です。")
+        return value
+
+    @staticmethod
+    def _boolean(value: object, path: str) -> bool:
+        if not isinstance(value, bool):
+            raise MapResourceError(f"{path}が不正です。")
+        return value
+
+    @staticmethod
+    def _map_cell(
+        value: object,
+        width: int,
+        height: int,
+        path: str,
+    ) -> MapCell:
+        if (
+            not isinstance(value, list)
+            or len(value) != 2
+            or not all(
+                isinstance(item, int) and not isinstance(item, bool)
+                for item in value
+            )
+            or not (0 <= value[0] < width and 0 <= value[1] < height)
+        ):
+            raise MapResourceError(f"{path}が不正です。")
+        return MapCell(x=value[0], y=value[1])
+
+    @classmethod
     def _animations(
         cls,
         value: object,
@@ -415,10 +677,15 @@ class MapResources:
 
 __all__ = [
     "CompiledMap",
+    "MapArrivalPoint",
     "MapAnimation",
     "MapAnimationFrame",
+    "MapCell",
+    "MapDestination",
+    "MAP_FACINGS",
     "MAP_TILE_SIZE",
     "MapObjectTile",
     "MapResourceError",
     "MapResources",
+    "WorldSite",
 ]

@@ -54,10 +54,17 @@ class MapEditorServerTest(unittest.TestCase):
         with urlopen(request, timeout=2) as response:
             return json.loads(response.read())
 
-    def post_json(self, path: str, data: dict) -> dict:
+    def post_json(
+        self,
+        path: str,
+        data: dict,
+        site_names_ja: dict[str, str] | None = None,
+    ) -> dict:
         request = Request(
             f"{self.base_url}{path}",
-            data=json.dumps({"data": data}).encode("utf-8"),
+            data=json.dumps(
+                {"data": data, "site_names_ja": site_names_ja or {}}
+            ).encode("utf-8"),
             method="POST",
             headers={"Content-Type": "application/json", "X-Map-Editor-Token": "test-token"},
         )
@@ -67,7 +74,16 @@ class MapEditorServerTest(unittest.TestCase):
     def test_serves_new_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
+        self.assertEqual(payload["data"]["format_version"], 2)
         self.assertEqual(payload["data"]["size"], [6, 5])
+        self.assertEqual(payload["data"]["sites"], [])
+        self.assertEqual(payload["data"]["arrival_points"], [])
+        self.assertEqual(payload["site_names_ja"], {})
+        self.assertEqual(
+            payload["destination_options"],
+            [{"map_id": "test_world", "arrival_ids": []}],
+        )
+        self.assertEqual(payload["site_options"], [])
         self.assertIsNotNone(payload["resolved"])
 
         with self.assertRaises(HTTPError) as context:
@@ -77,15 +93,86 @@ class MapEditorServerTest(unittest.TestCase):
     def test_resolves_and_saves_source_with_runtime_outputs(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]
         data["grounds"][2][2] = "plain"
+        data["arrival_points"] = [
+            {
+                "id": "sample_site_world",
+                "position": [2, 2],
+                "facing": "down",
+                "teleport_enabled": True,
+                "site_id": "sample_site",
+            }
+        ]
+        data["sites"] = [
+            {
+                "id": "sample_site",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {
+                    "map_id": "test_world",
+                    "arrival_id": "sample_site_world",
+                },
+            }
+        ]
 
-        validation = self.post_json("/api/resolve", data)
-        result = self.post_json("/api/save", data)
+        names = {"sample_site": "サンプル拠点"}
+        validation = self.post_json("/api/resolve", data, names)
+        result = self.post_json("/api/save", data, names)
 
         self.assertIsNotNone(validation["resolved"])
         self.assertTrue(result["saved"])
         self.assertTrue(self.application.source_path.is_file())
         self.assertTrue(self.application.runtime_path.is_file())
         self.assertTrue(self.application.runtime_path.with_suffix(".bin").is_file())
+        saved = json.loads(self.application.source_path.read_text(encoding="utf-8"))
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        texts = json.loads(self.application.texts_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["sites"][0]["anchor"]["position"], [2, 2])
+        self.assertNotIn("name_text_key", saved["sites"][0])
+        self.assertEqual(runtime["sites"][0]["entrance_cells"], [[2, 2]])
+        self.assertEqual(runtime["sites"][0]["name_text_key"], "location.sample_site")
+        self.assertEqual(
+            texts,
+            [
+                {
+                    "text_key": "location.sample_site",
+                    "text_ja": "サンプル拠点",
+                    "text_en": "",
+                    "text_zhcn": "",
+                }
+            ],
+        )
+
+    def test_requires_japanese_site_name(self) -> None:
+        data = self.get_json("/api/document?token=test-token")["data"]
+        data["grounds"][2][2] = "plain"
+        data["arrival_points"] = [
+            {
+                "id": "sample_site_world",
+                "position": [2, 2],
+                "facing": "down",
+                "teleport_enabled": True,
+                "site_id": "sample_site",
+            }
+        ]
+        data["sites"] = [
+            {
+                "id": "sample_site",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {
+                    "map_id": "test_world",
+                    "arrival_id": "sample_site_world",
+                },
+            }
+        ]
+
+        result = self.post_json("/api/save", data)
+
+        self.assertFalse(result["saved"])
+        self.assertIn(
+            "missing_site_name_ja",
+            {item["code"] for item in result["diagnostics"]},
+        )
 
     def test_rejects_invalid_world_edge_without_writing(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]

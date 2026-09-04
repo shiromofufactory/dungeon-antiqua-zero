@@ -86,6 +86,15 @@ class SaveDataTest(unittest.TestCase):
         self.assertEqual(save_data.experience, 0)
         self.assertEqual(save_data.difficulty, Difficulty.NORMAL)
         self.assertEqual(save_data.play_time_frames, 0)
+        self.assertEqual(save_data.visited_site_ids, set())
+
+    def test_remembers_visited_sites_once(self) -> None:
+        save_data = SaveData()
+
+        save_data.remember_site("sample_town")
+        save_data.remember_site("sample_town")
+
+        self.assertEqual(save_data.visited_site_ids, {"sample_town"})
 
     def test_play_time_advances_in_frames(self) -> None:
         save_data = SaveData()
@@ -101,6 +110,8 @@ class SaveDataTest(unittest.TestCase):
             {"experience": True},
             {"play_time_frames": "0"},
             {"difficulty": "normal"},
+            {"visited_site_ids": ["sample_town"]},
+            {"visited_site_ids": {"Invalid Site"}},
         )
 
         for value in invalid_values:

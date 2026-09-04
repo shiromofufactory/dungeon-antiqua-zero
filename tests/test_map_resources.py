@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from app.resources.maps import MapResourceError, MapResources
+from app.resources.maps import MapCell, MapDestination, MapResourceError, MapResources
 
 
 class FakeImage:
@@ -36,7 +36,7 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 1,
+            "format_version": 2,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
@@ -73,6 +73,26 @@ class MapResourcesTest(unittest.TestCase):
                 }
             ],
             "collision_rows": ["10", "01"],
+            "sites": [
+                {
+                    "id": "sample_town",
+                    "name_text_key": "location.sample_town",
+                    "entrance_cells": [[1, 0]],
+                    "destination": {
+                        "map_id": "sample_town",
+                        "arrival_id": "from_world",
+                    },
+                }
+            ],
+            "arrival_points": [
+                {
+                    "id": "from_world",
+                    "position": [1, 0],
+                    "facing": "left",
+                    "teleport_enabled": True,
+                    "site_id": "sample_town",
+                }
+            ],
         }
         self._write_runtime()
         self.pyxel = FakePyxel()
@@ -101,6 +121,18 @@ class MapResourcesTest(unittest.TestCase):
         self.assertTrue(map_data.is_blocked(0, 0))
         self.assertFalse(map_data.is_blocked(1, 0))
         self.assertTrue(map_data.is_blocked(-1, 0))
+        self.assertEqual(map_data.sites[0].id, "sample_town")
+        self.assertEqual(map_data.sites[0].entrance_cells, (MapCell(1, 0),))
+        self.assertEqual(map_data.sites[0].destination.arrival_id, "from_world")
+        self.assertEqual(map_data.arrival_points[0].position, MapCell(1, 0))
+        self.assertEqual(map_data.arrival_points[0].facing, "left")
+        self.assertTrue(map_data.arrival_points[0].teleport_enabled)
+        self.assertEqual(map_data.arrival_points[0].site_id, "sample_town")
+        self.assertEqual(
+            resources.teleport_destination("sample_town"),
+            MapDestination("test_map", "from_world"),
+        )
+        self.assertIs(map_data.arrival_point("from_world"), map_data.arrival_points[0])
         self.assertEqual(
             [map_data.ground_tile_at(0, frame) for frame in range(6)],
             [0, 0, 1, 1, 1, 0],

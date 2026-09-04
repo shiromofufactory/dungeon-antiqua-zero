@@ -155,6 +155,28 @@ class MapTilesetTest(unittest.TestCase):
         self.assertEqual((info.columns, info.rows), (2, 1))
         self.assertIn("non_transparent_image_margin", {item.code for item in diagnostics})
 
+    def test_object_accepts_overlay_group_and_passable_override_only(self) -> None:
+        data = initial_worldmap_tileset()
+        data["objects"] = [
+            {
+                "id": "entrance",
+                "size": [1, 1],
+                "default_draw_group": "object_overlay",
+                "cells": [{"offset": [0, 0], "collision": "passable_override", "tile": [0, 0]}],
+            }
+        ]
+
+        diagnostics, _ = validate_tileset(data, image_path=self.image_path)
+        self.assertNotIn("invalid_collision", {item.code for item in diagnostics if item.severity == "error"})
+        self.assertNotIn("invalid_object_draw_group", {item.code for item in diagnostics if item.severity == "error"})
+
+        data["grounds"][0]["collision"] = "passable_override"
+        data["objects"][0]["default_draw_group"] = "unknown_group"
+        diagnostics, _ = validate_tileset(data, image_path=self.image_path)
+        codes = {item.code for item in diagnostics if item.severity == "error"}
+        self.assertIn("invalid_collision", codes)
+        self.assertIn("invalid_object_draw_group", codes)
+
     def test_accepts_reserved_transparent_color_in_image_margin(self) -> None:
         Image.new("RGBA", (33, 18), (255, 0, 128, 255)).save(self.image_path)
 
