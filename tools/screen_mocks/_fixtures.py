@@ -86,6 +86,8 @@ def load_mock_shops(items: dict[str, Item]) -> tuple[Shop, ...]:
 def load_mock_party(
     items: dict[str, Item],
     skills: dict[str, Skill],
+    *,
+    character_keys: tuple[str, ...] = MOCK_PARTY_CHARACTER_KEYS,
 ) -> tuple[Member, ...]:
     """Build the shared ordered party from generated character data."""
 
@@ -95,7 +97,7 @@ def load_mock_party(
         if isinstance(key := record.get("name_en"), str)
     }
     party: list[Member] = []
-    for key in MOCK_PARTY_CHARACTER_KEYS:
+    for key in character_keys:
         record = records_by_key.get(key)
         if record is None:
             raise MemberDataError(f"モック用キャラクターが見つかりません: {key}")

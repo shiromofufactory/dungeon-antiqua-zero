@@ -11,7 +11,7 @@ else:
     from resources.maps import WorldSite
 
 
-SITE_NAME_DISTANCE = 3
+SITE_NAME_DISTANCE = 2
 
 
 class WorldSiteCatalog:

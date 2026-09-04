@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from input import InputAction, InputDevice, InputState
+from input import Direction, InputAction, InputDevice, InputState
 from localization import Localizer, format_number
 from member import (
     FIORA_CHARACTER_KEY,
@@ -13,7 +14,7 @@ from member import (
     MIN_INTERNAL_LEVEL,
     Member,
 )
-from resources import FontResources
+from resources import FontResources, FontRole
 from state import Language, SaveData, Settings
 from systems import DebugPartyEditor, DebugPartyError
 from tools.screen_mocks.debug_text import DEBUG_TEXT
@@ -34,6 +35,7 @@ MAIN_ROWS = (
     ("party_level", 11),
     ("gold", 17),
     ("members", 23),
+    ("teleport", 29),
 )
 MAIN_CURSOR_X = 4
 MAIN_LABEL_X = 6
@@ -43,6 +45,11 @@ MEMBER_ROW_HEIGHT = 3
 MEMBER_ROW_COUNT = 10
 MEMBER_TEXT_X = (6, 34)
 MEMBER_CURSOR_X = (4, 32)
+TELEPORT_FIRST_Y = 9
+TELEPORT_ROW_HEIGHT = 4
+TELEPORT_VISIBLE_COUNT = 10
+TELEPORT_TEXT_X = 6
+TELEPORT_CURSOR_X = 4
 NUMERIC_WINDOW_GRID = (12, 14, 40, 30)
 NUMERIC_DIGIT_X = (6, 10, 14, 18, 22)
 NUMERIC_ROW_Y = (11, 15)
@@ -59,7 +66,22 @@ class DebugMenuPhase(Enum):
 
     MAIN = auto()
     MEMBERS = auto()
+    TELEPORT = auto()
     NUMBER = auto()
+
+
+@dataclass(frozen=True)
+class DebugTeleportTarget:
+    """One stable teleport target and its already-localized display name."""
+
+    site_id: str
+    name: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.site_id, str) or not self.site_id:
+            raise ValueError("debug teleport site ID must be a non-empty string")
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("debug teleport name must be a non-empty string")
 
 
 @dataclass
@@ -112,7 +134,7 @@ class NumericEntry:
 
 
 class DebugMenuScreenMock:
-    """Edit level, gold, and party membership inside the field mock."""
+    """Edit party state and request debug travel inside the field mock."""
 
     def __init__(
         self,
@@ -122,6 +144,8 @@ class DebugMenuScreenMock:
         settings: Settings,
         fonts: FontResources,
         alert: object,
+        teleport_targets: Iterable[DebugTeleportTarget] = (),
+        on_teleport: Callable[[str], bool] | None = None,
     ) -> None:
         if not isinstance(editor, DebugPartyEditor):
             raise TypeError("editor must be a DebugPartyEditor")
@@ -133,12 +157,29 @@ class DebugMenuScreenMock:
             raise TypeError("fonts must be FontResources")
         if not callable(getattr(alert, "start", None)):
             raise TypeError("alert must provide start()")
+        registered_teleports = tuple(teleport_targets)
+        if not all(
+            isinstance(target, DebugTeleportTarget)
+            for target in registered_teleports
+        ):
+            raise TypeError(
+                "teleport_targets must contain DebugTeleportTarget values"
+            )
+        site_ids = tuple(target.site_id for target in registered_teleports)
+        if len(site_ids) != len(set(site_ids)):
+            raise ValueError("debug teleport site IDs must be unique")
+        if on_teleport is not None and not callable(on_teleport):
+            raise TypeError("on_teleport must be callable")
+        if registered_teleports and on_teleport is None:
+            raise ValueError("on_teleport is required for teleport targets")
 
         self.editor = editor
         self.save_data = save_data
         self.settings = settings
         self.fonts = fonts
         self.alert = alert
+        self.teleport_targets = registered_teleports
+        self.on_teleport = on_teleport
         self.localizer = Localizer(settings.language)
         self.debug_texts = LocalizedWindowTextFactory.from_language(
             fonts,
@@ -148,6 +189,11 @@ class DebugMenuScreenMock:
             fonts,
             settings.language,
         )
+        self.teleport_texts = LocalizedWindowTextFactory.from_language(
+            fonts,
+            settings.language,
+            role=FontRole.LARGE,
+        )
         self.windows = WindowFactory(fonts.font_for(Language.JAPANESE))
         self.phase = DebugMenuPhase.MAIN
         self.main_window: Window
@@ -155,6 +201,10 @@ class DebugMenuScreenMock:
         self.member_window: Window | None = None
         self.member_cursor: WindowCursor | None = None
         self.member_index = 0
+        self.teleport_window: Window | None = None
+        self.teleport_cursor: WindowCursor | None = None
+        self.teleport_index = 0
+        self.teleport_scroll_offset = 0
         self.numeric_window: Window | None = None
         self.numeric_cursor: WindowCursor | None = None
         self.numeric_entry: NumericEntry | None = None
@@ -167,6 +217,9 @@ class DebugMenuScreenMock:
 
     def _member_count_text(self) -> str:
         return DEBUG_TEXT.member_count(self.editor.other_member_count)
+
+    def _teleport_count_text(self) -> str:
+        return DEBUG_TEXT.teleport_count(len(self.teleport_targets))
 
     def _guide_text(self) -> WindowText:
         return self.debug_texts.create(
@@ -183,11 +236,13 @@ class DebugMenuScreenMock:
             "party_level": format_number(self.editor.baseline_level),
             "gold": format_number(self.save_data.gold),
             "members": self._member_count_text(),
+            "teleport": self._teleport_count_text(),
         }
         labels = {
             "party_level": DEBUG_TEXT.party_level,
             "gold": DEBUG_TEXT.gold,
             "members": DEBUG_TEXT.members,
+            "teleport": DEBUG_TEXT.teleport,
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.title, 4, 3)
@@ -279,6 +334,106 @@ class DebugMenuScreenMock:
         except DebugPartyError:
             self.alert.start()
         self._build_member_window()
+
+    def _build_teleport_window(self) -> None:
+        placements = [
+            self.debug_texts.create(DEBUG_TEXT.teleport_destination, 4, 3)
+        ]
+        visible_targets = self.teleport_targets[
+            self.teleport_scroll_offset :
+            self.teleport_scroll_offset + TELEPORT_VISIBLE_COUNT
+        ]
+        cursor_targets: list[CursorTarget] = []
+        if not visible_targets:
+            placements.append(
+                self.debug_texts.create(
+                    DEBUG_TEXT.no_teleport_destinations,
+                    TELEPORT_TEXT_X,
+                    TELEPORT_FIRST_Y,
+                    color=DISABLED_COLOR,
+                )
+            )
+        else:
+            for row, target in enumerate(visible_targets):
+                y = TELEPORT_FIRST_Y + row * TELEPORT_ROW_HEIGHT
+                placements.append(
+                    self.teleport_texts.create(target.name, TELEPORT_TEXT_X, y)
+                )
+                cursor_targets.append(
+                    CursorTarget(TELEPORT_CURSOR_X, y, key=target.site_id)
+                )
+        placements.append(self._guide_text())
+        self.teleport_window = self.windows.create(
+            *DEBUG_WINDOW_GRID,
+            tuple(placements),
+            vertical_navigation=(
+                len(self.teleport_targets) > TELEPORT_VISIBLE_COUNT
+            ),
+            opened=True,
+        )
+        if not cursor_targets:
+            self.teleport_cursor = None
+            return
+        self.teleport_cursor = self.teleport_window.set_cursor(
+            tuple(cursor_targets)
+        )
+        self._select_cursor_key(
+            self.teleport_cursor,
+            self.teleport_targets[self.teleport_index].site_id,
+        )
+
+    def _open_teleport(self) -> None:
+        self.phase = DebugMenuPhase.TELEPORT
+        self.teleport_index = 0
+        self.teleport_scroll_offset = 0
+        self._build_teleport_window()
+
+    def _close_teleport(self) -> None:
+        self.phase = DebugMenuPhase.MAIN
+        self.teleport_window = None
+        self.teleport_cursor = None
+        self._build_main_window(selected_key="teleport")
+
+    def _move_teleport(self, distance: int) -> None:
+        if distance not in (-1, 1):
+            raise ValueError("teleport distance must be -1 or 1")
+        if not self.teleport_targets:
+            return
+        self.teleport_index = (
+            self.teleport_index + distance
+        ) % len(self.teleport_targets)
+        if self.teleport_index < self.teleport_scroll_offset:
+            self.teleport_scroll_offset = self.teleport_index
+        elif (
+            self.teleport_index
+            >= self.teleport_scroll_offset + TELEPORT_VISIBLE_COUNT
+        ):
+            self.teleport_scroll_offset = (
+                self.teleport_index - TELEPORT_VISIBLE_COUNT + 1
+            )
+        self._build_teleport_window()
+
+    def _confirm_teleport(self) -> None:
+        if self.teleport_cursor is None or self.on_teleport is None:
+            self.alert.start()
+            return
+        site_id = self.teleport_cursor.selected_key
+        if not isinstance(site_id, str) or not self.on_teleport(site_id):
+            self.alert.start()
+
+    def _update_teleport(self, input_state: InputState) -> None:
+        if input_state.cancel.triggered:
+            self._close_teleport()
+            return
+        if input_state.confirm.triggered:
+            self._confirm_teleport()
+            return
+        if input_state.navigation is Direction.UP:
+            self._move_teleport(-1)
+        elif input_state.navigation is Direction.DOWN:
+            self._move_teleport(1)
+        elif self.teleport_window is not None:
+            self.teleport_window.update()
 
     def _open_numeric(self, target: str) -> None:
         if target == "party_level":
@@ -416,6 +571,9 @@ class DebugMenuScreenMock:
         if self.phase is DebugMenuPhase.NUMBER:
             self._update_numeric(input_state)
             return False
+        if self.phase is DebugMenuPhase.TELEPORT:
+            self._update_teleport(input_state)
+            return False
         if self.phase is DebugMenuPhase.MEMBERS:
             if input_state.cancel.triggered:
                 self.phase = DebugMenuPhase.MAIN
@@ -445,6 +603,8 @@ class DebugMenuScreenMock:
             key = self.main_cursor.selected_key
             if key == "members":
                 self._open_members()
+            elif key == "teleport":
+                self._open_teleport()
             elif isinstance(key, str):
                 self._open_numeric(key)
             return False
@@ -456,6 +616,11 @@ class DebugMenuScreenMock:
             self.numeric_window.draw()
         elif self.phase is DebugMenuPhase.MEMBERS and self.member_window is not None:
             self.member_window.draw()
+        elif (
+            self.phase is DebugMenuPhase.TELEPORT
+            and self.teleport_window is not None
+        ):
+            self.teleport_window.draw()
         else:
             self.main_window.draw()
 
@@ -467,6 +632,7 @@ class DebugMenuScreenMock:
 __all__ = [
     "DebugMenuPhase",
     "DebugMenuScreenMock",
+    "DebugTeleportTarget",
     "MAX_GOLD",
     "NumericEntry",
 ]

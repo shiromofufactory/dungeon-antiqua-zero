@@ -12,13 +12,14 @@ from tools.screen_mocks._fixtures import (
 from tools.screen_mocks.debug_menu import (
     DebugMenuPhase,
     DebugMenuScreenMock,
+    DebugTeleportTarget,
     MAX_GOLD,
     NumericEntry,
 )
 from tools.screen_mocks.debug_text import DEBUG_TEXT, DebugText
 from input import Direction, InputButton, InputState
-from resources import FontResources
-from state import SaveData, Settings
+from resources import FontResources, FontRole
+from state import Language, SaveData, Settings
 from systems import DebugPartyEditor
 
 
@@ -198,10 +199,90 @@ class DebugMenuScreenMockTest(unittest.TestCase):
         )
         self.alert.start.assert_not_called()
 
+    def test_teleport_list_requests_the_selected_visited_site(self) -> None:
+        on_teleport = Mock(return_value=True)
+        screen = DebugMenuScreenMock(
+            editor=self.editor,
+            save_data=self.save_data,
+            settings=Settings(),
+            fonts=FontResources(),
+            alert=self.alert,
+            teleport_targets=(
+                DebugTeleportTarget("fairy_village", "妖精の里"),
+                DebugTeleportTarget("sample_cave", "サンプルの洞窟"),
+            ),
+            on_teleport=on_teleport,
+        )
+        screen.main_cursor.select_key("teleport")
+
+        screen.update(self.confirm())
+        self.assertIs(screen.phase, DebugMenuPhase.TELEPORT)
+        self.assertEqual(screen.teleport_cursor.selected_key, "fairy_village")
+        self.assertIs(
+            screen.teleport_texts.font,
+            screen.fonts.font_for(Language.JAPANESE, role=FontRole.LARGE),
+        )
+
+        screen.update(
+            InputState(
+                navigation=Direction.DOWN,
+                held_direction=Direction.DOWN,
+            )
+        )
+        self.assertEqual(screen.teleport_cursor.selected_key, "sample_cave")
+        screen.update(self.confirm())
+
+        on_teleport.assert_called_once_with("sample_cave")
+        self.alert.start.assert_not_called()
+
+    def test_empty_teleport_list_alerts_and_can_return_to_main(self) -> None:
+        self.screen.main_cursor.select_key("teleport")
+        self.screen.update(self.confirm())
+
+        self.assertIs(self.screen.phase, DebugMenuPhase.TELEPORT)
+        self.assertIsNone(self.screen.teleport_cursor)
+        self.screen.update(self.confirm())
+        self.alert.start.assert_called_once_with()
+
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+        self.assertEqual(self.screen.main_cursor.selected_key, "teleport")
+
+    def test_teleport_list_scrolls_beyond_the_visible_rows(self) -> None:
+        targets = tuple(
+            DebugTeleportTarget(f"site_{index}", f"拠点{index}")
+            for index in range(12)
+        )
+        screen = DebugMenuScreenMock(
+            editor=self.editor,
+            save_data=self.save_data,
+            settings=Settings(),
+            fonts=FontResources(),
+            alert=self.alert,
+            teleport_targets=targets,
+            on_teleport=Mock(return_value=True),
+        )
+        screen.main_cursor.select_key("teleport")
+        screen.update(self.confirm())
+
+        for _index in range(10):
+            screen.update(
+                InputState(
+                    navigation=Direction.DOWN,
+                    held_direction=Direction.DOWN,
+                )
+            )
+
+        self.assertEqual(screen.teleport_index, 10)
+        self.assertEqual(screen.teleport_scroll_offset, 1)
+        self.assertEqual(screen.teleport_cursor.selected_key, "site_10")
+        self.assertEqual(len(screen.teleport_cursor.targets), 10)
+
     def test_debug_text_is_japanese_only_and_formats_member_count(self) -> None:
         self.assertIsInstance(DEBUG_TEXT, DebugText)
         self.assertEqual(DEBUG_TEXT.title, "デバッグメニュー")
         self.assertEqual(DEBUG_TEXT.member_count(0), "フィオラ＋０にん")
+        self.assertEqual(DEBUG_TEXT.teleport_count(2), "２かしょ")
 
 
 if __name__ == "__main__":

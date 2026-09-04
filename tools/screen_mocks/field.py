@@ -18,7 +18,10 @@ from tools.screen_mocks._fixtures import (
     load_mock_skills,
     load_mock_spells,
 )
-from tools.screen_mocks.debug_menu import DebugMenuScreenMock
+from tools.screen_mocks.debug_menu import (
+    DebugMenuScreenMock,
+    DebugTeleportTarget,
+)
 from tools.screen_mocks.debug_text import DEBUG_TEXT
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
@@ -69,6 +72,7 @@ from resources import (
     FontRole,
     ImageResourceError,
     ImageResources,
+    MapDestination,
     MapResourceError,
     MapResources,
 )
@@ -85,7 +89,6 @@ from shop import ShopDataError
 from spell import SpellDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
 from systems import (
-    MAX_GOLD,
     DebugPartyEditor,
     DebugPartyError,
     InventorySystem,
@@ -236,8 +239,11 @@ FORMATION_ARROW_WIDTH = 8
 FORMATION_ARROW_HEIGHT = 16
 FORMATION_ARROW_COLKEY = 1
 FORMATION_ARROW_FRAME_DURATION = 30
+TELEPORT_SOUND_CHANNEL = 0
+TELEPORT_SOUND_ID = 8
 ALERT_CHANNEL = 1
 ALERT_SOUND_ID = 7
+SE_CHANNELS = (TELEPORT_SOUND_CHANNEL, ALERT_CHANNEL)
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
 SETTINGS_WINDOW_GRID = (4, 12, 56, 36)
@@ -255,6 +261,8 @@ SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
 FIELD_MOCK_SETTINGS_ENV = "DA0_FIELD_MOCK_SETTINGS"
 FIELD_BGM_ID = "da3-field"
+FIELD_MOCK_INITIAL_GOLD = 100
+FIELD_MOCK_INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
 SHOP_SELECTOR_WINDOW_GRID = (4, 7, 56, 46)
 SHOP_SELECTOR_TEXT_X = 4
 SHOP_SELECTOR_CURSOR_X = 2
@@ -282,6 +290,7 @@ class FieldScreenChange(Enum):
     OPEN_SHOP = auto()
     CLOSE_SHOP = auto()
     CHANGE_MAP = auto()
+    TELEPORT = auto()
 
 
 class MenuAlertEffect:
@@ -352,12 +361,16 @@ class FieldScreenMock:
         self.bgm.play(FIELD_BGM_ID)
         if self.settings.display_mode is DisplayMode.SMOOTH:
             self._apply_display_mode()
-        self.save_data = SaveData(gold=MAX_GOLD)
+        self.save_data = SaveData(gold=FIELD_MOCK_INITIAL_GOLD)
         self.items = load_mock_items()
-        self.inventory_system = InventorySystem.with_one_each(self.items)
+        self.inventory_system = InventorySystem(self.items)
         self.skills = load_mock_skills()
         self.spells = load_mock_spells()
-        self.party = load_mock_party(self.items, self.skills)
+        self.party = load_mock_party(
+            self.items,
+            self.skills,
+            character_keys=FIELD_MOCK_INITIAL_PARTY_KEYS,
+        )
         self.shops = load_mock_shops(self.items)
         self.shop_system = ShopSystem(
             shops=self.shops,
@@ -673,27 +686,35 @@ class FieldScreenMock:
         site = self.world_sites.entrance_at(arrived.x, arrived.y)
         if site is None:
             return
-        destination = site.destination
+        if not self._stage_map_destination(site.destination):
+            return
+        self.pending_site = site
+        self._begin_screen_change(FieldScreenChange.CHANGE_MAP)
+
+    def _stage_map_destination(self, destination: MapDestination) -> bool:
+        """Resolve a map destination before starting a screen transition."""
+
+        if not isinstance(destination, MapDestination):
+            raise TypeError("map destination must be a MapDestination")
         try:
             target_map = self.map_resources.map(destination.map_id)
         except MapResourceError:
-            return
+            return False
         try:
             arrival = target_map.arrival_point(destination.arrival_id)
         except KeyError:
-            return
-        self.pending_site = site
+            return False
         self.pending_target_map = target_map
         self.pending_target_arrival = arrival
-        self._begin_screen_change(FieldScreenChange.CHANGE_MAP)
+        return True
 
-    def _apply_pending_site_change(self) -> None:
-        site = self.pending_site
+    def _apply_pending_map_destination(self) -> None:
+        """Replace the field using the destination resolved before fading."""
+
         target_map = self.pending_target_map
         arrival = self.pending_target_arrival
-        if site is None or target_map is None or arrival is None:
-            raise RuntimeError("site map change has incomplete destination data")
-        self.travel_system.enter_site(self.save_data, site)
+        if target_map is None or arrival is None:
+            raise RuntimeError("map change has incomplete destination data")
         self.current_map = target_map
         self.field = FieldMovement(
             target_map,
@@ -705,10 +726,17 @@ class FieldScreenMock:
             screen_width=SCREEN_WIDTH,
             screen_height=SCREEN_HEIGHT,
         )
-        self.pending_site = None
         self.pending_target_map = None
         self.pending_target_arrival = None
         self._refresh_site_name_label(force=True)
+
+    def _apply_pending_site_change(self) -> None:
+        site = self.pending_site
+        if site is None:
+            raise RuntimeError("site map change has no entered site")
+        self.travel_system.enter_site(self.save_data, site)
+        self._apply_pending_map_destination()
+        self.pending_site = None
 
     def _party_window_texts(
         self,
@@ -1075,9 +1103,44 @@ class FieldScreenMock:
             settings=self.settings,
             fonts=self.fonts,
             alert=self.alert,
+            teleport_targets=self._debug_teleport_targets(),
+            on_teleport=self._start_debug_teleport,
         )
 
-    def _finish_debug_menu(self) -> None:
+    def _debug_teleport_targets(self) -> tuple[DebugTeleportTarget, ...]:
+        """Build localized choices accepted by the real teleport rules."""
+
+        localizer = Localizer(self.settings.language)
+        return tuple(
+            DebugTeleportTarget(
+                site.id,
+                self.texts.text(
+                    site.name_text_key,
+                    localizer,
+                    default=site.id,
+                ),
+            )
+            for site in self.travel_system.teleport_destinations(self.save_data)
+        )
+
+    def _start_debug_teleport(self, site_id: str) -> bool:
+        """Stage one visited teleport destination and begin fading out."""
+
+        try:
+            destination = self.travel_system.teleport_destination(
+                self.save_data,
+                site_id,
+            )
+        except (MapResourceError, ValueError):
+            return False
+        if not self._stage_map_destination(destination):
+            return False
+        self.pending_site = None
+        self._begin_screen_change(FieldScreenChange.TELEPORT)
+        pyxel.play(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+        return True
+
+    def _finish_debug_menu(self, *, resume_settings: bool = True) -> None:
         if self.debug_screen is None:
             return
         self.party = self.debug_screen.party
@@ -1088,9 +1151,20 @@ class FieldScreenMock:
             len(self.party) - 1,
         )
         self._build_main_windows(selected_command="config", animate=False)
-        self.command_cursor.active = False
-        if self.settings_cursor is not None:
-            self.settings_cursor.active = True
+        self.command_cursor.active = not resume_settings
+        if resume_settings:
+            if self.settings_cursor is not None:
+                self.settings_cursor.active = True
+        else:
+            self.settings_window = None
+            self.settings_cursor = None
+
+    def _apply_pending_debug_teleport(self) -> None:
+        """Apply a debug teleport and return directly to the field."""
+
+        self._apply_pending_map_destination()
+        self._finish_debug_menu(resume_settings=False)
+        self.showing_field = True
 
     def _start_status(self) -> None:
         self.command_cursor.active = False
@@ -1173,7 +1247,10 @@ class FieldScreenMock:
             raise RuntimeError("field screen change is already pending")
         frame_count = (
             SITE_MAP_FADE_FRAME_COUNT
-            if change is FieldScreenChange.CHANGE_MAP
+            if change in (
+                FieldScreenChange.CHANGE_MAP,
+                FieldScreenChange.TELEPORT,
+            )
             else DEFAULT_FADE_FRAME_COUNT
         )
         fade = getattr(self, "fade", None)
@@ -1225,6 +1302,8 @@ class FieldScreenMock:
             self.showing_field = True
         elif change is FieldScreenChange.CHANGE_MAP:
             self._apply_pending_site_change()
+        elif change is FieldScreenChange.TELEPORT:
+            self._apply_pending_debug_teleport()
         else:
             self._finish_status()
         self.pending_screen_change = None
@@ -1388,10 +1467,10 @@ class FieldScreenMock:
         self._refresh_settings_window(selected_key=key)
 
     def _apply_se_volume(self) -> None:
-        if len(pyxel.channels) > ALERT_CHANNEL:
-            pyxel.channels[ALERT_CHANNEL].gain = SE_VOLUME_GAINS[
-                self.settings.se_volume
-            ]
+        gain = SE_VOLUME_GAINS[self.settings.se_volume]
+        for channel in SE_CHANNELS:
+            if len(pyxel.channels) > channel:
+                pyxel.channels[channel].gain = gain
 
     def _apply_display_mode(self) -> None:
         pyxel.screen_mode(1 if self.settings.display_mode is DisplayMode.SMOOTH else 0)

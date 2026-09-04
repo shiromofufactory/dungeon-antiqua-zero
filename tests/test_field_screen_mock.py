@@ -6,11 +6,14 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
+from tools.screen_mocks.debug_menu import DebugTeleportTarget
 from tools.screen_mocks.field import (
     ALERT_CHANNEL,
     ALERT_SOUND_ID,
     FACES_IMAGE_ID,
     FIELD_BGM_ID,
+    FIELD_MOCK_INITIAL_GOLD,
+    FIELD_MOCK_INITIAL_PARTY_KEYS,
     FIELD_MOCK_SETTINGS_ENV,
     FORMATION_ARROW_COLKEY,
     FORMATION_ARROW_FRAME_DURATION,
@@ -32,6 +35,7 @@ from tools.screen_mocks.field import (
     PARTY_RECOVERY_TEXT_X,
     PARTY_WINDOW_GRID,
     RESERVE_MEMBER_Y_OFFSET_GRID,
+    SE_CHANNELS,
     SE_PREVIEW_SOUND_ID,
     SITE_MAP_FADE_FRAME_COUNT,
     SITE_NAME_FONT_ROLE,
@@ -42,6 +46,8 @@ from tools.screen_mocks.field import (
     SETTINGS_VALUE_X,
     SETTINGS_WINDOW_GRID,
     SORT_SOURCE_CURSOR_X_OFFSET,
+    TELEPORT_SOUND_CHANNEL,
+    TELEPORT_SOUND_ID,
     WORLD_MAP_ID,
     WORLD_MAP_START_POSITION,
     MenuAlertEffect,
@@ -87,7 +93,7 @@ class FieldScreenMockTest(unittest.TestCase):
     @patch("tools.screen_mocks.field.MapResources")
     @patch("tools.screen_mocks.field.ImageResources")
     @patch("tools.screen_mocks.field.FontResources")
-    def test_creates_six_slot_main_window_and_da2_side_windows(
+    def test_creates_initial_party_and_da2_side_windows(
         self,
         fonts_class: Mock,
         images_class: Mock,
@@ -179,23 +185,22 @@ class FieldScreenMockTest(unittest.TestCase):
         party_texts = {(text.x, text.y): text for text in party_args[4]}
         self.assertEqual(
             [member.definition.key for member in mock.party],
-            ["Fiora", "Cerion", "Alvan", "Elika", "Ragna", "Dain"],
+            list(FIELD_MOCK_INITIAL_PARTY_KEYS),
         )
         self.assertEqual(
             [member.definition.key for member in mock._main_menu_members()],
-            ["Fiora", "Cerion", "Alvan", "Elika", "Ragna", "Dain"],
+            list(FIELD_MOCK_INITIAL_PARTY_KEYS),
         )
         self.assertEqual(
             [member.formation_row for member in mock.party],
             [
                 FormationRow.FRONT,
                 FormationRow.BACK,
-                FormationRow.FRONT,
-                FormationRow.BACK,
-                FormationRow.FRONT,
-                FormationRow.FRONT,
             ],
         )
+        self.assertEqual(mock.save_data.gold, FIELD_MOCK_INITIAL_GOLD)
+        self.assertEqual(dict(mock.inventory_system.quantities), {})
+        self.assertEqual(mock.inventory_system.items, ())
         self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 2)].text, "フィオラ")
         self.assertEqual(
             party_texts[(PARTY_POINT_TEXT_X, 5)].text,
@@ -205,56 +210,15 @@ class FieldScreenMockTest(unittest.TestCase):
             party_texts[(PARTY_POINT_TEXT_X, 8)].text,
             "ＭＰ　　１２／　１２",
         )
-        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 11)].text, "セリオン")
-        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 20)].text, "アルヴァン")
-        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 29)].text, "エリカ")
-        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 38)].text, "ラグナ")
-        self.assertEqual(
-            party_texts[(PARTY_POINT_TEXT_X, 44)].color,
-            DISABLED_COLOR,
-        )
-        self.assertEqual(
-            party_texts[(PARTY_NAME_TEXT_X, 49)].text,
-            "ダイン（ひかえ）",
-        )
-        self.assertEqual(
-            party_texts[(PARTY_NAME_TEXT_X, 49)].color,
-            RESERVE_MEMBER_TEXT_COLOR,
-        )
-        self.assertEqual(
-            party_texts[(PARTY_POINT_TEXT_X, 52)].color,
-            RESERVE_MEMBER_TEXT_COLOR,
-        )
-        self.assertEqual(
-            party_texts[(PARTY_POINT_TEXT_X, 55)].color,
-            RESERVE_MEMBER_TEXT_COLOR,
-        )
+        self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 13)].text, "セリオン")
         self.assertEqual(
             [target.key for target in mock._sort_cursor_targets()],
-            list(range(6)),
+            list(range(2)),
         )
         self.assertEqual(
             mock._sort_cursor_targets()[-1].y,
             PARTY_CURSOR_Y
-            + 5 * PARTY_MEMBER_ROW_HEIGHT
-            + RESERVE_MEMBER_Y_OFFSET_GRID,
-        )
-        five_member_texts = mock._party_window_texts(
-            mock.party[:5],
-            mock.localized,
-            mock.localized_texts,
-        )
-        five_member_names = [
-            text.y
-            for text in five_member_texts
-            if text.x == PARTY_NAME_TEXT_X
-        ]
-        self.assertEqual(
-            five_member_names,
-            [
-                2 + index * PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE
-                for index in range(5)
-            ],
+            + PARTY_MEMBER_ROW_HEIGHT_WITHOUT_RESERVE,
         )
 
         args = factory.create.call_args_list[1].args
@@ -324,7 +288,7 @@ class FieldScreenMockTest(unittest.TestCase):
             [(text.text, text.x, text.y) for text in info_args[4]],
             [
                 ("Ｇｏｌｄ", 2, 2),
-                ("９９９９９９", 2, 5),
+                ("　　　１００", 2, 5),
                 ("けいけんち", 2, 8),
                 ("　　　　　０", 2, 11),
                 ("なんいど", 2, 14),
@@ -861,12 +825,14 @@ class FieldScreenMockTest(unittest.TestCase):
             font_spans=(),
         )
 
+    @patch("tools.screen_mocks.field.pyxel.play")
     @patch("tools.screen_mocks.field.FieldRenderer")
     @patch("tools.screen_mocks.field.FieldMovement")
     def test_arriving_at_site_changes_map_at_fade_midpoint(
         self,
         field_movement_class: Mock,
         field_renderer_class: Mock,
+        play: Mock,
     ) -> None:
         site = WorldSite(
             id="sample_town",
@@ -920,6 +886,7 @@ class FieldScreenMockTest(unittest.TestCase):
             screen_height=240,
         )
         self.assertIs(mock.current_map, target_map)
+        play.assert_not_called()
 
     def test_missing_site_map_does_not_mark_site_visited(self) -> None:
         site = WorldSite(
@@ -943,6 +910,150 @@ class FieldScreenMockTest(unittest.TestCase):
 
         mock.travel_system.enter_site.assert_not_called()
         self.assertIsNone(mock.pending_screen_change)
+
+    def test_debug_teleport_targets_use_visited_sites_and_localized_names(
+        self,
+    ) -> None:
+        site = WorldSite(
+            id="sample_town",
+            name_text_key="location.sample_town",
+            entrance_cells=(MapCell(2, 2),),
+            destination=MapDestination("sample_town", "from_world"),
+        )
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.settings = Settings(language=Language.JAPANESE)
+        mock.save_data = SaveData(visited_site_ids={"sample_town"})
+        mock.travel_system = Mock()
+        mock.travel_system.teleport_destinations.return_value = (site,)
+        mock.texts = Mock()
+        mock.texts.text.return_value = "サンプルの町"
+
+        targets = mock._debug_teleport_targets()
+
+        self.assertEqual(
+            targets,
+            (DebugTeleportTarget("sample_town", "サンプルの町"),),
+        )
+        mock.travel_system.teleport_destinations.assert_called_once_with(
+            mock.save_data
+        )
+        self.assertEqual(
+            mock.texts.text.call_args.args[0],
+            "location.sample_town",
+        )
+        self.assertIsInstance(mock.texts.text.call_args.args[1], Localizer)
+
+    @patch("tools.screen_mocks.field.pyxel.play")
+    def test_debug_teleport_stages_destination_and_starts_slow_fade(
+        self,
+        play: Mock,
+    ) -> None:
+        destination = MapDestination("worldmap", "sample_town_world")
+        arrival = MapArrivalPoint(
+            "sample_town_world",
+            MapCell(7, 8),
+            "down",
+            True,
+            "sample_town",
+        )
+        target_map = Mock()
+        target_map.arrival_point.return_value = arrival
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.save_data = SaveData(visited_site_ids={"sample_town"})
+        mock.travel_system = Mock()
+        mock.travel_system.teleport_destination.return_value = destination
+        mock.map_resources = Mock()
+        mock.map_resources.map.return_value = target_map
+        mock.pending_site = Mock()
+        mock.pending_target_map = None
+        mock.pending_target_arrival = None
+        mock.pending_screen_change = None
+        mock.fade = FadeThroughBlack()
+
+        started = mock._start_debug_teleport("sample_town")
+
+        self.assertTrue(started)
+        mock.travel_system.teleport_destination.assert_called_once_with(
+            mock.save_data,
+            "sample_town",
+        )
+        self.assertIsNone(mock.pending_site)
+        self.assertIs(mock.pending_target_map, target_map)
+        self.assertIs(mock.pending_target_arrival, arrival)
+        self.assertIs(
+            mock.pending_screen_change,
+            FieldScreenChange.TELEPORT,
+        )
+        self.assertEqual(mock.fade.frame_count, SITE_MAP_FADE_FRAME_COUNT)
+        play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+
+    @patch("tools.screen_mocks.field.pyxel.channels")
+    def test_se_volume_applies_to_every_field_mock_se_channel(
+        self,
+        channels: Mock,
+    ) -> None:
+        channel_values = [Mock() for _ in range(max(SE_CHANNELS) + 1)]
+        channels.__len__.return_value = len(channel_values)
+        channels.__getitem__.side_effect = channel_values.__getitem__
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.settings = Settings(se_volume=3)
+
+        mock._apply_se_volume()
+
+        for channel in SE_CHANNELS:
+            self.assertEqual(channel_values[channel].gain, 0.15)
+
+    @patch("tools.screen_mocks.field.FieldRenderer")
+    @patch("tools.screen_mocks.field.FieldMovement")
+    def test_applying_debug_teleport_returns_directly_to_field(
+        self,
+        field_movement_class: Mock,
+        field_renderer_class: Mock,
+    ) -> None:
+        arrival = MapArrivalPoint(
+            "sample_town_world",
+            MapCell(7, 8),
+            "left",
+            True,
+            "sample_town",
+        )
+        target_map = Mock()
+        party = (Mock(),)
+        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock.pending_target_map = target_map
+        mock.pending_target_arrival = arrival
+        mock.debug_screen = Mock(party=party)
+        mock.party = ()
+        mock._force_reserve_front = Mock()
+        mock.selected_member_index = 5
+        mock._build_main_windows = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.settings_window = Mock()
+        mock.settings_cursor = Mock(active=False)
+        mock.showing_field = False
+        mock._refresh_site_name_label = Mock()
+        mock.travel_system = Mock()
+
+        mock._apply_pending_debug_teleport()
+
+        field_movement_class.assert_called_once_with(
+            target_map,
+            start=FieldPosition(7, 8),
+            facing=Direction.LEFT,
+        )
+        field_renderer_class.assert_called_once_with(
+            target_map,
+            screen_width=256,
+            screen_height=240,
+        )
+        self.assertTrue(mock.showing_field)
+        self.assertIsNone(mock.debug_screen)
+        self.assertIsNone(mock.settings_window)
+        self.assertIsNone(mock.settings_cursor)
+        self.assertTrue(mock.command_cursor.active)
+        self.assertEqual(mock.party, party)
+        self.assertEqual(mock.selected_member_index, 0)
+        mock.travel_system.enter_site.assert_not_called()
 
     @patch("tools.screen_mocks.field.pyxel.cls")
     @patch("tools.screen_mocks.field.pyxel.camera")
