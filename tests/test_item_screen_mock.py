@@ -72,7 +72,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 32, 39))
         self.assertEqual(ITEM_INFO_WINDOW_GRID, (31, 5, 33, 39))
         self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24, 36))
-        self.assertEqual(len(mock.items), 121)
+        self.assertEqual(len(mock.items), 122)
         self.assertEqual(len(mock.inventory), len(mock.items))
         self.assertEqual(set(mock.item_counts.values()), {1})
         self.assertEqual(mock.important_items, ())
@@ -121,9 +121,9 @@ class ItemScreenMockTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "１２１",
+                "１２２",
                 "きろくずみ：",
-                "１２１／１２１",
+                "１２２／１２２",
             ],
         )
         self.assertEqual(
@@ -715,9 +715,9 @@ class ItemScreenMockTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "１２０",
+                "１２１",
                 "きろくずみ：",
-                "１２１／１２１",
+                "１２２／１２２",
             ],
         )
 

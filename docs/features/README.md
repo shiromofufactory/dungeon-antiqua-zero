@@ -33,7 +33,7 @@
 ## 機能一覧
 
 - [セーブデータ形式](./save-data.md)
-- [フィールドモック](./field-mock.md)
+- [フィールド・メニュー](./field.md)
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)
 - [マップチップメタデータ設定ツール](./map-chip-metadata-tool.md)

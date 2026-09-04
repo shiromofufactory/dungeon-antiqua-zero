@@ -9,14 +9,14 @@ from tools.screen_mocks._fixtures import (
     load_mock_party,
     load_mock_skills,
 )
-from tools.screen_mocks.debug_menu import (
+from ui.debug_menu import (
     DebugMenuPhase,
-    DebugMenuScreenMock,
+    DebugMenuOverlay,
     DebugTeleportTarget,
     MAX_GOLD,
     NumericEntry,
 )
-from tools.screen_mocks.debug_text import DEBUG_TEXT, DebugText
+from ui.debug_text import DEBUG_TEXT, DebugText
 from input import Direction, InputButton, InputState
 from resources import FontResources, FontRole
 from state import Language, SaveData, Settings
@@ -46,7 +46,7 @@ class NumericEntryTest(unittest.TestCase):
         self.assertFalse(entry.delete())
 
 
-class DebugMenuScreenMockTest(unittest.TestCase):
+class DebugMenuOverlayTest(unittest.TestCase):
     def setUp(self) -> None:
         items = load_mock_items()
         skills = load_mock_skills()
@@ -59,7 +59,7 @@ class DebugMenuScreenMockTest(unittest.TestCase):
         )
         self.save_data = SaveData()
         self.alert = Mock()
-        self.screen = DebugMenuScreenMock(
+        self.screen = DebugMenuOverlay(
             editor=self.editor,
             save_data=self.save_data,
             settings=Settings(),
@@ -201,7 +201,7 @@ class DebugMenuScreenMockTest(unittest.TestCase):
 
     def test_teleport_list_requests_the_selected_visited_site(self) -> None:
         on_teleport = Mock(return_value=True)
-        screen = DebugMenuScreenMock(
+        screen = DebugMenuOverlay(
             editor=self.editor,
             save_data=self.save_data,
             settings=Settings(),
@@ -253,7 +253,7 @@ class DebugMenuScreenMockTest(unittest.TestCase):
             DebugTeleportTarget(f"site_{index}", f"拠点{index}")
             for index in range(12)
         )
-        screen = DebugMenuScreenMock(
+        screen = DebugMenuOverlay(
             editor=self.editor,
             save_data=self.save_data,
             settings=Settings(),

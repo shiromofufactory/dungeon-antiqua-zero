@@ -1,36 +1,25 @@
-"""Run the connected field-movement and menu-screen mock."""
+"""Coordinate the currently playable field-first game flow."""
 
 from __future__ import annotations
 
 import json
 import os
 from enum import Enum, auto
+from pathlib import Path
 
 import pyxel
 
-from tools._bootstrap import APP_ROOT, PROJECT_ROOT
-from tools.screen_mocks._fixtures import (
-    MockFixtureError,
-    load_mock_character_records,
-    load_mock_items,
-    load_mock_party,
-    load_mock_shops,
-    load_mock_skills,
-    load_mock_spells,
+from game_data import (
+    GameDataError,
+    create_party,
+    load_character_records,
+    load_items,
+    load_shops,
+    load_skills,
+    load_spells,
 )
-from tools.screen_mocks.debug_menu import (
-    DebugMenuScreenMock,
-    DebugTeleportTarget,
-)
-from tools.screen_mocks.debug_text import DEBUG_TEXT
-from tools.screen_mocks._runner import run_screen_mock
-from tools.screen_mocks._runtime import (
-    FPS,
-    SCREEN_HEIGHT,
-    SCREEN_WIDTH,
-    create_mock_input_reader,
-    initialize_screen_mock,
-)
+from ui.debug_menu import DebugMenuOverlay, DebugTeleportTarget
+from ui.debug_text import DEBUG_TEXT
 from ui.equipment_menu import (
     EquipmentMenuDataError,
     EquipmentMenuOverlay,
@@ -52,7 +41,9 @@ from field import FieldMovement, FieldPosition
 from input import (
     Direction,
     InputAction,
+    InputBindings,
     InputDevice,
+    PyxelInputReader,
 )
 from item import ItemDataError
 from localization import Localizer, format_number
@@ -84,6 +75,7 @@ from rendering import (
     FadePhase,
     FadeThroughBlack,
     FieldRenderer,
+    PaletteShifter,
 )
 from skill import SkillDataError
 from shop import ShopDataError
@@ -122,6 +114,11 @@ from ui import (
     input_icon_tag,
     pad,
 )
+
+APP_ROOT = Path(__file__).resolve().parent
+SCREEN_WIDTH = 256
+SCREEN_HEIGHT = 240
+FPS = 60
 
 MENU_COMMANDS = (
     ("item", "menu.command.item"),
@@ -211,7 +208,6 @@ MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
 WORLD_MAP_ID = "worldmap"
 WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
-CONTENT_TEXTS_PATH = PROJECT_ROOT / "content" / "data" / "texts.json"
 RUNTIME_TEXTS_PATH = APP_ROOT / "data" / "texts.json"
 SITE_MAP_FADE_FRAME_COUNT = 12
 SITE_NAME_FONT_ROLE = FontRole.LARGE
@@ -266,10 +262,10 @@ CONFIRMATION_YES_Y = 8
 CONFIRMATION_NO_Y = 11
 SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
-FIELD_MOCK_SETTINGS_ENV = "DA0_FIELD_MOCK_SETTINGS"
+GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
 FIELD_BGM_ID = "da3-field"
-FIELD_MOCK_INITIAL_GOLD = 100
-FIELD_MOCK_INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
+INITIAL_GOLD = 100
+INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
 SHOP_SELECTOR_WINDOW_GRID = (4, 7, 56, 46)
 SHOP_SELECTOR_TEXT_X = 4
 SHOP_SELECTOR_CURSOR_X = 2
@@ -277,12 +273,8 @@ SHOP_SELECTOR_FIRST_Y = 2
 SHOP_SELECTOR_ROW_HEIGHT = 3
 
 
-class FieldMockDataError(RuntimeError):
-    """Raised when localized data required by the field mock is unavailable."""
-
-
-class FieldScreenChange(Enum):
-    """Field-mock screen replacement applied only while fully black."""
+class GameScreenChange(Enum):
+    """Screen replacement applied only while fully black."""
 
     SHOW_FIELD = auto()
     SHOW_MENU = auto()
@@ -342,45 +334,46 @@ def localized_menu_texts(
     for key in keys:
         text = catalog.text(key, localizer)
         if not text:
-            raise FieldMockDataError(f"フィールドモック用テキストが見つかりません: {key}")
+            raise GameDataError(f"ゲーム用テキストが見つかりません: {key}")
         localized[key] = text
 
     close_guide = localized[MENU_CLOSE_GUIDE_TEXT_KEY]
     if close_guide.count("%CANCEL%") != 1:
-        raise FieldMockDataError(f"{MENU_CLOSE_GUIDE_TEXT_KEY}には%CANCEL%が1つ必要です")
+        raise GameDataError(f"{MENU_CLOSE_GUIDE_TEXT_KEY}には%CANCEL%が1つ必要です")
     return localized
 
 
-class FieldScreenMock:
-    def __init__(self) -> None:
-        self.settings = self._settings_from_environment()
-        self.palette_shifter = initialize_screen_mock(
-            "Dungeon Antiqua ZERO Field Mock",
-            display_scale=(
-                None if self.settings.screen_scale == 5 else self.settings.screen_scale
-            ),
-        )
-        if self.settings.screen_scale == 5:
-            pyxel.fullscreen(True)
-        self.input_reader = create_mock_input_reader()
+class Game:
+    """Own the current field-first runtime state and Pyxel callbacks."""
+
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        palette_shifter: PaletteShifter,
+    ) -> None:
+        if not isinstance(settings, Settings):
+            raise TypeError("settings must be Settings")
+        self.settings = settings
+        self.palette_shifter = palette_shifter
+        self.input_reader = create_game_input_reader()
         self.alert = MenuAlertEffect()
 
         self._apply_se_volume()
         self.bgm = BgmPlayer(volume=self.settings.bgm_volume)
         self.bgm.play(FIELD_BGM_ID)
-        if self.settings.display_mode is DisplayMode.SMOOTH:
-            self._apply_display_mode()
-        self.save_data = SaveData(gold=FIELD_MOCK_INITIAL_GOLD)
-        self.items = load_mock_items()
+        self.save_data = SaveData(gold=INITIAL_GOLD)
+        self.items = load_items()
         self.inventory_system = InventorySystem(self.items)
-        self.skills = load_mock_skills()
-        self.spells = load_mock_spells()
-        self.party = load_mock_party(
+        self.skills = load_skills()
+        self.spells = load_spells()
+        self.party = create_party(
             self.items,
             self.skills,
-            character_keys=FIELD_MOCK_INITIAL_PARTY_KEYS,
+            character_keys=INITIAL_PARTY_KEYS,
+            back_row_character_keys=("Cerion",),
         )
-        self.shops = load_mock_shops(self.items)
+        self.shops = load_shops(self.items)
         self.shop_system = ShopSystem(
             shops=self.shops,
             inventory=self.inventory_system,
@@ -388,7 +381,7 @@ class FieldScreenMock:
             save_data=self.save_data,
         )
         self._force_reserve_front()
-        self.character_records = load_mock_character_records()
+        self.character_records = load_character_records()
         self.character_states = {
             member.definition.key: member for member in self.party
         }
@@ -402,12 +395,7 @@ class FieldScreenMock:
         }
         self.save_repository = SaveRepository()
         self.current_save_slot: int | None = None
-        texts_path = (
-            CONTENT_TEXTS_PATH
-            if CONTENT_TEXTS_PATH.is_file()
-            else RUNTIME_TEXTS_PATH
-        )
-        self.texts = TextCatalog.from_json(texts_path)
+        self.texts = TextCatalog.from_json(RUNTIME_TEXTS_PATH)
         self.fonts = FontResources()
         images = ImageResources()
         self.faces = images.image(FACES_IMAGE_ID)
@@ -431,7 +419,7 @@ class FieldScreenMock:
         self.confirmation_cursor: WindowCursor | None = None
         self.pending_settings_action: str | None = None
         self.fade = FadeThroughBlack()
-        self.pending_screen_change: FieldScreenChange | None = None
+        self.pending_screen_change: GameScreenChange | None = None
         self.animate_main_windows_with_fade = False
         self.showing_field = True
         self.item_screen: ItemMenuOverlay | None = None
@@ -443,7 +431,7 @@ class FieldScreenMock:
         self.shop_selector_window = None
         self.shop_selector_cursor: WindowCursor | None = None
         self.pending_shop = None
-        self.debug_screen: DebugMenuScreenMock | None = None
+        self.debug_screen: DebugMenuOverlay | None = None
         self.selected_member_index = 0
         self.site_name_site = None
         self.site_name_text: WindowText | None = None
@@ -454,18 +442,16 @@ class FieldScreenMock:
         self._build_main_windows()
         self._refresh_site_name_label()
 
-        pyxel.run(self.update, self.draw)
-
     @staticmethod
-    def _settings_from_environment() -> Settings:
-        serialized = os.environ.get(FIELD_MOCK_SETTINGS_ENV)
+    def settings_from_environment() -> Settings:
+        serialized = os.environ.get(GAME_SETTINGS_ENV)
         if serialized is None:
             return Settings()
         try:
             data = json.loads(serialized)
             return Settings.from_dict(data)
         except (json.JSONDecodeError, TypeError, ValueError):
-            os.environ.pop(FIELD_MOCK_SETTINGS_ENV, None)
+            os.environ.pop(GAME_SETTINGS_ENV, None)
             return Settings()
 
     @staticmethod
@@ -712,7 +698,7 @@ class FieldScreenMock:
         if not self._stage_map_destination(site.destination):
             return
         self.pending_site = site
-        self._begin_screen_change(FieldScreenChange.CHANGE_MAP)
+        self._begin_screen_change(GameScreenChange.CHANGE_MAP)
 
     def _stage_map_destination(self, destination: MapDestination) -> bool:
         """Resolve a map destination before starting a screen transition."""
@@ -1120,7 +1106,7 @@ class FieldScreenMock:
             skills=self.skills,
             party=self.party,
         )
-        self.debug_screen = DebugMenuScreenMock(
+        self.debug_screen = DebugMenuOverlay(
             editor=editor,
             save_data=self.save_data,
             settings=self.settings,
@@ -1159,7 +1145,7 @@ class FieldScreenMock:
         if not self._stage_map_destination(destination):
             return False
         self.pending_site = None
-        self._begin_screen_change(FieldScreenChange.TELEPORT)
+        self._begin_screen_change(GameScreenChange.TELEPORT)
         pyxel.play(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
         return True
 
@@ -1266,18 +1252,18 @@ class FieldScreenMock:
         else:
             self.command_cursor.active = True
 
-    def _begin_screen_change(self, change: FieldScreenChange) -> None:
+    def _begin_screen_change(self, change: GameScreenChange) -> None:
         """Reserve one menu-related screen replacement and begin fading out."""
 
-        if not isinstance(change, FieldScreenChange):
-            raise TypeError("field screen change must be a FieldScreenChange")
+        if not isinstance(change, GameScreenChange):
+            raise TypeError("field screen change must be a GameScreenChange")
         if getattr(self, "pending_screen_change", None) is not None:
             raise RuntimeError("field screen change is already pending")
         frame_count = (
             SITE_MAP_FADE_FRAME_COUNT
             if change in (
-                FieldScreenChange.CHANGE_MAP,
-                FieldScreenChange.TELEPORT,
+                GameScreenChange.CHANGE_MAP,
+                GameScreenChange.TELEPORT,
             )
             else DEFAULT_FADE_FRAME_COUNT
         )
@@ -1287,12 +1273,12 @@ class FieldScreenMock:
             self.fade = fade
         self.pending_screen_change = change
         if change in (
-            FieldScreenChange.SHOW_FIELD,
-            FieldScreenChange.OPEN_ITEM,
-            FieldScreenChange.OPEN_SPELL,
-            FieldScreenChange.OPEN_EQUIPMENT,
-            FieldScreenChange.OPEN_STATUS,
-            FieldScreenChange.OPEN_SAVE,
+            GameScreenChange.SHOW_FIELD,
+            GameScreenChange.OPEN_ITEM,
+            GameScreenChange.OPEN_SPELL,
+            GameScreenChange.OPEN_EQUIPMENT,
+            GameScreenChange.OPEN_STATUS,
+            GameScreenChange.OPEN_SAVE,
         ):
             self.command_cursor.active = False
         fade.start()
@@ -1303,41 +1289,41 @@ class FieldScreenMock:
         change = self.pending_screen_change
         if change is None:
             raise RuntimeError("fade midpoint has no pending field screen change")
-        if change is FieldScreenChange.SHOW_FIELD:
+        if change is GameScreenChange.SHOW_FIELD:
             self.showing_field = True
-        elif change is FieldScreenChange.SHOW_MENU:
+        elif change is GameScreenChange.SHOW_MENU:
             self.showing_field = False
             self.command_cursor.active = True
             self._restart_main_windows_for_fade_in()
-        elif change is FieldScreenChange.OPEN_ITEM:
+        elif change is GameScreenChange.OPEN_ITEM:
             self._start_item()
-        elif change is FieldScreenChange.CLOSE_ITEM:
+        elif change is GameScreenChange.CLOSE_ITEM:
             self._finish_item()
-        elif change is FieldScreenChange.OPEN_SPELL:
+        elif change is GameScreenChange.OPEN_SPELL:
             self._start_spell()
-        elif change is FieldScreenChange.CLOSE_SPELL:
+        elif change is GameScreenChange.CLOSE_SPELL:
             self._finish_spell()
-        elif change is FieldScreenChange.OPEN_EQUIPMENT:
+        elif change is GameScreenChange.OPEN_EQUIPMENT:
             self._start_equipment()
-        elif change is FieldScreenChange.CLOSE_EQUIPMENT:
+        elif change is GameScreenChange.CLOSE_EQUIPMENT:
             self._finish_equipment()
-        elif change is FieldScreenChange.OPEN_STATUS:
+        elif change is GameScreenChange.OPEN_STATUS:
             self._start_status()
-        elif change is FieldScreenChange.CLOSE_STATUS:
+        elif change is GameScreenChange.CLOSE_STATUS:
             self._finish_status()
-        elif change is FieldScreenChange.OPEN_SAVE:
+        elif change is GameScreenChange.OPEN_SAVE:
             self._start_save()
-        elif change is FieldScreenChange.CLOSE_SAVE:
+        elif change is GameScreenChange.CLOSE_SAVE:
             self._finish_save()
-        elif change is FieldScreenChange.OPEN_SHOP:
+        elif change is GameScreenChange.OPEN_SHOP:
             self.showing_field = False
             self._start_shop()
-        elif change is FieldScreenChange.CLOSE_SHOP:
+        elif change is GameScreenChange.CLOSE_SHOP:
             self._finish_shop()
             self.showing_field = True
-        elif change is FieldScreenChange.CHANGE_MAP:
+        elif change is GameScreenChange.CHANGE_MAP:
             self._apply_pending_site_change()
-        elif change is FieldScreenChange.TELEPORT:
+        elif change is GameScreenChange.TELEPORT:
             self._apply_pending_debug_teleport()
         else:
             raise RuntimeError(f"unsupported field screen change: {change}")
@@ -1468,7 +1454,7 @@ class FieldScreenMock:
     def _start_shop(self) -> None:
         shop = self.pending_shop
         if shop is None:
-            raise FieldMockDataError("選択されたショップがありません")
+            raise GameDataError("選択されたショップがありません")
         self.shop_system = ShopSystem(
             shops=self.shops,
             inventory=self.inventory_system,
@@ -1602,8 +1588,8 @@ class FieldScreenMock:
         if self.settings_cursor is not None:
             self.settings_cursor.active = True
 
-    def _restart_mock(self) -> None:
-        os.environ[FIELD_MOCK_SETTINGS_ENV] = json.dumps(
+    def _restart_game(self) -> None:
+        os.environ[GAME_SETTINGS_ENV] = json.dumps(
             self.settings.to_dict(),
             ensure_ascii=True,
         )
@@ -1634,7 +1620,7 @@ class FieldScreenMock:
         shop_screen = getattr(self, "shop_screen", None)
         if shop_screen is not None:
             if shop_screen.update(input_state):
-                self._begin_screen_change(FieldScreenChange.CLOSE_SHOP)
+                self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
             shop_selector_cursor = getattr(self, "shop_selector_cursor", None)
@@ -1649,16 +1635,16 @@ class FieldScreenMock:
                         None,
                     )
                     if self.pending_shop is None:
-                        raise FieldMockDataError(
+                        raise GameDataError(
                             f"選択されたショップが見つかりません: {selected_key!r}"
                         )
-                    self._begin_screen_change(FieldScreenChange.OPEN_SHOP)
+                    self._begin_screen_change(GameScreenChange.OPEN_SHOP)
                     return
                 shop_selector_cursor.update(input_state.navigation)
             elif input_state.confirm.triggered:
                 self._start_shop_selector()
             elif input_state.menu.triggered:
-                self._begin_screen_change(FieldScreenChange.SHOW_MENU)
+                self._begin_screen_change(GameScreenChange.SHOW_MENU)
             elif input_state.cancel.triggered:
                 pyxel.quit()
             else:
@@ -1669,27 +1655,27 @@ class FieldScreenMock:
         item_screen = getattr(self, "item_screen", None)
         if item_screen is not None:
             if item_screen.update(input_state):
-                self._begin_screen_change(FieldScreenChange.CLOSE_ITEM)
+                self._begin_screen_change(GameScreenChange.CLOSE_ITEM)
             return
         spell_screen = getattr(self, "spell_screen", None)
         if spell_screen is not None:
             if spell_screen.update(input_state):
-                self._begin_screen_change(FieldScreenChange.CLOSE_SPELL)
+                self._begin_screen_change(GameScreenChange.CLOSE_SPELL)
             return
         equipment_screen = getattr(self, "equipment_screen", None)
         if equipment_screen is not None:
             if equipment_screen.update(input_state):
-                self._begin_screen_change(FieldScreenChange.CLOSE_EQUIPMENT)
+                self._begin_screen_change(GameScreenChange.CLOSE_EQUIPMENT)
             return
         status_screen = getattr(self, "status_screen", None)
         if status_screen is not None:
             if status_screen.update(input_state):
-                self._begin_screen_change(FieldScreenChange.CLOSE_STATUS)
+                self._begin_screen_change(GameScreenChange.CLOSE_STATUS)
             return
         save_screen = getattr(self, "save_screen", None)
         if save_screen is not None:
             if save_screen.update(input_state):
-                self._begin_screen_change(FieldScreenChange.CLOSE_SAVE)
+                self._begin_screen_change(GameScreenChange.CLOSE_SAVE)
             return
         debug_screen = getattr(self, "debug_screen", None)
         if debug_screen is not None:
@@ -1707,7 +1693,7 @@ class FieldScreenMock:
                 if self.confirmation_cursor.selected_key == "yes":
                     action = self.pending_settings_action
                     if action == "return_title":
-                        self._restart_mock()
+                        self._restart_game()
                     elif action == "quit":
                         pyxel.quit()
                     return
@@ -1754,28 +1740,28 @@ class FieldScreenMock:
             return
 
         if input_state.cancel.triggered:
-            self._begin_screen_change(FieldScreenChange.SHOW_FIELD)
+            self._begin_screen_change(GameScreenChange.SHOW_FIELD)
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "item":
-            self._begin_screen_change(FieldScreenChange.OPEN_ITEM)
+            self._begin_screen_change(GameScreenChange.OPEN_ITEM)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "spell"
         ):
-            self._begin_screen_change(FieldScreenChange.OPEN_SPELL)
+            self._begin_screen_change(GameScreenChange.OPEN_SPELL)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "equip"
         ):
-            self._begin_screen_change(FieldScreenChange.OPEN_EQUIPMENT)
+            self._begin_screen_change(GameScreenChange.OPEN_EQUIPMENT)
             return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "status"
         ):
-            self._begin_screen_change(FieldScreenChange.OPEN_STATUS)
+            self._begin_screen_change(GameScreenChange.OPEN_STATUS)
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "sort":
             self._start_sort()
@@ -1787,7 +1773,7 @@ class FieldScreenMock:
             self._start_settings()
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "save":
-            self._begin_screen_change(FieldScreenChange.OPEN_SAVE)
+            self._begin_screen_change(GameScreenChange.OPEN_SAVE)
             return
         self.command_window.update(input_state.navigation)
 
@@ -1917,33 +1903,42 @@ class FieldScreenMock:
         )
 
 
-def main() -> int:
-    return run_screen_mock(
-        FieldScreenMock,
-        expected_errors=(
-            AudioResourceError,
-            DataResourceError,
-            DebugPartyError,
-            EquipmentMenuDataError,
-            FontResourceError,
-            ImageResourceError,
-            MapResourceError,
-            ItemDataError,
-            ItemMenuDataError,
-            MemberDataError,
-            FieldMockDataError,
-            MockFixtureError,
-            SkillDataError,
-            SaveMenuDataError,
-            SpellDataError,
-            SpellMenuDataError,
-            ShopUiDataError,
-            ShopDataError,
-            StatusMenuDataError,
-            TextCatalogError,
-        ),
-    )
+GAME_ERRORS = (
+    AudioResourceError,
+    DataResourceError,
+    DebugPartyError,
+    EquipmentMenuDataError,
+    FontResourceError,
+    ImageResourceError,
+    MapResourceError,
+    ItemDataError,
+    ItemMenuDataError,
+    MemberDataError,
+    GameDataError,
+    SkillDataError,
+    SaveMenuDataError,
+    SpellDataError,
+    SpellMenuDataError,
+    ShopUiDataError,
+    ShopDataError,
+    StatusMenuDataError,
+    TextCatalogError,
+)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def create_game_input_reader() -> PyxelInputReader:
+    """Create the normal bindings used by the game runtime."""
+
+    return PyxelInputReader(InputBindings.default())
+
+
+__all__ = [
+    "FPS",
+    "GAME_ERRORS",
+    "GAME_SETTINGS_ENV",
+    "Game",
+    "SCREEN_HEIGHT",
+    "SCREEN_WIDTH",
+    "create_game_input_reader",
+    "localized_menu_texts",
+]

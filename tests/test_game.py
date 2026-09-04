@@ -6,15 +6,15 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
-from tools.screen_mocks.debug_menu import DebugTeleportTarget
-from tools.screen_mocks.field import (
+from ui.debug_menu import DebugTeleportTarget
+from game import (
     ALERT_CHANNEL,
     ALERT_SOUND_ID,
     FACES_IMAGE_ID,
     FIELD_BGM_ID,
-    FIELD_MOCK_INITIAL_GOLD,
-    FIELD_MOCK_INITIAL_PARTY_KEYS,
-    FIELD_MOCK_SETTINGS_ENV,
+    INITIAL_GOLD,
+    INITIAL_PARTY_KEYS,
+    GAME_SETTINGS_ENV,
     FORMATION_ARROW_COLKEY,
     FORMATION_ARROW_FRAME_DURATION,
     FORMATION_ARROW_HEIGHT,
@@ -51,8 +51,8 @@ from tools.screen_mocks.field import (
     WORLD_MAP_ID,
     WORLD_MAP_START_POSITION,
     MenuAlertEffect,
-    FieldScreenChange,
-    FieldScreenMock,
+    GameScreenChange,
+    Game,
     TextCatalog,
     TRANSPARENT_INDEX,
     localized_menu_texts,
@@ -82,17 +82,15 @@ from ui import (
 from world_sites import WorldSiteCatalog
 
 
-class FieldScreenMockTest(unittest.TestCase):
-    @patch("tools.screen_mocks.field.BgmPlayer")
-    @patch("tools.screen_mocks.field.pyxel.run")
-    @patch("tools.screen_mocks.field.create_mock_input_reader")
-    @patch("tools.screen_mocks.field.initialize_screen_mock")
-    @patch("tools.screen_mocks.field.WindowFactory")
-    @patch("tools.screen_mocks.field.FieldRenderer")
-    @patch("tools.screen_mocks.field.FieldMovement")
-    @patch("tools.screen_mocks.field.MapResources")
-    @patch("tools.screen_mocks.field.ImageResources")
-    @patch("tools.screen_mocks.field.FontResources")
+class GameTest(unittest.TestCase):
+    @patch("game.BgmPlayer")
+    @patch("game.create_game_input_reader")
+    @patch("game.WindowFactory")
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
+    @patch("game.MapResources")
+    @patch("game.ImageResources")
+    @patch("game.FontResources")
     def test_creates_initial_party_and_da2_side_windows(
         self,
         fonts_class: Mock,
@@ -101,9 +99,7 @@ class FieldScreenMockTest(unittest.TestCase):
         field_movement_class: Mock,
         field_renderer_class: Mock,
         window_factory_class: Mock,
-        initialize: Mock,
         create_input_reader: Mock,
-        _run: Mock,
         bgm_player_class: Mock,
     ) -> None:
         fonts = fonts_class.return_value
@@ -126,13 +122,14 @@ class FieldScreenMockTest(unittest.TestCase):
         world_map = map_resources_class.return_value.map.return_value
         world_map.sites = ()
 
-        mock = FieldScreenMock()
-
-        initialize.assert_called_once_with(
-            "Dungeon Antiqua ZERO Field Mock",
-            display_scale=3,
+        palette_shifter = Mock()
+        mock = Game(
+            settings=Settings(),
+            palette_shifter=palette_shifter,
         )
+
         self.assertIs(mock.input_reader, create_input_reader.return_value)
+        self.assertIs(mock.palette_shifter, palette_shifter)
         self.assertIsInstance(mock.alert, MenuAlertEffect)
         bgm_player_class.assert_called_once_with(volume=3)
         self.assertIs(mock.bgm, bgm_player_class.return_value)
@@ -185,11 +182,11 @@ class FieldScreenMockTest(unittest.TestCase):
         party_texts = {(text.x, text.y): text for text in party_args[4]}
         self.assertEqual(
             [member.definition.key for member in mock.party],
-            list(FIELD_MOCK_INITIAL_PARTY_KEYS),
+            list(INITIAL_PARTY_KEYS),
         )
         self.assertEqual(
             [member.definition.key for member in mock._main_menu_members()],
-            list(FIELD_MOCK_INITIAL_PARTY_KEYS),
+            list(INITIAL_PARTY_KEYS),
         )
         self.assertEqual(
             [member.formation_row for member in mock.party],
@@ -198,7 +195,7 @@ class FieldScreenMockTest(unittest.TestCase):
                 FormationRow.BACK,
             ],
         )
-        self.assertEqual(mock.save_data.gold, FIELD_MOCK_INITIAL_GOLD)
+        self.assertEqual(mock.save_data.gold, INITIAL_GOLD)
         self.assertEqual(dict(mock.inventory_system.quantities), {})
         self.assertEqual(mock.inventory_system.items, ())
         self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 2)].text, "フィオラ")
@@ -265,7 +262,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.equipment_screen)
         self.assertIsNone(mock.status_screen)
         self.assertIsNone(mock.spell_screen)
-        self.assertEqual(len(mock.spells), 38)
+        self.assertEqual(len(mock.spells), 39)
         self.assertEqual(mock.selected_member_index, 0)
         self.assertIs(mock.party_window, party_window)
         self.assertIs(mock.info_window, info_window)
@@ -380,20 +377,20 @@ class FieldScreenMockTest(unittest.TestCase):
             display_mode=DisplayMode.SMOOTH,
         )
         with patch.dict(
-            "tools.screen_mocks.field.os.environ",
-            {FIELD_MOCK_SETTINGS_ENV: json.dumps(settings.to_dict())},
+            "game.os.environ",
+            {GAME_SETTINGS_ENV: json.dumps(settings.to_dict())},
             clear=True,
         ):
-            restored = FieldScreenMock._settings_from_environment()
+            restored = Game.settings_from_environment()
 
         self.assertEqual(restored, settings)
 
-    @patch("tools.screen_mocks.field.WindowFactory")
+    @patch("game.WindowFactory")
     def test_builds_da2_settings_rows_and_language_guide(
         self,
         window_factory_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings()
         mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         mock.localized = localized_menu_texts(
@@ -451,12 +448,12 @@ class FieldScreenMockTest(unittest.TestCase):
             "げんごを　きりかえられます",
         )
 
-    @patch("tools.screen_mocks.field.WindowFactory")
+    @patch("game.WindowFactory")
     def test_english_return_confirmation_fits_widened_window_on_one_line(
         self,
         window_factory_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(language=Language.ENGLISH)
         mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         mock.localized = localized_menu_texts(
@@ -487,7 +484,7 @@ class FieldScreenMockTest(unittest.TestCase):
         factory.create.return_value.open.assert_called_once_with()
 
     def test_update_passes_logical_navigation_to_command_window(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             navigation=Direction.DOWN,
@@ -505,7 +502,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.command_window.update.assert_called_once_with(Direction.DOWN)
 
     def test_opening_windows_advance_and_block_menu_input(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -524,7 +521,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.command_window.update.assert_not_called()
 
     def test_party_hp_uses_shared_recovery_colors(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Mock(language=Language.JAPANESE)
         mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         text_factory = Mock()
@@ -570,8 +567,8 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertEqual(POSITIVE_COLOR, 29)
         self.assertEqual(NEGATIVE_COLOR, 45)
 
-    def test_cancel_fades_from_main_menu_to_mock_field(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+    def test_cancel_fades_from_main_menu_to_field(self) -> None:
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             cancel=InputButton(triggered=True, held=True)
@@ -589,7 +586,7 @@ class FieldScreenMockTest(unittest.TestCase):
 
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.SHOW_FIELD,
+            GameScreenChange.SHOW_FIELD,
         )
         self.assertFalse(mock.command_cursor.active)
         self.assertFalse(mock.showing_field)
@@ -600,8 +597,8 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.pending_screen_change)
         mock.command_window.update.assert_not_called()
 
-    def test_menu_button_fades_from_mock_field_back_to_menu(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+    def test_menu_button_fades_from_field_back_to_menu(self) -> None:
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             menu=InputButton(triggered=True, held=True)
@@ -617,7 +614,7 @@ class FieldScreenMockTest(unittest.TestCase):
 
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.SHOW_MENU,
+            GameScreenChange.SHOW_MENU,
         )
         self.assertTrue(mock.showing_field)
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
@@ -637,17 +634,17 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.animate_main_windows_with_fade)
 
     def test_menu_screen_change_restores_standard_fade_speed(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.fade = FadeThroughBlack(SITE_MAP_FADE_FRAME_COUNT)
         mock.pending_screen_change = None
 
-        mock._begin_screen_change(FieldScreenChange.SHOW_MENU)
+        mock._begin_screen_change(GameScreenChange.SHOW_MENU)
 
         self.assertEqual(mock.fade.frame_count, DEFAULT_FADE_FRAME_COUNT)
 
-    @patch("tools.screen_mocks.field.pyxel.quit")
-    def test_cancel_on_mock_field_still_exits_the_mock(self, quit_game: Mock) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+    @patch("game.pyxel.quit")
+    def test_cancel_on_field_exits_the_game(self, quit_game: Mock) -> None:
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             cancel=InputButton(triggered=True, held=True)
@@ -659,14 +656,14 @@ class FieldScreenMockTest(unittest.TestCase):
 
         quit_game.assert_called_once_with()
 
-    @patch("tools.screen_mocks.field.pyxel.cls")
-    @patch("tools.screen_mocks.field.pyxel.camera")
+    @patch("game.pyxel.cls")
+    @patch("game.pyxel.camera")
     def test_draw_uses_compiled_world_map_field(
         self,
         camera: Mock,
         clear_screen: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.showing_field = True
         mock.field = object()
         mock.field_renderer = Mock()
@@ -679,7 +676,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     def test_field_passes_held_direction_to_movement(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock(
             poll=Mock(return_value=InputState(held_direction=Direction.LEFT))
@@ -694,7 +691,7 @@ class FieldScreenMockTest(unittest.TestCase):
 
         mock.field.update.assert_called_once_with(Direction.LEFT)
 
-    @patch("tools.screen_mocks.field.LocalizedWindowTextFactory")
+    @patch("game.LocalizedWindowTextFactory")
     def test_nearby_site_name_uses_current_language_text(
         self,
         localized_factory_class: Mock,
@@ -706,7 +703,7 @@ class FieldScreenMockTest(unittest.TestCase):
             destination=MapDestination("sample_town", "from_world"),
         )
         world_map = object()
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(language=Language.JAPANESE)
         mock.texts = Mock()
         mock.texts.text.return_value = "サンプルの町"
@@ -739,7 +736,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.site_name_site, site)
         self.assertIs(mock.site_name_text, localized_text)
 
-    @patch("tools.screen_mocks.field.draw_tagged_text")
+    @patch("game.draw_tagged_text")
     def test_draws_site_name_below_site_when_player_is_above(
         self,
         draw_text: Mock,
@@ -759,7 +756,7 @@ class FieldScreenMockTest(unittest.TestCase):
             font=font,
             baseline_offset=1,
         )
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.site_name_site = site
         mock.site_name_text = text
         mock.current_map = Mock(tile_size=16)
@@ -787,7 +784,7 @@ class FieldScreenMockTest(unittest.TestCase):
             role=SITE_NAME_FONT_ROLE,
         )
 
-    @patch("tools.screen_mocks.field.draw_tagged_text")
+    @patch("game.draw_tagged_text")
     def test_draws_site_name_above_site_when_player_is_not_above(
         self,
         draw_text: Mock,
@@ -801,7 +798,7 @@ class FieldScreenMockTest(unittest.TestCase):
         font = Mock()
         font.text_width.return_value = 48
         text = WindowText("サンプルの町", 0, 0, font=font)
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.site_name_site = site
         mock.site_name_text = text
         mock.current_map = Mock(tile_size=16)
@@ -825,9 +822,9 @@ class FieldScreenMockTest(unittest.TestCase):
             font_spans=(),
         )
 
-    @patch("tools.screen_mocks.field.pyxel.play")
-    @patch("tools.screen_mocks.field.FieldRenderer")
-    @patch("tools.screen_mocks.field.FieldMovement")
+    @patch("game.pyxel.play")
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
     def test_arriving_at_site_changes_map_at_fade_midpoint(
         self,
         field_movement_class: Mock,
@@ -850,7 +847,7 @@ class FieldScreenMockTest(unittest.TestCase):
         world_map = object()
         target_map = Mock()
         target_map.arrival_point.return_value = arrival
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.field = Mock(arrived_position=FieldPosition(2, 2))
         mock.world_map = world_map
         mock.current_map = world_map
@@ -869,7 +866,7 @@ class FieldScreenMockTest(unittest.TestCase):
 
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.CHANGE_MAP,
+            GameScreenChange.CHANGE_MAP,
         )
         self.assertEqual(mock.fade.frame_count, SITE_MAP_FADE_FRAME_COUNT)
         mock.travel_system.enter_site.assert_not_called()
@@ -896,7 +893,7 @@ class FieldScreenMockTest(unittest.TestCase):
             destination=MapDestination("missing_map", "from_world"),
         )
         world_map = object()
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.field = Mock(arrived_position=FieldPosition(2, 2))
         mock.world_map = world_map
         mock.current_map = world_map
@@ -920,7 +917,7 @@ class FieldScreenMockTest(unittest.TestCase):
             entrance_cells=(MapCell(2, 2),),
             destination=MapDestination("sample_town", "from_world"),
         )
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(language=Language.JAPANESE)
         mock.save_data = SaveData(visited_site_ids={"sample_town"})
         mock.travel_system = Mock()
@@ -943,7 +940,7 @@ class FieldScreenMockTest(unittest.TestCase):
         )
         self.assertIsInstance(mock.texts.text.call_args.args[1], Localizer)
 
-    @patch("tools.screen_mocks.field.pyxel.play")
+    @patch("game.pyxel.play")
     def test_debug_teleport_stages_destination_and_starts_slow_fade(
         self,
         play: Mock,
@@ -958,7 +955,7 @@ class FieldScreenMockTest(unittest.TestCase):
         )
         target_map = Mock()
         target_map.arrival_point.return_value = arrival
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.save_data = SaveData(visited_site_ids={"sample_town"})
         mock.travel_system = Mock()
         mock.travel_system.teleport_destination.return_value = destination
@@ -982,20 +979,20 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.pending_target_arrival, arrival)
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.TELEPORT,
+            GameScreenChange.TELEPORT,
         )
         self.assertEqual(mock.fade.frame_count, SITE_MAP_FADE_FRAME_COUNT)
         play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
 
-    @patch("tools.screen_mocks.field.pyxel.channels")
-    def test_se_volume_applies_to_every_field_mock_se_channel(
+    @patch("game.pyxel.channels")
+    def test_se_volume_applies_to_every_game_se_channel(
         self,
         channels: Mock,
     ) -> None:
         channel_values = [Mock() for _ in range(max(SE_CHANNELS) + 1)]
         channels.__len__.return_value = len(channel_values)
         channels.__getitem__.side_effect = channel_values.__getitem__
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(se_volume=3)
 
         mock._apply_se_volume()
@@ -1003,8 +1000,8 @@ class FieldScreenMockTest(unittest.TestCase):
         for channel in SE_CHANNELS:
             self.assertEqual(channel_values[channel].gain, 0.15)
 
-    @patch("tools.screen_mocks.field.FieldRenderer")
-    @patch("tools.screen_mocks.field.FieldMovement")
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
     def test_applying_debug_teleport_returns_directly_to_field(
         self,
         field_movement_class: Mock,
@@ -1019,7 +1016,7 @@ class FieldScreenMockTest(unittest.TestCase):
         )
         target_map = Mock()
         party = (Mock(),)
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.pending_target_map = target_map
         mock.pending_target_arrival = arrival
         mock.debug_screen = Mock(party=party)
@@ -1055,16 +1052,16 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_member_index, 0)
         mock.travel_system.enter_site.assert_not_called()
 
-    @patch("tools.screen_mocks.field.pyxel.cls")
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.blt")
     def test_draws_windows_and_offsets_back_row_faces(
         self,
         blt: Mock,
         camera: Mock,
         clear_screen: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         party_window = Mock()
         side_window = Mock()
         mock.windows = (party_window, side_window)
@@ -1128,9 +1125,9 @@ class FieldScreenMockTest(unittest.TestCase):
         )
         mock.palette_shifter.shifted.assert_called_once_with(DIMMED_PALETTE)
 
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.blt")
     def test_five_member_faces_keep_twelve_pixel_gaps(self, blt: Mock) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         member = Mock(
             is_front_row=True,
             face_position=Mock(x=32, y=0),
@@ -1151,16 +1148,16 @@ class FieldScreenMockTest(unittest.TestCase):
             TRANSPARENT_INDEX,
         )
 
-    @patch("tools.screen_mocks.field.pyxel.cls")
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.blt")
     def test_party_faces_wait_until_party_window_is_open(
         self,
         blt: Mock,
         _camera: Mock,
         _clear_screen: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         party_window = Mock(is_open=False)
         mock.windows = (party_window,)
         mock.party_window = party_window
@@ -1178,7 +1175,7 @@ class FieldScreenMockTest(unittest.TestCase):
         blt.assert_not_called()
 
     def test_confirming_sort_command_activates_member_cursor(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             confirm=InputButton(triggered=True, held=True)
@@ -1214,12 +1211,12 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.command_cursor.active)
         mock.command_window.update.assert_not_called()
 
-    @patch("tools.screen_mocks.field.ItemMenuOverlay")
+    @patch("game.ItemMenuOverlay")
     def test_confirming_item_command_opens_connected_item_screen(
         self,
         item_screen_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             confirm=InputButton(triggered=True, held=True)
         )
@@ -1247,7 +1244,7 @@ class FieldScreenMockTest(unittest.TestCase):
         item_screen_class.assert_not_called()
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.OPEN_ITEM,
+            GameScreenChange.OPEN_ITEM,
         )
         self.assertTrue(mock.fade.is_active)
         self.assertFalse(mock.command_cursor.active)
@@ -1271,7 +1268,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.command_window.update.assert_not_called()
 
     def test_cancel_from_item_returns_to_selected_menu_command(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             cancel=InputButton(triggered=True, held=True)
         )
@@ -1290,7 +1287,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.item_screen, item_screen)
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.CLOSE_ITEM,
+            GameScreenChange.CLOSE_ITEM,
         )
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_fade()
@@ -1298,14 +1295,14 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.item_screen)
         self.assertTrue(mock.command_cursor.active)
 
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
     def test_draw_uses_item_screen_while_item_is_active(
         self,
         clear_screen: Mock,
         camera: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.item_screen = Mock()
         mock.alert = Mock(camera_x=-1)
 
@@ -1315,12 +1312,12 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.item_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(-1, 0), call()])
 
-    @patch("tools.screen_mocks.field.EquipmentMenuOverlay")
+    @patch("game.EquipmentMenuOverlay")
     def test_confirming_equipment_command_opens_connected_equipment_screen(
         self,
         equipment_screen_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(confirm=InputButton(triggered=True, held=True))
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = input_state
@@ -1346,7 +1343,7 @@ class FieldScreenMockTest(unittest.TestCase):
 
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.OPEN_EQUIPMENT,
+            GameScreenChange.OPEN_EQUIPMENT,
         )
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_fade()
@@ -1365,7 +1362,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.equipment_screen, equipment_screen_class.return_value)
 
     def test_cancel_from_equipment_returns_to_menu_and_keeps_member(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(cancel=InputButton(triggered=True, held=True))
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = input_state
@@ -1383,7 +1380,7 @@ class FieldScreenMockTest(unittest.TestCase):
         equipment_screen.update.assert_called_once_with(input_state)
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.CLOSE_EQUIPMENT,
+            GameScreenChange.CLOSE_EQUIPMENT,
         )
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_fade()
@@ -1392,14 +1389,14 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         mock._refresh_party_window_texts.assert_called_once_with()
 
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
     def test_draw_uses_equipment_screen_while_equipment_is_active(
         self,
         clear_screen: Mock,
         camera: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.equipment_screen = Mock()
         mock.alert = Mock(camera_x=0)
 
@@ -1409,12 +1406,12 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.equipment_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
-    @patch("tools.screen_mocks.field.StatusMenuOverlay")
+    @patch("game.StatusMenuOverlay")
     def test_confirming_status_command_opens_connected_status_screen(
         self,
         status_screen_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             confirm=InputButton(triggered=True, held=True)
         )
@@ -1440,7 +1437,7 @@ class FieldScreenMockTest(unittest.TestCase):
         status_screen_class.assert_not_called()
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.OPEN_STATUS,
+            GameScreenChange.OPEN_STATUS,
         )
         self.assertTrue(mock.fade.is_active)
         self.assertFalse(mock.command_cursor.active)
@@ -1460,7 +1457,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.command_window.update.assert_not_called()
 
     def test_cancel_from_status_returns_to_selected_menu_command(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             cancel=InputButton(triggered=True, held=True)
         )
@@ -1481,7 +1478,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.status_screen, status_screen)
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.CLOSE_STATUS,
+            GameScreenChange.CLOSE_STATUS,
         )
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_fade()
@@ -1490,12 +1487,12 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 3)
 
-    @patch("tools.screen_mocks.field.SaveMenuOverlay")
+    @patch("game.SaveMenuOverlay")
     def test_confirming_save_command_opens_connected_save_screen(
         self,
         save_screen_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             confirm=InputButton(triggered=True, held=True)
         )
@@ -1520,7 +1517,7 @@ class FieldScreenMockTest(unittest.TestCase):
 
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.OPEN_SAVE,
+            GameScreenChange.OPEN_SAVE,
         )
         self.assertFalse(mock.command_cursor.active)
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
@@ -1541,7 +1538,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.pending_screen_change)
 
     def test_cancel_from_save_returns_to_selected_menu_command(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(cancel=InputButton(triggered=True, held=True))
         mock.input_reader = Mock(poll=Mock(return_value=input_state))
         mock.alert = Mock()
@@ -1556,7 +1553,7 @@ class FieldScreenMockTest(unittest.TestCase):
         save_screen.update.assert_called_once_with(input_state)
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.CLOSE_SAVE,
+            GameScreenChange.CLOSE_SAVE,
         )
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_fade()
@@ -1564,14 +1561,14 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.save_screen)
         self.assertTrue(mock.command_cursor.active)
 
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
     def test_draw_uses_save_screen_while_save_is_active(
         self,
         clear_screen: Mock,
         camera: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.save_screen = Mock()
         mock.alert = Mock(camera_x=0)
 
@@ -1581,12 +1578,12 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.save_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
-    @patch("tools.screen_mocks.field.create_save_document")
+    @patch("game.create_save_document")
     def test_save_slot_writes_current_field_and_all_known_characters(
         self,
         create_document: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.save_data = Mock()
         mock.party = (Mock(),)
         mock.character_states = {"Fiora": mock.party[0], "Cerion": Mock()}
@@ -1619,14 +1616,14 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.current_save_slot, 3)
 
     def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState()
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.fade = FadeThroughBlack()
         mock.fade.start()
-        mock.pending_screen_change = FieldScreenChange.OPEN_ITEM
+        mock.pending_screen_change = GameScreenChange.OPEN_ITEM
         mock._apply_pending_screen_change = Mock()
         mock.item_screen = Mock()
 
@@ -1644,7 +1641,7 @@ class FieldScreenMockTest(unittest.TestCase):
     def test_status_return_rebuilds_changed_language_without_window_animation(
         self,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings()
         changed_settings = Settings(language=Language.ENGLISH)
         mock.status_screen = Mock(settings=changed_settings, member_index=2)
@@ -1660,14 +1657,14 @@ class FieldScreenMockTest(unittest.TestCase):
             animate=False,
         )
 
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
     def test_draw_uses_status_screen_while_status_is_active(
         self,
         clear_screen: Mock,
         camera: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.status_screen = Mock()
         mock.alert = Mock(camera_x=0)
 
@@ -1677,12 +1674,12 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.status_screen.draw.assert_called_once_with()
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
-    @patch("tools.screen_mocks.field.SpellMenuOverlay")
+    @patch("game.SpellMenuOverlay")
     def test_confirming_spell_command_opens_connected_spell_screen(
         self,
         spell_screen_class: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             confirm=InputButton(triggered=True, held=True)
         )
@@ -1709,7 +1706,7 @@ class FieldScreenMockTest(unittest.TestCase):
         spell_screen_class.assert_not_called()
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.OPEN_SPELL,
+            GameScreenChange.OPEN_SPELL,
         )
         self.assertTrue(mock.fade.is_active)
         self.assertFalse(mock.command_cursor.active)
@@ -1730,7 +1727,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.command_window.update.assert_not_called()
 
     def test_cancel_from_spell_returns_to_selected_menu_command(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         input_state = InputState(
             cancel=InputButton(triggered=True, held=True)
         )
@@ -1750,7 +1747,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(mock.spell_screen, spell_screen)
         self.assertIs(
             mock.pending_screen_change,
-            FieldScreenChange.CLOSE_SPELL,
+            GameScreenChange.CLOSE_SPELL,
         )
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_fade()
@@ -1759,14 +1756,14 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 2)
 
-    @patch("tools.screen_mocks.field.pyxel.camera")
-    @patch("tools.screen_mocks.field.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
     def test_draw_uses_spell_screen_while_spell_is_active(
         self,
         clear_screen: Mock,
         camera: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.spell_screen = Mock()
         mock.alert = Mock(camera_x=0)
 
@@ -1777,7 +1774,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertEqual(camera.call_args_list, [call(0, 0), call()])
 
     def test_field_confirm_opens_shop_key_selector(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock(
             poll=Mock(
@@ -1794,12 +1791,12 @@ class FieldScreenMockTest(unittest.TestCase):
 
         mock._start_shop_selector.assert_called_once_with()
 
-    @patch("tools.screen_mocks.field.pyxel.quit")
+    @patch("game.pyxel.quit")
     def test_cancel_closes_shop_selector_and_restores_field_input(
         self,
         quit_game: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock(
             poll=Mock(
@@ -1829,11 +1826,11 @@ class FieldScreenMockTest(unittest.TestCase):
 
         mock.update()
 
-        self.assertIs(mock.pending_screen_change, FieldScreenChange.SHOW_MENU)
+        self.assertIs(mock.pending_screen_change, GameScreenChange.SHOW_MENU)
         quit_game.assert_not_called()
 
     def test_shop_selector_reserves_selected_shop_for_fade_transition(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         selected_shop = Mock(key="TEST_SHOP")
         mock.alert = Mock()
         mock.input_reader = Mock(
@@ -1851,14 +1848,14 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.update()
 
         self.assertIs(mock.pending_shop, selected_shop)
-        self.assertIs(mock.pending_screen_change, FieldScreenChange.OPEN_SHOP)
+        self.assertIs(mock.pending_screen_change, GameScreenChange.OPEN_SHOP)
 
-    @patch("tools.screen_mocks.field.WindowCursor")
+    @patch("game.WindowCursor")
     def test_selecting_fiora_and_reserve_swaps_their_order(
         self,
         window_cursor: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
         mock.party = tuple(
@@ -1891,12 +1888,12 @@ class FieldScreenMockTest(unittest.TestCase):
             PARTY_CURSOR_X + SORT_SOURCE_CURSOR_X_OFFSET,
         )
 
-    @patch("tools.screen_mocks.field.WindowCursor")
+    @patch("game.WindowCursor")
     def test_selecting_same_member_changes_formation_row(
         self,
         _window_cursor: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
         front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
@@ -1912,12 +1909,12 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(front.formation_row, FormationRow.BACK)
         self.assertIsNone(mock.sort_source_index)
 
-    @patch("tools.screen_mocks.field.WindowCursor")
+    @patch("game.WindowCursor")
     def test_reserve_is_forced_front_across_two_swaps(
         self,
         _window_cursor: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock()
         front = Mock(
@@ -1970,12 +1967,12 @@ class FieldScreenMockTest(unittest.TestCase):
             )
         )
 
-    @patch("tools.screen_mocks.field.WindowCursor")
+    @patch("game.WindowCursor")
     def test_reserve_cannot_be_changed_to_back(
         self,
         _window_cursor: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=5)
         active = tuple(
@@ -1997,12 +1994,12 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertIs(reserve.formation_row, FormationRow.FRONT)
         mock.alert.start.assert_called_once_with()
 
-    @patch("tools.screen_mocks.field.WindowCursor")
+    @patch("game.WindowCursor")
     def test_last_front_member_cannot_move_to_back(
         self,
         _window_cursor: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
         front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
@@ -2020,7 +2017,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.alert.start.assert_called_once_with()
 
     def test_cancel_steps_back_from_source_then_from_sort_mode(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             cancel=InputButton(triggered=True, held=True)
@@ -2047,7 +2044,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         mock.party_window.clear_cursor.assert_called_once_with()
 
-    @patch("tools.screen_mocks.field.pyxel.play")
+    @patch("game.pyxel.play")
     def test_alert_matches_da2_sound_and_three_frame_shake(self, play: Mock) -> None:
         alert = MenuAlertEffect()
 
@@ -2062,12 +2059,12 @@ class FieldScreenMockTest(unittest.TestCase):
         alert.update()
         self.assertEqual(alert.camera_x, 0)
 
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.blt")
     def test_selected_member_draws_blinking_formation_arrow(
         self,
         blt: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.sort_source_index = 1
         mock.party_cursor = Mock(selected_key=1)
         mock.party = (
@@ -2076,7 +2073,7 @@ class FieldScreenMockTest(unittest.TestCase):
         )
 
         with patch(
-            "tools.screen_mocks.field.pyxel.frame_count",
+            "game.pyxel.frame_count",
             FORMATION_ARROW_FRAME_DURATION,
         ):
             mock._draw_formation_arrow()
@@ -2094,12 +2091,12 @@ class FieldScreenMockTest(unittest.TestCase):
             FORMATION_ARROW_COLKEY,
         )
 
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.blt")
     def test_front_member_draws_right_arrow_when_another_front_remains(
         self,
         blt: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.sort_source_index = 0
         mock.party_cursor = Mock(selected_key=0)
         mock.party = (
@@ -2107,18 +2104,18 @@ class FieldScreenMockTest(unittest.TestCase):
             Mock(is_front_row=True),
         )
 
-        with patch("tools.screen_mocks.field.pyxel.frame_count", 0):
+        with patch("game.pyxel.frame_count", 0):
             mock._draw_formation_arrow()
 
         self.assertEqual(blt.call_args.args[0], PARTY_FACE_X[True] + PARTY_FACE_SIZE)
         self.assertEqual(blt.call_args.args[3], FORMATION_ARROW_RIGHT_X[0])
 
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.blt")
     def test_last_front_member_does_not_draw_formation_arrow(
         self,
         blt: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.sort_source_index = 0
         mock.party_cursor = Mock(selected_key=0)
         mock.party = (
@@ -2130,12 +2127,12 @@ class FieldScreenMockTest(unittest.TestCase):
 
         blt.assert_not_called()
 
-    @patch("tools.screen_mocks.field.pyxel.blt")
+    @patch("game.pyxel.blt")
     def test_formation_arrow_is_hidden_when_cursor_moves_from_source(
         self,
         blt: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.sort_source_index = 0
         mock.party_cursor = Mock(selected_key=1)
         mock.party = (
@@ -2148,7 +2145,7 @@ class FieldScreenMockTest(unittest.TestCase):
         blt.assert_not_called()
 
     def test_confirming_settings_command_opens_settings_window(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             confirm=InputButton(triggered=True, held=True)
@@ -2166,11 +2163,11 @@ class FieldScreenMockTest(unittest.TestCase):
         mock._start_settings.assert_called_once_with()
         mock.command_window.update.assert_not_called()
 
-    def test_debug_settings_row_is_always_available_in_mock(self) -> None:
+    def test_debug_settings_row_is_available_in_current_game(self) -> None:
         self.assertIn(("debug", 17), SETTINGS_ROWS)
 
     def test_confirming_debug_setting_opens_debug_menu(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
             confirm=InputButton(triggered=True, held=True)
@@ -2191,7 +2188,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock._start_debug_menu.assert_called_once_with()
 
     def test_language_setting_cycles_like_da2_and_rebuilds_windows(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings()
         mock.settings_cursor = Mock(selected_key="language")
         mock.command_cursor = Mock(active=True)
@@ -2210,9 +2207,9 @@ class FieldScreenMockTest(unittest.TestCase):
             selected_key="language"
         )
 
-    @patch("tools.screen_mocks.field.pyxel.play")
+    @patch("game.pyxel.play")
     def test_se_setting_wraps_and_plays_da2_preview_sound(self, play: Mock) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(se_volume=4)
         mock.settings_cursor = Mock(selected_key="se")
         mock._apply_se_volume = Mock()
@@ -2225,12 +2222,12 @@ class FieldScreenMockTest(unittest.TestCase):
         play.assert_called_once_with(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
         mock._refresh_settings_window.assert_called_once_with(selected_key="se")
 
-    @patch("tools.screen_mocks.field.pyxel.play")
+    @patch("game.pyxel.play")
     def test_bgm_setting_wraps_and_immediately_changes_volume(
         self,
         play: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(bgm_volume=4)
         mock.settings_cursor = Mock(selected_key="bgm")
         mock.bgm = Mock()
@@ -2244,7 +2241,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock._refresh_settings_window.assert_called_once_with(selected_key="bgm")
 
     def test_screen_size_and_display_settings_wrap_in_both_directions(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(screen_scale=1)
         mock.settings_cursor = Mock(selected_key="screen_size")
         mock._refresh_settings_window = Mock()
@@ -2263,7 +2260,7 @@ class FieldScreenMockTest(unittest.TestCase):
     def test_moving_settings_cursor_refreshes_text_without_reopening_window(
         self,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -2286,7 +2283,7 @@ class FieldScreenMockTest(unittest.TestCase):
         mock.settings_window.open.assert_not_called()
 
     def test_refreshing_settings_text_keeps_existing_window_open(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings_window = Mock()
         placement = Mock(
             text="guide",
@@ -2315,37 +2312,37 @@ class FieldScreenMockTest(unittest.TestCase):
         )
         mock.settings_window.open.assert_not_called()
 
-    @patch("tools.screen_mocks.field.pyxel.reset")
-    def test_return_to_title_restarts_mock_with_settings(
+    @patch("game.pyxel.reset")
+    def test_return_to_title_restarts_game_with_settings(
         self,
         reset: Mock,
     ) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.settings = Settings(
             language=Language.ENGLISH,
             screen_scale=5,
         )
         with patch.dict(
-            "tools.screen_mocks.field.os.environ",
+            "game.os.environ",
             {"PYXEL_WINDOW_STATE": "old"},
             clear=True,
         ) as environment:
             with patch(
-                "tools.screen_mocks.field.pyxel.WINDOW_STATE_ENV",
+                "game.pyxel.WINDOW_STATE_ENV",
                 "PYXEL_WINDOW_STATE",
             ):
-                mock._restart_mock()
+                mock._restart_game()
 
             self.assertNotIn("PYXEL_WINDOW_STATE", environment)
             self.assertEqual(
-                json.loads(environment[FIELD_MOCK_SETTINGS_ENV]),
+                json.loads(environment[GAME_SETTINGS_ENV]),
                 mock.settings.to_dict(),
             )
         reset.assert_called_once_with()
 
-    @patch("tools.screen_mocks.field.pyxel.quit")
-    def test_confirmed_quit_exits_the_mock(self, quit_game: Mock) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+    @patch("game.pyxel.quit")
+    def test_confirmed_quit_exits_the_game(self, quit_game: Mock) -> None:
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -2358,8 +2355,8 @@ class FieldScreenMockTest(unittest.TestCase):
 
         quit_game.assert_called_once_with()
 
-    def test_confirmed_return_to_title_resets_the_mock(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+    def test_confirmed_return_to_title_resets_the_game(self) -> None:
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -2367,14 +2364,14 @@ class FieldScreenMockTest(unittest.TestCase):
         )
         mock.confirmation_cursor = Mock(selected_key="yes")
         mock.pending_settings_action = "return_title"
-        mock._restart_mock = Mock()
+        mock._restart_game = Mock()
 
         mock.update()
 
-        mock._restart_mock.assert_called_once_with()
+        mock._restart_game.assert_called_once_with()
 
     def test_cancel_closes_settings_and_reactivates_command_cursor(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -2392,7 +2389,7 @@ class FieldScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
 
     def test_declining_confirmation_returns_to_settings(self) -> None:
-        mock = FieldScreenMock.__new__(FieldScreenMock)
+        mock = Game.__new__(Game)
         mock.alert = Mock()
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(

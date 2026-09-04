@@ -1,4 +1,4 @@
-"""Debug menu view used by the connected field mock."""
+"""Development-only debug menu overlay used by the game."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from member import (
 from resources import FontResources, FontRole
 from state import Language, SaveData, Settings
 from systems import DebugPartyEditor, DebugPartyError
-from tools.screen_mocks.debug_text import DEBUG_TEXT
+from ui.debug_text import DEBUG_TEXT
 from ui import (
     CursorTarget,
     DEFAULT_TEXT_COLOR,
@@ -133,8 +133,8 @@ class NumericEntry:
         return True
 
 
-class DebugMenuScreenMock:
-    """Edit party state and request debug travel inside the field mock."""
+class DebugMenuOverlay:
+    """Edit party state and request debug travel inside the current game."""
 
     def __init__(
         self,
@@ -631,7 +631,7 @@ class DebugMenuScreenMock:
 
 __all__ = [
     "DebugMenuPhase",
-    "DebugMenuScreenMock",
+    "DebugMenuOverlay",
     "DebugTeleportTarget",
     "MAX_GOLD",
     "NumericEntry",

@@ -1,4 +1,4 @@
-"""Japanese-only text owned by the development debug screens."""
+"""Japanese-only text owned by the development debug overlay."""
 
 from __future__ import annotations
 

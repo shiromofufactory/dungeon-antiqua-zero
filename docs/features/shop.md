@@ -36,13 +36,13 @@
 - 所持品全体の合計個数には上限を設けない。
 - 売却一覧の個数と売却可能数には、装備中の品を含めない。
 
-## モックからの確認動線
+## 現在のゲームからの確認動線
 
-- フィールドモックはワールドマップから開始する。
+- 現在のゲームはワールドマップから開始する。
 - ワールドマップで決定すると、`shops.json` の全 `shop_key` をデータ順に並べた選択Windowを開く。
 - 店を選択すると標準フェードを通してショップを開く。
 - `shop_key` 選択中のキャンセルは選択Windowだけを閉じ、ワールドマップへ戻る。
-- フィールドモックは所持品なし、所持金100 Goldで開始する。
+- 現在のゲームは所持品なし、所持金100 Goldで開始する。
 - ショップ、アイテム、装備画面は同じ `SaveData` と `InventorySystem` を共有する。
 
 ## 操作フロー
@@ -178,7 +178,7 @@
 - 取引ルール: `app/systems/shop.py`
 - ショップOverlay: `app/ui/shop.py`
 - 購入時メンバー表示: `app/ui/shop_party.py`
-- モックの接続元・ワールドマップ: `tools/screen_mocks/field.py`
+- 現在の接続元・ワールドマップ: `app/game.py`
 - モック互換アダプター: `tools/screen_mocks/shop.py`
 - 回帰テスト: `tests/test_shop_screen_mock.py`、`tests/test_shop_system.py`、`tests/test_shop.py`
 
