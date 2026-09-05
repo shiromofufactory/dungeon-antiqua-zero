@@ -141,6 +141,15 @@ class MapSourceTest(unittest.TestCase):
             "sprite_index": 0,
         }
         source["actors"] = [prop]
+        source["event_triggers"] = [
+            {
+                "id": "open_treasure",
+                "event_id": "sample.open_treasure",
+                "activations": ["touch", "interact"],
+                "anchor": {"kind": "actor", "actor_id": "treasure_1"},
+                "offsets": [[0, 0]],
+            }
+        ]
 
         self.assertEqual(
             [
@@ -156,6 +165,67 @@ class MapSourceTest(unittest.TestCase):
         codes = {item.code for item in validate_map_source(source, self.tileset)}
         self.assertIn("prop_actor_has_facing", codes)
         self.assertIn("deprecated_actor_appearance_id", codes)
+
+    def test_requires_one_fixed_touch_interact_trigger_per_actor(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source["grounds"][2][2] = "plain"
+        source["actors"] = [
+            {
+                "id": "elder",
+                "position": [2, 2],
+                "kind": "stationary",
+                "sprite_index": 0,
+                "facing": "down",
+            }
+        ]
+
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("missing_actor_trigger", codes)
+
+        source["event_triggers"] = [
+            {
+                "id": "talk_elder",
+                "event_id": "sample.talk_elder",
+                "activations": ["touch"],
+                "anchor": {"kind": "actor", "actor_id": "elder"},
+                "offsets": [[1, 0]],
+            }
+        ]
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("invalid_actor_trigger_activations", codes)
+        self.assertIn("invalid_actor_trigger_offsets", codes)
+
+        source["event_triggers"][0].update(
+            {
+                "activations": ["touch", "interact"],
+                "offsets": [[0, 0]],
+            }
+        )
+        self.assertEqual(
+            [
+                item
+                for item in validate_map_source(source, self.tileset)
+                if item.severity == "error"
+            ],
+            [],
+        )
+
+    def test_rejects_standalone_interact_trigger(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source["grounds"][2][2] = "plain"
+        source["event_triggers"] = [
+            {
+                "id": "inspect_cell",
+                "event_id": "sample.inspect_cell",
+                "activations": ["interact"],
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "offsets": [[0, 0]],
+            }
+        ]
+
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+
+        self.assertIn("interact_requires_actor_anchor", codes)
 
     def test_resolves_object_anchored_site_and_arrival_point(self) -> None:
         tileset = deepcopy(self.tileset)

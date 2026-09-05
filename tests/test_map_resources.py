@@ -106,7 +106,7 @@ class MapResourcesTest(unittest.TestCase):
                 {
                     "id": "sign",
                     "event_id": "sample.sign",
-                    "activations": ["interact"],
+                    "activations": ["touch"],
                     "target": {"kind": "cells", "cells": [[1, 0]]},
                 },
                 {
@@ -164,7 +164,7 @@ class MapResourcesTest(unittest.TestCase):
         self.assertEqual(map_data.actors[0].kind, "stationary")
         self.assertEqual(map_data.actors[0].sprite_index, 0)
         self.assertEqual(
-            map_data.event_trigger_at("interact", 1, 0).event_id,
+            map_data.event_trigger_at("touch", 1, 0).event_id,
             "sample.sign",
         )
         self.assertEqual(
@@ -203,6 +203,17 @@ class MapResourcesTest(unittest.TestCase):
         for map_id in ("../test_map", "/test_map", "TestMap"):
             with self.subTest(map_id=map_id), self.assertRaises(ValueError):
                 resources.map(map_id)
+
+    def test_requires_exact_actor_trigger_and_rejects_standalone_interact(self) -> None:
+        self.runtime["event_triggers"] = self.runtime["event_triggers"][:1]
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "actor elder"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+        self.runtime["event_triggers"][0]["activations"] = ["interact"]
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "actor target"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
 
 if __name__ == "__main__":

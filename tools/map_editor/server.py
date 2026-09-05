@@ -41,6 +41,16 @@ DEFAULT_PORT = 8767
 SESSION_CLIENT_HEADER = "map-editor-ui"
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 SITE_NAME_TEXT_PREFIX = "location."
+ACTOR_ASSETS = {
+    "prop": {
+        "path": Path("actors/props.png"),
+        "sprite_size": [16, 16],
+    },
+    "character": {
+        "path": Path("actors/characters.png"),
+        "sprite_size": [32, 64],
+    },
+}
 MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8",
@@ -124,6 +134,25 @@ class MapEditorApplication:
         if not isinstance(image_id, str):
             raise ValueError("source_image_idが不正です。")
         return resolve_source_image(self.content_root, image_id)
+
+    def actor_image(self, asset_id: str) -> Path:
+        asset = ACTOR_ASSETS.get(asset_id)
+        if asset is None:
+            raise ValueError(f"actor画像種別が不正です: {asset_id}")
+        image_root = (self.content_root / "images").resolve()
+        image_path = (image_root / asset["path"]).resolve()
+        if image_root not in image_path.parents or not image_path.is_file():
+            raise FileNotFoundError(f"actor画像が見つかりません: {image_path}")
+        return image_path
+
+    def actor_assets_payload(self) -> dict[str, dict[str, object]]:
+        return {
+            asset_id: {
+                "image_url": f"/api/actor-image?asset={asset_id}&token={self.token}",
+                "sprite_size": list(asset["sprite_size"]),
+            }
+            for asset_id, asset in ACTOR_ASSETS.items()
+        }
 
     def map_sources(self, current: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
         source_dir = self.content_root / "maps" / "sources"
@@ -321,6 +350,7 @@ class MapEditorApplication:
             "resolved": resolved,
             "image_info": image_info,
             "image_url": f"/api/source-image?token={self.token}",
+            "actor_assets": self.actor_assets_payload(),
             "is_new": is_new,
             "source_path": self._display_path(self.source_path),
             "runtime_path": self._display_path(self.runtime_path),
@@ -473,6 +503,22 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                     tileset = application.load_tileset(data["tileset_id"])
                     image_path = application.source_image(tileset)
                     self._send_bytes(image_path.read_bytes(), MIME_TYPES.get(image_path.suffix.lower(), "application/octet-stream"))
+                except (OSError, ValueError) as error:
+                    self._error(HTTPStatus.NOT_FOUND, str(error))
+                return
+            if parsed.path == "/api/actor-image":
+                if not self._authorized(parsed):
+                    self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
+                    return
+                try:
+                    asset_id = parse_qs(parsed.query).get("asset", [""])[0]
+                    image_path = application.actor_image(asset_id)
+                    self._send_bytes(
+                        image_path.read_bytes(),
+                        MIME_TYPES.get(
+                            image_path.suffix.lower(), "application/octet-stream"
+                        ),
+                    )
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.NOT_FOUND, str(error))
                 return

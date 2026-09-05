@@ -732,6 +732,7 @@ class MapResources:
         loaded = []
         ids: set[str] = set()
         actor_ids = {actor.id for actor in actors}
+        actor_trigger_counts = {actor_id: 0 for actor_id in actor_ids}
         for index, record in enumerate(value):
             path = f"event_triggers[{index}]"
             if not isinstance(record, dict):
@@ -755,6 +756,10 @@ class MapResources:
             if not isinstance(target, dict):
                 raise MapResourceError(f"{path}.targetが不正です。")
             if target.get("kind") == "cells":
+                if "interact" in activation_values:
+                    raise MapResourceError(
+                        f"{path}.activationsのinteractはactor targetにだけ使用できます。"
+                    )
                 values = target.get("cells")
                 if not isinstance(values, list) or not values:
                     raise MapResourceError(f"{path}.target.cellsが不正です。")
@@ -778,8 +783,13 @@ class MapResources:
                 )
                 if actor_id not in actor_ids:
                     raise MapResourceError(f"{path}.target.actor_idが見つかりません。")
+                actor_trigger_counts[actor_id] += 1
+                if activation_values != ["touch", "interact"]:
+                    raise MapResourceError(
+                        f"{path}.activationsはtouch、interactの固定ペアである必要があります。"
+                    )
                 values = target.get("offsets")
-                if not isinstance(values, list) or not values:
+                if values != [[0, 0]]:
                     raise MapResourceError(f"{path}.target.offsetsが不正です。")
                 offsets = tuple(
                     cls._offset(cell, f"{path}.target.offsets[{cell_index}]")
@@ -798,6 +808,11 @@ class MapResources:
                 )
             else:
                 raise MapResourceError(f"{path}.target.kindが不正です。")
+        for actor_id, trigger_count in actor_trigger_counts.items():
+            if trigger_count != 1:
+                raise MapResourceError(
+                    f"actor {actor_id}のトリガーは1件である必要があります。"
+                )
         return tuple(loaded)
 
     @classmethod

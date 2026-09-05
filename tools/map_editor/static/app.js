@@ -12,6 +12,7 @@ const state = {
   destinationOptions: [],
   siteOptions: [],
   eventOptions: [],
+  actorAssets: {},
   resolved: null,
   diagnostics: [],
   dirty: false,
@@ -39,10 +40,15 @@ const state = {
   resolveTimer: null,
   resolveRevision: 0,
   siteNameEditing: false,
+  spritePickerActorId: null,
 };
 
 const rawImage = new Image();
 const sourceImage = document.createElement("canvas");
+const actorSheets = {
+  prop: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
+  character: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
+};
 const byId = (id) => document.getElementById(id);
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const escapeHtml = (value) => String(value)
@@ -251,6 +257,144 @@ function prepareSourceImage() {
   drawMap(performance.now());
 }
 
+function actorAssetId(kind) {
+  return kind === "prop" ? "prop" : "character";
+}
+
+function prepareActorSheet(assetId) {
+  const sheet = actorSheets[assetId];
+  const image = sheet.image;
+  sheet.canvas.width = image.naturalWidth;
+  sheet.canvas.height = image.naturalHeight;
+  const context = sheet.canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0);
+  const pixels = context.getImageData(0, 0, sheet.canvas.width, sheet.canvas.height);
+  for (let index = 0; index < pixels.data.length; index += 4) {
+    if (pixels.data[index] === 255 && pixels.data[index + 1] === 0 && pixels.data[index + 2] === 128) pixels.data[index + 3] = 0;
+  }
+  context.putImageData(pixels, 0, 0);
+  sheet.ready = true;
+  drawSelectedActorSprite();
+  if (byId("actor-sprite-dialog").open) renderActorSpriteDialog();
+}
+
+function loadActorSheets() {
+  for (const [assetId, asset] of Object.entries(state.actorAssets)) {
+    const sheet = actorSheets[assetId];
+    if (!sheet || typeof asset?.image_url !== "string") continue;
+    sheet.ready = false;
+    sheet.image.onload = () => prepareActorSheet(assetId);
+    sheet.image.onerror = () => {
+      sheet.ready = false;
+      if (byId("actor-sprite-dialog").open) renderActorSpriteDialog();
+      showToast("actorスプライト画像を表示できません。", true);
+    };
+    sheet.image.src = editorApiPath(asset.image_url);
+  }
+}
+
+function actorSpriteCapacity(assetId) {
+  const sheet = actorSheets[assetId];
+  const size = state.actorAssets[assetId]?.sprite_size;
+  if (!sheet?.ready || !Array.isArray(size) || size.length !== 2) return 0;
+  return Math.floor(sheet.canvas.width / size[0]) * Math.floor(sheet.canvas.height / size[1]);
+}
+
+function actorSpriteSource(assetId, spriteIndex, facing = "down") {
+  const sheet = actorSheets[assetId];
+  const size = state.actorAssets[assetId]?.sprite_size;
+  if (!sheet?.ready || !Array.isArray(size) || !Number.isInteger(spriteIndex)) return null;
+  const columns = Math.floor(sheet.canvas.width / size[0]);
+  if (columns < 1 || spriteIndex < 0 || spriteIndex >= actorSpriteCapacity(assetId)) return null;
+  let sourceX = (spriteIndex % columns) * size[0];
+  let sourceY = Math.floor(spriteIndex / columns) * size[1];
+  if (assetId === "character") {
+    const facingRow = { up: 0, right: 1, down: 2, left: 3 }[facing] ?? 2;
+    sourceY += facingRow * CELL_SIZE;
+  }
+  return { sheet, sourceX, sourceY };
+}
+
+function drawActorSprite(canvas, assetId, spriteIndex, facing = "down") {
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  const source = actorSpriteSource(assetId, spriteIndex, facing);
+  if (!source) return;
+  const scale = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / CELL_SIZE));
+  const drawSize = CELL_SIZE * scale;
+  const drawX = Math.floor((canvas.width - drawSize) / 2);
+  const drawY = Math.floor((canvas.height - drawSize) / 2);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(source.sheet.canvas, source.sourceX, source.sourceY, CELL_SIZE, CELL_SIZE, drawX, drawY, drawSize, drawSize);
+}
+
+function drawActorOnMap(context, actor, scale) {
+  const source = actorSpriteSource(actorAssetId(actor.kind), actor.sprite_index, actor.facing);
+  if (!source) return false;
+  context.imageSmoothingEnabled = false;
+  context.drawImage(
+    source.sheet.canvas,
+    source.sourceX,
+    source.sourceY,
+    CELL_SIZE,
+    CELL_SIZE,
+    actor.position[0] * scale,
+    actor.position[1] * scale,
+    scale,
+    scale,
+  );
+  return true;
+}
+
+function drawSelectedActorSprite() {
+  const actor = currentActor();
+  const canvas = document.querySelector("[data-selected-actor-sprite]");
+  if (!actor || !canvas) return;
+  drawActorSprite(canvas, actorAssetId(actor.kind), actor.sprite_index, actor.facing);
+}
+
+function renderActorSpriteDialog() {
+  const actor = state.data?.actors?.find((item) => item.id === state.spritePickerActorId);
+  const options = byId("actor-sprite-options");
+  if (!actor) {
+    options.innerHTML = `<div class="empty-state">actorが選択されていません。</div>`;
+    return;
+  }
+  const assetId = actorAssetId(actor.kind);
+  const capacity = actorSpriteCapacity(assetId);
+  byId("actor-sprite-dialog-title").textContent = actor.kind === "prop" ? "固定物のスプライトを選択" : "キャラクターのスプライトを選択";
+  byId("actor-sprite-dialog-summary").textContent = capacity
+    ? `${capacity}件${assetId === "character" ? "・下向きの画像で表示" : ""}`
+    : "画像を読み込んでいます…";
+  options.innerHTML = capacity
+    ? Array.from({ length: capacity }, (_, index) => `<button class="actor-sprite-option ${index === actor.sprite_index ? "selected" : ""}" type="button" role="option" aria-selected="${index === actor.sprite_index}" data-action="select-actor-sprite" data-sprite-index="${index}"><canvas width="48" height="48" data-actor-sprite-option="${index}"></canvas><span>#${index}</span></button>`).join("")
+    : `<div class="empty-state">スプライト画像を表示できません。</div>`;
+  options.querySelectorAll("[data-actor-sprite-option]").forEach((canvas) => {
+    drawActorSprite(canvas, assetId, Number(canvas.dataset.actorSpriteOption));
+  });
+}
+
+function openActorSpriteDialog() {
+  const actor = currentActor();
+  if (!actor) return;
+  state.spritePickerActorId = actor.id;
+  renderActorSpriteDialog();
+  byId("actor-sprite-dialog").showModal();
+}
+
+function closeActorSpriteDialog() {
+  const dialog = byId("actor-sprite-dialog");
+  if (dialog.open) dialog.close();
+}
+
+function selectActorSprite(spriteIndex) {
+  const actor = state.data?.actors?.find((item) => item.id === state.spritePickerActorId);
+  const assetId = actor ? actorAssetId(actor.kind) : null;
+  if (!actor || !Number.isInteger(spriteIndex) || spriteIndex < 0 || spriteIndex >= actorSpriteCapacity(assetId)) return;
+  if (actor.sprite_index !== spriteIndex) commit(() => { actor.sprite_index = spriteIndex; });
+  closeActorSpriteDialog();
+}
+
 function renderPalette() {
   if (!state.tileset) return;
   const container = byId("palette-content");
@@ -301,10 +445,10 @@ function renderPalette() {
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-actor">actorを配置</button></div>
       </div>
       <div class="section">
-        <div class="section-title"><h2>トリガー</h2><span class="subtle">${state.data.event_triggers.length}件</span></div>
-        <div class="travel-list">${state.data.event_triggers.map((trigger) => `
+        <div class="section-title"><h2>トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
+        <div class="travel-list">${standaloneTriggers().map((trigger) => `
           <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / ${trigger.activations.join(", ")}</button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
-        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="add-actor-trigger" ${currentActor() ? "" : "disabled"}>選択actorのtrigger</button><button class="button ghost small" type="button" data-action="add-object-trigger" ${currentInstance() ? "" : "disabled"}>選択objectのtrigger</button></div>
+        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="add-object-trigger" ${currentInstance() ? "" : "disabled"}>選択objectのtrigger</button></div>
       </div>`;
   }
   drawPaletteThumbs();
@@ -344,6 +488,14 @@ function currentActor() {
 
 function currentTrigger() {
   return state.data?.event_triggers?.find((trigger) => trigger.id === state.selectedTriggerId) || null;
+}
+
+function actorTrigger(actorId) {
+  return state.data?.event_triggers?.find((trigger) => trigger.anchor?.kind === "actor" && trigger.anchor.actor_id === actorId) || null;
+}
+
+function standaloneTriggers() {
+  return state.data?.event_triggers?.filter((trigger) => trigger.anchor?.kind !== "actor") || [];
 }
 
 function eventIdOptions(selected) {
@@ -422,6 +574,7 @@ function renderInspector() {
   const arrival = currentArrival();
   const actor = currentActor();
   const trigger = currentTrigger();
+  const linkedActorTrigger = actor ? actorTrigger(actor.id) : null;
   const attachedSite = instance ? siteForObject(instance.id) : null;
   const objectInspector = `
     <div class="section">
@@ -476,16 +629,17 @@ function renderInspector() {
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>actor ID</label><input type="text" value="${escapeHtml(actor.id)}" data-actor-field="id"></div>
           <div class="field full"><label>種別</label><select data-actor-field="kind"><option value="prop" ${actor.kind === "prop" ? "selected" : ""}>固定物（向きなし）</option><option value="stationary" ${actor.kind === "stationary" ? "selected" : ""}>固定キャラ</option><option value="roaming" ${actor.kind === "roaming" ? "selected" : ""}>移動キャラ</option></select></div>
-          <div class="field full"><label>スプライト番号</label><input type="number" min="0" step="1" value="${actor.sprite_index}" data-actor-field="sprite_index"></div>
+          <div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="48" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>番号 #${actor.sprite_index}</strong><span>画像から選択</span></span></button></div>
           ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>`}
-        </div><div class="row between" style="margin-top:9px"><button class="button ghost small" data-action="move-actor">セルを移動</button><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
+          <div class="field full"><label>イベント</label><select data-actor-event-id="true">${eventIdOptions(linkedActorTrigger?.event_id || "")}</select><div class="field-note">touch・interactで自動的に起動します。</div></div>
+        </div><div class="row between" style="margin-top:9px"><div class="row"><button class="button ghost small" data-action="move-actor">セルを移動</button>${editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
     </div>
     <div class="section">
-      <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${state.data.event_triggers.length}件</span></div>
+      <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
       ${trigger ? `<div class="instance-card"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / 対象 ${trigger.offsets.length}セル</div>
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>イベント</label><select data-trigger-field="event_id">${eventIdOptions(trigger.event_id)}</select></div>
-          <div class="field full"><label>発火方法</label><div class="row">${["step","touch","interact"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
+          <div class="field full"><label>発火方法</label><div class="row">${["step","touch"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
         </div><div class="row between" style="margin-top:9px"><div class="row"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button>${editorRoute ? `<button class="button secondary small" data-action="open-trigger-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
     </div>`;
   byId("inspector-content").innerHTML = `
@@ -503,6 +657,7 @@ function renderInspector() {
       </div>
     </div>
     ${state.tab === "site" ? siteInspector : state.tab === "event" ? eventInspector : objectInspector}`;
+  drawSelectedActorSprite();
 }
 
 function renderIssues() {
@@ -594,19 +749,27 @@ function drawDirectionMarker(context, position, facing, scale, color) {
   context.fill();
 }
 
+function drawCellSelectionFrame(context, position, scale) {
+  context.strokeStyle = "#ff67bd";
+  context.lineWidth = Math.max(2, state.zoom * 2);
+  context.strokeRect(position[0] * scale + 1, position[1] * scale + 1, scale - 2, scale - 2);
+}
+
 function drawTravelMarkers(context, scale) {
+  const emphasized = state.tab === "site";
   for (const site of state.data.sites) {
     const selected = site.id === state.selectedSiteId;
     const origin = siteAnchorPosition(site);
-    context.lineWidth = Math.max(selected ? 3 : 2, state.zoom);
+    context.lineWidth = Math.max(selected ? 3 : emphasized ? 2.5 : 2, state.zoom);
     for (const entrance of siteEntrancePositions(site)) {
-      context.fillStyle = selected ? "rgba(47,196,255,.42)" : "rgba(47,196,255,.24)";
-      context.strokeStyle = selected ? "#71ddff" : "#319bc0";
+      context.fillStyle = selected ? "rgba(47,196,255,.52)" : emphasized ? "rgba(47,196,255,.40)" : "rgba(47,196,255,.24)";
+      context.strokeStyle = selected ? "#71ddff" : emphasized ? "#49c7f4" : "rgba(49,155,192,.78)";
       context.fillRect(entrance[0] * scale, entrance[1] * scale, scale, scale);
       context.strokeRect(entrance[0] * scale + 1, entrance[1] * scale + 1, scale - 2, scale - 2);
+      if (selected) drawCellSelectionFrame(context, entrance, scale);
     }
     if (site.anchor?.kind === "cell" && origin) {
-      context.strokeStyle = selected ? "#ff67bd" : "#9d4779";
+      context.strokeStyle = selected ? "#ff67bd" : emphasized ? "#d75ca0" : "rgba(157,71,121,.72)";
       context.beginPath();
       context.moveTo(origin[0] * scale + scale * .2, origin[1] * scale + scale * .2);
       context.lineTo((origin[0] + .8) * scale, (origin[1] + .8) * scale);
@@ -617,20 +780,24 @@ function drawTravelMarkers(context, scale) {
   }
   for (const arrival of state.data.arrival_points) {
     const selected = arrival.id === state.selectedArrivalId;
-    const color = selected ? "#91f090" : "#4b9652";
+    const color = selected ? "#91f090" : emphasized ? "#66db79" : "rgba(75,150,82,.78)";
+    context.fillStyle = selected ? "rgba(95,232,120,.52)" : emphasized ? "rgba(95,232,120,.40)" : "rgba(95,232,120,.22)";
     context.strokeStyle = color;
-    context.lineWidth = Math.max(selected ? 3 : 2, state.zoom);
+    context.lineWidth = Math.max(selected ? 3 : emphasized ? 2.5 : 2, state.zoom);
+    context.fillRect(arrival.position[0] * scale + 3, arrival.position[1] * scale + 3, scale - 6, scale - 6);
     context.strokeRect(arrival.position[0] * scale + 5, arrival.position[1] * scale + 5, scale - 10, scale - 10);
     drawDirectionMarker(context, arrival.position, arrival.facing, scale, color);
+    if (selected) drawCellSelectionFrame(context, arrival.position, scale);
   }
 }
 
 function drawEventMarkers(context, scale) {
-  for (const trigger of state.data.event_triggers) {
+  const emphasized = state.tab === "event";
+  for (const trigger of standaloneTriggers()) {
     const selected = trigger.id === state.selectedTriggerId;
-    context.fillStyle = selected ? "rgba(255,79,163,.42)" : "rgba(224,184,90,.22)";
-    context.strokeStyle = selected ? "#ff67bd" : "#d0a94e";
-    context.lineWidth = Math.max(selected ? 3 : 2, state.zoom);
+    context.fillStyle = selected ? "rgba(255,79,163,.52)" : emphasized ? "rgba(224,184,90,.40)" : "rgba(224,184,90,.22)";
+    context.strokeStyle = selected ? "#ff67bd" : emphasized ? "#e9c45c" : "rgba(208,169,78,.78)";
+    context.lineWidth = Math.max(selected ? 3 : emphasized ? 2.5 : 2, state.zoom);
     for (const position of triggerPositions(trigger)) {
       context.fillRect(position[0] * scale, position[1] * scale, scale, scale);
       context.strokeRect(position[0] * scale + 2, position[1] * scale + 2, scale - 4, scale - 4);
@@ -638,13 +805,19 @@ function drawEventMarkers(context, scale) {
   }
   for (const actor of state.data.actors) {
     const selected = actor.id === state.selectedActorId;
-    const centerX = (actor.position[0] + .5) * scale;
-    const centerY = (actor.position[1] + .5) * scale;
-    context.fillStyle = selected ? "#ff67bd" : "#76d7c4";
-    context.beginPath();
-    context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
-    context.fill();
-    if (actor.kind !== "prop") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
+    const rendered = drawActorOnMap(context, actor, scale);
+    if (!rendered) {
+      const centerX = (actor.position[0] + .5) * scale;
+      const centerY = (actor.position[1] + .5) * scale;
+      context.fillStyle = selected ? "#ff67bd" : "#76d7c4";
+      context.beginPath();
+      context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
+      context.fill();
+      if (actor.kind !== "prop") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
+    }
+    if (selected && rendered) {
+      drawCellSelectionFrame(context, actor.position, scale);
+    }
   }
 }
 
@@ -883,7 +1056,9 @@ function defaultTrigger(anchor) {
 function createActor(position) {
   const id = uniqueRecordId("actor_1", state.data.actors);
   commit(() => {
-    state.data.actors.push({ id, position: [...position], kind: "stationary", sprite_index: 0, facing: "down" });
+    const actor = { id, position: [...position], kind: "stationary", sprite_index: 0, facing: "down" };
+    state.data.actors.push(actor);
+    ensureActorTrigger(actor);
     state.selectedActorId = id;
     state.selectedTriggerId = null;
     state.eventTool = "select";
@@ -899,6 +1074,14 @@ function addAnchoredTrigger(anchor) {
   });
 }
 
+function ensureActorTrigger(actor) {
+  let trigger = actorTrigger(actor.id);
+  if (trigger) return trigger;
+  trigger = defaultTrigger({ kind: "actor", actor_id: actor.id });
+  state.data.event_triggers.push(trigger);
+  return trigger;
+}
+
 function triggerOffsetForCell(trigger, cell) {
   const origin = triggerAnchorPosition(trigger);
   return origin ? [cell[0] - origin[0], cell[1] - origin[1]] : null;
@@ -906,10 +1089,77 @@ function triggerOffsetForCell(trigger, cell) {
 
 function selectEventAt(cell) {
   const actor = state.data.actors.find((item) => item.position[0] === cell[0] && item.position[1] === cell[1]);
-  const trigger = state.data.event_triggers.find((item) => triggerPositions(item).some((position) => position[0] === cell[0] && position[1] === cell[1]));
+  const trigger = standaloneTriggers().find((item) => triggerPositions(item).some((position) => position[0] === cell[0] && position[1] === cell[1]));
+  if (actor && !actorTrigger(actor.id)) {
+    commit(() => {
+      ensureActorTrigger(actor);
+      state.selectedActorId = actor.id;
+      state.selectedTriggerId = null;
+    });
+    return;
+  }
   state.selectedActorId = actor?.id || null;
   state.selectedTriggerId = trigger?.id || null;
   renderAll();
+}
+
+function mapSelectionCandidatesAt(cell) {
+  const [x, y] = cell;
+  const candidates = [];
+  for (const actor of state.data.actors) {
+    if (actor.position[0] === x && actor.position[1] === y) candidates.push({ kind: "actor", id: actor.id, tab: "event" });
+  }
+  for (const trigger of standaloneTriggers()) {
+    if (triggerPositions(trigger).some((position) => position[0] === x && position[1] === y)) candidates.push({ kind: "trigger", id: trigger.id, tab: "event" });
+  }
+  for (const arrival of state.data.arrival_points) {
+    if (arrival.position[0] === x && arrival.position[1] === y) candidates.push({ kind: "arrival", id: arrival.id, tab: "site" });
+  }
+  for (const site of state.data.sites) {
+    const origin = siteAnchorPosition(site);
+    const occupiesCell = siteEntrancePositions(site).some((position) => position[0] === x && position[1] === y)
+      || (site.anchor?.kind === "cell" && origin?.[0] === x && origin?.[1] === y);
+    if (occupiesCell) candidates.push({ kind: "site", id: site.id, tab: "site" });
+  }
+  const instance = instanceAt(x, y);
+  if (instance) candidates.push({ kind: "object", id: instance.id, tab: "object" });
+  return candidates;
+}
+
+function isMapSelectionCandidateSelected(candidate) {
+  if (candidate.tab !== state.tab) return false;
+  if (candidate.kind === "actor") return candidate.id === state.selectedActorId;
+  if (candidate.kind === "trigger") return candidate.id === state.selectedTriggerId;
+  if (candidate.kind === "arrival") return candidate.id === state.selectedArrivalId;
+  if (candidate.kind === "site") return candidate.id === state.selectedSiteId;
+  return candidate.id === state.selectedInstanceId;
+}
+
+function selectAnyAt(cell) {
+  const candidates = mapSelectionCandidatesAt(cell);
+  const selectedIndex = candidates.findIndex(isMapSelectionCandidateSelected);
+  const candidate = candidates.length ? candidates[(selectedIndex + 1) % candidates.length] : null;
+  state.selectedInstanceId = null;
+  state.selectedSiteId = null;
+  state.selectedArrivalId = null;
+  state.selectedActorId = null;
+  state.selectedTriggerId = null;
+  state.travelTool = "select";
+  state.eventTool = "select";
+  if (!candidate) {
+    renderAll();
+    return null;
+  }
+  state.tab = candidate.tab;
+  if (candidate.kind === "actor") state.selectedActorId = candidate.id;
+  else if (candidate.kind === "trigger") state.selectedTriggerId = candidate.id;
+  else if (candidate.kind === "arrival") state.selectedArrivalId = candidate.id;
+  else if (candidate.kind === "site") state.selectedSiteId = candidate.id;
+  else state.selectedInstanceId = candidate.id;
+  const actor = candidate.kind === "actor" ? currentActor() : null;
+  if (actor && !actorTrigger(actor.id)) commit(() => ensureActorTrigger(actor));
+  else renderAll();
+  return candidate;
 }
 
 function handleEventCell(cell) {
@@ -1094,6 +1344,11 @@ function handlePaletteAction(element) {
     state.selectedActorId = element.dataset.id;
     state.selectedTriggerId = null;
     state.eventTool = "select";
+    if (currentActor() && !actorTrigger(currentActor().id)) {
+      commit(() => { ensureActorTrigger(currentActor()); });
+      centerMapOnPosition(currentActor()?.position);
+      return;
+    }
     renderAll();
     centerMapOnPosition(currentActor()?.position);
   } else if (action === "select-trigger") {
@@ -1109,8 +1364,6 @@ function handlePaletteAction(element) {
     state.selectedTriggerId = null;
     state.eventTool = "create_trigger";
     renderAll();
-  } else if (action === "add-actor-trigger" && currentActor()) {
-    addAnchoredTrigger({ kind: "actor", actor_id: currentActor().id });
   } else if (action === "add-object-trigger" && currentInstance()) {
     addAnchoredTrigger({ kind: "object", object_id: currentInstance().id });
   }
@@ -1210,6 +1463,14 @@ function handleInspectorAction(element) {
     state.eventTool = "move_actor";
     renderAll();
   }
+  else if (action === "open-actor-sprite-dialog") openActorSpriteDialog();
+  else if (action === "open-actor-event" && currentActor()) {
+    const trigger = actorTrigger(currentActor().id);
+    if (!trigger?.event_id) return;
+    const [namespace, eventId] = trigger.event_id.split(".", 2);
+    const url = editorUrl("event", { namespace, event: eventId });
+    if (url) window.location.assign(url);
+  }
   else if (action === "delete-actor") commit(() => {
     const actorId = state.selectedActorId;
     state.data.actors = state.data.actors.filter((actor) => actor.id !== actorId);
@@ -1306,8 +1567,18 @@ function updateActorField(path, value) {
       actor.kind = value;
       if (value === "prop") delete actor.facing;
       else if (!actor.facing) actor.facing = "down";
+      const capacity = actorSpriteCapacity(actorAssetId(value));
+      if (capacity > 0 && actor.sprite_index >= capacity) actor.sprite_index = 0;
     } else if (path === "sprite_index") actor.sprite_index = Number(value);
     else actor[path] = value;
+  });
+}
+
+function updateActorEventId(value) {
+  const actor = currentActor();
+  if (!actor) return;
+  commit(() => {
+    ensureActorTrigger(actor).event_id = value;
   });
 }
 
@@ -1369,6 +1640,7 @@ async function initialize() {
     state.destinationOptions = payload.destination_options;
     state.siteOptions = payload.site_options;
     state.eventOptions = payload.event_options;
+    state.actorAssets = payload.actor_assets || {};
     state.resolved = payload.resolved;
     state.diagnostics = payload.diagnostics;
     state.dirty = payload.is_new;
@@ -1378,6 +1650,7 @@ async function initialize() {
     rawImage.onload = prepareSourceImage;
     rawImage.onerror = () => showToast("マップチップ画像を表示できません。", true);
     rawImage.src = editorApiPath(payload.image_url);
+    loadActorSheets();
     renderAll();
   } catch (error) {
     showToast(error.message, true);
@@ -1412,6 +1685,7 @@ byId("inspector-content").addEventListener("change", (event) => {
   else if (event.target.dataset.siteField) updateSiteField(event.target.dataset.siteField, event.target.value);
   else if (event.target.dataset.arrivalField) updateArrivalField(event.target.dataset.arrivalField, event.target.type === "checkbox" ? event.target.checked : event.target.value);
   else if (event.target.dataset.actorField) updateActorField(event.target.dataset.actorField, event.target.value);
+  else if (event.target.dataset.actorEventId) updateActorEventId(event.target.value);
   else if (event.target.dataset.triggerField) updateTriggerField(event.target.dataset.triggerField, event.target.value);
   else if (event.target.dataset.triggerActivation) commit(() => {
     const trigger = currentTrigger();
@@ -1420,6 +1694,14 @@ byId("inspector-content").addEventListener("change", (event) => {
     else if (!event.target.checked) trigger.activations = trigger.activations.filter((item) => item !== activation);
   });
 });
+byId("actor-sprite-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeActorSpriteDialog();
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+  if (target.dataset.action === "close-actor-sprite-dialog") closeActorSpriteDialog();
+  else if (target.dataset.action === "select-actor-sprite") selectActorSprite(Number(target.dataset.spriteIndex));
+});
+byId("actor-sprite-dialog").addEventListener("close", () => { state.spritePickerActorId = null; });
 byId("undo-button").addEventListener("click", undo);
 byId("redo-button").addEventListener("click", redo);
 byId("save-button").addEventListener("click", save);
@@ -1439,20 +1721,8 @@ mapCanvas.addEventListener("pointerdown", (event) => {
   if (!cell) return;
   if (event.button === 2) {
     event.preventDefault();
-    if (state.tab === "site") {
-      state.travelTool = "select";
-      selectTravelAt(cell);
-      return;
-    }
-    if (state.tab === "event") {
-      state.eventTool = "select";
-      selectEventAt(cell);
-      return;
-    }
-    state.selectedInstanceId = instanceAt(...cell)?.id || null;
-    state.tab = "object";
-    renderAll();
-    beginObjectDrag(event, cell);
+    const candidate = selectAnyAt(cell);
+    if (candidate?.kind === "object") beginObjectDrag(event, cell);
     return;
   }
   if (event.button !== 0) return;

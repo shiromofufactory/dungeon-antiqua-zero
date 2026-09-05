@@ -257,6 +257,22 @@ def make_handler(
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.NOT_FOUND, str(error))
                 return
+            if editor == "map" and path == "/api/actor-image":
+                if not self._authorized(editor, parsed):
+                    self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
+                    return
+                try:
+                    asset_id = parse_qs(parsed.query).get("asset", [""])[0]
+                    image_path = map_application.actor_image(asset_id)
+                    self._send_bytes(
+                        image_path.read_bytes(),
+                        MIME_TYPES.get(
+                            image_path.suffix.lower(), "application/octet-stream"
+                        ),
+                    )
+                except (OSError, ValueError) as error:
+                    self._error(HTTPStatus.NOT_FOUND, str(error))
+                return
             self._serve_static(editor, path)
 
         def _read_payload(self, editor: str) -> tuple[bool, object]:

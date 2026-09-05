@@ -22,6 +22,14 @@ class MapEditorServerTest(unittest.TestCase):
         image_path = content_root / "images" / "mapchips" / "worldmap.png"
         image_path.parent.mkdir(parents=True)
         Image.new("RGBA", (64, 96), (0, 0, 0, 255)).save(image_path)
+        actor_image_root = content_root / "images" / "actors"
+        actor_image_root.mkdir(parents=True)
+        Image.new("RGB", (48, 16), (255, 0, 128)).save(
+            actor_image_root / "props.png"
+        )
+        Image.new("RGB", (64, 64), (255, 0, 128)).save(
+            actor_image_root / "characters.png"
+        )
         metadata_path = content_root / "maps" / "tilesets" / "worldmap.json"
         tileset = initial_worldmap_tileset()
         save_tileset(metadata_path, tileset)
@@ -90,11 +98,52 @@ class MapEditorServerTest(unittest.TestCase):
             [{"map_id": "test_world", "arrival_ids": []}],
         )
         self.assertEqual(payload["site_options"], [])
+        self.assertEqual(payload["actor_assets"]["prop"]["sprite_size"], [16, 16])
+        self.assertEqual(
+            payload["actor_assets"]["character"]["sprite_size"], [32, 64]
+        )
         self.assertIsNotNone(payload["resolved"])
 
         with self.assertRaises(HTTPError) as context:
             self.get_json("/api/document")
         self.assertEqual(context.exception.code, 403)
+
+    def test_serves_actor_images_and_sprite_picker_ui(self) -> None:
+        with urlopen(
+            f"{self.base_url}/api/actor-image?asset=prop&token=test-token",
+            timeout=2,
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
+
+        page = self.get_text("/")
+        script = self.get_text("/app.js")
+        self.assertIn('id="actor-sprite-dialog"', page)
+        self.assertIn('data-action="open-actor-sprite-dialog"', script)
+        self.assertIn('data-action="select-actor-sprite"', script)
+        self.assertIn("function drawActorOnMap(context, actor, scale)", script)
+        self.assertIn("const rendered = drawActorOnMap(context, actor, scale)", script)
+        self.assertNotIn('data-actor-field="sprite_index"', script)
+
+    def test_actor_trigger_is_automatic_and_interact_is_not_selectable(self) -> None:
+        script = self.get_text("/app.js")
+
+        self.assertIn('data-actor-event-id="true"', script)
+        self.assertIn("ensureActorTrigger(actor)", script)
+        self.assertIn('["step","touch"]', script)
+        self.assertNotIn('data-action="add-actor-trigger"', script)
+        self.assertNotIn('["step","touch","interact"]', script)
+
+    def test_map_markers_are_emphasized_by_tab_and_right_click_selects_any_kind(self) -> None:
+        script = self.get_text("/app.js")
+
+        self.assertIn('const emphasized = state.tab === "site"', script)
+        self.assertIn('const emphasized = state.tab === "event"', script)
+        self.assertIn("function drawCellSelectionFrame(context, position, scale)", script)
+        self.assertIn("if (selected) drawCellSelectionFrame(context, arrival.position, scale)", script)
+        self.assertIn("function mapSelectionCandidatesAt(cell)", script)
+        self.assertIn("function selectAnyAt(cell)", script)
+        self.assertIn("const candidate = selectAnyAt(cell)", script)
 
     def test_trigger_id_is_internal_in_editor_ui(self) -> None:
         script = self.get_text("/app.js")

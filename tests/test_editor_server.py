@@ -45,6 +45,14 @@ class EditorServerTest(unittest.TestCase):
         image_path = self.content_root / "images" / "mapchips" / "worldmap.png"
         image_path.parent.mkdir(parents=True)
         Image.new("RGBA", (64, 96), (0, 0, 0, 255)).save(image_path)
+        actor_image_root = self.content_root / "images" / "actors"
+        actor_image_root.mkdir(parents=True)
+        Image.new("RGB", (48, 16), (255, 0, 128)).save(
+            actor_image_root / "props.png"
+        )
+        Image.new("RGB", (64, 64), (255, 0, 128)).save(
+            actor_image_root / "characters.png"
+        )
         save_tileset(
             self.content_root / "maps" / "tilesets" / "worldmap.json",
             initial_worldmap_tileset(),
@@ -144,6 +152,7 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn('data-list-tab="message"', event_page)
         self.assertIn('id="editor-switch"', map_page)
         self.assertIn('id="editor-switch"', event_page)
+        self.assertIn('id="actor-sprite-dialog"', map_page)
         self.assertIn("editorApiPath", self.get_text("/map/app.js"))
         self.assertIn("editorApiPath", self.get_text("/event/app.js"))
         self.assertEqual(
@@ -171,6 +180,13 @@ class EditorServerTest(unittest.TestCase):
         )
         self.assertIn('$("namespace-dialog").showModal()', event_script)
         self.assertIn('$("namespace-form").addEventListener("submit"', event_script)
+
+        with urlopen(
+            f"{self.base_url}/map/api/actor-image?asset=character&token=shared-token",
+            timeout=3,
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_root_redirects_to_the_map_editor(self) -> None:
         with urlopen(

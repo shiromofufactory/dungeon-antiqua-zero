@@ -66,6 +66,22 @@
     </aside>
   </main>
 
+  <dialog id="actor-sprite-dialog" class="actor-sprite-dialog" aria-labelledby="actor-sprite-dialog-title">
+    <div class="actor-sprite-dialog-content">
+      <div class="actor-sprite-dialog-heading">
+        <div>
+          <h2 id="actor-sprite-dialog-title">スプライトを選択</h2>
+          <p id="actor-sprite-dialog-summary"></p>
+        </div>
+        <button class="icon-button" type="button" data-action="close-actor-sprite-dialog" aria-label="閉じる">×</button>
+      </div>
+      <div id="actor-sprite-options" class="actor-sprite-options" role="listbox" aria-label="スプライト候補"></div>
+      <div class="actor-sprite-dialog-actions">
+        <button class="button ghost" type="button" data-action="close-actor-sprite-dialog">閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js" defer></script>
 </body>

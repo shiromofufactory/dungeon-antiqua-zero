@@ -447,6 +447,7 @@ def _validate_event_triggers(
     trigger_ids: set[str] = set()
     occupied: dict[tuple[str, int, int], str] = {}
     actor_occupied: dict[tuple[str, str, int, int], str] = {}
+    actor_trigger_counts = {actor_id: 0 for actor_id in actor_positions}
     for index, trigger in enumerate(value):
         path = f"event_triggers[{index}]"
         if not isinstance(trigger, dict):
@@ -477,23 +478,27 @@ def _validate_event_triggers(
 
         anchor = trigger.get("anchor")
         anchor_origin: tuple[int, int] | None = None
+        anchor_kind: str | None = None
         moving_actor = False
         moving_actor_id: str | None = None
         if not isinstance(anchor, dict):
             _diagnostic(diagnostics, "error", "invalid_trigger_anchor", f"{path}.anchor", "trigger anchorはobjectで指定してください。")
         elif anchor.get("kind") == "cell":
+            anchor_kind = "cell"
             position = anchor.get("position")
             if not _valid_point(position) or not _point_in_bounds(position, width, height):
                 _diagnostic(diagnostics, "error", "invalid_trigger_anchor_cell", f"{path}.anchor.position", "cell anchorはマップ内の[x, y]で指定してください。")
             else:
                 anchor_origin = (position[0], position[1])
         elif anchor.get("kind") == "object":
+            anchor_kind = "object"
             object_id = anchor.get("object_id")
             if not _valid_id(object_id) or object_id not in object_origins:
                 _diagnostic(diagnostics, "error", "unknown_trigger_anchor_object", f"{path}.anchor.object_id", f"配置オブジェクトが見つかりません: {object_id}")
             else:
                 anchor_origin = object_origins[object_id]
         elif anchor.get("kind") == "actor":
+            anchor_kind = "actor"
             actor_id = anchor.get("actor_id")
             if not _valid_id(actor_id) or actor_id not in actor_positions:
                 _diagnostic(diagnostics, "error", "unknown_trigger_anchor_actor", f"{path}.anchor.actor_id", f"actorが見つかりません: {actor_id}")
@@ -501,13 +506,40 @@ def _validate_event_triggers(
                 anchor_origin = actor_positions[actor_id]
                 moving_actor = True
                 moving_actor_id = actor_id
+                actor_trigger_counts[actor_id] += 1
         else:
             _diagnostic(diagnostics, "error", "invalid_trigger_anchor_kind", f"{path}.anchor.kind", "anchor kindはcell、object、actorのいずれかです。")
+
+        if anchor_kind == "actor":
+            if activations_value != ["touch", "interact"]:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "invalid_actor_trigger_activations",
+                    f"{path}.activations",
+                    "actor triggerのactivationsはtouch、interactの固定ペアで指定してください。",
+                )
+        elif anchor_kind in ("cell", "object") and "interact" in activations:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "interact_requires_actor_anchor",
+                f"{path}.activations",
+                "interactはactorアンカーの自動トリガーにだけ使用できます。",
+            )
 
         offsets = trigger.get("offsets")
         if not isinstance(offsets, list) or not offsets:
             _diagnostic(diagnostics, "error", "invalid_trigger_offsets", f"{path}.offsets", "offsetsは[x, y]を1件以上含む配列で指定してください。")
             continue
+        if anchor_kind == "actor" and offsets != [[0, 0]]:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_actor_trigger_offsets",
+                f"{path}.offsets",
+                "actor triggerのoffsetsは[[0, 0]]に固定してください。",
+            )
         seen_offsets: set[tuple[int, int]] = set()
         for offset_index, offset in enumerate(offsets):
             offset_path = f"{path}.offsets[{offset_index}]"
@@ -550,6 +582,24 @@ def _validate_event_triggers(
                     _diagnostic(diagnostics, "error", "overlapping_event_trigger", offset_path, f"{activation} triggerが{previous}と同じセルで重複しています。")
                 elif isinstance(trigger_id, str):
                     occupied[key] = trigger_id
+
+    for actor_id, trigger_count in actor_trigger_counts.items():
+        if trigger_count == 0:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "missing_actor_trigger",
+                "event_triggers",
+                f"actorに対するtouch・interact triggerがありません: {actor_id}",
+            )
+        elif trigger_count > 1:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "multiple_actor_triggers",
+                "event_triggers",
+                f"actorに対するtriggerは1件だけ指定できます: {actor_id}",
+            )
 
 
 def _validate_arrival_points(
