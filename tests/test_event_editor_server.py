@@ -224,6 +224,65 @@ class EventEditorServerTest(unittest.TestCase):
             messages,
         )
 
+    def test_preserves_flag_event_and_message_order_when_saving(self) -> None:
+        flags = [
+            {"flag_id": "story.second", "note": "2番目"},
+            {"flag_id": "story.first", "note": "1番目"},
+        ]
+        data = {
+            "format_version": 1,
+            "namespace": "sample",
+            "events": [
+                {"id": "second", "commands": [{"command": "end_event"}]},
+                {"id": "first", "commands": [{"command": "end_event"}]},
+            ],
+        }
+        messages = [
+            {
+                "message_id": "sample.second",
+                "text_ja": ["2番目"],
+                "text_en": [],
+                "text_zhcn": [],
+            },
+            {
+                "message_id": "sample.first",
+                "text_ja": ["1番目"],
+                "text_en": [],
+                "text_zhcn": [],
+            },
+        ]
+
+        result = self.post_json(
+            "/api/save",
+            data,
+            flags=flags,
+            messages=messages,
+        )
+
+        self.assertTrue(result["saved"])
+        self.assertEqual(
+            json.loads(
+                (self.content_root / "events" / "flags.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            flags,
+        )
+        self.assertEqual(
+            json.loads(
+                self.application.source_path.read_text(encoding="utf-8")
+            )["events"],
+            data["events"],
+        )
+        self.assertEqual(
+            json.loads(
+                (self.content_root / "events" / "messages.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            messages,
+        )
+
     def test_switches_existing_namespace_and_prepares_new_source(self) -> None:
         other = {
             "format_version": 1,

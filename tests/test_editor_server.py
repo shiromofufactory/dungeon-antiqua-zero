@@ -131,7 +131,13 @@ class EditorServerTest(unittest.TestCase):
         self.assertNotIn('id="validate"', event_page)
         self.assertNotIn('id="document-path"', map_page)
         self.assertNotIn('id="document-path"', event_page)
-        self.assertIn('class="namespace-tools event-context-bar"', event_page)
+        event_header = event_page.split("</header>", 1)[0]
+        self.assertIn('class="header-actions"', event_header)
+        self.assertIn('id="namespace-select"', event_header)
+        self.assertIn('data-action="open-namespace-dialog"', event_header)
+        self.assertNotIn("event-context-bar", event_page)
+        self.assertIn('id="namespace-dialog"', event_page)
+        self.assertIn('id="namespace-form"', event_page)
         self.assertNotIn('data-action="open-namespace"', event_page)
         self.assertIn('data-list-tab="flag"', event_page)
         self.assertIn('data-list-tab="event"', event_page)
@@ -145,13 +151,16 @@ class EditorServerTest(unittest.TestCase):
             self.get_text("/event/editor-header.css"),
         )
         self.assertIn(
-            ".event-context-bar",
+            ".namespace-dialog",
             self.get_text("/event/event-layout.css"),
         )
         event_script = self.get_text("/event/app.js")
         self.assertIn("localStorage.getItem(UI_STORAGE_KEY)", event_script)
         self.assertIn('draggable="true"', event_script)
         self.assertIn('data-drop-list-path', event_script)
+        self.assertIn('data-list-item-drag', event_script)
+        self.assertIn('data-list-drop-kind', event_script)
+        self.assertIn('function moveListItem(', event_script)
         self.assertIn('["end_event", "イベント終了"]', event_script)
         self.assertNotIn('data-message-field="note"', event_script)
         self.assertNotIn('data-action="move-command-up"', event_script)
@@ -160,6 +169,8 @@ class EditorServerTest(unittest.TestCase):
             '$("namespace-select").addEventListener("change"',
             event_script,
         )
+        self.assertIn('$("namespace-dialog").showModal()', event_script)
+        self.assertIn('$("namespace-form").addEventListener("submit"', event_script)
 
     def test_root_redirects_to_the_map_editor(self) -> None:
         with urlopen(

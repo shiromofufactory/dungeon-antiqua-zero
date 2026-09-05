@@ -37,6 +37,7 @@ const state = {
   revision: 0,
 };
 let draggedCommand = null;
+let draggedListItem = null;
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "")
@@ -241,6 +242,37 @@ function updateStatus() {
   $("redo").disabled = !state.future.length;
 }
 
+function listForKind(kind) {
+  if (kind === "flag") return state.flags;
+  if (kind === "event") return state.data.events;
+  if (kind === "message") return state.messages;
+  return null;
+}
+
+function moveListItem(kind, sourceIndex, targetIndex) {
+  const items = listForKind(kind);
+  if (!items || !items[sourceIndex] || targetIndex < 0 || targetIndex > items.length) {
+    return false;
+  }
+  let insertionIndex = targetIndex;
+  if (sourceIndex < insertionIndex) insertionIndex -= 1;
+  if (sourceIndex === insertionIndex) return false;
+
+  const selectedEvent = currentEvent();
+  const selectedMessage = currentMessage();
+  commit(() => {
+    const [item] = items.splice(sourceIndex, 1);
+    items.splice(insertionIndex, 0, item);
+    if (selectedEvent) state.selectedEvent = state.data.events.indexOf(selectedEvent);
+    if (selectedMessage) state.selectedMessage = state.messages.indexOf(selectedMessage);
+  });
+  return true;
+}
+
+function renderListDropZone(kind, index) {
+  return `<div class="list-drop-zone" data-list-drop-kind="${kind}" data-list-drop-index="${index}"></div>`;
+}
+
 function renderLists() {
   document.querySelectorAll("[data-list-tab]").forEach((button) => {
     const active = button.dataset.listTab === state.mode;
@@ -253,28 +285,40 @@ function renderLists() {
 
   $("flags").className = "list";
   $("flags").innerHTML = state.flags.map((flag, index) => `
-    <div class="list-item">
-      <div class="field"><label>グローバルID</label><input value="${esc(flag.flag_id)}" data-flag-index="${index}" data-flag-field="flag_id"></div>
-      <div class="field compact"><label>制作メモ</label><input value="${esc(flag.note || "")}" data-flag-index="${index}" data-flag-field="note"></div>
-      <div class="row compact"><button class="danger icon" data-action="delete-flag" data-index="${index}">削除</button></div>
+    ${renderListDropZone("flag", index)}
+    <div class="list-item reorderable-list-item" data-list-item-kind="flag">
+      <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(flag.flag_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="flag" data-index="${index}">⠿</span>
+      <div class="list-item-body">
+        <div class="field"><label>グローバルID</label><input value="${esc(flag.flag_id)}" data-flag-index="${index}" data-flag-field="flag_id"></div>
+        <div class="field compact"><label>制作メモ</label><input value="${esc(flag.note || "")}" data-flag-index="${index}" data-flag-field="note"></div>
+        <div class="row compact"><button class="danger icon" data-action="delete-flag" data-index="${index}">削除</button></div>
+      </div>
     </div>
-  `).join("") || '<div class="empty">フラグはありません。</div>';
+  `).join("") + (state.flags.length ? renderListDropZone("flag", state.flags.length) : '<div class="empty">フラグはありません。</div>');
 
   $("events").className = "list";
   $("events").innerHTML = state.data.events.map((event, index) => `
-    <button class="list-item ${state.mode === "event" && index === state.selectedEvent ? "active" : ""}" data-action="select-event" data-index="${index}">
-      <strong>${esc(event.id)}</strong>
-      <small>${event.commands?.length || 0} commands · ${esc(event.note || "メモなし")}</small>
-    </button>
-  `).join("") || '<div class="empty">イベントはありません。</div>';
+    ${renderListDropZone("event", index)}
+    <div class="list-item reorderable-list-item ${state.mode === "event" && index === state.selectedEvent ? "active" : ""}" data-list-item-kind="event">
+      <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(event.id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="event" data-index="${index}">⠿</span>
+      <button type="button" class="list-item-select" data-action="select-event" data-index="${index}">
+        <strong>${esc(event.id)}</strong>
+        <small>${event.commands?.length || 0} commands · ${esc(event.note || "メモなし")}</small>
+      </button>
+    </div>
+  `).join("") + (state.data.events.length ? renderListDropZone("event", state.data.events.length) : '<div class="empty">イベントはありません。</div>');
 
   $("messages").className = "list";
   $("messages").innerHTML = state.messages.map((message, index) => `
-    <button class="list-item ${state.mode === "message" && index === state.selectedMessage ? "active" : ""}" data-action="select-message" data-index="${index}">
-      <strong>${esc(message.message_id)}</strong>
-      <small>${esc((message.text_ja || [])[0] || "日本語未入力")}</small>
-    </button>
-  `).join("") || '<div class="empty">メッセージはありません。</div>';
+    ${renderListDropZone("message", index)}
+    <div class="list-item reorderable-list-item ${state.mode === "message" && index === state.selectedMessage ? "active" : ""}" data-list-item-kind="message">
+      <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(message.message_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="message" data-index="${index}">⠿</span>
+      <button type="button" class="list-item-select" data-action="select-message" data-index="${index}">
+        <strong>${esc(message.message_id)}</strong>
+        <small>${esc((message.text_ja || [])[0] || "日本語未入力")}</small>
+      </button>
+    </div>
+  `).join("") + (state.messages.length ? renderListDropZone("message", state.messages.length) : '<div class="empty">メッセージはありません。</div>');
 }
 
 function field(label, html, full = false) {
@@ -583,20 +627,25 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
 async function openNamespace(namespace, selectedListTab = state.mode) {
   if (!NAMESPACE_PATTERN.test(namespace) || ["flags", "messages"].includes(namespace)) {
     toast("namespaceはlower_snake_caseで入力してください（flagsとmessagesは予約名です）。");
-    return;
+    return false;
   }
-  if (namespace === state.data.namespace) return;
+  if (namespace === state.data.namespace) {
+    toast(`${namespace}.jsonは現在開いています。`);
+    return false;
+  }
   if (state.dirty && !window.confirm("未保存の変更を破棄してイベントファイルを切り替えますか？")) {
     renderNamespaceControls();
-    return;
+    return false;
   }
   try {
     const payload = await api(`/api/document?namespace=${encodeURIComponent(namespace)}`);
     applyDocument(payload, null, selectedListTab);
     toast(payload.is_new ? `${namespace}.jsonを新規作成します。` : `${namespace}.jsonへ切り替えました。`);
+    return true;
   } catch (error) {
     renderNamespaceControls();
     toast(error.message);
+    return false;
   }
 }
 
@@ -607,8 +656,12 @@ document.body.addEventListener("click", (event) => {
   if (action === "select-list-tab") {
     state.mode = target.dataset.listTab;
     render();
-  } else if (action === "create-namespace") {
-    openNamespace($("namespace-new").value.trim());
+  } else if (action === "open-namespace-dialog") {
+    $("namespace-new").value = "";
+    $("namespace-dialog").showModal();
+    $("namespace-new").focus();
+  } else if (action === "cancel-namespace-dialog") {
+    $("namespace-dialog").close();
   } else if (action === "add-flag") {
     commit(() => {
       state.flags.push({flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
@@ -760,14 +813,61 @@ $("event-editor").addEventListener("drop", (event) => {
 
 $("event-editor").addEventListener("dragend", clearCommandDrag);
 
+function clearListItemDrag() {
+  draggedListItem = null;
+  document.body.classList.remove("list-item-dragging");
+  document.querySelectorAll(".reorderable-list-item.dragging, .list-drop-zone.active").forEach((node) => {
+    node.classList.remove("dragging", "active");
+  });
+}
+
+document.querySelector(".sidebar").addEventListener("dragstart", (event) => {
+  const handle = event.target.closest("[data-list-item-drag]");
+  if (!handle || !event.dataTransfer) return;
+  draggedListItem = {
+    kind: handle.dataset.listKind,
+    index: Number(handle.dataset.index),
+  };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", `list:${draggedListItem.kind}:${draggedListItem.index}`);
+  handle.closest(".reorderable-list-item").classList.add("dragging");
+  document.body.classList.add("list-item-dragging");
+});
+
+document.querySelector(".sidebar").addEventListener("dragover", (event) => {
+  const zone = event.target.closest(".list-drop-zone");
+  if (!zone || !draggedListItem || zone.dataset.listDropKind !== draggedListItem.kind) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  document.querySelectorAll(".list-drop-zone.active").forEach((node) => node.classList.remove("active"));
+  zone.classList.add("active");
+});
+
+document.querySelector(".sidebar").addEventListener("drop", (event) => {
+  const zone = event.target.closest(".list-drop-zone");
+  if (!zone || !draggedListItem || zone.dataset.listDropKind !== draggedListItem.kind) return;
+  event.preventDefault();
+  moveListItem(
+    draggedListItem.kind,
+    draggedListItem.index,
+    Number(zone.dataset.listDropIndex),
+  );
+  clearListItemDrag();
+});
+
+document.querySelector(".sidebar").addEventListener("dragend", clearListItemDrag);
+
 $("undo").addEventListener("click", undo);
 $("redo").addEventListener("click", redo);
 $("save").addEventListener("click", save);
 $("namespace-select").addEventListener("change", (event) => {
   openNamespace(event.target.value);
 });
-$("namespace-new").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") openNamespace(event.target.value.trim());
+$("namespace-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (await openNamespace($("namespace-new").value.trim())) {
+    $("namespace-dialog").close();
+  }
 });
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
