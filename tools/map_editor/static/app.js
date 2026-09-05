@@ -278,7 +278,7 @@ function renderPalette() {
       <div class="section">
         <div class="section-title"><h2>トリガー</h2><span class="subtle">${state.data.event_triggers.length}件</span></div>
         <div class="travel-list">${state.data.event_triggers.map((trigger) => `
-          <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.id)}</strong>${escapeHtml(trigger.event_id)} / ${trigger.activations.join(", ")}</button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
+          <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / ${trigger.activations.join(", ")}</button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="add-actor-trigger" ${currentActor() ? "" : "disabled"}>選択actorのtrigger</button><button class="button ghost small" type="button" data-action="add-object-trigger" ${currentInstance() ? "" : "disabled"}>選択objectのtrigger</button></div>
       </div>`;
   }
@@ -456,9 +456,8 @@ function renderInspector() {
     </div>
     <div class="section">
       <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${state.data.event_triggers.length}件</span></div>
-      ${trigger ? `<div class="instance-card"><strong>${escapeHtml(trigger.id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / 対象 ${trigger.offsets.length}セル</div>
+      ${trigger ? `<div class="instance-card"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / 対象 ${trigger.offsets.length}セル</div>
         <div class="form-grid" style="margin-top:9px">
-          <div class="field full"><label>trigger ID</label><input type="text" value="${escapeHtml(trigger.id)}" data-trigger-field="id"></div>
           <div class="field full"><label>イベント</label><select data-trigger-field="event_id">${eventIdOptions(trigger.event_id)}</select></div>
           <div class="field full"><label>発火方法</label><div class="row">${["step","touch","interact"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
         </div><div class="row between" style="margin-top:9px"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
@@ -1280,10 +1279,9 @@ function updateActorField(path, value) {
 
 function updateTriggerField(path, value) {
   const trigger = currentTrigger();
-  if (!trigger) return;
+  if (!trigger || path !== "event_id") return;
   commit(() => {
-    if (path === "id") state.selectedTriggerId = value;
-    trigger[path] = value;
+    trigger.event_id = value;
   });
 }
 

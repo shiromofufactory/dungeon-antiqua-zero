@@ -54,6 +54,10 @@ class MapEditorServerTest(unittest.TestCase):
         with urlopen(request, timeout=2) as response:
             return json.loads(response.read())
 
+    def get_text(self, path: str) -> str:
+        with urlopen(f"{self.base_url}{path}", timeout=2) as response:
+            return response.read().decode("utf-8")
+
     def post_json(
         self,
         path: str,
@@ -91,6 +95,16 @@ class MapEditorServerTest(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             self.get_json("/api/document")
         self.assertEqual(context.exception.code, 403)
+
+    def test_trigger_id_is_internal_in_editor_ui(self) -> None:
+        script = self.get_text("/app.js")
+
+        self.assertNotIn('data-trigger-field="id"', script)
+        self.assertNotIn("<label>trigger ID</label>", script)
+        self.assertGreaterEqual(
+            script.count("<strong>${escapeHtml(trigger.event_id)}</strong>"),
+            2,
+        )
 
     def test_resolves_and_saves_source_with_runtime_outputs(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]

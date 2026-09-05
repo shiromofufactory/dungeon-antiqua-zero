@@ -15,6 +15,7 @@ from game import (
 )
 from rendering import PaletteShifter, create_default_palette_shifter
 from state import DisplayMode, Settings
+from systems import SettingsRepository
 
 APP_ROOT = Path(__file__).resolve().parent
 WINDOW_TITLE = "Dungeon Antiqua ZERO"
@@ -45,9 +46,14 @@ def initialize_game(settings: Settings) -> PaletteShifter:
 def run_game() -> None:
     """Create the current game flow and connect it to Pyxel callbacks."""
 
-    settings = Game.settings_from_environment()
+    settings_repository = SettingsRepository()
+    settings = Game.settings_from_environment(settings_repository)
     palette_shifter = initialize_game(settings)
-    game = Game(settings=settings, palette_shifter=palette_shifter)
+    game = Game(
+        settings=settings,
+        palette_shifter=palette_shifter,
+        settings_repository=settings_repository,
+    )
     pyxel.run(game.update, game.draw)
 
 

@@ -60,6 +60,7 @@ class MainTest(unittest.TestCase):
         palette = Mock(spec=PaletteShifter)
         game = Mock(spec=Game)
         with (
+            patch("main.SettingsRepository") as settings_repository_class,
             patch("main.initialize_game", return_value=palette),
             patch("main.Game", return_value=game) as game_class,
             patch("main.pyxel.run") as run,
@@ -67,9 +68,14 @@ class MainTest(unittest.TestCase):
             game_class.settings_from_environment.return_value = settings
             game_main.run_game()
 
+        settings_repository = settings_repository_class.return_value
+        game_class.settings_from_environment.assert_called_once_with(
+            settings_repository
+        )
         game_class.assert_called_once_with(
             settings=settings,
             palette_shifter=palette,
+            settings_repository=settings_repository,
         )
         run.assert_called_once_with(game.update, game.draw)
 

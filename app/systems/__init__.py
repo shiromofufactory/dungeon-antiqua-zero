@@ -29,6 +29,12 @@ from .save import (
     create_save_document,
     restore_save_document,
 )
+from .settings import (
+    SETTINGS_DIRECTORY,
+    SETTINGS_PATH,
+    SettingsRepository,
+    SettingsSystemError,
+)
 from .shop import MAX_GOLD, ShopSystem
 from .travel import TravelSystem
 
@@ -57,6 +63,10 @@ __all__ = [
     "SaveRepository",
     "SaveSlotSummary",
     "SaveSystemError",
+    "SETTINGS_DIRECTORY",
+    "SETTINGS_PATH",
+    "SettingsRepository",
+    "SettingsSystemError",
     "ShopSystem",
     "TravelSystem",
     "create_save_document",

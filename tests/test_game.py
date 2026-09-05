@@ -391,6 +391,15 @@ class GameTest(unittest.TestCase):
 
         self.assertEqual(restored, settings)
 
+    def test_startup_settings_are_restored_from_repository(self) -> None:
+        repository = Mock()
+        repository.load.return_value = Settings(language=Language.ENGLISH)
+        with patch.dict("game.os.environ", {}, clear=True):
+            restored = Game.settings_from_environment(repository)
+
+        self.assertIs(restored.language, Language.ENGLISH)
+        repository.load.assert_called_once_with()
+
     @patch("game.WindowFactory")
     def test_builds_da2_settings_rows_and_language_guide(
         self,
@@ -2295,6 +2304,7 @@ class GameTest(unittest.TestCase):
     def test_language_setting_cycles_like_da2_and_rebuilds_windows(self) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings()
+        mock.settings_repository = Mock()
         mock.settings_cursor = Mock(selected_key="language")
         mock.command_cursor = Mock(active=True)
         mock._build_main_windows = Mock()
@@ -2303,6 +2313,7 @@ class GameTest(unittest.TestCase):
         mock._change_setting(-1)
 
         self.assertIs(mock.settings.language, Language.ENGLISH)
+        mock.settings_repository.save.assert_called_once_with(mock.settings)
         mock._build_main_windows.assert_called_once_with(
             selected_command="config",
             animate=False,
@@ -2316,6 +2327,7 @@ class GameTest(unittest.TestCase):
     def test_se_setting_wraps_and_plays_da2_preview_sound(self, play: Mock) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings(se_volume=4)
+        mock.settings_repository = Mock()
         mock.settings_cursor = Mock(selected_key="se")
         mock._apply_se_volume = Mock()
         mock._refresh_settings_window = Mock()
@@ -2334,6 +2346,7 @@ class GameTest(unittest.TestCase):
     ) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings(bgm_volume=4)
+        mock.settings_repository = Mock()
         mock.settings_cursor = Mock(selected_key="bgm")
         mock.bgm = Mock()
         mock._refresh_settings_window = Mock()
@@ -2348,6 +2361,7 @@ class GameTest(unittest.TestCase):
     def test_screen_size_and_display_settings_wrap_in_both_directions(self) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings(screen_scale=1)
+        mock.settings_repository = Mock()
         mock.settings_cursor = Mock(selected_key="screen_size")
         mock._refresh_settings_window = Mock()
 
@@ -2361,6 +2375,25 @@ class GameTest(unittest.TestCase):
 
         self.assertIs(mock.settings.display_mode, DisplayMode.SMOOTH)
         mock._apply_display_mode.assert_called_once_with()
+
+    def test_setting_change_is_not_applied_when_persistence_fails(self) -> None:
+        from systems import SettingsSystemError
+
+        mock = Game.__new__(Game)
+        mock.settings = Settings()
+        mock.settings_repository = Mock()
+        mock.settings_repository.save.side_effect = SettingsSystemError()
+        mock.settings_cursor = Mock(selected_key="language")
+        mock.alert = Mock()
+        mock._build_main_windows = Mock()
+        mock._refresh_settings_window = Mock()
+
+        mock._change_setting(1)
+
+        self.assertIs(mock.settings.language, Language.JAPANESE)
+        mock.alert.start.assert_called_once_with()
+        mock._build_main_windows.assert_not_called()
+        mock._refresh_settings_window.assert_not_called()
 
     def test_moving_settings_cursor_refreshes_text_without_reopening_window(
         self,
@@ -2486,6 +2519,7 @@ class GameTest(unittest.TestCase):
     def test_in_memory_title_return_reinitializes_same_game_object(self) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings(language=Language.ENGLISH, screen_scale=3)
+        mock.settings_repository = Mock()
         mock.palette_shifter = Mock()
         with patch.object(
             Game,
@@ -2499,6 +2533,7 @@ class GameTest(unittest.TestCase):
             mock,
             settings=mock.settings,
             palette_shifter=mock.palette_shifter,
+            settings_repository=mock.settings_repository,
         )
 
     def test_return_to_title_closes_all_menu_windows_and_disables_cursors(

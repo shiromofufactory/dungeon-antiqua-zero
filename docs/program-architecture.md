@@ -66,6 +66,7 @@ app/
 │   ├── debug.py              # デバッグ時だけ使うパーティ状態の再生成
 │   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
 │   ├── save.py               # セーブv1の変換、検証、スロット永続化
+│   ├── settings.py           # 端末設定の読込と原子的な永続化
 │   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
 ├── ui/
 │   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
@@ -195,6 +196,7 @@ app/
 │   ├── progression.py       # 戦闘回数、魔力減衰、世界変化
 │   ├── inventory.py         # 所持、使用、装備にまたがる操作
 │   ├── travel.py            # 拠点への入場、テレポート候補と到着地点参照
+│   ├── settings.py          # Settingsの端末別永続化
 │   └── save.py              # SaveDataと保存形式の変換・入出力
 │
 ├── resources/
@@ -787,7 +789,9 @@ guide.draw()
 ### Settings
 
 端末やプレイヤー設定。BGM、SE、言語、表示倍率、表示方式、キー配置などを持つ。
-ゲーム進行とは別に保存する。現段階の`Settings`は言語、BGM音量0〜4、SE音量0〜4、
+ゲーム進行とは別に `~/.config/.pyxel/dungeon-antiqua-zero/settings.json` へ保存する。
+設定変更時は一時ファイルからの置換で即時保存し、起動時に読み込む。設定ファイルがない場合や
+内容を安全に復元できない場合は初期値を使う。現段階の`Settings`は言語、BGM音量0〜4、SE音量0〜4、
 画面倍率1〜5、`DisplayMode.PIXEL` / `DisplayMode.SMOOTH`を保持し、BGM・SE・画面倍率は
 DA2と同じ初期値3・3・3、表示方式はピクセル表示を使う。
 
@@ -1213,6 +1217,7 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | 戦闘終了後の世界変化 | `WorldProgression` |
 | ウィンドウ枠、文字、カーソル描画 | `ui/window.py` |
 | 確認結果を受けた後の処理 | ダイアログを開いたSceneまたはOverlay |
+| SettingsとJSONの変換・永続化 | `systems/settings.py` |
 | SaveDataとJSONの変換 | `systems/save.py` |
 | 起動時のスロット選択と削除確認 | `ui/start_menu.py` |
 | ロードJSONからの状態再構築と検証 | `systems/save.py` |

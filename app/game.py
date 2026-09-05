@@ -107,6 +107,8 @@ from systems import (
     SaveRepository,
     SaveSlotSummary,
     SaveSystemError,
+    SettingsRepository,
+    SettingsSystemError,
     ShopSystem,
     TravelSystem,
     create_save_document,
@@ -372,10 +374,16 @@ class Game:
         *,
         settings: Settings,
         palette_shifter: PaletteShifter,
+        settings_repository: SettingsRepository | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
         self.settings = settings
+        self.settings_repository = (
+            SettingsRepository()
+            if settings_repository is None
+            else settings_repository
+        )
         self.applied_screen_scale = settings.screen_scale
         self.palette_shifter = palette_shifter
         self.input_reader = create_game_input_reader()
@@ -501,15 +509,22 @@ class Game:
         )
 
     @staticmethod
-    def settings_from_environment() -> Settings:
+    def settings_from_environment(
+        repository: SettingsRepository | None = None,
+    ) -> Settings:
+        """Restore reset settings first, then persisted device settings."""
+
+        repository = SettingsRepository() if repository is None else repository
         serialized = os.environ.get(GAME_SETTINGS_ENV)
-        if serialized is None:
-            return Settings()
+        if serialized is not None:
+            try:
+                data = json.loads(serialized)
+                return Settings.from_dict(data)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                os.environ.pop(GAME_SETTINGS_ENV, None)
         try:
-            data = json.loads(serialized)
-            return Settings.from_dict(data)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            os.environ.pop(GAME_SETTINGS_ENV, None)
+            return repository.load()
+        except SettingsSystemError:
             return Settings()
 
     @staticmethod
@@ -1669,31 +1684,43 @@ class Game:
         if key == "language":
             index = LANGUAGE_SEQUENCE.index(self.settings.language)
             language = LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
-            self.settings = self.settings.with_language(language)
+            updated_settings = self.settings.with_language(language)
+        elif key == "bgm":
+            volume = (self.settings.bgm_volume + distance) % 5
+            updated_settings = self.settings.with_bgm_volume(volume)
+        elif key == "se":
+            volume = (self.settings.se_volume + distance) % 5
+            updated_settings = self.settings.with_se_volume(volume)
+        elif key == "screen_size":
+            scale = (self.settings.screen_scale - 1 + distance) % 5 + 1
+            updated_settings = self.settings.with_screen_scale(scale)
+        elif key == "display":
+            index = DISPLAY_SEQUENCE.index(self.settings.display_mode)
+            mode = DISPLAY_SEQUENCE[(index + distance) % len(DISPLAY_SEQUENCE)]
+            updated_settings = self.settings.with_display_mode(mode)
+        else:
+            return
+
+        try:
+            self.settings_repository.save(updated_settings)
+        except SettingsSystemError:
+            self.alert.start()
+            return
+        self.settings = updated_settings
+
+        if key == "language":
             self._build_main_windows(
                 selected_command="config",
                 animate=False,
             )
             self.command_cursor.active = False
         elif key == "bgm":
-            volume = (self.settings.bgm_volume + distance) % 5
-            self.settings = self.settings.with_bgm_volume(volume)
-            self.bgm.set_volume(volume)
+            self.bgm.set_volume(self.settings.bgm_volume)
         elif key == "se":
-            volume = (self.settings.se_volume + distance) % 5
-            self.settings = self.settings.with_se_volume(volume)
             self._apply_se_volume()
             pyxel.play(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
-        elif key == "screen_size":
-            scale = (self.settings.screen_scale - 1 + distance) % 5 + 1
-            self.settings = self.settings.with_screen_scale(scale)
         elif key == "display":
-            index = DISPLAY_SEQUENCE.index(self.settings.display_mode)
-            mode = DISPLAY_SEQUENCE[(index + distance) % len(DISPLAY_SEQUENCE)]
-            self.settings = self.settings.with_display_mode(mode)
             self._apply_display_mode()
-        else:
-            return
         self._refresh_settings_window(selected_key=key)
 
     def _apply_se_volume(self) -> None:
@@ -1825,6 +1852,7 @@ class Game:
         self.__init__(
             settings=settings,
             palette_shifter=palette_shifter,
+            settings_repository=self.settings_repository,
         )
 
     def _visible_windows(self) -> tuple[object, ...]:
