@@ -12,6 +12,12 @@ from typing import Mapping
 
 EVENT_FORMAT_VERSION = 1
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
+FLAG_ID_PATTERN = re.compile(
+    r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$"
+)
+MESSAGE_ID_PATTERN = re.compile(
+    r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
+)
 LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MOVEMENT_DIRECTIONS = frozenset(("up", "right", "down", "left"))
 
@@ -44,7 +50,7 @@ def _condition_is_valid(value: object) -> bool:
     if condition_type == "flag_set":
         return set(value) == {"type", "flag_id"} and isinstance(
             value.get("flag_id"), str
-        ) and EVENT_ID_PATTERN.fullmatch(value["flag_id"]) is not None
+        ) and FLAG_ID_PATTERN.fullmatch(value["flag_id"]) is not None
     if condition_type == "member_in_party":
         return set(value) == {"type", "character_key"} and isinstance(
             value.get("character_key"), str
@@ -81,7 +87,7 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
         if command_type == "set_flag":
             if set(command) != {"command", "flag_id"} or not isinstance(
                 command.get("flag_id"), str
-            ) or EVENT_ID_PATTERN.fullmatch(command["flag_id"]) is None:
+            ) or FLAG_ID_PATTERN.fullmatch(command["flag_id"]) is None:
                 return False
         elif command_type in ("join_party", "leave_party"):
             if set(command) != {"command", "character_key"} or not isinstance(
@@ -105,9 +111,12 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
             ):
                 return False
         elif command_type == "message":
-            if not set(command) <= {"command", "text_key", "portrait_character_key"} or set(command) < {"command", "text_key"}:
+            if not set(command) <= {"command", "message_id", "portrait_character_key"} or set(command) < {"command", "message_id"}:
                 return False
-            if not isinstance(command.get("text_key"), str) or not command["text_key"]:
+            if (
+                not isinstance(command.get("message_id"), str)
+                or MESSAGE_ID_PATTERN.fullmatch(command["message_id"]) is None
+            ):
                 return False
             if "portrait_character_key" in command and (
                 not isinstance(command["portrait_character_key"], str)
@@ -164,7 +173,7 @@ class EventCatalog:
         ):
             raise TypeError("events must map IDs to matching EventDefinition values")
         if not isinstance(flag_ids, frozenset) or not all(
-            isinstance(flag_id, str) and EVENT_ID_PATTERN.fullmatch(flag_id)
+            isinstance(flag_id, str) and FLAG_ID_PATTERN.fullmatch(flag_id)
             for flag_id in flag_ids
         ):
             raise TypeError("flag_ids must be fully qualified event IDs")
@@ -217,7 +226,7 @@ class EventCatalog:
             raise EventResourceError("イベントJSONのsource_sha256が不正です。")
         flag_values = document.get("flags")
         if not isinstance(flag_values, list) or not all(
-            isinstance(value, str) and EVENT_ID_PATTERN.fullmatch(value)
+            isinstance(value, str) and FLAG_ID_PATTERN.fullmatch(value)
             for value in flag_values
         ) or len(flag_values) != len(set(flag_values)):
             raise EventResourceError("イベントJSONのflagsが不正です。")

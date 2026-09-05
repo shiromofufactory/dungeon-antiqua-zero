@@ -11,15 +11,15 @@ if __package__ == "ui":
     from localization import Localizer
     from member import FacePosition
     from resources import FontResources, TRANSPARENT_INDEX
+    from resources.event_messages import EventMessageCatalog
     from state import Settings
-    from text_catalog import TextCatalog
 else:
     from ..input import InputState
     from ..localization import Localizer
     from ..member import FacePosition
     from ..resources import FontResources, TRANSPARENT_INDEX
+    from ..resources.event_messages import EventMessageCatalog
     from ..state import Settings
-    from ..text_catalog import TextCatalog
 
 from .localized_text import LocalizedWindowTextFactory
 from .window import WindowFactory
@@ -44,15 +44,15 @@ class EventMessageOverlay:
     def __init__(
         self,
         *,
-        text_key: str,
+        message_id: str,
         portrait_character_key: str | None,
         settings: Settings,
-        texts: TextCatalog,
+        messages: EventMessageCatalog,
         fonts: FontResources,
         faces: object,
         face_positions: Mapping[str, FacePosition],
     ) -> None:
-        self.text_key = text_key
+        self.message_id = message_id
         self.portrait_character_key = portrait_character_key
         self.faces = faces
         self.face_position = (
@@ -65,9 +65,11 @@ class EventMessageOverlay:
                 f"顔グラフィックが見つかりません: {portrait_character_key}"
             )
         localizer = Localizer(settings.language)
-        lines = texts.lines(text_key, localizer)
+        lines = messages.lines(message_id, localizer)
         if not lines:
-            raise EventMessageDataError(f"イベント文言が見つかりません: {text_key}")
+            raise EventMessageDataError(
+                f"イベントメッセージが見つかりません: {message_id}"
+            )
         self._pages = tuple(
             tuple(lines[index : index + EVENT_MESSAGE_MAX_LINES])
             for index in range(0, len(lines), EVENT_MESSAGE_MAX_LINES)

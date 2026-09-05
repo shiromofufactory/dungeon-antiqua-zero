@@ -7,9 +7,10 @@ from scripts.event_pipeline import compile_event_sources, validate_event_sources
 
 
 CATALOGS = {
+    "flag_ids": {"story.met_alvan"},
     "character_keys": {"Fiora", "Alvan"},
     "item_keys": {"POTION"},
-    "text_keys": {"event.sample.greeting"},
+    "message_ids": {"sample.greeting"},
     "bgm_ids": {"field/world"},
     "se_ids": {"confirm"},
 }
@@ -19,7 +20,6 @@ def sample_source() -> dict[str, object]:
     return {
         "format_version": 1,
         "namespace": "sample",
-        "flags": [{"id": "met_alvan", "note": "met"}],
         "events": [
             {
                 "id": "greeting",
@@ -29,17 +29,17 @@ def sample_source() -> dict[str, object]:
                         "command": "branch",
                         "condition": {
                             "type": "flag_set",
-                            "flag_id": "sample.met_alvan",
+                            "flag_id": "story.met_alvan",
                         },
                         "then": [],
                         "else": [
                             {
                                 "command": "message",
-                                "text_key": "event.sample.greeting",
+                                "message_id": "sample.greeting",
                                 "portrait_character_key": "Alvan",
                             },
                             {"command": "give_item", "item_key": "POTION", "quantity": 1},
-                            {"command": "set_flag", "flag_id": "sample.met_alvan"},
+                            {"command": "set_flag", "flag_id": "story.met_alvan"},
                         ],
                     }
                 ],
@@ -58,7 +58,7 @@ class EventPipelineTest(unittest.TestCase):
         self.assertEqual(
             [item for item in diagnostics if item.severity == "error"], []
         )
-        self.assertEqual(compiled["flags"], ["sample.met_alvan"])
+        self.assertEqual(compiled["flags"], ["story.met_alvan"])
         self.assertEqual(tuple(compiled["events"]), ("sample.greeting",))
         self.assertNotIn("note", compiled["events"]["sample.greeting"])
 
@@ -66,7 +66,10 @@ class EventPipelineTest(unittest.TestCase):
         source = sample_source()
         source["namespace"] = "wrong"
         command = source["events"][0]["commands"][0]["else"][0]
-        command["text_key"] = "event.missing"
+        command["message_id"] = "sample.missing"
+        source["events"][0]["commands"][0]["condition"]["flag_id"] = (
+            "missing_flag"
+        )
 
         codes = {
             item.code
@@ -75,7 +78,7 @@ class EventPipelineTest(unittest.TestCase):
         }
 
         self.assertIn("namespace_filename_mismatch", codes)
-        self.assertIn("unknown_text", codes)
+        self.assertIn("unknown_message", codes)
         self.assertIn("unknown_flag", codes)
 
     def test_rejects_unknown_fields_and_invalid_movement(self) -> None:

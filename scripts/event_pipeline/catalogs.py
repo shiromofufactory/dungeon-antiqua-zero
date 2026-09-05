@@ -45,12 +45,23 @@ def reference_catalogs(
     """Return every stable ID list shared by validation and authoring tools."""
 
     audio_dir = app_root / "audio"
+    flag_path = content_root / "events" / "flags.json"
+    message_path = content_root / "events" / "messages.json"
     return {
         "character_keys": _record_keys(
             content_root / "data" / "characters.json", "name_en"
         ),
         "item_keys": _record_keys(content_root / "data" / "items.json", "name_en"),
-        "text_keys": _record_keys(content_root / "data" / "texts.json", "text_key"),
+        "flag_ids": (
+            _record_keys(flag_path, "flag_id")
+            if flag_path.is_file()
+            else set()
+        ),
+        "message_ids": (
+            _record_keys(message_path, "message_id")
+            if message_path.is_file()
+            else set()
+        ),
         "bgm_ids": {
             path.relative_to(audio_dir).with_suffix("").as_posix()
             for path in audio_dir.rglob("*.ogg")

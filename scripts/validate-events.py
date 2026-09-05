@@ -10,13 +10,19 @@ import sys
 
 from event_pipeline import (
     event_source_paths,
+    load_event_flags,
+    load_event_messages,
     load_event_source,
     reference_catalogs,
     validate_event_sources,
+    validate_event_flags,
+    validate_event_messages,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="content/eventsのイベント定義を検証します。")
     parser.add_argument("--content-root", type=Path, default=Path(os.environ.get("DA0_CONTENT_DIR", PROJECT_ROOT / "content")))
@@ -25,10 +31,16 @@ def main() -> int:
     try:
         paths = event_source_paths(content_root)
         sources = {path.stem: load_event_source(path) for path in paths}
-        diagnostics = validate_event_sources(
-            sources,
-            **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
-        )
+        flags = load_event_flags(content_root)
+        messages = load_event_messages(content_root)
+        diagnostics = [
+            *validate_event_flags(flags),
+            *validate_event_messages(messages),
+            *validate_event_sources(
+                sources,
+                **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
+            ),
+        ]
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
@@ -38,7 +50,11 @@ def main() -> int:
         print(f"  {item.severity.upper()} {item.path}: {item.message}")
     errors = sum(item.severity == "error" for item in diagnostics)
     warnings = sum(item.severity == "warning" for item in diagnostics)
-    print(f"検証完了: {len(paths)} event source, {errors} error, {warnings} warning")
+    print(
+        f"検証完了: {len(paths)} event source, {len(flags)} flag, "
+        f"{len(messages)} message, "
+        f"{errors} error, {warnings} warning"
+    )
     return 1 if errors else 0
 
 

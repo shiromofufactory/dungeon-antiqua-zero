@@ -35,6 +35,9 @@ class SettingsDataError(ValueError):
 
 
 _STABLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_FLAG_ID_PATTERN = re.compile(
+    r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$"
+)
 
 
 @dataclass(frozen=True)
@@ -177,10 +180,11 @@ class SaveData:
         if not isinstance(self.difficulty, Difficulty):
             raise TypeError("difficulty must be a Difficulty")
         if not isinstance(self.event_flags, set) or not all(
-            isinstance(event_flag, str) and event_flag
+            isinstance(event_flag, str)
+            and _FLAG_ID_PATTERN.fullmatch(event_flag) is not None
             for event_flag in self.event_flags
         ):
-            raise TypeError("event_flags must be a set of non-empty strings")
+            raise TypeError("event_flags must be a set of global flag IDs")
         if not isinstance(self.visited_site_ids, set) or not all(
             isinstance(site_id, str)
             and _STABLE_ID_PATTERN.fullmatch(site_id) is not None
@@ -213,9 +217,22 @@ class SaveData:
             if not isinstance(entry, dict):
                 raise TypeError("logs must contain objects")
             text_key = entry.get("text_key")
+            message_id = entry.get("message_id")
             arguments = entry.get("arguments")
-            if not isinstance(text_key, str) or not text_key:
-                raise TypeError("log.text_key must be a non-empty string")
+            if (
+                (text_key is None) == (message_id is None)
+                or (
+                    text_key is not None
+                    and (not isinstance(text_key, str) or not text_key)
+                )
+                or (
+                    message_id is not None
+                    and (not isinstance(message_id, str) or not message_id)
+                )
+            ):
+                raise TypeError(
+                    "log must contain exactly one non-empty text_key or message_id"
+                )
             if not isinstance(arguments, dict) or not all(
                 isinstance(key, str)
                 and key

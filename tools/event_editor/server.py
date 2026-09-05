@@ -15,12 +15,25 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from scripts.event_pipeline import (
+    compile_event_flags,
+    compile_event_messages,
     compile_event_sources,
+    event_flag_ids,
+    event_flags_path,
+    event_message_ids,
+    event_messages_path,
+    event_source_paths,
+    load_event_flags,
+    load_event_messages,
     load_event_source,
     load_event_sources,
     reference_catalogs,
     save_compiled_events,
+    save_event_flags,
+    save_event_messages,
     save_event_source,
+    validate_event_flags,
+    validate_event_messages,
     validate_event_sources,
 )
 
@@ -39,7 +52,10 @@ MIME_TYPES = {
 
 
 def _valid_id(value: str) -> bool:
-    return re.fullmatch(r"[a-z][a-z0-9_]*", value) is not None
+    return (
+        re.fullmatch(r"[a-z][a-z0-9_]*", value) is not None
+        and value not in {"flags", "messages"}
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -47,7 +63,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         os.environ.get("DA0_CONTENT_DIR", PROJECT_ROOT / "content")
     ).resolve()
     parser = argparse.ArgumentParser(description="イベント定義を構造化フォームで制作します。")
-    parser.add_argument("--namespace", default="common", help="編集するnamespace（既定: common）")
+    parser.add_argument(
+        "--namespace",
+        default="common",
+        help="最初に表示するnamespace（画面内で切替可能、既定: common）",
+    )
     parser.add_argument("--content-root", type=Path, default=content_root, help=argparse.SUPPRESS)
     parser.add_argument("--runtime", type=Path, default=PROJECT_ROOT / "app" / "events" / "events.json", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -66,37 +86,62 @@ class EventEditorApplication:
         app_root: Path | None = None,
     ) -> None:
         if not _valid_id(namespace):
-            raise ValueError("namespaceはlower_snake_caseで指定してください。")
+            raise ValueError(
+                "namespaceはlower_snake_caseで指定してください。flagsとmessagesは予約名です。"
+            )
         self.content_root = content_root.resolve()
         self.runtime_path = runtime_path.resolve()
+        self.runtime_messages_path = self.runtime_path.with_name("messages.json")
         self.namespace = namespace
         self.token = token or secrets.token_urlsafe(24)
         self.app_root = (app_root or PROJECT_ROOT / "app").resolve()
-        self.source_path = (
-            self.content_root / "events" / f"{namespace}.json"
-        ).resolve()
-        source_root = (self.content_root / "events").resolve()
-        if source_root not in self.source_path.parents:
-            raise ValueError("イベントパスがcontent/events外です。")
+        self.source_path = self.source_path_for(namespace)
 
-    def load_source(self) -> tuple[dict[str, object], bool]:
-        if self.source_path.is_file():
-            return load_event_source(self.source_path), False
+    def source_path_for(self, namespace: str) -> Path:
+        if not _valid_id(namespace):
+            raise ValueError(
+                "namespaceはlower_snake_caseで指定してください。flagsとmessagesは予約名です。"
+            )
+        path = (self.content_root / "events" / f"{namespace}.json").resolve()
+        source_root = (self.content_root / "events").resolve()
+        if source_root not in path.parents:
+            raise ValueError("イベントパスがcontent/events外です。")
+        return path
+
+    def namespace_options(self) -> list[str]:
+        return sorted(path.stem for path in event_source_paths(self.content_root))
+
+    def load_source(
+        self, namespace: str | None = None
+    ) -> tuple[dict[str, object], bool]:
+        selected = self.namespace if namespace is None else namespace
+        source_path = self.source_path_for(selected)
+        if source_path.is_file():
+            return load_event_source(source_path), False
         return {
             "format_version": 1,
-            "namespace": self.namespace,
-            "flags": [],
+            "namespace": selected,
             "events": [],
         }, True
 
-    def sources_with(self, data: object) -> dict[str, dict[str, object]]:
+    def sources_with(
+        self, namespace: str, data: object
+    ) -> dict[str, dict[str, object]]:
         sources = load_event_sources(self.content_root)
         if isinstance(data, dict):
-            sources[self.namespace] = data
+            sources[namespace] = data
         return sources
 
-    def catalogs(self) -> dict[str, set[str]]:
+    def catalogs(
+        self,
+        flags: object | None = None,
+        messages: object | None = None,
+    ) -> dict[str, set[str]]:
         catalogs = reference_catalogs(self.content_root, app_root=self.app_root)
+        if flags is not None:
+            catalogs["flag_ids"] = event_flag_ids(flags)
+        if messages is not None:
+            catalogs["message_ids"] = event_message_ids(messages)
         maps_root = self.content_root / "maps" / "sources"
         actor_ids: set[str] = set()
         for path in sorted(maps_root.glob("*.json")) if maps_root.is_dir() else ():
@@ -114,30 +159,44 @@ class EventEditorApplication:
         catalogs["actor_ids"] = actor_ids
         return catalogs
 
-    def validate(self, data: object) -> list[dict[str, str]]:
+    def validate(
+        self,
+        namespace: str,
+        data: object,
+        flags: object,
+        messages: object,
+    ) -> list[dict[str, str]]:
+        self.source_path_for(namespace)
         if not isinstance(data, dict):
             return [{
                 "severity": "error",
                 "code": "invalid_root",
-                "path": self.namespace,
+                "path": namespace,
                 "message": "イベントJSONのルートはobjectである必要があります。",
             }]
         return [
             item.as_dict()
-            for item in validate_event_sources(
-                self.sources_with(data),
-                **{
-                    key: value
-                    for key, value in self.catalogs().items()
-                    if key != "actor_ids"
-                },
+            for item in (
+                *validate_event_flags(flags),
+                *validate_event_messages(messages),
+                *validate_event_sources(
+                    self.sources_with(namespace, data),
+                    **{
+                        key: value
+                        for key, value in self.catalogs(flags, messages).items()
+                        if key != "actor_ids"
+                    },
+                ),
             )
         ]
 
-    def document_payload(self) -> dict[str, object]:
-        data, is_new = self.load_source()
-        catalogs = self.catalogs()
-        sources = self.sources_with(data)
+    def document_payload(self, namespace: str | None = None) -> dict[str, object]:
+        selected = self.namespace if namespace is None else namespace
+        data, is_new = self.load_source(selected)
+        flags = load_event_flags(self.content_root)
+        messages = load_event_messages(self.content_root)
+        catalogs = self.catalogs(flags, messages)
+        sources = self.sources_with(selected, data)
         event_ids = sorted(
             f"{source.get('namespace')}.{event.get('id')}"
             for source in sources.values()
@@ -145,42 +204,58 @@ class EventEditorApplication:
             for event in source.get("events", [])
             if isinstance(event, dict) and isinstance(event.get("id"), str)
         )
-        flag_ids = sorted(
-            f"{source.get('namespace')}.{flag.get('id')}"
-            for source in sources.values()
-            if isinstance(source.get("namespace"), str)
-            for flag in source.get("flags", [])
-            if isinstance(flag, dict) and isinstance(flag.get("id"), str)
-        )
         return {
             "data": data,
+            "flags": flags,
+            "messages": messages,
+            "namespace_options": self.namespace_options(),
             "catalogs": {
                 key: sorted(values) for key, values in catalogs.items()
             },
             "event_ids": event_ids,
-            "flag_ids": flag_ids,
-            "diagnostics": self.validate(data),
+            "flag_ids": sorted(catalogs["flag_ids"]),
+            "diagnostics": self.validate(selected, data, flags, messages),
             "is_new": is_new,
-            "source_path": self._display_path(self.source_path),
+            "source_path": self._display_path(self.source_path_for(selected)),
+            "flags_path": self._display_path(event_flags_path(self.content_root)),
+            "messages_path": self._display_path(
+                event_messages_path(self.content_root)
+            ),
             "runtime_path": self._display_path(self.runtime_path),
         }
 
-    def save(self, data: object) -> dict[str, object]:
-        diagnostics = self.validate(data)
-        if any(item["severity"] == "error" for item in diagnostics) or not isinstance(data, dict):
+    def save(
+        self,
+        namespace: str,
+        data: object,
+        flags: object,
+        messages: object,
+    ) -> dict[str, object]:
+        diagnostics = self.validate(namespace, data, flags, messages)
+        if (
+            any(item["severity"] == "error" for item in diagnostics)
+            or not isinstance(data, dict)
+        ):
             return {"saved": False, "diagnostics": diagnostics}
-        sources = self.sources_with(data)
-        catalogs = self.catalogs()
+        sources = self.sources_with(namespace, data)
+        catalogs = self.catalogs(flags, messages)
+        compiled_flags = compile_event_flags(flags)
+        catalogs["flag_ids"] = set(compiled_flags)
         compiled = compile_event_sources(
             sources,
             **{key: value for key, value in catalogs.items() if key != "actor_ids"},
         )
-        save_event_source(self.source_path, data)
+        compiled_messages = compile_event_messages(messages)
+        save_event_source(self.source_path_for(namespace), data)
+        save_event_flags(event_flags_path(self.content_root), flags)
+        save_event_messages(event_messages_path(self.content_root), messages)
         save_compiled_events(self.runtime_path, compiled)
+        save_event_messages(self.runtime_messages_path, compiled_messages)
         return {
             "saved": True,
             "diagnostics": diagnostics,
             "source_sha256": compiled["source_sha256"],
+            "namespace_options": self.namespace_options(),
         }
 
     @staticmethod
@@ -246,7 +321,10 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
                     self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
                     return
                 try:
-                    self._send_json(application.document_payload())
+                    namespace = parse_qs(parsed.query).get(
+                        "namespace", [application.namespace]
+                    )[0]
+                    self._send_json(application.document_payload(namespace))
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
                 return
@@ -282,11 +360,39 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
                 self._error(HTTPStatus.BAD_REQUEST, "JSONを読み込めません。")
                 return
             data = payload.get("data") if isinstance(payload, dict) else None
+            flags = payload.get("flags") if isinstance(payload, dict) else None
+            messages = (
+                payload.get("messages") if isinstance(payload, dict) else None
+            )
+            namespace = (
+                payload.get("namespace") if isinstance(payload, dict) else None
+            )
+            if not isinstance(namespace, str) and isinstance(data, dict):
+                namespace = data.get("namespace")
+            if not isinstance(namespace, str):
+                namespace = application.namespace
+            if flags is None:
+                try:
+                    flags = load_event_flags(application.content_root)
+                except (OSError, ValueError) as error:
+                    self._error(HTTPStatus.BAD_REQUEST, str(error))
+                    return
+            if messages is None:
+                try:
+                    messages = load_event_messages(application.content_root)
+                except (OSError, ValueError) as error:
+                    self._error(HTTPStatus.BAD_REQUEST, str(error))
+                    return
             try:
                 response = (
-                    application.save(data)
+                    application.save(namespace, data, flags, messages)
                     if parsed.path == "/api/save"
-                    else {"saved": False, "diagnostics": application.validate(data)}
+                    else {
+                        "saved": False,
+                        "diagnostics": application.validate(
+                            namespace, data, flags, messages
+                        ),
+                    }
                 )
                 self._send_json(response)
             except (OSError, ValueError) as error:

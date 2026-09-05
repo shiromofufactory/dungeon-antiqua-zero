@@ -87,6 +87,7 @@ app/
 ├── resources/
 │   ├── audio.py              # 外部BGMの読込、音量、再生状態
 │   ├── data.py               # 生成済みJSON配列の読込と構造検証
+│   ├── event_messages.py     # イベント専用メッセージの読込と多言語解決
 │   ├── fonts.py              # 言語別フォントの読込とキャッシュ
 │   ├── images.py             # 生成済み画像bundleの本番用loader
 │   └── maps.py               # 生成済みマップとatlasの本番用loader
@@ -111,6 +112,7 @@ app/
 
 content/                    # 共有コンテンツsubmodule
 ├── data/                   # JSONの正本
+├── events/                 # イベント定義とイベント専用メッセージの正本
 ├── images/                 # PNG/GIF画像の正本
 ├── docs/da0.md             # 制作スタッフ向けの企画ベースドキュメント
 ├── portal/                 # スタッフポータルの生成処理・表示資産
@@ -198,6 +200,7 @@ app/
 ├── resources/
 │   ├── audio.py             # 外部BGMの読込、音量、再生状態
 │   ├── events.py            # 生成済みイベントの読込、形式検証、ID索引
+│   ├── event_messages.py    # 生成済みイベントメッセージの読込
 │   └── images.py            # manifestと画像bundleの読込・検証
 ├── rendering/
 │   └── palette.py           # 一時パレットシフトと色変換
@@ -1161,6 +1164,15 @@ ZEROはフリーシナリオ、戦闘回数による敵の強化、魔力設備�
 通常イベントは型付きのJSONコマンド列として定義する。詳細なsource形式、条件、初期コマンド、
 マップトリガー、イベントエディタ、実行時エラーは
 [`features/events.md`](./features/events.md) を正本とする。
+
+イベント会話は通常UI語彙の `content/data/texts.json` と分離し、
+`content/events/messages.json` から `app/events/messages.json` を生成する。イベント定義は
+`message_id` だけを保持し、Overlayが現在言語を解決する。イベントnamespaceはID整理の単位であり、
+マップIDとは対応付けない。
+
+イベントフラグ宣言は各イベントnamespaceへ持たせず、`content/events/flags.json` でグローバルに
+管理する。`flag_id` は全イベントから同じ値を参照し、任意のドット区切り接頭辞は分類目的だけに
+使用する。生成時に宣言済みIDを `app/events/events.json` へ収録する。
 
 Sceneはトリガー検出、EventRunnerは条件評価とコマンド進行、既存のDomain Model／Systemは
 状態変更、Overlayはメッセージなどの入力待ちを担当する。RunnerはUIや具体的Sceneを直接参照せず、

@@ -445,7 +445,16 @@ def _restore_logs(value: object) -> list[dict[str, object]]:
     restored: list[dict[str, object]] = []
     for index, entry in enumerate(value):
         current = _mapping(entry, f"logs[{index}]")
-        text_key = _required_string(current, "text_key", f"logs[{index}]")
+        text_key = current.get("text_key")
+        message_id = current.get("message_id")
+        if isinstance(message_id, str) and message_id and text_key is None:
+            reference = {"message_id": message_id}
+        elif isinstance(text_key, str) and text_key and message_id is None:
+            reference = {"text_key": text_key}
+        else:
+            raise SaveSystemError(
+                f"logs[{index}] must contain one text_key or message_id"
+            )
         arguments = _required_mapping(current, "arguments", f"logs[{index}]")
         if not all(
             isinstance(argument_key, str)
@@ -454,7 +463,7 @@ def _restore_logs(value: object) -> list[dict[str, object]]:
             for argument_key, argument in arguments.items()
         ):
             raise SaveSystemError(f"logs[{index}].arguments contains invalid data")
-        restored.append({"text_key": text_key, "arguments": dict(arguments)})
+        restored.append({**reference, "arguments": dict(arguments)})
     return restored
 
 
@@ -663,9 +672,14 @@ def _serialize_logs(logs: Sequence[Mapping[str, object]]) -> list[dict[str, obje
         if not isinstance(entry, Mapping):
             raise TypeError("each log must be an object")
         text_key = entry.get("text_key")
+        message_id = entry.get("message_id")
         arguments = entry.get("arguments")
-        if not isinstance(text_key, str) or not text_key:
-            raise TypeError("log.text_key must be a non-empty string")
+        if isinstance(message_id, str) and message_id and text_key is None:
+            reference = {"message_id": message_id}
+        elif isinstance(text_key, str) and text_key and message_id is None:
+            reference = {"text_key": text_key}
+        else:
+            raise TypeError("log must contain one text_key or message_id")
         if not isinstance(arguments, Mapping) or not all(
             isinstance(key, str)
             and key
@@ -677,7 +691,7 @@ def _serialize_logs(logs: Sequence[Mapping[str, object]]) -> list[dict[str, obje
         ):
             raise TypeError("log.arguments contains an unsupported value")
         serialized.append(
-            {"text_key": text_key, "arguments": dict(sorted(arguments.items()))}
+            {**reference, "arguments": dict(sorted(arguments.items()))}
         )
     return serialized
 

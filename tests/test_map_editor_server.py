@@ -184,7 +184,6 @@ class MapEditorServerTest(unittest.TestCase):
                 {
                     "format_version": 1,
                     "namespace": "sample",
-                    "flags": [],
                     "events": [{"id": "talk", "commands": []}],
                 }
             ),

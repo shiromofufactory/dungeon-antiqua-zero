@@ -101,14 +101,14 @@ class EventRunnerTest(unittest.TestCase):
             [
                 {"command": "join_party", "character_key": "Alvan"},
                 {"command": "give_item", "item_key": "POTION", "quantity": 2},
-                {"command": "message", "text_key": "event.sample.greeting"},
+                {"command": "message", "message_id": "sample.greeting"},
                 {"command": "move_party", "direction": "right", "steps": 2},
                 {"command": "set_flag", "flag_id": "sample.done"},
             ]
         )
 
         message = runner.advance()
-        self.assertEqual(message, MessageEffect("event.sample.greeting"))
+        self.assertEqual(message, MessageEffect("sample.greeting"))
         self.assertTrue(self.party.contains("Alvan"))
         self.assertEqual(self.inventory.quantity("POTION"), 2)
         self.assertIs(runner.advance(), message)
@@ -179,6 +179,22 @@ class EventRunnerTest(unittest.TestCase):
 
         with self.assertRaises(EventResourceError):
             EventCatalog.from_document(document)
+
+    def test_runtime_catalog_rejects_invalid_message_id(self) -> None:
+        document = runtime_document(
+            [{"command": "message", "message_id": "Invalid"}]
+        )
+
+        with self.assertRaises(EventResourceError):
+            EventCatalog.from_document(document)
+
+    def test_runtime_catalog_accepts_unprefixed_global_flag(self) -> None:
+        document = runtime_document([])
+        document["flags"] = ["game_started"]
+
+        catalog = EventCatalog.from_document(document)
+
+        self.assertEqual(catalog.flag_ids, frozenset({"game_started"}))
 
 
 if __name__ == "__main__":

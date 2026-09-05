@@ -4,7 +4,7 @@
 
 本書は、フィールドや戦闘から起動される通常イベントの定義形式、実行順序、マップ上の
 トリガー、イベント制作ツール、検証条件を定める。イベントで表示する実際の文言は
-`content/data/texts.json`、キャラクターとアイテムは対応する `content/data/*.json` を正本とする。
+`content/events/messages.json`、キャラクターとアイテムは対応する `content/data/*.json` を正本とする。
 Scene、Overlay、Systemの依存方向は
 [`program-architecture.md`](../program-architecture.md)、セーブ対象は
 [`save-data.md`](./save-data.md)、空間上の編集操作は
@@ -19,7 +19,9 @@ Scene、Overlay、Systemの依存方向は
 - イベントは人とプログラムの双方が扱えるJSONを正本とする。YAMLとの二重管理はしない。
 - 通常の制作入口として、参照先をリストから選べるローカルWeb版イベントエディタを用意する。
   JSONの手編集も許可するが、保存時とCIで同じ検証を必須にする。
-- イベント本体は `content/events/*.json`、空間上のトリガーは
+- イベント会話は通常UI文言の `texts.json` と分け、`content/events/messages.json` で管理する。
+- イベント本体は `content/events/<namespace>.json`、グローバルフラグは
+  `content/events/flags.json`、空間上のトリガーは
   `content/maps/sources/*.json` に分ける。同じイベントを別のトリガーから参照できる。
 - イベント本体はコマンド列として表し、条件分岐だけが子コマンド列を持つ。任意の式やPythonを
   JSONへ埋め込まない。
@@ -39,8 +41,9 @@ JSONを採用する理由は、既存のマスターデータ、マップ、Pyth
 | 用語 | 内容 |
 |---|---|
 | イベント定義 | 安定イベントIDと、順番に実行するコマンド列 |
-| イベント名前空間 | 1ファイルをまとめる安定ID。ファイル名と一致させる |
-| イベントフラグ定義 | 利用可能なフラグIDと制作用メモの宣言 |
+| イベント名前空間 | 1つのイベント定義ファイル内のIDをまとめる名前。ファイル名と一致させる |
+| グローバルフラグ定義 | 全イベントから参照できるフラグIDと制作用メモの宣言 |
+| イベントメッセージ | `message_id` で参照するイベント専用の多言語会話文 |
 | トリガー | いつ、どのイベントIDを起動するかというScene側の設定 |
 | イベント呼び出し | トリガーからRunnerへ渡すイベントID、起動元Scene、マップIDなどの値 |
 | EventCatalog | 生成済みイベントをIDで検索する不変カタログ |
@@ -55,14 +58,17 @@ JSONを採用する理由は、既存のマスターデータ、マップ、Pyth
 
 ```text
 content/events/
-├── fairy_village.json        # イベントとフラグの制作用正本
-└── common.json
+├── fairy_village.json        # イベントの制作用正本
+├── common.json
+├── flags.json                # グローバルフラグ宣言の制作用正本
+└── messages.json             # イベントメッセージの制作用正本
 
 content/maps/sources/
 └── fairy_village.json        # actor配置とevent_triggersを含むマップ正本
 
 app/events/
-└── events.json               # 全定義を索引化したゲーム用生成物
+├── events.json               # 全定義を索引化したゲーム用生成物
+└── messages.json             # noteを除いたゲーム用メッセージ
 
 app/maps/
 └── fairy_village.json        # 解決済みトリガーを含むゲーム用生成物
@@ -83,7 +89,8 @@ npm run events:build
 
 `content:validate` はイベント、マップ、マスターデータの横断検証を含むようにする。
 `events:build` はエラーが1件でもあれば生成物を更新せず、成功時だけ原子的に
-`app/events/events.json` を置き換える。マップ生成も存在するイベントIDとの参照整合性を検証する。
+`app/events/events.json` と `app/events/messages.json` を置き換える。マップ生成も存在する
+イベントIDとの参照整合性を検証する。
 
 ## イベント定義形式
 
@@ -95,12 +102,6 @@ npm run events:build
 {
   "format_version": 1,
   "namespace": "fairy_village",
-  "flags": [
-    {
-      "id": "alvan_joined",
-      "note": "アルヴァンが一度加入した"
-    }
-  ],
   "events": [
     {
       "id": "meet_alvan",
@@ -110,19 +111,19 @@ npm run events:build
           "command": "branch",
           "condition": {
             "type": "flag_set",
-            "flag_id": "fairy_village.alvan_joined"
+            "flag_id": "quest.alvan_joined"
           },
           "then": [
             {
               "command": "message",
-              "text_key": "event.fairy_village.meet_alvan.after",
+              "message_id": "fairy_village.meet_alvan.after",
               "portrait_character_key": "Alvan"
             }
           ],
           "else": [
             {
               "command": "message",
-              "text_key": "event.fairy_village.meet_alvan.first",
+              "message_id": "fairy_village.meet_alvan.first",
               "portrait_character_key": "Alvan"
             },
             {
@@ -131,7 +132,7 @@ npm run events:build
             },
             {
               "command": "set_flag",
-              "flag_id": "fairy_village.alvan_joined"
+              "flag_id": "quest.alvan_joined"
             }
           ]
         }
@@ -141,17 +142,65 @@ npm run events:build
 }
 ```
 
-名前空間、フラグのローカルID、イベントのローカルIDは `lower_snake_case` とする。
+名前空間とイベントのローカルIDは `lower_snake_case` とする。
 ファイル名は `<namespace>.json` と一致させる。実行時に使う完全IDは
-`<namespace>.<local_id>` とし、上の例では `fairy_village.meet_alvan` と
-`fairy_village.alvan_joined` になる。
+`<namespace>.<local_id>` とし、上の例では `fairy_village.meet_alvan` になる。
 
-参照フィールドには常に完全IDを保存する。エディタ上では同じ名前空間の接頭辞を省略表示して
-よいが、JSONへ省略形を保存しない。`note` は制作者向けでありゲーム用生成物から除外する。
+名前空間はイベントを整理するための名前であり、呼び出し元のマップIDとは1対1で対応しない。
+たとえば複数マップから `common.*` を呼んでもよく、1つのマップから複数の名前空間を参照してもよい。
+ただし `move_actor` は起動元マップに対象actorが必要なため、そのイベントを参照する各マップとの
+横断検証対象になる。
 
-フラグは `flags` で先に宣言する。条件やコマンドに書かれただけの未知フラグを自動作成しない。
-これにより手入力の綴り違いを別フラグとして受理しない。フラグIDの削除・変更時は全イベントと
-セーブ互換性への影響を確認する。
+イベント参照には常に完全IDを保存する。JSONへイベントIDの省略形を保存しない。`note` は
+制作者向けでありゲーム用生成物から除外する。
+
+### グローバルフラグ形式
+
+`content/events/flags.json` はイベントnamespaceから独立した配列で、次の形式とする。
+
+```json
+[
+  {
+    "flag_id": "quest.alvan_joined",
+    "note": "アルヴァンが一度加入した"
+  },
+  {
+    "flag_id": "game_started",
+    "note": "ゲーム開始処理を完了した"
+  }
+]
+```
+
+- `flag_id` は全イベントを通じて一意なグローバルIDとする。
+- IDは `lower_snake_case` の単独名、または同形式をドットでつないだ分類名を使用できる。
+  `quest.*` や `world.*` は任意の整理方法であり、イベントnamespaceとは結び付けない。
+- どのイベントファイルからでも同じフラグを条件・設定に使用できる。
+- 条件やコマンドに書かれただけの未知フラグを自動作成しない。綴り違いは検証エラーにする。
+- `note` は任意の制作メモで、ゲーム用生成物には含めない。
+- フラグIDの削除・変更時は全イベントとセーブ互換性への影響を確認する。
+
+### イベントメッセージ形式
+
+`content/events/messages.json` は全イベント定義から共有する配列で、次の形式とする。
+
+```json
+[
+  {
+    "message_id": "fairy_village.meet_alvan.first",
+    "text_ja": ["はじめまして。", "アルヴァンです。"],
+    "text_en": ["Nice to meet you.", "I'm Alvan."],
+    "text_zhcn": ["初次见面。", "我是阿尔万。"],
+    "note": "初対面の挨拶"
+  }
+]
+```
+
+- `message_id` は2要素以上をドットでつないだ `lower_snake_case` とし、全体で一意にする。
+- IDの接頭辞をイベント名前空間に合わせることは推奨するが、強制しない。
+- 各 `text_*` は1表示行ごとの文字列配列とする。`text_ja` は1行以上必須、未翻訳の
+  `text_en` と `text_zhcn` は空配列を許可し、その場合は既存の言語フォールバックを使う。
+- `note` は任意の制作メモで、ゲーム用生成物には含めない。
+- 通常UI、用語、ショップなどで使う `content/data/texts.json` とは相互参照しない。
 
 ### 条件
 
@@ -159,7 +208,7 @@ npm run events:build
 
 | `type` | 必須属性 | 真になる条件 |
 |---|---|---|
-| `flag_set` | `flag_id` | `SaveData.event_flags` に完全フラグIDがある |
+| `flag_set` | `flag_id` | `SaveData.event_flags` にグローバルフラグIDがある |
 | `member_in_party` | `character_key` | 現在の活動パーティにキャラクターがいる |
 | `item_at_least` | `item_key`, `quantity` | 装備中を除くインベントリに指定数以上ある |
 | `all` | `conditions` | 1件以上の全子条件が真 |
@@ -207,7 +256,7 @@ npm run events:build
 | `give_item` | `item_key`, `quantity` | 全数量を一括でインベントリへ追加 | field / battle |
 | `take_item` | `item_key`, `quantity` | 全数量を一括でインベントリから削除 | field / battle |
 | `branch` | `condition`, `then`, `else` | 条件に応じて片方の子コマンド列だけを実行 | field / battle |
-| `message` | `text_key` | メッセージOverlayを閉じるまで待機 | field / battle |
+| `message` | `message_id` | メッセージOverlayを閉じるまで待機 | field / battle |
 | `play_se` | `se_id` | SE再生を要求して同フレームで完了 | field / battle |
 | `change_bgm` | `bgm_id` | BGM切替要求が受理された時点で完了 | field / battle |
 | `move_party` | `direction`, `steps` | 指定歩数のフィールド移動演出完了まで待機 | fieldのみ |
@@ -239,12 +288,12 @@ npm run events:build
 ```json
 {
   "command": "message",
-  "text_key": "event.fairy_village.meet_alvan.first",
+  "message_id": "fairy_village.meet_alvan.first",
   "portrait_character_key": "Alvan"
 }
 ```
 
-- `text_key` は `content/data/texts.json` の既存キーを参照する。翻訳後文字列をイベント定義へ
+- `message_id` は `content/events/messages.json` の既存IDを参照する。翻訳後文字列をイベント定義へ
   複製しない。
 - `portrait_character_key` は任意で、指定時は `characters.json` の `name_en` と顔座標を使う。
   現在パーティにいないキャラクターも表示できる。初期仕様で任意画像座標は指定しない。
@@ -252,7 +301,8 @@ npm run events:build
   自動送りは画面仕様が必要になった時点で追加する。
 - イベント中の決定入力は最上位のメッセージOverlayだけが受け取り、閉じた入力を次のコマンドや
   FieldSceneへ持ち越さない。
-- 表示したメッセージは既存ログ仕様に従って `text_key` と引数を記録する。演出専用でログへ
+- 表示したメッセージはログへ `message_id` と引数を記録する。旧セーブの通常UIログが持つ
+  `text_key` も復元できるが、新しいイベントメッセージへは使用しない。演出専用でログへ
   残さない指定が必要になった場合は別属性として追加する。
 
 #### 音声
@@ -488,39 +538,44 @@ validatorを使う。
 
 画面は次の3列を基本とする。
 
-1. 左: 編集中名前空間のイベントとフラグの一覧・入力欄
-2. 中央: イベント属性、コマンド列、branchの入れ子、参照先選択。追加、削除、上下移動
+1. 左: グローバルフラグ、編集中名前空間のイベント、共有メッセージの一覧・入力欄
+2. 中央: イベント属性、コマンド列、branchの入れ子、または多言語メッセージ編集
 3. 右: validatorの問題一覧
 
-イベント／フラグのIDと制作用 `note` は自由入力できる。参照値は原則としてリストまたは検索付き
+イベント／フラグのIDと制作用 `note` は自由入力できる。フラグ一覧はnamespaceを切り替えても
+共通である。参照値は原則としてリストまたは検索付き
 セレクターから選ぶ。
 
 | 入力 | 選択元 |
 |---|---|
-| `flag_id` | 全 `content/events/*.json` の宣言済みフラグ |
+| `flag_id` | `content/events/flags.json` の宣言済みグローバルフラグ |
 | `character_key` / 顔 | `content/data/characters.json` |
 | `item_key` | `content/data/items.json` |
-| `text_key` | `content/data/texts.json` |
+| `message_id` | `content/events/messages.json` |
 | `bgm_id` | 本番BGMカタログ／生成元 |
 | `se_id` | 安定SEカタログ |
 | `actor_id` | 全マップのactor一覧。参照元マップとの一致は保存・生成時に横断検証する |
 
-初期版のmessage編集は、既存の `text_key` を一覧から選ぶ。文言そのものの追加・翻訳は
-`content/data/texts.json` 側で行う。将来、エディタから文言を新規作成するときは
-`event.<namespace>.<event_id>.<message_id>` を既定値とし、並べ替えで変化しない安定IDを使う。
+メッセージは左の一覧から新規作成・選択し、中央で `message_id`、日本語、英語、簡体字中国語、
+制作メモを編集する。新規IDは `<現在のnamespace>.message_<連番>` を既定値にするが、別の
+名前へ変更できる。イベントのmessageコマンドはこの一覧からIDを選択する。
 
 ### 操作と安全策
 
-- 起動時に全イベント、フラグ、マスターデータ、文言、音声を読み、参照索引を作る。
+- 起動時に全イベント、フラグ、イベントメッセージ、マスターデータ、音声を読み、参照索引を作る。
+- ヘッダーで既存の `content/events/<namespace>.json` を切り替えられる。新規namespaceを入力すると
+  空の定義として開き、最初の保存時にファイルを作成する。namespaceはマップIDの一覧に制約されない。
 - コマンドを選ぶと、その種類に必要な属性だけを表示する。未使用属性はJSONへ残さない。
 - conditionは「すべて／いずれか／否定／フラグ／メンバー／アイテム」の部品で組み立てる。
 - ID変更・削除後は同じvalidatorで全参照を検証し、問題一覧へ不整合を表示する。参照先の
   一括変更とセーブ済みフラグIDの移行は初期版では自動化しない。
 - Undo/Redoは1回のコマンド追加、削除、並べ替え、属性変更を単位とする。
-- 未保存変更がある状態でページを閉じる場合は確認する。名前空間は起動引数で1件を指定する。
+- 未保存変更がある状態でページを閉じる場合や別namespaceへ切り替える場合は確認する。
 - エラーがある間は保存しない。警告は内容を表示したうえで保存できる。
-- 保存は無関係なJSONを再整形せず、変更対象のイベントファイルだけを更新する。
-- 保存成功後にゲーム用イベントを生成する。マップ側の未保存変更はイベント保存に含めない。
+- 保存は変更対象のイベントファイルと共有 `flags.json`、`messages.json` を更新する。他の
+  イベントファイルは再整形しない。
+- 保存成功後にゲーム用イベントとイベントメッセージを生成する。マップ側の未保存変更は
+  イベント保存に含めない。
 
 初期版では任意JSON入力欄、Python式、変数、ラベル／goto、並列実行、タイムライン編集、イベントの
 途中再開を提供しない。必要な機能は型付きconditionまたはcommandとして追加する。
@@ -534,8 +589,8 @@ validatorを使う。
 - cellアンカーとoffsetはキャンバスで移動・複数選択できる。object/actorアンカーは対象の移動へ
   追従し、トリガーだけの絶対座標を保持しない。
 - イベントIDはイベントカタログから選ぶ。未作成イベントIDを文字列で仮入力する機能は設けない。
-- イベント本文の新規作成と編集は `npm run tools:event-editor -- --namespace <namespace>` で行い、
-  保存後にマップエディタを再読込してイベント一覧を更新する。
+- イベント本文の新規作成と編集は `npm run tools:event-editor` で行い、画面内でnamespaceを
+  切り替える。保存後にマップエディタを再読込してイベント一覧を更新する。
 - 問題一覧は不正なトリガー、イベント定義、参照先actorのJSON pathと理由を表示する。
 - マップ保存はイベント参照を検証し、成功時だけ制作用マップとゲーム用マップを更新する。
 
@@ -545,10 +600,10 @@ validatorを使う。
 
 次をエラーにする。
 
-- 不正なformat version、名前空間、ローカルID、またはファイル名との不一致
-- 名前空間、完全イベントID、完全フラグIDの重複
+- 不正なformat version、名前空間、ローカルID、グローバルフラグID、またはファイル名との不一致
+- 名前空間、完全イベントID、グローバルフラグIDの重複
 - 未知のフィールド、condition、command、または必須属性の欠落
-- 宣言されていないフラグ、存在しないキャラクター、アイテム、文言、BGM、SEの参照
+- 宣言されていないフラグ、存在しないキャラクター、アイテム、イベントメッセージ、BGM、SEの参照
 - 0以下または上限外の数量・歩数、空のcondition集合、branchの深さ超過
 - フィオラを対象にした `leave_party`
 - 数量や歩数など、単体で静的に判定できる不正値
@@ -565,7 +620,7 @@ validatorを使う。
 
 別マップのactorを動かすことはできない。1イベントが複数マップから参照される場合、
 `move_actor` の各IDが全参照元マップに存在しなければエラーにする。マップ固有のactorを動かす
-イベントはマップ固有の名前空間へ置く。
+イベントはマップ固有のイベントファイルへ分けることを推奨する。
 
 空のイベントまたはbranchの空のthen側は警告にする。空のelse側は正常な定義として扱う。
 未参照イベント、未使用フラグ、

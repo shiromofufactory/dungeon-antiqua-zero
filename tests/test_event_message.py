@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 from tools._bootstrap import APP_ROOT
 from app.input import InputButton, InputState
 from app.member import FacePosition
+from app.resources.event_messages import EventMessageCatalog
 from app.state import Settings
-from app.text_catalog import TextCatalog
 from app.ui.event_message import EventMessageDataError, EventMessageOverlay
 
 
@@ -20,10 +20,10 @@ class EventMessageOverlayTest(unittest.TestCase):
         self.faces = object()
 
     def overlay(self, *, portrait: str | None = None) -> EventMessageOverlay:
-        texts = TextCatalog.from_records(
+        messages = EventMessageCatalog.from_records(
             [
                 {
-                    "text_key": "event.sample.hello",
+                    "message_id": "sample.hello",
                     "text_ja": ["こんにちは", "ようこそ"],
                     "text_en": ["Hello", "Welcome"],
                     "text_zhcn": ["你好", "欢迎"],
@@ -31,10 +31,10 @@ class EventMessageOverlayTest(unittest.TestCase):
             ]
         )
         return EventMessageOverlay(
-            text_key="event.sample.hello",
+            message_id="sample.hello",
             portrait_character_key=portrait,
             settings=Settings(),
-            texts=texts,
+            messages=messages,
             fonts=self.fonts,
             faces=self.faces,
             face_positions={"Alvan": FacePosition(32, 64)},
@@ -69,14 +69,19 @@ class EventMessageOverlayTest(unittest.TestCase):
             self.overlay(portrait="Missing")
 
     def test_splits_long_text_into_acknowledged_pages(self) -> None:
-        texts = TextCatalog.from_records(
-            [{"text_key": "event.long", "text_ja": ["a"] * 5}]
+        messages = EventMessageCatalog.from_records(
+            [{
+                "message_id": "event.long",
+                "text_ja": ["a"] * 5,
+                "text_en": [],
+                "text_zhcn": [],
+            }]
         )
         overlay = EventMessageOverlay(
-            text_key="event.long",
+            message_id="event.long",
             portrait_character_key=None,
             settings=Settings(),
-            texts=texts,
+            messages=messages,
             fonts=self.fonts,
             faces=self.faces,
             face_positions={},

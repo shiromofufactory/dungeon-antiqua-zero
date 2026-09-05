@@ -35,7 +35,7 @@ class EventRuntimeError(RuntimeError):
 
 @dataclass(frozen=True)
 class MessageEffect:
-    text_key: str
+    message_id: str
     portrait_character_key: str | None = None
 
 
@@ -189,7 +189,7 @@ class EventRunner:
                 return None
             if command_type == "message":
                 portrait = command.get("portrait_character_key")
-                return MessageEffect(str(command["text_key"]), None if portrait is None else str(portrait))
+                return MessageEffect(str(command["message_id"]), None if portrait is None else str(portrait))
             if command_type == "play_se":
                 return PlaySeEffect(str(command["se_id"]))
             if command_type == "change_bgm":

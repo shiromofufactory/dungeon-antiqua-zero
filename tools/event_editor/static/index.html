@@ -9,10 +9,18 @@
 <body>
   <header>
     <div class="brand"><span>DA0</span><div><h1>Event Editor</h1><p id="document-path">読み込み中…</p></div></div>
-    <div class="toolbar"><span id="save-state" class="pill">読み込み中</span><button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直す</button><button id="validate">検証</button><button id="save" class="primary">保存・生成</button></div>
+    <div class="header-actions">
+      <div class="namespace-tools">
+        <label>イベントファイル<select id="namespace-select"></select></label>
+        <button data-action="open-namespace">切替</button>
+        <label>新規namespace<input id="namespace-new" placeholder="例: fairy_village" autocomplete="off"></label>
+        <button data-action="create-namespace">新規作成</button>
+      </div>
+      <div class="toolbar"><span id="save-state" class="pill">読み込み中</span><button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直す</button><button id="validate">検証</button><button id="save" class="primary">保存・生成</button></div>
+    </div>
   </header>
   <main>
-    <aside class="panel sidebar"><section><div class="heading"><h2>フラグ</h2><button data-action="add-flag">追加</button></div><div id="flags"></div></section><section><div class="heading"><h2>イベント</h2><button data-action="add-event">追加</button></div><div id="events"></div></section></aside>
+    <aside class="panel sidebar"><section><div class="heading"><h2>グローバルフラグ</h2><button data-action="add-flag">追加</button></div><div id="flags"></div></section><section><div class="heading"><h2>イベント</h2><button data-action="add-event">追加</button></div><div id="events"></div></section><section><div class="heading"><h2>メッセージ</h2><button data-action="add-message">追加</button></div><div id="messages"></div></section></aside>
     <section class="panel editor"><div id="event-editor" class="empty">イベントを選択してください。</div></section>
     <aside class="panel issues"><div class="heading"><h2>問題一覧</h2><span id="issue-count" class="pill">0</span></div><div id="issues"></div></aside>
   </main>

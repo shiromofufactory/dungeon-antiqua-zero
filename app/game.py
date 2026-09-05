@@ -73,6 +73,10 @@ from resources import (
     MapResources,
     play_se,
 )
+from resources.event_messages import (
+    EventMessageCatalog,
+    EventMessageResourceError,
+)
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
@@ -425,6 +429,7 @@ class Game:
         self.images = ImageResources()
         self.faces = self.images.image(FACES_IMAGE_ID)
         self.event_catalog = EventCatalog.from_json()
+        self.event_messages = EventMessageCatalog.from_json()
         self.map_resources = MapResources()
         self.world_map = self.map_resources.map(WORLD_MAP_ID)
         self.current_map = self.world_map
@@ -1906,16 +1911,16 @@ class Game:
                 continue
             if isinstance(effect, MessageEffect):
                 self.event_message = EventMessageOverlay(
-                    text_key=effect.text_key,
+                    message_id=effect.message_id,
                     portrait_character_key=effect.portrait_character_key,
                     settings=self.settings,
-                    texts=self.texts,
+                    messages=self.event_messages,
                     fonts=self.fonts,
                     faces=self.faces,
                     face_positions=self.character_face_positions,
                 )
                 self.save_data.logs.append(
-                    {"text_key": effect.text_key, "arguments": {}}
+                    {"message_id": effect.message_id, "arguments": {}}
                 )
                 del self.save_data.logs[:-20]
                 return
@@ -2353,6 +2358,7 @@ GAME_ERRORS = (
     AudioResourceError,
     DataResourceError,
     DebugPartyError,
+    EventMessageResourceError,
     EquipmentMenuDataError,
     FontResourceError,
     ImageResourceError,

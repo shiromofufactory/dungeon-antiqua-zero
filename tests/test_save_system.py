@@ -60,6 +60,10 @@ class SaveSystemTest(unittest.TestCase):
                         "text_key": "shop.greeting",
                         "arguments": {"COUNT": 2},
                     },
+                    {
+                        "message_id": "sample.greeting",
+                        "arguments": {},
+                    },
                 ],
             ),
             active_party=party,
@@ -127,7 +131,10 @@ class SaveSystemTest(unittest.TestCase):
         )
         self.assertEqual(
             document["logs"],
-            [{"text_key": "shop.greeting", "arguments": {"COUNT": 2}}],
+            [
+                {"text_key": "shop.greeting", "arguments": {"COUNT": 2}},
+                {"message_id": "sample.greeting", "arguments": {}},
+            ],
         )
         self.assertNotIn("automapping", document)
         self.assertNotIn("important_items", document)

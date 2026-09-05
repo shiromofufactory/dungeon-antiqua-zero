@@ -22,7 +22,7 @@
 - `data/*.json` と、制作スタッフ向けの企画文書 `docs/da0.md` の正本を管理する。
 - ゲームとポータルで共有するPNG/GIF画像の正本を `images/` で管理する。
 - タイルセットメタデータと制作用マップの正本を `maps/` で管理する。
-- 通常イベントとイベントフラグ宣言の正本を `events/` で管理する。
+- 通常イベント、グローバルフラグ宣言、イベントメッセージの正本を `events/` で管理する。
 - JSONの検証、Google Sheetsとの同期、スタッフポータルの生成と配備を担当する。
 - このリポジトリ単独でもスタッフが編集・レビューできる。
 
@@ -154,20 +154,24 @@ npm run maps:build
 
 ## イベント制作データとゲーム用データ生成
 
-`content/events` はイベントエディタまたは人が編集する通常イベントとフラグ宣言の正本とする。
-コマンド列や条件分岐の入れ子を維持するためGoogle Sheetsとは同期しない。形式と編集操作は
+`content/events/<namespace>.json` はイベントエディタまたは人が編集する通常イベントの正本、
+`content/events/flags.json` は全イベントから共有するグローバルフラグ宣言の正本、
+`content/events/messages.json` はイベント専用の多言語メッセージの正本とする。
+いずれもGoogle Sheetsとは同期しない。形式と編集操作は
 [`features/events.md`](./features/events.md) を参照する。
 
-ゲーム用の `app/events` は全イベントを完全IDで索引化した生成物であり、直接編集または
-Git管理しない。次のコマンドで非対話の検証と生成を行う。
+ゲーム用の `app/events/events.json` は全イベントを完全IDで索引化し、
+`app/events/messages.json` は制作メモを除いた会話文を収録する生成物である。どちらも直接編集
+またはGit管理しない。次のコマンドで非対話の検証と生成を行う。
 
 ```sh
 npm run events:validate
 npm run events:build
 ```
 
-イベント、宣言済みフラグ、マスターデータ、文言、音声、マップトリガー、actorの参照を横断して
-検証する。`content:validate` にも同じイベント検証を含め、エラー時は既存のゲーム用生成物を
+イベント、宣言済みグローバルフラグ、マスターデータ、イベントメッセージ、音声、マップトリガー、actorの
+参照を横断して検証する。通常UI用の `content/data/texts.json` はイベントmessageコマンドから
+参照しない。`content:validate` にも同じイベント検証を含め、エラー時は既存のゲーム用生成物を
 更新しない。
 
 ## Google Sheetsとの同期

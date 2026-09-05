@@ -118,6 +118,7 @@ class SaveDataTest(unittest.TestCase):
             {"difficulty": "normal"},
             {"event_flags": ["prologue_complete"]},
             {"event_flags": {""}},
+            {"event_flags": {"Invalid"}},
             {"visited_site_ids": ["sample_town"]},
             {"visited_site_ids": {"Invalid Site"}},
             {"opened_treasures": [("worldmap", "chest_1")]},
@@ -126,6 +127,13 @@ class SaveDataTest(unittest.TestCase):
             {"monster_records": {"": {"profile"}}},
             {"logs": [{}]},
             {"logs": [{"text_key": "event", "arguments": {"VALUE": []}}]},
+            {
+                "logs": [{
+                    "text_key": "legacy.event",
+                    "message_id": "sample.event",
+                    "arguments": {},
+                }]
+            },
         )
 
         for value in invalid_values:

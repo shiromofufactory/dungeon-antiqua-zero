@@ -14,6 +14,22 @@ from .events import (
     save_event_source,
     validate_event_sources,
 )
+from .flags import (
+    compile_event_flags,
+    event_flag_ids,
+    event_flags_path,
+    load_event_flags,
+    save_event_flags,
+    validate_event_flags,
+)
+from .messages import (
+    compile_event_messages,
+    event_message_ids,
+    event_messages_path,
+    load_event_messages,
+    save_event_messages,
+    validate_event_messages,
+)
 
 __all__ = (
     "EVENT_RUNTIME_FORMAT_VERSION",
@@ -28,4 +44,16 @@ __all__ = (
     "save_compiled_events",
     "save_event_source",
     "validate_event_sources",
+    "compile_event_flags",
+    "event_flag_ids",
+    "event_flags_path",
+    "load_event_flags",
+    "save_event_flags",
+    "validate_event_flags",
+    "compile_event_messages",
+    "event_message_ids",
+    "event_messages_path",
+    "load_event_messages",
+    "save_event_messages",
+    "validate_event_messages",
 )
