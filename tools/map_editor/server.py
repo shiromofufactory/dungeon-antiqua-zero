@@ -327,11 +327,28 @@ class MapEditorApplication:
             *name_diagnostics,
         ]
         resolved = None
-        if not any(item.severity == "error" for item in diagnostics):
+        has_errors = any(item.severity == "error" for item in diagnostics)
+        tileset_has_errors = any(
+            item.severity == "error" for item in tileset_diagnostics
+        )
+        if not tileset_has_errors:
             try:
                 resolved = resolve_map(data, tileset)
             except ValueError as error:
-                diagnostics.append(Diagnostic("error", "resolve_failed", "$", str(error)))
+                if has_errors:
+                    preview_data = {
+                        **data,
+                        "sites": [],
+                        "arrival_points": [],
+                        "actors": [],
+                        "event_triggers": [],
+                    }
+                    try:
+                        resolved = resolve_map(preview_data, tileset)
+                    except ValueError:
+                        pass
+                else:
+                    diagnostics.append(Diagnostic("error", "resolve_failed", "$", str(error)))
         return [item.as_dict() for item in diagnostics], image_info.as_dict() if image_info else None, resolved
 
     def document_payload(self) -> dict[str, Any]:

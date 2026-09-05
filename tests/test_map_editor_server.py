@@ -142,8 +142,19 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("function drawCellSelectionFrame(context, position, scale)", script)
         self.assertIn("if (selected) drawCellSelectionFrame(context, arrival.position, scale)", script)
         self.assertIn("function mapSelectionCandidatesAt(cell)", script)
+        self.assertIn("function prioritizeMapSelectionCandidates(candidates)", script)
+        self.assertIn("candidate.tab === state.tab", script)
         self.assertIn("function selectAnyAt(cell)", script)
         self.assertIn("const candidate = selectAnyAt(cell)", script)
+
+    def test_tab_change_clears_other_selections_and_object_trigger_has_own_tool(self) -> None:
+        script = self.get_text("/app.js")
+
+        self.assertIn("function clearSelectionsOutsideTab(tab)", script)
+        self.assertIn("clearSelectionsOutsideTab(state.tab)", script)
+        self.assertIn('data-action="prepare-object-trigger"', script)
+        self.assertIn('state.eventTool = "create_object_trigger"', script)
+        self.assertNotIn('data-action="add-object-trigger"', script)
 
     def test_trigger_id_is_internal_in_editor_ui(self) -> None:
         script = self.get_text("/app.js")
@@ -238,6 +249,35 @@ class MapEditorServerTest(unittest.TestCase):
             "missing_site_name_ja",
             {item["code"] for item in result["diagnostics"]},
         )
+        self.assertIsNotNone(result["resolved"])
+
+    def test_keeps_visual_preview_for_incomplete_site(self) -> None:
+        data = self.get_json("/api/document?token=test-token")["data"]
+        data["grounds"][2][2] = "plain"
+        data["sites"] = [
+            {
+                "id": "incomplete_site",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {"map_id": "", "arrival_id": ""},
+            }
+        ]
+
+        result = self.post_json(
+            "/api/resolve",
+            data,
+            {"incomplete_site": ""},
+        )
+
+        self.assertTrue(
+            any(item["severity"] == "error" for item in result["diagnostics"])
+        )
+        self.assertIsNotNone(result["resolved"])
+        self.assertEqual(len(result["resolved"]["ground_cells"]), 30)
+
+        script = self.get_text("/app.js")
+        self.assertIn("function applyValidationResult(result)", script)
+        self.assertIn("if (result.resolved) state.resolved = result.resolved", script)
 
     def test_saves_actor_and_event_trigger_using_defined_event(self) -> None:
         events_dir = self.application.content_root / "events"

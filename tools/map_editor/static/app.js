@@ -219,6 +219,18 @@ function normalizeSelections() {
   if (!state.data?.event_triggers?.some((trigger) => trigger.id === state.selectedTriggerId)) state.selectedTriggerId = null;
 }
 
+function clearSelectionsOutsideTab(tab) {
+  if (tab !== "object") state.selectedInstanceId = null;
+  if (tab !== "site") {
+    state.selectedSiteId = null;
+    state.selectedArrivalId = null;
+  }
+  if (tab !== "event") {
+    state.selectedActorId = null;
+    state.selectedTriggerId = null;
+  }
+}
+
 function groundStack(groundId) {
   const byGround = new Map(state.tileset.grounds.map((ground) => [ground.id, ground]));
   const stack = [];
@@ -448,7 +460,7 @@ function renderPalette() {
         <div class="section-title"><h2>トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
         <div class="travel-list">${standaloneTriggers().map((trigger) => `
           <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / ${trigger.activations.join(", ")}</button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
-        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="add-object-trigger" ${currentInstance() ? "" : "disabled"}>選択objectのtrigger</button></div>
+        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="prepare-object-trigger" ${state.data.objects.length ? "" : "disabled"}>object trigger</button></div>
       </div>`;
   }
   drawPaletteThumbs();
@@ -672,6 +684,7 @@ function renderIssues() {
 function renderAll() {
   if (!state.data) return;
   normalizeSelections();
+  clearSelectionsOutsideTab(state.tab);
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === state.tab));
   byId("grid-toggle").checked = state.showGrid;
   byId("collision-toggle").checked = state.showCollision;
@@ -899,6 +912,7 @@ function updateToolStatus() {
       select: "actorまたはtriggerを選択",
       create_actor: "actorを置くセルを選択",
       create_trigger: "triggerの基準セルを選択",
+      create_object_trigger: "triggerを設定するobjectを選択",
       move_actor: "actorの新しいセルを選択",
       trigger_offsets: "trigger対象セルをクリックして追加・解除",
     };
@@ -1126,6 +1140,12 @@ function mapSelectionCandidatesAt(cell) {
   return candidates;
 }
 
+function prioritizeMapSelectionCandidates(candidates) {
+  const preferred = candidates.filter((candidate) => candidate.tab === state.tab);
+  if (!preferred.length || preferred.length === candidates.length) return candidates;
+  return [...preferred, ...candidates.filter((candidate) => candidate.tab !== state.tab)];
+}
+
 function isMapSelectionCandidateSelected(candidate) {
   if (candidate.tab !== state.tab) return false;
   if (candidate.kind === "actor") return candidate.id === state.selectedActorId;
@@ -1136,7 +1156,7 @@ function isMapSelectionCandidateSelected(candidate) {
 }
 
 function selectAnyAt(cell) {
-  const candidates = mapSelectionCandidatesAt(cell);
+  const candidates = prioritizeMapSelectionCandidates(mapSelectionCandidatesAt(cell));
   const selectedIndex = candidates.findIndex(isMapSelectionCandidateSelected);
   const candidate = candidates.length ? candidates[(selectedIndex + 1) % candidates.length] : null;
   state.selectedInstanceId = null;
@@ -1165,6 +1185,14 @@ function selectAnyAt(cell) {
 function handleEventCell(cell) {
   if (state.eventTool === "create_actor") return createActor(cell);
   if (state.eventTool === "create_trigger") return addAnchoredTrigger({ kind: "cell", position: [...cell] });
+  if (state.eventTool === "create_object_trigger") {
+    const instance = instanceAt(...cell);
+    if (!instance) {
+      showToast("トリガーを設定するオブジェクトを選択してください。", true);
+      return;
+    }
+    return addAnchoredTrigger({ kind: "object", object_id: instance.id });
+  }
   if (state.eventTool === "move_actor" && currentActor()) {
     commit(() => { currentActor().position = [...cell]; state.eventTool = "select"; });
     return;
@@ -1364,8 +1392,10 @@ function handlePaletteAction(element) {
     state.selectedTriggerId = null;
     state.eventTool = "create_trigger";
     renderAll();
-  } else if (action === "add-object-trigger" && currentInstance()) {
-    addAnchoredTrigger({ kind: "object", object_id: currentInstance().id });
+  } else if (action === "prepare-object-trigger") {
+    state.selectedTriggerId = null;
+    state.eventTool = "create_object_trigger";
+    renderAll();
   }
 }
 
@@ -1590,6 +1620,11 @@ function updateTriggerField(path, value) {
   });
 }
 
+function applyValidationResult(result) {
+  state.diagnostics = result.diagnostics;
+  if (result.resolved) state.resolved = result.resolved;
+}
+
 function scheduleResolution(delay = 70) {
   window.clearTimeout(state.resolveTimer);
   const revision = ++state.resolveRevision;
@@ -1597,8 +1632,7 @@ function scheduleResolution(delay = 70) {
     try {
       const result = await api("/api/resolve", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
       if (revision !== state.resolveRevision) return;
-      state.diagnostics = result.diagnostics;
-      state.resolved = result.resolved;
+      applyValidationResult(result);
       renderIssues();
       drawMap(performance.now());
     } catch (error) {
@@ -1611,8 +1645,7 @@ async function save() {
   updateSaveState("dirty", "保存・生成中…");
   try {
     const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
-    state.diagnostics = result.diagnostics;
-    state.resolved = result.resolved;
+    applyValidationResult(result);
     if (result.saved) {
       state.dirty = false;
       state.history = [];
