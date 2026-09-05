@@ -355,19 +355,27 @@ npm run events:build
 
 ### 制作用形式
 
-イベントトリガー追加時に制作用マップの `format_version` を3へ上げ、version 2からは
-`actors: []` と `event_triggers: []` を追加する明示的な移行を行う。既存の
-`sites` と `arrival_points` はそのまま維持する。
+actor種別と共通スプライトシート参照の追加に伴い、制作用マップの `format_version` は4とする。
+version 3のactorは `appearance_id` を廃止し、用途に応じた `kind` と共通シート内の
+`sprite_index` へ明示的に移行する。actorのないversion 3マップはversion番号だけを更新できる。
+既存の `sites`、`arrival_points`、`event_triggers` はそのまま維持する。
 
 ```json
 {
-  "format_version": 3,
+  "format_version": 4,
   "actors": [
     {
       "id": "village_elder",
       "position": [12, 8],
-      "facing": "down",
-      "appearance_id": "village_elder"
+      "kind": "stationary",
+      "sprite_index": 3,
+      "facing": "down"
+    },
+    {
+      "id": "treasure_1",
+      "position": [14, 8],
+      "kind": "prop",
+      "sprite_index": 0
     }
   ],
   "event_triggers": [
@@ -395,10 +403,40 @@ npm run events:build
 }
 ```
 
-actorの描画用 `appearance_id` の正本と衝突規則は、フィールドactor配置機能で別途定める。
-イベント機能はマップ内で一意な `actor.id`、現在位置、向き、移動完了通知だけに依存する。
-初期実装では `appearance_id` と一致する生成済み画像があればそれを使い、未登録時はフィールドの
-標準キャラクターチップを代替表示する。専用actor素材のカタログ化は素材形式の決定後に行う。
+actorは次の3種類とする。
+
+| `kind` | 用途 | 向き | 通常時の移動 |
+|---|---|---|---|
+| `prop` | 宝箱、看板などの固定物 | なし。`facing` は指定しない | 移動しない |
+| `stationary` | 定位置の人物・モンスター | 4方向 | 自律移動しない |
+| `roaming` | 村人などの移動人物・モンスター | 4方向 | 30〜90フレームの待機後、上下左右またはその場待機を等確率で選ぶ |
+
+`sprite_index` は0以上の整数とし、マップ固有画像ではなく後述の共通シートを
+左上から右、次に下へ読む番号とする。`prop` は下地が通行可能なセルに置くが、
+actor自身がpartyと他actorの進入を防ぐ。`stationary` と `roaming` はactorをアンカーとする
+`touch` または `interact` で起動される際、未完了の自律歩行を初期セルへ戻してpartyの方を向く。`prop` は
+会話や調査でも向きを変えない。
+
+actorの配置、現在位置、向き、待機タイマーはFieldの一時状態とし、セーブしない。
+自律移動はマップ外、通行不可地形、party、他actorの現在セルと移動先セルへ進まず、
+イベント中と通常メニュー中は更新を止める。`move_actor` は向きと歩行を持つ
+`stationary` / `roaming` に使用できるが、`prop` の参照は生成エラーとする。
+
+### actor共通アセット
+
+マップによらず使える次の2ファイルを正本とし、`npm run images:build` で通常の
+画像bundleへ収録する。
+
+| actor | 正本パス | 画像ID | 配置 |
+|---|---|---|---|
+| `prop` | `content/images/actors/props.png` | `actors/props` | 16×16pxの単一チップを行優先で並べる |
+| `stationary` / `roaming` | `content/images/actors/characters.png` | `actors/characters` | 1キャラ32×64pxのブロックを行優先で並べる |
+
+`props.png` の幅と高さは16pxの倍数とする。`characters.png` の幅は32pxの倍数、高さは
+64pxの倍数とする。1キャラブロック内は、列が歩行パターン0・1、行が上・右・下・左の順で、
+各1チップは16×16pxとする。透過色は他のZERO画像と同じパレット番号1
+`#FF0080` を使う。シート不在、寸法不正、範囲外の `sprite_index` は、代替画像を出さず
+実行時リソースエラーとする。
 
 トリガーのアンカーは次の3種類とする。
 

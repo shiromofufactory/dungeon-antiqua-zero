@@ -113,7 +113,7 @@ class FieldMovementTest(unittest.TestCase):
         object.__setattr__(
             map_data,
             "actors",
-            (MapActor("elder", MapCell(1, 1), "down", "elder"),),
+            (MapActor("elder", MapCell(1, 1), "roaming", 0, "down"),),
         )
         actors = FieldActors(map_data)
 
@@ -125,6 +125,56 @@ class FieldMovementTest(unittest.TestCase):
             )
         )
         self.assertEqual(actors.actor("elder").movement.position, FieldPosition(1, 1))
+
+    def test_stationary_actor_faces_the_adjacent_party_when_spoken_to(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("elder", MapCell(1, 1), "stationary", 0, "up"),),
+        )
+        actors = FieldActors(map_data)
+
+        actors.face_toward("elder", FieldPosition(2, 1))
+
+        self.assertIs(actors.actor("elder").movement.facing, Direction.RIGHT)
+
+    def test_prop_actor_has_no_facing_or_movement(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("chest", MapCell(1, 1), "prop", 0),),
+        )
+        actors = FieldActors(map_data)
+
+        actors.face_toward("chest", FieldPosition(2, 1))
+        with self.assertRaisesRegex(ValueError, "prop"):
+            actors.update(
+                "chest",
+                Direction.RIGHT,
+                party_position=FieldPosition(0, 0),
+            )
+
+        self.assertEqual(actors.actor("chest").movement.position, FieldPosition(1, 1))
+
+    def test_roaming_actor_chooses_and_starts_an_autonomous_step(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("villager", MapCell(1, 1), "roaming", 0, "down"),),
+        )
+        random_source = Mock()
+        random_source.randint.return_value = 30
+        random_source.choice.return_value = Direction.RIGHT
+        actors = FieldActors(map_data, random_source=random_source)
+        actors.actor("villager").roam_wait_frames = 0
+
+        actors.update_roaming(party_position=FieldPosition(0, 0))
+
+        self.assertEqual(actors.actor("villager").movement.world_x, 17)
+        self.assertTrue(actors.actor("villager").movement.is_moving)
 
 
 class FieldRendererTest(unittest.TestCase):
@@ -189,19 +239,21 @@ class FieldRendererTest(unittest.TestCase):
         far_field = FieldMovement(map_data, start=FieldPosition(2, 2))
         self.assertEqual(renderer.camera_position(far_field), (16, 16))
 
-    def test_draws_actor_image_and_falls_back_to_field_character_bank(self) -> None:
+    def test_draws_actor_common_sheets_and_player_character_bank(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
         object.__setattr__(
             map_data,
             "actors",
             (
-                MapActor("elder", MapCell(1, 0), "down", "elder"),
-                MapActor("guide", MapCell(2, 0), "left", "guide"),
+                MapActor("chest", MapCell(0, 0), "prop", 1),
+                MapActor("elder", MapCell(1, 0), "stationary", 2, "down"),
+                MapActor("guide", MapCell(2, 0), "roaming", 3, "left"),
             ),
         )
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
         actors = FieldActors(map_data)
-        elder_image = object()
+        prop_image = Mock(width=32, height=16)
+        character_image = Mock(width=128, height=64)
         pyxel = Mock(frame_count=0)
         renderer = FieldRenderer(
             map_data,
@@ -213,20 +265,25 @@ class FieldRendererTest(unittest.TestCase):
         renderer.draw(
             field,
             actors=actors,
-            actor_images={"elder": elder_image},
+            prop_image=prop_image,
+            actor_character_image=character_image,
         )
 
-        character_calls = pyxel.blt.call_args_list[-3:]
+        character_calls = pyxel.blt.call_args_list[-4:]
         self.assertEqual(
             character_calls[0],
-            call(16, 0, elder_image, 0, 32, 16, 16, 1),
+            call(0, 0, prop_image, 16, 0, 16, 16, 1),
         )
         self.assertEqual(
             character_calls[1],
-            call(32, 0, 0, 0, 112, 16, 16, 1),
+            call(16, 0, character_image, 64, 32, 16, 16, 1),
         )
         self.assertEqual(
             character_calls[2],
+            call(32, 0, character_image, 96, 48, 16, 16, 1),
+        )
+        self.assertEqual(
+            character_calls[3],
             call(16, 16, 0, 0, 96, 16, 16, 1),
         )
 

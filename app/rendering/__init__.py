@@ -8,12 +8,14 @@ from .fade import (
 )
 from .field import (
     FIELD_CHARACTER_ANIMATION_INTERVAL,
+    FIELD_CHARACTER_ASSET_ID,
     FIELD_CHARACTER_BANK,
     FIELD_CHARACTER_COLKEY,
     FIELD_CHARACTER_FACING_ROWS,
     FIELD_CHARACTER_SIZE,
     FIELD_CHARACTER_SOURCE_X,
     FIELD_CHARACTER_SOURCE_Y,
+    FIELD_PROP_ASSET_ID,
     FieldRenderer,
 )
 from .palette import (
@@ -31,12 +33,14 @@ __all__ = [
     "FadePhase",
     "FadeThroughBlack",
     "FIELD_CHARACTER_ANIMATION_INTERVAL",
+    "FIELD_CHARACTER_ASSET_ID",
     "FIELD_CHARACTER_BANK",
     "FIELD_CHARACTER_COLKEY",
     "FIELD_CHARACTER_FACING_ROWS",
     "FIELD_CHARACTER_SIZE",
     "FIELD_CHARACTER_SOURCE_X",
     "FIELD_CHARACTER_SOURCE_Y",
+    "FIELD_PROP_ASSET_ID",
     "FieldRenderer",
     "PaletteShifter",
     "create_default_palette_shifter",

@@ -26,6 +26,7 @@ from .images import (
     ImageResources,
 )
 from .maps import (
+    MAP_ACTOR_KINDS,
     MAP_FACINGS,
     MAP_EVENT_ACTIVATIONS,
     MAP_TILE_SIZE,
@@ -63,6 +64,7 @@ __all__ = [
     "ImageEntry",
     "ImageResourceError",
     "ImageResources",
+    "MAP_ACTOR_KINDS",
     "MAP_FACINGS",
     "MAP_EVENT_ACTIVATIONS",
     "MAP_TILE_SIZE",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 from types import MappingProxyType
 from typing import Mapping
 
@@ -15,6 +16,8 @@ else:
 
 
 DEFAULT_FIELD_MOVE_SPEED = 1
+DEFAULT_ROAM_WAIT_MIN = 30
+DEFAULT_ROAM_WAIT_MAX = 90
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,24 @@ class FieldMovement:
     def world_y(self) -> int:
         return self.position.y * self.map_data.tile_size + self.offset_y
 
+    @property
+    def destination_position(self) -> FieldPosition | None:
+        if self._moving_direction is None:
+            return None
+        return FieldPosition(
+            self.position.x + self._moving_direction.dx,
+            self.position.y + self._moving_direction.dy,
+        )
+
+    def stop(self) -> None:
+        """Cancel an unfinished step and return to the current logical cell."""
+
+        self.offset_x = 0
+        self.offset_y = 0
+        self._moving_direction = None
+        self._moved_this_frame = False
+        self._arrived_position = None
+
     def update(
         self,
         direction: Direction | None,
@@ -150,29 +171,46 @@ class FieldMovement:
 @dataclass
 class FieldActor:
     id: str
-    appearance_id: str
+    kind: str
+    sprite_index: int
     movement: FieldMovement
+    roam_wait_frames: int = 0
 
 
 class FieldActors:
     """Own runtime movement state for map-defined field actors."""
 
-    def __init__(self, map_data: CompiledMap) -> None:
+    def __init__(
+        self,
+        map_data: CompiledMap,
+        *,
+        random_source: random.Random | None = None,
+    ) -> None:
         if not isinstance(map_data, CompiledMap):
             raise TypeError("field actors require a CompiledMap")
         self.map_data = map_data
+        self._random = random_source or random.Random(f"{map_data.map_id}:actors")
         self._actors = {
             actor.id: FieldActor(
                 actor.id,
-                actor.appearance_id,
+                actor.kind,
+                actor.sprite_index,
                 FieldMovement(
                     map_data,
                     start=FieldPosition(actor.position.x, actor.position.y),
-                    facing=Direction[actor.facing.upper()],
+                    facing=(
+                        Direction.DOWN
+                        if actor.facing is None
+                        else Direction[actor.facing.upper()]
+                    ),
                 ),
+                self._next_roam_wait() if actor.kind == "roaming" else 0,
             )
             for actor in map_data.actors
         }
+
+    def _next_roam_wait(self) -> int:
+        return self._random.randint(DEFAULT_ROAM_WAIT_MIN, DEFAULT_ROAM_WAIT_MAX)
 
     @property
     def actors(self) -> tuple[FieldActor, ...]:
@@ -194,10 +232,34 @@ class FieldActors:
             raise KeyError(f"unknown field actor: {actor_id}") from error
 
     def blocked_positions(self, *, excluding: str | None = None) -> tuple[FieldPosition, ...]:
-        return tuple(
-            actor.movement.position
+        positions = (
+            position
             for actor_id, actor in self._actors.items()
             if actor_id != excluding
+            for position in (
+                actor.movement.position,
+                actor.movement.destination_position,
+            )
+            if position is not None
+        )
+        return tuple(dict.fromkeys(positions))
+
+    def stop(self, actor_id: str) -> None:
+        self.actor(actor_id).movement.stop()
+
+    def face_toward(self, actor_id: str, target: FieldPosition) -> None:
+        actor = self.actor(actor_id)
+        if actor.kind == "prop":
+            return
+        actor.movement.stop()
+        dx = target.x - actor.movement.position.x
+        dy = target.y - actor.movement.position.y
+        if abs(dx) + abs(dy) != 1:
+            return
+        actor.movement.facing = next(
+            direction
+            for direction in Direction
+            if (direction.dx, direction.dy) == (dx, dy)
         )
 
     def update(
@@ -208,6 +270,8 @@ class FieldActors:
         party_position: FieldPosition,
     ) -> bool:
         actor = self.actor(actor_id)
+        if actor.kind == "prop":
+            raise ValueError("prop field actors cannot move")
         return actor.movement.update(
             direction,
             blocked_positions=(
@@ -216,9 +280,41 @@ class FieldActors:
             ),
         )
 
+    def update_roaming(self, *, party_position: FieldPosition) -> None:
+        """Advance autonomous actors once without storing their transient state."""
+
+        for actor_id, actor in self._actors.items():
+            if actor.kind == "stationary":
+                actor.movement.update(None)
+                continue
+            if actor.kind != "roaming":
+                continue
+            blockers = (
+                party_position,
+                *self.blocked_positions(excluding=actor_id),
+            )
+            if actor.movement.is_moving:
+                actor.movement.update(None, blocked_positions=blockers)
+                if not actor.movement.is_moving:
+                    actor.roam_wait_frames = self._next_roam_wait()
+                continue
+            if actor.roam_wait_frames > 0:
+                actor.movement.update(None)
+                actor.roam_wait_frames -= 1
+                continue
+            direction = self._random.choice((*Direction, None))
+            if direction is None:
+                actor.roam_wait_frames = self._next_roam_wait()
+                continue
+            actor.movement.update(direction, blocked_positions=blockers)
+            if not actor.movement.is_moving:
+                actor.roam_wait_frames = self._next_roam_wait()
+
 
 __all__ = [
     "DEFAULT_FIELD_MOVE_SPEED",
+    "DEFAULT_ROAM_WAIT_MAX",
+    "DEFAULT_ROAM_WAIT_MIN",
     "FieldMovement",
     "FieldPosition",
     "FieldActor",

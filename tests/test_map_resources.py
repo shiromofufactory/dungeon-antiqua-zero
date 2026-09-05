@@ -36,7 +36,7 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 3,
+            "format_version": 4,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
@@ -97,8 +97,9 @@ class MapResourcesTest(unittest.TestCase):
                 {
                     "id": "elder",
                     "position": [0, 1],
+                    "kind": "stationary",
+                    "sprite_index": 0,
                     "facing": "down",
-                    "appearance_id": "village_elder",
                 }
             ],
             "event_triggers": [
@@ -160,6 +161,8 @@ class MapResourcesTest(unittest.TestCase):
         )
         self.assertIs(map_data.arrival_point("from_world"), map_data.arrival_points[0])
         self.assertEqual(map_data.actors[0].id, "elder")
+        self.assertEqual(map_data.actors[0].kind, "stationary")
+        self.assertEqual(map_data.actors[0].sprite_index, 0)
         self.assertEqual(
             map_data.event_trigger_at("interact", 1, 0).event_id,
             "sample.sign",

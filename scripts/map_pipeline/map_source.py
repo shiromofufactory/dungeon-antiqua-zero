@@ -24,13 +24,14 @@ from .tileset import (
 )
 
 
-SOURCE_FORMAT_VERSION = 3
-RUNTIME_FORMAT_VERSION = 3
+SOURCE_FORMAT_VERSION = 4
+RUNTIME_FORMAT_VERSION = 4
 MAX_MAP_DIMENSION = 512
 MAX_ANIMATION_PERIOD = 3600
 TRANSPARENT_INDEX = 1
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 CARDINAL_FACINGS = frozenset(("up", "right", "down", "left"))
+ACTOR_KINDS = frozenset(("prop", "stationary", "roaming"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 DIRECTION_OFFSETS = {
@@ -389,10 +390,43 @@ def _validate_actors(
             if point in occupied:
                 _diagnostic(diagnostics, "error", "overlapping_actors", f"{path}.position", "同じセルに複数のactorを配置できません。")
             occupied.add(point)
-        if actor.get("facing") not in CARDINAL_FACINGS:
-            _diagnostic(diagnostics, "error", "invalid_actor_facing", f"{path}.facing", "actorの向きはup、right、down、leftのいずれかです。")
-        if not _valid_id(actor.get("appearance_id")):
-            _diagnostic(diagnostics, "error", "invalid_appearance_id", f"{path}.appearance_id", "appearance_idはlower_snake_caseで指定してください。")
+        kind = actor.get("kind")
+        if kind not in ACTOR_KINDS:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_actor_kind",
+                f"{path}.kind",
+                "actor kindはprop、stationary、roamingのいずれかです。",
+            )
+        if kind == "prop":
+            if "facing" in actor:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "prop_actor_has_facing",
+                    f"{path}.facing",
+                    "prop actorは向きを持ちません。facingを省略してください。",
+                )
+        elif actor.get("facing") not in CARDINAL_FACINGS:
+            _diagnostic(diagnostics, "error", "invalid_actor_facing", f"{path}.facing", "stationaryとroaming actorの向きはup、right、down、leftのいずれかです。")
+        sprite_index = actor.get("sprite_index")
+        if not _is_int(sprite_index) or sprite_index < 0:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_actor_sprite_index",
+                f"{path}.sprite_index",
+                "sprite_indexは0以上の整数で指定してください。",
+            )
+        if "appearance_id" in actor:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "deprecated_actor_appearance_id",
+                f"{path}.appearance_id",
+                "appearance_idは廃止されました。共通シート内のsprite_indexを使用してください。",
+            )
         if valid_actor_id and valid_position:
             actors[actor_id] = (position[0], position[1])
     return actors
@@ -1028,8 +1062,8 @@ def validate_map_event_links(
     diagnostics: list[Diagnostic] = []
     checked_actor_links: set[tuple[str, str, str]] = set()
     for map_id, source in sources.items():
-        actor_ids = {
-            actor.get("id")
+        actor_kinds = {
+            actor.get("id"): actor.get("kind")
             for actor in source.get("actors", [])
             if isinstance(actor, Mapping) and isinstance(actor.get("id"), str)
         }
@@ -1058,7 +1092,18 @@ def validate_map_event_links(
             commands = events[event_id].get("commands")
             for actor_id in _moved_actor_ids(commands):
                 link = (map_id, event_id, actor_id)
-                if actor_id in actor_ids or link in checked_actor_links:
+                if actor_id in actor_kinds:
+                    if actor_kinds[actor_id] == "prop" and link not in checked_actor_links:
+                        checked_actor_links.add(link)
+                        _diagnostic(
+                            diagnostics,
+                            "error",
+                            "immovable_event_actor",
+                            f"{map_id}.event_triggers[{index}].event_id",
+                            f"イベント{event_id}は向きのないprop actorを移動できません: {actor_id}",
+                        )
+                    continue
+                if link in checked_actor_links:
                     continue
                 checked_actor_links.add(link)
                 _diagnostic(

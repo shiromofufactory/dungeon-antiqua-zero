@@ -6,13 +6,17 @@ from unittest.mock import Mock
 
 from tools._bootstrap import APP_ROOT
 from game import Game
-from field import FieldMovement, FieldPosition
+from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
-from resources import CompiledMap, MapCell, MapEventTrigger
+from resources import CompiledMap, MapActor, MapCell, MapEventTrigger
 from systems import MovePartyEffect
 
 
-def compiled_map(trigger: MapEventTrigger) -> CompiledMap:
+def compiled_map(
+    trigger: MapEventTrigger,
+    *,
+    actors: tuple[MapActor, ...] = (),
+) -> CompiledMap:
     static = {activation: {} for activation in ("step", "touch", "interact")}
     for activation in trigger.activations:
         for cell in trigger.cells:
@@ -32,23 +36,31 @@ def compiled_map(trigger: MapEventTrigger) -> CompiledMap:
         collision_rows=("000", "000", "000"),
         ground_animations=MappingProxyType({}),
         object_animations=MappingProxyType({}),
+        actors=actors,
         event_triggers=(trigger,),
         event_trigger_index=MappingProxyType(
             {key: MappingProxyType(value) for key, value in static.items()}
         ),
+        actor_event_triggers=MappingProxyType(
+            {} if trigger.actor_id is None else {trigger.actor_id: (trigger,)}
+        ),
     )
 
 
-def game_for(trigger: MapEventTrigger) -> Game:
+def game_for(
+    trigger: MapEventTrigger,
+    *,
+    actors: tuple[MapActor, ...] = (),
+) -> Game:
     game = Game.__new__(Game)
-    game.current_map = compiled_map(trigger)
+    game.current_map = compiled_map(trigger, actors=actors)
     game.field = FieldMovement(
         game.current_map,
         start=FieldPosition(1, 1),
         speed=16,
         facing=Direction.RIGHT,
     )
-    game.field_actors = None
+    game.field_actors = FieldActors(game.current_map) if actors else None
     game.event_release_direction = None
     game.event_release_confirm = False
     game._start_field_event = Mock(return_value=True)
@@ -94,6 +106,44 @@ class GameEventTriggerTest(unittest.TestCase):
             "sample.sign",
             release_direction=None,
             release_confirm=True,
+        )
+
+    def test_interacting_with_character_actor_turns_it_toward_the_party(self) -> None:
+        actor = MapActor("elder", MapCell(2, 1), "stationary", 0, "up")
+        trigger = MapEventTrigger(
+            "elder_talk",
+            "sample.talk",
+            frozenset(("interact",)),
+            actor_id="elder",
+            offsets=(MapCell(0, 0),),
+        )
+        game = game_for(trigger, actors=(actor,))
+
+        game._update_field(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        self.assertIs(
+            game.field_actors.actor("elder").movement.facing,
+            Direction.LEFT,
+        )
+
+    def test_touching_character_actor_also_turns_it_toward_the_party(self) -> None:
+        actor = MapActor("elder", MapCell(2, 1), "stationary", 0, "up")
+        trigger = MapEventTrigger(
+            "elder_touch",
+            "sample.talk",
+            frozenset(("touch",)),
+            actor_id="elder",
+            offsets=(MapCell(0, 0),),
+        )
+        game = game_for(trigger, actors=(actor,))
+
+        game._update_field(InputState(held_direction=Direction.RIGHT))
+
+        self.assertIs(
+            game.field_actors.actor("elder").movement.facing,
+            Direction.LEFT,
         )
 
     def test_step_trigger_runs_only_after_arriving(self) -> None:

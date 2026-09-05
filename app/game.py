@@ -83,6 +83,8 @@ from rendering import (
     FadeEvent,
     FadePhase,
     FadeThroughBlack,
+    FIELD_CHARACTER_ASSET_ID,
+    FIELD_PROP_ASSET_ID,
     FieldRenderer,
     PaletteShifter,
 )
@@ -454,7 +456,8 @@ class Game:
             screen_height=SCREEN_HEIGHT,
         )
         self.field_actors: FieldActors | None = None
-        self.field_actor_images: dict[str, object] = {}
+        self.field_prop_image = None
+        self.field_actor_character_image = None
         self._reset_field_actors()
         self.event_runner: EventRunner | None = None
         self.event_effect = None
@@ -725,15 +728,44 @@ class Game:
 
         if not isinstance(getattr(self, "current_map", None), CompiledMap):
             self.field_actors = None
-            self.field_actor_images = {}
+            self.field_prop_image = None
+            self.field_actor_character_image = None
             return
         self.field_actors = FieldActors(self.current_map)
-        image_ids = set(self.images.ids)
-        self.field_actor_images = {
-            actor.appearance_id: self.images.image(actor.appearance_id)
-            for actor in self.field_actors.actors
-            if actor.appearance_id in image_ids
-        }
+        actors = self.field_actors.actors
+        prop_actors = tuple(actor for actor in actors if actor.kind == "prop")
+        character_actors = tuple(actor for actor in actors if actor.kind != "prop")
+        self.field_prop_image = None
+        if prop_actors:
+            entry = self.images.entry(FIELD_PROP_ASSET_ID)
+            if entry.width % 16 or entry.height % 16:
+                raise ImageResourceError(
+                    f"{FIELD_PROP_ASSET_ID}の寸法は16pxの倍数である必要があります。"
+                )
+            prop_capacity = (entry.width // 16) * (entry.height // 16)
+            if max(actor.sprite_index for actor in prop_actors) >= prop_capacity:
+                raise ImageResourceError(
+                    f"{FIELD_PROP_ASSET_ID}にactorのsprite_indexが参照するチップがありません。"
+                )
+            self.field_prop_image = self.images.image(FIELD_PROP_ASSET_ID)
+        self.field_actor_character_image = None
+        if character_actors:
+            entry = self.images.entry(FIELD_CHARACTER_ASSET_ID)
+            if entry.width % 32 or entry.height % 64:
+                raise ImageResourceError(
+                    f"{FIELD_CHARACTER_ASSET_ID}の寸法は幅32px、高さ64pxの倍数である必要があります。"
+                )
+            character_capacity = (entry.width // 32) * (entry.height // 64)
+            if (
+                max(actor.sprite_index for actor in character_actors)
+                >= character_capacity
+            ):
+                raise ImageResourceError(
+                    f"{FIELD_CHARACTER_ASSET_ID}にactorのsprite_indexが参照するキャラクターがありません。"
+                )
+            self.field_actor_character_image = self.images.image(
+                FIELD_CHARACTER_ASSET_ID
+            )
 
     def _draw_site_name(self) -> None:
         """Draw the nearby-site name at a position fixed to the world map."""
@@ -2057,6 +2089,14 @@ class Game:
         )
         if trigger is None:
             return False
+        if trigger.actor_id is not None and self.field_actors is not None:
+            if activation in ("touch", "interact"):
+                self.field_actors.face_toward(
+                    trigger.actor_id,
+                    self.field.position,
+                )
+            else:
+                self.field_actors.stop(trigger.actor_id)
         self._start_field_event(
             trigger.event_id,
             release_direction=release_direction,
@@ -2103,6 +2143,9 @@ class Game:
             return
         self._handle_arrived_site()
         self._refresh_site_name_label()
+        field_actors = getattr(self, "field_actors", None)
+        if field_actors is not None:
+            field_actors.update_roaming(party_position=self.field.position)
 
     def update(self) -> None:
         self.alert.update()
@@ -2269,7 +2312,8 @@ class Game:
                     self.field_renderer.draw(
                         self.field,
                         actors=self.field_actors,
-                        actor_images=self.field_actor_images,
+                        prop_image=self.field_prop_image,
+                        actor_character_image=self.field_actor_character_image,
                     )
                 else:
                     self.field_renderer.draw(self.field)

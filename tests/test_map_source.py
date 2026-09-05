@@ -62,8 +62,9 @@ class MapSourceTest(unittest.TestCase):
             {
                 "id": "elder",
                 "position": [2, 2],
+                "kind": "stationary",
+                "sprite_index": 0,
                 "facing": "down",
-                "appearance_id": "elder",
             }
         ]
         source["event_triggers"] = [
@@ -109,8 +110,9 @@ class MapSourceTest(unittest.TestCase):
             {
                 "id": "elder",
                 "position": [0, 0],
+                "kind": "stationary",
+                "sprite_index": 0,
                 "facing": "down",
-                "appearance_id": "elder",
             }
         ]
         source["event_triggers"] = [
@@ -128,6 +130,32 @@ class MapSourceTest(unittest.TestCase):
 
         self.assertIn("actor_on_blocked_cell", codes)
         self.assertIn("overlapping_event_trigger", codes)
+
+    def test_prop_actor_uses_a_sheet_index_and_rejects_facing_or_legacy_appearance(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source["grounds"][2][2] = "plain"
+        prop = {
+            "id": "treasure_1",
+            "position": [2, 2],
+            "kind": "prop",
+            "sprite_index": 0,
+        }
+        source["actors"] = [prop]
+
+        self.assertEqual(
+            [
+                item
+                for item in validate_map_source(source, self.tileset)
+                if item.severity == "error"
+            ],
+            [],
+        )
+
+        prop["facing"] = "down"
+        prop["appearance_id"] = "treasure"
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("prop_actor_has_facing", codes)
+        self.assertIn("deprecated_actor_appearance_id", codes)
 
     def test_resolves_object_anchored_site_and_arrival_point(self) -> None:
         tileset = deepcopy(self.tileset)
@@ -440,12 +468,22 @@ class MapSourceTest(unittest.TestCase):
             {
                 "id": "elder",
                 "position": [2, 2],
+                "kind": "stationary",
+                "sprite_index": 0,
                 "facing": "down",
-                "appearance_id": "elder",
             }
         ]
         self.assertNotIn(
             "unknown_event_actor_id",
+            {
+                item.code
+                for item in validate_map_event_links({"test_world": source}, events)
+            },
+        )
+        source["actors"][0]["kind"] = "prop"
+        del source["actors"][0]["facing"]
+        self.assertIn(
+            "immovable_event_actor",
             {
                 item.code
                 for item in validate_map_event_links({"test_world": source}, events)

@@ -9,7 +9,7 @@
 
 地面、オブジェクト、ワールドマップ拠点、マップ内到着地点を対象とする。拠点の詳細は
 [`world-sites.md`](./world-sites.md)を参照する。通常イベントの定義、マップ上のトリガー、
-actorとの接続は [`events.md`](./events.md) を正本とし、制作用マップ形式version 3で扱う。
+actorとの接続は [`events.md`](./events.md) を正本とし、制作用マップ形式version 4で扱う。
 イベント本文や条件式はタイルセットメタデータへ埋め込まない。
 
 ## 結論
@@ -44,11 +44,11 @@ app/maps/
 
 ## 制作用マップ形式
 
-形式version 3の例を示す。
+形式version 4の例を示す。
 
 ```json
 {
-  "format_version": 3,
+  "format_version": 4,
   "map_id": "worldmap",
   "profile": "world",
   "tileset_id": "worldmap",
@@ -75,7 +75,7 @@ app/maps/
 
 | 属性 | 内容 |
 |---|---|
-| `format_version` | 制作用マップ形式。actor・イベントトリガーを含む形式は3 |
+| `format_version` | 制作用マップ形式。actor種別・共通スプライト参照を含む形式は4 |
 | `map_id` | `lower_snake_case` の安定ID |
 | `profile` | `world`、`dungeon`、`town`。タイルセットの対応profileに含まれること |
 | `tileset_id` | 使用するタイルセットID |
@@ -85,7 +85,7 @@ app/maps/
 | `objects` | オブジェクト実体の配列 |
 | `sites` | world profileで使う拠点レコードの配列 |
 | `arrival_points` | 別マップまたは同じマップから移動するときの到着地点レコードの配列 |
-| `actors` | マップ内キャラクターの安定ID、初期位置、向き、appearance ID |
+| `actors` | マップ内actorの安定ID、初期位置、種別、共通シートのスプライト番号、人物系の向き |
 | `event_triggers` | イベントID、発火方法、cell／object／actorアンカー、対象offset |
 
 オブジェクト実体IDは配置時に定義IDから自動生成する。`origin` は定義の左上起点、`order` は
@@ -164,7 +164,8 @@ app/maps/
 
 ### イベント
 
-- actorはキャンバスへ配置後、安定ID、appearance ID、向きを編集する。
+- actorはキャンバスへ配置後、安定ID、種別、共通シートのスプライト番号を編集する。
+  固定物には向きを表示せず、固定・移動キャラには初期向きを表示する。
 - トリガーはcell、選択object、選択actorのいずれかをアンカーにして追加する。
 - trigger IDは配置時に内部で自動採番し、画面には表示せず編集もさせない。トリガー一覧と
   選択情報の見出しには、参照するイベントIDを表示する。

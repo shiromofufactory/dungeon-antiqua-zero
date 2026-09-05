@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any
 
 import pyxel
 
@@ -22,6 +22,8 @@ FIELD_CHARACTER_SOURCE_Y = 64
 FIELD_CHARACTER_SIZE = 16
 FIELD_CHARACTER_COLKEY = 1
 FIELD_CHARACTER_ANIMATION_INTERVAL = 16
+FIELD_PROP_ASSET_ID = "actors/props"
+FIELD_CHARACTER_ASSET_ID = "actors/characters"
 FIELD_CHARACTER_FACING_ROWS = {
     Direction.UP: 0,
     Direction.RIGHT: 1,
@@ -59,7 +61,8 @@ class FieldRenderer:
         field: FieldMovement,
         *,
         actors: FieldActors | None = None,
-        actor_images: Mapping[str, Any] | None = None,
+        prop_image: Any | None = None,
+        actor_character_image: Any | None = None,
         frame_count: int | None = None,
     ) -> None:
         if not isinstance(field, FieldMovement):
@@ -74,24 +77,37 @@ class FieldRenderer:
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
         self._draw_objects(camera_x, camera_y, frame_count)
-        actor_images = {} if actor_images is None else actor_images
-        characters: list[tuple[int, FieldMovement, Any | None]] = [
-            (field.world_y, field, None)
+        characters: list[tuple[int, FieldMovement, str, int, Any | None]] = [
+            (field.world_y, field, "player", 0, None)
         ]
         if actors is not None:
             if actors.map_data is not self.map_data:
                 raise ValueError("field renderer and actors must use the same map data")
             for actor in actors.actors:
-                image = actor_images.get(actor.appearance_id)
-                characters.append((actor.movement.world_y, actor.movement, image))
-        for _world_y, movement, image in sorted(characters, key=lambda item: item[0]):
-            self._draw_character(
-                movement,
-                camera_x,
-                camera_y,
-                frame_count,
-                image=image,
-            )
+                image = prop_image if actor.kind == "prop" else actor_character_image
+                characters.append(
+                    (
+                        actor.movement.world_y,
+                        actor.movement,
+                        actor.kind,
+                        actor.sprite_index,
+                        image,
+                    )
+                )
+        for _world_y, movement, kind, sprite_index, image in sorted(
+            characters, key=lambda item: item[0]
+        ):
+            if kind == "prop":
+                self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
+            else:
+                self._draw_character(
+                    movement,
+                    camera_x,
+                    camera_y,
+                    frame_count,
+                    image=image,
+                    sprite_index=sprite_index,
+                )
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:
         player_screen_x = (self.screen_width - FIELD_CHARACTER_SIZE) // 2
@@ -182,16 +198,59 @@ class FieldRenderer:
         frame_count: int,
         *,
         image: Any | None = None,
+        sprite_index: int = 0,
     ) -> None:
         frame = (frame_count // FIELD_CHARACTER_ANIMATION_INTERVAL) % 2
         row = FIELD_CHARACTER_FACING_ROWS[field.facing]
+        if image is None:
+            source_x = FIELD_CHARACTER_SOURCE_X + frame * FIELD_CHARACTER_SIZE
+            source_y = FIELD_CHARACTER_SOURCE_Y + row * FIELD_CHARACTER_SIZE
+            source_image = FIELD_CHARACTER_BANK
+        else:
+            columns = image.width // (FIELD_CHARACTER_SIZE * 2)
+            if columns <= 0:
+                raise ValueError("actor character sheet must be at least 32 pixels wide")
+            block_x = (sprite_index % columns) * FIELD_CHARACTER_SIZE * 2
+            block_y = (sprite_index // columns) * FIELD_CHARACTER_SIZE * 4
+            if block_y + FIELD_CHARACTER_SIZE * 4 > image.height:
+                raise ValueError("actor character sprite_index is outside the sheet")
+            source_x = block_x + frame * FIELD_CHARACTER_SIZE
+            source_y = block_y + row * FIELD_CHARACTER_SIZE
+            source_image = image
         self._pyxel.blt(
             field.world_x - camera_x,
             field.world_y - camera_y,
-            FIELD_CHARACTER_BANK if image is None else image,
-            FIELD_CHARACTER_SOURCE_X + frame * FIELD_CHARACTER_SIZE,
-            (FIELD_CHARACTER_SOURCE_Y if image is None else 0)
-            + row * FIELD_CHARACTER_SIZE,
+            source_image,
+            source_x,
+            source_y,
+            FIELD_CHARACTER_SIZE,
+            FIELD_CHARACTER_SIZE,
+            FIELD_CHARACTER_COLKEY,
+        )
+
+    def _draw_prop(
+        self,
+        field: FieldMovement,
+        camera_x: int,
+        camera_y: int,
+        sprite_index: int,
+        image: Any | None,
+    ) -> None:
+        if image is None:
+            raise ValueError("actor prop sheet is required to draw prop actors")
+        columns = image.width // FIELD_CHARACTER_SIZE
+        if columns <= 0:
+            raise ValueError("actor prop sheet must be at least 16 pixels wide")
+        source_x = (sprite_index % columns) * FIELD_CHARACTER_SIZE
+        source_y = (sprite_index // columns) * FIELD_CHARACTER_SIZE
+        if source_y + FIELD_CHARACTER_SIZE > image.height:
+            raise ValueError("actor prop sprite_index is outside the sheet")
+        self._pyxel.blt(
+            field.world_x - camera_x,
+            field.world_y - camera_y,
+            image,
+            source_x,
+            source_y,
             FIELD_CHARACTER_SIZE,
             FIELD_CHARACTER_SIZE,
             FIELD_CHARACTER_COLKEY,
@@ -203,8 +262,10 @@ __all__ = [
     "FIELD_CHARACTER_BANK",
     "FIELD_CHARACTER_COLKEY",
     "FIELD_CHARACTER_FACING_ROWS",
+    "FIELD_CHARACTER_ASSET_ID",
     "FIELD_CHARACTER_SIZE",
     "FIELD_CHARACTER_SOURCE_X",
     "FIELD_CHARACTER_SOURCE_Y",
+    "FIELD_PROP_ASSET_ID",
     "FieldRenderer",
 ]

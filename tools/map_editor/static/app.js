@@ -297,7 +297,7 @@ function renderPalette() {
       <div class="section">
         <div class="section-title"><h2>actor</h2><span class="subtle">${state.data.actors.length}件</span></div>
         <div class="travel-list">${state.data.actors.map((actor) => `
-          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.appearance_id)}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
+          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.kind)} #${actor.sprite_index}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-actor">actorを配置</button></div>
       </div>
       <div class="section">
@@ -475,8 +475,9 @@ function renderInspector() {
       ${actor ? `<div class="instance-card"><strong>${escapeHtml(actor.id)}</strong>セル: ${actor.position.join(", ")}</div>
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>actor ID</label><input type="text" value="${escapeHtml(actor.id)}" data-actor-field="id"></div>
-          <div class="field full"><label>appearance ID</label><input type="text" value="${escapeHtml(actor.appearance_id)}" data-actor-field="appearance_id"></div>
-          <div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>
+          <div class="field full"><label>種別</label><select data-actor-field="kind"><option value="prop" ${actor.kind === "prop" ? "selected" : ""}>固定物（向きなし）</option><option value="stationary" ${actor.kind === "stationary" ? "selected" : ""}>固定キャラ</option><option value="roaming" ${actor.kind === "roaming" ? "selected" : ""}>移動キャラ</option></select></div>
+          <div class="field full"><label>スプライト番号</label><input type="number" min="0" step="1" value="${actor.sprite_index}" data-actor-field="sprite_index"></div>
+          ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>`}
         </div><div class="row between" style="margin-top:9px"><button class="button ghost small" data-action="move-actor">セルを移動</button><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
     </div>
     <div class="section">
@@ -495,15 +496,13 @@ function renderInspector() {
         <div class="field"><label>高さ</label><input id="map-height" type="number" min="1" max="512" value="${height}"></div>
         <div class="field"><label>横方向</label><select id="resize-horizontal"><option value="left" ${state.resizeHorizontal === "left" ? "selected" : ""}>左側を増減</option><option value="right" ${state.resizeHorizontal === "right" ? "selected" : ""}>右側を増減</option></select></div>
         <div class="field"><label>縦方向</label><select id="resize-vertical"><option value="up" ${state.resizeVertical === "up" ? "selected" : ""}>上側を増減</option><option value="down" ${state.resizeVertical === "down" ? "selected" : ""}>下側を増減</option></select></div>
-        <div class="field full"><label>表示seed</label><input id="visual-seed" type="number" min="0" value="${state.data.visual_seed}" disabled></div>
       </div>
       <div class="row between" style="margin-top:9px">
         <button class="button ghost small" type="button" data-action="reroll">見た目を振り直す</button>
         <button class="button secondary small" type="button" data-action="resize-map">寸法を反映</button>
       </div>
     </div>
-    ${state.tab === "site" ? siteInspector : state.tab === "event" ? eventInspector : objectInspector}
-    <div class="section"><div class="section-title"><h2>出力</h2></div><p class="subtle">保存時に制作用JSONとゲーム用マップを同時生成します。</p></div>`;
+    ${state.tab === "site" ? siteInspector : state.tab === "event" ? eventInspector : objectInspector}`;
 }
 
 function renderIssues() {
@@ -645,7 +644,7 @@ function drawEventMarkers(context, scale) {
     context.beginPath();
     context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
     context.fill();
-    drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
+    if (actor.kind !== "prop") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
   }
 }
 
@@ -884,7 +883,7 @@ function defaultTrigger(anchor) {
 function createActor(position) {
   const id = uniqueRecordId("actor_1", state.data.actors);
   commit(() => {
-    state.data.actors.push({ id, position: [...position], facing: "down", appearance_id: id });
+    state.data.actors.push({ id, position: [...position], kind: "stationary", sprite_index: 0, facing: "down" });
     state.selectedActorId = id;
     state.selectedTriggerId = null;
     state.eventTool = "select";
@@ -1303,7 +1302,12 @@ function updateActorField(path, value) {
       for (const trigger of state.data.event_triggers) {
         if (trigger.anchor?.kind === "actor" && trigger.anchor.actor_id === previousId) trigger.anchor.actor_id = value;
       }
-    } else actor[path] = value;
+    } else if (path === "kind") {
+      actor.kind = value;
+      if (value === "prop") delete actor.facing;
+      else if (!actor.facing) actor.facing = "down";
+    } else if (path === "sprite_index") actor.sprite_index = Number(value);
+    else actor[path] = value;
   });
 }
 

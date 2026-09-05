@@ -78,7 +78,7 @@ class MapEditorServerTest(unittest.TestCase):
     def test_serves_new_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
-        self.assertEqual(payload["data"]["format_version"], 3)
+        self.assertEqual(payload["data"]["format_version"], 4)
         self.assertEqual(payload["data"]["actors"], [])
         self.assertEqual(payload["data"]["event_triggers"], [])
         self.assertEqual(payload["data"]["size"], [6, 5])
@@ -210,8 +210,9 @@ class MapEditorServerTest(unittest.TestCase):
             {
                 "id": "elder",
                 "position": [2, 2],
+                "kind": "stationary",
+                "sprite_index": 0,
                 "facing": "down",
-                "appearance_id": "village_elder",
             }
         ]
         data["event_triggers"] = [

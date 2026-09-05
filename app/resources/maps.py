@@ -13,11 +13,12 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAP_FACINGS = frozenset(("up", "right", "down", "left"))
+MAP_ACTOR_KINDS = frozenset(("prop", "stationary", "roaming"))
 MAP_EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
@@ -81,8 +82,9 @@ class MapArrivalPoint:
 class MapActor:
     id: str
     position: MapCell
-    facing: str
-    appearance_id: str
+    kind: str
+    sprite_index: int
+    facing: str | None = None
 
 
 @dataclass(frozen=True)
@@ -684,13 +686,36 @@ class MapResources:
                 MapActor(
                     id=actor_id,
                     position=position,
-                    facing=cls._facing(record.get("facing"), f"{path}.facing"),
-                    appearance_id=cls._stable_id(
-                        record.get("appearance_id"), f"{path}.appearance_id"
+                    kind=cls._actor_kind(record.get("kind"), f"{path}.kind"),
+                    sprite_index=cls._non_negative_integer(
+                        record.get("sprite_index"), f"{path}.sprite_index"
                     ),
+                    facing=cls._actor_facing(record, path),
                 )
             )
         return tuple(loaded)
+
+    @staticmethod
+    def _actor_kind(value: object, label: str) -> str:
+        if not isinstance(value, str) or value not in MAP_ACTOR_KINDS:
+            raise MapResourceError(
+                f"マップJSONの{label}はprop、stationary、roamingのいずれかである必要があります。"
+            )
+        return value
+
+    @classmethod
+    def _actor_facing(cls, record: Mapping[str, object], path: str) -> str | None:
+        if record.get("kind") == "prop":
+            if "facing" in record:
+                raise MapResourceError(f"マップJSONの{path}.facingはprop actorに指定できません。")
+            return None
+        return cls._facing(record.get("facing"), f"{path}.facing")
+
+    @staticmethod
+    def _non_negative_integer(value: object, label: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise MapResourceError(f"マップJSONの{label}は0以上の整数である必要があります。")
+        return value
 
     @classmethod
     def _event_triggers(
@@ -901,6 +926,7 @@ class MapResources:
 
 __all__ = [
     "CompiledMap",
+    "MAP_ACTOR_KINDS",
     "MapArrivalPoint",
     "MapActor",
     "MapAnimation",
