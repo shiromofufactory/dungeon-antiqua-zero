@@ -108,6 +108,7 @@ class EventMessageOverlay:
         self._window_factory = WindowFactory(self._text_factory.font)
         self._page_placements = self._create_page_placements()
         self.window = self._create_window()
+        self.window.open()
 
     def _create_page_placements(self) -> tuple[WindowText, ...]:
         return tuple(
@@ -155,6 +156,7 @@ class EventMessageOverlay:
         return self._window_factory.create(
             *EVENT_MESSAGE_WINDOW_GRID,
             self._visible_page_placements(),
+            opened=False,
         )
 
     def _refresh_visible_text(self) -> None:
@@ -176,8 +178,9 @@ class EventMessageOverlay:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        was_open = self.window.is_open
         self.window.update()
-        if not self.window.is_open:
+        if not was_open:
             return False
         if not self._page_is_complete:
             characters_per_frame = (
@@ -200,7 +203,7 @@ class EventMessageOverlay:
         self._visible_character_count = 0
         self._wait_arrow_frame = 0
         self._page_placements = self._create_page_placements()
-        self.window = self._create_window()
+        self._refresh_visible_text()
         return False
 
     def draw(self) -> None:

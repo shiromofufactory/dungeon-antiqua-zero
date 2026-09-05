@@ -10,6 +10,7 @@ from app.resources import FontRole
 from app.resources.event_messages import EventMessageCatalog
 from app.state import Language, Settings
 from app.ui.event_message import EventMessageDataError, EventMessageOverlay
+from app.ui.window import WINDOW_ANIMATION_FRAME_COUNT, WindowState
 
 
 class EventMessageOverlayTest(unittest.TestCase):
@@ -45,6 +46,10 @@ class EventMessageOverlayTest(unittest.TestCase):
             faces=self.faces,
             face_positions={"Alvan": FacePosition(32, 64)},
         )
+
+    def finish_opening(self, overlay: EventMessageOverlay) -> None:
+        for _ in range(WINDOW_ANIMATION_FRAME_COUNT):
+            self.assertFalse(overlay.update(InputState()))
 
     def test_uses_same_large_japanese_font_role_as_site_names(self) -> None:
         overlay = self.overlay()
@@ -86,8 +91,30 @@ class EventMessageOverlayTest(unittest.TestCase):
                     expected_y_positions,
                 )
 
+    def test_opens_before_revealing_text_or_accepting_confirm(self) -> None:
+        overlay = self.overlay()
+
+        self.assertEqual(overlay.window.state, WindowState.OPENING)
+        self.assertEqual(overlay.window.visible_height, 0)
+        for _ in range(WINDOW_ANIMATION_FRAME_COUNT):
+            self.assertFalse(overlay.update(
+                InputState(confirm=InputButton(triggered=True, held=True))
+            ))
+
+        self.assertEqual(overlay.window.state, WindowState.OPEN)
+        self.assertEqual(
+            tuple(text.text for text in overlay.window.texts),
+            ("", ""),
+        )
+        self.assertFalse(overlay.update(InputState()))
+        self.assertEqual(
+            tuple(text.text for text in overlay.window.texts),
+            ("こ", ""),
+        )
+
     def test_reveals_one_character_per_frame_across_lines(self) -> None:
         overlay = self.overlay()
+        self.finish_opening(overlay)
 
         self.assertEqual(
             tuple(text.text for text in overlay.window.texts),
@@ -118,6 +145,7 @@ class EventMessageOverlayTest(unittest.TestCase):
 
     def test_held_confirm_reveals_two_characters_without_acknowledging(self) -> None:
         overlay = self.overlay()
+        self.finish_opening(overlay)
 
         self.assertFalse(
             overlay.update(
@@ -131,6 +159,7 @@ class EventMessageOverlayTest(unittest.TestCase):
 
     def test_confirm_closes_only_after_all_text_is_visible(self) -> None:
         overlay = self.overlay()
+        self.finish_opening(overlay)
 
         for _ in range(len("こんにちはようこそ")):
             self.assertFalse(overlay.update(InputState()))
@@ -154,6 +183,7 @@ class EventMessageOverlayTest(unittest.TestCase):
         overlay.draw()
         pyxel.blt.assert_not_called()
 
+        self.finish_opening(overlay)
         for _ in range(len("こんにちはようこそ")):
             overlay.update(InputState())
         overlay.draw()
@@ -195,6 +225,10 @@ class EventMessageOverlayTest(unittest.TestCase):
 
         overlay.draw()
 
+        pyxel.blt.assert_not_called()
+        self.finish_opening(overlay)
+        overlay.draw()
+
         self.assertIn(
             ((8, 8, self.faces, 32, 64, 32, 32, 1), {}),
             [(call.args, call.kwargs) for call in pyxel.blt.call_args_list],
@@ -222,12 +256,14 @@ class EventMessageOverlayTest(unittest.TestCase):
             faces=self.faces,
             face_positions={},
         )
+        self.finish_opening(overlay)
 
         for _ in range(2):
             self.assertFalse(overlay.update(InputState()))
         self.assertFalse(overlay.update(
             InputState(confirm=InputButton(triggered=True, held=True))
         ))
+        self.assertEqual(overlay.window.state, WindowState.OPEN)
         self.assertEqual(
             tuple(text.text for text in overlay.window.texts),
             ("", ""),
