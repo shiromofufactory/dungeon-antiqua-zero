@@ -181,10 +181,15 @@ class StartMenuOverlay:
         return max(dated, key=lambda value: value[0])[1]
 
     def _slot_label(self, slot: int) -> str:
+        slot_number = (
+            str(slot)
+            if self.settings.language is Language.ENGLISH
+            else format_number(slot)
+        )
         return self.texts.formatted_text(
             "save.slot",
             self.localizer,
-            {"SLOT": format_number(slot)},
+            {"SLOT": slot_number},
         )
 
     def _build_windows(self, *, message_key: str | None = None) -> None:

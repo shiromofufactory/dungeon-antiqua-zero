@@ -36,6 +36,7 @@ class StartMenuOverlayTest(unittest.TestCase):
         on_load: Mock | None = None,
         on_delete: Mock | None = None,
         on_invalid_action: Mock | None = None,
+        language: Language = Language.JAPANESE,
     ) -> StartMenuOverlay:
         fonts = Mock()
         japanese_font = Mock()
@@ -48,7 +49,7 @@ class StartMenuOverlayTest(unittest.TestCase):
         fonts.baseline_offset_for.return_value = 0
         return StartMenuOverlay(
             summaries=summaries() if slot_summaries is None else slot_summaries,
-            settings=Settings(),
+            settings=Settings(language=language),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
             fonts=fonts,
             faces=object(),
@@ -95,6 +96,16 @@ class StartMenuOverlayTest(unittest.TestCase):
         overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
 
         on_load.assert_called_once_with(5)
+
+    def test_english_slot_label_uses_standard_english_font(self) -> None:
+        overlay = self.create_overlay(language=Language.ENGLISH)
+
+        slot_text = overlay.slot_windows[0].texts[0]
+
+        self.assertEqual(slot_text.text, "Ｓａｖｅ　Ｓｌｏｔ　１")
+        self.assertIs(slot_text.font, overlay.text_factory.font)
+        self.assertIsNot(slot_text.font, overlay.text_factory.wide_font)
+        self.assertEqual(slot_text.font_spans, ())
 
     def test_empty_slot_reports_invalid_action(self) -> None:
         invalid = Mock()

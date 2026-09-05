@@ -175,6 +175,16 @@ class SaveMenuOverlayTest(unittest.TestCase):
             SAVE_MESSAGE_WINDOW_GRID,
         )
 
+    def test_english_slot_label_uses_standard_english_font(self) -> None:
+        overlay = self.create_overlay(language=Language.ENGLISH)
+
+        slot_text = overlay.slot_windows[0].texts[0]
+
+        self.assertEqual(slot_text.text, "Ｓａｖｅ　Ｓｌｏｔ　１")
+        self.assertIs(slot_text.font, overlay.text_factory.font)
+        self.assertIsNot(slot_text.font, overlay.text_factory.wide_font)
+        self.assertEqual(slot_text.font_spans, ())
+
     def test_dates_are_right_aligned_and_only_latest_is_positive(self) -> None:
         overlay = self.create_overlay(
             summaries(1, 2),

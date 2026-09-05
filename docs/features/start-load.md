@@ -19,6 +19,7 @@
   空きスロットはスロット番号だけを表示する。
 - 文言の正本は `content/data/texts.json` の `start.*`、`save.slot`、
   `settings.yes`、`settings.no` とする。
+- `save.slot` の英語表示は、全角化後も標準英語フォント `k6x8_gothic.bdf` を使用する。
 
 ## 初期選択
 
