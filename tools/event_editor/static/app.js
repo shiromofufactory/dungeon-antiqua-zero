@@ -2,7 +2,10 @@
 
 const CLIENT = "event-editor-ui";
 const NAMESPACE_PATTERN = /^[a-z][a-z0-9_]*$/;
+const UI_STORAGE_KEY = "da0.event-editor.ui.v1";
+const LIST_TABS = ["flag", "event", "message"];
 let token = new URLSearchParams(location.search).get("token") || "";
+const editorRoute = location.pathname.match(/^\/(map|event)(?:\/|$)/)?.[1] || null;
 const state = {
   data: null,
   flags: [],
@@ -18,10 +21,6 @@ const state = {
   future: [],
   timer: null,
   revision: 0,
-  sourcePath: "",
-  flagsPath: "",
-  messagesPath: "",
-  runtimePath: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -31,8 +30,47 @@ const esc = (value) => String(value ?? "")
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;");
 
+function loadUiSettings() {
+  try {
+    const value = JSON.parse(localStorage.getItem(UI_STORAGE_KEY) || "null");
+    return value && typeof value === "object" ? value : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function saveUiSettings() {
+  if (!state.data) return;
+  try {
+    localStorage.setItem(UI_STORAGE_KEY, JSON.stringify({
+      namespace: state.data.namespace,
+      listTab: state.mode,
+    }));
+  } catch (_error) {}
+}
+
+function editorApiPath(path) {
+  return editorRoute ? `/${editorRoute}${path}` : path;
+}
+
+function editorUrl(editor) {
+  if (!editorRoute) return null;
+  const url = new URL(`/${editor}/`, location.origin);
+  url.searchParams.set("token", token);
+  return url.href;
+}
+
+function configureEditorNavigation() {
+  const navigation = $("editor-switch");
+  if (!navigation || !editorRoute) return;
+  navigation.hidden = false;
+  navigation.querySelectorAll("[data-editor-link]").forEach((link) => {
+    link.href = editorUrl(link.dataset.editorLink);
+  });
+}
+
 async function renew() {
-  const response = await fetch("/api/session-token", {
+  const response = await fetch(editorApiPath("/api/session-token"), {
     headers: {"X-Event-Editor-Client": CLIENT},
   });
   if (!response.ok) return false;
@@ -40,11 +78,12 @@ async function renew() {
   const url = new URL(location.href);
   url.searchParams.set("token", token);
   history.replaceState(null, "", url);
+  configureEditorNavigation();
   return true;
 }
 
 async function api(path, options = {}, retry = true) {
-  const response = await fetch(path, {
+  const response = await fetch(editorApiPath(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -124,6 +163,7 @@ function normalize() {
   if (!Array.isArray(state.flags)) state.flags = [];
   if (!Array.isArray(state.data.events)) state.data.events = [];
   if (!Array.isArray(state.messages)) state.messages = [];
+  if (!LIST_TABS.includes(state.mode)) state.mode = "event";
   state.selectedEvent = Math.max(
     0,
     Math.min(state.selectedEvent, state.data.events.length - 1),
@@ -187,6 +227,15 @@ function updateStatus() {
 }
 
 function renderLists() {
+  document.querySelectorAll("[data-list-tab]").forEach((button) => {
+    const active = button.dataset.listTab === state.mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-list-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.listPanel !== state.mode;
+  });
+
   $("flags").className = "list";
   $("flags").innerHTML = state.flags.map((flag, index) => `
     <div class="list-item">
@@ -345,8 +394,14 @@ function renderMessageEditor() {
 }
 
 function renderEditor() {
-  if (state.mode === "message") renderMessageEditor();
-  else renderEventEditor();
+  if (state.mode === "message") {
+    renderMessageEditor();
+  } else if (state.mode === "flag") {
+    $("event-editor").className = "empty";
+    $("event-editor").innerHTML = "グローバルフラグは左の一覧で編集します。";
+  } else {
+    renderEventEditor();
+  }
 }
 
 function renderIssues() {
@@ -364,6 +419,7 @@ function render() {
   renderLists();
   renderEditor();
   renderIssues();
+  saveUiSettings();
 }
 
 function defaultCondition(type = "flag_set") {
@@ -442,7 +498,7 @@ async function save() {
   }
 }
 
-function applyDocument(payload) {
+function applyDocument(payload, selectedEventId = null, selectedListTab = "event") {
   clearTimeout(state.timer);
   state.revision += 1;
   state.data = payload.data;
@@ -451,36 +507,42 @@ function applyDocument(payload) {
   state.catalogs = payload.catalogs;
   state.diagnostics = payload.diagnostics;
   state.namespaceOptions = payload.namespace_options || [];
-  state.selectedEvent = 0;
+  const requestedEventIndex = selectedEventId === null
+    ? -1
+    : state.data.events.findIndex((event) => event.id === selectedEventId);
+  state.selectedEvent = requestedEventIndex >= 0 ? requestedEventIndex : 0;
   state.selectedMessage = 0;
-  state.mode = "event";
+  state.mode = selectedEventId !== null || !LIST_TABS.includes(selectedListTab)
+    ? "event"
+    : selectedListTab;
   state.dirty = payload.is_new;
   state.history = [];
   state.future = [];
-  state.sourcePath = payload.source_path;
-  state.flagsPath = payload.flags_path;
-  state.messagesPath = payload.messages_path;
-  state.runtimePath = payload.runtime_path;
   normalize();
-  $("document-path").textContent = `${state.sourcePath} + ${state.flagsPath} + ${state.messagesPath} → ${state.runtimePath}`;
   const url = new URL(location.href);
   url.searchParams.set("namespace", state.data.namespace);
+  if (requestedEventIndex >= 0) url.searchParams.set("event", selectedEventId);
+  else url.searchParams.delete("event");
   history.replaceState(null, "", url);
   render();
 }
 
-async function openNamespace(namespace) {
+async function openNamespace(namespace, selectedListTab = state.mode) {
   if (!NAMESPACE_PATTERN.test(namespace) || ["flags", "messages"].includes(namespace)) {
     toast("namespaceはlower_snake_caseで入力してください（flagsとmessagesは予約名です）。");
     return;
   }
   if (namespace === state.data.namespace) return;
-  if (state.dirty && !window.confirm("未保存の変更を破棄してイベントファイルを切り替えますか？")) return;
+  if (state.dirty && !window.confirm("未保存の変更を破棄してイベントファイルを切り替えますか？")) {
+    renderNamespaceControls();
+    return;
+  }
   try {
     const payload = await api(`/api/document?namespace=${encodeURIComponent(namespace)}`);
-    applyDocument(payload);
+    applyDocument(payload, null, selectedListTab);
     toast(payload.is_new ? `${namespace}.jsonを新規作成します。` : `${namespace}.jsonへ切り替えました。`);
   } catch (error) {
+    renderNamespaceControls();
     toast(error.message);
   }
 }
@@ -489,12 +551,16 @@ document.body.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
   const action = target.dataset.action;
-  if (action === "open-namespace") {
-    openNamespace($("namespace-select").value);
+  if (action === "select-list-tab") {
+    state.mode = target.dataset.listTab;
+    render();
   } else if (action === "create-namespace") {
     openNamespace($("namespace-new").value.trim());
   } else if (action === "add-flag") {
-    commit(() => state.flags.push({flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""}));
+    commit(() => {
+      state.flags.push({flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
+      state.mode = "flag";
+    });
   } else if (action === "delete-flag") {
     commit(() => state.flags.splice(Number(target.dataset.index), 1));
   } else if (action === "add-event") {
@@ -603,6 +669,9 @@ $("validate").addEventListener("click", () => {
   toast("検証しました。");
 });
 $("save").addEventListener("click", save);
+$("namespace-select").addEventListener("change", (event) => {
+  openNamespace(event.target.value);
+});
 $("namespace-new").addEventListener("keydown", (event) => {
   if (event.key === "Enter") openNamespace(event.target.value.trim());
 });
@@ -622,11 +691,22 @@ window.addEventListener("beforeunload", (event) => {
   }
 });
 
+configureEditorNavigation();
+
 (async function initialize() {
   try {
-    const requestedNamespace = new URLSearchParams(location.search).get("namespace");
+    const parameters = new URLSearchParams(location.search);
+    const uiSettings = loadUiSettings();
+    const storedNamespace = typeof uiSettings.namespace === "string"
+      && NAMESPACE_PATTERN.test(uiSettings.namespace)
+      && !["flags", "messages"].includes(uiSettings.namespace)
+      ? uiSettings.namespace
+      : null;
+    const requestedNamespace = parameters.get("namespace") || storedNamespace;
+    const requestedEvent = parameters.get("event");
+    const requestedListTab = requestedEvent ? "event" : uiSettings.listTab;
     const query = requestedNamespace ? `?namespace=${encodeURIComponent(requestedNamespace)}` : "";
-    applyDocument(await api(`/api/document${query}`));
+    applyDocument(await api(`/api/document${query}`), requestedEvent, requestedListTab);
   } catch (error) {
     toast(error.message);
   }

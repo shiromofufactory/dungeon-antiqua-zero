@@ -99,6 +99,11 @@ app/maps/
 
 ## 画面と操作
 
+ヘッダーの「マップ／イベント」で、同じローカルサーバー上のマップエディタとイベントエディタを
+切り替える。両エディタは同じヘッダー高とブランド領域幅を使い、切り替え前後でナビゲーションの
+位置を変えない。編集対象・生成先のファイルパスはヘッダーに表示しない。未保存変更がある状態で
+切り替える場合は、ページを閉じる場合と同じ確認を行う。
+
 画面は次の3列を基本とする。
 
 1. 左: 地面／オブジェクト／拠点・移動／イベントのパレット
@@ -223,11 +228,15 @@ app/maps/
 ## 起動と非対話生成
 
 ```sh
-npm run tools:map-editor
-npm run tools:map-editor -- --map field_01 --tileset dungeon --profile dungeon
+npm run tools:editor
+npm run tools:editor -- --map field_01 --tileset dungeon --profile dungeon
+npm run tools:editor -- --editor event --namespace common
 npm run maps:validate
 npm run maps:build
 ```
+
+`tools:map-editor` と `tools:event-editor` は、最初に表示する画面だけを指定する互換入口として残す。
+どの入口から起動してもヘッダーから両エディタへ切り替えられる。
 
 新規マップは既定で32×24セルとする。`--width`、`--height` で初期寸法を変更できる。
 既存マップでは制作用JSONに保存されたタイルセット、profile、寸法を使用する。
@@ -243,6 +252,7 @@ npm run maps:build
 - オブジェクトまたはセルへ拠点を配置し、複数入口と単一の移動先を編集できる。
 - マップ内の到着地点、向き、テレポート対象拠点を編集できる。
 - actorとcell／object／actorアンカーのイベントトリガーを配置・編集できる。
+- 同じ起動プロセス内でイベントエディタへ切り替え、選択トリガーのイベント本文を直接開ける。
 - マップ寸法を左右・上下の任意の方向へ拡張、縮小できる。
 - 地面とオブジェクトを合成した通行不可セルを確認できる。
 - 保存後に同じ制作用マップを再読込できる。

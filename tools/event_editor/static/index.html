@@ -4,27 +4,41 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DA ZERO — Event Editor</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="editor-header.css">
+  <link rel="stylesheet" href="event-layout.css">
 </head>
 <body>
-  <header>
-    <div class="brand"><span>DA0</span><div><h1>Event Editor</h1><p id="document-path">読み込み中…</p></div></div>
-    <div class="header-actions">
-      <div class="namespace-tools">
-        <label>イベントファイル<select id="namespace-select"></select></label>
-        <button data-action="open-namespace">切替</button>
-        <label>新規namespace<input id="namespace-new" placeholder="例: fairy_village" autocomplete="off"></label>
-        <button data-action="create-namespace">新規作成</button>
-      </div>
-      <div class="toolbar"><span id="save-state" class="pill">読み込み中</span><button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直す</button><button id="validate">検証</button><button id="save" class="primary">保存・生成</button></div>
+  <header class="app-header">
+    <div class="header-identity">
+      <div class="brand"><span>DA0</span><div><h1>Event Editor</h1></div></div>
+      <nav id="editor-switch" class="editor-switch" aria-label="エディタ切り替え" hidden>
+        <a data-editor-link="map">マップ</a>
+        <a data-editor-link="event" aria-current="page">イベント</a>
+      </nav>
     </div>
+    <div class="toolbar"><span id="save-state" class="pill">読み込み中</span><button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直す</button><button id="validate">検証</button><button id="save" class="primary">保存・生成</button></div>
   </header>
-  <main>
-    <aside class="panel sidebar"><section><div class="heading"><h2>グローバルフラグ</h2><button data-action="add-flag">追加</button></div><div id="flags"></div></section><section><div class="heading"><h2>イベント</h2><button data-action="add-event">追加</button></div><div id="events"></div></section><section><div class="heading"><h2>メッセージ</h2><button data-action="add-message">追加</button></div><div id="messages"></div></section></aside>
+  <main class="event-workspace">
+    <div class="namespace-tools event-context-bar">
+      <label>イベントファイル<select id="namespace-select"></select></label>
+      <label>新規namespace<input id="namespace-new" placeholder="例: fairy_village" autocomplete="off"></label>
+      <button data-action="create-namespace">新規作成</button>
+    </div>
+    <aside class="panel sidebar">
+      <nav class="sidebar-tabs" role="tablist" aria-label="編集対象">
+        <button id="list-tab-flag" class="sidebar-tab" type="button" role="tab" aria-controls="list-panel-flag" data-action="select-list-tab" data-list-tab="flag">フラグ</button>
+        <button id="list-tab-event" class="sidebar-tab active" type="button" role="tab" aria-controls="list-panel-event" data-action="select-list-tab" data-list-tab="event" aria-selected="true">イベント</button>
+        <button id="list-tab-message" class="sidebar-tab" type="button" role="tab" aria-controls="list-panel-message" data-action="select-list-tab" data-list-tab="message">メッセージ</button>
+      </nav>
+      <section id="list-panel-flag" role="tabpanel" aria-labelledby="list-tab-flag" data-list-panel="flag" hidden><div class="heading"><h2>グローバルフラグ</h2><button data-action="add-flag">追加</button></div><div id="flags"></div></section>
+      <section id="list-panel-event" role="tabpanel" aria-labelledby="list-tab-event" data-list-panel="event"><div class="heading"><h2>イベント</h2><button data-action="add-event">追加</button></div><div id="events"></div></section>
+      <section id="list-panel-message" role="tabpanel" aria-labelledby="list-tab-message" data-list-panel="message" hidden><div class="heading"><h2>メッセージ</h2><button data-action="add-message">追加</button></div><div id="messages"></div></section>
+    </aside>
     <section class="panel editor"><div id="event-editor" class="empty">イベントを選択してください。</div></section>
     <aside class="panel issues"><div class="heading"><h2>問題一覧</h2><span id="issue-count" class="pill">0</span></div><div id="issues"></div></aside>
   </main>
   <div id="toast" role="status"></div>
-  <script src="/app.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

@@ -1,0 +1,51 @@
+.event-workspace {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.event-context-bar {
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(27, 31, 25, .92);
+}
+
+.event-workspace > .panel {
+  min-height: 0;
+}
+
+.sidebar-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.sidebar-tab {
+  padding: 12px 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.sidebar-tab.active {
+  border-bottom-color: var(--pink);
+  background: rgba(255, 79, 163, .06);
+  color: var(--text);
+}
+
+.sidebar > section[hidden] {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .event-workspace {
+    grid-template-rows: auto;
+  }
+}

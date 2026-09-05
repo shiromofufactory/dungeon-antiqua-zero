@@ -1,0 +1,101 @@
+:root {
+  --editor-header-height: 76px;
+  --editor-brand-width: 200px;
+}
+
+.app-header {
+  width: 100%;
+  height: var(--editor-header-height);
+  min-height: var(--editor-header-height);
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.app-header .header-identity {
+  width: auto;
+  min-width: 0;
+  flex: none;
+  display: grid;
+  grid-template-columns: var(--editor-brand-width) max-content;
+  align-items: center;
+  gap: 18px;
+}
+
+.app-header .brand {
+  width: var(--editor-brand-width);
+  min-width: var(--editor-brand-width);
+}
+
+.app-header .brand > div {
+  min-width: 0;
+}
+
+.app-header .brand p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header .editor-switch {
+  flex: none;
+}
+
+.app-header > .toolbar,
+.app-header .header-actions {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app-header .namespace-tools,
+.app-header .toolbar {
+  flex-wrap: nowrap;
+}
+
+.app-header + main {
+  height: calc(100vh - var(--editor-header-height));
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --editor-header-height: 132px;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .app-header .header-actions,
+  .app-header > .toolbar {
+    width: 100%;
+    flex: none;
+    justify-content: flex-start;
+  }
+
+  .app-header + main {
+    height: auto;
+    min-height: calc(100vh - var(--editor-header-height));
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --editor-header-height: 190px;
+    --editor-brand-width: 160px;
+  }
+
+  .app-header .header-actions,
+  .app-header .namespace-tools,
+  .app-header .toolbar {
+    flex-wrap: wrap;
+  }
+}

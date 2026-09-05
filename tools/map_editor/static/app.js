@@ -3,6 +3,7 @@
 const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
 let token = new URLSearchParams(window.location.search).get("token") || "";
+const editorRoute = window.location.pathname.match(/^\/(map|event)(?:\/|$)/)?.[1] || null;
 
 const state = {
   data: null,
@@ -50,9 +51,32 @@ const escapeHtml = (value) => String(value)
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;");
 
+function editorApiPath(path) {
+  return editorRoute ? `/${editorRoute}${path}` : path;
+}
+
+function editorUrl(editor, parameters = {}) {
+  if (!editorRoute) return null;
+  const url = new URL(`/${editor}/`, window.location.origin);
+  url.searchParams.set("token", token);
+  for (const [key, value] of Object.entries(parameters)) {
+    if (value) url.searchParams.set(key, value);
+  }
+  return url.href;
+}
+
+function configureEditorNavigation() {
+  const navigation = byId("editor-switch");
+  if (!navigation || !editorRoute) return;
+  navigation.hidden = false;
+  navigation.querySelectorAll("[data-editor-link]").forEach((link) => {
+    link.href = editorUrl(link.dataset.editorLink);
+  });
+}
+
 async function renewSessionToken() {
   try {
-    const response = await fetch("/api/session-token", { cache: "no-store", headers: { "X-Map-Editor-Client": SESSION_CLIENT_HEADER } });
+    const response = await fetch(editorApiPath("/api/session-token"), { cache: "no-store", headers: { "X-Map-Editor-Client": SESSION_CLIENT_HEADER } });
     if (!response.ok) return false;
     const value = await response.json();
     if (typeof value.token !== "string" || !value.token) return false;
@@ -60,6 +84,7 @@ async function renewSessionToken() {
     const url = new URL(window.location.href);
     url.searchParams.set("token", token);
     window.history.replaceState(null, "", url);
+    configureEditorNavigation();
     return true;
   } catch (_error) {
     return false;
@@ -67,7 +92,7 @@ async function renewSessionToken() {
 }
 
 async function api(path, options = {}, retryAuthentication = true) {
-  const response = await fetch(path, {
+  const response = await fetch(editorApiPath(path), {
     ...options,
     headers: { "Content-Type": "application/json", "X-Map-Editor-Token": token, ...(options.headers || {}) },
   });
@@ -460,7 +485,7 @@ function renderInspector() {
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>イベント</label><select data-trigger-field="event_id">${eventIdOptions(trigger.event_id)}</select></div>
           <div class="field full"><label>発火方法</label><div class="row">${["step","touch","interact"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
-        </div><div class="row between" style="margin-top:9px"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
+        </div><div class="row between" style="margin-top:9px"><div class="row"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button>${editorRoute ? `<button class="button secondary small" data-action="open-trigger-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
     </div>`;
   byId("inspector-content").innerHTML = `
     <div class="section">
@@ -1198,6 +1223,11 @@ function handleInspectorAction(element) {
     state.eventTool = "trigger_offsets";
     renderAll();
   }
+  else if (action === "open-trigger-event" && currentTrigger()) {
+    const [namespace, eventId] = currentTrigger().event_id.split(".", 2);
+    const url = editorUrl("event", { namespace, event: eventId });
+    if (url) window.location.assign(url);
+  }
   else if (action === "delete-trigger") commit(() => {
     state.data.event_triggers = state.data.event_triggers.filter((trigger) => trigger.id !== state.selectedTriggerId);
     state.selectedTriggerId = null;
@@ -1354,10 +1384,9 @@ async function initialize() {
     state.groundId = state.tileset.grounds[0]?.id || null;
     state.objectId = state.tileset.objects[0]?.id || null;
     restoreUiSettings();
-    byId("document-path").textContent = `${payload.source_path} → ${payload.runtime_path}`;
     rawImage.onload = prepareSourceImage;
     rawImage.onerror = () => showToast("マップチップ画像を表示できません。", true);
-    rawImage.src = payload.image_url;
+    rawImage.src = editorApiPath(payload.image_url);
     renderAll();
   } catch (error) {
     showToast(error.message, true);
@@ -1516,4 +1545,5 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 requestAnimationFrame(animationLoop);
+configureEditorNavigation();
 initialize();
