@@ -102,6 +102,36 @@ class EventPipelineTest(unittest.TestCase):
             set(),
         )
 
+    def test_accepts_attribute_free_end_event_inside_branch(self) -> None:
+        source = deepcopy(sample_source())
+        source["events"][0]["commands"][0]["then"] = [
+            {"command": "end_event"}
+        ]
+
+        diagnostics = validate_event_sources({"sample": source}, **CATALOGS)
+        compiled = compile_event_sources({"sample": source}, **CATALOGS)
+
+        self.assertEqual(
+            [item for item in diagnostics if item.severity == "error"], []
+        )
+        self.assertEqual(
+            compiled["events"]["sample.greeting"]["commands"][0]["then"],
+            [{"command": "end_event"}],
+        )
+
+    def test_rejects_attributes_on_end_event(self) -> None:
+        source = deepcopy(sample_source())
+        source["events"][0]["commands"] = [
+            {"command": "end_event", "unexpected": True}
+        ]
+
+        codes = {
+            item.code
+            for item in validate_event_sources({"sample": source}, **CATALOGS)
+        }
+
+        self.assertIn("unknown_field", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

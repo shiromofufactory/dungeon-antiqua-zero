@@ -127,6 +127,8 @@ class EditorServerTest(unittest.TestCase):
 
         self.assertIn("Map Editor", map_page)
         self.assertIn("Event Editor", event_page)
+        self.assertNotIn('id="validate-button"', map_page)
+        self.assertNotIn('id="validate"', event_page)
         self.assertNotIn('id="document-path"', map_page)
         self.assertNotIn('id="document-path"', event_page)
         self.assertIn('class="namespace-tools event-context-bar"', event_page)
@@ -148,6 +150,12 @@ class EditorServerTest(unittest.TestCase):
         )
         event_script = self.get_text("/event/app.js")
         self.assertIn("localStorage.getItem(UI_STORAGE_KEY)", event_script)
+        self.assertIn('draggable="true"', event_script)
+        self.assertIn('data-drop-list-path', event_script)
+        self.assertIn('["end_event", "イベント終了"]', event_script)
+        self.assertNotIn('data-message-field="note"', event_script)
+        self.assertNotIn('data-action="move-command-up"', event_script)
+        self.assertNotIn('data-action="move-command-down"', event_script)
         self.assertIn(
             '$("namespace-select").addEventListener("change"',
             event_script,

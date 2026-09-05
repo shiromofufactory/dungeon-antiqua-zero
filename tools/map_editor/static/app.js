@@ -1332,19 +1332,6 @@ function scheduleResolution(delay = 70) {
   }, delay);
 }
 
-async function validate(showResult = false) {
-  try {
-    const result = await api("/api/validate", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
-    state.diagnostics = result.diagnostics;
-    state.resolved = result.resolved;
-    renderIssues();
-    drawMap(performance.now());
-    if (showResult) showToast(state.diagnostics.some((issue) => issue.severity === "error") ? "修正が必要な項目があります。" : "検証に成功しました。", state.diagnostics.some((issue) => issue.severity === "error"));
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
 async function save() {
   updateSaveState("dirty", "保存・生成中…");
   try {
@@ -1431,7 +1418,6 @@ byId("inspector-content").addEventListener("change", (event) => {
 });
 byId("undo-button").addEventListener("click", undo);
 byId("redo-button").addEventListener("click", redo);
-byId("validate-button").addEventListener("click", () => validate(true));
 byId("save-button").addEventListener("click", save);
 byId("zoom-in").addEventListener("click", () => { state.zoom = Math.min(4, state.zoom + 1); saveUiSettings(); renderAll(); });
 byId("zoom-out").addEventListener("click", () => { state.zoom = Math.max(1, state.zoom - 1); saveUiSettings(); renderAll(); });

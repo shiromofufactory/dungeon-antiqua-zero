@@ -221,6 +221,8 @@ def _validate_command_list(
                 if branch_name == "else" and branch == []:
                     continue
                 _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1)
+        elif command_type == "end_event":
+            _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
             _known_fields(command, {"command", "message_id", "portrait_character_key"}, diagnostics, command_path)
             message_id = command.get("message_id")

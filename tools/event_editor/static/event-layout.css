@@ -44,6 +44,85 @@
   display: none;
 }
 
+.commands {
+  gap: 0;
+}
+
+.command {
+  margin: 4px 0;
+}
+
+.command-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.drag-handle {
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: grab;
+  font-size: 16px;
+  line-height: 1;
+  user-select: none;
+}
+
+.drag-handle:hover {
+  border-color: var(--line);
+  color: var(--accent);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.command.dragging {
+  opacity: .38;
+}
+
+.command-description {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.command-drop-zone {
+  min-height: 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: min-height .12s, border-color .12s, background .12s;
+}
+
+.command-drop-zone.empty-list {
+  min-height: 68px;
+  padding: 22px 10px;
+  border-color: var(--line);
+  border-style: dashed;
+  color: var(--muted);
+  text-align: center;
+}
+
+.command-dragging .command-drop-zone:not(.invalid) {
+  min-height: 17px;
+  border-color: #59664f;
+  border-style: dashed;
+  background: rgba(224, 184, 90, .035);
+}
+
+.command-dragging .command-drop-zone.active {
+  min-height: 27px;
+  border-color: var(--pink);
+  background: rgba(255, 79, 163, .14);
+  box-shadow: inset 0 0 0 1px var(--pink);
+}
+
+.command-dragging .command-drop-zone.invalid {
+  opacity: .2;
+}
+
 @media (max-width: 1180px) {
   .event-workspace {
     grid-template-rows: auto;

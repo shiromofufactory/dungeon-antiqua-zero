@@ -14,9 +14,7 @@ from .events import EventDiagnostic, EventSourceError
 MESSAGE_ID_PATTERN = re.compile(
     r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
 )
-MESSAGE_FIELDS = frozenset(
-    ("message_id", "text_ja", "text_en", "text_zhcn", "note")
-)
+MESSAGE_FIELDS = frozenset(("message_id", "text_ja", "text_en", "text_zhcn"))
 LOCALIZED_FIELDS = ("text_ja", "text_en", "text_zhcn")
 
 
@@ -111,15 +109,6 @@ def validate_event_messages(value: object) -> list[EventDiagnostic]:
                         ),
                     )
                 )
-        if "note" in record and not isinstance(record.get("note"), str):
-            diagnostics.append(
-                EventDiagnostic(
-                    "error",
-                    "invalid_note",
-                    f"{path}.note",
-                    "noteは文字列で指定してください。",
-                )
-            )
     return diagnostics
 
 

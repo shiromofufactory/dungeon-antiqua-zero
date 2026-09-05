@@ -4,6 +4,20 @@ const CLIENT = "event-editor-ui";
 const NAMESPACE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const UI_STORAGE_KEY = "da0.event-editor.ui.v1";
 const LIST_TABS = ["flag", "event", "message"];
+const COMMAND_OPTIONS = [
+  ["message", "message"],
+  ["set_flag", "set_flag"],
+  ["branch", "branch"],
+  ["end_event", "イベント終了"],
+  ["join_party", "join_party"],
+  ["leave_party", "leave_party"],
+  ["give_item", "give_item"],
+  ["take_item", "take_item"],
+  ["play_se", "play_se"],
+  ["change_bgm", "change_bgm"],
+  ["move_party", "move_party"],
+  ["move_actor", "move_actor"],
+];
 let token = new URLSearchParams(location.search).get("token") || "";
 const editorRoute = location.pathname.match(/^\/(map|event)(?:\/|$)/)?.[1] || null;
 const state = {
@@ -22,6 +36,7 @@ const state = {
   timer: null,
   revision: 0,
 };
+let draggedCommand = null;
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "")
@@ -284,6 +299,31 @@ function listAt(path) {
   return commandAt(parts.join("/"))[branch];
 }
 
+function commandPath(listPath, index) {
+  return listPath ? `${listPath}/${index}` : String(index);
+}
+
+function isDescendantList(sourceListPath, sourceIndex, targetListPath) {
+  return targetListPath.startsWith(`${commandPath(sourceListPath, sourceIndex)}/`);
+}
+
+function moveCommand(sourceListPath, sourceIndex, targetListPath, targetIndex) {
+  const source = listAt(sourceListPath);
+  const target = listAt(targetListPath);
+  if (!source[sourceIndex] || targetIndex < 0 || targetIndex > target.length) return false;
+  if (isDescendantList(sourceListPath, sourceIndex, targetListPath)) return false;
+
+  let insertionIndex = targetIndex;
+  if (source === target && sourceIndex < insertionIndex) insertionIndex -= 1;
+  if (source === target && sourceIndex === insertionIndex) return false;
+
+  commit(() => {
+    const [command] = source.splice(sourceIndex, 1);
+    target.splice(insertionIndex, 0, command);
+  });
+  return true;
+}
+
 function conditionAt(command, path) {
   let value = command;
   for (const part of path.split("/").filter(Boolean)) {
@@ -340,21 +380,34 @@ function renderCommand(command, path, listPath, index) {
       + field("歩数", `<input type="number" min="1" max="255" value="${Number(command.steps) || 1}" ${attr("steps")}>`);
   } else if (type === "branch") {
     fields = `<div class="full">${renderCondition(command.condition, path, "condition")}${renderBranch(command.then, path, "then")}${renderBranch(command.else, path, "else")}</div>`;
+  } else if (type === "end_event") {
+    fields = '<p class="command-description full">ここでイベント全体を終了し、後続のコマンドを実行しません。</p>';
   }
-  return `<article class="command">
-    <div class="command-head"><code>${index + 1}. ${esc(type)}</code><div class="row"><button class="icon" data-action="move-command-up" data-list-path="${listPath}" data-index="${index}">↑</button><button class="icon" data-action="move-command-down" data-list-path="${listPath}" data-index="${index}">↓</button><button class="danger icon" data-action="delete-command" data-list-path="${listPath}" data-index="${index}">削除</button></div></div>
+  const label = type === "end_event" ? "イベント終了" : type;
+  return `<article class="command" data-command-path="${esc(path)}">
+    <div class="command-head"><div class="command-title"><span class="drag-handle" draggable="true" role="button" aria-label="${esc(label)}を移動" title="ドラッグして移動" data-command-drag data-list-path="${esc(listPath)}" data-index="${index}">⠿</span><code>${index + 1}. ${esc(label)}</code></div><button class="danger icon" data-action="delete-command" data-list-path="${esc(listPath)}" data-index="${index}">削除</button></div>
     <div class="command-fields">${fields}</div>
   </article>`;
 }
 
 function renderBranch(commands, parentPath, name) {
   const path = `${parentPath}/${name}`;
-  return `<div class="branch"><h3>${name}</h3><div class="commands">${commands.map((command, index) => renderCommand(command, `${path}/${index}`, path, index)).join("") || '<div class="empty">コマンドなし</div>'}</div>${addCommand(path)}</div>`;
+  return `<div class="branch"><h3>${name}</h3>${renderCommandList(commands, path, "コマンドなし")}${addCommand(path)}</div>`;
+}
+
+function renderDropZone(listPath, index, emptyMessage = "") {
+  return `<div class="command-drop-zone ${emptyMessage ? "empty-list" : ""}" data-drop-list-path="${esc(listPath)}" data-drop-index="${index}">${emptyMessage ? `<span>${esc(emptyMessage)}</span>` : ""}</div>`;
+}
+
+function renderCommandList(commands, listPath, emptyMessage) {
+  const content = commands.map((command, index) =>
+    `${renderDropZone(listPath, index)}${renderCommand(command, commandPath(listPath, index), listPath, index)}`,
+  ).join("");
+  return `<div class="commands" data-command-list="${esc(listPath)}">${content}${renderDropZone(listPath, commands.length, commands.length ? "" : emptyMessage)}</div>`;
 }
 
 function addCommand(listPath = "") {
-  const types = ["message", "set_flag", "branch", "join_party", "leave_party", "give_item", "take_item", "play_se", "change_bgm", "move_party", "move_actor"];
-  return `<div class="add-row"><select data-new-command="${listPath}">${types.map((value) => `<option>${value}</option>`).join("")}</select><button data-action="add-command" data-list-path="${listPath}">コマンドを追加</button></div>`;
+  return `<div class="add-row"><select data-new-command="${esc(listPath)}">${COMMAND_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select><button data-action="add-command" data-list-path="${esc(listPath)}">コマンドを追加</button></div>`;
 }
 
 function renderEventEditor() {
@@ -368,7 +421,7 @@ function renderEventEditor() {
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("イベントID", `<input data-event-field="id" value="${esc(event.id)}">`)}${field("制作メモ", `<input data-event-field="note" value="${esc(event.note || "")}">`)}<button class="danger" data-action="delete-event">イベントを削除</button></div>
     <div class="heading"><h2>${esc(state.data.namespace)}.${esc(event.id)}</h2><span class="pill">${event.commands.length} commands</span></div>
-    <div class="commands">${event.commands.map((command, index) => renderCommand(command, String(index), "", index)).join("") || '<div class="empty">コマンドはありません。</div>'}</div>
+    ${renderCommandList(event.commands, "", "コマンドはありません。")}
     ${addCommand()}
   `;
 }
@@ -385,7 +438,6 @@ function renderMessageEditor() {
     <div class="heading"><h2>メッセージ編集</h2><button class="danger" data-action="delete-message">メッセージを削除</button></div>
     <div class="message-form">
       ${field("メッセージID", `<input data-message-field="message_id" value="${esc(message.message_id)}">`, true)}
-      ${field("制作メモ", `<input data-message-field="note" value="${esc(message.note || "")}">`, true)}
       ${field("日本語（1行ごとにゲーム内の1行）", `<textarea rows="6" data-message-field="text_ja">${esc((message.text_ja || []).join("\n"))}</textarea>`, true)}
       ${field("英語（未翻訳なら空欄）", `<textarea rows="6" data-message-field="text_en">${esc((message.text_en || []).join("\n"))}</textarea>`, true)}
       ${field("簡体字中国語（未翻訳なら空欄）", `<textarea rows="6" data-message-field="text_zhcn">${esc((message.text_zhcn || []).join("\n"))}</textarea>`, true)}
@@ -440,6 +492,7 @@ function defaultCommand(type) {
   if (type === "change_bgm") return one("bgm_id", state.catalogs.bgm_ids);
   if (type === "move_party") return {command: type, direction: "down", steps: 1};
   if (type === "move_actor") return {command: type, actor_id: state.catalogs.actor_ids?.[0] || "", direction: "down", steps: 1};
+  if (type === "end_event") return {command: type};
   return {command: "branch", condition: defaultCondition(), then: [], else: []};
 }
 
@@ -583,7 +636,6 @@ document.body.addEventListener("click", (event) => {
         text_ja: ["メッセージ"],
         text_en: [],
         text_zhcn: [],
-        note: "",
       });
       state.selectedMessage = state.messages.length - 1;
       state.mode = "message";
@@ -601,13 +653,6 @@ document.body.addEventListener("click", (event) => {
     commit(() => listAt(path).push(defaultCommand(type)));
   } else if (action === "delete-command") {
     commit(() => listAt(target.dataset.listPath).splice(Number(target.dataset.index), 1));
-  } else if (action === "move-command-up" || action === "move-command-down") {
-    commit(() => {
-      const list = listAt(target.dataset.listPath);
-      const index = Number(target.dataset.index);
-      const next = index + (action.endsWith("up") ? -1 : 1);
-      if (next >= 0 && next < list.length) [list[index], list[next]] = [list[next], list[index]];
-    });
   } else if (action === "add-condition") {
     commit(() => conditionAt(commandAt(target.dataset.commandPath), target.dataset.conditionPath).conditions.push(defaultCondition()));
   } else if (action === "delete-condition") {
@@ -662,12 +707,61 @@ $("event-editor").addEventListener("change", (event) => {
   }
 });
 
+function clearCommandDrag() {
+  draggedCommand = null;
+  document.body.classList.remove("command-dragging");
+  document.querySelectorAll(".command.dragging, .command-drop-zone.active, .command-drop-zone.invalid").forEach((node) => {
+    node.classList.remove("dragging", "active", "invalid");
+  });
+}
+
+$("event-editor").addEventListener("dragstart", (event) => {
+  const handle = event.target.closest("[data-command-drag]");
+  if (!handle || !event.dataTransfer) return;
+  draggedCommand = {
+    listPath: handle.dataset.listPath,
+    index: Number(handle.dataset.index),
+  };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", commandPath(draggedCommand.listPath, draggedCommand.index));
+  handle.closest(".command").classList.add("dragging");
+  document.body.classList.add("command-dragging");
+  document.querySelectorAll(".command-drop-zone").forEach((zone) => {
+    zone.classList.toggle("invalid", isDescendantList(
+      draggedCommand.listPath,
+      draggedCommand.index,
+      zone.dataset.dropListPath,
+    ));
+  });
+});
+
+$("event-editor").addEventListener("dragover", (event) => {
+  const zone = event.target.closest(".command-drop-zone");
+  if (!zone || !draggedCommand || zone.classList.contains("invalid")) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  document.querySelectorAll(".command-drop-zone.active").forEach((node) => node.classList.remove("active"));
+  zone.classList.add("active");
+});
+
+$("event-editor").addEventListener("drop", (event) => {
+  const zone = event.target.closest(".command-drop-zone");
+  if (!zone || !draggedCommand || zone.classList.contains("invalid")) return;
+  event.preventDefault();
+  const source = draggedCommand;
+  moveCommand(
+    source.listPath,
+    source.index,
+    zone.dataset.dropListPath,
+    Number(zone.dataset.dropIndex),
+  );
+  clearCommandDrag();
+});
+
+$("event-editor").addEventListener("dragend", clearCommandDrag);
+
 $("undo").addEventListener("click", undo);
 $("redo").addEventListener("click", redo);
-$("validate").addEventListener("click", () => {
-  schedule(0);
-  toast("検証しました。");
-});
 $("save").addEventListener("click", save);
 $("namespace-select").addEventListener("change", (event) => {
   openNamespace(event.target.value);

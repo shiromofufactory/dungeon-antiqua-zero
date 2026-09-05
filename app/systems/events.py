@@ -187,6 +187,9 @@ class EventRunner:
                     raise TypeError("compiled branch commands must be a tuple")
                 self._stack.append(_Frame(commands, f"{path}.{branch}"))
                 return None
+            if command_type == "end_event":
+                self._stack.clear()
+                return None
             if command_type == "message":
                 portrait = command.get("portrait_character_key")
                 return MessageEffect(str(command["message_id"]), None if portrait is None else str(portrait))

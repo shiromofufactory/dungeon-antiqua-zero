@@ -37,7 +37,6 @@ class EventEditorServerTest(unittest.TestCase):
                     "text_ja": ["こんにちは"],
                     "text_en": ["Hello"],
                     "text_zhcn": ["你好"],
-                    "note": "挨拶",
                 }
             ]),
             encoding="utf-8",
@@ -199,7 +198,6 @@ class EventEditorServerTest(unittest.TestCase):
                 "text_ja": ["新しいメッセージ"],
                 "text_en": [],
                 "text_zhcn": [],
-                "note": "同じ保存操作で追加",
             }
         ]
         data = {

@@ -146,6 +146,31 @@ class EventRunnerTest(unittest.TestCase):
         self.assertTrue(runner.is_complete)
         self.assertEqual(self.inventory.quantity("POTION"), 0)
 
+    def test_end_event_inside_branch_skips_all_remaining_commands(self) -> None:
+        runner = self.runner(
+            [
+                {
+                    "command": "branch",
+                    "condition": {"type": "flag_set", "flag_id": "sample.done"},
+                    "then": [
+                        {"command": "set_flag", "flag_id": "sample.reached"},
+                        {"command": "end_event"},
+                        {"command": "set_flag", "flag_id": "sample.branch_after"},
+                    ],
+                    "else": [],
+                },
+                {"command": "set_flag", "flag_id": "sample.root_after"},
+            ]
+        )
+        self.save_data.event_flags.add("sample.done")
+
+        self.assertIsNone(runner.advance())
+
+        self.assertTrue(runner.is_complete)
+        self.assertIn("sample.reached", self.save_data.event_flags)
+        self.assertNotIn("sample.branch_after", self.save_data.event_flags)
+        self.assertNotIn("sample.root_after", self.save_data.event_flags)
+
     def test_failing_atomic_item_change_stops_the_event(self) -> None:
         runner = self.runner(
             [{"command": "take_item", "item_key": "POTION", "quantity": 1}]

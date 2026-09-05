@@ -68,7 +68,7 @@ content/maps/sources/
 
 app/events/
 ├── events.json               # 全定義を索引化したゲーム用生成物
-└── messages.json             # noteを除いたゲーム用メッセージ
+└── messages.json             # ゲーム用メッセージ
 
 app/maps/
 └── fairy_village.json        # 解決済みトリガーを含むゲーム用生成物
@@ -189,8 +189,7 @@ npm run events:build
     "message_id": "fairy_village.meet_alvan.first",
     "text_ja": ["はじめまして。", "アルヴァンです。"],
     "text_en": ["Nice to meet you.", "I'm Alvan."],
-    "text_zhcn": ["初次见面。", "我是阿尔万。"],
-    "note": "初対面の挨拶"
+    "text_zhcn": ["初次见面。", "我是阿尔万。"]
   }
 ]
 ```
@@ -199,7 +198,6 @@ npm run events:build
 - IDの接頭辞をイベント名前空間に合わせることは推奨するが、強制しない。
 - 各 `text_*` は1表示行ごとの文字列配列とする。`text_ja` は1行以上必須、未翻訳の
   `text_en` と `text_zhcn` は空配列を許可し、その場合は既存の言語フォールバックを使う。
-- `note` は任意の制作メモで、ゲーム用生成物には含めない。
 - 通常UI、用語、ショップなどで使う `content/data/texts.json` とは相互参照しない。
 
 ### 条件
@@ -256,6 +254,7 @@ npm run events:build
 | `give_item` | `item_key`, `quantity` | 全数量を一括でインベントリへ追加 | field / battle |
 | `take_item` | `item_key`, `quantity` | 全数量を一括でインベントリから削除 | field / battle |
 | `branch` | `condition`, `then`, `else` | 条件に応じて片方の子コマンド列だけを実行 | field / battle |
+| `end_event` | なし | branchを含む現在のイベント全体を直ちに終了し、後続コマンドを実行しない | field / battle |
 | `message` | `message_id` | メッセージOverlayを閉じるまで待機 | field / battle |
 | `play_se` | `se_id` | SE再生を要求して同フレームで完了 | field / battle |
 | `change_bgm` | `bgm_id` | BGM切替要求が受理された時点で完了 | field / battle |
@@ -507,7 +506,7 @@ EventRunner ──→ 条件評価／SaveData・PartySystem・InventorySystem
 4. 同期コマンドは既存Systemへ委譲して結果を受け、直ちに次へ進む。
 5. メッセージや移動はEventEffectを1件返して待機する。SceneManagerまたはSceneがOverlay／演出を
    開き、完了結果をRunnerへ返す。
-6. 全コマンド完了後、CoordinatorがRunnerを破棄し、入力リリース待ちを経てScene操作へ戻す。
+6. 全コマンド完了後、または `end_event` の実行後、CoordinatorがRunnerを破棄し、入力リリース待ちを経てScene操作へ戻す。
 
 Runner自身はPyxel、Window、具体的Scene、ファイルI/Oを参照しない。巨大なGame Contextも
 受け取らず、条件参照と状態変更に必要な `SaveData`、PartySystem、InventorySystemなどを
@@ -570,9 +569,9 @@ validatorを使う。
 | `se_id` | 安定SEカタログ |
 | `actor_id` | 全マップのactor一覧。参照元マップとの一致は保存・生成時に横断検証する |
 
-メッセージは左の一覧から新規作成・選択し、中央で `message_id`、日本語、英語、簡体字中国語、
-制作メモを編集する。新規IDは `<現在のnamespace>.message_<連番>` を既定値にするが、別の
-名前へ変更できる。イベントのmessageコマンドはこの一覧からIDを選択する。
+メッセージは左の一覧から新規作成・選択し、中央で `message_id`、日本語、英語、簡体字中国語を
+編集する。新規IDは `<現在のnamespace>.message_<連番>` を既定値にするが、別の名前へ変更できる。
+イベントのmessageコマンドはこの一覧からIDを選択する。
 
 ### 操作と安全策
 
@@ -582,12 +581,16 @@ validatorを使う。
   復元する。新規namespaceを入力すると空の定義として開き、最初の保存時にファイルを作成する。
   namespaceはマップIDの一覧に制約されない。
 - コマンドを選ぶと、その種類に必要な属性だけを表示する。未使用属性はJSONへ残さない。
+- コマンドはドラッグ＆ドロップした位置へ移動する。ルートとbranchの `then` / `else` の間も
+  移動でき、1回のドロップを1回のUndo単位とする。branch自身をその子孫へ移動する操作は許可しない。
 - conditionは「すべて／いずれか／否定／フラグ／メンバー／アイテム」の部品で組み立てる。
 - ID変更・削除後は同じvalidatorで全参照を検証し、問題一覧へ不整合を表示する。参照先の
   一括変更とセーブ済みフラグIDの移行は初期版では自動化しない。
 - Undo/Redoは1回のコマンド追加、削除、並べ替え、属性変更を単位とする。
 - 未保存変更がある状態でページを閉じる場合や別namespaceへ切り替える場合は確認する。
 - エラーがある間は保存しない。警告は内容を表示したうえで保存できる。
+- 問題一覧は編集のたびに自動更新するため、独立した検証ボタンは設けない。保存時にも同じ
+  validatorを再実行する。
 - 保存は変更対象のイベントファイルと共有 `flags.json`、`messages.json` を更新する。他の
   イベントファイルは再整形しない。
 - 保存成功後にゲーム用イベントとイベントメッセージを生成する。マップ側の未保存変更は

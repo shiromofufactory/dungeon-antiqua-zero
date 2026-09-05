@@ -110,6 +110,9 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or not _commands_are_valid(command.get("else"), depth=depth + 1)
             ):
                 return False
+        elif command_type == "end_event":
+            if set(command) != {"command"}:
+                return False
         elif command_type == "message":
             if not set(command) <= {"command", "message_id", "portrait_character_key"} or set(command) < {"command", "message_id"}:
                 return False
