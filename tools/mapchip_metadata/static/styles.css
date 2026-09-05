@@ -168,6 +168,7 @@ h1, h2, h3, p { margin: 0; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .panel-heading.compact { margin-bottom: 12px; }
 .panel-heading h2, .issues-heading h2 { font-size: 14px; letter-spacing: .04em; }
+.source-controls { display: flex; align-items: center; gap: 10px; }
 .zoom-controls { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .preview-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .preview-collision-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
@@ -265,6 +266,11 @@ h1, h2, h3, p { margin: 0; }
 .boundary-rule-tab .tile-thumb { width: 32px; height: 32px; }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.resource-dialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(#252b22, #191d17); color: var(--text); box-shadow: 0 18px 60px #000a; }
+.resource-dialog::backdrop { background: #050704b8; backdrop-filter: blur(3px); }
+.resource-dialog-content { padding: 18px; display: grid; gap: 14px; }
+.resource-dialog-content h2 { font-size: 16px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field.full { grid-column: 1 / -1; }
 .field label { color: var(--muted); font-size: 11px; }

@@ -224,13 +224,10 @@ def _validate_command_list(
         elif command_type == "end_event":
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
-            _known_fields(command, {"command", "message_id", "portrait_character_key"}, diagnostics, command_path)
+            _known_fields(command, {"command", "message_id"}, diagnostics, command_path)
             message_id = command.get("message_id")
             if not isinstance(message_id, str) or message_id not in message_ids:
                 _diagnostic(diagnostics, "error", "unknown_message", f"{command_path}.message_id", f"存在しないイベントメッセージです: {message_id}")
-            portrait = command.get("portrait_character_key")
-            if portrait is not None and (not isinstance(portrait, str) or portrait not in character_keys):
-                _diagnostic(diagnostics, "error", "unknown_character", f"{command_path}.portrait_character_key", f"存在しない顔キャラクターです: {portrait}")
         elif command_type == "play_se":
             _known_fields(command, {"command", "se_id"}, diagnostics, command_path)
             se_id = command.get("se_id")

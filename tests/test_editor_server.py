@@ -80,8 +80,8 @@ class EditorServerTest(unittest.TestCase):
             "test_world",
             "worldmap",
             "world",
-            6,
-            5,
+            16,
+            15,
             palette_path=palette_path,
             token="shared-token",
         )
@@ -171,10 +171,17 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn('data-editor-link="tileset"', event_page)
         self.assertIn('data-editor-link="map"', tileset_page)
         self.assertIn('data-editor-link="event"', tileset_page)
+        self.assertIn('<select id="new-tileset-profile">', tileset_page)
+        self.assertNotIn('name="new-tileset-profile"', tileset_page)
+        self.assertIn('id="delete-tileset-button"', tileset_page)
+        self.assertNotIn('id="change-source-button"', tileset_page)
+        self.assertIn('id="change-map-tileset-button"', map_page)
+        self.assertIn('id="delete-map-button"', map_page)
         self.assertIn('id="actor-sprite-dialog"', map_page)
         self.assertIn("editorApiPath", self.get_text("/map/app.js"))
         self.assertIn("editorApiPath", self.get_text("/event/app.js"))
         self.assertIn("editorApiPath", self.get_text("/tileset/app.js"))
+        self.assertIn("object_id_renames", self.get_text("/tileset/app.js"))
         self.assertIn(".editor-switch", self.get_text("/tileset/styles.css"))
         self.assertEqual(
             self.get_text("/map/editor-header.css"),
@@ -298,6 +305,36 @@ class EditorServerTest(unittest.TestCase):
             self.metadata_application.metadata_path.read_text(encoding="utf-8")
         )
         self.assertEqual(saved["grounds"][0]["base_visual"]["frame_interval"], 12)
+
+    def test_previews_source_image_before_new_tileset_is_saved(self) -> None:
+        created = self.post_json(
+            "/tileset/api/create",
+            {
+                "tileset_id": "new_town",
+                "source_image_id": "mapchips/worldmap",
+                "profile": "town",
+                "base_ground_id": "ground",
+                "base_collision": "passable",
+            },
+            "X-Mapchip-Token",
+        )
+
+        self.assertTrue(created["is_new"])
+        with urlopen(f"{self.base_url}/tileset{created['image_url']}", timeout=3) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
+        saved = self.post_json(
+            "/tileset/api/save",
+            {"data": created["data"]},
+            "X-Mapchip-Token",
+        )
+        self.assertTrue(saved["saved"])
+        deleted = self.post_json(
+            "/tileset/api/delete",
+            {"tileset_id": "new_town"},
+            "X-Mapchip-Token",
+        )
+        self.assertTrue(deleted["deleted"])
 
     def test_refreshes_each_editor_session_token(self) -> None:
         map_token = self.get_json(

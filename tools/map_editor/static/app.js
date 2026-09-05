@@ -2,6 +2,8 @@
 
 const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
+const MIN_MAP_WIDTH = 16;
+const MIN_MAP_HEIGHT = 15;
 let token = new URLSearchParams(window.location.search).get("token") || "";
 const editorRoute = window.location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 
@@ -13,6 +15,8 @@ const state = {
   siteOptions: [],
   eventOptions: [],
   actorAssets: {},
+  mapCatalog: [],
+  tilesetCatalog: [],
   resolved: null,
   diagnostics: [],
   dirty: false,
@@ -76,7 +80,10 @@ function configureEditorNavigation() {
   if (!navigation || !editorRoute) return;
   navigation.hidden = false;
   navigation.querySelectorAll("[data-editor-link]").forEach((link) => {
-    link.href = editorUrl(link.dataset.editorLink);
+    link.href = editorUrl(link.dataset.editorLink, {
+      map: state.data?.map_id,
+      tileset: state.data?.tileset_id,
+    });
   });
 }
 
@@ -106,6 +113,99 @@ async function api(path, options = {}, retryAuthentication = true) {
   const value = await response.json();
   if (!response.ok) throw new Error(response.status === 403 ? "認証セッションを更新できませんでした。ツールを再起動してください。" : value.error || `HTTP ${response.status}`);
   return value;
+}
+
+function renderMapSelector() {
+  const select = byId("map-select");
+  if (!select) return;
+  const records = [...state.mapCatalog];
+  if (state.data) {
+    const current = {
+      map_id: state.data.map_id,
+      profile: state.data.profile,
+      tileset_id: state.data.tileset_id,
+      size: state.data.size,
+    };
+    const index = records.findIndex((item) => item.map_id === state.data.map_id);
+    if (index === -1) records.push({ ...current, is_new: true });
+    else if (state.dirty) records[index] = { ...records[index], ...current, dirty: true };
+  }
+  records.sort((left, right) => left.map_id.localeCompare(right.map_id));
+  select.innerHTML = records.map((item) => {
+    const suffix = item.is_new ? "（未保存）" : `${item.profile} / ${item.tileset_id}${item.dirty ? "（未保存）" : ""}`;
+    return `<option value="${escapeHtml(item.map_id)}" ${item.map_id === state.data?.map_id ? "selected" : ""}>${escapeHtml(item.map_id)} — ${escapeHtml(suffix)}</option>`;
+  }).join("");
+  select.disabled = records.length === 0;
+  const persisted = state.data && state.mapCatalog.some((item) => item.map_id === state.data.map_id);
+  const alternatives = state.tilesetCatalog.filter((item) => item.profile === state.data?.profile && item.tileset_id !== state.data?.tileset_id);
+  byId("change-map-tileset-button").disabled = !persisted || alternatives.length === 0;
+  byId("delete-map-button").disabled = !persisted || state.data?.map_id === "worldmap";
+}
+
+function applyDocumentPayload(payload) {
+  window.clearTimeout(state.resolveTimer);
+  state.resolveRevision += 1;
+  state.data = payload.data;
+  state.tileset = payload.tileset;
+  state.siteNamesJa = payload.site_names_ja;
+  state.destinationOptions = payload.destination_options;
+  state.siteOptions = payload.site_options;
+  state.eventOptions = payload.event_options;
+  state.actorAssets = payload.actor_assets || {};
+  state.resolved = payload.resolved;
+  state.diagnostics = payload.diagnostics;
+  state.dirty = Boolean(payload.is_new || payload.dirty);
+  state.history = [];
+  state.future = [];
+  state.groundId = state.tileset.grounds[0]?.id || null;
+  state.objectId = state.tileset.objects[0]?.id || null;
+  state.selectedInstanceId = null;
+  state.selectedSiteId = null;
+  state.selectedArrivalId = null;
+  state.selectedActorId = null;
+  state.selectedTriggerId = null;
+  state.zoom = 2;
+  state.showGrid = true;
+  state.showCollision = false;
+  restoreUiSettings();
+  rawImage.onload = prepareSourceImage;
+  rawImage.onerror = () => showToast("マップチップ画像を表示できません。", true);
+  rawImage.src = `${editorApiPath(payload.image_url)}&revision=${Date.now()}`;
+  loadActorSheets();
+  const url = new URL(window.location.href);
+  url.searchParams.set("map", state.data.map_id);
+  url.searchParams.set("tileset", state.data.tileset_id);
+  window.history.replaceState(null, "", url);
+  renderMapSelector();
+  configureEditorNavigation();
+  renderAll();
+}
+
+async function loadMapDocument(mapId) {
+  const payload = await api(`/api/document?map=${encodeURIComponent(mapId)}`);
+  applyDocumentPayload(payload);
+}
+
+function renderNewMapTilesets() {
+  const profile = byId("new-map-profile").value;
+  const compatible = state.tilesetCatalog.filter((item) => item.profile === profile);
+  const select = byId("new-map-tileset");
+  const previous = select.value;
+  select.innerHTML = compatible.map((item) => `<option value="${escapeHtml(item.tileset_id)}">${escapeHtml(item.tileset_id)}</option>`).join("");
+  if (compatible.some((item) => item.tileset_id === previous)) select.value = previous;
+  const selected = compatible.find((item) => item.tileset_id === select.value);
+  select.disabled = compatible.length === 0;
+  byId("new-map-form").querySelector('button[type="submit"]').disabled = compatible.length === 0;
+  byId("new-map-source-summary").textContent = selected ? `ソース画像: ${selected.source_image_id} / ベース地面: ${selected.base_ground_id}` : "このprofileに対応するタイルセットがありません。";
+}
+
+function renderChangeMapTilesets() {
+  const compatible = state.tilesetCatalog.filter((item) => item.profile === state.data.profile && item.tileset_id !== state.data.tileset_id);
+  const select = byId("change-map-tileset-select");
+  select.innerHTML = compatible.map((item) => `<option value="${escapeHtml(item.tileset_id)}">${escapeHtml(item.tileset_id)} — ${escapeHtml(item.source_image_id)}</option>`).join("");
+  const selected = compatible.find((item) => item.tileset_id === select.value);
+  byId("change-map-tileset-summary").textContent = selected ? `ベース地面: ${selected.base_ground_id}` : "同じprofileの別タイルセットがありません。";
+  byId("change-map-tileset-form").querySelector('button[type="submit"]').disabled = compatible.length === 0;
 }
 
 function showToast(message, error = false) {
@@ -658,8 +758,8 @@ function renderInspector() {
     <div class="section">
       <div class="section-title"><h2>マップ設定</h2><span class="subtle">${escapeHtml(state.data.profile)} / ${escapeHtml(state.data.tileset_id)}</span></div>
       <div class="form-grid">
-        <div class="field"><label>幅</label><input id="map-width" type="number" min="1" max="512" value="${width}"></div>
-        <div class="field"><label>高さ</label><input id="map-height" type="number" min="1" max="512" value="${height}"></div>
+        <div class="field"><label>幅</label><input id="map-width" type="number" min="${MIN_MAP_WIDTH}" max="512" value="${width}"></div>
+        <div class="field"><label>高さ</label><input id="map-height" type="number" min="${MIN_MAP_HEIGHT}" max="512" value="${height}"></div>
         <div class="field"><label>横方向</label><select id="resize-horizontal"><option value="left" ${state.resizeHorizontal === "left" ? "selected" : ""}>左側を増減</option><option value="right" ${state.resizeHorizontal === "right" ? "selected" : ""}>右側を増減</option></select></div>
         <div class="field"><label>縦方向</label><select id="resize-vertical"><option value="up" ${state.resizeVertical === "up" ? "selected" : ""}>上側を増減</option><option value="down" ${state.resizeVertical === "down" ? "selected" : ""}>下側を増減</option></select></div>
       </div>
@@ -816,6 +916,9 @@ function drawEventMarkers(context, scale) {
       context.strokeRect(position[0] * scale + 2, position[1] * scale + 2, scale - 4, scale - 4);
     }
   }
+}
+
+function drawActors(context, scale) {
   for (const actor of state.data.actors) {
     const selected = actor.id === state.selectedActorId;
     const rendered = drawActorOnMap(context, actor, scale);
@@ -827,9 +930,6 @@ function drawEventMarkers(context, scale) {
       context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
       context.fill();
       if (actor.kind !== "prop") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
-    }
-    if (selected && rendered) {
-      drawCellSelectionFrame(context, actor.position, scale);
     }
   }
 }
@@ -853,7 +953,10 @@ function drawMap(now) {
       const y = Math.floor(index / width) * scale;
       for (const layer of cell.layers) drawSourceTile(context, frameTile(layer, now), x, y, scale);
     });
-    for (const cell of state.resolved.object_cells) drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+    for (const cell of state.resolved.object_cells) {
+      if (cell.draw_group === "object_foreground") continue;
+      drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+    }
     if (state.showCollision) {
       context.fillStyle = "rgba(239,91,80,.32)";
       context.strokeStyle = "rgba(255,130,118,.9)";
@@ -867,6 +970,13 @@ function drawMap(now) {
       });
     }
   }
+  drawActors(context, scale);
+  if (state.resolved) {
+    for (const cell of state.resolved.object_cells) {
+      if (cell.draw_group !== "object_foreground") continue;
+      drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+    }
+  }
   const selected = currentInstance();
   if (selected) {
     const definition = state.tileset.objects.find((object) => object.id === selected.definition_id);
@@ -878,6 +988,7 @@ function drawMap(now) {
   }
   drawTravelMarkers(context, scale);
   drawEventMarkers(context, scale);
+  if (currentActor()) drawCellSelectionFrame(context, currentActor().position, scale);
   if (state.showGrid) {
     context.strokeStyle = "rgba(238,233,215,.18)";
     context.lineWidth = 1;
@@ -1402,15 +1513,15 @@ function handlePaletteAction(element) {
 function resizeMap() {
   const width = Number(byId("map-width").value);
   const height = Number(byId("map-height").value);
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 512 || height > 512) {
-    showToast("幅と高さは1〜512の整数で指定してください。", true);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < MIN_MAP_WIDTH || height < MIN_MAP_HEIGHT || width > 512 || height > 512) {
+    showToast(`幅は${MIN_MAP_WIDTH}〜512、高さは${MIN_MAP_HEIGHT}〜512の整数で指定してください。`, true);
     return;
   }
   if (width === state.data.size[0] && height === state.data.size[1]) return;
   const [previousWidth, previousHeight] = state.data.size;
   const offsetX = state.resizeHorizontal === "left" ? width - previousWidth : 0;
   const offsetY = state.resizeVertical === "up" ? height - previousHeight : 0;
-  const rootGround = state.data.profile === "world" && state.tileset.grounds.some((ground) => ground.id === "sea") ? "sea" : state.tileset.grounds[0].id;
+  const rootGround = state.tileset.grounds[0].id;
   commit(() => {
     const previous = state.data.grounds;
     state.data.grounds = Array.from({ length: height }, (_unused, y) => Array.from({ length: width }, (_empty, x) => {
@@ -1650,8 +1761,18 @@ async function save() {
       state.dirty = false;
       state.history = [];
       state.future = [];
+      const existing = state.mapCatalog.find((item) => item.map_id === state.data.map_id);
+      const record = {
+        map_id: state.data.map_id,
+        profile: state.data.profile,
+        tileset_id: state.data.tileset_id,
+        size: state.data.size,
+      };
+      if (existing) Object.assign(existing, record, { is_new: false });
+      else state.mapCatalog.push(record);
       showToast("制作用マップを保存し、ゲーム用データを生成しました。");
     } else showToast("エラーを修正してから保存してください。", true);
+    renderMapSelector();
     renderAll();
   } catch (error) {
     updateSaveState("error", "保存失敗");
@@ -1666,30 +1787,106 @@ async function initialize() {
     return;
   }
   try {
-    const payload = await api("/api/document");
-    state.data = payload.data;
-    state.tileset = payload.tileset;
-    state.siteNamesJa = payload.site_names_ja;
-    state.destinationOptions = payload.destination_options;
-    state.siteOptions = payload.site_options;
-    state.eventOptions = payload.event_options;
-    state.actorAssets = payload.actor_assets || {};
-    state.resolved = payload.resolved;
-    state.diagnostics = payload.diagnostics;
-    state.dirty = payload.is_new;
-    state.groundId = state.tileset.grounds[0]?.id || null;
-    state.objectId = state.tileset.objects[0]?.id || null;
-    restoreUiSettings();
-    rawImage.onload = prepareSourceImage;
-    rawImage.onerror = () => showToast("マップチップ画像を表示できません。", true);
-    rawImage.src = editorApiPath(payload.image_url);
-    loadActorSheets();
-    renderAll();
+    const requestedMap = new URLSearchParams(window.location.search).get("map");
+    const [catalog, payload] = await Promise.all([
+      api("/api/catalog"),
+      api(requestedMap ? `/api/document?map=${encodeURIComponent(requestedMap)}` : "/api/document"),
+    ]);
+    state.mapCatalog = catalog.maps || [];
+    state.tilesetCatalog = catalog.tilesets || [];
+    applyDocumentPayload(payload);
   } catch (error) {
     showToast(error.message, true);
     updateSaveState("error", "読込失敗");
   }
 }
+
+byId("map-select").addEventListener("change", async (event) => {
+  const mapId = event.target.value;
+  if (mapId === state.data?.map_id) return;
+  if (state.dirty && !window.confirm("未保存の変更を破棄してマップを切り替えますか？")) {
+    renderMapSelector();
+    return;
+  }
+  try {
+    await loadMapDocument(mapId);
+  } catch (error) {
+    showToast(error.message, true);
+    renderMapSelector();
+  }
+});
+byId("new-map-button").addEventListener("click", () => {
+  if (state.dirty && !window.confirm("未保存の変更を破棄して新規マップを作成しますか？")) return;
+  byId("new-map-id").value = "";
+  renderNewMapTilesets();
+  byId("new-map-dialog").showModal();
+});
+byId("new-map-profile").addEventListener("change", renderNewMapTilesets);
+byId("new-map-tileset").addEventListener("change", renderNewMapTilesets);
+byId("new-map-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget || event.target.dataset.action === "close-new-map-dialog") byId("new-map-dialog").close();
+});
+byId("new-map-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await api("/api/create", {
+      method: "POST",
+      body: JSON.stringify({
+        map_id: byId("new-map-id").value.trim(),
+        profile: byId("new-map-profile").value,
+        tileset_id: byId("new-map-tileset").value,
+        width: Number(byId("new-map-width").value),
+        height: Number(byId("new-map-height").value),
+      }),
+    });
+    byId("new-map-dialog").close();
+    applyDocumentPayload(payload);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
+byId("change-map-tileset-button").addEventListener("click", () => {
+  if (state.dirty) {
+    showToast("先に現在の変更を保存してください。", true);
+    return;
+  }
+  renderChangeMapTilesets();
+  byId("change-map-tileset-dialog").showModal();
+});
+byId("change-map-tileset-select").addEventListener("change", renderChangeMapTilesets);
+byId("change-map-tileset-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget || event.target.dataset.action === "close-change-map-tileset-dialog") byId("change-map-tileset-dialog").close();
+});
+byId("change-map-tileset-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!window.confirm(`マップ ${state.data.map_id} の内容をすべてクリアしてマップチップを変更しますか？`)) return;
+  try {
+    const payload = await api("/api/change-tileset", {
+      method: "POST",
+      body: JSON.stringify({ map_id: state.data.map_id, tileset_id: byId("change-map-tileset-select").value }),
+    });
+    byId("change-map-tileset-dialog").close();
+    applyDocumentPayload(payload);
+    showToast("マップを初期化しました。保存すると変更が確定します。");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
+byId("delete-map-button").addEventListener("click", async () => {
+  if (state.dirty) {
+    showToast("未保存の変更があるため削除できません。", true);
+    return;
+  }
+  if (!window.confirm(`マップ ${state.data.map_id} を削除しますか？この操作は元に戻せません。`)) return;
+  try {
+    const result = await api("/api/delete", { method: "POST", body: JSON.stringify({ map_id: state.data.map_id }) });
+    state.mapCatalog = result.maps || [];
+    if (result.next_map_id) await loadMapDocument(result.next_map_id);
+    showToast(`マップ ${result.map_id} を削除しました。`);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
 
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => {
   state.tab = button.dataset.tab;

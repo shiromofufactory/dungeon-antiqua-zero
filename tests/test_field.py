@@ -239,6 +239,40 @@ class FieldRendererTest(unittest.TestCase):
         far_field = FieldMovement(map_data, start=FieldPosition(2, 2))
         self.assertEqual(renderer.camera_position(far_field), (16, 16))
 
+    def test_draws_foreground_objects_after_player(self) -> None:
+        objects = (
+            MapObjectTile("floor_1", "floor", 1, 1, "object", 0, 0),
+            MapObjectTile(
+                "roof_1",
+                "roof",
+                1,
+                1,
+                "object_foreground",
+                0,
+                0,
+            ),
+        )
+        map_data = compiled_map(("000", "000", "000"), objects=objects)
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(field)
+
+        self.assertEqual(
+            pyxel.blt.call_args_list[-2],
+            call(8, 8, 0, 0, 96, 16, 16, 1),
+        )
+        self.assertEqual(
+            pyxel.blt.call_args_list[-1],
+            call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
+        )
+
     def test_draws_actor_common_sheets_and_player_character_bank(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
         object.__setattr__(

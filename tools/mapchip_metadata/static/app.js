@@ -18,9 +18,12 @@ const state = {
   imageInfo: null,
   imageUrl: "",
   diagnostics: [],
+  tilesetCatalog: [],
+  sourceImages: [],
   dirty: false,
   history: [],
   future: [],
+  objectOrigins: [],
   tab: "ground",
   groundIndex: 0,
   boundaryIndex: 0,
@@ -86,10 +89,13 @@ function editorApiPath(path) {
   return editorRoute ? `/${editorRoute}${path}` : path;
 }
 
-function editorUrl(editor) {
+function editorUrl(editor, parameters = {}) {
   if (!editorRoute) return null;
   const url = new URL(`/${editor}/`, window.location.origin);
   url.searchParams.set("token", token);
+  for (const [key, value] of Object.entries(parameters)) {
+    if (value) url.searchParams.set(key, value);
+  }
   return url.href;
 }
 
@@ -98,7 +104,10 @@ function configureEditorNavigation() {
   if (!navigation || !editorRoute) return;
   navigation.hidden = false;
   navigation.querySelectorAll("[data-editor-link]").forEach((link) => {
-    link.href = editorUrl(link.dataset.editorLink);
+    link.href = editorUrl(link.dataset.editorLink, {
+      tileset: state.data?.tileset_id,
+      map: new URLSearchParams(window.location.search).get("map"),
+    });
   });
 }
 
@@ -149,6 +158,81 @@ async function api(path, options = {}, retryAuthentication = true) {
   return value;
 }
 
+function currentTilesetCatalogRecord() {
+  return state.tilesetCatalog.find((item) => item.tileset_id === state.data?.tileset_id) || null;
+}
+
+function renderTilesetSelector() {
+  const select = byId("tileset-select");
+  const records = [...state.tilesetCatalog];
+  if (state.data && !records.some((item) => item.tileset_id === state.data.tileset_id)) {
+    records.push({
+      tileset_id: state.data.tileset_id,
+      source_image_id: state.data.source_image_id,
+      profile: state.data.profile,
+      base_ground_id: state.data.grounds[0]?.id,
+      map_ids: [],
+      is_new: true,
+    });
+  }
+  records.sort((left, right) => left.tileset_id.localeCompare(right.tileset_id));
+  select.innerHTML = records.map((item) => `<option value="${escapeHtml(item.tileset_id)}" ${item.tileset_id === state.data?.tileset_id ? "selected" : ""}>${escapeHtml(item.tileset_id)} — ${escapeHtml(item.profile)} / ${escapeHtml(item.source_image_id)}${item.is_new ? "（未保存）" : ""}</option>`).join("");
+  select.disabled = records.length === 0;
+  const record = currentTilesetCatalogRecord();
+  byId("delete-tileset-button").disabled = !record || state.data?.tileset_id === "worldmap";
+}
+
+function sourceImageOptions(selected = "") {
+  return state.sourceImages.map((item) => `<option value="${escapeHtml(item.image_id)}" ${item.image_id === selected ? "selected" : ""}>${escapeHtml(item.file_name)}</option>`).join("");
+}
+
+function applyDocumentPayload(payload) {
+  window.clearTimeout(state.validateTimer);
+  state.data = payload.data;
+  state.imageInfo = payload.image_info;
+  state.imageUrl = payload.image_url;
+  state.diagnostics = payload.diagnostics;
+  state.dirty = Boolean(payload.is_new);
+  state.history = [];
+  state.future = [];
+  state.objectOrigins = (state.data.objects || []).map((object) => payload.is_new ? null : object.id);
+  state.tab = "ground";
+  state.groundIndex = 0;
+  state.boundaryIndex = 0;
+  state.objectIndex = 0;
+  state.choiceIndex = 0;
+  state.frameIndex = 0;
+  state.selection = { x: 0, y: 0, width: 1, height: 1 };
+  const fallback = state.data.grounds.some((ground) => ground.id === "plain") ? "plain" : state.data.grounds[0]?.id;
+  state.previewGrounds = Array(9).fill(fallback);
+  if (state.data.grounds.some((ground) => ground.id === "sand")) state.previewGrounds[4] = "sand";
+  restorePreviewSettings();
+  byId("image-summary").textContent = `${state.imageInfo.width}×${state.imageInfo.height}px · ${state.imageInfo.columns}×${state.imageInfo.rows} cells · 16px · ${state.data.source_image_id}`;
+  rawImage.onload = prepareProcessedImage;
+  rawImage.onerror = () => showToast("ソース画像を表示できません。", true);
+  rawImage.src = `${editorApiPath(state.imageUrl)}&revision=${Date.now()}`;
+  const url = new URL(window.location.href);
+  url.searchParams.set("tileset", state.data.tileset_id);
+  window.history.replaceState(null, "", url);
+  renderTilesetSelector();
+  configureEditorNavigation();
+  renderAll();
+  savePreviewSettings();
+  updateSaveState(payload.is_new ? "dirty" : "saved", payload.is_new ? "未保存" : "保存済み");
+}
+
+async function loadTilesetDocument(tilesetId) {
+  const payload = await api(`/api/document?tileset=${encodeURIComponent(tilesetId)}`);
+  applyDocumentPayload(payload);
+}
+
+async function refreshCatalog() {
+  const catalog = await api("/api/catalog");
+  state.tilesetCatalog = catalog.tilesets || [];
+  state.sourceImages = catalog.source_images || [];
+  renderTilesetSelector();
+}
+
 function showToast(message, error = false) {
   const toast = byId("toast");
   toast.textContent = message;
@@ -173,7 +257,7 @@ function updateSaveState(kind = null, text = null) {
 }
 
 function commit(mutator) {
-  state.history.push(JSON.stringify(state.data));
+  state.history.push(JSON.stringify({ data: state.data, objectOrigins: state.objectOrigins }));
   if (state.history.length > 100) state.history.shift();
   state.future = [];
   mutator();
@@ -186,8 +270,10 @@ function commit(mutator) {
 
 function undo() {
   if (!state.history.length) return;
-  state.future.push(JSON.stringify(state.data));
-  state.data = JSON.parse(state.history.pop());
+  state.future.push(JSON.stringify({ data: state.data, objectOrigins: state.objectOrigins }));
+  const previous = JSON.parse(state.history.pop());
+  state.data = previous.data;
+  state.objectOrigins = previous.objectOrigins;
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
@@ -197,8 +283,10 @@ function undo() {
 
 function redo() {
   if (!state.future.length) return;
-  state.history.push(JSON.stringify(state.data));
-  state.data = JSON.parse(state.future.pop());
+  state.history.push(JSON.stringify({ data: state.data, objectOrigins: state.objectOrigins }));
+  const next = JSON.parse(state.future.pop());
+  state.data = next.data;
+  state.objectOrigins = next.objectOrigins;
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
@@ -354,10 +442,10 @@ function tileThumb(tile) {
   return `${tileThumbImage(tile)}<span>${column},${row}</span>`;
 }
 
-function renderDefinitionList(items, activeIndex, action, addAction, addLabel) {
+function renderDefinitionList(items, activeIndex, action, addAction, addLabel, baseIndex = null) {
   const chips = items.map((item, index) => `
     <button type="button" class="definition-chip ${index === activeIndex ? "active" : ""}"
-      data-action="${action}" data-index="${index}">${escapeHtml(item.id || `#${index + 1}`)}</button>
+      data-action="${action}" data-index="${index}">${escapeHtml(item.id || `#${index + 1}`)}${index === baseIndex ? " · ベース" : ""}</button>
   `).join("");
   return `<div class="definition-list">${chips}<button type="button" class="definition-chip" data-action="${addAction}">＋ ${addLabel}</button></div>`;
 }
@@ -419,18 +507,18 @@ function renderGroundEditor() {
   return `
     <div class="section">
       <div class="section-title"><h3>地面定義</h3><span class="subtle">最上位地面を1セルに保存</span></div>
-      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面")}
+      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", 0)}
       <div class="divider"></div>
       <div class="form-grid">
-        <div class="field"><label>地面ID</label><input type="text" value="${escapeHtml(ground.id)}" data-change="ground-id"></div>
-        <div class="field"><label>描画上の親</label><select data-change="ground-parent">
+        <div class="field"><label>地面ID${state.groundIndex === 0 ? "（ベース・変更不可）" : ""}</label><input type="text" value="${escapeHtml(ground.id)}" data-change="ground-id" ${state.groundIndex === 0 ? "disabled" : ""}></div>
+        <div class="field"><label>描画上の親${state.groundIndex === 0 ? "（ベースは設定不可）" : ""}</label><select data-change="ground-parent" ${state.groundIndex === 0 ? "disabled" : ""}>
           <option value="">なし</option>
           ${grounds.map((candidate, index) => index === state.groundIndex ? "" : `<option value="${escapeHtml(candidate.id)}" ${ground.parent_id === candidate.id ? "selected" : ""}>${escapeHtml(candidate.id)}</option>`).join("")}
         </select></div>
         <div class="field"><label>通行</label><select data-change="ground-collision"><option value="passable" ${ground.collision === "passable" ? "selected" : ""}>通行可</option><option value="blocked" ${ground.collision === "blocked" ? "selected" : ""}>通行不可</option></select></div>
         <div class="field"><label>境界ルール数</label><input type="text" value="${ground.boundaries.length}" disabled></div>
       </div>
-      <div class="row end" style="margin-top:10px"><button type="button" class="button danger small" data-action="delete-ground" ${grounds.length <= 1 ? "disabled" : ""}>地面を削除</button></div>
+      <div class="row end" style="margin-top:10px"><button type="button" class="button danger small" data-action="delete-ground" ${grounds.length <= 1 || state.groundIndex === 0 ? "disabled" : ""}>地面を削除</button></div>
     </div>
     <div class="section">
       <div class="section-title"><h3>通常表示</h3><span class="subtle">境界ルールに一致しない場合</span></div>
@@ -446,7 +534,7 @@ function renderBoundaryEditor() {
   return `
     <div class="section">
       <div class="section-title"><h3>対象地面</h3><span class="subtle">親を含むかでsame判定</span></div>
-      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面")}
+      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", 0)}
     </div>
     <div class="section">
       <div class="section-title"><h3>境界ルール</h3><span class="subtle">左から順に最初の一致を採用</span></div>
@@ -508,7 +596,7 @@ function renderObjectEditor() {
         <div class="field full"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
-        <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常より手前）</option></select></div>
+        <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常オブジェクトより手前）</option><option value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>キャラクター前景（屋根など）</option></select></div>
       </div>
       <div class="row between" style="margin-top:10px">
         <button type="button" class="button secondary small" data-action="object-from-selection">選択矩形で置換</button>
@@ -749,13 +837,21 @@ function scheduleValidation() {
 async function save() {
   updateSaveState("dirty", "保存中…");
   try {
-    const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data }) });
+    const objectIdRenames = {};
+    (state.data.objects || []).forEach((object, index) => {
+      const originalId = state.objectOrigins[index];
+      if (originalId && originalId !== object.id) objectIdRenames[originalId] = object.id;
+    });
+    const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data, object_id_renames: objectIdRenames }) });
     state.diagnostics = result.diagnostics;
     if (result.saved) {
       state.dirty = false;
       state.history = [];
       state.future = [];
-      showToast("メタデータを保存しました。");
+      state.objectOrigins = (state.data.objects || []).map((object) => object.id);
+      await refreshCatalog();
+      const updatedCount = result.updated_map_ids?.length || 0;
+      showToast(updatedCount ? `メタデータを保存し、${updatedCount}件のマップを更新しました。` : "メタデータを保存しました。");
     } else {
       showToast("エラーを修正してから保存してください。", true);
     }
@@ -871,6 +967,7 @@ function handleAction(element) {
   } else if (action === "add-object") {
     commit(() => {
       objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
+      state.objectOrigins.push(null);
       state.objectIndex = objects.length - 1;
     });
   } else if (action === "object-from-selection") {
@@ -879,6 +976,7 @@ function handleAction(element) {
       if (!object) {
         object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", cells: [] };
         objects.push(object);
+        state.objectOrigins.push(null);
         state.objectIndex = objects.length - 1;
       }
       object.size = [state.selection.width, state.selection.height];
@@ -891,7 +989,10 @@ function handleAction(element) {
     });
   } else if (action === "delete-object") {
     if (!window.confirm(`オブジェクト ${currentObject().id} を削除しますか？`)) return;
-    commit(() => objects.splice(state.objectIndex, 1));
+    commit(() => {
+      objects.splice(state.objectIndex, 1);
+      state.objectOrigins.splice(state.objectIndex, 1);
+    });
   } else if (action === "toggle-object-cell-collision") {
     const x = Number(element.dataset.x);
     const y = Number(element.dataset.y);
@@ -946,27 +1047,98 @@ async function initialize() {
     return;
   }
   try {
-    const payload = await api("/api/document");
-    state.data = payload.data;
-    state.imageInfo = payload.image_info;
-    state.imageUrl = payload.image_url;
-    state.diagnostics = payload.diagnostics;
-    const fallback = state.data.grounds.some((ground) => ground.id === "plain") ? "plain" : state.data.grounds[0]?.id;
-    state.previewGrounds = Array(9).fill(fallback);
-    if (state.data.grounds.some((ground) => ground.id === "sand")) state.previewGrounds[4] = "sand";
-    restorePreviewSettings();
-    byId("image-summary").textContent = `${state.imageInfo.width}×${state.imageInfo.height}px · ${state.imageInfo.columns}×${state.imageInfo.rows} cells · 16px`;
-    rawImage.onload = prepareProcessedImage;
-    rawImage.onerror = () => showToast("ソース画像を表示できません。", true);
-    rawImage.src = editorApiPath(state.imageUrl);
-    renderAll();
-    savePreviewSettings();
-    updateSaveState("saved", "保存済み");
+    const requestedTileset = new URLSearchParams(window.location.search).get("tileset");
+    const [catalog, payload] = await Promise.all([
+      api("/api/catalog"),
+      api(requestedTileset ? `/api/document?tileset=${encodeURIComponent(requestedTileset)}` : "/api/document"),
+    ]);
+    state.tilesetCatalog = catalog.tilesets || [];
+    state.sourceImages = catalog.source_images || [];
+    applyDocumentPayload(payload);
   } catch (error) {
     showToast(error.message, true);
     updateSaveState("error", "読込失敗");
   }
 }
+
+byId("tileset-select").addEventListener("change", async (event) => {
+  const tilesetId = event.target.value;
+  if (tilesetId === state.data?.tileset_id) return;
+  if (state.dirty && !window.confirm("未保存の変更を破棄してタイルセットを切り替えますか？")) {
+    renderTilesetSelector();
+    return;
+  }
+  try {
+    await loadTilesetDocument(tilesetId);
+  } catch (error) {
+    showToast(error.message, true);
+    renderTilesetSelector();
+  }
+});
+byId("new-tileset-button").addEventListener("click", () => {
+  if (state.dirty && !window.confirm("未保存の変更を破棄して新規タイルセットを作成しますか？")) return;
+  byId("new-tileset-id").value = "";
+  byId("new-tileset-source").innerHTML = sourceImageOptions();
+  byId("new-tileset-dialog").showModal();
+});
+byId("new-tileset-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget || event.target.dataset.action === "close-new-tileset-dialog") byId("new-tileset-dialog").close();
+});
+byId("new-tileset-profile").addEventListener("change", () => {
+  const world = byId("new-tileset-profile").value === "world";
+  const baseInput = byId("new-tileset-base-id");
+  const collisionInput = byId("new-tileset-base-collision");
+  if (world) {
+    baseInput.value = "sea";
+    collisionInput.value = "blocked";
+  }
+  baseInput.disabled = world;
+  collisionInput.disabled = world;
+});
+byId("new-tileset-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await api("/api/create", {
+      method: "POST",
+      body: JSON.stringify({
+        tileset_id: byId("new-tileset-id").value.trim(),
+        source_image_id: byId("new-tileset-source").value,
+        profile: byId("new-tileset-profile").value,
+        base_ground_id: byId("new-tileset-base-id").value.trim(),
+        base_collision: byId("new-tileset-base-collision").value,
+      }),
+    });
+    byId("new-tileset-dialog").close();
+    applyDocumentPayload(payload);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
+byId("delete-tileset-button").addEventListener("click", async () => {
+  const record = currentTilesetCatalogRecord();
+  if (!record) return;
+  const maps = record.map_ids || [];
+  if (maps.length) {
+    showToast(`次のマップで使用中のため削除できません: ${maps.join(", ")}`, true);
+    return;
+  }
+  if (state.dirty) {
+    showToast("未保存の変更があるため削除できません。", true);
+    return;
+  }
+  if (!window.confirm(`タイルセット ${state.data.tileset_id} を削除しますか？この操作は元に戻せません。`)) return;
+  try {
+    const result = await api("/api/delete", {
+      method: "POST",
+      body: JSON.stringify({ tileset_id: state.data.tileset_id }),
+    });
+    state.tilesetCatalog = result.tilesets || [];
+    if (result.next_tileset_id) await loadTilesetDocument(result.next_tileset_id);
+    showToast(`タイルセット ${result.tileset_id} を削除しました。`);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
 
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => {
   state.tab = button.dataset.tab;

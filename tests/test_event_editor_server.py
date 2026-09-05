@@ -34,6 +34,7 @@ class EventEditorServerTest(unittest.TestCase):
             json.dumps([
                 {
                     "message_id": "sample.hello",
+                    "portrait_character_key": "Fiora",
                     "text_ja": ["こんにちは"],
                     "text_en": ["Hello"],
                     "text_zhcn": ["你好"],
@@ -121,6 +122,10 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertEqual(payload["flags"][0]["flag_id"], "story.done")
         self.assertEqual(payload["catalogs"]["message_ids"], ["sample.hello"])
         self.assertEqual(payload["messages"][0]["message_id"], "sample.hello")
+        self.assertEqual(
+            payload["messages"][0]["portrait_character_key"],
+            "Fiora",
+        )
         self.assertEqual(payload["catalogs"]["bgm_ids"], ["field"])
         self.assertEqual(payload["catalogs"]["se_ids"], ["confirm"])
         self.assertEqual(payload["catalogs"]["actor_ids"], ["elder"])
@@ -158,6 +163,10 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertIn("sample.hello", runtime["events"])
         self.assertNotIn("note", runtime["events"]["sample.hello"])
         self.assertNotIn("note", runtime_messages[0])
+        self.assertEqual(
+            runtime_messages[0]["portrait_character_key"],
+            "Fiora",
+        )
 
     def test_saves_global_flag_and_cross_namespace_reference_together(self) -> None:
         flags = [{"flag_id": "quest.alvan_joined", "note": "加入済み"}]

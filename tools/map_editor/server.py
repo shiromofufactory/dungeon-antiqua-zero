@@ -58,6 +58,7 @@ MIME_TYPES = {
     ".png": "image/png",
     ".gif": "image/gif",
 }
+PROTECTED_MAP_IDS = frozenset(("worldmap",))
 
 
 def _valid_id(value: str) -> bool:
@@ -117,10 +118,85 @@ class MapEditorApplication:
             raise ValueError("文言パスがcontent/data外です。")
 
     def load_source(self) -> tuple[dict[str, Any], bool]:
-        if self.source_path.is_file():
-            return load_map_source(self.source_path), False
+        return self.load_source_by_id(self.map_id)
+
+    def source_path_for(self, map_id: str) -> Path:
+        if not _valid_id(map_id):
+            raise ValueError("マップIDはlower_snake_caseで指定してください。")
+        path = (self.content_root / "maps" / "sources" / f"{map_id}.json").resolve()
+        source_root = (self.content_root / "maps" / "sources").resolve()
+        if source_root not in path.parents:
+            raise ValueError("マップパスがcontent/maps/sources外です。")
+        return path
+
+    def runtime_path_for(self, map_id: str) -> Path:
+        if not _valid_id(map_id):
+            raise ValueError("マップIDはlower_snake_caseで指定してください。")
+        path = (self.runtime_root / f"{map_id}.json").resolve()
+        if self.runtime_root not in path.parents:
+            raise ValueError("生成先がruntime root外です。")
+        return path
+
+    def load_source_by_id(self, map_id: str) -> tuple[dict[str, Any], bool]:
+        source_path = self.source_path_for(map_id)
+        if source_path.is_file():
+            return load_map_source(source_path), False
+        if map_id != self.map_id:
+            raise FileNotFoundError(f"制作用マップが見つかりません: {source_path}")
         tileset = self.load_tileset(self.initial_tileset_id)
-        return initial_map_source(self.map_id, tileset, self.profile, self.width, self.height), True
+        return initial_map_source(map_id, tileset, self.profile, self.width, self.height), True
+
+    def map_catalog(self) -> list[dict[str, object]]:
+        source_dir = self.content_root / "maps" / "sources"
+        catalog = []
+        if source_dir.is_dir():
+            for path in sorted(source_dir.glob("*.json")):
+                source = load_map_source(path)
+                map_id = source.get("map_id")
+                if not isinstance(map_id, str) or path.stem != map_id:
+                    raise ValueError(f"マップIDとファイル名が一致しません: {path}")
+                catalog.append(
+                    {
+                        "map_id": map_id,
+                        "profile": source.get("profile"),
+                        "tileset_id": source.get("tileset_id"),
+                        "size": source.get("size"),
+                    }
+                )
+        if not catalog and not self.source_path.is_file():
+            catalog.append(
+                {
+                    "map_id": self.map_id,
+                    "profile": self.profile,
+                    "tileset_id": self.initial_tileset_id,
+                    "size": [self.width, self.height],
+                    "is_new": True,
+                }
+            )
+        return catalog
+
+    def tileset_catalog(self) -> list[dict[str, object]]:
+        tileset_dir = self.content_root / "maps" / "tilesets"
+        catalog = []
+        if tileset_dir.is_dir():
+            for path in sorted(tileset_dir.glob("*.json")):
+                tileset = load_tileset(path)
+                tileset_id = tileset.get("tileset_id")
+                if not isinstance(tileset_id, str) or path.stem != tileset_id:
+                    raise ValueError(f"タイルセットIDとファイル名が一致しません: {path}")
+                catalog.append(
+                    {
+                        "tileset_id": tileset_id,
+                        "source_image_id": tileset.get("source_image_id"),
+                        "profile": tileset.get("profile"),
+                        "base_ground_id": (
+                            tileset.get("grounds", [{}])[0].get("id")
+                            if tileset.get("grounds")
+                            else None
+                        ),
+                    }
+                )
+        return catalog
 
     def load_tileset(self, tileset_id: str) -> dict[str, Any]:
         path = (self.content_root / "maps" / "tilesets" / f"{tileset_id}.json").resolve()
@@ -297,11 +373,7 @@ class MapEditorApplication:
         tileset_diagnostics, image_info = validate_tileset(tileset, image_path, self.palette_path)
         map_diagnostics = validate_map_source(data, tileset)
         link_diagnostics = (
-            [
-                item
-                for item in validate_map_links(self.map_sources(data))
-                if item.path.startswith(f"{data.get('map_id')}.")
-            ]
+            validate_map_links(self.map_sources(data))
             if isinstance(data, dict)
             else []
         )
@@ -351,8 +423,12 @@ class MapEditorApplication:
                     diagnostics.append(Diagnostic("error", "resolve_failed", "$", str(error)))
         return [item.as_dict() for item in diagnostics], image_info.as_dict() if image_info else None, resolved
 
-    def document_payload(self) -> dict[str, Any]:
-        data, is_new = self.load_source()
+    def _document_payload(
+        self,
+        data: dict[str, Any],
+        *,
+        is_new: bool,
+    ) -> dict[str, Any]:
         tileset = self.load_tileset(data["tileset_id"])
         site_names_ja = self.site_names_ja(data)
         diagnostics, image_info, resolved = self.validate(data, site_names_ja)
@@ -366,11 +442,130 @@ class MapEditorApplication:
             "diagnostics": diagnostics,
             "resolved": resolved,
             "image_info": image_info,
-            "image_url": f"/api/source-image?token={self.token}",
+            "image_url": (
+                f"/api/source-image?tileset={data['tileset_id']}&token={self.token}"
+            ),
             "actor_assets": self.actor_assets_payload(),
             "is_new": is_new,
-            "source_path": self._display_path(self.source_path),
-            "runtime_path": self._display_path(self.runtime_path),
+            "source_path": self._display_path(self.source_path_for(data["map_id"])),
+            "runtime_path": self._display_path(self.runtime_path_for(data["map_id"])),
+        }
+
+    def document_payload(self, map_id: str | None = None) -> dict[str, Any]:
+        data, is_new = (
+            self.load_source()
+            if map_id is None
+            else self.load_source_by_id(map_id)
+        )
+        return self._document_payload(data, is_new=is_new)
+
+    def create_document_payload(
+        self,
+        map_id: str,
+        tileset_id: str,
+        profile: str,
+        width: int,
+        height: int,
+    ) -> dict[str, Any]:
+        if not isinstance(map_id, str) or not isinstance(tileset_id, str):
+            raise ValueError("マップIDとタイルセットIDが不正です。")
+        if not isinstance(profile, str):
+            raise ValueError("profileが不正です。")
+        if (
+            isinstance(width, bool)
+            or not isinstance(width, int)
+            or isinstance(height, bool)
+            or not isinstance(height, int)
+        ):
+            raise ValueError("マップ寸法が不正です。")
+        source_path = self.source_path_for(map_id)
+        if source_path.exists():
+            raise ValueError(f"マップIDはすでに使用されています: {map_id}")
+        tileset = self.load_tileset(tileset_id)
+        if profile != tileset.get("profile"):
+            raise ValueError("マップとタイルセットのprofileが一致していません。")
+        data = initial_map_source(map_id, tileset, profile, width, height)
+        return self._document_payload(data, is_new=True)
+
+    def change_tileset_document_payload(
+        self,
+        map_id: str,
+        tileset_id: str,
+    ) -> dict[str, Any]:
+        if not isinstance(map_id, str) or not isinstance(tileset_id, str):
+            raise ValueError("マップIDとタイルセットIDが不正です。")
+        source, is_new = self.load_source_by_id(map_id)
+        if is_new:
+            raise ValueError("未保存マップのタイルセットは新規作成画面で選択してください。")
+        if source.get("tileset_id") == tileset_id:
+            raise ValueError("現在と異なるタイルセットを選択してください。")
+        tileset = self.load_tileset(tileset_id)
+        if source.get("profile") != tileset.get("profile"):
+            raise ValueError("マップとタイルセットのprofileが一致していません。")
+        width, height = source["size"]
+        reset_source = initial_map_source(
+            map_id,
+            tileset,
+            source["profile"],
+            width,
+            height,
+        )
+        payload = self._document_payload(reset_source, is_new=False)
+        payload["dirty"] = True
+        return payload
+
+    def map_delete_blockers(self, map_id: str) -> list[str]:
+        target, is_new = self.load_source_by_id(map_id)
+        if is_new:
+            raise ValueError("未保存マップは削除対象ではありません。")
+        target_site_ids = {
+            site.get("id")
+            for site in target.get("sites", [])
+            if isinstance(site, Mapping) and isinstance(site.get("id"), str)
+        }
+        blockers: set[str] = set()
+        for other_id, source in self.map_sources(target).items():
+            if other_id == map_id:
+                continue
+            for site in source.get("sites", []):
+                if not isinstance(site, Mapping):
+                    continue
+                destination = site.get("destination")
+                if isinstance(destination, Mapping) and destination.get("map_id") == map_id:
+                    blockers.add(f"{other_id}の移動先")
+            for arrival in source.get("arrival_points", []):
+                if (
+                    isinstance(arrival, Mapping)
+                    and arrival.get("teleport_enabled") is True
+                    and arrival.get("site_id") in target_site_ids
+                ):
+                    blockers.add(f"{other_id}のテレポート到着地点")
+        return sorted(blockers)
+
+    def delete_map(self, map_id: str) -> dict[str, Any]:
+        if not isinstance(map_id, str):
+            raise ValueError("マップIDが不正です。")
+        if map_id in PROTECTED_MAP_IDS:
+            raise ValueError("worldmapはゲームの必須マップなので削除できません。")
+        source_path = self.source_path_for(map_id)
+        if not source_path.is_file():
+            raise FileNotFoundError(f"制作用マップが見つかりません: {source_path}")
+        blockers = self.map_delete_blockers(map_id)
+        if blockers:
+            raise ValueError(
+                "他のマップから参照されているため削除できません: "
+                + "、".join(blockers)
+            )
+        runtime_path = self.runtime_path_for(map_id)
+        source_path.unlink()
+        runtime_path.unlink(missing_ok=True)
+        runtime_path.with_suffix(".bin").unlink(missing_ok=True)
+        catalog = self.map_catalog()
+        return {
+            "deleted": True,
+            "map_id": map_id,
+            "next_map_id": catalog[0]["map_id"] if catalog else None,
+            "maps": catalog,
         }
 
     def save(
@@ -387,8 +582,11 @@ class MapEditorApplication:
         except (OSError, ValueError) as error:
             diagnostics.append(Diagnostic("error", "compile_failed", "$", str(error)).as_dict())
             return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
-        save_map_source(self.source_path, data)
-        save_compiled_map(self.runtime_path, compiled)
+        map_id = data["map_id"]
+        source_path = self.source_path_for(map_id)
+        runtime_path = self.runtime_path_for(map_id)
+        save_map_source(source_path, data)
+        save_compiled_map(runtime_path, compiled)
         self._save_site_names(data, site_names_ja)
         return {
             "saved": True,
@@ -507,7 +705,22 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                     self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
                     return
                 try:
-                    self._send_json(application.document_payload())
+                    map_id = parse_qs(parsed.query).get("map", [None])[0]
+                    self._send_json(application.document_payload(map_id))
+                except (OSError, ValueError) as error:
+                    self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+                return
+            if parsed.path == "/api/catalog":
+                if not self._authorized(parsed):
+                    self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
+                    return
+                try:
+                    self._send_json(
+                        {
+                            "maps": application.map_catalog(),
+                            "tilesets": application.tileset_catalog(),
+                        }
+                    )
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
                 return
@@ -516,8 +729,11 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                     self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
                     return
                 try:
-                    data, _is_new = application.load_source()
-                    tileset = application.load_tileset(data["tileset_id"])
+                    tileset_id = parse_qs(parsed.query).get("tileset", [None])[0]
+                    if tileset_id is None:
+                        data, _is_new = application.load_source()
+                        tileset_id = data["tileset_id"]
+                    tileset = application.load_tileset(tileset_id)
                     image_path = application.source_image(tileset)
                     self._send_bytes(image_path.read_bytes(), MIME_TYPES.get(image_path.suffix.lower(), "application/octet-stream"))
                 except (OSError, ValueError) as error:
@@ -548,7 +764,14 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            if parsed.path not in ("/api/validate", "/api/resolve", "/api/save"):
+            if parsed.path not in (
+                "/api/validate",
+                "/api/resolve",
+                "/api/save",
+                "/api/create",
+                "/api/change-tileset",
+                "/api/delete",
+            ):
                 self._error(HTTPStatus.NOT_FOUND, "APIが見つかりません。")
                 return
             if not self._authorized(parsed):
@@ -574,7 +797,28 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                 else None
             )
             try:
-                if parsed.path == "/api/save":
+                if parsed.path == "/api/create":
+                    if not isinstance(payload, dict):
+                        raise ValueError("新規マップの設定が不正です。")
+                    response = application.create_document_payload(
+                        payload.get("map_id"),
+                        payload.get("tileset_id"),
+                        payload.get("profile"),
+                        payload.get("width"),
+                        payload.get("height"),
+                    )
+                elif parsed.path == "/api/change-tileset":
+                    if not isinstance(payload, dict):
+                        raise ValueError("タイルセット変更の設定が不正です。")
+                    response = application.change_tileset_document_payload(
+                        payload.get("map_id"),
+                        payload.get("tileset_id"),
+                    )
+                elif parsed.path == "/api/delete":
+                    if not isinstance(payload, dict):
+                        raise ValueError("削除対象マップが不正です。")
+                    response = application.delete_map(payload.get("map_id"))
+                elif parsed.path == "/api/save":
                     response = application.save(data, site_names_ja)
                 else:
                     diagnostics, image_info, resolved = application.validate(

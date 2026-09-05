@@ -1976,7 +1976,6 @@ class Game:
             if isinstance(effect, MessageEffect):
                 self.event_message = EventMessageOverlay(
                     message_id=effect.message_id,
-                    portrait_character_key=effect.portrait_character_key,
                     settings=self.settings,
                     messages=self.event_messages,
                     fonts=self.fonts,

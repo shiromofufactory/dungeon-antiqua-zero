@@ -22,6 +22,11 @@
         <a data-editor-link="event">イベント</a>
       </nav>
     </div>
+    <div class="editor-context" aria-label="編集対象タイルセット">
+      <label for="tileset-select">タイルセット</label>
+      <select id="tileset-select" disabled></select>
+      <button id="new-tileset-button" class="button ghost" type="button">新規タイルセット</button>
+    </div>
     <div class="toolbar">
       <span id="save-state" class="status-pill">読み込み中</span>
       <button id="undo-button" class="button ghost" type="button" disabled>元に戻す</button>
@@ -37,10 +42,13 @@
           <h2>ソース画像</h2>
           <p id="image-summary">—</p>
         </div>
-        <div class="zoom-controls" aria-label="ズーム">
-          <button id="zoom-out" class="icon-button" type="button" title="縮小">−</button>
-          <span id="zoom-label">3×</span>
-          <button id="zoom-in" class="icon-button" type="button" title="拡大">＋</button>
+        <div class="source-controls">
+          <div class="zoom-controls" aria-label="ズーム">
+            <button id="zoom-out" class="icon-button" type="button" title="縮小">−</button>
+            <span id="zoom-label">3×</span>
+            <button id="zoom-in" class="icon-button" type="button" title="拡大">＋</button>
+          </div>
+          <button id="delete-tileset-button" class="button danger small" type="button">タイルセット削除</button>
         </div>
       </div>
       <div class="transparency-note">
@@ -89,6 +97,20 @@
       <div id="issues" class="issues" aria-live="polite"></div>
     </aside>
   </main>
+
+  <dialog id="new-tileset-dialog" class="resource-dialog" aria-labelledby="new-tileset-dialog-title">
+    <form id="new-tileset-form" method="dialog" class="resource-dialog-content">
+      <h2 id="new-tileset-dialog-title">新規タイルセット</h2>
+      <div class="form-grid">
+        <div class="field full"><label>タイルセットID</label><input id="new-tileset-id" type="text" pattern="[a-z][a-z0-9_]*" required></div>
+        <div class="field full"><label>ソース画像</label><select id="new-tileset-source" required></select></div>
+        <div class="field full"><label>profile</label><select id="new-tileset-profile"><option value="town">town（集落）</option><option value="dungeon">dungeon（戦闘マップ）</option><option value="world">world</option></select></div>
+        <div class="field"><label>ベース地面ID</label><input id="new-tileset-base-id" type="text" pattern="[a-z][a-z0-9_]*" value="base" required></div>
+        <div class="field"><label>ベース地面の通行</label><select id="new-tileset-base-collision"><option value="blocked">通行不可</option><option value="passable">通行可</option></select></div>
+      </div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-action="close-new-tileset-dialog">キャンセル</button><button class="button primary" type="submit">作成</button></div>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js" defer></script>

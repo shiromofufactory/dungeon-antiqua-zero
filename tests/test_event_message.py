@@ -31,6 +31,11 @@ class EventMessageOverlayTest(unittest.TestCase):
             [
                 {
                     "message_id": "sample.hello",
+                    **(
+                        {"portrait_character_key": portrait}
+                        if portrait is not None
+                        else {}
+                    ),
                     "text_ja": ["こんにちは", "ようこそ"],
                     "text_en": ["Hello", "Welcome"],
                     "text_zhcn": ["你好", "欢迎"],
@@ -39,7 +44,6 @@ class EventMessageOverlayTest(unittest.TestCase):
         )
         return EventMessageOverlay(
             message_id="sample.hello",
-            portrait_character_key=portrait,
             settings=Settings(language=language),
             messages=messages,
             fonts=self.fonts,
@@ -78,7 +82,6 @@ class EventMessageOverlayTest(unittest.TestCase):
             with self.subTest(language=language):
                 overlay = EventMessageOverlay(
                     message_id="sample.layout",
-                    portrait_character_key=None,
                     settings=Settings(language=language),
                     messages=messages,
                     fonts=self.fonts,
@@ -249,7 +252,6 @@ class EventMessageOverlayTest(unittest.TestCase):
         )
         overlay = EventMessageOverlay(
             message_id="event.long",
-            portrait_character_key=None,
             settings=Settings(),
             messages=messages,
             fonts=self.fonts,

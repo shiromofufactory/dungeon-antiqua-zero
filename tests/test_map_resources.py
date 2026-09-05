@@ -196,6 +196,17 @@ class MapResourcesTest(unittest.TestCase):
         with self.assertRaisesRegex(MapResourceError, "collision_rows"):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
+    def test_accepts_foreground_and_rejects_unknown_object_draw_group(self) -> None:
+        self.runtime["object_tiles"][0]["draw_group"] = "object_foreground"
+        self._write_runtime()
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.assertEqual(loaded.object_tiles[0].draw_group, "object_foreground")
+
+        self.runtime["object_tiles"][0]["draw_group"] = "unknown"
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "draw_group"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
     def test_rejects_missing_and_unsafe_map_ids(self) -> None:
         resources = MapResources(self.maps_dir, pyxel_api=self.pyxel)
         with self.assertRaises(MapResourceError):

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+from types import MappingProxyType
 from typing import Iterable, Mapping
 
 if __package__ == "resources":
@@ -30,6 +31,7 @@ class EventMessageResourceError(RuntimeError):
 class EventMessageCatalog:
     _texts: TextCatalog
     _ids: tuple[str, ...]
+    _portrait_character_keys: Mapping[str, str | None]
 
     @classmethod
     def from_records(
@@ -39,6 +41,7 @@ class EventMessageCatalog:
             raise EventMessageResourceError("messages must be an array of objects")
         converted = []
         ids: list[str] = []
+        portrait_character_keys: dict[str, str | None] = {}
         try:
             iterator = iter(records)
         except TypeError as error:
@@ -48,7 +51,11 @@ class EventMessageCatalog:
         for index, record in enumerate(iterator):
             if not isinstance(record, Mapping):
                 raise EventMessageResourceError(f"messages[{index}]が不正です。")
-            if set(record) != {"message_id", *LOCALIZED_FIELDS}:
+            if not set(record) <= {
+                "message_id",
+                "portrait_character_key",
+                *LOCALIZED_FIELDS,
+            } or not {"message_id", *LOCALIZED_FIELDS} <= set(record):
                 raise EventMessageResourceError(
                     f"messages[{index}]の属性が不正です。"
                 )
@@ -60,7 +67,15 @@ class EventMessageCatalog:
                 raise EventMessageResourceError(
                     f"messages[{index}].message_idが不正です。"
                 )
+            portrait = record.get("portrait_character_key")
+            if portrait is not None and (
+                not isinstance(portrait, str) or not portrait
+            ):
+                raise EventMessageResourceError(
+                    f"messages[{index}].portrait_character_keyが不正です。"
+                )
             ids.append(message_id)
+            portrait_character_keys[message_id] = portrait
             converted.append(
                 {
                     "text_key": message_id,
@@ -71,7 +86,11 @@ class EventMessageCatalog:
             texts = TextCatalog.from_records(converted)
         except TextCatalogError as error:
             raise EventMessageResourceError(str(error)) from error
-        return cls(texts, tuple(ids))
+        return cls(
+            texts,
+            tuple(ids),
+            MappingProxyType(portrait_character_keys),
+        )
 
     @classmethod
     def from_json(cls, path: Path | None = None) -> EventMessageCatalog:
@@ -95,6 +114,12 @@ class EventMessageCatalog:
 
     def lines(self, message_id: str, localizer: Localizer) -> tuple[str, ...]:
         return self._texts.lines(message_id, localizer)
+
+    def portrait_character_key(self, message_id: str) -> str | None:
+        try:
+            return self._portrait_character_keys[message_id]
+        except KeyError as error:
+            raise KeyError(f"unknown event message: {message_id}") from error
 
 
 __all__ = [

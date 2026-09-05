@@ -11,6 +11,7 @@ from PIL import Image
 from scripts.map_pipeline.tileset import (
     choose_visual_choice,
     ground_stack,
+    initial_tileset,
     initial_worldmap_tileset,
     inspect_source_image,
     load_tileset,
@@ -42,6 +43,36 @@ class MapTilesetTest(unittest.TestCase):
         warning_codes = {item.code for item in diagnostics if item.severity == "warning"}
         self.assertIn("missing_world_boundaries", warning_codes)
         self.assertIn("missing_world_objects", warning_codes)
+
+    def test_creates_non_world_tileset_and_requires_sea_as_world_base(self) -> None:
+        town = initial_tileset(
+            "village",
+            "mapchips/village",
+            "town",
+            "grass",
+            "passable",
+        )
+        self.assertEqual(town["grounds"][0]["id"], "grass")
+        self.assertEqual(town["profile"], "town")
+
+        multiple = deepcopy(town)
+        multiple["profile"] = ["town", "dungeon"]
+        diagnostics, _ = validate_tileset(multiple, image_path=self.image_path)
+        self.assertIn(
+            "invalid_profile",
+            {item.code for item in diagnostics if item.severity == "error"},
+        )
+
+        world = initial_worldmap_tileset()
+        world["grounds"][0], world["grounds"][1] = (
+            world["grounds"][1],
+            world["grounds"][0],
+        )
+        diagnostics, _ = validate_tileset(world, image_path=self.image_path)
+        self.assertIn(
+            "world_base_ground_not_sea",
+            {item.code for item in diagnostics if item.severity == "error"},
+        )
 
     def test_reports_invalid_graph_visual_and_world_contract(self) -> None:
         data = initial_worldmap_tileset()
@@ -155,7 +186,7 @@ class MapTilesetTest(unittest.TestCase):
         self.assertEqual((info.columns, info.rows), (2, 1))
         self.assertIn("non_transparent_image_margin", {item.code for item in diagnostics})
 
-    def test_object_accepts_overlay_group_and_passable_override_only(self) -> None:
+    def test_object_accepts_overlay_foreground_and_passable_override_only(self) -> None:
         data = initial_worldmap_tileset()
         data["objects"] = [
             {
@@ -169,6 +200,13 @@ class MapTilesetTest(unittest.TestCase):
         diagnostics, _ = validate_tileset(data, image_path=self.image_path)
         self.assertNotIn("invalid_collision", {item.code for item in diagnostics if item.severity == "error"})
         self.assertNotIn("invalid_object_draw_group", {item.code for item in diagnostics if item.severity == "error"})
+
+        data["objects"][0]["default_draw_group"] = "object_foreground"
+        diagnostics, _ = validate_tileset(data, image_path=self.image_path)
+        self.assertNotIn(
+            "invalid_object_draw_group",
+            {item.code for item in diagnostics if item.severity == "error"},
+        )
 
         data["grounds"][0]["collision"] = "passable_override"
         data["objects"][0]["default_draw_group"] = "unknown_group"

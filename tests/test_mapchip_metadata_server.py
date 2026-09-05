@@ -10,7 +10,14 @@ from urllib.request import Request, urlopen
 
 from PIL import Image
 
-from scripts.map_pipeline import initial_worldmap_tileset, save_tileset
+from scripts.map_pipeline import (
+    initial_map_source,
+    initial_worldmap_tileset,
+    load_map_source,
+    load_tileset,
+    save_map_source,
+    save_tileset,
+)
 from tools.mapchip_metadata.server import MetadataApplication, create_server
 
 
@@ -21,6 +28,9 @@ class MapchipMetadataServerTest(unittest.TestCase):
         image_path = self.content_root / "images" / "mapchips" / "worldmap.png"
         image_path.parent.mkdir(parents=True)
         Image.new("RGBA", (64, 96), (0, 0, 0, 0)).save(image_path)
+        Image.new("RGBA", (64, 96), (0, 0, 0, 0)).save(
+            image_path.with_name("alternate.png")
+        )
         metadata_path = self.content_root / "maps" / "tilesets" / "worldmap.json"
         save_tileset(metadata_path, initial_worldmap_tileset())
 
@@ -90,6 +100,179 @@ class MapchipMetadataServerTest(unittest.TestCase):
         self.assertTrue(result["saved"])
         saved = json.loads(self.application.metadata_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["grounds"][0]["base_visual"]["frame_interval"], 12)
+
+    def test_lists_and_creates_tileset_with_shared_source_image(self) -> None:
+        catalog = self.get_json("/api/catalog?token=test-token")
+        self.assertEqual(
+            [item["image_id"] for item in catalog["source_images"]],
+            ["mapchips/alternate", "mapchips/worldmap"],
+        )
+        self.assertEqual(catalog["tilesets"][0]["profile"], "world")
+
+        created = self.post_json(
+            "/api/create",
+            {
+                "tileset_id": "village",
+                "source_image_id": "mapchips/worldmap",
+                "profile": "town",
+                "base_ground_id": "grass",
+                "base_collision": "passable",
+            },
+        )
+        self.assertTrue(created["is_new"])
+        self.assertEqual(created["data"]["profile"], "town")
+        self.assertEqual(created["data"]["grounds"][0]["id"], "grass")
+        with urlopen(f"{self.base_url}{created['image_url']}", timeout=2) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
+
+        saved = self.post_json("/api/save", {"data": created["data"]})
+        self.assertTrue(saved["saved"])
+        reopened = self.get_json(
+            "/api/document?tileset=village&token=test-token"
+        )
+        self.assertEqual(reopened["data"]["source_image_id"], "mapchips/worldmap")
+
+    def test_rejects_base_profile_and_source_changes(self) -> None:
+        data = initial_worldmap_tileset()
+        changed_base = json.loads(json.dumps(data))
+        changed_base["grounds"][0]["id"] = "ocean"
+        base_result = self.post_json("/api/save", {"data": changed_base})
+        self.assertIn(
+            "base_ground_is_immutable",
+            {item["code"] for item in base_result["diagnostics"]},
+        )
+
+        changed_profile = json.loads(json.dumps(data))
+        changed_profile["profile"] = "town"
+        profile_result = self.post_json("/api/save", {"data": changed_profile})
+        self.assertIn(
+            "profile_is_immutable",
+            {item["code"] for item in profile_result["diagnostics"]},
+        )
+
+        changed_source = json.loads(json.dumps(data))
+        changed_source["source_image_id"] = "mapchips/alternate"
+        source_result = self.post_json("/api/save", {"data": changed_source})
+        self.assertIn(
+            "source_image_is_immutable",
+            {item["code"] for item in source_result["diagnostics"]},
+        )
+
+    def test_renames_object_references_in_all_maps_using_tileset(self) -> None:
+        tileset = initial_worldmap_tileset()
+        tileset["objects"] = [
+            {
+                "id": "w1",
+                "size": [1, 1],
+                "default_draw_group": "object",
+                "cells": [
+                    {
+                        "offset": [0, 0],
+                        "collision": "blocked",
+                        "tile": [0, 0],
+                    }
+                ],
+            }
+        ]
+        save_tileset(self.application.metadata_path, tileset)
+        source_root = self.content_root / "maps" / "sources"
+        for map_id in ("forest_a", "forest_b"):
+            source = initial_map_source(map_id, tileset, "world", 16, 15)
+            source["objects"] = [
+                {
+                    "id": f"{map_id}_object",
+                    "definition_id": "w1",
+                    "origin": [2, 2],
+                    "order": 0,
+                }
+            ]
+            save_map_source(source_root / f"{map_id}.json", source)
+
+        renamed = json.loads(json.dumps(tileset))
+        renamed["objects"][0]["id"] = "wu1"
+        result = self.post_json(
+            "/api/save",
+            {"data": renamed, "object_id_renames": {"w1": "wu1"}},
+        )
+
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["updated_map_ids"], ["forest_a", "forest_b"])
+        for map_id in ("forest_a", "forest_b"):
+            saved_map = json.loads(
+                (source_root / f"{map_id}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved_map["objects"][0]["definition_id"], "wu1")
+
+    def test_rejects_removing_an_object_definition_used_by_a_map(self) -> None:
+        tileset = initial_worldmap_tileset()
+        tileset["objects"] = [
+            {
+                "id": "tree",
+                "size": [1, 1],
+                "default_draw_group": "object",
+                "cells": [
+                    {
+                        "offset": [0, 0],
+                        "collision": "blocked",
+                        "tile": [0, 0],
+                    }
+                ],
+            }
+        ]
+        save_tileset(self.application.metadata_path, tileset)
+        source = initial_map_source("forest", tileset, "world", 16, 15)
+        source["objects"] = [
+            {
+                "id": "tree_1",
+                "definition_id": "tree",
+                "origin": [2, 2],
+                "order": 0,
+            }
+        ]
+        source_path = self.content_root / "maps" / "sources" / "forest.json"
+        save_map_source(source_path, source)
+
+        changed = json.loads(json.dumps(tileset))
+        changed["objects"] = []
+        result = self.post_json("/api/save", {"data": changed})
+
+        self.assertFalse(result["saved"])
+        self.assertIn(
+            "map_object_definition_would_be_missing",
+            {item["code"] for item in result["diagnostics"]},
+        )
+        self.assertEqual(load_map_source(source_path)["objects"][0]["definition_id"], "tree")
+        self.assertEqual(load_tileset(self.application.metadata_path)["objects"][0]["id"], "tree")
+
+    def test_deletes_only_unreferenced_non_world_tileset(self) -> None:
+        created = self.post_json(
+            "/api/create",
+            {
+                "tileset_id": "village",
+                "source_image_id": "mapchips/worldmap",
+                "profile": "town",
+                "base_ground_id": "grass",
+                "base_collision": "passable",
+            },
+        )
+        self.assertTrue(self.post_json("/api/save", {"data": created["data"]})["saved"])
+
+        source_path = self.content_root / "maps" / "sources" / "sample_village.json"
+        save_map_source(
+            source_path,
+            initial_map_source("sample_village", created["data"], "town", 16, 15),
+        )
+        with self.assertRaisesRegex(ValueError, "sample_village"):
+            self.application.delete_tileset("village")
+        source_path.unlink()
+
+        deleted = self.post_json("/api/delete", {"tileset_id": "village"})
+        self.assertTrue(deleted["deleted"])
+        self.assertFalse(self.application.metadata_path_for("village").exists())
+
+        with self.assertRaisesRegex(ValueError, "必須タイルセット"):
+            self.application.delete_tileset("worldmap")
 
     def test_rejects_invalid_save_without_replacing_file(self) -> None:
         original = self.application.metadata_path.read_text(encoding="utf-8")

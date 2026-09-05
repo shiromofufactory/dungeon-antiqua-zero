@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 import tempfile
-from typing import Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from .events import EventDiagnostic, EventSourceError
 
@@ -14,7 +14,9 @@ from .events import EventDiagnostic, EventSourceError
 MESSAGE_ID_PATTERN = re.compile(
     r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
 )
-MESSAGE_FIELDS = frozenset(("message_id", "text_ja", "text_en", "text_zhcn"))
+MESSAGE_FIELDS = frozenset(
+    ("message_id", "portrait_character_key", "text_ja", "text_en", "text_zhcn")
+)
 LOCALIZED_FIELDS = ("text_ja", "text_en", "text_zhcn")
 
 
@@ -37,8 +39,15 @@ def load_event_messages(content_root: Path) -> list[dict[str, object]]:
     return value
 
 
-def validate_event_messages(value: object) -> list[EventDiagnostic]:
+def validate_event_messages(
+    value: object,
+    *,
+    character_keys: Iterable[str] | None = None,
+) -> list[EventDiagnostic]:
     diagnostics: list[EventDiagnostic] = []
+    known_character_keys = (
+        None if character_keys is None else frozenset(character_keys)
+    )
     if not isinstance(value, list):
         return [
             EventDiagnostic(
@@ -91,6 +100,23 @@ def validate_event_messages(value: object) -> list[EventDiagnostic]:
             )
         else:
             seen.add(message_id)
+        portrait = record.get("portrait_character_key")
+        if portrait is not None and (
+            not isinstance(portrait, str)
+            or not portrait
+            or (
+                known_character_keys is not None
+                and portrait not in known_character_keys
+            )
+        ):
+            diagnostics.append(
+                EventDiagnostic(
+                    "error",
+                    "unknown_character",
+                    f"{path}.portrait_character_key",
+                    f"存在しない顔キャラクターです: {portrait}",
+                )
+            )
         for field in LOCALIZED_FIELDS:
             lines = record.get(field)
             valid_lines = isinstance(lines, list) and all(
@@ -124,8 +150,12 @@ def event_message_ids(value: object) -> set[str]:
     }
 
 
-def compile_event_messages(value: object) -> list[dict[str, object]]:
-    diagnostics = validate_event_messages(value)
+def compile_event_messages(
+    value: object,
+    *,
+    character_keys: Iterable[str] | None = None,
+) -> list[dict[str, object]]:
+    diagnostics = validate_event_messages(value, character_keys=character_keys)
     errors = [item for item in diagnostics if item.severity == "error"]
     if errors:
         raise EventSourceError(errors[0].message)
@@ -136,6 +166,11 @@ def compile_event_messages(value: object) -> list[dict[str, object]]:
         compiled.append(
             {
                 "message_id": record["message_id"],
+                **(
+                    {"portrait_character_key": record["portrait_character_key"]}
+                    if "portrait_character_key" in record
+                    else {}
+                ),
                 **{field: list(record[field]) for field in LOCALIZED_FIELDS},
             }
         )

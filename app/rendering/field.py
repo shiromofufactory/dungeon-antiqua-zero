@@ -76,7 +76,12 @@ class FieldRenderer:
 
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
-        self._draw_objects(camera_x, camera_y, frame_count)
+        self._draw_objects(
+            camera_x,
+            camera_y,
+            frame_count,
+            draw_groups=("object", "object_overlay"),
+        )
         characters: list[tuple[int, FieldMovement, str, int, Any | None]] = [
             (field.world_y, field, "player", 0, None)
         ]
@@ -108,6 +113,12 @@ class FieldRenderer:
                     image=image,
                     sprite_index=sprite_index,
                 )
+        self._draw_objects(
+            camera_x,
+            camera_y,
+            frame_count,
+            draw_groups=("object_foreground",),
+        )
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:
         player_screen_x = (self.screen_width - FIELD_CHARACTER_SIZE) // 2
@@ -146,9 +157,18 @@ class FieldRenderer:
                     y * tile_size - camera_y,
                 )
 
-    def _draw_objects(self, camera_x: int, camera_y: int, frame_count: int) -> None:
+    def _draw_objects(
+        self,
+        camera_x: int,
+        camera_y: int,
+        frame_count: int,
+        *,
+        draw_groups: tuple[str, ...],
+    ) -> None:
         tile_size = self.map_data.tile_size
         for index, object_tile in enumerate(self.map_data.object_tiles):
+            if object_tile.draw_group not in draw_groups:
+                continue
             x = object_tile.x * tile_size - camera_x
             y = object_tile.y * tile_size - camera_y
             if (

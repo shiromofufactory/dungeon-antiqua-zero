@@ -50,7 +50,10 @@ def main() -> int:
             sources,
             **catalogs,
         )
-        compiled_messages = compile_event_messages(messages)
+        compiled_messages = compile_event_messages(
+            messages,
+            character_keys=catalogs["character_keys"],
+        )
         save_compiled_events(args.output.resolve(), compiled)
         save_event_messages(args.messages_output.resolve(), compiled_messages)
     except (OSError, ValueError) as error:

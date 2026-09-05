@@ -213,6 +213,18 @@ class EventRunnerTest(unittest.TestCase):
         with self.assertRaises(EventResourceError):
             EventCatalog.from_document(document)
 
+    def test_runtime_catalog_rejects_portrait_on_message_command(self) -> None:
+        document = runtime_document(
+            [{
+                "command": "message",
+                "message_id": "sample.greeting",
+                "portrait_character_key": "Alvan",
+            }]
+        )
+
+        with self.assertRaises(EventResourceError):
+            EventCatalog.from_document(document)
+
     def test_runtime_catalog_accepts_unprefixed_global_flag(self) -> None:
         document = runtime_document([])
         document["flags"] = ["game_started"]

@@ -114,16 +114,11 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
             if set(command) != {"command"}:
                 return False
         elif command_type == "message":
-            if not set(command) <= {"command", "message_id", "portrait_character_key"} or set(command) < {"command", "message_id"}:
+            if set(command) != {"command", "message_id"}:
                 return False
             if (
                 not isinstance(command.get("message_id"), str)
                 or MESSAGE_ID_PATTERN.fullmatch(command["message_id"]) is None
-            ):
-                return False
-            if "portrait_character_key" in command and (
-                not isinstance(command["portrait_character_key"], str)
-                or not command["portrait_character_key"]
             ):
                 return False
         elif command_type in ("play_se", "change_bgm"):

@@ -10,7 +10,13 @@ from urllib.request import Request, urlopen
 
 from PIL import Image
 
-from scripts.map_pipeline import initial_worldmap_tileset, save_tileset
+from scripts.map_pipeline import (
+    initial_tileset,
+    initial_worldmap_tileset,
+    load_map_source,
+    save_map_source,
+    save_tileset,
+)
 from tools.map_editor.server import MapEditorApplication, create_server
 
 
@@ -22,6 +28,9 @@ class MapEditorServerTest(unittest.TestCase):
         image_path = content_root / "images" / "mapchips" / "worldmap.png"
         image_path.parent.mkdir(parents=True)
         Image.new("RGBA", (64, 96), (0, 0, 0, 255)).save(image_path)
+        Image.new("RGBA", (64, 96), (0, 0, 0, 255)).save(
+            image_path.with_name("village.png")
+        )
         actor_image_root = content_root / "images" / "actors"
         actor_image_root.mkdir(parents=True)
         Image.new("RGB", (48, 16), (255, 0, 128)).save(
@@ -33,6 +42,26 @@ class MapEditorServerTest(unittest.TestCase):
         metadata_path = content_root / "maps" / "tilesets" / "worldmap.json"
         tileset = initial_worldmap_tileset()
         save_tileset(metadata_path, tileset)
+        save_tileset(
+            metadata_path.with_name("village.json"),
+            initial_tileset(
+                "village",
+                "mapchips/village",
+                "town",
+                "grass",
+                "passable",
+            ),
+        )
+        save_tileset(
+            metadata_path.with_name("village_alt.json"),
+            initial_tileset(
+                "village_alt",
+                "mapchips/village",
+                "town",
+                "floor",
+                "passable",
+            ),
+        )
         palette_path = self.root / "palette.pyxpal"
         palette_path.write_text("000000\nFF0080\n", encoding="utf-8")
         self.application = MapEditorApplication(
@@ -41,8 +70,8 @@ class MapEditorServerTest(unittest.TestCase):
             "test_world",
             "worldmap",
             "world",
-            6,
-            5,
+            16,
+            15,
             palette_path=palette_path,
             token="test-token",
         )
@@ -83,13 +112,23 @@ class MapEditorServerTest(unittest.TestCase):
         with urlopen(request, timeout=4) as response:
             return json.loads(response.read())
 
+    def post_payload(self, path: str, payload: dict) -> dict:
+        request = Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json", "X-Map-Editor-Token": "test-token"},
+        )
+        with urlopen(request, timeout=4) as response:
+            return json.loads(response.read())
+
     def test_serves_new_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
         self.assertEqual(payload["data"]["format_version"], 4)
         self.assertEqual(payload["data"]["actors"], [])
         self.assertEqual(payload["data"]["event_triggers"], [])
-        self.assertEqual(payload["data"]["size"], [6, 5])
+        self.assertEqual(payload["data"]["size"], [16, 15])
         self.assertEqual(payload["data"]["sites"], [])
         self.assertEqual(payload["data"]["arrival_points"], [])
         self.assertEqual(payload["site_names_ja"], {})
@@ -124,6 +163,89 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("function drawActorOnMap(context, actor, scale)", script)
         self.assertIn("const rendered = drawActorOnMap(context, actor, scale)", script)
         self.assertNotIn('data-actor-field="sprite_index"', script)
+        self.assertIn('id="map-select"', page)
+        self.assertIn('id="new-map-dialog"', page)
+        self.assertIn('id="change-map-tileset-dialog"', page)
+        self.assertIn('id="delete-map-button"', page)
+        self.assertIn("function renderMapSelector()", script)
+        self.assertIn('api("/api/change-tileset"', script)
+        self.assertIn('api("/api/delete"', script)
+
+    def test_lists_creates_saves_and_reopens_town_map(self) -> None:
+        catalog = self.get_json("/api/catalog?token=test-token")
+        self.assertEqual(catalog["maps"][0]["map_id"], "test_world")
+        self.assertEqual(
+            [item["tileset_id"] for item in catalog["tilesets"]],
+            ["village", "village_alt", "worldmap"],
+        )
+        self.assertEqual(
+            [item["profile"] for item in catalog["tilesets"]],
+            ["town", "town", "world"],
+        )
+        with self.assertRaisesRegex(ValueError, "profileが一致"):
+            self.application.create_document_payload(
+                "wrong_profile",
+                "worldmap",
+                "town",
+                16,
+                15,
+            )
+
+        created = self.post_payload(
+            "/api/create",
+            {
+                "map_id": "sample_village",
+                "tileset_id": "village",
+                "profile": "town",
+                "width": 16,
+                "height": 15,
+            },
+        )
+        self.assertTrue(created["is_new"])
+        self.assertEqual(created["data"]["grounds"][0], ["grass"] * 16)
+        self.assertEqual(created["tileset"]["source_image_id"], "mapchips/village")
+
+        saved = self.post_json("/api/save", created["data"])
+        self.assertTrue(saved["saved"])
+        reopened = self.get_json(
+            "/api/document?map=sample_village&token=test-token"
+        )
+        self.assertFalse(reopened["is_new"])
+        self.assertEqual(reopened["data"]["profile"], "town")
+        self.assertTrue((self.application.runtime_root / "sample_village.json").is_file())
+
+        changed = self.post_payload(
+            "/api/change-tileset",
+            {"map_id": "sample_village", "tileset_id": "village_alt"},
+        )
+        self.assertTrue(changed["dirty"])
+        self.assertEqual(changed["data"]["tileset_id"], "village_alt")
+        self.assertEqual(changed["data"]["grounds"][0], ["floor"] * 16)
+        self.assertEqual(changed["data"]["objects"], [])
+        self.assertEqual(
+            load_map_source(self.application.source_path_for("sample_village"))[
+                "tileset_id"
+            ],
+            "village",
+        )
+        self.assertTrue(self.post_json("/api/save", changed["data"])["saved"])
+
+        blocker_path = self.application.source_path_for("other_world")
+        blocker = changed["data"].copy()
+        blocker["map_id"] = "other_world"
+        blocker["sites"] = [
+            {"destination": {"map_id": "sample_village"}}
+        ]
+        save_map_source(blocker_path, blocker)
+        with self.assertRaisesRegex(ValueError, "other_worldの移動先"):
+            self.application.delete_map("sample_village")
+        blocker_path.unlink()
+
+        deleted = self.post_payload("/api/delete", {"map_id": "sample_village"})
+        self.assertTrue(deleted["deleted"])
+        self.assertFalse(self.application.source_path_for("sample_village").exists())
+        self.assertFalse((self.application.runtime_root / "sample_village.json").exists())
+        self.assertFalse((self.application.runtime_root / "sample_village.bin").exists())
 
     def test_actor_trigger_is_automatic_and_interact_is_not_selectable(self) -> None:
         script = self.get_text("/app.js")
@@ -273,7 +395,7 @@ class MapEditorServerTest(unittest.TestCase):
             any(item["severity"] == "error" for item in result["diagnostics"])
         )
         self.assertIsNotNone(result["resolved"])
-        self.assertEqual(len(result["resolved"]["ground_cells"]), 30)
+        self.assertEqual(len(result["resolved"]["ground_cells"]), 240)
 
         script = self.get_text("/app.js")
         self.assertIn("function applyValidationResult(result)", script)
@@ -333,7 +455,7 @@ class MapEditorServerTest(unittest.TestCase):
 
         self.assertFalse(result["saved"])
         self.assertFalse(self.application.source_path.exists())
-        self.assertIn("world_edge_not_sea", {item["code"] for item in result["diagnostics"]})
+        self.assertIn("map_edge_not_base_ground", {item["code"] for item in result["diagnostics"]})
 
 
 if __name__ == "__main__":

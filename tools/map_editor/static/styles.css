@@ -96,6 +96,9 @@ input[type="number"], input[type="text"], select { width: 100%; min-width: 0; pa
 .row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .row.end { justify-content: flex-end; }
 .row.between { justify-content: space-between; }
+.map-resource-actions { margin: 0 12px 12px; }
+.map-resource-actions .subtle { line-height: 1.5; }
+.map-resource-action-buttons { margin-top: 10px; }
 .instance-card { padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font-size: 12px; }
 .instance-card strong { display: block; margin-bottom: 3px; color: var(--accent); }
 .empty-state { padding: 17px 10px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 7px; font-size: 12px; }
@@ -123,6 +126,11 @@ input[type="number"], input[type="text"], select { width: 100%; min-width: 0; pa
 .actor-sprite-option canvas { width: 48px; height: 48px; border-radius: 4px; background-color: #11130f; background-image: linear-gradient(45deg,#272c24 25%,transparent 25%),linear-gradient(-45deg,#272c24 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#272c24 75%),linear-gradient(-45deg,transparent 75%,#272c24 75%); background-size: 12px 12px; background-position: 0 0,0 6px,6px -6px,-6px 0; image-rendering: pixelated; }
 .actor-sprite-option span { font: 11px ui-monospace,SFMono-Regular,Menlo,monospace; }
 .actor-sprite-dialog-actions { padding: 11px 18px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--line); }
+.resource-dialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(#252b22, #191d17); color: var(--text); box-shadow: 0 18px 60px #000a; }
+.resource-dialog::backdrop { background: #050704b8; backdrop-filter: blur(3px); }
+.resource-dialog-content { padding: 18px; display: grid; gap: 14px; }
+.resource-dialog-content h2 { font-size: 16px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 1180px) {
   .workspace { height: auto; min-height: calc(100vh - 76px); grid-template-columns: minmax(220px,280px) minmax(500px,1fr); }

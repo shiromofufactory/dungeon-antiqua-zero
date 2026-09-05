@@ -27,6 +27,8 @@ from .tileset import (
 SOURCE_FORMAT_VERSION = 4
 RUNTIME_FORMAT_VERSION = 4
 MAX_MAP_DIMENSION = 512
+MIN_MAP_WIDTH = 16
+MIN_MAP_HEIGHT = 15
 MAX_ANIMATION_PERIOD = 3600
 TRANSPARENT_INDEX = 1
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -108,13 +110,23 @@ def initial_map_source(
 ) -> dict[str, Any]:
     if not _valid_id(map_id):
         raise ValueError("マップIDはlower_snake_caseで指定してください。")
-    if not _is_int(width) or not _is_int(height) or width <= 0 or height <= 0:
-        raise ValueError("マップ寸法は1以上の整数で指定してください。")
+    if (
+        not _is_int(width)
+        or not _is_int(height)
+        or width < MIN_MAP_WIDTH
+        or height < MIN_MAP_HEIGHT
+        or width > MAX_MAP_DIMENSION
+        or height > MAX_MAP_DIMENSION
+    ):
+        raise ValueError(
+            f"マップ寸法は幅{MIN_MAP_WIDTH}〜{MAX_MAP_DIMENSION}、"
+            f"高さ{MIN_MAP_HEIGHT}〜{MAX_MAP_DIMENSION}の整数で指定してください。"
+        )
     grounds = tileset.get("grounds")
     if not isinstance(grounds, list) or not grounds:
         raise ValueError("タイルセットに地面定義がありません。")
     ground_ids = [ground.get("id") for ground in grounds if isinstance(ground, dict)]
-    fill = "sea" if profile == "world" and "sea" in ground_ids else ground_ids[0]
+    fill = ground_ids[0]
     if not isinstance(fill, str):
         raise ValueError("初期地面を決定できません。")
     return {
@@ -156,9 +168,9 @@ def validate_map_source(
         _diagnostic(diagnostics, "error", "tileset_mismatch", "tileset_id", "起動時に読み込んだタイルセットIDと一致しません。")
 
     profile = data.get("profile")
-    supported_profiles = tileset.get("supported_profiles")
-    if not isinstance(profile, str) or not isinstance(supported_profiles, list) or profile not in supported_profiles:
-        _diagnostic(diagnostics, "error", "unsupported_profile", "profile", "タイルセットが対応するprofileを指定してください。")
+    tileset_profile = tileset.get("profile")
+    if not isinstance(profile, str) or profile != tileset_profile:
+        _diagnostic(diagnostics, "error", "profile_mismatch", "profile", "マップとタイルセットのprofileを一致させてください。")
 
     size = data.get("size")
     width = height = 0
@@ -166,14 +178,17 @@ def validate_map_source(
         not isinstance(size, list)
         or len(size) != 2
         or not all(_is_int(value) for value in size)
-        or any(value <= 0 or value > MAX_MAP_DIMENSION for value in size)
+        or size[0] < MIN_MAP_WIDTH
+        or size[1] < MIN_MAP_HEIGHT
+        or any(value > MAX_MAP_DIMENSION for value in size)
     ):
         _diagnostic(
             diagnostics,
             "error",
             "invalid_map_size",
             "size",
-            f"マップ寸法は1から{MAX_MAP_DIMENSION}までの整数2要素で指定してください。",
+            f"マップ寸法は幅{MIN_MAP_WIDTH}〜{MAX_MAP_DIMENSION}、"
+            f"高さ{MIN_MAP_HEIGHT}〜{MAX_MAP_DIMENSION}の整数2要素で指定してください。",
         )
     else:
         width, height = size
@@ -200,13 +215,27 @@ def validate_map_source(
                 if ground_id not in ground_ids:
                     _diagnostic(diagnostics, "error", "unknown_ground", f"grounds[{y}][{x}]", f"未定義の地面IDです: {ground_id}")
 
-    if profile == "world" and rows_valid and width > 0 and height > 0 and "sea" in ground_ids:
+    base_ground_id = None
+    if isinstance(ground_definitions, list) and ground_definitions:
+        first_ground = ground_definitions[0]
+        if isinstance(first_ground, dict) and isinstance(first_ground.get("id"), str):
+            base_ground_id = first_ground["id"]
+    if rows_valid and width > 0 and height > 0 and base_ground_id is not None:
         for y, row in enumerate(rows):
             if not isinstance(row, list) or len(row) != width:
                 continue
             for x, ground_id in enumerate(row):
-                if (x in (0, width - 1) or y in (0, height - 1)) and ground_id != "sea":
-                    _diagnostic(diagnostics, "error", "world_edge_not_sea", f"grounds[{y}][{x}]", "ワールドマップの外周はseaである必要があります。")
+                if (
+                    (x in (0, width - 1) or y in (0, height - 1))
+                    and ground_id != base_ground_id
+                ):
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "map_edge_not_base_ground",
+                        f"grounds[{y}][{x}]",
+                        f"マップ外周はベース地面`{base_ground_id}`で囲む必要があります。",
+                    )
 
     object_definitions = tileset.get("objects")
     objects_by_id = {

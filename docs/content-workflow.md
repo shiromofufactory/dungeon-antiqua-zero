@@ -157,6 +157,8 @@ npm run maps:build
 `content/events/<namespace>.json` はイベントエディタまたは人が編集する通常イベントの正本、
 `content/events/flags.json` は全イベントから共有するグローバルフラグ宣言の正本、
 `content/events/messages.json` はイベント専用の多言語メッセージの正本とする。
+イベントメッセージの任意の顔グラフィック指定も同じレコードが所有し、イベントコマンドには
+`message_id` だけを保存する。
 いずれもGoogle Sheetsとは同期しない。形式と編集操作は
 [`features/events.md`](./features/events.md) を参照する。
 

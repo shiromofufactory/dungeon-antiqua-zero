@@ -16,6 +16,9 @@ import pyxel
 FORMAT_VERSION = 4
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
+MAP_OBJECT_DRAW_GROUPS = frozenset(
+    ("object", "object_overlay", "object_foreground")
+)
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAP_FACINGS = frozenset(("up", "right", "down", "left"))
 MAP_ACTOR_KINDS = frozenset(("prop", "stationary", "roaming"))
@@ -505,13 +508,18 @@ class MapResources:
                 raise MapResourceError(f"object_tiles[{index}].tileが不正です。")
             if isinstance(order, bool) or not isinstance(order, int):
                 raise MapResourceError(f"object_tiles[{index}].orderが不正です。")
+            draw_group = cls._required_id(record, "draw_group")
+            if draw_group not in MAP_OBJECT_DRAW_GROUPS:
+                raise MapResourceError(
+                    f"object_tiles[{index}].draw_groupが不正です。"
+                )
             loaded.append(
                 MapObjectTile(
                     instance_id=cls._required_id(record, "instance_id"),
                     definition_id=cls._required_id(record, "definition_id"),
                     x=position[0],
                     y=position[1],
-                    draw_group=cls._required_id(record, "draw_group"),
+                    draw_group=draw_group,
                     order=order,
                     tile=tile,
                 )

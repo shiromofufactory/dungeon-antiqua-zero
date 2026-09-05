@@ -242,9 +242,32 @@ def make_handler(
                         )[0]
                         payload = event_application.document_payload(namespace)
                     elif editor == "tileset":
-                        payload = metadata_application.document_payload()
+                        tileset_id = parse_qs(parsed.query).get(
+                            "tileset", [None]
+                        )[0]
+                        payload = metadata_application.document_payload(tileset_id)
                     else:
-                        payload = map_application.document_payload()
+                        map_id = parse_qs(parsed.query).get("map", [None])[0]
+                        payload = map_application.document_payload(map_id)
+                    self._send_json(payload)
+                except (OSError, ValueError) as error:
+                    self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+                return
+            if path == "/api/catalog" and editor in {"map", "tileset"}:
+                if not self._authorized(editor, parsed):
+                    self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
+                    return
+                try:
+                    if editor == "map":
+                        payload = {
+                            "maps": map_application.map_catalog(),
+                            "tilesets": map_application.tileset_catalog(),
+                        }
+                    else:
+                        payload = {
+                            "tilesets": metadata_application.tileset_catalog(),
+                            "source_images": metadata_application.source_image_catalog(),
+                        }
                     self._send_json(payload)
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
@@ -255,11 +278,24 @@ def make_handler(
                     return
                 try:
                     if editor == "tileset":
-                        data = metadata_application.load()
-                        image_path = metadata_application.source_image(data)
+                        query = parse_qs(parsed.query)
+                        source_image_id = query.get("source", [None])[0]
+                        if source_image_id is not None:
+                            image_path = metadata_application.source_image(
+                                {"source_image_id": source_image_id}
+                            )
+                        else:
+                            tileset_id = query.get("tileset", [None])[0]
+                            data = metadata_application.load(tileset_id)
+                            image_path = metadata_application.source_image(data)
                     else:
-                        data, _is_new = map_application.load_source()
-                        tileset = map_application.load_tileset(data["tileset_id"])
+                        tileset_id = parse_qs(parsed.query).get(
+                            "tileset", [None]
+                        )[0]
+                        if tileset_id is None:
+                            data, _is_new = map_application.load_source()
+                            tileset_id = data["tileset_id"]
+                        tileset = map_application.load_tileset(tileset_id)
                         image_path = map_application.source_image(tileset)
                     self._send_bytes(
                         image_path.read_bytes(),
@@ -333,6 +369,27 @@ def make_handler(
             }
 
         def _map_response(self, path: str, payload: object) -> object:
+            if path == "/api/create":
+                if not isinstance(payload, dict):
+                    raise ValueError("新規マップの設定が不正です。")
+                return map_application.create_document_payload(
+                    payload.get("map_id"),
+                    payload.get("tileset_id"),
+                    payload.get("profile"),
+                    payload.get("width"),
+                    payload.get("height"),
+                )
+            if path == "/api/change-tileset":
+                if not isinstance(payload, dict):
+                    raise ValueError("タイルセット変更の設定が不正です。")
+                return map_application.change_tileset_document_payload(
+                    payload.get("map_id"),
+                    payload.get("tileset_id"),
+                )
+            if path == "/api/delete":
+                if not isinstance(payload, dict):
+                    raise ValueError("削除対象マップが不正です。")
+                return map_application.delete_map(payload.get("map_id"))
             data = payload.get("data") if isinstance(payload, dict) else None
             site_names_ja = (
                 payload.get("site_names_ja")
@@ -352,9 +409,28 @@ def make_handler(
             }
 
         def _metadata_response(self, path: str, payload: object) -> object:
+            if path == "/api/create":
+                if not isinstance(payload, dict):
+                    raise ValueError("新規タイルセットの設定が不正です。")
+                return metadata_application.create_document_payload(
+                    payload.get("tileset_id"),
+                    payload.get("source_image_id"),
+                    payload.get("profile"),
+                    payload.get("base_ground_id"),
+                    payload.get("base_collision"),
+                )
+            if path == "/api/delete":
+                if not isinstance(payload, dict):
+                    raise ValueError("削除対象タイルセットが不正です。")
+                return metadata_application.delete_tileset(payload.get("tileset_id"))
             data = payload.get("data") if isinstance(payload, dict) else None
             if path == "/api/save":
-                return metadata_application.save(data)
+                return metadata_application.save(
+                    data,
+                    payload.get("object_id_renames")
+                    if isinstance(payload, dict)
+                    else None,
+                )
             diagnostics, image_info = metadata_application.validate(data)
             return {
                 "saved": False,
@@ -371,7 +447,11 @@ def make_handler(
             editor, path = route
             allowed_paths = {"/api/validate", "/api/save"}
             if editor == "map":
-                allowed_paths.add("/api/resolve")
+                allowed_paths.update(
+                    ("/api/resolve", "/api/create", "/api/change-tileset", "/api/delete")
+                )
+            elif editor == "tileset":
+                allowed_paths.update(("/api/create", "/api/delete"))
             if path not in allowed_paths:
                 self._error(HTTPStatus.NOT_FOUND, "APIが見つかりません。")
                 return

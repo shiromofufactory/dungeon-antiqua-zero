@@ -20,6 +20,11 @@
         <a data-editor-link="event">イベント</a>
       </nav>
     </div>
+    <div class="editor-context" aria-label="編集対象マップ">
+      <label for="map-select">マップ</label>
+      <select id="map-select" disabled></select>
+      <button id="new-map-button" class="button ghost" type="button">新規マップ</button>
+    </div>
     <div class="toolbar">
       <span id="save-state" class="status-pill">読み込み中</span>
       <button id="undo-button" class="button ghost" type="button" disabled>元に戻す</button>
@@ -62,10 +67,43 @@
 
     <aside class="inspector-panel panel">
       <div id="inspector-content"></div>
+      <section class="section map-resource-actions" aria-labelledby="map-resource-actions-title">
+        <div class="section-title"><h2 id="map-resource-actions-title">マップ管理</h2></div>
+        <p class="subtle">マップチップの変更時は、マップの配置内容をすべて初期化します。</p>
+        <div class="row map-resource-action-buttons">
+          <button id="change-map-tileset-button" class="button ghost" type="button">マップチップ変更</button>
+          <button id="delete-map-button" class="button danger" type="button">マップを削除</button>
+        </div>
+      </section>
       <div class="issues-heading"><h2>問題一覧</h2><span id="issue-count" class="count-badge">0</span></div>
       <div id="issues" class="issues" aria-live="polite"></div>
     </aside>
   </main>
+
+  <dialog id="new-map-dialog" class="resource-dialog" aria-labelledby="new-map-dialog-title">
+    <form id="new-map-form" method="dialog" class="resource-dialog-content">
+      <h2 id="new-map-dialog-title">新規マップ</h2>
+      <div class="form-grid">
+        <div class="field full"><label>マップID</label><input id="new-map-id" type="text" pattern="[a-z][a-z0-9_]*" required></div>
+        <div class="field"><label>profile</label><select id="new-map-profile"><option value="town">town（集落）</option><option value="dungeon">dungeon（戦闘マップ）</option><option value="world">world</option></select></div>
+        <div class="field"><label>タイルセット</label><select id="new-map-tileset" required></select></div>
+        <div class="field"><label>幅</label><input id="new-map-width" type="number" min="16" max="512" value="32" required></div>
+        <div class="field"><label>高さ</label><input id="new-map-height" type="number" min="15" max="512" value="24" required></div>
+      </div>
+      <p id="new-map-source-summary" class="subtle"></p>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-action="close-new-map-dialog">キャンセル</button><button class="button primary" type="submit">作成</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="change-map-tileset-dialog" class="resource-dialog" aria-labelledby="change-map-tileset-dialog-title">
+    <form id="change-map-tileset-form" method="dialog" class="resource-dialog-content">
+      <h2 id="change-map-tileset-dialog-title">マップチップを変更</h2>
+      <p>マップの寸法は維持し、地面を新しいベース地面へ戻します。オブジェクト、拠点、到着地点、actor、イベントトリガーはすべてクリアされます。</p>
+      <div class="field"><label>新しいタイルセット</label><select id="change-map-tileset-select" required></select></div>
+      <p id="change-map-tileset-summary" class="subtle"></p>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-action="close-change-map-tileset-dialog">キャンセル</button><button class="button danger" type="submit">変更して初期化</button></div>
+    </form>
+  </dialog>
 
   <dialog id="actor-sprite-dialog" class="actor-sprite-dialog" aria-labelledby="actor-sprite-dialog-title">
     <div class="actor-sprite-dialog-content">

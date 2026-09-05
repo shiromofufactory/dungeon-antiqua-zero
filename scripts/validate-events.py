@@ -33,12 +33,18 @@ def main() -> int:
         sources = {path.stem: load_event_source(path) for path in paths}
         flags = load_event_flags(content_root)
         messages = load_event_messages(content_root)
+        catalogs = reference_catalogs(
+            content_root, app_root=PROJECT_ROOT / "app"
+        )
         diagnostics = [
             *validate_event_flags(flags),
-            *validate_event_messages(messages),
+            *validate_event_messages(
+                messages,
+                character_keys=catalogs["character_keys"],
+            ),
             *validate_event_sources(
                 sources,
-                **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
+                **catalogs,
             ),
         ]
     except (OSError, ValueError) as error:

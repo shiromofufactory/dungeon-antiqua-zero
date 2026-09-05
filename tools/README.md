@@ -75,6 +75,11 @@ npm run tools:mapchip-metadata -- --no-browser
 既定では `content/maps/tilesets/worldmap.json` と
 `content/images/mapchips/worldmap.png` を開く。メタデータJSONは検証成功時だけ原子的に保存する。
 画像のパレット不一致は問題一覧へ警告として表示するが、メタデータの保存は妨げない。
+ヘッダーから既存タイルセットを切り替えたり、同じ元画像を再利用して新規作成したりできる。
+ソース画像は作成後に変更できない。使用中でない通常タイルセットはソース画像欄から削除できる。
+保存済みオブジェクト定義IDを変更して保存すると、同じタイルセットを使う全制作用マップの
+`definition_id` も追随して更新する。追随先のない定義削除など、マップに未定義参照を残す変更は
+保存できない。
 
 対話UIは `tools/mapchip_metadata/`、UIから独立した検証処理は `scripts/map_pipeline/` に置く。
 後続のマップエディタも同じ検証処理を利用する。
@@ -91,7 +96,10 @@ npm run tools:map-editor
 
 既定では `worldmap` マップを開く。`content/maps/sources/worldmap.json` がなければ、
 32×24セルの海で埋めた新規マップとして開始し、保存するまでファイルは作成しない。
-別マップを作る場合は、マップID、タイルセット、profileを指定する。
+ヘッダーから既存マップを切り替え、マップID、タイルセット、profile、寸法を指定して別マップを
+作成できる。マップの最小寸法は16×15セルで、外周と拡張領域はタイルセット先頭のベース地面で埋める。
+同じprofileの別タイルセットへ変更すると、寸法を維持してマップ内容を初期化する。未参照の通常マップは
+制作用データとゲーム用生成物をまとめて削除できる。
 
 ```sh
 npm run tools:map-editor -- --map field_01 --tileset dungeon --profile dungeon

@@ -21,9 +21,16 @@ from scripts.event_pipeline import (
 
 def message_record(
     message_id: str = "sample.greeting",
+    *,
+    portrait: str | None = None,
 ) -> dict[str, object]:
     return {
         "message_id": message_id,
+        **(
+            {"portrait_character_key": portrait}
+            if portrait is not None
+            else {}
+        ),
         "text_ja": ["こんにちは", "ようこそ"],
         "text_en": [],
         "text_zhcn": ["你好", "欢迎"],
@@ -47,6 +54,28 @@ class EventMessagePipelineTest(unittest.TestCase):
         diagnostics = validate_event_messages(source)
 
         self.assertIn("unknown_field", {item.code for item in diagnostics})
+
+    def test_compiles_known_optional_portrait_and_rejects_unknown_one(self) -> None:
+        source = [message_record(portrait="Alvan")]
+
+        self.assertEqual(
+            validate_event_messages(source, character_keys={"Alvan"}),
+            [],
+        )
+        self.assertEqual(
+            compile_event_messages(source, character_keys={"Alvan"}),
+            source,
+        )
+        self.assertIn(
+            "unknown_character",
+            {
+                item.code
+                for item in validate_event_messages(
+                    source,
+                    character_keys={"Fiora"},
+                )
+            },
+        )
 
     def test_rejects_duplicate_invalid_and_empty_messages(self) -> None:
         source = [
@@ -105,6 +134,16 @@ class EventMessageCatalogTest(unittest.TestCase):
         self.assertEqual(
             catalog.lines("sample.greeting", Localizer(Language.ENGLISH)),
             ("こんにちは", "ようこそ"),
+        )
+
+    def test_resolves_optional_portrait_from_message(self) -> None:
+        catalog = EventMessageCatalog.from_records(
+            [message_record(portrait="Alvan")]
+        )
+
+        self.assertEqual(
+            catalog.portrait_character_key("sample.greeting"),
+            "Alvan",
         )
 
     def test_loads_compiled_json_and_rejects_unknown_fields(self) -> None:

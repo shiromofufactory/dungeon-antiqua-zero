@@ -18,7 +18,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from PIL import Image, UnidentifiedImageError
 
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 TILE_SIZE = 16
 TRANSPARENT_RGB = (255, 0, 128)
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -26,8 +26,12 @@ DIRECTIONS = ("n", "ne", "e", "se", "s", "sw", "w", "nw")
 NEIGHBOR_STATES = frozenset(("same", "different", "any"))
 GROUND_COLLISION_STATES = frozenset(("passable", "blocked"))
 OBJECT_COLLISION_STATES = frozenset(("passable", "blocked", "passable_override"))
-OBJECT_DRAW_GROUPS = frozenset(("object", "object_overlay"))
-OBJECT_DRAW_GROUP_ORDER = {"object": 0, "object_overlay": 1}
+OBJECT_DRAW_GROUPS = frozenset(("object", "object_overlay", "object_foreground"))
+OBJECT_DRAW_GROUP_ORDER = {
+    "object": 0,
+    "object_overlay": 1,
+    "object_foreground": 2,
+}
 SUPPORTED_PROFILES = frozenset(("world", "dungeon", "town"))
 SUPPORTED_IMAGE_SUFFIXES = (".png", ".gif")
 
@@ -462,7 +466,7 @@ def _validate_object(
             "error",
             "invalid_object_draw_group",
             f"{path}.default_draw_group",
-            "描画グループはobjectまたはobject_overlayで指定してください。",
+            "描画グループはobject、object_overlay、object_foregroundのいずれかで指定してください。",
         )
     cells = object_value.get("cells")
     if not isinstance(cells, list) or not cells:
@@ -633,12 +637,26 @@ def _validate_ground_graph(
 
 
 def _validate_world_profile(
-    profiles: Sequence[object],
+    profile: object,
+    grounds: Sequence[object],
     by_id: Mapping[str, Mapping[str, Any]],
     diagnostics: list[Diagnostic],
 ) -> None:
-    if "world" not in profiles:
+    if profile != "world":
         return
+    first_ground_id = (
+        grounds[0].get("id")
+        if grounds and isinstance(grounds[0], Mapping)
+        else None
+    )
+    if first_ground_id != "sea":
+        _diag(
+            diagnostics,
+            "error",
+            "world_base_ground_not_sea",
+            "grounds[0].id",
+            "world profileのベース地面（先頭地面）は`sea`である必要があります。",
+        )
     expected = {
         "sea": (None, "blocked"),
         "plain": ("sea", "passable"),
@@ -860,35 +878,15 @@ def validate_tileset(
             "チップサイズは16固定です。",
         )
 
-    profiles = data.get("supported_profiles")
-    valid_profiles: list[object] = []
-    if not isinstance(profiles, list) or not profiles:
+    profile = data.get("profile")
+    if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         _diag(
             diagnostics,
             "error",
-            "missing_profiles",
-            "supported_profiles",
-            "対応profileを1件以上指定してください。",
+            "invalid_profile",
+            "profile",
+            "profileはworld、dungeon、townのいずれかです。",
         )
-    else:
-        valid_profiles = profiles
-        if len(profiles) != len(set(map(str, profiles))):
-            _diag(
-                diagnostics,
-                "error",
-                "duplicate_profile",
-                "supported_profiles",
-                "対応profileが重複しています。",
-            )
-        for index, profile in enumerate(profiles):
-            if profile not in SUPPORTED_PROFILES:
-                _diag(
-                    diagnostics,
-                    "error",
-                    "invalid_profile",
-                    f"supported_profiles[{index}]",
-                    "profileはworld、dungeon、townのいずれかです。",
-                )
 
     grounds = data.get("grounds")
     if not isinstance(grounds, list) or not grounds:
@@ -902,8 +900,16 @@ def validate_tileset(
         grounds = []
     for index, ground in enumerate(grounds):
         _validate_ground(ground, index, columns, rows, diagnostics)
+    if grounds and isinstance(grounds[0], Mapping) and grounds[0].get("parent_id") is not None:
+        _diag(
+            diagnostics,
+            "error",
+            "base_ground_has_parent",
+            "grounds[0].parent_id",
+            "ベース地面（先頭地面）には親地面を設定できません。",
+        )
     by_id = _validate_ground_graph(grounds, diagnostics)
-    _validate_world_profile(valid_profiles, by_id, diagnostics)
+    _validate_world_profile(profile, grounds, by_id, diagnostics)
 
     objects = data.get("objects")
     if not isinstance(objects, list):
@@ -934,7 +940,7 @@ def validate_tileset(
                     f"オブジェクトIDが重複しています: {object_id}",
                 )
             object_ids.add(object_id)
-    if "world" in valid_profiles and not objects:
+    if profile == "world" and not objects:
         _diag(
             diagnostics,
             "warning",
@@ -1123,7 +1129,7 @@ def initial_worldmap_tileset() -> dict[str, Any]:
         "tileset_id": "worldmap",
         "source_image_id": "mapchips/worldmap",
         "tile_size": TILE_SIZE,
-        "supported_profiles": ["world"],
+        "profile": "world",
         "grounds": [
             {
                 "id": "sea",
@@ -1147,5 +1153,73 @@ def initial_worldmap_tileset() -> dict[str, Any]:
                 "boundaries": [],
             },
         ],
+        "objects": [],
+    }
+
+
+def initial_tileset(
+    tileset_id: str,
+    source_image_id: str,
+    profile: str,
+    base_ground_id: str,
+    base_collision: str = "blocked",
+) -> dict[str, Any]:
+    """Return editable metadata for a new tileset with a fixed base ground."""
+
+    if not isinstance(tileset_id, str) or ID_PATTERN.fullmatch(tileset_id) is None:
+        raise ValueError("タイルセットIDはlower_snake_caseで指定してください。")
+    if not isinstance(base_ground_id, str) or ID_PATTERN.fullmatch(base_ground_id) is None:
+        raise ValueError("ベース地面IDはlower_snake_caseで指定してください。")
+    if base_collision not in GROUND_COLLISION_STATES:
+        raise ValueError("ベース地面の通行設定が不正です。")
+    if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
+        raise ValueError("profileはworld、dungeon、townのいずれかです。")
+    if (
+        not isinstance(source_image_id, str)
+        or not source_image_id
+        or source_image_id.startswith("/")
+        or ".." in Path(source_image_id).parts
+    ):
+        raise ValueError("ソース画像IDが不正です。")
+    if profile == "world" and base_ground_id != "sea":
+        raise ValueError("world profileのベース地面IDはseaです。")
+
+    def ground(
+        ground_id: str,
+        parent_id: str | None,
+        collision: str,
+    ) -> dict[str, Any]:
+        return {
+            "id": ground_id,
+            "parent_id": parent_id,
+            "collision": collision,
+            "base_visual": {
+                "frame_interval": 1,
+                "choices": [
+                    {
+                        "id": "default",
+                        "weight": 1,
+                        "frames": [{"tile": [0, 0]}],
+                    }
+                ],
+            },
+            "boundaries": [],
+        }
+
+    grounds = [ground(base_ground_id, None, base_collision)]
+    if profile == "world":
+        grounds.extend(
+            (
+                ground("plain", "sea", "passable"),
+                ground("sand", "plain", "passable"),
+            )
+        )
+    return {
+        "format_version": FORMAT_VERSION,
+        "tileset_id": tileset_id,
+        "source_image_id": source_image_id,
+        "tile_size": TILE_SIZE,
+        "profile": profile,
+        "grounds": grounds,
         "objects": [],
     }

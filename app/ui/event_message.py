@@ -62,7 +62,6 @@ class EventMessageOverlay:
         self,
         *,
         message_id: str,
-        portrait_character_key: str | None,
         settings: Settings,
         messages: EventMessageCatalog,
         fonts: FontResources,
@@ -70,6 +69,7 @@ class EventMessageOverlay:
         face_positions: Mapping[str, FacePosition],
     ) -> None:
         self.message_id = message_id
+        portrait_character_key = messages.portrait_character_key(message_id)
         self.portrait_character_key = portrait_character_key
         self.faces = faces
         self.face_position = (

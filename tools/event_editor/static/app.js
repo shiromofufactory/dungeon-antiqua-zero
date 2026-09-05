@@ -412,8 +412,7 @@ function renderCommand(command, path, listPath, index) {
     fields = field("アイテム", `<select ${attr("item_key")}>${options(state.catalogs.item_keys || [], command.item_key)}</select>`)
       + field("個数", `<input type="number" min="1" value="${Number(command.quantity) || 1}" ${attr("quantity")}>`);
   } else if (type === "message") {
-    fields = field("メッセージID", `<select ${attr("message_id")}>${options(messageIds(), command.message_id)}</select>`)
-      + field("顔（任意）", `<select ${attr("portrait_character_key")}>${options(state.catalogs.character_keys || [], command.portrait_character_key, "顔なし")}</select>`);
+    fields = field("メッセージID", `<select ${attr("message_id")}>${options(messageIds(), command.message_id)}</select>`);
   } else if (type === "play_se") {
     fields = field("SE", `<select ${attr("se_id")}>${options(state.catalogs.se_ids || [], command.se_id)}</select>`, true);
   } else if (type === "change_bgm") {
@@ -482,6 +481,7 @@ function renderMessageEditor() {
     <div class="heading"><h2>メッセージ編集</h2><button class="danger" data-action="delete-message">メッセージを削除</button></div>
     <div class="message-form">
       ${field("メッセージID", `<input data-message-field="message_id" value="${esc(message.message_id)}">`, true)}
+      ${field("顔（任意）", `<select data-message-field="portrait_character_key">${options(state.catalogs.character_keys || [], message.portrait_character_key, "顔なし")}</select>`)}
       ${field("日本語（1行ごとにゲーム内の1行）", `<textarea rows="6" data-message-field="text_ja">${esc((message.text_ja || []).join("\n"))}</textarea>`, true)}
       ${field("英語（未翻訳なら空欄）", `<textarea rows="6" data-message-field="text_en">${esc((message.text_en || []).join("\n"))}</textarea>`, true)}
       ${field("簡体字中国語（未翻訳なら空欄）", `<textarea rows="6" data-message-field="text_zhcn">${esc((message.text_zhcn || []).join("\n"))}</textarea>`, true)}
@@ -729,9 +729,13 @@ $("event-editor").addEventListener("change", (event) => {
   } else if (target.dataset.messageField) {
     commit(() => {
       const fieldName = target.dataset.messageField;
-      currentMessage()[fieldName] = fieldName.startsWith("text_")
-        ? linesFromTextarea(target.value)
-        : target.value;
+      if (fieldName === "portrait_character_key" && !target.value) {
+        delete currentMessage()[fieldName];
+      } else {
+        currentMessage()[fieldName] = fieldName.startsWith("text_")
+          ? linesFromTextarea(target.value)
+          : target.value;
+      }
     });
   } else if (target.dataset.commandField) {
     commit(() => {
@@ -740,9 +744,6 @@ $("event-editor").addEventListener("change", (event) => {
       command[fieldName] = fieldName === "quantity" || fieldName === "steps"
         ? Number(target.value)
         : target.value;
-      if (fieldName === "portrait_character_key" && !command[fieldName]) {
-        delete command[fieldName];
-      }
     });
   } else if (target.dataset.condField) {
     commit(() => {

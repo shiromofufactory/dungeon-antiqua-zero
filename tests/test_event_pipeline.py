@@ -36,7 +36,6 @@ def sample_source() -> dict[str, object]:
                             {
                                 "command": "message",
                                 "message_id": "sample.greeting",
-                                "portrait_character_key": "Alvan",
                             },
                             {"command": "give_item", "item_key": "POTION", "quantity": 1},
                             {"command": "set_flag", "flag_id": "story.met_alvan"},
@@ -101,6 +100,18 @@ class EventPipelineTest(unittest.TestCase):
             {"unknown_field", "invalid_direction", "invalid_steps"} - codes,
             set(),
         )
+
+    def test_rejects_portrait_on_message_command(self) -> None:
+        source = deepcopy(sample_source())
+        command = source["events"][0]["commands"][0]["else"][0]
+        command["portrait_character_key"] = "Alvan"
+
+        codes = {
+            item.code
+            for item in validate_event_sources({"sample": source}, **CATALOGS)
+        }
+
+        self.assertIn("unknown_field", codes)
 
     def test_accepts_attribute_free_end_event_inside_branch(self) -> None:
         source = deepcopy(sample_source())

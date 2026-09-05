@@ -10,6 +10,7 @@ from PIL import Image
 from scripts.map_pipeline import (
     compile_map,
     initial_map_source,
+    initial_tileset,
     initial_worldmap_tileset,
     resolve_map,
     validate_map_event_links,
@@ -40,7 +41,7 @@ class MapSourceTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_initial_world_map_is_valid_and_resolves_deterministically(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
 
         diagnostics = validate_map_source(source, self.tileset)
@@ -49,13 +50,60 @@ class MapSourceTest(unittest.TestCase):
 
         self.assertEqual([item for item in diagnostics if item.severity == "error"], [])
         self.assertEqual(first, second)
-        self.assertEqual(len(first["ground_cells"]), 30)
-        self.assertFalse(first["collision"][2 * 6 + 2])
+        self.assertEqual(len(first["ground_cells"]), 240)
+        self.assertFalse(first["collision"][2 * 16 + 2])
         self.assertEqual(first["sites"], [])
         self.assertEqual(first["arrival_points"], [])
 
+    def test_requires_at_least_one_screen_and_uses_first_ground_as_town_edge(self) -> None:
+        town_tileset = initial_tileset(
+            "village",
+            "mapchips/village",
+            "town",
+            "grass",
+            "passable",
+        )
+        source = initial_map_source("sample_village", town_tileset, "town", 16, 15)
+
+        self.assertTrue(
+            all(
+                ground_id == "grass"
+                for row in source["grounds"]
+                for ground_id in row
+            )
+        )
+        source["grounds"].append(["grass"] * 16)
+        source["size"] = [16, 16]
+        source["grounds"][0][4] = "missing"
+        codes = {item.code for item in validate_map_source(source, town_tileset)}
+        self.assertIn("unknown_ground", codes)
+
+        town_tileset["grounds"].append(
+            {
+                "id": "path",
+                "parent_id": "grass",
+                "collision": "passable",
+                "base_visual": deepcopy(town_tileset["grounds"][0]["base_visual"]),
+                "boundaries": [],
+            }
+        )
+        source["grounds"][0][4] = "path"
+        codes = {item.code for item in validate_map_source(source, town_tileset)}
+        self.assertIn("map_edge_not_base_ground", codes)
+
+        with self.assertRaisesRegex(ValueError, "幅16"):
+            initial_map_source("too_small", town_tileset, "town", 15, 15)
+
+        mismatch = initial_map_source("wrong_profile", town_tileset, "dungeon", 16, 15)
+        self.assertIn(
+            "profile_mismatch",
+            {item.code for item in validate_map_source(mismatch, town_tileset)},
+        )
+        with self.assertRaisesRegex(ValueError, "高さ15"):
+            initial_map_source("too_short", town_tileset, "town", 16, 14)
+
     def test_validates_and_compiles_actors_and_event_triggers(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["grounds"][2][3] = "plain"
         source["actors"] = [
@@ -105,7 +153,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(compiled.runtime["actors"], source["actors"])
 
     def test_rejects_invalid_actor_and_overlapping_actor_triggers(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["actors"] = [
             {
                 "id": "elder",
@@ -132,7 +180,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertIn("overlapping_event_trigger", codes)
 
     def test_prop_actor_uses_a_sheet_index_and_rejects_facing_or_legacy_appearance(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         prop = {
             "id": "treasure_1",
@@ -167,7 +215,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertIn("deprecated_actor_appearance_id", codes)
 
     def test_requires_one_fixed_touch_interact_trigger_per_actor(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["actors"] = [
             {
@@ -211,7 +259,7 @@ class MapSourceTest(unittest.TestCase):
         )
 
     def test_rejects_standalone_interact_trigger(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["event_triggers"] = [
             {
@@ -245,7 +293,7 @@ class MapSourceTest(unittest.TestCase):
                 ],
             }
         ]
-        source = initial_map_source("test_world", tileset, "world", 6, 5)
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
         for x, y in ((1, 1), (2, 2), (3, 2), (2, 3), (3, 3)):
             source["grounds"][y][x] = "plain"
         source["objects"] = [
@@ -296,7 +344,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(compiled.runtime["arrival_points"], source["arrival_points"])
 
     def test_rejects_invalid_site_cells_and_missing_anchor(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["sites"] = [
             {
                 "id": "bad_site",
@@ -323,7 +371,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertIn("arrival_point_blocked", codes)
 
     def test_reports_unselected_and_invalid_destinations_for_list_fields(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["sites"] = [
             {
@@ -363,7 +411,7 @@ class MapSourceTest(unittest.TestCase):
         )
 
     def test_validates_site_destinations_across_maps(self) -> None:
-        world = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        world = initial_map_source("test_world", self.tileset, "world", 16, 15)
         world["grounds"][2][2] = "plain"
         world["arrival_points"] = [
             {
@@ -390,7 +438,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(missing_map[0].code, "missing_destination_map")
         self.assertEqual(missing_map[0].severity, "warning")
 
-        town = initial_map_source("sample_town", self.tileset, "town", 6, 5)
+        town = initial_map_source("sample_town", self.tileset, "town", 16, 15)
         missing_spawn = validate_map_links(
             {"test_world": world, "sample_town": town}
         )
@@ -420,8 +468,8 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(validate_map_links({"test_world": same_world}), [])
 
     def test_reports_global_site_id_collision_for_every_owning_map(self) -> None:
-        first = initial_map_source("first_world", self.tileset, "world", 6, 5)
-        second = initial_map_source("second_world", self.tileset, "world", 6, 5)
+        first = initial_map_source("first_world", self.tileset, "world", 16, 15)
+        second = initial_map_source("second_world", self.tileset, "world", 16, 15)
         for source in (first, second):
             source["grounds"][2][2] = "plain"
             source["arrival_points"] = [
@@ -460,7 +508,7 @@ class MapSourceTest(unittest.TestCase):
         )
 
     def test_validates_teleport_arrival_site_links(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["grounds"][2][3] = "plain"
         source["sites"] = [
@@ -497,7 +545,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertIn("duplicate_site_teleport_arrival", codes)
 
     def test_validates_event_and_moved_actor_links_for_each_map(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["event_triggers"] = [
             {
@@ -561,7 +609,7 @@ class MapSourceTest(unittest.TestCase):
         )
 
     def test_rejects_non_sea_world_edge_and_duplicate_object_origin(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][0][1] = "plain"
         source["objects"] = [
             {"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0},
@@ -570,7 +618,7 @@ class MapSourceTest(unittest.TestCase):
 
         codes = {item.code for item in validate_map_source(source, self.tileset)}
 
-        self.assertIn("world_edge_not_sea", codes)
+        self.assertIn("map_edge_not_base_ground", codes)
         self.assertIn("duplicate_object_origin", codes)
 
     def test_allows_object_overlap_when_origins_differ_and_combines_collision(self) -> None:
@@ -580,7 +628,7 @@ class MapSourceTest(unittest.TestCase):
             {"offset": [0, 0], "collision": "blocked", "tile": [0, 0]},
             {"offset": [1, 0], "collision": "passable", "tile": [1, 0]},
         ]
-        source = initial_map_source("test_world", tileset, "world", 6, 5)
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["grounds"][2][3] = "plain"
         source["grounds"][2][4] = "plain"
@@ -592,9 +640,9 @@ class MapSourceTest(unittest.TestCase):
         resolved = resolve_map(source, tileset)
 
         self.assertEqual(len(resolved["object_cells"]), 4)
-        self.assertTrue(resolved["collision"][2 * 6 + 2])
-        self.assertTrue(resolved["collision"][2 * 6 + 3])
-        self.assertFalse(resolved["collision"][2 * 6 + 4])
+        self.assertTrue(resolved["collision"][2 * 16 + 2])
+        self.assertTrue(resolved["collision"][2 * 16 + 3])
+        self.assertFalse(resolved["collision"][2 * 16 + 4])
 
     def test_draws_object_with_lower_bottom_edge_in_front_regardless_of_order(self) -> None:
         tileset = deepcopy(self.tileset)
@@ -605,7 +653,7 @@ class MapSourceTest(unittest.TestCase):
             {"offset": [0, 1], "collision": "passable", "tile": [0, 1]},
             {"offset": [1, 1], "collision": "passable", "tile": [1, 1]},
         ]
-        source = initial_map_source("test_world", tileset, "world", 6, 6)
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
         source["objects"] = [
             {"id": "rock_upper", "definition_id": "rock", "origin": [2, 1], "order": 100},
             {"id": "rock_lower", "definition_id": "rock", "origin": [2, 2], "order": -100},
@@ -634,7 +682,7 @@ class MapSourceTest(unittest.TestCase):
             "default_draw_group": "object_overlay",
             "cells": [{"offset": [0, 0], "collision": "passable_override", "tile": [1, 0]}],
         })
-        source = initial_map_source("test_world", tileset, "world", 6, 6)
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["objects"] = [
             {"id": "mountain_1", "definition_id": "mountain", "origin": [1, 1], "order": 100},
@@ -649,7 +697,7 @@ class MapSourceTest(unittest.TestCase):
         ]
 
         self.assertEqual(overlapping, ["mountain_1", "entrance_1"])
-        self.assertFalse(resolved["collision"][2 * 6 + 2])
+        self.assertFalse(resolved["collision"][2 * 16 + 2])
         self.assertNotIn(
             "passable_override_without_blocked_object",
             {item.code for item in validate_map_source(source, tileset)},
@@ -662,7 +710,46 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(compiled.runtime["collision_rows"][2][2], "0")
 
         tileset["objects"][1]["cells"][0]["collision"] = "passable"
-        self.assertTrue(resolve_map(source, tileset)["collision"][2 * 6 + 2])
+        self.assertTrue(resolve_map(source, tileset)["collision"][2 * 16 + 2])
+
+    def test_foreground_is_resolved_after_overlay(self) -> None:
+        tileset = deepcopy(self.tileset)
+        tileset["objects"] = [
+            {
+                "id": draw_group,
+                "size": [1, 1],
+                "default_draw_group": draw_group,
+                "cells": [
+                    {
+                        "offset": [0, 0],
+                        "collision": "passable",
+                        "tile": [index, 0],
+                    }
+                ],
+            }
+            for index, draw_group in enumerate(
+                ("object", "object_overlay", "object_foreground")
+            )
+        ]
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
+        source["objects"] = [
+            {
+                "id": f"{draw_group}_1",
+                "definition_id": draw_group,
+                "origin": [2 + index, 2],
+                "order": 0,
+            }
+            for index, draw_group in enumerate(
+                ("object_foreground", "object_overlay", "object")
+            )
+        ]
+
+        resolved = resolve_map(source, tileset)
+
+        self.assertEqual(
+            [cell["draw_group"] for cell in resolved["object_cells"]],
+            ["object", "object_overlay", "object_foreground"],
+        )
 
     def test_warns_when_passable_override_has_no_blocked_object_below(self) -> None:
         tileset = deepcopy(self.tileset)
@@ -672,7 +759,7 @@ class MapSourceTest(unittest.TestCase):
             "default_draw_group": "object_overlay",
             "cells": [{"offset": [0, 0], "collision": "passable_override", "tile": [1, 0]}],
         })
-        source = initial_map_source("test_world", tileset, "world", 6, 5)
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
         source["objects"] = [
             {"id": "entrance_1", "definition_id": "entrance", "origin": [2, 2], "order": 0}
         ]
@@ -682,7 +769,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertIn("passable_override_without_blocked_object", warnings)
 
     def test_compiles_rules_and_choices_to_runtime_atlas(self) -> None:
-        source = initial_map_source("test_world", self.tileset, "world", 6, 5)
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
         source["objects"] = [
             {"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0}
@@ -690,8 +777,8 @@ class MapSourceTest(unittest.TestCase):
 
         compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
 
-        self.assertEqual(compiled.runtime["size"], [6, 5])
-        self.assertEqual(len(compiled.runtime["ground_tiles"]), 30)
+        self.assertEqual(compiled.runtime["size"], [16, 15])
+        self.assertEqual(len(compiled.runtime["ground_tiles"]), 240)
         self.assertEqual(len(compiled.runtime["object_tiles"]), 1)
         self.assertEqual(compiled.runtime["collision_rows"][2][2], "1")
         self.assertEqual(len(compiled.atlas), compiled.runtime["atlas"]["width"] * compiled.runtime["atlas"]["height"])

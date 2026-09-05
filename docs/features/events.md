@@ -117,15 +117,13 @@ npm run events:build
           "then": [
             {
               "command": "message",
-              "message_id": "fairy_village.meet_alvan.after",
-              "portrait_character_key": "Alvan"
+              "message_id": "fairy_village.meet_alvan.after"
             }
           ],
           "else": [
             {
               "command": "message",
-              "message_id": "fairy_village.meet_alvan.first",
-              "portrait_character_key": "Alvan"
+              "message_id": "fairy_village.meet_alvan.first"
             },
             {
               "command": "join_party",
@@ -188,6 +186,7 @@ npm run events:build
 [
   {
     "message_id": "fairy_village.meet_alvan.first",
+    "portrait_character_key": "Alvan",
     "text_ja": ["はじめまして。", "アルヴァンです。"],
     "text_en": ["Nice to meet you.", "I'm Alvan."],
     "text_zhcn": ["初次见面。", "我是阿尔万。"]
@@ -197,6 +196,9 @@ npm run events:build
 
 - `message_id` は2要素以上をドットでつないだ `lower_snake_case` とし、全体で一意にする。
 - IDの接頭辞をイベント名前空間に合わせることは推奨するが、強制しない。
+- `portrait_character_key` は任意で、指定時は `characters.json` の `name_en` と顔座標を使う。
+  現在パーティにいないキャラクターも表示できる。同じメッセージを参照するすべての箇所で
+  顔の有無と種類は共通とし、イベントのmessageコマンド側には顔情報を持たせない。
 - 各 `text_*` は1表示行ごとの文字列配列とする。`text_ja` は1行以上必須、未翻訳の
   `text_en` と `text_zhcn` は空配列を許可し、その場合は既存の言語フォールバックを使う。
 - 通常UI、用語、ショップなどで使う `content/data/texts.json` とは相互参照しない。
@@ -288,15 +290,14 @@ npm run events:build
 ```json
 {
   "command": "message",
-  "message_id": "fairy_village.meet_alvan.first",
-  "portrait_character_key": "Alvan"
+  "message_id": "fairy_village.meet_alvan.first"
 }
 ```
 
 - `message_id` は `content/events/messages.json` の既存IDを参照する。翻訳後文字列をイベント定義へ
   複製しない。
-- `portrait_character_key` は任意で、指定時は `characters.json` の `name_en` と顔座標を使う。
-  現在パーティにいないキャラクターも表示できる。初期仕様で任意画像座標は指定しない。
+- 顔グラフィックは参照先のメッセージレコードが持つ任意の `portrait_character_key` から解決する。
+  初期仕様で任意画像座標は指定しない。
 - 顔なしでは本文領域をWindow全幅にし、顔ありでは32×32pxの顔領域を確保する。左右配置、話者名、
   自動送りは画面仕様が必要になった時点で追加する。
 - 本文は拠点名表示と同じ大きい表示文字用フォントを使う。日本語では `umplus_j12r.bdf` を使用する。
@@ -629,9 +630,9 @@ validatorを使う。
 | `se_id` | 安定SEカタログ |
 | `actor_id` | 全マップのactor一覧。参照元マップとの一致は保存・生成時に横断検証する |
 
-メッセージは左の一覧から新規作成・選択し、中央で `message_id`、日本語、英語、簡体字中国語を
-編集する。新規IDは `<現在のnamespace>.message_<連番>` を既定値にするが、別の名前へ変更できる。
-イベントのmessageコマンドはこの一覧からIDを選択する。
+メッセージは左の一覧から新規作成・選択し、中央で `message_id`、任意の顔、日本語、英語、
+簡体字中国語を編集する。新規IDは `<現在のnamespace>.message_<連番>` を既定値にするが、
+別の名前へ変更できる。イベントのmessageコマンドはこの一覧からIDを選択し、顔は指定しない。
 
 ### 操作と安全策
 

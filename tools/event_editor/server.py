@@ -174,16 +174,20 @@ class EventEditorApplication:
                 "path": namespace,
                 "message": "イベントJSONのルートはobjectである必要があります。",
             }]
+        catalogs = self.catalogs(flags, messages)
         return [
             item.as_dict()
             for item in (
                 *validate_event_flags(flags),
-                *validate_event_messages(messages),
+                *validate_event_messages(
+                    messages,
+                    character_keys=catalogs["character_keys"],
+                ),
                 *validate_event_sources(
                     self.sources_with(namespace, data),
                     **{
                         key: value
-                        for key, value in self.catalogs(flags, messages).items()
+                        for key, value in catalogs.items()
                         if key != "actor_ids"
                     },
                 ),
@@ -245,7 +249,10 @@ class EventEditorApplication:
             sources,
             **{key: value for key, value in catalogs.items() if key != "actor_ids"},
         )
-        compiled_messages = compile_event_messages(messages)
+        compiled_messages = compile_event_messages(
+            messages,
+            character_keys=catalogs["character_keys"],
+        )
         save_event_source(self.source_path_for(namespace), data)
         save_event_flags(event_flags_path(self.content_root), flags)
         save_event_messages(event_messages_path(self.content_root), messages)

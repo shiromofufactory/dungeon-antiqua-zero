@@ -44,6 +44,23 @@
   flex: none;
 }
 
+.app-header .editor-context {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.app-header .editor-context label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.app-header .editor-context select {
+  width: min(220px, 22vw);
+  min-width: 130px;
+}
+
 .app-header > .toolbar,
 .app-header .header-actions {
   min-width: 0;
@@ -75,6 +92,7 @@
   }
 
   .app-header .header-actions,
+  .app-header .editor-context,
   .app-header > .toolbar {
     width: 100%;
     flex: none;
@@ -94,6 +112,7 @@
   }
 
   .app-header .header-actions,
+  .app-header .editor-context,
   .app-header .namespace-tools,
   .app-header .toolbar {
     flex-wrap: wrap;
