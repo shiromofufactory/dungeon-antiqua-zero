@@ -253,13 +253,16 @@ app/maps/
 ```sh
 npm run tools:editor
 npm run tools:editor -- --map field_01 --tileset dungeon --profile dungeon
+npm run tools:editor -- --editor tileset --tileset dungeon
 npm run tools:editor -- --editor event --namespace common
 npm run maps:validate
 npm run maps:build
 ```
 
-`tools:map-editor` と `tools:event-editor` は、最初に表示する画面だけを指定する互換入口として残す。
-どの入口から起動してもヘッダーから両エディタへ切り替えられる。
+`tools:mapchip-metadata`、`tools:map-editor`、`tools:event-editor` は、最初に表示する画面だけを
+指定する互換入口として残す。どの入口から起動しても、同じ認証セッションのヘッダーから
+マップチップ、マップ、イベントの3画面へ切り替えられる。各画面の編集中状態と保存・検証処理は
+独立させ、画面切り替え時に未保存変更があればブラウザの離脱確認を表示する。
 
 新規マップは既定で32×24セルとする。`--width`、`--height` で初期寸法を変更できる。
 既存マップでは制作用JSONに保存されたタイルセット、profile、寸法を使用する。
@@ -267,6 +270,7 @@ npm run maps:build
 ## 受け入れ条件
 
 - メタデータ設定ツールで定義した地面を選び、ドラッグで塗布できる。
+- 同じ起動プロセス内でマップチップメタデータを編集し、マップ画面へ戻って再読込できる。
 - 8方向境界、ランダム候補、アニメーションがキャンバスへ反映される。
 - 定義済みオブジェクトを配置でき、同一起点は禁止しつつ異なる起点で重ねられる。
 - 配置済みオブジェクトを右クリックで選択し、右ドラッグまたは選択後の左ドラッグで移動できる。

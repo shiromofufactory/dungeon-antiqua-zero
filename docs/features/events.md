@@ -82,7 +82,8 @@ app/maps/
 次の入口を使用する。
 
 ```sh
-npm run tools:event-editor
+npm run tools:editor -- --editor event
+npm run tools:event-editor  # 互換入口
 npm run events:validate
 npm run events:build
 ```

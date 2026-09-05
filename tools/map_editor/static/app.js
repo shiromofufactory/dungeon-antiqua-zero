@@ -3,7 +3,7 @@
 const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
 let token = new URLSearchParams(window.location.search).get("token") || "";
-const editorRoute = window.location.pathname.match(/^\/(map|event)(?:\/|$)/)?.[1] || null;
+const editorRoute = window.location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 
 const state = {
   data: null,

@@ -11,6 +11,7 @@ const OBJECT_COLLISION_LABELS = {
 const SESSION_CLIENT_HEADER = "mapchip-metadata-ui";
 const PREVIEW_SETTINGS_VERSION = 1;
 let token = new URLSearchParams(window.location.search).get("token") || "";
+const editorRoute = window.location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 
 const state = {
   data: null,
@@ -81,6 +82,26 @@ function restorePreviewSettings() {
   }
 }
 
+function editorApiPath(path) {
+  return editorRoute ? `/${editorRoute}${path}` : path;
+}
+
+function editorUrl(editor) {
+  if (!editorRoute) return null;
+  const url = new URL(`/${editor}/`, window.location.origin);
+  url.searchParams.set("token", token);
+  return url.href;
+}
+
+function configureEditorNavigation() {
+  const navigation = byId("editor-switch");
+  if (!navigation || !editorRoute) return;
+  navigation.hidden = false;
+  navigation.querySelectorAll("[data-editor-link]").forEach((link) => {
+    link.href = editorUrl(link.dataset.editorLink);
+  });
+}
+
 function syncPreviewControls() {
   byId("preview-collision").checked = state.previewShowCollision;
   byId("preview-pause").textContent = state.previewPaused ? "再生" : "一時停止";
@@ -88,7 +109,7 @@ function syncPreviewControls() {
 
 async function renewSessionToken() {
   try {
-    const response = await fetch("/api/session-token", {
+    const response = await fetch(editorApiPath("/api/session-token"), {
       cache: "no-store",
       headers: { "X-Mapchip-Client": SESSION_CLIENT_HEADER },
     });
@@ -99,6 +120,7 @@ async function renewSessionToken() {
     const currentUrl = new URL(window.location.href);
     currentUrl.searchParams.set("token", token);
     window.history.replaceState(null, "", currentUrl);
+    configureEditorNavigation();
     return true;
   } catch (_error) {
     return false;
@@ -106,7 +128,7 @@ async function renewSessionToken() {
 }
 
 async function api(path, options = {}, retryAuthentication = true) {
-  const response = await fetch(path, {
+  const response = await fetch(editorApiPath(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -706,17 +728,13 @@ function renderAll() {
   drawSource();
 }
 
-async function validate(showResult = false) {
+async function validate() {
   if (!state.data) return;
   try {
     const result = await api("/api/validate", { method: "POST", body: JSON.stringify({ data: state.data }) });
     state.diagnostics = result.diagnostics;
     if (result.image_info) state.imageInfo = result.image_info;
     renderIssues();
-    if (showResult) {
-      const errors = state.diagnostics.filter((item) => item.severity === "error").length;
-      showToast(errors ? `${errors}件のエラーがあります。` : "検証に成功しました。", errors > 0);
-    }
   } catch (error) {
     showToast(error.message, true);
   }
@@ -724,7 +742,7 @@ async function validate(showResult = false) {
 
 function scheduleValidation() {
   window.clearTimeout(state.validateTimer);
-  state.validateTimer = window.setTimeout(() => validate(false), 280);
+  state.validateTimer = window.setTimeout(validate, 280);
   updateSaveState("dirty", "検証中…");
 }
 
@@ -937,11 +955,10 @@ async function initialize() {
     state.previewGrounds = Array(9).fill(fallback);
     if (state.data.grounds.some((ground) => ground.id === "sand")) state.previewGrounds[4] = "sand";
     restorePreviewSettings();
-    byId("document-path").textContent = payload.metadata_path;
     byId("image-summary").textContent = `${state.imageInfo.width}×${state.imageInfo.height}px · ${state.imageInfo.columns}×${state.imageInfo.rows} cells · 16px`;
     rawImage.onload = prepareProcessedImage;
     rawImage.onerror = () => showToast("ソース画像を表示できません。", true);
-    rawImage.src = state.imageUrl;
+    rawImage.src = editorApiPath(state.imageUrl);
     renderAll();
     savePreviewSettings();
     updateSaveState("saved", "保存済み");
@@ -975,7 +992,6 @@ byId("preview-content").addEventListener("click", (event) => {
 });
 byId("undo-button").addEventListener("click", undo);
 byId("redo-button").addEventListener("click", redo);
-byId("validate-button").addEventListener("click", () => validate(true));
 byId("save-button").addEventListener("click", save);
 byId("zoom-in").addEventListener("click", () => { state.zoom = Math.min(6, state.zoom + 1); drawSource(); });
 byId("zoom-out").addEventListener("click", () => { state.zoom = Math.max(1, state.zoom - 1); drawSource(); });
@@ -1026,4 +1042,5 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 requestAnimationFrame(animationLoop);
+configureEditorNavigation();
 initialize();

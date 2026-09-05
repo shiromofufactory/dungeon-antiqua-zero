@@ -389,10 +389,10 @@ manifestや保存形式など、本番と共有すべき解釈処理は `app/res
 
 ツール同士を巨大な共通Appへ統合しない。単独で確認するツールは `python3 -m tools.<module>` で独立起動できる小さなComposition Rootとし、画面遷移を確認する場合は起点となるモックだけをComposition Rootにする。複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。画面モックでは、Pyxelと共通資産の初期化を `_runtime.py`、想定内例外と終了コードの変換を `_runner.py`、疑似パーティを `_fixtures.py` が担当する。Settings、SaveData、画面固有画像は起点が生成し、子画面へ必要な依存だけを明示的に渡す。すべてを格納する汎用Contextは作らない。`tools/` は `pyxel package app ...` の配布対象に含めない。
 
-マップエディタとイベントエディタは `tools/editor` を共通のComposition Rootとし、単一の
-ローカルHTTPサーバーと認証セッションから `/map/`、`/event/` へ振り分ける。統合するのは起動、
-静的ファイル配信、ナビゲーションだけとし、マップとイベントのApplication、保存、検証処理は
-それぞれのモジュールに保持する。
+マップチップメタデータ設定ツール、マップエディタ、イベントエディタは `tools/editor` を共通の
+Composition Rootとし、単一のローカルHTTPサーバーと認証セッションから `/tileset/`、`/map/`、
+`/event/` へ振り分ける。統合するのは起動、静的ファイル配信、ナビゲーションだけとし、各画面の
+Application、編集中状態、保存、検証処理はそれぞれのモジュールに保持する。
 
 マップチップメタデータ設定ツールとマップエディタは対話UIだけを `tools/` に置き、JSON Schema、
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。

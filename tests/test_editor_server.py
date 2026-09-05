@@ -14,6 +14,7 @@ from scripts.map_pipeline import initial_worldmap_tileset, save_tileset
 from tools.editor.server import create_server, make_handler
 from tools.event_editor.server import EventEditorApplication
 from tools.map_editor.server import MapEditorApplication
+from tools.mapchip_metadata.server import MetadataApplication
 
 
 class EditorServerTest(unittest.TestCase):
@@ -91,8 +92,17 @@ class EditorServerTest(unittest.TestCase):
             token="shared-token",
             app_root=app_root,
         )
+        self.metadata_application = MetadataApplication(
+            self.content_root,
+            "worldmap",
+            token="shared-token",
+            palette_path=palette_path,
+        )
         self.server = create_server(
-            self.map_application, self.event_application, 0
+            self.map_application,
+            self.event_application,
+            self.metadata_application,
+            0,
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever, daemon=True
@@ -129,16 +139,20 @@ class EditorServerTest(unittest.TestCase):
         with urlopen(request, timeout=4) as response:
             return json.loads(response.read())
 
-    def test_serves_both_editors_and_their_static_assets(self) -> None:
+    def test_serves_all_editors_and_their_static_assets(self) -> None:
         map_page = self.get_text("/map/?token=shared-token")
         event_page = self.get_text("/event/?token=shared-token")
+        tileset_page = self.get_text("/tileset/?token=shared-token")
 
         self.assertIn("Map Editor", map_page)
         self.assertIn("Event Editor", event_page)
+        self.assertIn("Map Chip Metadata", tileset_page)
         self.assertNotIn('id="validate-button"', map_page)
+        self.assertNotIn('id="validate-button"', tileset_page)
         self.assertNotIn('id="validate"', event_page)
         self.assertNotIn('id="document-path"', map_page)
         self.assertNotIn('id="document-path"', event_page)
+        self.assertNotIn('id="document-path"', tileset_page)
         event_header = event_page.split("</header>", 1)[0]
         self.assertIn('class="header-actions"', event_header)
         self.assertIn('id="namespace-select"', event_header)
@@ -152,12 +166,23 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn('data-list-tab="message"', event_page)
         self.assertIn('id="editor-switch"', map_page)
         self.assertIn('id="editor-switch"', event_page)
+        self.assertIn('id="editor-switch"', tileset_page)
+        self.assertIn('data-editor-link="tileset"', map_page)
+        self.assertIn('data-editor-link="tileset"', event_page)
+        self.assertIn('data-editor-link="map"', tileset_page)
+        self.assertIn('data-editor-link="event"', tileset_page)
         self.assertIn('id="actor-sprite-dialog"', map_page)
         self.assertIn("editorApiPath", self.get_text("/map/app.js"))
         self.assertIn("editorApiPath", self.get_text("/event/app.js"))
+        self.assertIn("editorApiPath", self.get_text("/tileset/app.js"))
+        self.assertIn(".editor-switch", self.get_text("/tileset/styles.css"))
         self.assertEqual(
             self.get_text("/map/editor-header.css"),
             self.get_text("/event/editor-header.css"),
+        )
+        self.assertEqual(
+            self.get_text("/map/editor-header.css"),
+            self.get_text("/tileset/editor-header.css"),
         )
         self.assertIn(
             ".namespace-dialog",
@@ -203,9 +228,13 @@ class EditorServerTest(unittest.TestCase):
         event_payload = self.get_json(
             "/event/api/document?namespace=sample&token=shared-token"
         )
+        tileset_payload = self.get_json(
+            "/tileset/api/document?token=shared-token"
+        )
 
         self.assertEqual(map_payload["data"]["map_id"], "test_world")
         self.assertEqual(event_payload["data"]["namespace"], "sample")
+        self.assertEqual(tileset_payload["data"]["tileset_id"], "worldmap")
 
         with self.assertRaises(HTTPError) as context:
             self.get_json("/event/api/document")
@@ -231,12 +260,44 @@ class EditorServerTest(unittest.TestCase):
             },
             "X-Event-Editor-Token",
         )
+        tileset_payload = self.get_json(
+            "/tileset/api/document?token=shared-token"
+        )
+        tileset_result = self.post_json(
+            "/tileset/api/validate",
+            {"data": tileset_payload["data"]},
+            "X-Mapchip-Token",
+        )
 
         self.assertIsNotNone(map_result["resolved"])
         self.assertIn(
             "empty_commands",
             {item["code"] for item in event_result["diagnostics"]},
         )
+        self.assertFalse(
+            any(
+                item["severity"] == "error"
+                for item in tileset_result["diagnostics"]
+            )
+        )
+
+    def test_routes_tileset_save_requests(self) -> None:
+        payload = self.get_json(
+            "/tileset/api/document?token=shared-token"
+        )
+        payload["data"]["grounds"][0]["base_visual"]["frame_interval"] = 12
+
+        result = self.post_json(
+            "/tileset/api/save",
+            {"data": payload["data"]},
+            "X-Mapchip-Token",
+        )
+
+        self.assertTrue(result["saved"])
+        saved = json.loads(
+            self.metadata_application.metadata_path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(saved["grounds"][0]["base_visual"]["frame_interval"], 12)
 
     def test_refreshes_each_editor_session_token(self) -> None:
         map_token = self.get_json(
@@ -247,15 +308,34 @@ class EditorServerTest(unittest.TestCase):
             "/event/api/session-token",
             {"X-Event-Editor-Client": "event-editor-ui"},
         )
+        tileset_token = self.get_json(
+            "/tileset/api/session-token",
+            {"X-Mapchip-Client": "mapchip-metadata-ui"},
+        )
 
         self.assertEqual(map_token["token"], "shared-token")
         self.assertEqual(event_token["token"], "shared-token")
+        self.assertEqual(tileset_token["token"], "shared-token")
 
     def test_rejects_applications_with_different_tokens(self) -> None:
         self.event_application.token = "different-token"
 
         with self.assertRaisesRegex(ValueError, "共通の認証トークン"):
-            make_handler(self.map_application, self.event_application)
+            make_handler(
+                self.map_application,
+                self.event_application,
+                self.metadata_application,
+            )
+
+    def test_rejects_metadata_application_with_a_different_token(self) -> None:
+        self.metadata_application.token = "different-token"
+
+        with self.assertRaisesRegex(ValueError, "共通の認証トークン"):
+            make_handler(
+                self.map_application,
+                self.event_application,
+                self.metadata_application,
+            )
 
 
 if __name__ == "__main__":

@@ -75,6 +75,7 @@ class MetadataApplication:
         content_root: Path,
         tileset_id: str,
         token: str | None = None,
+        palette_path: Path | None = None,
     ):
         if not _valid_tileset_name(tileset_id):
             raise ValueError("タイルセットIDが不正です。")
@@ -86,7 +87,9 @@ class MetadataApplication:
         expected_root = (self.content_root / "maps" / "tilesets").resolve()
         if expected_root not in self.metadata_path.parents:
             raise ValueError("メタデータパスがcontent/maps/tilesets外です。")
-        self.palette_path = PROJECT_ROOT / "app" / "assets.pyxpal"
+        self.palette_path = (
+            palette_path or PROJECT_ROOT / "app" / "assets.pyxpal"
+        ).resolve()
         self.token = token or secrets.token_urlsafe(24)
 
     def load(self) -> dict[str, Any]:
@@ -127,9 +130,6 @@ class MetadataApplication:
             "diagnostics": diagnostics,
             "image_info": image_info,
             "image_url": f"/api/source-image?token={self.token}",
-            "metadata_path": self.metadata_path.relative_to(PROJECT_ROOT).as_posix()
-            if PROJECT_ROOT in self.metadata_path.parents
-            else self.metadata_path.as_posix(),
         }
 
     def save(self, data: object) -> dict[str, Any]:

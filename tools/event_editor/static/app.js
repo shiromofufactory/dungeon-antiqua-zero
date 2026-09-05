@@ -19,7 +19,7 @@ const COMMAND_OPTIONS = [
   ["move_actor", "move_actor"],
 ];
 let token = new URLSearchParams(location.search).get("token") || "";
-const editorRoute = location.pathname.match(/^\/(map|event)(?:\/|$)/)?.[1] || null;
+const editorRoute = location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 const state = {
   data: null,
   flags: [],

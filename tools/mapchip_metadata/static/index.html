@@ -4,22 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DA ZERO — Map Chip Metadata</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="editor-header.css">
 </head>
 <body>
   <header class="app-header">
-    <div class="brand">
-      <span class="brand-mark">DA0</span>
-      <div>
-        <h1>Map Chip Metadata</h1>
-        <p id="document-path">読み込み中…</p>
+    <div class="header-identity">
+      <div class="brand">
+        <span class="brand-mark">DA0</span>
+        <div>
+          <h1>Map Chip Metadata</h1>
+        </div>
       </div>
+      <nav id="editor-switch" class="editor-switch" aria-label="エディタ切り替え" hidden>
+        <a data-editor-link="tileset" aria-current="page">マップチップ</a>
+        <a data-editor-link="map">マップ</a>
+        <a data-editor-link="event">イベント</a>
+      </nav>
     </div>
     <div class="toolbar">
       <span id="save-state" class="status-pill">読み込み中</span>
       <button id="undo-button" class="button ghost" type="button" disabled>元に戻す</button>
       <button id="redo-button" class="button ghost" type="button" disabled>やり直す</button>
-      <button id="validate-button" class="button secondary" type="button">検証</button>
       <button id="save-button" class="button primary" type="button">保存</button>
     </div>
   </header>
@@ -85,6 +91,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-"""Serve the map and event editors from one local entry point."""
+"""Serve the tileset, map, and event editors from one local entry point."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import webbrowser
 from scripts.event_pipeline import load_event_flags, load_event_messages
 from tools.event_editor.server import EventEditorApplication
 from tools.map_editor.server import MapEditorApplication
+from tools.mapchip_metadata.server import MetadataApplication
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,10 +25,12 @@ DEFAULT_PORT = 8767
 MAX_REQUEST_BYTES = {
     "event": 8 * 1024 * 1024,
     "map": 32 * 1024 * 1024,
+    "tileset": 4 * 1024 * 1024,
 }
 STATIC_ROOTS = {
     "event": PROJECT_ROOT / "tools" / "event_editor" / "static",
     "map": PROJECT_ROOT / "tools" / "map_editor" / "static",
+    "tileset": PROJECT_ROOT / "tools" / "mapchip_metadata" / "static",
 }
 MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -39,10 +42,12 @@ MIME_TYPES = {
 CLIENT_HEADERS = {
     "event": ("X-Event-Editor-Client", "event-editor-ui"),
     "map": ("X-Map-Editor-Client", "map-editor-ui"),
+    "tileset": ("X-Mapchip-Client", "mapchip-metadata-ui"),
 }
 TOKEN_HEADERS = {
     "event": "X-Event-Editor-Token",
     "map": "X-Map-Editor-Token",
+    "tileset": "X-Mapchip-Token",
 }
 
 
@@ -51,11 +56,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         os.environ.get("DA0_CONTENT_DIR", PROJECT_ROOT / "content")
     ).resolve()
     parser = argparse.ArgumentParser(
-        description="マップエディタとイベントエディタをまとめて起動します。"
+        description="マップチップ、マップ、イベントの各エディタをまとめて起動します。"
     )
     parser.add_argument(
         "--editor",
-        choices=("map", "event"),
+        choices=("tileset", "map", "event"),
         default="map",
         help="最初に表示するエディタ（既定: map）",
     )
@@ -65,7 +70,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--tileset",
         default="worldmap",
-        help="新規マップで使うタイルセットID（既定: worldmap）",
+        help="編集対象または新規マップで使うタイルセットID（既定: worldmap）",
     )
     parser.add_argument(
         "--profile", default="world", choices=("world", "dungeon", "town")
@@ -118,12 +123,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def make_handler(
     map_application: MapEditorApplication,
     event_application: EventEditorApplication,
+    metadata_application: MetadataApplication,
 ) -> type[BaseHTTPRequestHandler]:
     applications = {
         "map": map_application,
         "event": event_application,
+        "tileset": metadata_application,
     }
-    if map_application.token != event_application.token:
+    if len({application.token for application in applications.values()}) != 1:
         raise ValueError("統合エディタでは共通の認証トークンが必要です。")
 
     class EditorHandler(BaseHTTPRequestHandler):
@@ -168,7 +175,7 @@ def make_handler(
 
         @staticmethod
         def _editor_route(path: str) -> tuple[str, str] | None:
-            for editor in ("map", "event"):
+            for editor in ("tileset", "map", "event"):
                 prefix = f"/{editor}"
                 if path == prefix:
                     return editor, ""
@@ -234,20 +241,26 @@ def make_handler(
                             "namespace", [event_application.namespace]
                         )[0]
                         payload = event_application.document_payload(namespace)
+                    elif editor == "tileset":
+                        payload = metadata_application.document_payload()
                     else:
                         payload = map_application.document_payload()
                     self._send_json(payload)
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
                 return
-            if editor == "map" and path == "/api/source-image":
+            if editor in {"map", "tileset"} and path == "/api/source-image":
                 if not self._authorized(editor, parsed):
                     self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
                     return
                 try:
-                    data, _is_new = map_application.load_source()
-                    tileset = map_application.load_tileset(data["tileset_id"])
-                    image_path = map_application.source_image(tileset)
+                    if editor == "tileset":
+                        data = metadata_application.load()
+                        image_path = metadata_application.source_image(data)
+                    else:
+                        data, _is_new = map_application.load_source()
+                        tileset = map_application.load_tileset(data["tileset_id"])
+                        image_path = map_application.source_image(tileset)
                     self._send_bytes(
                         image_path.read_bytes(),
                         MIME_TYPES.get(
@@ -338,6 +351,17 @@ def make_handler(
                 "resolved": resolved,
             }
 
+        def _metadata_response(self, path: str, payload: object) -> object:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if path == "/api/save":
+                return metadata_application.save(data)
+            diagnostics, image_info = metadata_application.validate(data)
+            return {
+                "saved": False,
+                "diagnostics": diagnostics,
+                "image_info": image_info,
+            }
+
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             route = self._editor_route(parsed.path)
@@ -345,11 +369,9 @@ def make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "APIが見つかりません。")
                 return
             editor, path = route
-            allowed_paths = (
-                {"/api/validate", "/api/resolve", "/api/save"}
-                if editor == "map"
-                else {"/api/validate", "/api/save"}
-            )
+            allowed_paths = {"/api/validate", "/api/save"}
+            if editor == "map":
+                allowed_paths.add("/api/resolve")
             if path not in allowed_paths:
                 self._error(HTTPStatus.NOT_FOUND, "APIが見つかりません。")
                 return
@@ -360,11 +382,12 @@ def make_handler(
             if not valid_payload:
                 return
             try:
-                response = (
-                    self._map_response(path, payload)
-                    if editor == "map"
-                    else self._event_response(path, payload)
-                )
+                if editor == "map":
+                    response = self._map_response(path, payload)
+                elif editor == "tileset":
+                    response = self._metadata_response(path, payload)
+                else:
+                    response = self._event_response(path, payload)
                 self._send_json(response)
             except (OSError, ValueError) as error:
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
@@ -375,12 +398,14 @@ def make_handler(
 def create_server(
     map_application: MapEditorApplication,
     event_application: EventEditorApplication,
+    metadata_application: MetadataApplication,
     port: int,
 ) -> ThreadingHTTPServer:
     if not 0 <= port <= 65535:
         raise ValueError("portは0から65535で指定してください。")
     return ThreadingHTTPServer(
-        (DEFAULT_HOST, port), make_handler(map_application, event_application)
+        (DEFAULT_HOST, port),
+        make_handler(map_application, event_application, metadata_application),
     )
 
 
@@ -411,7 +436,24 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
             app_root=args.app_root,
         )
-        server = create_server(map_application, event_application, args.port)
+        metadata_tileset_id = args.tileset
+        if args.editor == "map":
+            map_data, _is_new = map_application.load_source()
+            current_tileset_id = map_data.get("tileset_id")
+            if isinstance(current_tileset_id, str):
+                metadata_tileset_id = current_tileset_id
+        metadata_application = MetadataApplication(
+            args.content_root,
+            metadata_tileset_id,
+            token=token,
+            palette_path=args.palette,
+        )
+        server = create_server(
+            map_application,
+            event_application,
+            metadata_application,
+            args.port,
+        )
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
