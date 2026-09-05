@@ -23,6 +23,7 @@ from game import (
     FORMATION_ARROW_WIDTH,
     FORMATION_ARROW_Y,
     MENU_COMMANDS,
+    NEW_GAME_EVENT_ID,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
     PARTY_FACE_Y,
@@ -1708,6 +1709,7 @@ class GameTest(unittest.TestCase):
         mock.shops = (Mock(),)
         mock._build_main_windows = Mock()
         mock._refresh_site_name_label = Mock()
+        mock._start_field_event = Mock()
         mock.bgm = Mock()
         mock.start_screen = Mock()
         mock.showing_field = False
@@ -1729,6 +1731,33 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.start_screen)
         self.assertTrue(mock.showing_field)
         mock.bgm.play.assert_called_once_with(FIELD_BGM_ID)
+        mock._start_field_event.assert_not_called()
+
+    def test_start_game_starts_prologue_only_for_new_game(self) -> None:
+        mock = Game.__new__(Game)
+        calls = []
+        mock.pending_loaded_state = None
+        mock.pending_loaded_map = None
+        mock.pending_loaded_field = None
+        mock.pending_loaded_renderer = None
+        mock.pending_load_slot = None
+        mock.start_screen = Mock()
+        mock.showing_field = False
+        mock._refresh_site_name_label = Mock()
+        mock.bgm = Mock()
+        mock._start_field_event = Mock()
+        mock.bgm.play.side_effect = lambda _bgm_id: calls.append("bgm")
+        mock._start_field_event.side_effect = lambda _event_id: calls.append(
+            "event"
+        )
+
+        mock._apply_start_game()
+
+        self.assertIsNone(mock.start_screen)
+        self.assertTrue(mock.showing_field)
+        mock.bgm.play.assert_called_once_with(FIELD_BGM_ID)
+        mock._start_field_event.assert_called_once_with(NEW_GAME_EVENT_ID)
+        self.assertEqual(calls, ["bgm", "event"])
 
     def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
         mock = Game.__new__(Game)

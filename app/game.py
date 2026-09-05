@@ -234,6 +234,7 @@ MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces_pc"
 WORLD_MAP_ID = "worldmap"
 WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
+NEW_GAME_EVENT_ID = "worldmap.prologue"
 RUNTIME_TEXTS_PATH = APP_ROOT / "data" / "texts.json"
 SITE_MAP_FADE_FRAME_COUNT = 12
 SITE_NAME_FONT_ROLE = FontRole.LARGE
@@ -1592,6 +1593,7 @@ class Game:
         """Commit staged loaded state at the fully black fade midpoint."""
 
         loaded = self.pending_loaded_state
+        is_new_game = loaded is None
         if loaded is not None:
             if (
                 self.pending_loaded_map is None
@@ -1634,6 +1636,8 @@ class Game:
         self.showing_field = True
         self._refresh_site_name_label(force=True)
         self.bgm.play(FIELD_BGM_ID)
+        if is_new_game:
+            self._start_field_event(NEW_GAME_EVENT_ID)
 
     def _finish_spell(self) -> None:
         if self.spell_screen is None:
