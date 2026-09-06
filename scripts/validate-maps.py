@@ -102,6 +102,7 @@ def main() -> int:
                     errors += 1
                 else:
                     warnings += 1
+        catalogs = reference_catalogs(content_root, app_root=PROJECT_ROOT / "app")
         sources = map_paths(content_root, args.map_id)
         for path in sources:
             data = load_map_source(path)
@@ -116,7 +117,11 @@ def main() -> int:
                 print(f"  ERROR tileset_id: タイルセットが見つかりません: {tileset_id}")
                 errors += 1
                 continue
-            diagnostics = validate_map_source(data, tileset)
+            diagnostics = validate_map_source(
+                data,
+                tileset,
+                bgm_ids=catalogs["bgm_ids"],
+            )
             if not diagnostics:
                 print("  OK")
             for diagnostic in diagnostics:
@@ -136,7 +141,7 @@ def main() -> int:
         event_sources = load_event_sources(content_root)
         event_catalog = compile_event_sources(
             event_sources,
-            **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
+            **catalogs,
         )
         link_diagnostics.extend(
             validate_map_event_links(all_sources, event_catalog["events"])

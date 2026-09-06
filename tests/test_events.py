@@ -14,6 +14,7 @@ from app.systems import (
     InventorySystem,
     MessageEffect,
     MovePartyEffect,
+    OpenShopEffect,
     PartySystem,
 )
 
@@ -189,6 +190,41 @@ class EventRunnerTest(unittest.TestCase):
 
         self.assertIs(self.party.active_party[-1], alvan)
         self.assertEqual(self.party.active_party[-1].hp, 1)
+
+    def test_recover_party_restores_hp_mp_and_all_conditions(self) -> None:
+        self.party.join("Alvan")
+        for member in self.party.active_party:
+            member.hp = 0
+            member.mp = 0
+            member.poisoned = True
+            member.paralyzed = True
+            member.sleeping = 3
+            member.confused = 2
+        runner = self.runner([{"command": "recover_party"}])
+
+        self.assertIsNone(runner.advance())
+
+        for member in self.party.active_party:
+            self.assertEqual(member.hp, member.max_hp)
+            self.assertEqual(member.mp, member.max_mp)
+            self.assertFalse(member.poisoned)
+            self.assertFalse(member.paralyzed)
+            self.assertEqual(member.sleeping, 0)
+            self.assertEqual(member.confused, 0)
+
+    def test_open_shop_waits_for_field_effect_completion(self) -> None:
+        runner = self.runner([
+            {"command": "open_shop", "shop_key": "FAIRY_HAMLET_ITEMS"},
+            {"command": "set_flag", "flag_id": "sample.done"},
+        ])
+
+        effect = runner.advance()
+
+        self.assertEqual(effect, OpenShopEffect("FAIRY_HAMLET_ITEMS"))
+        self.assertNotIn("sample.done", self.save_data.event_flags)
+        runner.complete_effect(effect)
+        self.assertIsNone(runner.advance())
+        self.assertIn("sample.done", self.save_data.event_flags)
 
     def test_runtime_catalog_rejects_unknown_nested_command(self) -> None:
         document = runtime_document(

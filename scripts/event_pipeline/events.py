@@ -175,6 +175,7 @@ def _validate_command_list(
     flag_ids: set[str],
     character_keys: set[str],
     item_keys: set[str],
+    shop_keys: set[str],
     message_ids: set[str],
     bgm_ids: set[str],
     se_ids: set[str],
@@ -220,7 +221,7 @@ def _validate_command_list(
                 branch = command.get(branch_name)
                 if branch_name == "else" and branch == []:
                     continue
-                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1)
+                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1)
         elif command_type == "end_event":
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
@@ -238,6 +239,13 @@ def _validate_command_list(
             bgm_id = command.get("bgm_id")
             if not isinstance(bgm_id, str) or bgm_id not in bgm_ids:
                 _diagnostic(diagnostics, "error", "unknown_bgm", f"{command_path}.bgm_id", f"存在しないBGM IDです: {bgm_id}")
+        elif command_type == "recover_party":
+            _known_fields(command, {"command"}, diagnostics, command_path)
+        elif command_type == "open_shop":
+            _known_fields(command, {"command", "shop_key"}, diagnostics, command_path)
+            shop_key = command.get("shop_key")
+            if not isinstance(shop_key, str) or shop_key not in shop_keys:
+                _diagnostic(diagnostics, "error", "unknown_shop", f"{command_path}.shop_key", f"存在しないショップです: {shop_key}")
         elif command_type == "move_party":
             _known_fields(command, {"command", "direction", "steps"}, diagnostics, command_path)
             _validate_movement(command, diagnostics, command_path)
@@ -268,6 +276,7 @@ def validate_event_sources(
     flag_ids: Iterable[str] = (),
     character_keys: Iterable[str] = (),
     item_keys: Iterable[str] = (),
+    shop_keys: Iterable[str] = (),
     message_ids: Iterable[str] = (),
     bgm_ids: Iterable[str] = (),
     se_ids: Iterable[str] = (),
@@ -278,6 +287,7 @@ def validate_event_sources(
         raise TypeError("event sources must be a mapping")
     characters = set(character_keys)
     items = set(item_keys)
+    shops = set(shop_keys)
     messages = set(message_ids)
     bgms = set(bgm_ids)
     sounds = set(se_ids)
@@ -336,6 +346,7 @@ def validate_event_sources(
             _validate_command_list(
                 event.get("commands"), diagnostics, f"{path}.commands",
                 flag_ids=flags, character_keys=characters, item_keys=items,
+                shop_keys=shops,
                 message_ids=messages, bgm_ids=bgms, se_ids=sounds,
             )
     return diagnostics

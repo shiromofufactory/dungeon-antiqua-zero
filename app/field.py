@@ -16,6 +16,7 @@ else:
 
 
 DEFAULT_FIELD_MOVE_SPEED = 1
+INTERIOR_FIELD_MOVE_SPEED = 2
 DEFAULT_ROAM_WAIT_MIN = 30
 DEFAULT_ROAM_WAIT_MAX = 90
 
@@ -34,22 +35,35 @@ class FieldMovement:
         map_data: CompiledMap,
         *,
         start: FieldPosition | None = None,
-        speed: int = DEFAULT_FIELD_MOVE_SPEED,
+        speed: int | None = None,
         facing: Direction = Direction.DOWN,
+        allow_blocked_start: bool = False,
     ) -> None:
         if not isinstance(map_data, CompiledMap):
             raise TypeError("field map data must be a CompiledMap")
+        if speed is None:
+            if map_data.profile == "world":
+                speed = DEFAULT_FIELD_MOVE_SPEED
+            elif map_data.profile in ("dungeon", "town"):
+                speed = INTERIOR_FIELD_MOVE_SPEED
+            else:
+                raise ValueError(f"unsupported field map profile: {map_data.profile}")
         if isinstance(speed, bool) or not isinstance(speed, int):
             raise TypeError("field movement speed must be an integer")
         if speed <= 0 or map_data.tile_size % speed:
             raise ValueError("field movement speed must divide the map tile size")
         if not isinstance(facing, Direction):
             raise TypeError("field facing must be a Direction")
+        if not isinstance(allow_blocked_start, bool):
+            raise TypeError("allow_blocked_start must be a boolean")
         if start is None:
             start = self._nearest_passable_position(map_data)
         if not isinstance(start, FieldPosition):
             raise TypeError("field start must be a FieldPosition")
-        if map_data.is_blocked(start.x, start.y):
+        start_is_blocked = map_data.is_blocked(start.x, start.y)
+        if not (0 <= start.x < map_data.width and 0 <= start.y < map_data.height):
+            raise ValueError("field start must be within the map bounds")
+        if start_is_blocked and not allow_blocked_start:
             raise ValueError("field start must be on a passable map cell")
 
         self.map_data = map_data

@@ -65,6 +65,10 @@ class MapEditorServerTest(unittest.TestCase):
         )
         palette_path = self.root / "palette.pyxpal"
         palette_path.write_text("000000\nFF0080\n", encoding="utf-8")
+        audio_root = self.root / "app" / "audio"
+        audio_root.mkdir(parents=True)
+        for bgm_id in ("da3-field", "da3-town"):
+            (audio_root / f"{bgm_id}.ogg").write_bytes(b"")
         self.application = MapEditorApplication(
             content_root,
             self.root / "runtime",
@@ -75,6 +79,7 @@ class MapEditorServerTest(unittest.TestCase):
             15,
             palette_path=palette_path,
             token="test-token",
+            audio_root=audio_root,
         )
         self.server = create_server(self.application, 0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -126,12 +131,14 @@ class MapEditorServerTest(unittest.TestCase):
     def test_serves_new_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
-        self.assertEqual(payload["data"]["format_version"], 4)
+        self.assertEqual(payload["data"]["format_version"], 5)
         self.assertEqual(payload["data"]["actors"], [])
         self.assertEqual(payload["data"]["event_triggers"], [])
         self.assertEqual(payload["data"]["size"], [16, 15])
         self.assertEqual(payload["data"]["sites"], [])
         self.assertEqual(payload["data"]["arrival_points"], [])
+        self.assertEqual(payload["data"]["bgm_id"], "da3-field")
+        self.assertEqual(payload["bgm_options"], ["da3-field", "da3-town"])
         self.assertEqual(payload["site_names_ja"], {})
         self.assertEqual(
             payload["destination_options"],
@@ -170,6 +177,7 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('id="delete-map-button"', page)
         self.assertIn('id="save-button" class="button primary" type="button" disabled', page)
         self.assertIn('id="ground-only-toggle"', page)
+        self.assertIn('data-map-field="bgm_id"', script)
         self.assertIn("function renderMapSelector()", script)
         self.assertIn('byId("save-button").disabled = !canSave()', script)
         self.assertIn('if (!canSave()) return;', script)
@@ -221,6 +229,7 @@ class MapEditorServerTest(unittest.TestCase):
             },
         )
         self.assertTrue(created["is_new"])
+        self.assertEqual(created["data"]["bgm_id"], "da3-town")
         self.assertEqual(created["data"]["grounds"][0], ["grass"] * 16)
         self.assertEqual(created["tileset"]["source_image_id"], "mapchips/village")
 
@@ -239,6 +248,7 @@ class MapEditorServerTest(unittest.TestCase):
         )
         self.assertTrue(changed["dirty"])
         self.assertEqual(changed["data"]["tileset_id"], "village_alt")
+        self.assertEqual(changed["data"]["bgm_id"], "da3-town")
         self.assertEqual(changed["data"]["grounds"][0], ["floor"] * 16)
         self.assertEqual(changed["data"]["objects"], [])
         self.assertEqual(

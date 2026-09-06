@@ -52,6 +52,9 @@ def reference_catalogs(
             content_root / "data" / "characters.json", "name_en"
         ),
         "item_keys": _record_keys(content_root / "data" / "items.json", "name_en"),
+        "shop_keys": _record_keys(
+            content_root / "data" / "shops.json", "shop_key"
+        ),
         "flag_ids": (
             _record_keys(flag_path, "flag_id")
             if flag_path.is_file()

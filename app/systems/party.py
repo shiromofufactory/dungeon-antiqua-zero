@@ -111,6 +111,12 @@ class PartySystem:
         self._active_party = remaining
         return True
 
+    def recover_all(self) -> None:
+        """Fully recover every member of the active party."""
+
+        for member in self._active_party:
+            member.fully_recover()
+
     def _require_character(self, character_key: str) -> None:
         if not isinstance(character_key, str):
             raise TypeError("character_key must be a string")

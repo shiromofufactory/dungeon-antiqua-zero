@@ -49,6 +49,11 @@ class ChangeBgmEffect:
 
 
 @dataclass(frozen=True)
+class OpenShopEffect:
+    shop_key: str
+
+
+@dataclass(frozen=True)
 class MovePartyEffect:
     direction: Direction
     steps: int
@@ -62,7 +67,12 @@ class MoveActorEffect:
 
 
 EventEffect = (
-    MessageEffect | PlaySeEffect | ChangeBgmEffect | MovePartyEffect | MoveActorEffect
+    MessageEffect
+    | PlaySeEffect
+    | ChangeBgmEffect
+    | OpenShopEffect
+    | MovePartyEffect
+    | MoveActorEffect
 )
 
 
@@ -195,6 +205,12 @@ class EventRunner:
                 return PlaySeEffect(str(command["se_id"]))
             if command_type == "change_bgm":
                 return ChangeBgmEffect(str(command["bgm_id"]))
+            if command_type == "recover_party":
+                self.party.recover_all()
+                return None
+            if command_type == "open_shop":
+                self._require_field(command_type)
+                return OpenShopEffect(str(command["shop_key"]))
             if command_type == "move_party":
                 self._require_field(command_type)
                 return MovePartyEffect(self._direction(command["direction"]), int(command["steps"]))
@@ -246,5 +262,6 @@ __all__ = [
     "MessageEffect",
     "MoveActorEffect",
     "MovePartyEffect",
+    "OpenShopEffect",
     "PlaySeEffect",
 ]

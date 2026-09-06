@@ -158,6 +158,43 @@ class MapSourceTest(unittest.TestCase):
         )
         self.assertEqual(compiled.runtime["actors"], source["actors"])
 
+    def test_validates_and_compiles_map_bgm(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+
+        self.assertEqual(source["bgm_id"], "da3-field")
+        self.assertEqual(
+            [
+                item.code
+                for item in validate_map_source(
+                    source,
+                    self.tileset,
+                    bgm_ids={"da3-field", "da3-town"},
+                )
+                if item.severity == "error"
+            ],
+            [],
+        )
+        compiled = compile_map(
+            source,
+            self.tileset,
+            self.image_path,
+            self.palette_path,
+        )
+        self.assertEqual(compiled.runtime["bgm_id"], "da3-field")
+
+        source["bgm_id"] = "missing"
+        self.assertIn(
+            "unknown_bgm",
+            {
+                item.code
+                for item in validate_map_source(
+                    source,
+                    self.tileset,
+                    bgm_ids={"da3-field", "da3-town"},
+                )
+            },
+        )
+
     def test_rejects_invalid_actor_and_overlapping_actor_triggers(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["actors"] = [

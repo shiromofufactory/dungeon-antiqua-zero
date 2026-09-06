@@ -160,6 +160,28 @@ class BgmPlayerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             player.set_volume(True)  # type: ignore[arg-type]
 
+    def test_fade_rate_scales_gain_without_changing_configured_volume(self) -> None:
+        player = BgmPlayer(self.audio_dir, volume=3, pyxel_api=self.pyxel)
+
+        player.set_fade_rate(0.5)
+
+        self.assertEqual(player.volume, 3)
+        self.assertEqual(player.fade_rate, 0.5)
+        self.assertEqual(
+            self.pyxel.channels[2].gain,
+            BGM_VOLUME_GAINS[3] * 0.5,
+        )
+        player.set_volume(4)
+        self.assertEqual(
+            self.pyxel.channels[2].gain,
+            BGM_VOLUME_GAINS[4] * 0.5,
+        )
+
+        with self.assertRaises(ValueError):
+            player.set_fade_rate(1.1)
+        with self.assertRaises(TypeError):
+            player.set_fade_rate(True)  # type: ignore[arg-type]
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -94,6 +94,7 @@ class MapEditorApplication:
         height: int,
         palette_path: Path | None = None,
         token: str | None = None,
+        audio_root: Path | None = None,
     ):
         if not _valid_id(map_id) or not _valid_id(tileset_id):
             raise ValueError("マップIDとタイルセットIDはlower_snake_caseで指定してください。")
@@ -106,6 +107,7 @@ class MapEditorApplication:
         self.height = height
         self.palette_path = (palette_path or PROJECT_ROOT / "app" / "assets.pyxpal").resolve()
         self.token = token or secrets.token_urlsafe(24)
+        self.audio_root = (audio_root or PROJECT_ROOT / "app" / "audio").resolve()
         self.source_path = (self.content_root / "maps" / "sources" / f"{map_id}.json").resolve()
         source_root = (self.content_root / "maps" / "sources").resolve()
         if source_root not in self.source_path.parents:
@@ -276,6 +278,17 @@ class MapEditorApplication:
     def event_options(self) -> list[str]:
         return sorted(self.event_definitions())
 
+    def bgm_options(self) -> list[str]:
+        if not self.audio_root.is_dir():
+            return []
+        return sorted(
+            {
+                path.relative_to(self.audio_root).with_suffix("").as_posix()
+                for path in self.audio_root.rglob("*.ogg")
+                if path.is_file() and not path.name.startswith(".")
+            }
+        )
+
     def event_definitions(self) -> dict[str, Mapping[str, Any]]:
         return {
             f"{source.get('namespace')}.{event.get('id')}": event
@@ -377,7 +390,11 @@ class MapEditorApplication:
             issue = Diagnostic("error", "missing_tileset", "tileset_id", str(error))
             return [issue.as_dict()], None, None
         tileset_diagnostics, image_info = validate_tileset(tileset, image_path, self.palette_path)
-        map_diagnostics = validate_map_source(data, tileset)
+        map_diagnostics = validate_map_source(
+            data,
+            tileset,
+            bgm_ids=self.bgm_options(),
+        )
         link_diagnostics = (
             validate_map_links(self.map_sources(data))
             if isinstance(data, dict)
@@ -452,6 +469,7 @@ class MapEditorApplication:
             "destination_options": self.destination_options(data),
             "site_options": self.site_options(data),
             "event_options": self.event_options(),
+            "bgm_options": self.bgm_options(),
             "tileset": tileset,
             "diagnostics": diagnostics,
             "resolved": resolved,
@@ -524,6 +542,7 @@ class MapEditorApplication:
             width,
             height,
         )
+        reset_source["bgm_id"] = source["bgm_id"]
         payload = self._document_payload(reset_source, is_new=False)
         payload["dirty"] = True
         return payload

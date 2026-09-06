@@ -263,6 +263,8 @@ npm run events:build
 | `message` | `message_id` | メッセージOverlayを閉じるまで待機 | field / battle |
 | `play_se` | `se_id` | SE再生を要求して同フレームで完了 | field / battle |
 | `change_bgm` | `bgm_id` | BGM切替要求が受理された時点で完了 | field / battle |
+| `recover_party` | なし | 活動パーティ全員のHP・MPを最大値へ戻し、全状態異常を解除 | field / battle |
+| `open_shop` | `shop_key` | 指定ショップを開き、退出してフィールドへ戻るまで待機 | fieldのみ |
 | `move_party` | `direction`, `steps` | 指定歩数のフィールド移動演出完了まで待機 | fieldのみ |
 | `move_actor` | `actor_id`, `direction`, `steps` | 指定actorの移動演出完了まで待機 | fieldのみ |
 
@@ -328,6 +330,29 @@ npm run events:build
   `app/audio/catalog.json` へ分離し、イベントエディタと本番コードが同じカタログを読む。
 - 音量は `Settings.bgm_volume` / `se_volume` を使い、イベント定義へ音量設定を持たせない。
 
+#### パーティ全快とショップ
+
+```json
+{
+  "command": "recover_party"
+}
+```
+
+- `recover_party` は活動中のパーティ全員を対象に、HP・MPを最大値へ戻し、死亡（HP 0）、毒、
+  麻痺、眠り、混乱を全て解除する。離脱中のキャラクター状態は変更しない。
+
+```json
+{
+  "command": "open_shop",
+  "shop_key": "FAIRY_HAMLET_ITEMS"
+}
+```
+
+- `shop_key` は `content/data/shops.json` の既存 `shop_key` を参照し、イベントエディタでは
+  登録済みショップから選択する。未知IDは生成時エラーにする。
+- `open_shop` は標準フェードで本番のショップOverlayを開く。ショップ退出後のフェードが
+  完了してから後続コマンドへ進み、イベントを起動したフィールド操作へ戻る。
+
 #### 移動
 
 ```json
@@ -361,14 +386,15 @@ npm run events:build
 
 ### 制作用形式
 
-actor種別と共通スプライトシート参照の追加に伴い、制作用マップの `format_version` は4とする。
-version 3のactorは `appearance_id` を廃止し、用途に応じた `kind` と共通シート内の
+actor種別と共通スプライトシート参照はversion 4で追加され、現在の制作用マップの
+`format_version` はマップ別BGMを追加した5とする。version 3のactorは `appearance_id` を
+廃止し、用途に応じた `kind` と共通シート内の
 `sprite_index` へ明示的に移行する。actorのないversion 3マップはversion番号だけを更新できる。
 既存の `sites`、`arrival_points`、`event_triggers` はそのまま維持する。
 
 ```json
 {
-  "format_version": 4,
+  "format_version": 5,
   "actors": [
     {
       "id": "village_elder",
@@ -559,14 +585,15 @@ EventRunner ──→ 条件評価／SaveData・PartySystem・InventorySystem
         │
         ├──→ MessageEffect ──→ MessageOverlay ──→ 完了通知
         ├──→ AudioEffect ────→ BGM／SEサービス ─→ 完了通知
-        └──→ MovementEffect ─→ FieldScene ──────→ 完了通知
+        ├──→ MovementEffect ─→ FieldScene ──────→ 完了通知
+        └──→ OpenShopEffect ─→ ShopOverlay ─────→ 退出後に完了通知
 ```
 
 1. Sceneが通常更新の安全な境界でトリガーを検出する。
 2. EventCoordinatorは別イベント実行中でないことを確認し、EventCatalogから完全IDを解決する。
 3. EventRunnerはコマンド位置とbranchのスタックを作る。
 4. 同期コマンドは既存Systemへ委譲して結果を受け、直ちに次へ進む。
-5. メッセージや移動はEventEffectを1件返して待機する。SceneManagerまたはSceneがOverlay／演出を
+5. メッセージ、移動、ショップはEventEffectを1件返して待機する。SceneManagerまたはSceneがOverlay／演出を
    開き、完了結果をRunnerへ返す。
 6. 全コマンド完了後、または `end_event` の実行後、CoordinatorがRunnerを破棄し、入力リリース待ちを経てScene操作へ戻す。
 

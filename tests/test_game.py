@@ -11,7 +11,6 @@ from game import (
     ALERT_CHANNEL,
     ALERT_SOUND_ID,
     FACES_IMAGE_ID,
-    FIELD_BGM_ID,
     INITIAL_GOLD,
     INITIAL_PARTY_KEYS,
     GAME_SETTINGS_ENV,
@@ -867,7 +866,7 @@ class GameTest(unittest.TestCase):
             None,
         )
         world_map = object()
-        target_map = Mock()
+        target_map = Mock(bgm_id="da3-town")
         target_map.sites = ()
         target_map.arrival_point.return_value = arrival
         mock = Game.__new__(Game)
@@ -885,6 +884,7 @@ class GameTest(unittest.TestCase):
         mock.pending_site = None
         mock.pending_target_map = None
         mock.pending_target_arrival = None
+        mock.bgm = Mock()
 
         mock._handle_arrived_site()
 
@@ -907,6 +907,7 @@ class GameTest(unittest.TestCase):
             screen_height=240,
         )
         self.assertIs(mock.current_map, target_map)
+        mock.bgm.play.assert_called_once_with("da3-town")
         play.assert_not_called()
 
     def test_missing_site_map_does_not_mark_site_visited(self) -> None:
@@ -954,7 +955,7 @@ class GameTest(unittest.TestCase):
             None,
         )
         dungeon_map = object()
-        world_map = Mock(sites=())
+        world_map = Mock(sites=(), bgm_id="da3-field")
         world_map.arrival_point.return_value = arrival
         mock = Game.__new__(Game)
         mock.field = Mock(arrived_position=FieldPosition(2, 2))
@@ -971,6 +972,7 @@ class GameTest(unittest.TestCase):
         mock.pending_site = None
         mock.pending_target_map = None
         mock.pending_target_arrival = None
+        mock.bgm = Mock()
 
         mock._handle_arrived_site()
         mock._apply_pending_screen_change()
@@ -988,6 +990,7 @@ class GameTest(unittest.TestCase):
             screen_width=256,
             screen_height=240,
         )
+        mock.bgm.play.assert_called_once_with("da3-field")
 
     def test_debug_teleport_targets_use_visited_sites_and_localized_names(
         self,
@@ -1095,7 +1098,7 @@ class GameTest(unittest.TestCase):
             True,
             "sample_town",
         )
-        target_map = Mock(sites=())
+        target_map = Mock(sites=(), bgm_id="da3-field")
         party = (Mock(),)
         mock = Game.__new__(Game)
         mock.pending_target_map = target_map
@@ -1111,6 +1114,7 @@ class GameTest(unittest.TestCase):
         mock.showing_field = False
         mock._refresh_site_name_label = Mock()
         mock.travel_system = Mock()
+        mock.bgm = Mock()
 
         mock._apply_pending_debug_teleport()
 
@@ -1128,6 +1132,7 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.debug_screen)
         self.assertIsNone(mock.settings_window)
         self.assertIsNone(mock.settings_cursor)
+        mock.bgm.play.assert_called_once_with("da3-field")
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.party, party)
         self.assertEqual(mock.selected_member_index, 0)
@@ -1737,6 +1742,7 @@ class GameTest(unittest.TestCase):
             target_map,
             start=FieldPosition(17, 39),
             facing=Direction.LEFT,
+            allow_blocked_start=True,
         )
         field_renderer_class.assert_called_once_with(
             target_map,
@@ -1761,7 +1767,7 @@ class GameTest(unittest.TestCase):
         loaded.character_states = {"Fiora": loaded.active_party[0]}
         loaded.inventory = Mock()
         mock.pending_loaded_state = loaded
-        mock.pending_loaded_map = Mock(sites=())
+        mock.pending_loaded_map = Mock(sites=(), bgm_id="dungeon/ruins")
         mock.pending_loaded_field = Mock()
         mock.pending_loaded_renderer = Mock()
         mock.pending_load_slot = 4
@@ -1789,7 +1795,7 @@ class GameTest(unittest.TestCase):
         mock._build_main_windows.assert_called_once_with(animate=False)
         self.assertIsNone(mock.start_screen)
         self.assertTrue(mock.showing_field)
-        mock.bgm.play.assert_called_once_with(FIELD_BGM_ID)
+        mock.bgm.play.assert_called_once_with("dungeon/ruins")
         mock._start_field_event.assert_not_called()
 
     def test_start_game_starts_prologue_only_for_new_game(self) -> None:
@@ -1802,6 +1808,7 @@ class GameTest(unittest.TestCase):
         mock.pending_load_slot = None
         mock.start_screen = Mock()
         mock.showing_field = False
+        mock.current_map = Mock(bgm_id="da3-field")
         mock._refresh_site_name_label = Mock()
         mock.bgm = Mock()
         mock._start_field_event = Mock()
@@ -1814,7 +1821,7 @@ class GameTest(unittest.TestCase):
 
         self.assertIsNone(mock.start_screen)
         self.assertTrue(mock.showing_field)
-        mock.bgm.play.assert_called_once_with(FIELD_BGM_ID)
+        mock.bgm.play.assert_called_once_with("da3-field")
         mock._start_field_event.assert_called_once_with(NEW_GAME_EVENT_ID)
         self.assertEqual(calls, ["bgm", "event"])
 
@@ -1840,6 +1847,46 @@ class GameTest(unittest.TestCase):
             mock.palette_shifter.set_global_mix.call_args.kwargs,
             {"base_rate": 1.0, "target_color": 0x000000},
         )
+
+    def test_map_change_fades_bgm_out_and_in_with_screen(self) -> None:
+        mock = Game.__new__(Game)
+        mock.fade = FadeThroughBlack(SITE_MAP_FADE_FRAME_COUNT)
+        mock.pending_screen_change = None
+        mock.bgm = Mock()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock._apply_pending_screen_change = Mock()
+
+        mock._begin_screen_change(GameScreenChange.CHANGE_MAP)
+        for _frame in range(SITE_MAP_FADE_FRAME_COUNT * 2):
+            mock._update_fade()
+
+        expected_rates = [
+            1.0 - frame / SITE_MAP_FADE_FRAME_COUNT
+            for frame in range(1, SITE_MAP_FADE_FRAME_COUNT + 1)
+        ] + [
+            frame / SITE_MAP_FADE_FRAME_COUNT
+            for frame in range(1, SITE_MAP_FADE_FRAME_COUNT + 1)
+        ]
+        self.assertEqual(
+            [call.args[0] for call in mock.bgm.set_fade_rate.call_args_list],
+            expected_rates,
+        )
+        mock._apply_pending_screen_change.assert_called_once_with()
+        self.assertFalse(mock.fade_bgm)
+
+    def test_menu_change_does_not_fade_bgm(self) -> None:
+        mock = Game.__new__(Game)
+        mock.fade = FadeThroughBlack()
+        mock.pending_screen_change = None
+        mock.bgm = Mock()
+        mock.command_cursor = Mock()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock._apply_pending_screen_change = Mock()
+
+        mock._begin_screen_change(GameScreenChange.SHOW_MENU)
+        mock._update_fade()
+
+        mock.bgm.set_fade_rate.assert_not_called()
 
     def test_status_return_rebuilds_changed_language_without_window_animation(
         self,

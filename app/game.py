@@ -104,6 +104,7 @@ from systems import (
     MessageEffect,
     MoveActorEffect,
     MovePartyEffect,
+    OpenShopEffect,
     PartySystem,
     PlaySeEffect,
     SaveRepository,
@@ -293,7 +294,6 @@ SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
 GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
 WELCOME_BGM_ID = "da3-welcome"
-FIELD_BGM_ID = "da3-field"
 INITIAL_GOLD = 100
 INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
 
@@ -466,6 +466,7 @@ class Game:
         self.event_move_remaining = 0
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
+        self.event_resume_after_fade = False
         self.last_event_error: str | None = None
         self.settings_window = None
         self.settings_cursor: WindowCursor | None = None
@@ -475,6 +476,7 @@ class Game:
         self._returning_to_start = False
         self.fade = FadeThroughBlack()
         self.pending_screen_change: GameScreenChange | None = None
+        self.fade_bgm = False
         self.animate_main_windows_with_fade = False
         self.showing_field = False
         self.item_screen: ItemMenuOverlay | None = None
@@ -859,6 +861,7 @@ class Game:
             screen_height=SCREEN_HEIGHT,
         )
         self._reset_field_actors()
+        self.bgm.play(target_map.bgm_id)
         self.pending_target_map = None
         self.pending_target_arrival = None
         self._refresh_site_name_label(force=True)
@@ -1429,6 +1432,11 @@ class Game:
             fade = FadeThroughBlack(frame_count)
             self.fade = fade
         self.pending_screen_change = change
+        self.fade_bgm = change in (
+            GameScreenChange.CHANGE_MAP,
+            GameScreenChange.TELEPORT,
+            GameScreenChange.START_GAME,
+        )
         if change in (
             GameScreenChange.SHOW_FIELD,
             GameScreenChange.OPEN_ITEM,
@@ -1483,6 +1491,16 @@ class Game:
             self._finish_shop()
             self.shop_return_to_debug = False
             self.showing_field = not return_to_debug
+            effect = getattr(self, "event_effect", None)
+            runner = getattr(self, "event_runner", None)
+            if (
+                not return_to_debug
+                and isinstance(effect, OpenShopEffect)
+                and runner is not None
+            ):
+                runner.complete_effect(effect)
+                self.event_effect = None
+                self.event_resume_after_fade = True
         elif change is GameScreenChange.CHANGE_MAP:
             self._apply_pending_site_change()
         elif change is GameScreenChange.TELEPORT:
@@ -1519,6 +1537,8 @@ class Game:
             base_rate=fade.visible_rate,
             target_color=self.palette_shifter.base_colors[0],
         )
+        if getattr(self, "fade_bgm", False):
+            self.bgm.set_fade_rate(fade.visible_rate)
         if event is FadeEvent.COVERED:
             self._apply_pending_screen_change()
         elif was_fading_in and getattr(
@@ -1529,6 +1549,20 @@ class Game:
             self._update_window_animations()
             if event is FadeEvent.FINISHED:
                 self.animate_main_windows_with_fade = False
+        if event is FadeEvent.FINISHED:
+            self.fade_bgm = False
+            if getattr(self, "event_resume_after_fade", False):
+                self.event_resume_after_fade = False
+                try:
+                    self._continue_event()
+                except (
+                    KeyError,
+                    EventRuntimeError,
+                    EventMessageDataError,
+                    AudioResourceError,
+                    ValueError,
+                ) as error:
+                    self._abort_event(error)
         return True
 
     def _start_spell(self) -> None:
@@ -1601,6 +1635,7 @@ class Game:
                 target_map,
                 start=loaded.position,
                 facing=loaded.facing,
+                allow_blocked_start=True,
             )
             target_renderer = FieldRenderer(
                 target_map,
@@ -1671,7 +1706,7 @@ class Game:
         self.start_screen = None
         self.showing_field = True
         self._refresh_site_name_label(force=True)
-        self.bgm.play(FIELD_BGM_ID)
+        self.bgm.play(self.current_map.bgm_id)
         if is_new_game:
             self._start_field_event(NEW_GAME_EVENT_ID)
 
@@ -1977,6 +2012,21 @@ class Game:
                 runner.complete_effect(effect)
                 self.event_effect = None
                 continue
+            if isinstance(effect, OpenShopEffect):
+                shop = next(
+                    (shop for shop in self.shops if shop.key == effect.shop_key),
+                    None,
+                )
+                if shop is None:
+                    raise EventRuntimeError(
+                        runner.event_id,
+                        "effect",
+                        f"shop is not available: {effect.shop_key}",
+                    )
+                self.pending_shop = shop
+                self.shop_return_to_debug = False
+                self._begin_screen_change(GameScreenChange.OPEN_SHOP)
+                return
             if isinstance(effect, MessageEffect):
                 self.event_message = EventMessageOverlay(
                     message_id=effect.message_id,
@@ -2056,6 +2106,7 @@ class Game:
         self.event_effect = None
         self.event_message = None
         self.event_move_remaining = 0
+        self.event_resume_after_fade = False
         self.alert.start()
 
     def _release_latch_blocks_field(self, input_state: InputState) -> bool:

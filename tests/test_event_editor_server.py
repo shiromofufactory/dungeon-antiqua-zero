@@ -24,6 +24,10 @@ class EventEditorServerTest(unittest.TestCase):
         (data_root / "items.json").write_text(
             json.dumps([{"name_en": "POTION"}]), encoding="utf-8"
         )
+        (data_root / "shops.json").write_text(
+            json.dumps([{"shop_key": "FAIRY_HAMLET_ITEMS"}]),
+            encoding="utf-8",
+        )
         events_root = self.content_root / "events"
         events_root.mkdir(parents=True)
         (events_root / "flags.json").write_text(
@@ -118,6 +122,9 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertEqual(payload["data"]["namespace"], "sample")
         self.assertEqual(payload["catalogs"]["character_keys"], ["Fiora"])
         self.assertEqual(payload["catalogs"]["item_keys"], ["POTION"])
+        self.assertEqual(
+            payload["catalogs"]["shop_keys"], ["FAIRY_HAMLET_ITEMS"]
+        )
 
         self.assertEqual(payload["catalogs"]["flag_ids"], ["story.done"])
         self.assertEqual(payload["flags"][0]["flag_id"], "story.done")
@@ -155,6 +162,11 @@ class EventEditorServerTest(unittest.TestCase):
                     "note": "挨拶",
                     "commands": [
                         {"command": "message", "message_id": "sample.hello"},
+                        {"command": "recover_party"},
+                        {
+                            "command": "open_shop",
+                            "shop_key": "FAIRY_HAMLET_ITEMS",
+                        },
                         {"command": "set_flag", "flag_id": "story.done"},
                     ],
                 }
@@ -172,6 +184,16 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertEqual(saved, data)
         self.assertEqual(runtime["flags"], ["story.done"])
         self.assertIn("sample.hello", runtime["events"])
+        self.assertEqual(
+            runtime["events"]["sample.hello"]["commands"][1:3],
+            [
+                {"command": "recover_party"},
+                {
+                    "command": "open_shop",
+                    "shop_key": "FAIRY_HAMLET_ITEMS",
+                },
+            ],
+        )
         self.assertNotIn("note", runtime["events"]["sample.hello"])
         self.assertNotIn("note", runtime_messages[0])
         self.assertEqual(

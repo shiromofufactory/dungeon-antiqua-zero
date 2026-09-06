@@ -127,6 +127,14 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 command.get(key), str
             ) or not command[key]:
                 return False
+        elif command_type == "recover_party":
+            if set(command) != {"command"}:
+                return False
+        elif command_type == "open_shop":
+            if set(command) != {"command", "shop_key"} or not isinstance(
+                command.get("shop_key"), str
+            ) or not command["shop_key"]:
+                return False
         elif command_type in ("move_party", "move_actor"):
             fields = {"command", "direction", "steps"}
             if command_type == "move_actor":

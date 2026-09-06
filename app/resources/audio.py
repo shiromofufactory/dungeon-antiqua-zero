@@ -106,6 +106,7 @@ class BgmPlayer:
         self._current_id: str | None = None
         self._loop = True
         self._volume = 0
+        self._fade_rate = 1.0
         self.set_volume(volume)
 
     @property
@@ -115,6 +116,10 @@ class BgmPlayer:
     @property
     def volume(self) -> int:
         return self._volume
+
+    @property
+    def fade_rate(self) -> float:
+        return self._fade_rate
 
     @property
     def is_playing(self) -> bool:
@@ -135,7 +140,22 @@ class BgmPlayer:
             )
 
         self._volume = volume
-        self._pyxel.channels[self.channel].gain = BGM_VOLUME_GAINS[volume]
+        self._apply_gain()
+
+    def set_fade_rate(self, rate: float) -> None:
+        """Scale the configured BGM volume without changing the setting."""
+
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)):
+            raise TypeError("BGM fade rate must be a number")
+        if not 0.0 <= rate <= 1.0:
+            raise ValueError("BGM fade rate must be from 0.0 to 1.0")
+        self._fade_rate = float(rate)
+        self._apply_gain()
+
+    def _apply_gain(self) -> None:
+        self._pyxel.channels[self.channel].gain = (
+            BGM_VOLUME_GAINS[self._volume] * self._fade_rate
+        )
 
     def play(
         self,

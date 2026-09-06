@@ -17,12 +17,13 @@ def compiled_map(
     collision_rows: tuple[str, ...],
     *,
     objects: tuple[MapObjectTile, ...] = (),
+    profile: str = "world",
 ) -> CompiledMap:
     width = len(collision_rows[0])
     height = len(collision_rows)
     return CompiledMap(
         map_id="test_map",
-        profile="world",
+        profile=profile,
         tileset_id="worldmap",
         tile_size=16,
         width=width,
@@ -39,6 +40,25 @@ def compiled_map(
 
 
 class FieldMovementTest(unittest.TestCase):
+    def test_town_and_dungeon_move_twice_as_fast_as_world(self) -> None:
+        movements = {
+            profile: FieldMovement(
+                compiled_map(("000", "000", "000"), profile=profile),
+                start=FieldPosition(1, 1),
+            )
+            for profile in ("world", "town", "dungeon")
+        }
+
+        self.assertEqual(movements["world"].speed, 1)
+        self.assertEqual(movements["town"].speed, 2)
+        self.assertEqual(movements["dungeon"].speed, 2)
+        for movement in movements.values():
+            for _frame in range(8):
+                movement.update(Direction.RIGHT)
+        self.assertEqual(movements["world"].position, FieldPosition(1, 1))
+        self.assertEqual(movements["town"].position, FieldPosition(2, 1))
+        self.assertEqual(movements["dungeon"].position, FieldPosition(2, 1))
+
     def test_starts_on_passable_cell_nearest_the_map_center(self) -> None:
         map_data = compiled_map(
             (
@@ -54,6 +74,35 @@ class FieldMovementTest(unittest.TestCase):
 
         self.assertEqual(field.position, FieldPosition(2, 1))
         self.assertIs(field.facing, Direction.DOWN)
+
+    def test_rejects_an_explicit_blocked_start_by_default(self) -> None:
+        map_data = compiled_map(("111", "100", "111"))
+
+        with self.assertRaisesRegex(ValueError, "passable map cell"):
+            FieldMovement(map_data, start=FieldPosition(0, 1))
+
+    def test_can_resume_on_a_blocked_cell_and_move_to_a_passable_cell(self) -> None:
+        map_data = compiled_map(("111", "100", "111"))
+        field = FieldMovement(
+            map_data,
+            start=FieldPosition(0, 1),
+            allow_blocked_start=True,
+        )
+
+        for _frame in range(map_data.tile_size):
+            field.update(Direction.RIGHT)
+
+        self.assertEqual(field.position, FieldPosition(1, 1))
+
+    def test_blocked_start_override_does_not_allow_out_of_bounds_start(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+
+        with self.assertRaisesRegex(ValueError, "within the map bounds"):
+            FieldMovement(
+                map_data,
+                start=FieldPosition(-1, 1),
+                allow_blocked_start=True,
+            )
 
     def test_moves_one_tile_smoothly_and_finishes_the_active_step(self) -> None:
         map_data = compiled_map(("11111", "10001", "11111"))

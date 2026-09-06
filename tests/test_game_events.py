@@ -5,11 +5,12 @@ import unittest
 from unittest.mock import Mock
 
 from tools._bootstrap import APP_ROOT
-from game import Game
+from game import Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
 from resources import CompiledMap, MapActor, MapCell, MapEventTrigger
-from systems import MovePartyEffect
+from rendering import FadeThroughBlack
+from systems import MovePartyEffect, OpenShopEffect
 
 
 def compiled_map(
@@ -195,6 +196,59 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertEqual(game.field.position, FieldPosition(2, 1))
         runner.complete_effect.assert_called_once_with(effect)
         self.assertIsNone(game.event_effect)
+        game._continue_event.assert_called_once_with()
+
+    def test_event_shop_effect_stages_the_requested_shop(self) -> None:
+        game = Game.__new__(Game)
+        selected_shop = Mock(key="FAIRY_HAMLET_ITEMS")
+        effect = OpenShopEffect("FAIRY_HAMLET_ITEMS")
+        game.event_runner = Mock(advance=Mock(return_value=effect))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.shops = (selected_shop,)
+        game._begin_screen_change = Mock()
+
+        game._continue_event()
+
+        self.assertIs(game.pending_shop, selected_shop)
+        self.assertFalse(game.shop_return_to_debug)
+        self.assertIs(game.event_effect, effect)
+        game._begin_screen_change.assert_called_once_with(
+            GameScreenChange.OPEN_SHOP
+        )
+
+    def test_closing_event_shop_defers_event_resume_until_fade_finishes(self) -> None:
+        game = Game.__new__(Game)
+        effect = OpenShopEffect("FAIRY_HAMLET_ITEMS")
+        game.pending_screen_change = GameScreenChange.CLOSE_SHOP
+        game.shop_return_to_debug = False
+        game.debug_screen = None
+        game.event_effect = effect
+        game.event_runner = Mock()
+        game.event_resume_after_fade = False
+        game.showing_field = False
+        game._finish_shop = Mock()
+
+        game._apply_pending_screen_change()
+
+        game.event_runner.complete_effect.assert_called_once_with(effect)
+        self.assertIsNone(game.event_effect)
+        self.assertTrue(game.event_resume_after_fade)
+        self.assertTrue(game.showing_field)
+        self.assertIsNone(game.pending_screen_change)
+
+    def test_event_resumes_when_shop_close_fade_finishes(self) -> None:
+        game = Game.__new__(Game)
+        game.fade = FadeThroughBlack(1)
+        game.fade.start()
+        game.fade.update()
+        game.palette_shifter = Mock(base_colors=((0, 0, 0),))
+        game.fade_bgm = False
+        game.event_resume_after_fade = True
+        game._continue_event = Mock()
+
+        self.assertTrue(game._update_fade())
+
+        self.assertFalse(game.event_resume_after_fade)
         game._continue_event.assert_called_once_with()
 
 

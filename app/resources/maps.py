@@ -13,7 +13,7 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_OBJECT_DRAW_GROUPS = frozenset(
@@ -138,6 +138,7 @@ class CompiledMap:
     event_triggers: tuple[MapEventTrigger, ...] = ()
     event_trigger_index: Mapping[str, Mapping[tuple[int, int], MapEventTrigger]] = MappingProxyType({})
     actor_event_triggers: Mapping[str, tuple[MapEventTrigger, ...]] = MappingProxyType({})
+    bgm_id: str = "da3-field"
 
     def is_blocked(self, x: int, y: int) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
@@ -288,6 +289,7 @@ class MapResources:
 
         profile = self._required_id(runtime, "profile")
         tileset_id = self._required_id(runtime, "tileset_id")
+        bgm_id = self._required_bgm_id(runtime, "bgm_id")
         tile_size = self._positive_integer(runtime.get("tile_size"), "tile_size")
         if tile_size != MAP_TILE_SIZE:
             raise MapResourceError(
@@ -389,12 +391,28 @@ class MapResources:
             actor_event_triggers=MappingProxyType(
                 {actor_id: tuple(items) for actor_id, items in actor_index.items()}
             ),
+            bgm_id=bgm_id,
         )
 
     @staticmethod
     def _required_id(record: Mapping[str, object], key: str) -> str:
         value = record.get(key)
         if not isinstance(value, str) or not value:
+            raise MapResourceError(f"マップJSONの{key}が不正です。")
+        return value
+
+    @staticmethod
+    def _required_bgm_id(record: Mapping[str, object], key: str) -> str:
+        value = record.get(key)
+        if not isinstance(value, str) or not value:
+            raise MapResourceError(f"マップJSONの{key}が不正です。")
+        relative = Path(value)
+        if (
+            relative.is_absolute()
+            or relative.as_posix() != value
+            or relative.suffix
+            or any(part in ("", ".", "..") for part in relative.parts)
+        ):
             raise MapResourceError(f"マップJSONの{key}が不正です。")
         return value
 

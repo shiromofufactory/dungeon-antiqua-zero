@@ -932,6 +932,16 @@ class Member:
         )
         return self.hp - old_hp
 
+    def fully_recover(self) -> None:
+        """Restore HP and MP and clear every current abnormal condition."""
+
+        self.hp = self.max_hp
+        self.mp = self.max_mp
+        self.poisoned = False
+        self.paralyzed = False
+        self.sleeping = 0
+        self.confused = 0
+
     def proficiency(self, kind: ProficiencyKind) -> Proficiency:
         """Return the current proficiency for one stable kind."""
 

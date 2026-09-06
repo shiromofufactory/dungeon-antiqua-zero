@@ -10,6 +10,7 @@ CATALOGS = {
     "flag_ids": {"story.met_alvan"},
     "character_keys": {"Fiora", "Alvan"},
     "item_keys": {"POTION"},
+    "shop_keys": {"FAIRY_HAMLET_ITEMS"},
     "message_ids": {"sample.greeting"},
     "bgm_ids": {"field/world"},
     "se_ids": {"confirm"},
@@ -142,6 +143,32 @@ class EventPipelineTest(unittest.TestCase):
         }
 
         self.assertIn("unknown_field", codes)
+
+    def test_accepts_party_recovery_and_known_shop(self) -> None:
+        source = deepcopy(sample_source())
+        source["events"][0]["commands"] = [
+            {"command": "recover_party"},
+            {"command": "open_shop", "shop_key": "FAIRY_HAMLET_ITEMS"},
+        ]
+
+        diagnostics = validate_event_sources({"sample": source}, **CATALOGS)
+
+        self.assertEqual(
+            [item for item in diagnostics if item.severity == "error"], []
+        )
+
+    def test_rejects_unknown_shop(self) -> None:
+        source = deepcopy(sample_source())
+        source["events"][0]["commands"] = [
+            {"command": "open_shop", "shop_key": "MISSING"}
+        ]
+
+        codes = {
+            item.code
+            for item in validate_event_sources({"sample": source}, **CATALOGS)
+        }
+
+        self.assertIn("unknown_shop", codes)
 
 
 if __name__ == "__main__":

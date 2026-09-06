@@ -15,6 +15,7 @@ from .events import (
     MessageEffect,
     MoveActorEffect,
     MovePartyEffect,
+    OpenShopEffect,
     PlaySeEffect,
 )
 from .party import PartySystem, PartySystemError
@@ -50,6 +51,7 @@ __all__ = [
     "MessageEffect",
     "MoveActorEffect",
     "MovePartyEffect",
+    "OpenShopEffect",
     "PartySystem",
     "PartySystemError",
     "PlaySeEffect",

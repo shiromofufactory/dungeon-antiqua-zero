@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from PIL import Image
 
@@ -24,8 +24,8 @@ from .tileset import (
 )
 
 
-SOURCE_FORMAT_VERSION = 4
-RUNTIME_FORMAT_VERSION = 4
+SOURCE_FORMAT_VERSION = 5
+RUNTIME_FORMAT_VERSION = 5
 MAX_MAP_DIMENSION = 512
 MIN_MAP_WIDTH = 16
 MIN_MAP_HEIGHT = 15
@@ -36,6 +36,12 @@ CARDINAL_FACINGS = frozenset(("up", "right", "down", "left"))
 ACTOR_KINDS = frozenset(("prop", "stationary", "roaming"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
+DEFAULT_BGM_IDS = {
+    "world": "da3-field",
+    "dungeon": "da3-field",
+    "town": "da3-town",
+}
+BGM_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:/[a-z0-9][a-z0-9_-]*)*$")
 DIRECTION_OFFSETS = {
     "n": (0, -1),
     "ne": (1, -1),
@@ -134,6 +140,7 @@ def initial_map_source(
         "map_id": map_id,
         "profile": profile,
         "tileset_id": tileset.get("tileset_id"),
+        "bgm_id": DEFAULT_BGM_IDS.get(profile, "da3-field"),
         "size": [width, height],
         "visual_seed": 0,
         "grounds": [[fill for _x in range(width)] for _y in range(height)],
@@ -148,6 +155,8 @@ def initial_map_source(
 def validate_map_source(
     data: object,
     tileset: Mapping[str, Any],
+    *,
+    bgm_ids: Iterable[str] | None = None,
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     if not isinstance(data, dict):
@@ -171,6 +180,24 @@ def validate_map_source(
     tileset_profile = tileset.get("profile")
     if not isinstance(profile, str) or profile != tileset_profile:
         _diagnostic(diagnostics, "error", "profile_mismatch", "profile", "マップとタイルセットのprofileを一致させてください。")
+
+    bgm_id = data.get("bgm_id")
+    if not isinstance(bgm_id, str) or BGM_ID_PATTERN.fullmatch(bgm_id) is None:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_bgm_id",
+            "bgm_id",
+            "BGM IDをゲーム用OGGの拡張子なし相対パスで指定してください。",
+        )
+    elif bgm_ids is not None and bgm_id not in set(bgm_ids):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "unknown_bgm",
+            "bgm_id",
+            f"存在しないBGM IDです: {bgm_id}",
+        )
 
     size = data.get("size")
     width = height = 0
@@ -1537,6 +1564,7 @@ def compile_map(
         "map_id": data["map_id"],
         "profile": data["profile"],
         "tileset_id": data["tileset_id"],
+        "bgm_id": data["bgm_id"],
         "source_hash": content_hash(data),
         "tileset_hash": content_hash(tileset),
         "source_image_id": tileset["source_image_id"],

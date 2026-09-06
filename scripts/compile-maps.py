@@ -64,10 +64,12 @@ def main() -> int:
             map_id = source.get("map_id")
             if isinstance(map_id, str):
                 all_sources[map_id] = source
+        catalogs = reference_catalogs(content_root, app_root=PROJECT_ROOT / "app")
         event_catalog = compile_event_sources(
             load_event_sources(content_root),
-            **reference_catalogs(content_root, app_root=PROJECT_ROOT / "app"),
+            **catalogs,
         )
+        bgm_ids = catalogs["bgm_ids"]
         link_errors = [
             item
             for item in (
@@ -90,7 +92,11 @@ def main() -> int:
             tileset = load_tileset(tileset_path)
             image_path = resolve_source_image(content_root, tileset["source_image_id"])
             tileset_diagnostics, _info = validate_tileset(tileset, image_path, args.palette.resolve())
-            map_diagnostics = validate_map_source(data, tileset)
+            map_diagnostics = validate_map_source(
+                data,
+                tileset,
+                bgm_ids=bgm_ids,
+            )
             errors = [item for item in (*tileset_diagnostics, *map_diagnostics) if item.severity == "error"]
             if errors:
                 details = "\n".join(f"- {item.path}: {item.message}" for item in errors)

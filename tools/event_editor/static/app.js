@@ -13,6 +13,8 @@ const COMMAND_OPTIONS = [
   ["leave_party", "leave_party"],
   ["give_item", "give_item"],
   ["take_item", "take_item"],
+  ["recover_party", "パーティ全快"],
+  ["open_shop", "ショップを開く"],
   ["play_se", "play_se"],
   ["change_bgm", "change_bgm"],
   ["move_party", "move_party"],
@@ -421,6 +423,10 @@ function renderCommand(command, path, listPath, index) {
     fields = field("SE", `<select ${attr("se_id")}>${options(state.catalogs.se_ids || [], command.se_id)}</select>`, true);
   } else if (type === "change_bgm") {
     fields = field("BGM", `<select ${attr("bgm_id")}>${options(state.catalogs.bgm_ids || [], command.bgm_id)}</select>`, true);
+  } else if (type === "recover_party") {
+    fields = '<p class="command-description full">パーティ全員のHP・MP・状態異常を全て回復します。</p>';
+  } else if (type === "open_shop") {
+    fields = field("ショップID", `<select ${attr("shop_key")}>${options(state.catalogs.shop_keys || [], command.shop_key)}</select>`, true);
   } else if (type === "move_party" || type === "move_actor") {
     fields = (type === "move_actor" ? field("actor ID", `<select ${attr("actor_id")}>${options(state.catalogs.actor_ids || [], command.actor_id)}</select>`) : "")
       + field("方向", `<select ${attr("direction")}>${options(["up", "right", "down", "left"], command.direction)}</select>`)
@@ -430,7 +436,7 @@ function renderCommand(command, path, listPath, index) {
   } else if (type === "end_event") {
     fields = '<p class="command-description full">ここでイベント全体を終了し、後続のコマンドを実行しません。</p>';
   }
-  const label = type === "end_event" ? "イベント終了" : type;
+  const label = COMMAND_OPTIONS.find(([value]) => value === type)?.[1] || type;
   return `<article class="command" data-command-path="${esc(path)}">
     <div class="command-head"><div class="command-title"><span class="drag-handle" draggable="true" role="button" aria-label="${esc(label)}を移動" title="ドラッグして移動" data-command-drag data-list-path="${esc(listPath)}" data-index="${index}">⠿</span><code>${index + 1}. ${esc(label)}</code></div><button class="danger icon" data-action="delete-command" data-list-path="${esc(listPath)}" data-index="${index}">削除</button></div>
     <div class="command-fields">${fields}</div>
@@ -538,6 +544,8 @@ function defaultCommand(type) {
   if (type === "message") return one("message_id", messageIds());
   if (type === "play_se") return one("se_id", state.catalogs.se_ids);
   if (type === "change_bgm") return one("bgm_id", state.catalogs.bgm_ids);
+  if (type === "recover_party") return {command: type};
+  if (type === "open_shop") return one("shop_key", state.catalogs.shop_keys);
   if (type === "move_party") return {command: type, direction: "down", steps: 1};
   if (type === "move_actor") return {command: type, actor_id: state.catalogs.actor_ids?.[0] || "", direction: "down", steps: 1};
   if (type === "end_event") return {command: type};

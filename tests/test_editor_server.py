@@ -27,6 +27,7 @@ class EditorServerTest(unittest.TestCase):
         data_root.mkdir(parents=True)
         (data_root / "characters.json").write_text("[]\n", encoding="utf-8")
         (data_root / "items.json").write_text("[]\n", encoding="utf-8")
+        (data_root / "shops.json").write_text("[]\n", encoding="utf-8")
 
         events_root = self.content_root / "events"
         events_root.mkdir(parents=True)
@@ -74,6 +75,7 @@ class EditorServerTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (app_root / "audio" / "da3-field.ogg").write_bytes(b"")
         self.map_application = MapEditorApplication(
             self.content_root,
             app_root / "maps",
@@ -84,6 +86,7 @@ class EditorServerTest(unittest.TestCase):
             15,
             palette_path=palette_path,
             token="shared-token",
+            audio_root=app_root / "audio",
         )
         self.event_application = EventEditorApplication(
             self.content_root,
@@ -204,6 +207,8 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn('data-list-drop-kind', event_script)
         self.assertIn('function moveListItem(', event_script)
         self.assertIn('["end_event", "イベント終了"]', event_script)
+        self.assertIn('["recover_party", "パーティ全快"]', event_script)
+        self.assertIn('["open_shop", "ショップを開く"]', event_script)
         self.assertNotIn('data-message-field="note"', event_script)
         self.assertNotIn('data-action="move-command-up"', event_script)
         self.assertNotIn('data-action="move-command-down"', event_script)

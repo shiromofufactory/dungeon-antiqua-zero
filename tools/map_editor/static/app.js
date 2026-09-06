@@ -14,6 +14,7 @@ const state = {
   destinationOptions: [],
   siteOptions: [],
   eventOptions: [],
+  bgmOptions: [],
   actorAssets: {},
   mapCatalog: [],
   tilesetCatalog: [],
@@ -157,6 +158,7 @@ function applyDocumentPayload(payload) {
   state.destinationOptions = payload.destination_options;
   state.siteOptions = payload.site_options;
   state.eventOptions = payload.event_options;
+  state.bgmOptions = payload.bgm_options || [];
   state.actorAssets = payload.actor_assets || {};
   state.resolved = payload.resolved;
   state.diagnostics = payload.diagnostics;
@@ -833,10 +835,16 @@ function renderInspector() {
           <div class="field full"><label>発火方法</label><div class="row">${["step","touch"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
         </div><div class="row between" style="margin-top:9px"><div class="row"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button>${editorRoute ? `<button class="button secondary small" data-action="open-trigger-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
     </div>`;
+  const bgmOptions = [...new Set([...state.bgmOptions, state.data.bgm_id])]
+    .filter(Boolean)
+    .sort()
+    .map((bgmId) => `<option value="${escapeHtml(bgmId)}" ${bgmId === state.data.bgm_id ? "selected" : ""}>${escapeHtml(bgmId)}</option>`)
+    .join("");
   byId("inspector-content").innerHTML = `
     <div class="section">
       <div class="section-title"><h2>マップ設定</h2><span class="subtle">${escapeHtml(state.data.profile)} / ${escapeHtml(state.data.tileset_id)}</span></div>
       <div class="form-grid">
+        <div class="field full"><label>BGM</label><select data-map-field="bgm_id">${bgmOptions}</select></div>
         <div class="field"><label>幅</label><input id="map-width" type="number" min="${MIN_MAP_WIDTH}" max="512" value="${width}"></div>
         <div class="field"><label>高さ</label><input id="map-height" type="number" min="${MIN_MAP_HEIGHT}" max="512" value="${height}"></div>
         <div class="field"><label>横方向</label><select id="resize-horizontal"><option value="left" ${state.resizeHorizontal === "left" ? "selected" : ""}>左側を増減</option><option value="right" ${state.resizeHorizontal === "right" ? "selected" : ""}>右側を増減</option></select></div>
@@ -2437,6 +2445,7 @@ byId("inspector-content").addEventListener("input", (event) => {
 byId("inspector-content").addEventListener("change", (event) => {
   if (event.target.id === "resize-horizontal") state.resizeHorizontal = event.target.value;
   else if (event.target.id === "resize-vertical") state.resizeVertical = event.target.value;
+  else if (event.target.dataset.mapField === "bgm_id") commit(() => { state.data.bgm_id = event.target.value; });
   else if (event.target.dataset.siteNameJa) {
     state.siteNameEditing = false;
     renderPalette();

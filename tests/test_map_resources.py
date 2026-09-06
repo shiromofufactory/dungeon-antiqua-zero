@@ -36,10 +36,11 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 4,
+            "format_version": 5,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
+            "bgm_id": "da3-field",
             "tile_size": 16,
             "size": [2, 2],
             "atlas": {
@@ -139,6 +140,7 @@ class MapResourcesTest(unittest.TestCase):
         map_data = resources.map("test_map")
 
         self.assertEqual((map_data.width, map_data.height), (2, 2))
+        self.assertEqual(map_data.bgm_id, "da3-field")
         self.assertEqual(map_data.ground_tiles, (0, 0, 0, 0))
         self.assertEqual(len(map_data.object_tiles), 1)
         self.assertEqual(

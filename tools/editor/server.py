@@ -508,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             args.height,
             palette_path=args.palette,
             token=token,
+            audio_root=args.app_root / "audio",
         )
         event_application = EventEditorApplication(
             args.content_root,
