@@ -589,7 +589,7 @@ function renderPalette() {
         <div class="section-title"><h2>${siteLabel}</h2><span class="subtle">${state.data.sites.length}件</span></div>
         <div class="travel-list">${state.data.sites.map((site) => `
           <button class="travel-item ${site.id === state.selectedSiteId ? "active" : ""}" type="button" data-action="select-site" data-id="${escapeHtml(site.id)}">
-            <strong>${escapeHtml(site.id)}</strong>${isWorld ? escapeHtml(state.siteNamesJa[site.id] || "日本語名未入力") : "名称表示なし"}
+            <strong>${escapeHtml(site.id)}</strong>${isWorld ? escapeHtml(state.siteNamesJa[site.id] || "日本語名未入力") : escapeHtml(siteDestinationSummary(site))}
           </button>`).join("") || `<div class="empty-state">${siteLabel}がありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-site">座標${siteLabel}を追加</button></div>
       </div>
@@ -667,6 +667,13 @@ function eventIdOptions(selected) {
   const ids = [...state.eventOptions];
   if (selected && !ids.includes(selected)) ids.push(selected);
   return `<option value="" ${selected ? "" : "selected"}>イベントを選択</option>` + ids.map((id) => `<option value="${escapeHtml(id)}" ${id === selected ? "selected" : ""}>${escapeHtml(id)}${state.eventOptions.includes(id) ? "" : "（未定義）"}</option>`).join("");
+}
+
+function siteDestinationSummary(site) {
+  const mapId = site?.destination?.map_id;
+  const arrivalId = site?.destination?.arrival_id;
+  if (!mapId && !arrivalId) return "移動先未設定";
+  return `移動先: ${mapId || "—"} / ${arrivalId || "—"}`;
 }
 
 function triggerAnchorPosition(trigger) {
@@ -1216,7 +1223,7 @@ function rangeSelectionItems(rect) {
 }
 
 function beginRangeSelection(event, cell) {
-  const selectedObject = currentInstance();
+  const selectedItem = currentSingleSelectionItem();
   state.selectionRect = null;
   state.pointerDrag = {
     kind: "range_selection",
@@ -1224,7 +1231,7 @@ function beginRangeSelection(event, cell) {
     pointerId: event.pointerId,
     start: [...cell],
     last: [...cell],
-    draggableObjectId: selectedObject && instanceOccupies(selectedObject, ...cell) ? selectedObject.id : null,
+    draggableItem: selectedItem && bulkItemOccupiesCell(selectedItem, cell) ? selectedItem : null,
   };
   mapCanvas.setPointerCapture(event.pointerId);
 }
@@ -1232,12 +1239,14 @@ function beginRangeSelection(event, cell) {
 function updateRangeSelection(event, cell) {
   if (state.pointerDrag?.kind !== "range_selection") return;
   if (cell[0] === state.pointerDrag.last[0] && cell[1] === state.pointerDrag.last[1]) return;
-  if (!state.pointerDrag.changed && state.pointerDrag.draggableObjectId
-    && state.pointerDrag.draggableObjectId === state.selectedInstanceId) {
+  if (!state.pointerDrag.changed && state.pointerDrag.draggableItem
+    && isMapSelectionCandidateSelected(state.pointerDrag.draggableItem)) {
     const start = [...state.pointerDrag.start];
-    beginObjectDrag(event, start);
-    dragObjectTo(cell);
-    return;
+    const item = state.pointerDrag.draggableItem;
+    if (beginSingleSelectionDrag(event, start, item)) {
+      dragBulkTo(cell);
+      return;
+    }
   }
   if (!state.pointerDrag.changed) {
     clearSingleSelections();
@@ -1295,6 +1304,67 @@ function bulkMoveDescriptors() {
     }
   }
   return descriptors;
+}
+
+function currentSingleSelectionItem() {
+  if (state.tab === "object" && state.selectedInstanceId) return { kind: "object", id: state.selectedInstanceId, tab: "object" };
+  if (state.tab === "site" && state.selectedSiteId) return { kind: "site", id: state.selectedSiteId, tab: "site" };
+  if (state.tab === "site" && state.selectedArrivalId) return { kind: "arrival", id: state.selectedArrivalId, tab: "site" };
+  if (state.tab === "event" && state.selectedActorId) return { kind: "actor", id: state.selectedActorId, tab: "event" };
+  if (state.tab === "event" && state.selectedTriggerId) return { kind: "trigger", id: state.selectedTriggerId, tab: "event" };
+  return null;
+}
+
+function singleSelectionMoveDescriptors(item) {
+  if (item.kind === "object") {
+    const record = state.data.objects.find((candidate) => candidate.id === item.id);
+    return record ? [{ kind: "object", id: record.id, position: [...record.origin] }] : [];
+  }
+  if (item.kind === "site") {
+    const record = state.data.sites.find((candidate) => candidate.id === item.id);
+    if (record?.anchor?.kind === "cell") return [{ kind: "site", id: record.id, position: [...record.anchor.position] }];
+    if (record?.anchor?.kind === "object") {
+      const object = state.data.objects.find((candidate) => candidate.id === record.anchor.object_id);
+      return object ? [{ kind: "object", id: object.id, position: [...object.origin] }] : [];
+    }
+    return [];
+  }
+  if (item.kind === "arrival") {
+    const record = state.data.arrival_points.find((candidate) => candidate.id === item.id);
+    return record ? [{ kind: "arrival", id: record.id, position: [...record.position] }] : [];
+  }
+  if (item.kind === "actor") {
+    const record = state.data.actors.find((candidate) => candidate.id === item.id);
+    return record ? [{ kind: "actor", id: record.id, position: [...record.position] }] : [];
+  }
+  const trigger = standaloneTriggers().find((candidate) => candidate.id === item.id);
+  if (trigger?.anchor?.kind === "cell") return [{ kind: "trigger", id: trigger.id, position: [...trigger.anchor.position] }];
+  if (trigger?.anchor?.kind === "object") {
+    const object = state.data.objects.find((candidate) => candidate.id === trigger.anchor.object_id);
+    return object ? [{ kind: "object", id: object.id, position: [...object.origin] }] : [];
+  }
+  if (trigger?.anchor?.kind === "actor") {
+    const actor = state.data.actors.find((candidate) => candidate.id === trigger.anchor.actor_id);
+    return actor ? [{ kind: "actor", id: actor.id, position: [...actor.position] }] : [];
+  }
+  return [];
+}
+
+function beginSingleSelectionDrag(event, cell, item) {
+  const descriptors = singleSelectionMoveDescriptors(item);
+  if (!descriptors.length) return false;
+  beginChange();
+  state.pointerDrag = {
+    kind: "single_selection",
+    changed: false,
+    pointerId: event.pointerId,
+    start: [...cell],
+    delta: [0, 0],
+    descriptors,
+    originalRect: null,
+  };
+  mapCanvas.setPointerCapture(event.pointerId);
+  return true;
 }
 
 function beginBulkDrag(event, cell) {
@@ -1367,7 +1437,7 @@ function validBulkDelta(delta) {
 }
 
 function dragBulkTo(cell) {
-  if (state.pointerDrag?.kind !== "bulk") return;
+  if (!state.pointerDrag || !["bulk", "single_selection"].includes(state.pointerDrag.kind)) return;
   const delta = [cell[0] - state.pointerDrag.start[0], cell[1] - state.pointerDrag.start[1]];
   if (delta[0] === state.pointerDrag.delta[0] && delta[1] === state.pointerDrag.delta[1]) return;
   if (!validBulkDelta(delta)) return;
@@ -2444,6 +2514,7 @@ mapCanvas.addEventListener("pointermove", (event) => {
     else if (state.pointerDrag.kind === "site_anchor") dragSiteAnchorTo(cell);
     else if (state.pointerDrag.kind === "range_selection") updateRangeSelection(event, cell);
     else if (state.pointerDrag.kind === "bulk") dragBulkTo(cell);
+    else if (state.pointerDrag.kind === "single_selection") dragBulkTo(cell);
     else if (state.pointerDrag.kind === "ground_rectangle") updateGroundRectangle(cell);
     return;
   }
