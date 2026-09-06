@@ -15,6 +15,7 @@ const state = {
   destinationOptions: [],
   siteOptions: [],
   eventOptions: [],
+  itemOptions: [],
   bgmOptions: [],
   actorAssets: {},
   mapCatalog: [],
@@ -61,6 +62,7 @@ const sourceImage = document.createElement("canvas");
 const actorSheets = {
   prop: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
   character: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
+  treasure: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
 };
 const byId = (id) => document.getElementById(id);
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -230,6 +232,7 @@ function applyDocumentPayload(payload) {
   state.destinationOptions = payload.destination_options;
   state.siteOptions = payload.site_options;
   state.eventOptions = payload.event_options;
+  state.itemOptions = payload.item_options || [];
   state.bgmOptions = payload.bgm_options || [];
   state.actorAssets = payload.actor_assets || {};
   state.resolved = payload.resolved;
@@ -493,6 +496,7 @@ function prepareSourceImage() {
 }
 
 function actorAssetId(kind) {
+  if (kind === "treasure") return "treasure";
   return kind === "prop" ? "prop" : "character";
 }
 
@@ -564,7 +568,7 @@ function drawActorSprite(canvas, assetId, spriteIndex, facing = "down") {
 }
 
 function drawActorOnMap(context, actor, scale) {
-  const source = actorSpriteSource(actorAssetId(actor.kind), actor.sprite_index, actor.facing);
+  const source = actorSpriteSource(actorAssetId(actor.kind), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing);
   if (!source) return false;
   context.imageSmoothingEnabled = false;
   context.drawImage(
@@ -585,7 +589,7 @@ function drawSelectedActorSprite() {
   const actor = currentActor();
   const canvas = document.querySelector("[data-selected-actor-sprite]");
   if (!actor || !canvas) return;
-  drawActorSprite(canvas, actorAssetId(actor.kind), actor.sprite_index, actor.facing);
+  drawActorSprite(canvas, actorAssetId(actor.kind), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing);
 }
 
 function renderActorSpriteDialog() {
@@ -611,7 +615,7 @@ function renderActorSpriteDialog() {
 
 function openActorSpriteDialog() {
   const actor = currentActor();
-  if (!actor) return;
+  if (!actor || actor.kind === "treasure") return;
   state.spritePickerActorId = actor.id;
   renderActorSpriteDialog();
   byId("actor-sprite-dialog").showModal();
@@ -681,7 +685,7 @@ function renderPalette() {
       <div class="section">
         <div class="section-title"><h2>actor</h2><span class="subtle">${state.data.actors.length}件</span></div>
         <div class="travel-list">${state.data.actors.map((actor) => `
-          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.kind)} #${actor.sprite_index}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
+          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.kind)}${actor.kind === "treasure" ? "" : ` #${actor.sprite_index}`}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-actor">actorを配置</button></div>
       </div>
       <div class="section">
@@ -742,6 +746,10 @@ function eventIdOptions(selected) {
   const ids = [...state.eventOptions];
   if (selected && !ids.includes(selected)) ids.push(selected);
   return `<option value="" ${selected ? "" : "selected"}>イベントを選択</option>` + ids.map((id) => `<option value="${escapeHtml(id)}" ${id === selected ? "selected" : ""}>${escapeHtml(id)}${state.eventOptions.includes(id) ? "" : "（未定義）"}</option>`).join("");
+}
+
+function treasureItemOptions(selected) {
+  return state.itemOptions.map((item) => `<option value="${escapeHtml(item.key)}" ${item.key === selected ? "selected" : ""}>${escapeHtml(item.name_ja)} (${escapeHtml(item.key)})</option>`).join("");
 }
 
 function siteDestinationSummary(site) {
@@ -894,11 +902,16 @@ function renderInspector() {
       ${actor ? `<div class="instance-card"><strong>${escapeHtml(actor.id)}</strong>セル: ${actor.position.join(", ")}</div>
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>actor ID</label><input type="text" value="${escapeHtml(actor.id)}" data-actor-field="id"></div>
-          <div class="field full"><label>種別</label><select data-actor-field="kind"><option value="prop" ${actor.kind === "prop" ? "selected" : ""}>固定物（向きなし）</option><option value="stationary" ${actor.kind === "stationary" ? "selected" : ""}>固定キャラ</option><option value="roaming" ${actor.kind === "roaming" ? "selected" : ""}>移動キャラ</option></select></div>
-          <div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="48" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>番号 #${actor.sprite_index}</strong><span>画像から選択</span></span></button></div>
-          ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>`}
-          <div class="field full"><label>イベント</label><select data-actor-event-id="true">${eventIdOptions(linkedActorTrigger?.event_id || "")}</select><div class="field-note">touch・interactで自動的に起動します。</div></div>
-        </div><div class="row between" style="margin-top:9px"><div class="row">${editorRoute ? `<button class="button secondary small" data-action="add-actor-event">イベントを追加</button>` : ""}${editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
+          <div class="field full"><label>種別</label><select data-actor-field="kind"><option value="prop" ${actor.kind === "prop" ? "selected" : ""}>固定物（向きなし）</option><option value="stationary" ${actor.kind === "stationary" ? "selected" : ""}>固定キャラ</option><option value="roaming" ${actor.kind === "roaming" ? "selected" : ""}>移動キャラ</option><option value="treasure" ${actor.kind === "treasure" ? "selected" : ""}>宝箱</option></select></div>
+          ${actor.kind === "treasure"
+            ? `<div class="field full"><label>中身の種別</label><select data-treasure-field="type"><option value="gold" ${actor.contents?.type === "gold" ? "selected" : ""}>お金</option><option value="item" ${actor.contents?.type === "item" ? "selected" : ""}>アイテム</option></select></div>
+               ${actor.contents?.type === "gold"
+                 ? `<div class="field full"><label>金額</label><input type="number" min="1" max="999999" value="${actor.contents.amount}" data-treasure-field="amount"></div>`
+                 : `<div class="field full"><label>アイテム</label><select data-treasure-field="item_key">${treasureItemOptions(actor.contents?.item_key)}</select></div>`}`
+            : `<div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="48" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>番号 #${actor.sprite_index}</strong><span>画像から選択</span></span></button></div>
+               ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>`}
+               <div class="field full"><label>イベント</label><select data-actor-event-id="true">${eventIdOptions(linkedActorTrigger?.event_id || "")}</select><div class="field-note">touch・interactで自動的に起動します。</div></div>`}
+        </div><div class="row between" style="margin-top:9px"><div class="row">${actor.kind !== "treasure" && editorRoute ? `<button class="button secondary small" data-action="add-actor-event">イベントを追加</button>` : ""}${actor.kind !== "treasure" && editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
     </div>
     <div class="section">
       <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
@@ -1092,7 +1105,7 @@ function drawActors(context, scale) {
       context.beginPath();
       context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
       context.fill();
-      if (actor.kind !== "prop") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
+      if (actor.kind === "stationary" || actor.kind === "roaming") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
     }
     if (selected) drawCellSelectionFrame(context, actor.position, scale);
   }
@@ -1783,6 +1796,7 @@ function addAnchoredTrigger(anchor) {
 }
 
 function ensureActorTrigger(actor) {
+  if (actor.kind === "treasure") return null;
   let trigger = actorTrigger(actor.id);
   if (trigger) return trigger;
   trigger = defaultTrigger({ kind: "actor", actor_id: actor.id });
@@ -1798,7 +1812,7 @@ function triggerOffsetForCell(trigger, cell) {
 function selectEventAt(cell) {
   const actor = state.data.actors.find((item) => item.position[0] === cell[0] && item.position[1] === cell[1]);
   const trigger = standaloneTriggers().find((item) => triggerPositions(item).some((position) => position[0] === cell[0] && position[1] === cell[1]));
-  if (actor && !actorTrigger(actor.id)) {
+  if (actor && actor.kind !== "treasure" && !actorTrigger(actor.id)) {
     commit(() => {
       ensureActorTrigger(actor);
       state.selectedActorId = actor.id;
@@ -1868,7 +1882,7 @@ function selectAnyAt(cell) {
   else if (candidate.kind === "site") state.selectedSiteId = candidate.id;
   else state.selectedInstanceId = candidate.id;
   const actor = candidate.kind === "actor" ? currentActor() : null;
-  if (actor && !actorTrigger(actor.id)) commit(() => ensureActorTrigger(actor));
+  if (actor && actor.kind !== "treasure" && !actorTrigger(actor.id)) commit(() => ensureActorTrigger(actor));
   else renderAll();
   return candidate;
 }
@@ -2066,7 +2080,7 @@ function handlePaletteAction(element) {
     state.selectedActorId = element.dataset.id;
     state.selectedTriggerId = null;
     state.eventTool = "select";
-    if (currentActor() && !actorTrigger(currentActor().id)) {
+    if (currentActor() && currentActor().kind !== "treasure" && !actorTrigger(currentActor().id)) {
       commit(() => { ensureActorTrigger(currentActor()); });
       centerMapOnPosition(currentActor()?.position);
       return;
@@ -2295,12 +2309,33 @@ function updateActorField(path, value) {
       }
     } else if (path === "kind") {
       actor.kind = value;
-      if (value === "prop") delete actor.facing;
-      else if (!actor.facing) actor.facing = "down";
-      const capacity = actorSpriteCapacity(actorAssetId(value));
-      if (capacity > 0 && actor.sprite_index >= capacity) actor.sprite_index = 0;
+      state.data.event_triggers = state.data.event_triggers.filter((trigger) => !(trigger.anchor?.kind === "actor" && trigger.anchor.actor_id === actor.id));
+      if (value === "treasure") {
+        delete actor.facing;
+        delete actor.sprite_index;
+        actor.contents = { type: "gold", amount: 1 };
+      } else {
+        delete actor.contents;
+        actor.sprite_index = 0;
+        if (value === "prop") delete actor.facing;
+        else actor.facing = "down";
+        ensureActorTrigger(actor);
+      }
     } else if (path === "sprite_index") actor.sprite_index = Number(value);
     else actor[path] = value;
+  });
+}
+
+function updateTreasureField(path, value) {
+  const actor = currentActor();
+  if (!actor || actor.kind !== "treasure") return;
+  commit(() => {
+    if (path === "type") {
+      actor.contents = value === "item"
+        ? { type: "item", item_key: state.itemOptions[0]?.key || "" }
+        : { type: "gold", amount: 1 };
+    } else if (path === "amount") actor.contents.amount = Number(value);
+    else if (path === "item_key") actor.contents.item_key = value;
   });
 }
 
@@ -2308,7 +2343,8 @@ function updateActorEventId(value) {
   const actor = currentActor();
   if (!actor) return;
   commit(() => {
-    ensureActorTrigger(actor).event_id = value;
+    const trigger = ensureActorTrigger(actor);
+    if (trigger) trigger.event_id = value;
   });
 }
 
@@ -2525,6 +2561,7 @@ byId("inspector-content").addEventListener("change", (event) => {
   else if (event.target.dataset.siteField) updateSiteField(event.target.dataset.siteField, event.target.value);
   else if (event.target.dataset.arrivalField) updateArrivalField(event.target.dataset.arrivalField, event.target.type === "checkbox" ? event.target.checked : event.target.value);
   else if (event.target.dataset.actorField) updateActorField(event.target.dataset.actorField, event.target.value);
+  else if (event.target.dataset.treasureField) updateTreasureField(event.target.dataset.treasureField, event.target.value);
   else if (event.target.dataset.actorEventId) updateActorEventId(event.target.value);
   else if (event.target.dataset.triggerField) updateTriggerField(event.target.dataset.triggerField, event.target.value);
   else if (event.target.dataset.triggerActivation) commit(() => {

@@ -40,6 +40,15 @@ class MapEditorServerTest(unittest.TestCase):
         Image.new("RGB", (64, 64), (255, 0, 128)).save(
             actor_image_root / "characters.png"
         )
+        Image.new("RGB", (48, 16), (255, 0, 128)).save(
+            actor_image_root / "treasure.png"
+        )
+        data_root = content_root / "data"
+        data_root.mkdir(parents=True)
+        (data_root / "items.json").write_text(
+            json.dumps([{"name_en": "POTION", "name_ja": "きずぐすり"}]),
+            encoding="utf-8",
+        )
         metadata_path = content_root / "maps" / "tilesets" / "worldmap.json"
         tileset = initial_worldmap_tileset()
         save_tileset(metadata_path, tileset)
@@ -131,7 +140,7 @@ class MapEditorServerTest(unittest.TestCase):
     def test_serves_new_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
-        self.assertEqual(payload["data"]["format_version"], 5)
+        self.assertEqual(payload["data"]["format_version"], 6)
         self.assertEqual(payload["data"]["actors"], [])
         self.assertEqual(payload["data"]["event_triggers"], [])
         self.assertEqual(payload["data"]["size"], [16, 15])
@@ -148,6 +157,13 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertEqual(payload["actor_assets"]["prop"]["sprite_size"], [16, 16])
         self.assertEqual(
             payload["actor_assets"]["character"]["sprite_size"], [32, 64]
+        )
+        self.assertEqual(
+            payload["actor_assets"]["treasure"]["sprite_size"], [48, 16]
+        )
+        self.assertEqual(
+            payload["item_options"],
+            [{"key": "POTION", "name_ja": "きずぐすり"}],
         )
         self.assertIsNotNone(payload["resolved"])
 
@@ -567,6 +583,26 @@ class MapEditorServerTest(unittest.TestCase):
             runtime["event_triggers"][0]["target"],
             {"kind": "actor", "actor_id": "elder", "offsets": [[0, 0]]},
         )
+
+    def test_saves_treasure_actor_without_an_event_trigger(self) -> None:
+        payload = self.get_json("/api/document?token=test-token")
+        data = payload["data"]
+        data["grounds"][2][2] = "plain"
+        data["actors"] = [
+            {
+                "id": "entrance_potion",
+                "position": [2, 2],
+                "kind": "treasure",
+                "contents": {"type": "item", "item_key": "POTION"},
+            }
+        ]
+
+        result = self.post_json("/api/save", data)
+
+        self.assertTrue(result["saved"])
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(runtime["actors"], data["actors"])
+        self.assertEqual(runtime["event_triggers"], [])
 
     def test_rejects_invalid_world_edge_without_writing(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]

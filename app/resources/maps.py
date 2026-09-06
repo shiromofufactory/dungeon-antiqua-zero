@@ -13,7 +13,7 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_OBJECT_DRAW_GROUPS = frozenset(
@@ -21,7 +21,8 @@ MAP_OBJECT_DRAW_GROUPS = frozenset(
 )
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAP_FACINGS = frozenset(("up", "right", "down", "left"))
-MAP_ACTOR_KINDS = frozenset(("prop", "stationary", "roaming"))
+MAP_ACTOR_KINDS = frozenset(("prop", "stationary", "roaming", "treasure"))
+TREASURE_CONTENT_TYPES = frozenset(("gold", "item"))
 MAP_EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
@@ -82,12 +83,20 @@ class MapArrivalPoint:
 
 
 @dataclass(frozen=True)
+class MapTreasureContents:
+    type: str
+    amount: int | None = None
+    item_key: str | None = None
+
+
+@dataclass(frozen=True)
 class MapActor:
     id: str
     position: MapCell
     kind: str
     sprite_index: int
     facing: str | None = None
+    contents: MapTreasureContents | None = None
 
 
 @dataclass(frozen=True)
@@ -708,15 +717,21 @@ class MapResources:
                 raise MapResourceError(f"{path}.positionが配置できないセルです。")
             ids.add(actor_id)
             positions.add(point)
+            kind = cls._actor_kind(record.get("kind"), f"{path}.kind")
             loaded.append(
                 MapActor(
                     id=actor_id,
                     position=position,
-                    kind=cls._actor_kind(record.get("kind"), f"{path}.kind"),
-                    sprite_index=cls._non_negative_integer(
-                        record.get("sprite_index"), f"{path}.sprite_index"
+                    kind=kind,
+                    sprite_index=(
+                        0
+                        if kind == "treasure"
+                        else cls._non_negative_integer(
+                            record.get("sprite_index"), f"{path}.sprite_index"
+                        )
                     ),
                     facing=cls._actor_facing(record, path),
+                    contents=cls._treasure_contents(record, path),
                 )
             )
         return tuple(loaded)
@@ -725,17 +740,61 @@ class MapResources:
     def _actor_kind(value: object, label: str) -> str:
         if not isinstance(value, str) or value not in MAP_ACTOR_KINDS:
             raise MapResourceError(
-                f"マップJSONの{label}はprop、stationary、roamingのいずれかである必要があります。"
+                f"マップJSONの{label}はprop、stationary、roaming、treasureのいずれかである必要があります。"
             )
         return value
 
     @classmethod
     def _actor_facing(cls, record: Mapping[str, object], path: str) -> str | None:
-        if record.get("kind") == "prop":
+        if record.get("kind") in ("prop", "treasure"):
             if "facing" in record:
-                raise MapResourceError(f"マップJSONの{path}.facingはprop actorに指定できません。")
+                raise MapResourceError(
+                    f"マップJSONの{path}.facingは固定actorに指定できません。"
+                )
             return None
         return cls._facing(record.get("facing"), f"{path}.facing")
+
+    @classmethod
+    def _treasure_contents(
+        cls,
+        record: Mapping[str, object],
+        path: str,
+    ) -> MapTreasureContents | None:
+        if record.get("kind") != "treasure":
+            if "contents" in record:
+                raise MapResourceError(
+                    f"マップJSONの{path}.contentsはtreasure actorだけに指定できます。"
+                )
+            return None
+        if "sprite_index" in record:
+            raise MapResourceError(
+                f"マップJSONの{path}.sprite_indexはtreasure actorに指定できません。"
+            )
+        contents = record.get("contents")
+        if not isinstance(contents, dict):
+            raise MapResourceError(f"マップJSONの{path}.contentsが不正です。")
+        content_type = contents.get("type")
+        if content_type not in TREASURE_CONTENT_TYPES:
+            raise MapResourceError(f"マップJSONの{path}.contents.typeが不正です。")
+        if content_type == "gold":
+            if set(contents) != {"type", "amount"}:
+                raise MapResourceError(f"マップJSONの{path}.contentsが不正です。")
+            amount = cls._positive_integer(
+                contents.get("amount"), f"{path}.contents.amount"
+            )
+            if amount > 999_999:
+                raise MapResourceError(
+                    f"マップJSONの{path}.contents.amountは999999以下である必要があります。"
+                )
+            return MapTreasureContents("gold", amount=amount)
+        if set(contents) != {"type", "item_key"}:
+            raise MapResourceError(f"マップJSONの{path}.contentsが不正です。")
+        item_key = contents.get("item_key")
+        if not isinstance(item_key, str) or not item_key:
+            raise MapResourceError(
+                f"マップJSONの{path}.contents.item_keyが不正です。"
+            )
+        return MapTreasureContents("item", item_key=item_key)
 
     @staticmethod
     def _non_negative_integer(value: object, label: str) -> int:
@@ -758,7 +817,10 @@ class MapResources:
         loaded = []
         ids: set[str] = set()
         actor_ids = {actor.id for actor in actors}
-        actor_trigger_counts = {actor_id: 0 for actor_id in actor_ids}
+        actor_kinds = {actor.id: actor.kind for actor in actors}
+        actor_trigger_counts = {
+            actor.id: 0 for actor in actors if actor.kind != "treasure"
+        }
         for index, record in enumerate(value):
             path = f"event_triggers[{index}]"
             if not isinstance(record, dict):
@@ -809,6 +871,10 @@ class MapResources:
                 )
                 if actor_id not in actor_ids:
                     raise MapResourceError(f"{path}.target.actor_idが見つかりません。")
+                if actor_kinds[actor_id] == "treasure":
+                    raise MapResourceError(
+                        f"{path}.target.actor_idにtreasure actorは指定できません。"
+                    )
                 actor_trigger_counts[actor_id] += 1
                 if activation_values != ["touch", "interact"]:
                     raise MapResourceError(
@@ -968,6 +1034,7 @@ class MapResources:
 __all__ = [
     "CompiledMap",
     "MAP_ACTOR_KINDS",
+    "TREASURE_CONTENT_TYPES",
     "MapArrivalPoint",
     "MapActor",
     "MapAnimation",
@@ -981,5 +1048,6 @@ __all__ = [
     "MapObjectTile",
     "MapResourceError",
     "MapResources",
+    "MapTreasureContents",
     "WorldSite",
 ]

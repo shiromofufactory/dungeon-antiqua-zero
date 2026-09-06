@@ -36,7 +36,7 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 5,
+            "format_version": 6,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
@@ -101,6 +101,12 @@ class MapResourcesTest(unittest.TestCase):
                     "kind": "stationary",
                     "sprite_index": 0,
                     "facing": "down",
+                },
+                {
+                    "id": "entrance_potion",
+                    "position": [1, 0],
+                    "kind": "treasure",
+                    "contents": {"type": "item", "item_key": "POTION"},
                 }
             ],
             "event_triggers": [
@@ -165,6 +171,9 @@ class MapResourcesTest(unittest.TestCase):
         self.assertEqual(map_data.actors[0].id, "elder")
         self.assertEqual(map_data.actors[0].kind, "stationary")
         self.assertEqual(map_data.actors[0].sprite_index, 0)
+        self.assertEqual(map_data.actors[1].kind, "treasure")
+        self.assertEqual(map_data.actors[1].contents.type, "item")
+        self.assertEqual(map_data.actors[1].contents.item_key, "POTION")
         self.assertEqual(
             map_data.event_trigger_at("touch", 1, 0).event_id,
             "sample.sign",

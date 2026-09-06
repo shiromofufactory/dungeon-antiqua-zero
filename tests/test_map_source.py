@@ -301,6 +301,70 @@ class MapSourceTest(unittest.TestCase):
             [],
         )
 
+    def test_treasure_actor_requires_typed_contents_and_no_event_trigger(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["grounds"][2][2] = "plain"
+        source["actors"] = [
+            {
+                "id": "entrance_potion",
+                "position": [2, 2],
+                "kind": "treasure",
+                "contents": {"type": "item", "item_key": "POTION"},
+            }
+        ]
+
+        self.assertEqual(
+            [
+                item
+                for item in validate_map_source(
+                    source,
+                    self.tileset,
+                    item_keys={"POTION"},
+                )
+                if item.severity == "error"
+            ],
+            [],
+        )
+        source["actors"][0]["contents"]["item_key"] = "UNKNOWN"
+        codes = {
+            item.code
+            for item in validate_map_source(
+                source,
+                self.tileset,
+                item_keys={"POTION"},
+            )
+        }
+        self.assertIn("unknown_treasure_item_key", codes)
+
+    def test_treasure_actor_rejects_sprite_facing_and_event_trigger(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["grounds"][2][2] = "plain"
+        source["actors"] = [
+            {
+                "id": "gold_chest",
+                "position": [2, 2],
+                "kind": "treasure",
+                "sprite_index": 0,
+                "facing": "down",
+                "contents": {"type": "gold", "amount": 100},
+            }
+        ]
+        source["event_triggers"] = [
+            {
+                "id": "open_gold_chest",
+                "event_id": "sample.open_gold_chest",
+                "activations": ["touch", "interact"],
+                "anchor": {"kind": "actor", "actor_id": "gold_chest"},
+                "offsets": [[0, 0]],
+            }
+        ]
+
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+
+        self.assertIn("treasure_actor_has_sprite_index", codes)
+        self.assertIn("treasure_actor_has_facing", codes)
+        self.assertIn("treasure_actor_has_event_trigger", codes)
+
     def test_rejects_standalone_interact_trigger(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"

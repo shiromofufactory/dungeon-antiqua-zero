@@ -4,13 +4,24 @@ from types import MappingProxyType
 import unittest
 from unittest.mock import Mock, call
 
-from app.field import FieldActors, FieldMovement, FieldPosition
+from app.field import (
+    TREASURE_ANIMATION_FRAME_COUNT,
+    FieldActors,
+    FieldMovement,
+    FieldPosition,
+)
 from app.input import Direction
 from app.rendering.field import (
     FIELD_CHARACTER_ANIMATION_INTERVAL,
     FieldRenderer,
 )
-from app.resources.maps import CompiledMap, MapActor, MapCell, MapObjectTile
+from app.resources.maps import (
+    CompiledMap,
+    MapActor,
+    MapCell,
+    MapObjectTile,
+    MapTreasureContents,
+)
 
 
 def compiled_map(
@@ -225,6 +236,42 @@ class FieldMovementTest(unittest.TestCase):
         self.assertEqual(actors.actor("villager").movement.world_x, 17)
         self.assertTrue(actors.actor("villager").movement.is_moving)
 
+    def test_treasure_animation_uses_fifteen_frames_per_image(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        treasure = MapActor(
+            "chest",
+            MapCell(1, 1),
+            "treasure",
+            0,
+            contents=MapTreasureContents("gold", amount=10),
+        )
+        object.__setattr__(map_data, "actors", (treasure,))
+        actors = FieldActors(map_data)
+
+        actors.start_treasure_animation("chest", opened=False)
+        self.assertEqual(actors.actor("chest").treasure_frame, 1)
+        for expected in (2, 1, 0):
+            for _frame in range(TREASURE_ANIMATION_FRAME_COUNT - 1):
+                actors.update_treasure_animations()
+                self.assertNotEqual(actors.actor("chest").treasure_frame, expected)
+            actors.update_treasure_animations()
+            self.assertEqual(actors.actor("chest").treasure_frame, expected)
+
+    def test_opened_treasure_starts_on_the_final_image(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        treasure = MapActor(
+            "chest",
+            MapCell(1, 1),
+            "treasure",
+            0,
+            contents=MapTreasureContents("item", item_key="POTION"),
+        )
+        object.__setattr__(map_data, "actors", (treasure,))
+
+        actors = FieldActors(map_data, opened_treasure_ids=("chest",))
+
+        self.assertEqual(actors.actor("chest").treasure_frame, 2)
+
 
 class FieldRendererTest(unittest.TestCase):
     def test_draws_ground_objects_then_the_requested_character_frame(self) -> None:
@@ -368,6 +415,45 @@ class FieldRendererTest(unittest.TestCase):
         self.assertEqual(
             character_calls[3],
             call(16, 16, 0, 0, 96, 16, 16, 1),
+        )
+
+    def test_draws_the_current_treasure_animation_frame(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        treasure = MapActor(
+            "chest",
+            MapCell(1, 0),
+            "treasure",
+            0,
+            contents=MapTreasureContents("gold", amount=10),
+        )
+        object.__setattr__(map_data, "actors", (treasure,))
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        actors = FieldActors(map_data)
+        actors.start_treasure_animation("chest", opened=True)
+        treasure_image = Mock(width=48, height=16)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=48,
+            screen_height=48,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            actors=actors,
+            treasure_image=treasure_image,
+        )
+
+        pyxel.blt.assert_any_call(
+            16,
+            0,
+            treasure_image,
+            16,
+            0,
+            16,
+            16,
+            1,
         )
 
 

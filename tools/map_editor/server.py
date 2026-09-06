@@ -51,6 +51,10 @@ ACTOR_ASSETS = {
         "path": Path("actors/characters.png"),
         "sprite_size": [32, 64],
     },
+    "treasure": {
+        "path": Path("actors/treasure.png"),
+        "sprite_size": [48, 16],
+    },
 }
 MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -116,6 +120,7 @@ class MapEditorApplication:
         if self.runtime_root not in self.runtime_path.parents:
             raise ValueError("生成先がruntime root外です。")
         self.texts_path = (self.content_root / "data" / "texts.json").resolve()
+        self.items_path = (self.content_root / "data" / "items.json").resolve()
         data_root = (self.content_root / "data").resolve()
         if data_root not in self.texts_path.parents:
             raise ValueError("文言パスがcontent/data外です。")
@@ -278,6 +283,26 @@ class MapEditorApplication:
     def event_options(self) -> list[str]:
         return sorted(self.event_definitions())
 
+    def item_options(self) -> list[dict[str, str]]:
+        if not self.items_path.is_file():
+            return []
+        value = json.loads(self.items_path.read_text(encoding="utf-8"))
+        if not isinstance(value, list):
+            raise ValueError("content/data/items.jsonはobjectの配列である必要があります。")
+        options = []
+        for index, record in enumerate(value):
+            if not isinstance(record, Mapping):
+                raise ValueError(f"content/data/items.json[{index}]が不正です。")
+            key = record.get("name_en")
+            name = record.get("name_ja")
+            if not isinstance(key, str) or not key or not isinstance(name, str):
+                raise ValueError(f"content/data/items.json[{index}]の名称が不正です。")
+            options.append({"key": key, "name_ja": name})
+        return options
+
+    def item_keys(self) -> set[str]:
+        return {item["key"] for item in self.item_options()}
+
     def bgm_options(self) -> list[str]:
         if not self.audio_root.is_dir():
             return []
@@ -394,6 +419,7 @@ class MapEditorApplication:
             data,
             tileset,
             bgm_ids=self.bgm_options(),
+            item_keys=self.item_keys(),
         )
         link_diagnostics = (
             validate_map_links(self.map_sources(data))
@@ -469,6 +495,7 @@ class MapEditorApplication:
             "destination_options": self.destination_options(data),
             "site_options": self.site_options(data),
             "event_options": self.event_options(),
+            "item_options": self.item_options(),
             "bgm_options": self.bgm_options(),
             "tileset": tileset,
             "diagnostics": diagnostics,

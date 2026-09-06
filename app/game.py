@@ -85,6 +85,7 @@ from rendering import (
     FadeThroughBlack,
     FIELD_CHARACTER_ASSET_ID,
     FIELD_PROP_ASSET_ID,
+    FIELD_TREASURE_ASSET_ID,
     FieldRenderer,
     PaletteShifter,
 )
@@ -114,6 +115,8 @@ from systems import (
     SettingsSystemError,
     ShopSystem,
     TravelSystem,
+    TreasureOpenStatus,
+    TreasureSystem,
     create_save_document,
     restore_save_document,
 )
@@ -126,6 +129,7 @@ from ui import (
     DISABLED_COLOR,
     EventMessageDataError,
     EventMessageOverlay,
+    MessageOverlay,
     LocalizedWindowTextFactory,
     NEGATIVE_COLOR,
     POSITIVE_COLOR,
@@ -170,6 +174,9 @@ MENU_INFO_TEXT_KEYS = (
     "menu.info.play_time",
 )
 MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
+TREASURE_GOLD_TEXT_KEY = "treasure.found_gold"
+TREASURE_ITEM_TEXT_KEY = "treasure.found_item"
+TREASURE_CAPACITY_TEXT_KEY = "treasure.capacity_exceeded"
 MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
@@ -425,6 +432,10 @@ class Game:
             active_party=self.party,
             character_states=self.character_states,
         )
+        self.treasure_system = TreasureSystem(
+            save_data=self.save_data,
+            inventory=self.inventory_system,
+        )
         character_definitions = tuple(
             CharacterDefinition.from_record(record)
             for record in self.character_records
@@ -459,10 +470,12 @@ class Game:
         self.field_actors: FieldActors | None = None
         self.field_prop_image = None
         self.field_actor_character_image = None
+        self.field_treasure_image = None
         self._reset_field_actors()
         self.event_runner: EventRunner | None = None
         self.event_effect = None
         self.event_message: EventMessageOverlay | None = None
+        self.treasure_message: MessageOverlay | None = None
         self.event_move_remaining = 0
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
@@ -733,11 +746,22 @@ class Game:
             self.field_actors = None
             self.field_prop_image = None
             self.field_actor_character_image = None
+            self.field_treasure_image = None
             return
-        self.field_actors = FieldActors(self.current_map)
+        self.field_actors = FieldActors(
+            self.current_map,
+            opened_treasure_ids=(
+                treasure_id
+                for map_id, treasure_id in self.save_data.opened_treasures
+                if map_id == self.current_map.map_id
+            ),
+        )
         actors = self.field_actors.actors
         prop_actors = tuple(actor for actor in actors if actor.kind == "prop")
-        character_actors = tuple(actor for actor in actors if actor.kind != "prop")
+        character_actors = tuple(
+            actor for actor in actors if actor.kind in ("stationary", "roaming")
+        )
+        treasure_actors = tuple(actor for actor in actors if actor.kind == "treasure")
         self.field_prop_image = None
         if prop_actors:
             entry = self.images.entry(FIELD_PROP_ASSET_ID)
@@ -769,6 +793,14 @@ class Game:
             self.field_actor_character_image = self.images.image(
                 FIELD_CHARACTER_ASSET_ID
             )
+        self.field_treasure_image = None
+        if treasure_actors:
+            entry = self.images.entry(FIELD_TREASURE_ASSET_ID)
+            if entry.width != 48 or entry.height != 16:
+                raise ImageResourceError(
+                    f"{FIELD_TREASURE_ASSET_ID}の寸法は48x16pxである必要があります。"
+                )
+            self.field_treasure_image = self.images.image(FIELD_TREASURE_ASSET_ID)
 
     def _draw_site_name(self) -> None:
         """Draw the nearby-site name at a position fixed to the world map."""
@@ -1695,6 +1727,10 @@ class Game:
                     active_party=self.party,
                     character_states=self.character_states,
                 )
+            self.treasure_system = TreasureSystem(
+                save_data=self.save_data,
+                inventory=self.inventory_system,
+            )
             self._reset_field_actors()
             self.selected_member_index = 0
             self._build_main_windows(animate=False)
@@ -2158,6 +2194,70 @@ class Game:
         )
         return True
 
+    def _try_open_treasure(
+        self,
+        x: int,
+        y: int,
+        *,
+        release_direction: Direction | None = None,
+        release_confirm: bool = False,
+    ) -> bool:
+        actors = getattr(self, "field_actors", None)
+        current_map = getattr(self, "current_map", None)
+        if actors is None or not isinstance(current_map, CompiledMap):
+            return False
+        runtime_actor = actors.actor_at(x, y)
+        if runtime_actor is None or runtime_actor.kind != "treasure":
+            return False
+        if runtime_actor.treasure_frame == 2 and not runtime_actor.treasure_animation:
+            return False
+        if runtime_actor.treasure_animation:
+            self.event_release_direction = release_direction
+            self.event_release_confirm = release_confirm
+            return True
+        actor = next(item for item in current_map.actors if item.id == runtime_actor.id)
+        status = self.treasure_system.open(
+            current_map.map_id,
+            actor,
+            members=self.character_states.values(),
+        )
+        if status is TreasureOpenStatus.ALREADY_OPENED:
+            return False
+
+        self.event_release_direction = release_direction
+        self.event_release_confirm = release_confirm
+
+        contents = actor.contents
+        if contents is None:
+            raise ValueError("treasure contents are missing")
+        localizer = Localizer(self.settings.language)
+        if contents.type == "gold":
+            first_line = self.texts.formatted_text(
+                TREASURE_GOLD_TEXT_KEY,
+                localizer,
+                {"AMOUNT": format_number(contents.amount)},
+            )
+        else:
+            if contents.item_key is None:
+                raise ValueError("item treasure key is missing")
+            item = self.items[contents.item_key]
+            first_line = self.texts.formatted_text(
+                TREASURE_ITEM_TEXT_KEY,
+                localizer,
+                {"ITEM": str(item.localized_name(localizer))},
+            )
+        opened = status is TreasureOpenStatus.OPENED
+        lines = [first_line]
+        if not opened:
+            lines.append(self.texts.text(TREASURE_CAPACITY_TEXT_KEY, localizer))
+        actors.start_treasure_animation(actor.id, opened=opened)
+        self.treasure_message = MessageOverlay(
+            lines=tuple(lines),
+            settings=self.settings,
+            fonts=self.fonts,
+        )
+        return True
+
     def _update_field(self, input_state: InputState) -> None:
         if self._release_latch_blocks_field(input_state):
             self.field.update(None)
@@ -2168,6 +2268,8 @@ class Game:
         if not self.field.is_moving and input_state.confirm.triggered:
             x = self.field.position.x + self.field.facing.dx
             y = self.field.position.y + self.field.facing.dy
+            if self._try_open_treasure(x, y, release_confirm=True):
+                return
             if self._try_field_trigger(
                 "interact", x, y, release_confirm=True
             ):
@@ -2176,6 +2278,12 @@ class Game:
         if not self.field.is_moving and direction is not None:
             x = self.field.position.x + direction.dx
             y = self.field.position.y + direction.dy
+            if self._try_open_treasure(
+                x,
+                y,
+                release_direction=direction,
+            ):
+                return
             if self._try_field_trigger(
                 "touch", x, y, release_direction=direction
             ):
@@ -2219,6 +2327,14 @@ class Game:
                 self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
+            field_actors = getattr(self, "field_actors", None)
+            if field_actors is not None:
+                field_actors.update_treasure_animations()
+            treasure_message = getattr(self, "treasure_message", None)
+            if treasure_message is not None:
+                if treasure_message.update(input_state):
+                    self.treasure_message = None
+                return
             if getattr(self, "event_runner", None) is not None:
                 self._update_event(input_state)
             else:
@@ -2368,6 +2484,7 @@ class Game:
                         actors=self.field_actors,
                         prop_image=self.field_prop_image,
                         actor_character_image=self.field_actor_character_image,
+                        treasure_image=self.field_treasure_image,
                     )
                 else:
                     self.field_renderer.draw(self.field)
@@ -2375,6 +2492,9 @@ class Game:
                 event_message = getattr(self, "event_message", None)
                 if event_message is not None:
                     event_message.draw()
+                treasure_message = getattr(self, "treasure_message", None)
+                if treasure_message is not None:
+                    treasure_message.draw()
                 return
             item_screen = getattr(self, "item_screen", None)
             if item_screen is not None:

@@ -1190,6 +1190,11 @@ SaveDataが所有する。難易度の保存値には表示文言から独立し
 
 Member、Item、Spellなど、データとそのデータに密接なルールはDomain Modelへ置く。複数のModelやSaveDataをまたぐ操作はSystemへ置く。
 
+宝箱はマップactorの `kind=treasure` として配置する。`TreasureSystem` は `SaveData` と
+`InventorySystem` だけに依存し、所有上限の確認、報酬付与、開封済み記録を一体として扱う。
+Field側は表示コマと演出タイマー、Gameまたは将来のFieldSceneは入力とメッセージOverlayの接続を
+所有する。宝箱を通常イベントへ変換せず、RendererやDomain ModelからGameを逆参照しない。
+
 Systemへ単一の巨大なContextやAppを渡すと、再び暗黙の依存が増える。必要なデータとサービスを明示的に渡す。Sceneだけは調停役としてSaveDataや複数サービスをまとめて受け取ってよい。
 
 ## ZEROのイベント構造
@@ -1246,6 +1251,8 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | 毒や回復によるMember自身の変化 | `Member` |
 | 店で何を選んだか | Shop Overlay |
 | 価格、所持、装備可否 | `Item` / `Member` / `InventorySystem` |
+| 宝箱の報酬付与と開封済み記録 | `TreasureSystem` |
+| 宝箱の表示コマと一時的な開閉演出 | `FieldActors` |
 | 一時パレットシフトと変換色 | `rendering/palette.py` |
 | 戦闘終了後の世界変化 | `WorldProgression` |
 | ウィンドウ枠、文字、カーソル描画 | `ui/window.py` |

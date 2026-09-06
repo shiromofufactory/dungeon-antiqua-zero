@@ -41,6 +41,8 @@ from .maps import (
     MapObjectTile,
     MapResourceError,
     MapResources,
+    MapTreasureContents,
+    TREASURE_CONTENT_TYPES,
     WorldSite,
 )
 
@@ -79,6 +81,8 @@ __all__ = [
     "MapObjectTile",
     "MapResourceError",
     "MapResources",
+    "MapTreasureContents",
+    "TREASURE_CONTENT_TYPES",
     "WorldSite",
     "load_record_array",
     "list_bgm_ids",

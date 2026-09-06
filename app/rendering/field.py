@@ -24,6 +24,7 @@ FIELD_CHARACTER_COLKEY = 1
 FIELD_CHARACTER_ANIMATION_INTERVAL = 16
 FIELD_PROP_ASSET_ID = "actors/props"
 FIELD_CHARACTER_ASSET_ID = "actors/characters"
+FIELD_TREASURE_ASSET_ID = "actors/treasure"
 FIELD_CHARACTER_FACING_ROWS = {
     Direction.UP: 0,
     Direction.RIGHT: 1,
@@ -63,6 +64,7 @@ class FieldRenderer:
         actors: FieldActors | None = None,
         prop_image: Any | None = None,
         actor_character_image: Any | None = None,
+        treasure_image: Any | None = None,
         frame_count: int | None = None,
     ) -> None:
         if not isinstance(field, FieldMovement):
@@ -89,7 +91,12 @@ class FieldRenderer:
             if actors.map_data is not self.map_data:
                 raise ValueError("field renderer and actors must use the same map data")
             for actor in actors.actors:
-                image = prop_image if actor.kind == "prop" else actor_character_image
+                if actor.kind == "prop":
+                    image = prop_image
+                elif actor.kind == "treasure":
+                    image = treasure_image
+                else:
+                    image = actor_character_image
                 characters.append(
                     (
                         actor.movement.world_y,
@@ -104,6 +111,20 @@ class FieldRenderer:
         ):
             if kind == "prop":
                 self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
+            elif kind == "treasure":
+                actor = actors.actor_at(
+                    movement.position.x,
+                    movement.position.y,
+                )
+                if actor is None:
+                    raise ValueError("treasure actor state is missing")
+                self._draw_treasure(
+                    movement,
+                    camera_x,
+                    camera_y,
+                    actor.treasure_frame,
+                    image,
+                )
             else:
                 self._draw_character(
                     movement,
@@ -276,6 +297,31 @@ class FieldRenderer:
             FIELD_CHARACTER_COLKEY,
         )
 
+    def _draw_treasure(
+        self,
+        movement: FieldMovement,
+        camera_x: int,
+        camera_y: int,
+        frame: int,
+        image: Any | None,
+    ) -> None:
+        if image is None:
+            raise ValueError("treasure actor sheet is required to draw treasure actors")
+        if image.width != 48 or image.height != 16:
+            raise ValueError("treasure actor sheet must be 48x16 pixels")
+        if frame not in (0, 1, 2):
+            raise ValueError("treasure animation frame is outside the sheet")
+        self._pyxel.blt(
+            movement.world_x - camera_x,
+            movement.world_y - camera_y,
+            image,
+            frame * FIELD_CHARACTER_SIZE,
+            0,
+            FIELD_CHARACTER_SIZE,
+            FIELD_CHARACTER_SIZE,
+            FIELD_CHARACTER_COLKEY,
+        )
+
 
 __all__ = [
     "FIELD_CHARACTER_ANIMATION_INTERVAL",
@@ -287,5 +333,6 @@ __all__ = [
     "FIELD_CHARACTER_SOURCE_X",
     "FIELD_CHARACTER_SOURCE_Y",
     "FIELD_PROP_ASSET_ID",
+    "FIELD_TREASURE_ASSET_ID",
     "FieldRenderer",
 ]

@@ -24,8 +24,8 @@ from .tileset import (
 )
 
 
-SOURCE_FORMAT_VERSION = 5
-RUNTIME_FORMAT_VERSION = 5
+SOURCE_FORMAT_VERSION = 6
+RUNTIME_FORMAT_VERSION = 6
 MAX_MAP_DIMENSION = 512
 MIN_MAP_WIDTH = 16
 MIN_MAP_HEIGHT = 15
@@ -33,7 +33,8 @@ MAX_ANIMATION_PERIOD = 3600
 TRANSPARENT_INDEX = 1
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 CARDINAL_FACINGS = frozenset(("up", "right", "down", "left"))
-ACTOR_KINDS = frozenset(("prop", "stationary", "roaming"))
+ACTOR_KINDS = frozenset(("prop", "stationary", "roaming", "treasure"))
+TREASURE_CONTENT_TYPES = frozenset(("gold", "item"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 DEFAULT_BGM_IDS = {
@@ -157,6 +158,7 @@ def validate_map_source(
     tileset: Mapping[str, Any],
     *,
     bgm_ids: Iterable[str] | None = None,
+    item_keys: Iterable[str] | None = None,
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     if not isinstance(data, dict):
@@ -395,7 +397,13 @@ def validate_map_source(
         width,
         height,
         collision,
+        None if item_keys is None else frozenset(item_keys),
     )
+    actor_kinds = {
+        actor.get("id"): actor.get("kind")
+        for actor in data.get("actors", [])
+        if isinstance(actor, Mapping) and isinstance(actor.get("id"), str)
+    }
     _validate_event_triggers(
         data.get("event_triggers"),
         diagnostics,
@@ -403,6 +411,7 @@ def validate_map_source(
         height,
         object_origins,
         actor_positions,
+        actor_kinds,
         collision,
     )
     return diagnostics
@@ -414,6 +423,7 @@ def _validate_actors(
     width: int,
     height: int,
     collision: Sequence[bool] | None,
+    item_keys: frozenset[str] | None,
 ) -> dict[str, tuple[int, int]]:
     if not isinstance(value, list):
         _diagnostic(diagnostics, "error", "invalid_actors", "actors", "actorsは配列で指定してください。")
@@ -453,27 +463,57 @@ def _validate_actors(
                 "error",
                 "invalid_actor_kind",
                 f"{path}.kind",
-                "actor kindはprop、stationary、roamingのいずれかです。",
+                "actor kindはprop、stationary、roaming、treasureのいずれかです。",
             )
-        if kind == "prop":
+        if kind in ("prop", "treasure"):
             if "facing" in actor:
                 _diagnostic(
                     diagnostics,
                     "error",
-                    "prop_actor_has_facing",
+                    (
+                        "prop_actor_has_facing"
+                        if kind == "prop"
+                        else "treasure_actor_has_facing"
+                    ),
                     f"{path}.facing",
-                    "prop actorは向きを持ちません。facingを省略してください。",
+                    "propとtreasure actorは向きを持ちません。facingを省略してください。",
                 )
         elif actor.get("facing") not in CARDINAL_FACINGS:
             _diagnostic(diagnostics, "error", "invalid_actor_facing", f"{path}.facing", "stationaryとroaming actorの向きはup、right、down、leftのいずれかです。")
         sprite_index = actor.get("sprite_index")
-        if not _is_int(sprite_index) or sprite_index < 0:
+        if kind == "treasure" and "sprite_index" in actor:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "treasure_actor_has_sprite_index",
+                f"{path}.sprite_index",
+                "treasure actorの画像は固定です。sprite_indexを省略してください。",
+            )
+        elif kind != "treasure" and (
+            not _is_int(sprite_index) or sprite_index < 0
+        ):
             _diagnostic(
                 diagnostics,
                 "error",
                 "invalid_actor_sprite_index",
                 f"{path}.sprite_index",
                 "sprite_indexは0以上の整数で指定してください。",
+            )
+        contents = actor.get("contents")
+        if kind == "treasure":
+            _validate_treasure_contents(
+                contents,
+                diagnostics,
+                f"{path}.contents",
+                item_keys,
+            )
+        elif "contents" in actor:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "contents_requires_treasure_actor",
+                f"{path}.contents",
+                "contentsはtreasure actorだけに指定できます。",
             )
         if "appearance_id" in actor:
             _diagnostic(
@@ -488,6 +528,77 @@ def _validate_actors(
     return actors
 
 
+def _validate_treasure_contents(
+    contents: object,
+    diagnostics: list[Diagnostic],
+    path: str,
+    item_keys: frozenset[str] | None,
+) -> None:
+    if not isinstance(contents, dict):
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_treasure_contents",
+            path,
+            "宝箱の中身はobjectで指定してください。",
+        )
+        return
+    content_type = contents.get("type")
+    if content_type not in TREASURE_CONTENT_TYPES:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_treasure_content_type",
+            f"{path}.type",
+            "宝箱の中身はgoldまたはitemで指定してください。",
+        )
+        return
+    if content_type == "gold":
+        if set(contents) != {"type", "amount"}:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_gold_treasure_fields",
+                path,
+                "goldの中身にはtypeとamountだけを指定してください。",
+            )
+        amount = contents.get("amount")
+        if not _is_int(amount) or not 1 <= amount <= 999_999:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_treasure_gold_amount",
+                f"{path}.amount",
+                "宝箱の金額は1〜999999の整数で指定してください。",
+            )
+        return
+    if set(contents) != {"type", "item_key"}:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_item_treasure_fields",
+            path,
+            "itemの中身にはtypeとitem_keyだけを指定してください。",
+        )
+    item_key = contents.get("item_key")
+    if not isinstance(item_key, str) or not item_key:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "invalid_treasure_item_key",
+            f"{path}.item_key",
+            "宝箱のアイテムキーを指定してください。",
+        )
+    elif item_keys is not None and item_key not in item_keys:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "unknown_treasure_item_key",
+            f"{path}.item_key",
+            f"アイテムが見つかりません: {item_key}",
+        )
+
+
 def _validate_event_triggers(
     value: object,
     diagnostics: list[Diagnostic],
@@ -495,6 +606,7 @@ def _validate_event_triggers(
     height: int,
     object_origins: Mapping[str, tuple[int, int]],
     actor_positions: Mapping[str, tuple[int, int]],
+    actor_kinds: Mapping[str, object],
     collision: Sequence[bool] | None,
 ) -> None:
     if not isinstance(value, list):
@@ -503,7 +615,11 @@ def _validate_event_triggers(
     trigger_ids: set[str] = set()
     occupied: dict[tuple[str, int, int], str] = {}
     actor_occupied: dict[tuple[str, str, int, int], str] = {}
-    actor_trigger_counts = {actor_id: 0 for actor_id in actor_positions}
+    actor_trigger_counts = {
+        actor_id: 0
+        for actor_id in actor_positions
+        if actor_kinds.get(actor_id) != "treasure"
+    }
     for index, trigger in enumerate(value):
         path = f"event_triggers[{index}]"
         if not isinstance(trigger, dict):
@@ -560,9 +676,18 @@ def _validate_event_triggers(
                 _diagnostic(diagnostics, "error", "unknown_trigger_anchor_actor", f"{path}.anchor.actor_id", f"actorが見つかりません: {actor_id}")
             else:
                 anchor_origin = actor_positions[actor_id]
-                moving_actor = True
-                moving_actor_id = actor_id
-                actor_trigger_counts[actor_id] += 1
+                if actor_kinds.get(actor_id) == "treasure":
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "treasure_actor_has_event_trigger",
+                        f"{path}.anchor.actor_id",
+                        "treasure actorにはイベントトリガーを指定できません。",
+                    )
+                else:
+                    moving_actor = True
+                    moving_actor_id = actor_id
+                    actor_trigger_counts[actor_id] += 1
         else:
             _diagnostic(diagnostics, "error", "invalid_trigger_anchor_kind", f"{path}.anchor.kind", "anchor kindはcell、object、actorのいずれかです。")
 
@@ -1195,14 +1320,14 @@ def validate_map_event_links(
             for actor_id in _moved_actor_ids(commands):
                 link = (map_id, event_id, actor_id)
                 if actor_id in actor_kinds:
-                    if actor_kinds[actor_id] == "prop" and link not in checked_actor_links:
+                    if actor_kinds[actor_id] in ("prop", "treasure") and link not in checked_actor_links:
                         checked_actor_links.add(link)
                         _diagnostic(
                             diagnostics,
                             "error",
                             "immovable_event_actor",
                             f"{map_id}.event_triggers[{index}].event_id",
-                            f"イベント{event_id}は向きのないprop actorを移動できません: {actor_id}",
+                            f"イベント{event_id}は固定actorを移動できません: {actor_id}",
                         )
                     continue
                 if link in checked_actor_links:

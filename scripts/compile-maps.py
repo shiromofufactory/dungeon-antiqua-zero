@@ -96,6 +96,7 @@ def main() -> int:
                 data,
                 tileset,
                 bgm_ids=bgm_ids,
+                item_keys=catalogs["item_keys"],
             )
             errors = [item for item in (*tileset_diagnostics, *map_diagnostics) if item.severity == "error"]
             if errors:

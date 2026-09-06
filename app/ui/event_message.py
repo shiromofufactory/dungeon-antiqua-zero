@@ -57,36 +57,22 @@ class EventMessageDataError(RuntimeError):
     """Raised when an event message cannot be represented by the overlay."""
 
 
-class EventMessageOverlay:
+class MessageOverlay:
+    """Display already-localized lines with the standard blocking message UI."""
+
     def __init__(
         self,
         *,
-        message_id: str,
+        lines: tuple[str, ...],
         settings: Settings,
-        messages: EventMessageCatalog,
         fonts: FontResources,
-        faces: object,
-        face_positions: Mapping[str, FacePosition],
+        faces: object | None = None,
+        face_position: FacePosition | None = None,
     ) -> None:
-        self.message_id = message_id
-        portrait_character_key = messages.portrait_character_key(message_id)
-        self.portrait_character_key = portrait_character_key
+        if not lines or not all(isinstance(line, str) for line in lines):
+            raise EventMessageDataError("メッセージは1行以上必要です。")
         self.faces = faces
-        self.face_position = (
-            None
-            if portrait_character_key is None
-            else face_positions.get(portrait_character_key)
-        )
-        if portrait_character_key is not None and self.face_position is None:
-            raise EventMessageDataError(
-                f"顔グラフィックが見つかりません: {portrait_character_key}"
-            )
-        localizer = Localizer(settings.language)
-        lines = messages.lines(message_id, localizer)
-        if not lines:
-            raise EventMessageDataError(
-                f"イベントメッセージが見つかりません: {message_id}"
-            )
+        self.face_position = face_position
         self._max_lines, self._line_step = _page_layout_for(settings.language)
         self._pages = tuple(
             tuple(lines[index : index + self._max_lines])
@@ -241,6 +227,41 @@ class EventMessageOverlay:
             )
 
 
+class EventMessageOverlay(MessageOverlay):
+    def __init__(
+        self,
+        *,
+        message_id: str,
+        settings: Settings,
+        messages: EventMessageCatalog,
+        fonts: FontResources,
+        faces: object,
+        face_positions: Mapping[str, FacePosition],
+    ) -> None:
+        self.message_id = message_id
+        portrait_character_key = messages.portrait_character_key(message_id)
+        self.portrait_character_key = portrait_character_key
+        face_position = (
+            None
+            if portrait_character_key is None
+            else face_positions.get(portrait_character_key)
+        )
+        if portrait_character_key is not None and face_position is None:
+            raise EventMessageDataError(
+                f"顔グラフィックが見つかりません: {portrait_character_key}"
+            )
+        lines = messages.lines(message_id, Localizer(settings.language))
+        if not lines:
+            raise EventMessageDataError(
+                f"イベントメッセージが見つかりません: {message_id}"
+            )
+        super().__init__(
+            lines=lines,
+            settings=settings,
+            fonts=fonts,
+            faces=faces,
+            face_position=face_position,
+        )
 __all__ = [
     "EVENT_MESSAGE_CJK_LINE_STEP",
     "EVENT_MESSAGE_CJK_MAX_LINES",
@@ -255,4 +276,5 @@ __all__ = [
     "EVENT_MESSAGE_WINDOW_GRID",
     "EventMessageDataError",
     "EventMessageOverlay",
+    "MessageOverlay",
 ]

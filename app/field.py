@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import random
 from types import MappingProxyType
-from typing import Mapping
+from typing import Iterable, Mapping
 
 if __package__:
     from .input import Direction
@@ -19,6 +19,7 @@ DEFAULT_FIELD_MOVE_SPEED = 1
 INTERIOR_FIELD_MOVE_SPEED = 2
 DEFAULT_ROAM_WAIT_MIN = 30
 DEFAULT_ROAM_WAIT_MAX = 90
+TREASURE_ANIMATION_FRAME_COUNT = 10
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,9 @@ class FieldActor:
     sprite_index: int
     movement: FieldMovement
     roam_wait_frames: int = 0
+    treasure_frame: int = 0
+    treasure_animation: tuple[int, ...] = ()
+    treasure_animation_elapsed: int = 0
 
 
 class FieldActors:
@@ -199,11 +203,15 @@ class FieldActors:
         map_data: CompiledMap,
         *,
         random_source: random.Random | None = None,
+        opened_treasure_ids: Iterable[str] = (),
     ) -> None:
         if not isinstance(map_data, CompiledMap):
             raise TypeError("field actors require a CompiledMap")
         self.map_data = map_data
         self._random = random_source or random.Random(f"{map_data.map_id}:actors")
+        opened_ids = frozenset(opened_treasure_ids)
+        if not all(isinstance(actor_id, str) and actor_id for actor_id in opened_ids):
+            raise TypeError("opened treasure IDs must be non-empty strings")
         self._actors = {
             actor.id: FieldActor(
                 actor.id,
@@ -219,6 +227,7 @@ class FieldActors:
                     ),
                 ),
                 self._next_roam_wait() if actor.kind == "roaming" else 0,
+                2 if actor.kind == "treasure" and actor.id in opened_ids else 0,
             )
             for actor in map_data.actors
         }
@@ -245,6 +254,16 @@ class FieldActors:
         except KeyError as error:
             raise KeyError(f"unknown field actor: {actor_id}") from error
 
+    def actor_at(self, x: int, y: int) -> FieldActor | None:
+        return next(
+            (
+                actor
+                for actor in self._actors.values()
+                if actor.movement.position == FieldPosition(x, y)
+            ),
+            None,
+        )
+
     def blocked_positions(self, *, excluding: str | None = None) -> tuple[FieldPosition, ...]:
         positions = (
             position
@@ -263,7 +282,7 @@ class FieldActors:
 
     def face_toward(self, actor_id: str, target: FieldPosition) -> None:
         actor = self.actor(actor_id)
-        if actor.kind == "prop":
+        if actor.kind in ("prop", "treasure"):
             return
         actor.movement.stop()
         dx = target.x - actor.movement.position.x
@@ -284,8 +303,8 @@ class FieldActors:
         party_position: FieldPosition,
     ) -> bool:
         actor = self.actor(actor_id)
-        if actor.kind == "prop":
-            raise ValueError("prop field actors cannot move")
+        if actor.kind in ("prop", "treasure"):
+            raise ValueError("prop/treasure field actors cannot move")
         return actor.movement.update(
             direction,
             blocked_positions=(
@@ -324,11 +343,33 @@ class FieldActors:
             if not actor.movement.is_moving:
                 actor.roam_wait_frames = self._next_roam_wait()
 
+    def start_treasure_animation(self, actor_id: str, *, opened: bool) -> None:
+        actor = self.actor(actor_id)
+        if actor.kind != "treasure":
+            raise ValueError("treasure animation requires a treasure actor")
+        if actor.treasure_frame != 0 or actor.treasure_animation:
+            raise ValueError("treasure actor is not closed")
+        actor.treasure_frame = 1
+        actor.treasure_animation = (2,) if opened else (2, 1, 0)
+        actor.treasure_animation_elapsed = 0
+
+    def update_treasure_animations(self) -> None:
+        for actor in self._actors.values():
+            if not actor.treasure_animation:
+                continue
+            actor.treasure_animation_elapsed += 1
+            if actor.treasure_animation_elapsed < TREASURE_ANIMATION_FRAME_COUNT:
+                continue
+            actor.treasure_frame = actor.treasure_animation[0]
+            actor.treasure_animation = actor.treasure_animation[1:]
+            actor.treasure_animation_elapsed = 0
+
 
 __all__ = [
     "DEFAULT_FIELD_MOVE_SPEED",
     "DEFAULT_ROAM_WAIT_MAX",
     "DEFAULT_ROAM_WAIT_MIN",
+    "TREASURE_ANIMATION_FRAME_COUNT",
     "FieldMovement",
     "FieldPosition",
     "FieldActor",

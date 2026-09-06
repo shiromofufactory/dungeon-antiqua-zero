@@ -121,6 +121,7 @@ def main() -> int:
                 data,
                 tileset,
                 bgm_ids=catalogs["bgm_ids"],
+                item_keys=catalogs["item_keys"],
             )
             if not diagnostics:
                 print("  OK")

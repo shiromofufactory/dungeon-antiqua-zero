@@ -16,6 +16,7 @@ from .field import (
     FIELD_CHARACTER_SOURCE_X,
     FIELD_CHARACTER_SOURCE_Y,
     FIELD_PROP_ASSET_ID,
+    FIELD_TREASURE_ASSET_ID,
     FieldRenderer,
 )
 from .palette import (
@@ -41,6 +42,7 @@ __all__ = [
     "FIELD_CHARACTER_SOURCE_X",
     "FIELD_CHARACTER_SOURCE_Y",
     "FIELD_PROP_ASSET_ID",
+    "FIELD_TREASURE_ASSET_ID",
     "FieldRenderer",
     "PaletteShifter",
     "create_default_palette_shifter",

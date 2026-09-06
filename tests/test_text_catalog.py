@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.localization import Localizer
+from app.localization import Localizer, format_number
 from app.state import Language
 from app.text_catalog import TextCatalog, TextCatalogError
 
@@ -77,6 +77,27 @@ class TextCatalogTest(unittest.TestCase):
             ),
             "Ｄｒｏｐ　Ｐｏｔｉｏｎ？",
         )
+
+    def test_gold_treasure_amount_uses_the_same_wide_font_as_japanese_text(self) -> None:
+        catalog = TextCatalog.from_records(
+            [
+                {
+                    "text_key": "treasure.found_gold",
+                    "text_ja": "宝箱には　$AMOUNT$Ｇが入っていた！",
+                    "text_en": "",
+                    "text_zhcn": "",
+                }
+            ]
+        )
+
+        text = catalog.formatted_text(
+            "treasure.found_gold",
+            Localizer(Language.JAPANESE),
+            {"AMOUNT": format_number(100)},
+        )
+
+        self.assertEqual(text, "宝箱には　１００Ｇが入っていた！")
+        self.assertEqual(text.narrow_spans, ())
 
     def test_formats_template_with_raw_localized_values_from_shared_keys(self) -> None:
         catalog = TextCatalog.from_records(

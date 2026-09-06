@@ -40,7 +40,7 @@ from .save_menu import SaveMenuDataError, SaveMenuOverlay, format_saved_at
 from .start_menu import StartMenuDataError, StartMenuOverlay
 from .spell_menu import SpellMenuDataError, SpellMenuOverlay
 from .status_menu import StatusMenuDataError, StatusMenuOverlay
-from .event_message import EventMessageDataError, EventMessageOverlay
+from .event_message import EventMessageDataError, EventMessageOverlay, MessageOverlay
 
 
 __all__ = [
@@ -52,6 +52,7 @@ __all__ = [
     "EquipmentMenuOverlay",
     "EventMessageDataError",
     "EventMessageOverlay",
+    "MessageOverlay",
     "ItemCategory",
     "ItemMenuDataError",
     "ItemMenuOverlay",

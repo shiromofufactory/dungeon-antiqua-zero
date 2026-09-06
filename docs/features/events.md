@@ -387,14 +387,14 @@ npm run events:build
 ### 制作用形式
 
 actor種別と共通スプライトシート参照はversion 4で追加され、現在の制作用マップの
-`format_version` はマップ別BGMを追加した5とする。version 3のactorは `appearance_id` を
+`format_version` は宝箱actorを追加した6とする。version 3のactorは `appearance_id` を
 廃止し、用途に応じた `kind` と共通シート内の
 `sprite_index` へ明示的に移行する。actorのないversion 3マップはversion番号だけを更新できる。
 既存の `sites`、`arrival_points`、`event_triggers` はそのまま維持する。
 
 ```json
 {
-  "format_version": 5,
+  "format_version": 6,
   "actors": [
     {
       "id": "village_elder",
@@ -406,8 +406,11 @@ actor種別と共通スプライトシート参照はversion 4で追加され、
     {
       "id": "treasure_1",
       "position": [14, 8],
-      "kind": "prop",
-      "sprite_index": 0
+      "kind": "treasure",
+      "contents": {
+        "type": "gold",
+        "amount": 500
+      }
     }
   ],
   "event_triggers": [
@@ -435,34 +438,37 @@ actor種別と共通スプライトシート参照はversion 4で追加され、
 }
 ```
 
-actorは次の3種類とする。
+actorは次の4種類とする。
 
 | `kind` | 用途 | 向き | 通常時の移動 |
 |---|---|---|---|
-| `prop` | 宝箱、看板などの固定物 | なし。`facing` は指定しない | 移動しない |
+| `prop` | 看板などの固定物 | なし。`facing` は指定しない | 移動しない |
 | `stationary` | 定位置の人物・モンスター | 4方向 | 自律移動しない |
 | `roaming` | 村人などの移動人物・モンスター | 4方向 | 30〜90フレームの待機後、上下左右またはその場待機を等確率で選ぶ |
+| `treasure` | 報酬と開封状態を持つ宝箱 | なし。`facing` は指定しない | 移動しない |
 
-`sprite_index` は0以上の整数とし、マップ固有画像ではなく後述の共通シートを
+宝箱以外の `sprite_index` は0以上の整数とし、マップ固有画像ではなく後述の共通シートを
 左上から右、次に下へ読む番号とする。`prop` は下地が通行可能なセルに置くが、
-actor自身がpartyと他actorの進入を防ぐ。`stationary` と `roaming` はactorをアンカーとする
+すべてのactor自身がpartyと他actorの進入を防ぐ。`stationary` と `roaming` はactorをアンカーとする
 `touch` または `interact` で起動される際、未完了の自律歩行を初期セルへ戻してpartyの方を向く。`prop` は
-会話や調査でも向きを変えない。
+会話や調査でも向きを変えない。宝箱の中身、入力、演出、保存規則は
+[`treasures.md`](./treasures.md) を正本とする。
 
 actorの配置、現在位置、向き、待機タイマーはFieldの一時状態とし、セーブしない。
 自律移動はマップ外、通行不可地形、party、他actorの現在セルと移動先セルへ進まず、
 イベント中と通常メニュー中は更新を止める。`move_actor` は向きと歩行を持つ
-`stationary` / `roaming` に使用できるが、`prop` の参照は生成エラーとする。
+`stationary` / `roaming` に使用できるが、`prop` と `treasure` の参照は生成エラーとする。
 
 ### actor共通アセット
 
-マップによらず使える次の2ファイルを正本とし、`npm run images:build` で通常の
+マップによらず使える次の3ファイルを正本とし、`npm run images:build` で通常の
 画像bundleへ収録する。
 
 | actor | 正本パス | 画像ID | 配置 |
 |---|---|---|---|
 | `prop` | `content/images/actors/props.png` | `actors/props` | 16×16pxの単一チップを行優先で並べる |
 | `stationary` / `roaming` | `content/images/actors/characters.png` | `actors/characters` | 1キャラ32×64pxのブロックを行優先で並べる |
+| `treasure` | `content/images/actors/treasure.png` | `actors/treasure` | 閉・途中・開の16×16pxを横3コマに並べる |
 
 `props.png` の幅と高さは16pxの倍数とする。`characters.png` の幅は32pxの倍数、高さは
 64pxの倍数とする。1キャラブロック内は、列が歩行パターン0・1、行が上・右・下・左の順で、
@@ -490,10 +496,11 @@ actorの配置、現在位置、向き、待機タイマーはFieldの一時状�
 | `touch` | プレイヤーが対象セルへ進もうとし、接触が成立した時。対象は通行不可でもよい |
 | `interact` | パーティが停止中に対象セルを向き、決定操作がtriggeredになった時 |
 
-actorは1体につきactorアンカーのトリガーを1件必ず持ち、`activations` は
+`prop`、`stationary`、`roaming` は1体につきactorアンカーのトリガーを1件必ず持ち、`activations` は
 `["touch", "interact"]`、`offsets` は `[[0, 0]]` に固定する。マップエディタはactor作成時、
 または未設定の旧actorを選択した時にこのトリガーを自動追加する。発火方法とoffsetは
-actorのUIへ表示せず、起動するイベントだけをactor編集欄で選ぶ。
+actorのUIへ表示せず、起動するイベントだけをactor編集欄で選ぶ。`treasure` は専用の開封処理を
+持つためactorトリガーを登録せず、宝箱を参照するactorトリガーは生成エラーとする。
 
 cell / objectアンカーの単独トリガーで選択できるactivationは `step` と `touch` だけとし、
 `interact` を単独登録できない。起動条件の違う複数シナリオを同じセルへ重ねず、1イベント内の
@@ -700,7 +707,7 @@ messageコマンドでは、選択中のメッセージの日本語をゲーム�
 ## マップエディタのイベント操作
 
 - 「イベント」タブでcellまたはobjectをアンカーにして単独トリガーを追加する。
-- actorのトリガーはactor作成・選択時に自動追加し、actor編集欄でイベントを選ぶ。
+- 宝箱以外のactorのトリガーはactor作成・選択時に自動追加し、actor編集欄でイベントを選ぶ。
   actorトリガー自身はトリガー一覧、発火方法、offset編集に表示しない。
 - キャンバスではトリガー対象セルを半透明の枠、actorを共通スプライトの16x16画像で表示する。
   人物系actorは現在の向きに対応する静止パターンを使う。選択中のactorは画像を隠さないピンクの
@@ -710,7 +717,8 @@ messageコマンドでは、選択中のメッセージの日本語をゲーム�
 - イベントタブで「object trigger」を選び、キャンバス上のobjectを指定してトリガーを追加できる。
   初期offsetは `[[0, 0]]` とする。
 - actorのスプライトは、`prop` と人物系で対応する共通シートを切り替え、画像候補を表示する
-  ダイアログから選択する。`sprite_index` の直接入力欄は設けない。
+  ダイアログから選択する。`sprite_index` の直接入力欄は設けない。`treasure` は固定の専用画像と
+  中身の編集欄を表示し、画像選択とイベント操作を表示しない。
 - actor編集欄の「イベントを追加」は、現在のマップIDをnamespaceとしてイベントエディタを開き、
   イベントエディタの「追加」と同じ規則で `event_<連番>` を未保存状態で追加する。イベント保存時に
   引き継いだマップも保存し、新規イベントの完全IDを対象actorのtriggerへ紐づける。
@@ -746,6 +754,7 @@ messageコマンドでは、選択中のメッセージの日本語をゲーム�
 次をエラーにする。
 
 - 存在しないイベントID、object ID、actor IDの参照
+- 宝箱actorを参照するイベントトリガー、または `move_actor` で固定actorを参照する状態
 - 不正、空、重複、範囲外のトリガーoffsetまたは解決後セル
 - `step` の対象が通行不可である状態
 - 同じactivationと解決後セルを複数トリガーが占有する状態
@@ -764,7 +773,7 @@ messageコマンドでは、選択中のメッセージの日本語をゲーム�
 
 1. source parser、全体索引、validator、compiler、`EventCatalog` は実装済み。
 2. condition、同期コマンド、PartySystem、待機型Runner、メッセージ／音声／移動効果は実装済み。
-3. map format 4、actor、step/touch/interactトリガーとフィールド接続は実装済み。
+3. map format 6、actor、宝箱、step/touch/interactトリガーとフィールド接続は実装済み。
 4. 同じvalidatorを使うイベントエディタと、トリガーを扱うマップエディタは実装済み。
 5. BattleScene実装時に戦闘トリガーadapterと戦闘用conditionを追加する。
 6. 将来の `start_battle` などを新しい型付きコマンドとして追加する。
@@ -778,7 +787,7 @@ Runnerとマップトリガーを一度に作り込みすぎない。
 - JSONを手編集してもイベントエディタで編集しても、同じ検証とゲーム用生成結果になる。
 - イベント、フラグ、キャラクター、アイテム、文言、音声、actorの不正参照をゲーム起動前に検出できる。
 - step、touch、interactが定めた入力エッジで1回だけ発火し、初期配置やイベント移動では発火しない。
-- actorを作成・選択するとtouch・interactの固定トリガーが1件自動設定され、
+- 宝箱以外のactorを作成・選択するとtouch・interactの固定トリガーが1件自動設定され、
   interactを単独トリガーとして選択できない。
 - ニューゲームでは初期フィールドの適用後に `worldmap.prologue` が起動し、ロードでは起動しない。
 - フラグ、パーティ、インベントリへの操作が既存の上限・隊列・セーブ規則を迂回しない。

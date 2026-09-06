@@ -2,26 +2,39 @@ from __future__ import annotations
 
 from types import MappingProxyType
 import unittest
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock, patch
 
 from tools._bootstrap import APP_ROOT
 from game import Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
-from resources import CompiledMap, MapActor, MapCell, MapEventTrigger
+from resources import (
+    CompiledMap,
+    MapActor,
+    MapCell,
+    MapEventTrigger,
+    MapTreasureContents,
+)
 from rendering import FadeThroughBlack
-from systems import MovePartyEffect, OpenShopEffect
+from state import SaveData, Settings
+from systems import (
+    InventorySystem,
+    MovePartyEffect,
+    OpenShopEffect,
+    TreasureSystem,
+)
 
 
 def compiled_map(
-    trigger: MapEventTrigger,
+    trigger: MapEventTrigger | None,
     *,
     actors: tuple[MapActor, ...] = (),
 ) -> CompiledMap:
     static = {activation: {} for activation in ("step", "touch", "interact")}
-    for activation in trigger.activations:
-        for cell in trigger.cells:
-            static[activation][(cell.x, cell.y)] = trigger
+    if trigger is not None:
+        for activation in trigger.activations:
+            for cell in trigger.cells:
+                static[activation][(cell.x, cell.y)] = trigger
     return CompiledMap(
         map_id="test_map",
         profile="town",
@@ -38,12 +51,14 @@ def compiled_map(
         ground_animations=MappingProxyType({}),
         object_animations=MappingProxyType({}),
         actors=actors,
-        event_triggers=(trigger,),
+        event_triggers=() if trigger is None else (trigger,),
         event_trigger_index=MappingProxyType(
             {key: MappingProxyType(value) for key, value in static.items()}
         ),
         actor_event_triggers=MappingProxyType(
-            {} if trigger.actor_id is None else {trigger.actor_id: (trigger,)}
+            {}
+            if trigger is None or trigger.actor_id is None
+            else {trigger.actor_id: (trigger,)}
         ),
     )
 
@@ -72,6 +87,85 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    @patch("game.MessageOverlay")
+    def test_touching_treasure_opens_it_before_normal_movement(
+        self,
+        message_overlay: Mock,
+    ) -> None:
+        actor = MapActor(
+            "gold_chest",
+            MapCell(2, 1),
+            "treasure",
+            0,
+            contents=MapTreasureContents("gold", amount=50),
+        )
+        game = game_for(None, actors=(actor,))
+        game.save_data = SaveData(gold=10)
+        game.inventory_system = InventorySystem({})
+        game.treasure_system = TreasureSystem(
+            save_data=game.save_data,
+            inventory=game.inventory_system,
+        )
+        game.character_states = {}
+        game.settings = Settings()
+        game.fonts = Mock()
+        game.texts = Mock()
+        game.texts.formatted_text.return_value = "宝箱には　５０Ｇが入っていた！"
+
+        game._update_field(InputState(held_direction=Direction.RIGHT))
+
+        self.assertEqual(game.field.position, FieldPosition(1, 1))
+        self.assertEqual(game.save_data.gold, 60)
+        self.assertIn(("test_map", "gold_chest"), game.save_data.opened_treasures)
+        self.assertEqual(game.field_actors.actor("gold_chest").treasure_frame, 1)
+        message_overlay.assert_called_once_with(
+            lines=("宝箱には　５０Ｇが入っていた！",),
+            settings=game.settings,
+            fonts=game.fonts,
+        )
+        game.texts.formatted_text.assert_called_once_with(
+            "treasure.found_gold",
+            ANY,
+            {"AMOUNT": "５０"},
+        )
+
+    @patch("game.MessageOverlay")
+    def test_opened_treasure_has_no_special_reaction(
+        self,
+        message_overlay: Mock,
+    ) -> None:
+        actor = MapActor(
+            "gold_chest",
+            MapCell(2, 1),
+            "treasure",
+            0,
+            contents=MapTreasureContents("gold", amount=50),
+        )
+        game = game_for(None, actors=(actor,))
+        game.save_data = SaveData(
+            gold=60,
+            opened_treasures={("test_map", "gold_chest")},
+        )
+        game.inventory_system = InventorySystem({})
+        game.treasure_system = TreasureSystem(
+            save_data=game.save_data,
+            inventory=game.inventory_system,
+        )
+        game.character_states = {}
+        game.field_actors = FieldActors(
+            game.current_map,
+            opened_treasure_ids=("gold_chest",),
+        )
+
+        game._update_field(InputState(held_direction=Direction.RIGHT))
+
+        self.assertEqual(game.field.position, FieldPosition(1, 1))
+        self.assertEqual(game.save_data.gold, 60)
+        self.assertEqual(game.field_actors.actor("gold_chest").treasure_frame, 2)
+        self.assertIsNone(game.event_release_direction)
+        self.assertFalse(game.event_release_confirm)
+        message_overlay.assert_not_called()
+
     def test_touch_trigger_precedes_movement(self) -> None:
         trigger = MapEventTrigger(
             "npc_touch",

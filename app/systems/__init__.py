@@ -38,6 +38,7 @@ from .settings import (
 )
 from .shop import MAX_GOLD, ShopSystem
 from .travel import TravelSystem
+from .treasure import TreasureOpenStatus, TreasureSystem
 
 
 __all__ = [
@@ -71,6 +72,8 @@ __all__ = [
     "SettingsSystemError",
     "ShopSystem",
     "TravelSystem",
+    "TreasureOpenStatus",
+    "TreasureSystem",
     "create_save_document",
     "restore_save_document",
 ]

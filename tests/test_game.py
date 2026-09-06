@@ -72,6 +72,7 @@ from resources import (
 )
 from rendering import DIMMED_PALETTE, DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
 from state import DisplayMode, Language, SaveData, Settings
+from systems import InventorySystem
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
@@ -1765,7 +1766,7 @@ class GameTest(unittest.TestCase):
         loaded.save_data = SaveData(gold=321)
         loaded.active_party = (Mock(), Mock())
         loaded.character_states = {"Fiora": loaded.active_party[0]}
-        loaded.inventory = Mock()
+        loaded.inventory = InventorySystem({})
         mock.pending_loaded_state = loaded
         mock.pending_loaded_map = Mock(sites=(), bgm_id="dungeon/ruins")
         mock.pending_loaded_field = Mock()
