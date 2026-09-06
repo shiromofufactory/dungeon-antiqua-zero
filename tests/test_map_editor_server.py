@@ -180,7 +180,7 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('data-map-field="bgm_id"', script)
         self.assertIn("function renderMapSelector()", script)
         self.assertIn('byId("save-button").disabled = !canSave()', script)
-        self.assertIn('if (!canSave()) return;', script)
+        self.assertIn('if (!canSave()) return false;', script)
         self.assertIn('api("/api/change-tileset"', script)
         self.assertIn('api("/api/delete"', script)
 

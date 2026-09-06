@@ -10,6 +10,7 @@ const OBJECT_COLLISION_LABELS = {
 };
 const SESSION_CLIENT_HEADER = "mapchip-metadata-ui";
 const PREVIEW_SETTINGS_VERSION = 1;
+const LAST_TILESET_STORAGE_KEY = "da0.mapchip-metadata.last-tileset.v1";
 let token = new URLSearchParams(window.location.search).get("token") || "";
 const editorRoute = window.location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 
@@ -41,6 +42,7 @@ const state = {
   previewStartedAt: performance.now(),
   validateTimer: null,
 };
+let pendingEditorNavigationUrl = null;
 
 const rawImage = new Image();
 const processedImage = document.createElement("canvas");
@@ -111,6 +113,39 @@ function configureEditorNavigation() {
       map: new URLSearchParams(window.location.search).get("map"),
     });
   });
+}
+
+function navigateToEditor(url) {
+  if (!url) return;
+  if (!state.dirty) {
+    window.location.assign(url);
+    return;
+  }
+  pendingEditorNavigationUrl = url;
+  byId("unsaved-navigation-dialog").showModal();
+}
+
+function closeNavigationDialog() {
+  pendingEditorNavigationUrl = null;
+  byId("unsaved-navigation-dialog").close();
+}
+
+async function handleNavigationChoice(choice) {
+  const url = pendingEditorNavigationUrl;
+  if (!url || choice === "cancel") {
+    closeNavigationDialog();
+    return;
+  }
+  if (choice === "discard") {
+    state.dirty = false;
+    window.location.assign(url);
+    return;
+  }
+  const buttons = byId("unsaved-navigation-dialog").querySelectorAll("button");
+  buttons.forEach((button) => { button.disabled = true; });
+  const saved = await save();
+  buttons.forEach((button) => { button.disabled = false; });
+  if (saved) window.location.assign(url);
 }
 
 function syncPreviewControls() {
@@ -184,6 +219,21 @@ function renderTilesetSelector() {
   byId("delete-tileset-button").disabled = !record || state.data?.tileset_id === "worldmap";
 }
 
+function loadLastTilesetId() {
+  try {
+    return window.localStorage.getItem(LAST_TILESET_STORAGE_KEY) || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function saveLastTilesetId(tilesetId = state.data?.tileset_id) {
+  if (!tilesetId || !state.tilesetCatalog.some((item) => item.tileset_id === tilesetId)) return;
+  try {
+    window.localStorage.setItem(LAST_TILESET_STORAGE_KEY, tilesetId);
+  } catch (_error) {}
+}
+
 function sourceImageOptions(selected = "") {
   return state.sourceImages.map((item) => `<option value="${escapeHtml(item.image_id)}" ${item.image_id === selected ? "selected" : ""}>${escapeHtml(item.file_name)}</option>`).join("");
 }
@@ -216,6 +266,7 @@ function applyDocumentPayload(payload) {
   const url = new URL(window.location.href);
   url.searchParams.set("tileset", state.data.tileset_id);
   window.history.replaceState(null, "", url);
+  saveLastTilesetId();
   renderTilesetSelector();
   configureEditorNavigation();
   renderAll();
@@ -1118,7 +1169,7 @@ function scheduleValidation() {
 }
 
 async function save() {
-  if (!canSave()) return;
+  if (!canSave()) return false;
   updateSaveState("dirty", "保存中…");
   try {
     const objectIdRenames = {};
@@ -1134,6 +1185,7 @@ async function save() {
       state.future = [];
       state.objectOrigins = (state.data.objects || []).map((object) => object.id);
       await refreshCatalog();
+      saveLastTilesetId();
       const updatedCount = result.updated_map_ids?.length || 0;
       const generatedCount = result.generated_map_ids?.length || 0;
       const removedCount = result.removed_map_object_count || 0;
@@ -1150,9 +1202,11 @@ async function save() {
       showToast("エラーを修正してから保存してください。", true);
     }
     renderIssues();
+    return Boolean(result.saved);
   } catch (error) {
     updateSaveState("error", "保存失敗");
     showToast(error.message, true);
+    return false;
   }
 }
 
@@ -1436,10 +1490,11 @@ async function initialize() {
   }
   try {
     const requestedTileset = new URLSearchParams(window.location.search).get("tileset");
-    const [catalog, payload] = await Promise.all([
-      api("/api/catalog"),
-      api(requestedTileset ? `/api/document?tileset=${encodeURIComponent(requestedTileset)}` : "/api/document"),
-    ]);
+    const catalog = await api("/api/catalog");
+    const storedTileset = loadLastTilesetId();
+    const storedTilesetExists = (catalog.tilesets || []).some((item) => item.tileset_id === storedTileset);
+    const initialTileset = requestedTileset || (storedTilesetExists ? storedTileset : null);
+    const payload = await api(initialTileset ? `/api/document?tileset=${encodeURIComponent(initialTileset)}` : "/api/document");
     state.tilesetCatalog = catalog.tilesets || [];
     state.sourceImages = catalog.source_images || [];
     applyDocumentPayload(payload);
@@ -1462,6 +1517,19 @@ byId("tileset-select").addEventListener("change", async (event) => {
     showToast(error.message, true);
     renderTilesetSelector();
   }
+});
+byId("editor-switch").addEventListener("click", (event) => {
+  const link = event.target.closest("a");
+  if (!link || !state.dirty) return;
+  event.preventDefault();
+  navigateToEditor(link.href);
+});
+byId("unsaved-navigation-dialog").addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-navigation-choice]")?.dataset.navigationChoice;
+  if (choice) handleNavigationChoice(choice);
+});
+byId("unsaved-navigation-dialog").addEventListener("close", () => {
+  pendingEditorNavigationUrl = null;
 });
 byId("new-tileset-button").addEventListener("click", () => {
   if (state.dirty && !window.confirm("未保存の変更を破棄して新規タイルセットを作成しますか？")) return;

@@ -91,7 +91,7 @@ class MapchipMetadataServerTest(unittest.TestCase):
         self.assertIn('class="usage-dot unused"', page)
         self.assertIn('id="save-button" class="button primary" type="button" disabled', page)
         self.assertIn('byId("save-button").disabled = !canSave()', script)
-        self.assertIn('if (!canSave()) return;', script)
+        self.assertIn('if (!canSave()) return false;', script)
         self.assertIn("function sourceTileUsage()", script)
         self.assertIn("function drawSourceUsage(context, zoom)", script)
         self.assertIn('addVisualUsage(usage, ground.base_visual, "ground")', script)

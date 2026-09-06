@@ -11,7 +11,6 @@
   <header class="app-header">
     <div class="header-identity">
       <div class="brand">
-        <span class="brand-mark">DA0</span>
         <div><h1>Map Editor</h1></div>
       </div>
       <nav id="editor-switch" class="editor-switch" aria-label="エディタ切り替え" hidden>
@@ -118,6 +117,18 @@
       <div id="actor-sprite-options" class="actor-sprite-options" role="listbox" aria-label="スプライト候補"></div>
       <div class="actor-sprite-dialog-actions">
         <button class="button ghost" type="button" data-action="close-actor-sprite-dialog">閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="unsaved-navigation-dialog" class="resource-dialog" aria-labelledby="unsaved-navigation-dialog-title">
+    <div class="resource-dialog-content">
+      <h2 id="unsaved-navigation-dialog-title">未保存の変更があります</h2>
+      <p>変更を保存してからエディタを切り替えますか？</p>
+      <div class="dialog-actions">
+        <button class="button ghost" type="button" data-navigation-choice="cancel">キャンセル</button>
+        <button class="button danger" type="button" data-navigation-choice="discard">変更を破棄して移動</button>
+        <button class="button primary" type="button" data-navigation-choice="save">保存して移動</button>
       </div>
     </div>
   </dialog>

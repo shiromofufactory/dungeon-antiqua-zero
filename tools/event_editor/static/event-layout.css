@@ -127,6 +127,12 @@
   padding: 18px;
 }
 
+.navigation-dialog-content {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
 .namespace-dialog .heading {
   margin-bottom: 0;
 }

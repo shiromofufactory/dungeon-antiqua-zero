@@ -11,7 +11,7 @@
 <body>
   <header class="app-header">
     <div class="header-identity">
-      <div class="brand"><span>DA0</span><div><h1>Event Editor</h1></div></div>
+      <div class="brand"><div><h1>Event Editor</h1></div></div>
       <nav id="editor-switch" class="editor-switch" aria-label="エディタ切り替え" hidden>
         <a data-editor-link="tileset">マップチップ</a>
         <a data-editor-link="map">マップ</a>
@@ -50,6 +50,17 @@
         <button type="submit" class="primary">作成</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="unsaved-navigation-dialog" class="namespace-dialog" aria-labelledby="unsaved-navigation-dialog-title">
+    <div class="navigation-dialog-content">
+      <div class="heading"><h2 id="unsaved-navigation-dialog-title">未保存の変更があります</h2></div>
+      <p>変更を保存してからエディタを切り替えますか？</p>
+      <div class="dialog-actions">
+        <button type="button" data-navigation-choice="cancel">キャンセル</button>
+        <button class="danger" type="button" data-navigation-choice="discard">変更を破棄して移動</button>
+        <button class="primary" type="button" data-navigation-choice="save">保存して移動</button>
+      </div>
+    </div>
   </dialog>
   <div id="toast" role="status"></div>
   <script src="app.js" defer></script>

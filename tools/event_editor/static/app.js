@@ -37,9 +37,14 @@ const state = {
   future: [],
   timer: null,
   revision: 0,
+  pendingActorEventId: null,
 };
 let draggedCommand = null;
 let draggedListItem = null;
+let pendingEditorNavigationUrl = null;
+const pendingActorEventDraftId = new URLSearchParams(location.search).get("new_actor_event");
+let pendingActorEventDraft = null;
+let actorEventReturnMapId = null;
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "")
@@ -71,10 +76,13 @@ function editorApiPath(path) {
   return editorRoute ? `/${editorRoute}${path}` : path;
 }
 
-function editorUrl(editor) {
+function editorUrl(editor, parameters = {}) {
   if (!editorRoute) return null;
   const url = new URL(`/${editor}/`, location.origin);
   url.searchParams.set("token", token);
+  for (const [key, value] of Object.entries(parameters)) {
+    if (value) url.searchParams.set(key, value);
+  }
   return url.href;
 }
 
@@ -83,8 +91,113 @@ function configureEditorNavigation() {
   if (!navigation || !editorRoute) return;
   navigation.hidden = false;
   navigation.querySelectorAll("[data-editor-link]").forEach((link) => {
-    link.href = editorUrl(link.dataset.editorLink);
+    link.href = editorUrl(link.dataset.editorLink, {
+      map: pendingActorEventDraft?.data?.map_id || actorEventReturnMapId,
+    });
   });
+}
+
+function loadPendingActorEventDraft() {
+  if (!pendingActorEventDraftId) return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`da0.pending-actor-event:${pendingActorEventDraftId}`) || "null");
+    return value && typeof value === "object" ? value : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function mapApi(path, options = {}, retry = true) {
+  const response = await fetch(`/map${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Map-Editor-Token": token,
+      ...(options.headers || {}),
+    },
+  });
+  if (response.status === 403 && retry && await renew()) {
+    return mapApi(path, options, false);
+  }
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
+  return value;
+}
+
+async function savePendingActorEventLink() {
+  if (!pendingActorEventDraft || !pendingActorEventDraftId) return null;
+  const eventId = state.pendingActorEventId;
+  const eventExists = state.data.events.some((event) => event.id === eventId);
+  if (!eventId || !eventExists) {
+    throw new Error("actorへ紐づける新規イベントがありません。");
+  }
+  const mapData = JSON.parse(JSON.stringify(pendingActorEventDraft.data));
+  const actorId = pendingActorEventDraft.actor_id;
+  const actorExists = mapData.actors?.some((actor) => actor.id === actorId);
+  const trigger = mapData.event_triggers?.find(
+    (item) => item.anchor?.kind === "actor" && item.anchor.actor_id === actorId,
+  );
+  if (!actorExists || !trigger) {
+    throw new Error("紐づけ先のactorまたはtriggerが見つかりません。");
+  }
+  trigger.event_id = `${state.data.namespace}.${eventId}`;
+  const result = await mapApi("/api/save", {
+    method: "POST",
+    body: JSON.stringify({
+      data: mapData,
+      site_names_ja: pendingActorEventDraft.site_names_ja,
+    }),
+  });
+  if (!result.saved) {
+    const reason = result.diagnostics?.find((item) => item.severity === "error")?.message;
+    throw new Error(reason || "actorへのイベント紐づけを保存できませんでした。");
+  }
+  sessionStorage.removeItem(`da0.pending-actor-event:${pendingActorEventDraftId}`);
+  actorEventReturnMapId = mapData.map_id;
+  pendingActorEventDraft = null;
+  state.pendingActorEventId = null;
+  return {mapId: mapData.map_id, actorId};
+}
+
+function navigateToEditor(url) {
+  if (!url) return;
+  if (!state.dirty) {
+    location.assign(url);
+    return;
+  }
+  pendingEditorNavigationUrl = url;
+  $("unsaved-navigation-dialog").showModal();
+}
+
+function closeNavigationDialog() {
+  pendingEditorNavigationUrl = null;
+  $("unsaved-navigation-dialog").close();
+}
+
+function discardPendingActorEventDraft() {
+  if (!pendingActorEventDraftId) return;
+  sessionStorage.removeItem(`da0.pending-actor-event:${pendingActorEventDraftId}`);
+  pendingActorEventDraft = null;
+  state.pendingActorEventId = null;
+}
+
+async function handleNavigationChoice(choice) {
+  const url = pendingEditorNavigationUrl;
+  if (!url || choice === "cancel") {
+    closeNavigationDialog();
+    return;
+  }
+  if (choice === "discard") {
+    discardPendingActorEventDraft();
+    state.dirty = false;
+    location.assign(url);
+    return;
+  }
+  const buttons = $("unsaved-navigation-dialog").querySelectorAll("button");
+  buttons.forEach((button) => { button.disabled = true; });
+  const saved = await save();
+  buttons.forEach((button) => { button.disabled = false; });
+  if (saved) location.assign(url);
 }
 
 async function renew() {
@@ -133,6 +246,7 @@ function snapshot() {
     selectedEvent: state.selectedEvent,
     selectedMessage: state.selectedMessage,
     mode: state.mode,
+    pendingActorEventId: state.pendingActorEventId,
   });
 }
 
@@ -159,6 +273,7 @@ function restore(value) {
   state.selectedEvent = restored.selectedEvent;
   state.selectedMessage = restored.selectedMessage;
   state.mode = restored.mode;
+  state.pendingActorEventId = restored.pendingActorEventId || null;
   normalize();
   state.dirty = true;
   render();
@@ -553,6 +668,18 @@ function render() {
   saveUiSettings();
 }
 
+function addEvent(linkToPendingActor = false) {
+  let createdEvent = null;
+  commit(() => {
+    createdEvent = {id: uniqueId("event", state.data.events), note: "", commands: []};
+    state.data.events.push(createdEvent);
+    state.selectedEvent = state.data.events.length - 1;
+    state.mode = "event";
+    if (linkToPendingActor) state.pendingActorEventId = createdEvent.id;
+  });
+  return createdEvent;
+}
+
 function defaultCondition(type = "flag_set") {
   if (type === "flag_set") return {type, flag_id: fullFlags()[0] || ""};
   if (type === "member_in_party") return {type, character_key: state.catalogs.character_keys?.[0] || ""};
@@ -614,22 +741,27 @@ function schedule(delay = 100) {
 }
 
 async function save() {
-  if (!canSave()) return;
+  if (!canSave()) return false;
   try {
     const result = await api("/api/save", {method: "POST", body: requestBody()});
     state.diagnostics = result.diagnostics;
     if (result.saved) {
+      const linkedActor = await savePendingActorEventLink();
       state.dirty = false;
       state.history = [];
       state.future = [];
       state.namespaceOptions = result.namespace_options || state.namespaceOptions;
-      toast("イベント定義とメッセージを保存し、ゲーム用データを生成しました。");
+      toast(linkedActor
+        ? `イベントを保存し、${linkedActor.mapId}のactor ${linkedActor.actorId}へ紐づけました。`
+        : "イベント定義とメッセージを保存し、ゲーム用データを生成しました。");
     } else {
       toast("エラーを修正してください。");
     }
     render();
+    return Boolean(result.saved);
   } catch (error) {
     toast(error.message);
+    return false;
   }
 }
 
@@ -647,6 +779,7 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
     : state.data.events.findIndex((event) => event.id === selectedEventId);
   state.selectedEvent = requestedEventIndex >= 0 ? requestedEventIndex : 0;
   state.selectedMessage = 0;
+  state.pendingActorEventId = null;
   state.mode = selectedEventId !== null || !LIST_TABS.includes(selectedListTab)
     ? "event"
     : selectedListTab;
@@ -708,17 +841,16 @@ document.body.addEventListener("click", (event) => {
   } else if (action === "delete-flag") {
     commit(() => state.flags.splice(Number(target.dataset.index), 1));
   } else if (action === "add-event") {
-    commit(() => {
-      state.data.events.push({id: uniqueId("event", state.data.events), note: "", commands: []});
-      state.selectedEvent = state.data.events.length - 1;
-      state.mode = "event";
-    });
+    addEvent();
   } else if (action === "select-event") {
     state.selectedEvent = Number(target.dataset.index);
     state.mode = "event";
     render();
   } else if (action === "delete-event") {
-    commit(() => state.data.events.splice(state.selectedEvent, 1));
+    commit(() => {
+      const [deleted] = state.data.events.splice(state.selectedEvent, 1);
+      if (deleted?.id === state.pendingActorEventId) state.pendingActorEventId = null;
+    });
   } else if (action === "add-message") {
     commit(() => {
       const base = `${state.data.namespace}.message`;
@@ -763,7 +895,13 @@ $("flags").addEventListener("change", (event) => {
 $("event-editor").addEventListener("change", (event) => {
   const target = event.target;
   if (target.dataset.eventField) {
-    commit(() => { currentEvent()[target.dataset.eventField] = target.value; });
+    commit(() => {
+      const eventRecord = currentEvent();
+      if (target.dataset.eventField === "id" && eventRecord.id === state.pendingActorEventId) {
+        state.pendingActorEventId = target.value;
+      }
+      eventRecord[target.dataset.eventField] = target.value;
+    });
   } else if (target.dataset.messageField) {
     commit(() => {
       const fieldName = target.dataset.messageField;
@@ -908,6 +1046,19 @@ $("namespace-form").addEventListener("submit", async (event) => {
     $("namespace-dialog").close();
   }
 });
+$("editor-switch").addEventListener("click", (event) => {
+  const link = event.target.closest("a");
+  if (!link || !state.dirty) return;
+  event.preventDefault();
+  navigateToEditor(link.href);
+});
+$("unsaved-navigation-dialog").addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-navigation-choice]")?.dataset.navigationChoice;
+  if (choice) handleNavigationChoice(choice);
+});
+$("unsaved-navigation-dialog").addEventListener("close", () => {
+  pendingEditorNavigationUrl = null;
+});
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
@@ -929,6 +1080,8 @@ configureEditorNavigation();
 (async function initialize() {
   try {
     const parameters = new URLSearchParams(location.search);
+    pendingActorEventDraft = loadPendingActorEventDraft();
+    actorEventReturnMapId = pendingActorEventDraft?.data?.map_id || null;
     const uiSettings = loadUiSettings();
     const storedNamespace = typeof uiSettings.namespace === "string"
       && NAMESPACE_PATTERN.test(uiSettings.namespace)
@@ -940,6 +1093,14 @@ configureEditorNavigation();
     const requestedListTab = requestedEvent ? "event" : uiSettings.listTab;
     const query = requestedNamespace ? `?namespace=${encodeURIComponent(requestedNamespace)}` : "";
     applyDocument(await api(`/api/document${query}`), requestedEvent, requestedListTab);
+    if (pendingActorEventDraftId) {
+      if (!pendingActorEventDraft || pendingActorEventDraft.data?.map_id !== state.data.namespace) {
+        throw new Error("イベント追加用のマップ内容を復元できませんでした。");
+      }
+      const created = addEvent(true);
+      configureEditorNavigation();
+      toast(`${pendingActorEventDraft.actor_id}用の${created.id}を追加しました。`);
+    }
   } catch (error) {
     toast(error.message);
   }

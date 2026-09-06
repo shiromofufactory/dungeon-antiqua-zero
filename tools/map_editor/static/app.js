@@ -4,6 +4,7 @@ const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
 const MIN_MAP_WIDTH = 16;
 const MIN_MAP_HEIGHT = 15;
+const LAST_MAP_STORAGE_KEY = "da0.map-editor.last-map.v1";
 let token = new URLSearchParams(window.location.search).get("token") || "";
 const editorRoute = window.location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 
@@ -53,6 +54,7 @@ const state = {
   siteNameEditing: false,
   spritePickerActorId: null,
 };
+let pendingEditorNavigationUrl = null;
 
 const rawImage = new Image();
 const sourceImage = document.createElement("canvas");
@@ -92,6 +94,61 @@ function configureEditorNavigation() {
       tileset: state.data?.tileset_id,
     });
   });
+}
+
+function navigateToEditor(url) {
+  if (!url) return;
+  if (!state.dirty) {
+    window.location.assign(url);
+    return;
+  }
+  pendingEditorNavigationUrl = url;
+  byId("unsaved-navigation-dialog").showModal();
+}
+
+function openNewActorEvent() {
+  const actor = currentActor();
+  if (!actor || !editorRoute) return;
+  const draftId = crypto.randomUUID();
+  try {
+    sessionStorage.setItem(`da0.pending-actor-event:${draftId}`, JSON.stringify({
+      data: state.data,
+      site_names_ja: state.siteNamesJa,
+      actor_id: actor.id,
+    }));
+  } catch (_error) {
+    showToast("イベント追加用のマップ内容を一時保存できませんでした。", true);
+    return;
+  }
+  const url = editorUrl("event", {
+    namespace: state.data.map_id,
+    new_actor_event: draftId,
+  });
+  state.dirty = false;
+  window.location.assign(url);
+}
+
+function closeNavigationDialog() {
+  pendingEditorNavigationUrl = null;
+  byId("unsaved-navigation-dialog").close();
+}
+
+async function handleNavigationChoice(choice) {
+  const url = pendingEditorNavigationUrl;
+  if (!url || choice === "cancel") {
+    closeNavigationDialog();
+    return;
+  }
+  if (choice === "discard") {
+    state.dirty = false;
+    window.location.assign(url);
+    return;
+  }
+  const buttons = byId("unsaved-navigation-dialog").querySelectorAll("button");
+  buttons.forEach((button) => { button.disabled = true; });
+  const saved = await save();
+  buttons.forEach((button) => { button.disabled = false; });
+  if (saved) window.location.assign(url);
 }
 
 async function renewSessionToken() {
@@ -149,6 +206,21 @@ function renderMapSelector() {
   byId("delete-map-button").disabled = !persisted || state.data?.map_id === "worldmap";
 }
 
+function loadLastMapId() {
+  try {
+    return localStorage.getItem(LAST_MAP_STORAGE_KEY) || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function saveLastMapId(mapId = state.data?.map_id) {
+  if (!mapId || !state.mapCatalog.some((item) => item.map_id === mapId)) return;
+  try {
+    localStorage.setItem(LAST_MAP_STORAGE_KEY, mapId);
+  } catch (_error) {}
+}
+
 function applyDocumentPayload(payload) {
   window.clearTimeout(state.resolveTimer);
   state.resolveRevision += 1;
@@ -190,6 +262,7 @@ function applyDocumentPayload(payload) {
   url.searchParams.set("map", state.data.map_id);
   url.searchParams.set("tileset", state.data.tileset_id);
   window.history.replaceState(null, "", url);
+  saveLastMapId();
   renderMapSelector();
   configureEditorNavigation();
   renderAll();
@@ -812,7 +885,7 @@ function renderInspector() {
           <div class="field full"><label><input type="checkbox" data-arrival-field="teleport_enabled" ${arrival.teleport_enabled ? "checked" : ""}> テレポート対象にする</label></div>
           ${arrival.teleport_enabled ? `<div class="field full"><label>対応拠点</label><select data-arrival-field="site_id">${siteIdOptions(arrival.site_id)}</select></div>` : ""}
         </div>
-        <div class="row between" style="margin-top:9px"><button class="button ghost small" type="button" data-action="move-arrival">セルを移動</button><button class="button danger small" type="button" data-action="delete-arrival">到着地点を削除</button></div>
+        <div class="row end" style="margin-top:9px"><button class="button danger small" type="button" data-action="delete-arrival">到着地点を削除</button></div>
       ` : `<div class="empty-state">左の一覧またはキャンバスから到着地点を選択してください。</div>`}
     </div>`;
   const eventInspector = `
@@ -825,7 +898,7 @@ function renderInspector() {
           <div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="48" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>番号 #${actor.sprite_index}</strong><span>画像から選択</span></span></button></div>
           ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>`}
           <div class="field full"><label>イベント</label><select data-actor-event-id="true">${eventIdOptions(linkedActorTrigger?.event_id || "")}</select><div class="field-note">touch・interactで自動的に起動します。</div></div>
-        </div><div class="row between" style="margin-top:9px"><div class="row"><button class="button ghost small" data-action="move-actor">セルを移動</button>${editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
+        </div><div class="row between" style="margin-top:9px"><div class="row">${editorRoute ? `<button class="button secondary small" data-action="add-actor-event">イベントを追加</button>` : ""}${editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
     </div>
     <div class="section">
       <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
@@ -1161,7 +1234,6 @@ function updateToolStatus() {
       create_site: "座標アンカーにするセルを選択",
       entrance: "入口セルをクリックして追加・解除",
       create_arrival: "到着地点にするセルを選択",
-      move_arrival: "到着地点の新しいセルを選択",
     };
     byId("tool-status").textContent = `${labels[state.travelTool] || labels.select} / ${rangeHint}`;
   } else {
@@ -1170,7 +1242,6 @@ function updateToolStatus() {
       create_actor: "actorを置くセルを選択",
       create_trigger: "triggerの基準セルを選択",
       create_object_trigger: "triggerを設定するobjectを選択",
-      move_actor: "actorの新しいセルを選択",
       trigger_offsets: "trigger対象セルをクリックして追加・解除",
     };
     byId("tool-status").textContent = `${labels[state.eventTool] || labels.select} / ${rangeHint}`;
@@ -1677,13 +1748,6 @@ function handleTravelCell(cell) {
     });
     return;
   }
-  if (state.travelTool === "move_arrival" && arrival) {
-    commit(() => {
-      arrival.position = [...cell];
-      state.travelTool = "select";
-    });
-    return;
-  }
   selectTravelAt(cell);
 }
 
@@ -1819,10 +1883,6 @@ function handleEventCell(cell) {
       return;
     }
     return addAnchoredTrigger({ kind: "object", object_id: instance.id });
-  }
-  if (state.eventTool === "move_actor" && currentActor()) {
-    commit(() => { currentActor().position = [...cell]; state.eventTool = "select"; });
-    return;
   }
   if (state.eventTool === "trigger_offsets" && currentTrigger()) {
     const offset = triggerOffsetForCell(currentTrigger(), cell);
@@ -2126,27 +2186,20 @@ function handleInspectorAction(element) {
     state.selectedSiteId = null;
     state.travelTool = "select";
   });
-  else if (action === "move-arrival") {
-    state.travelTool = "move_arrival";
-    renderAll();
-  }
   else if (action === "delete-arrival") commit(() => {
     const index = state.data.arrival_points.findIndex((arrival) => arrival.id === state.selectedArrivalId);
     if (index >= 0) state.data.arrival_points.splice(index, 1);
     state.selectedArrivalId = null;
     state.travelTool = "select";
   });
-  else if (action === "move-actor") {
-    state.eventTool = "move_actor";
-    renderAll();
-  }
   else if (action === "open-actor-sprite-dialog") openActorSpriteDialog();
+  else if (action === "add-actor-event" && currentActor()) openNewActorEvent();
   else if (action === "open-actor-event" && currentActor()) {
     const trigger = actorTrigger(currentActor().id);
     if (!trigger?.event_id) return;
     const [namespace, eventId] = trigger.event_id.split(".", 2);
     const url = editorUrl("event", { namespace, event: eventId });
-    if (url) window.location.assign(url);
+    navigateToEditor(url);
   }
   else if (action === "delete-actor") commit(() => {
     const actorId = state.selectedActorId;
@@ -2163,7 +2216,7 @@ function handleInspectorAction(element) {
   else if (action === "open-trigger-event" && currentTrigger()) {
     const [namespace, eventId] = currentTrigger().event_id.split(".", 2);
     const url = editorUrl("event", { namespace, event: eventId });
-    if (url) window.location.assign(url);
+    navigateToEditor(url);
   }
   else if (action === "delete-trigger") commit(() => {
     state.data.event_triggers = state.data.event_triggers.filter((trigger) => trigger.id !== state.selectedTriggerId);
@@ -2289,7 +2342,7 @@ function scheduleResolution(delay = 70) {
 }
 
 async function save() {
-  if (!canSave()) return;
+  if (!canSave()) return false;
   updateSaveState("dirty", "保存・生成中…");
   try {
     const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
@@ -2307,13 +2360,18 @@ async function save() {
       };
       if (existing) Object.assign(existing, record, { is_new: false });
       else state.mapCatalog.push(record);
+      saveLastMapId();
       showToast("制作用マップを保存し、ゲーム用データを生成しました。");
-    } else showToast("エラーを修正してから保存してください。", true);
+    } else {
+      showToast("エラーを修正してから保存してください。", true);
+    }
     renderMapSelector();
     renderAll();
+    return Boolean(result.saved);
   } catch (error) {
     updateSaveState("error", "保存失敗");
     showToast(error.message, true);
+    return false;
   }
 }
 
@@ -2325,10 +2383,11 @@ async function initialize() {
   }
   try {
     const requestedMap = new URLSearchParams(window.location.search).get("map");
-    const [catalog, payload] = await Promise.all([
-      api("/api/catalog"),
-      api(requestedMap ? `/api/document?map=${encodeURIComponent(requestedMap)}` : "/api/document"),
-    ]);
+    const catalog = await api("/api/catalog");
+    const storedMap = loadLastMapId();
+    const storedMapExists = (catalog.maps || []).some((item) => item.map_id === storedMap);
+    const initialMap = requestedMap || (storedMapExists ? storedMap : null);
+    const payload = await api(initialMap ? `/api/document?map=${encodeURIComponent(initialMap)}` : "/api/document");
     state.mapCatalog = catalog.maps || [];
     state.tilesetCatalog = catalog.tilesets || [];
     applyDocumentPayload(payload);
@@ -2351,6 +2410,19 @@ byId("map-select").addEventListener("change", async (event) => {
     showToast(error.message, true);
     renderMapSelector();
   }
+});
+byId("editor-switch").addEventListener("click", (event) => {
+  const link = event.target.closest("a");
+  if (!link || !state.dirty) return;
+  event.preventDefault();
+  navigateToEditor(link.href);
+});
+byId("unsaved-navigation-dialog").addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-navigation-choice]")?.dataset.navigationChoice;
+  if (choice) handleNavigationChoice(choice);
+});
+byId("unsaved-navigation-dialog").addEventListener("close", () => {
+  pendingEditorNavigationUrl = null;
 });
 byId("new-map-button").addEventListener("click", () => {
   if (state.dirty && !window.confirm("未保存の変更を破棄して新規マップを作成しますか？")) return;

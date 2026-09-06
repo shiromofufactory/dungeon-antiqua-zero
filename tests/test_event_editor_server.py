@@ -150,7 +150,7 @@ class EventEditorServerTest(unittest.TestCase):
 
         self.assertIn('id="save" class="primary" disabled', page)
         self.assertIn('$("save").disabled = !canSave()', script)
-        self.assertIn('if (!canSave()) return;', script)
+        self.assertIn('if (!canSave()) return false;', script)
 
     def test_validates_saves_and_compiles_event_source(self) -> None:
         data = {
