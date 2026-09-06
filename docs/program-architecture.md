@@ -915,6 +915,14 @@ fixtureではセリオンとエリカを後列にする。この隊列は初期�
 `CharacterDefinition.face_position` へ読み込む。画面はキャラクター名による座標分岐や
 固定座標を持たず、現在の `Member.face_position` を参照して描画する。
 
+戦闘表示も同じくマスターデータから解決する。タイムライン用の16×16pxアイコンは
+`characters.json` と `monsters.json` の `icon_x`、`icon_y` を使い、イメージバンク1から
+切り出す。キャラクターの戦闘スプライトは `characters.json` の `battle_sprite` を縦方向の
+32px単位インデックスとして `characters/ch_battle` から解決する。モンスターの戦闘画像は
+`monsters.json` の `image_id`、`width`、`height` から解決する。BattleSceneまたはその専用の
+Rendererがこれらの描画用値を読む責務を持ち、名前・モンスター種別・固定座標で分岐しない。
+`Member` や戦闘ルールは画像リソースを保持しない。
+
 ステータスメニューOverlayは左右方向または前後ページ入力で表示中のMemberを切り替え、
 両端では循環する。切り替え時は名前だけでなく、顔、装備、能力値、熟練度を含むWindow全体を
 現在のMemberから再構築する。単体ステータスモックでは従来の疑似パーティを構築し、

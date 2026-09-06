@@ -35,6 +35,7 @@
 - [スタート・ロード画面](./start-load.md)
 - [セーブデータ形式](./save-data.md)
 - [フィールド・メニュー](./field.md)
+- [戦闘表示データ](./battle.md)
 - [宝箱](./treasures.md)
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)
