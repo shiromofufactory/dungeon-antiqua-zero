@@ -188,6 +188,33 @@
   line-height: 1.55;
 }
 
+.message-preview {
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0f120e;
+  overflow-wrap: anywhere;
+}
+
+.message-preview p {
+  line-height: 1.55;
+}
+
+.message-preview p + p {
+  margin-top: 2px;
+}
+
+.message-preview.empty,
+.message-preview.missing {
+  color: var(--muted);
+}
+
+.message-preview.missing {
+  border-color: var(--red);
+  color: #ffaca2;
+}
+
 .command-drop-zone {
   min-height: 5px;
   border: 1px solid transparent;

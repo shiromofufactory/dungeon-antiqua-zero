@@ -217,6 +217,30 @@ function messageIds() {
     .sort();
 }
 
+function renderMessagePreview(messageId) {
+  const message = state.messages.find((item) => item?.message_id === messageId);
+  let content = '<p class="message-preview-status">メッセージを選択してください。</p>';
+  let modifier = " empty";
+  if (messageId && !message) {
+    content = '<p class="message-preview-status">メッセージが見つかりません。</p>';
+    modifier = " missing";
+  } else if (message) {
+    const lines = Array.isArray(message.text_ja)
+      ? message.text_ja.filter((line) => typeof line === "string" && line.length)
+      : [];
+    if (lines.length) {
+      content = lines.map((line) => `<p>${esc(line)}</p>`).join("");
+      modifier = "";
+    } else {
+      content = '<p class="message-preview-status">日本語は未入力です。</p>';
+    }
+  }
+  return field(
+    "日本語プレビュー",
+    `<div class="message-preview${modifier}" data-message-preview aria-live="polite">${content}</div>`,
+  );
+}
+
 function options(values, selected, empty = "選択してください") {
   const all = [...values];
   if (selected && !all.includes(selected)) all.push(selected);
@@ -418,7 +442,8 @@ function renderCommand(command, path, listPath, index) {
     fields = field("アイテム", `<select ${attr("item_key")}>${options(state.catalogs.item_keys || [], command.item_key)}</select>`)
       + field("個数", `<input type="number" min="1" value="${Number(command.quantity) || 1}" ${attr("quantity")}>`);
   } else if (type === "message") {
-    fields = field("メッセージID", `<select ${attr("message_id")}>${options(messageIds(), command.message_id)}</select>`);
+    fields = field("メッセージID", `<select ${attr("message_id")}>${options(messageIds(), command.message_id)}</select>`)
+      + renderMessagePreview(command.message_id);
   } else if (type === "play_se") {
     fields = field("SE", `<select ${attr("se_id")}>${options(state.catalogs.se_ids || [], command.se_id)}</select>`, true);
   } else if (type === "change_bgm") {
