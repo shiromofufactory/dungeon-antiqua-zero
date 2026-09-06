@@ -80,8 +80,14 @@ def create_party(
     *,
     character_keys: Iterable[str],
     back_row_character_keys: Iterable[str] = (),
+    internal_level: int | None = None,
 ) -> tuple[Member, ...]:
-    """Create an ordered party from generated character data."""
+    """Create an ordered party from generated character data.
+
+    ``internal_level`` is for explicit-state fixtures, restoration, and debug
+    tools.  Normal party creation leaves it as ``None`` and uses each
+    character's joining-level rule.
+    """
 
     requested_keys = tuple(character_keys)
     if not requested_keys or not all(
@@ -104,7 +110,15 @@ def create_party(
         record = records_by_key.get(key)
         if record is None:
             raise MemberDataError(f"キャラクターが見つかりません: {key}")
-        member = Member.from_record(record, items=items, skills=skills)
+        if internal_level is None:
+            member = Member.from_record(record, items=items, skills=skills)
+        else:
+            member = Member.from_record_at_internal_level(
+                record,
+                internal_level,
+                items=items,
+                skills=skills,
+            )
         if key in back_row_keys:
             member.formation_row = FormationRow.BACK
         party.append(member)

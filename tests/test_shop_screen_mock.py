@@ -158,6 +158,7 @@ class ShopScreenMockTest(unittest.TestCase):
             [item.key for item in self.screen.shop.items],
             [
                 "POTION",
+                "REMEDY",
                 "MANA DROP",
                 "DAGGER",
                 "WAND of POISON",
@@ -256,7 +257,7 @@ class ShopScreenMockTest(unittest.TestCase):
     def test_quantity_selection_works_for_non_first_shop_items(self) -> None:
         self.screen.update(InputState(confirm=InputButton(triggered=True)))
 
-        for expected_key in ("MANA DROP", "DAGGER"):
+        for expected_key in ("REMEDY", "MANA DROP"):
             self.screen.update(InputState(navigation=Direction.DOWN))
             self.assertEqual(self.screen.selected_item.key, expected_key)
 
@@ -444,11 +445,11 @@ class ShopScreenMockTest(unittest.TestCase):
         }
         self.assertEqual(
             summary[(SHOP_BUY_PRICE_X, SHOP_BUY_PRICE_Y)],
-            "　　　　２０　Ｇｏｌｄ",
+            "　　２０００　Ｇｏｌｄ",
         )
         self.assertEqual(
             summary[(SHOP_BUY_OWNED_X, SHOP_BUY_OWNED_Y)],
-            "２こ　もっています",
+            "１こ　もっています",
         )
 
     def test_buy_uses_six_member_equipment_preview(self) -> None:

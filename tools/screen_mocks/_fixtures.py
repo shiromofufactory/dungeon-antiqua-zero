@@ -62,6 +62,7 @@ def load_mock_party(
     skills: dict[str, Skill],
     *,
     character_keys: tuple[str, ...] = MOCK_PARTY_CHARACTER_KEYS,
+    internal_level: int | None = None,
 ) -> tuple[Member, ...]:
     """Build the shared ordered party from generated character data."""
 
@@ -70,6 +71,7 @@ def load_mock_party(
         skills,
         character_keys=character_keys,
         back_row_character_keys=MOCK_BACK_ROW_CHARACTER_KEYS,
+        internal_level=internal_level,
     )
 
 

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from tools.screen_mocks.battle import (
+    BATTLE_MOCK_PARTY_CHARACTER_KEYS,
     BattleScreenMock,
+    FormationRow,
+    MAX_INTERNAL_LEVEL,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
+    ascii_to_fullwidth,
 )
+from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
 
@@ -59,6 +65,120 @@ class BattleScreenMockTest(unittest.TestCase):
             0,
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
+        )
+
+    def test_battle_fixture_uses_current_five_members_at_level_ninety_nine(self) -> None:
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+
+        self.assertEqual(
+            tuple(member.definition.key for member in party),
+            BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        self.assertEqual(len(party), 5)
+        self.assertTrue(
+            all(member.internal_level == MAX_INTERNAL_LEVEL for member in party)
+        )
+
+    def test_mock_initializes_display_data_from_generated_records(self) -> None:
+        with (
+            patch("tools.screen_mocks.battle.initialize_screen_mock"),
+            patch("tools.screen_mocks.battle.create_mock_input_reader"),
+            patch("tools.screen_mocks.battle.ImageResources") as images,
+            patch("tools.screen_mocks.battle.FontResources") as fonts,
+            patch("tools.screen_mocks.battle.WindowFactory") as windows,
+            patch("tools.screen_mocks.battle.pyxel.run"),
+        ):
+            images.return_value.entry.return_value = SimpleNamespace(
+                width=SCREEN_WIDTH,
+                height=SCREEN_HEIGHT,
+            )
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = object()
+            windows.return_value.create.return_value = Mock()
+
+            mock = BattleScreenMock()
+
+        self.assertEqual(
+            tuple(member.definition.key for member in mock.party),
+            BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        self.assertTrue(
+            all(member.internal_level == MAX_INTERNAL_LEVEL for member in mock.party)
+        )
+        self.assertEqual(
+            [visual.battle_sprite for visual in mock.party_visuals],
+            [0, 1, 2, 3, 4],
+        )
+        self.assertEqual(
+            [(entry.icon_x, entry.icon_y) for entry in mock.timeline],
+            [(0, 0), (224, 16), (128, 16), (224, 16), (64, 0), (224, 16)],
+        )
+        first_member = mock.party[0]
+        self.assertIn(
+            ascii_to_fullwidth(
+                f"{first_member.hp:03d}/{first_member.max_hp:03d}"
+            ),
+            [
+                call.args[0]
+                for call in windows.return_value.create.return_value.add_text.call_args_list
+            ],
+        )
+
+    def test_party_sprites_use_member_formation_and_data_sprite_index(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.character_sprites = object()
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.FRONT),
+                battle_sprite=2,
+            ),
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.BACK),
+                battle_sprite=4,
+            ),
+        )
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(156, 64, mock.character_sprites, 0, 64, 16, 32, 1),
+                call(176, 92, mock.character_sprites, 0, 128, 16, 32, 1),
+            ],
+        )
+
+    def test_monster_images_and_timeline_icons_use_display_data(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        image = object()
+        mock.monsters = (
+            SimpleNamespace(key="Coyote", width=96, height=64),
+        )
+        mock.monster_images = {"Coyote": image}
+        mock.timeline = (
+            SimpleNamespace(icon_x=224, icon_y=16),
+        )
+
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.rect"),
+        ):
+            mock._draw_monsters()
+            mock._draw_timeline()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(4, 56, image, 0, 0, 96, 64, 1),
+                call(70, 220, 1, 224, 16, 16, 16, 1),
+                call(74, 212, 0, 88, 16, 8, 8, 1),
+            ],
         )
 
     def test_update_passes_logical_navigation_to_open_command_window(self) -> None:
