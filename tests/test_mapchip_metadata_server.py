@@ -133,7 +133,7 @@ class MapchipMetadataServerTest(unittest.TestCase):
         )
         self.assertEqual(reopened["data"]["source_image_id"], "mapchips/worldmap")
 
-    def test_rejects_base_profile_and_source_changes(self) -> None:
+    def test_reports_base_profile_and_source_changes(self) -> None:
         data = initial_worldmap_tileset()
         changed_base = json.loads(json.dumps(data))
         changed_base["grounds"][0]["id"] = "ocean"
@@ -204,7 +204,7 @@ class MapchipMetadataServerTest(unittest.TestCase):
             )
             self.assertEqual(saved_map["objects"][0]["definition_id"], "wu1")
 
-    def test_rejects_removing_an_object_definition_used_by_a_map(self) -> None:
+    def test_removes_placed_objects_when_their_definition_is_removed(self) -> None:
         tileset = initial_worldmap_tileset()
         tileset["objects"] = [
             {
@@ -228,7 +228,13 @@ class MapchipMetadataServerTest(unittest.TestCase):
                 "definition_id": "tree",
                 "origin": [2, 2],
                 "order": 0,
-            }
+            },
+            {
+                "id": "already_missing_1",
+                "definition_id": "already_missing",
+                "origin": [3, 2],
+                "order": 0,
+            },
         ]
         source_path = self.content_root / "maps" / "sources" / "forest.json"
         save_map_source(source_path, source)
@@ -237,13 +243,21 @@ class MapchipMetadataServerTest(unittest.TestCase):
         changed["objects"] = []
         result = self.post_json("/api/save", {"data": changed})
 
-        self.assertFalse(result["saved"])
-        self.assertIn(
-            "map_object_definition_would_be_missing",
-            {item["code"] for item in result["diagnostics"]},
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["updated_map_ids"], ["forest"])
+        self.assertEqual(result["removed_map_object_count"], 1)
+        self.assertEqual(
+            load_map_source(source_path)["objects"],
+            [
+                {
+                    "id": "already_missing_1",
+                    "definition_id": "already_missing",
+                    "origin": [3, 2],
+                    "order": 0,
+                }
+            ],
         )
-        self.assertEqual(load_map_source(source_path)["objects"][0]["definition_id"], "tree")
-        self.assertEqual(load_tileset(self.application.metadata_path)["objects"][0]["id"], "tree")
+        self.assertEqual(load_tileset(self.application.metadata_path)["objects"], [])
 
     def test_deletes_only_unreferenced_non_world_tileset(self) -> None:
         created = self.post_json(
@@ -274,15 +288,21 @@ class MapchipMetadataServerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "必須タイルセット"):
             self.application.delete_tileset("worldmap")
 
-    def test_rejects_invalid_save_without_replacing_file(self) -> None:
-        original = self.application.metadata_path.read_text(encoding="utf-8")
+    def test_saves_validation_errors_for_later_correction(self) -> None:
         invalid = initial_worldmap_tileset()
         invalid["grounds"][0]["collision"] = "passable"
 
         result = self.post_json("/api/save", {"data": invalid})
 
-        self.assertFalse(result["saved"])
-        self.assertEqual(self.application.metadata_path.read_text(encoding="utf-8"), original)
+        self.assertTrue(result["saved"])
+        self.assertIn(
+            "invalid_world_ground_collision",
+            {item["code"] for item in result["diagnostics"]},
+        )
+        self.assertEqual(
+            load_tileset(self.application.metadata_path)["grounds"][0]["collision"],
+            "passable",
+        )
 
 
 if __name__ == "__main__":

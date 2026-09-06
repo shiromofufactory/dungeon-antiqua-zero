@@ -1357,7 +1357,7 @@ def resolve_map(
             elif isinstance(cell.get("visual"), dict):
                 resolved_cell.update(_resolve_visual(
                     cell["visual"],
-                    [visual_seed, map_id, "object", instance["id"], *cell["offset"]],
+                    [visual_seed, map_id, "object", instance["id"]],
                 ))
             else:
                 resolved_cell.update({"choice_id": None, "frame_interval": 1, "frames": []})

@@ -644,6 +644,37 @@ class MapSourceTest(unittest.TestCase):
         self.assertTrue(resolved["collision"][2 * 16 + 3])
         self.assertFalse(resolved["collision"][2 * 16 + 4])
 
+    def test_object_cells_share_one_weighted_visual_choice(self) -> None:
+        tileset = deepcopy(self.tileset)
+        left_visual = {
+            "frame_interval": 4,
+            "choices": [
+                {"id": "default", "weight": 1, "frames": [{"tile": [0, 0]}]},
+                {"id": "variant", "weight": 1, "frames": [{"tile": [0, 1]}]},
+            ],
+        }
+        right_visual = deepcopy(left_visual)
+        right_visual["choices"][0]["frames"][0]["tile"] = [1, 0]
+        right_visual["choices"][1]["frames"][0]["tile"] = [1, 1]
+        tileset["objects"][0]["size"] = [2, 1]
+        tileset["objects"][0]["cells"] = [
+            {"offset": [0, 0], "collision": "passable", "visual": left_visual},
+            {"offset": [1, 0], "collision": "passable", "visual": right_visual},
+        ]
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
+        source["objects"] = [
+            {"id": "rocks_1", "definition_id": "rock", "origin": [2, 2], "order": 0}
+        ]
+
+        resolved = resolve_map(source, tileset)
+        cells = resolved["object_cells"]
+
+        self.assertEqual([cell["choice_id"] for cell in cells], [cells[0]["choice_id"]] * 2)
+        self.assertIn(
+            [cell["frames"][0] for cell in cells],
+            [[[0, 0], [1, 0]], [[0, 1], [1, 1]]],
+        )
+
     def test_draws_object_with_lower_bottom_edge_in_front_regardless_of_order(self) -> None:
         tileset = deepcopy(self.tileset)
         tileset["objects"][0]["size"] = [2, 2]

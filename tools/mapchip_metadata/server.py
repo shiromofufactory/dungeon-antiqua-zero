@@ -70,8 +70,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _valid_tileset_name(value: str) -> bool:
-    return bool(value) and value.replace("_", "a").isalnum() and value.isascii()
+def _valid_tileset_name(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value.replace("_", "a").isalnum()
+        and value.isascii()
+    )
 
 
 class MetadataApplication:
@@ -278,11 +283,15 @@ class MetadataApplication:
         )
         return self._document_payload(data, is_new=True)
 
-    def _prepare_map_object_renames(
+    def _prepare_map_object_updates(
         self,
         data: Mapping[str, Any],
         object_id_renames: object,
-    ) -> tuple[list[tuple[Path, dict[str, Any], dict[str, Any]]], list[dict[str, str]]]:
+    ) -> tuple[
+        list[tuple[Path, dict[str, Any], dict[str, Any]]],
+        list[dict[str, str]],
+        int,
+    ]:
         diagnostics: list[dict[str, str]] = []
         if object_id_renames is None:
             renames: Mapping[object, object] = {}
@@ -297,7 +306,7 @@ class MetadataApplication:
                     "オブジェクトIDの変更情報が不正です。",
                 ).as_dict()
             )
-            return [], diagnostics
+            return [], diagnostics, 0
 
         tileset_id = data.get("tileset_id")
         metadata_path = (
@@ -312,11 +321,20 @@ class MetadataApplication:
                 for item in load_tileset(metadata_path).get("objects", [])
                 if isinstance(item, Mapping) and isinstance(item.get("id"), str)
             }
+        object_definitions = data.get("objects")
+        has_object_definition_list = isinstance(object_definitions, list)
+        can_reconcile_object_definitions = (
+            has_object_definition_list
+            and all(
+                isinstance(item, Mapping) and isinstance(item.get("id"), str)
+                for item in object_definitions
+            )
+        )
         current_ids = {
             item.get("id")
-            for item in data.get("objects", [])
+            for item in object_definitions
             if isinstance(item, Mapping) and isinstance(item.get("id"), str)
-        }
+        } if has_object_definition_list else set()
         normalized_renames: dict[str, str] = {}
         for old_id, new_id in renames.items():
             if not isinstance(old_id, str) or not isinstance(new_id, str):
@@ -343,38 +361,44 @@ class MetadataApplication:
                 continue
             normalized_renames[old_id] = new_id
         if diagnostics or not isinstance(tileset_id, str):
-            return [], diagnostics
+            return [], diagnostics, 0
 
+        removed_definition_ids = (
+            previous_ids - current_ids if can_reconcile_object_definitions else set()
+        )
         updates: list[tuple[Path, dict[str, Any], dict[str, Any]]] = []
+        removed_instance_count = 0
         source_root = self.content_root / "maps" / "sources"
         if not source_root.is_dir():
-            return updates, diagnostics
+            return updates, diagnostics, removed_instance_count
         for path in sorted(source_root.glob("*.json")):
             original = load_map_source(path)
             if original.get("tileset_id") != tileset_id:
                 continue
             updated = json.loads(json.dumps(original))
             changed = False
-            for index, instance in enumerate(updated.get("objects", [])):
+            instances = updated.get("objects")
+            if not isinstance(instances, list):
+                continue
+            retained_instances = []
+            for instance in instances:
                 if not isinstance(instance, dict):
+                    retained_instances.append(instance)
                     continue
                 definition_id = instance.get("definition_id")
                 if definition_id in normalized_renames:
                     instance["definition_id"] = normalized_renames[definition_id]
                     definition_id = instance["definition_id"]
                     changed = True
-                if isinstance(definition_id, str) and definition_id not in current_ids:
-                    diagnostics.append(
-                        Diagnostic(
-                            "error",
-                            "map_object_definition_would_be_missing",
-                            f"maps/sources/{path.name}.objects[{index}].definition_id",
-                            f"マップ {original.get('map_id', path.stem)} が未定義のオブジェクトを参照します: {definition_id}",
-                        ).as_dict()
-                    )
+                if definition_id in removed_definition_ids:
+                    removed_instance_count += 1
+                    changed = True
+                    continue
+                retained_instances.append(instance)
+            updated["objects"] = retained_instances
             if changed:
                 updates.append((path, original, updated))
-        return updates, diagnostics
+        return updates, diagnostics, removed_instance_count
 
     def save(
         self,
@@ -382,33 +406,49 @@ class MetadataApplication:
         object_id_renames: object = None,
     ) -> dict[str, Any]:
         diagnostics, image_info = self.validate(data)
-        has_errors = any(item["severity"] == "error" for item in diagnostics)
+        if not isinstance(data, dict):
+            return {
+                "saved": False,
+                "diagnostics": diagnostics,
+                "image_info": image_info,
+                "updated_map_ids": [],
+                "removed_map_object_count": 0,
+            }
+        try:
+            metadata_path = self.metadata_path_for(data.get("tileset_id"))
+        except (TypeError, ValueError):
+            return {
+                "saved": False,
+                "diagnostics": diagnostics,
+                "image_info": image_info,
+                "updated_map_ids": [],
+                "removed_map_object_count": 0,
+            }
+
         map_updates: list[tuple[Path, dict[str, Any], dict[str, Any]]] = []
-        if not has_errors and isinstance(data, dict):
-            map_updates, rename_diagnostics = self._prepare_map_object_renames(
-                data, object_id_renames
-            )
-            diagnostics.extend(rename_diagnostics)
-            has_errors = any(item["severity"] == "error" for item in diagnostics)
-        if not has_errors and isinstance(data, dict):
-            written_maps: list[tuple[Path, dict[str, Any]]] = []
-            try:
-                for path, original, updated in map_updates:
-                    save_map_source(path, updated)
-                    written_maps.append((path, original))
-                save_tileset(self.metadata_path_for(data["tileset_id"]), data)
-            except BaseException:
-                for path, original in written_maps:
-                    save_map_source(path, original)
-                raise
+        map_updates, update_diagnostics, removed_instance_count = (
+            self._prepare_map_object_updates(data, object_id_renames)
+        )
+        diagnostics.extend(update_diagnostics)
+        written_maps: list[tuple[Path, dict[str, Any]]] = []
+        try:
+            for path, original, updated in map_updates:
+                save_map_source(path, updated)
+                written_maps.append((path, original))
+            save_tileset(metadata_path, data)
+        except BaseException:
+            for path, original in written_maps:
+                save_map_source(path, original)
+            raise
         return {
-            "saved": not has_errors,
+            "saved": True,
             "diagnostics": diagnostics,
             "image_info": image_info,
             "updated_map_ids": [
                 updated.get("map_id", path.stem)
                 for path, _original, updated in map_updates
-            ] if not has_errors else [],
+            ],
+            "removed_map_object_count": removed_instance_count,
         }
 
     def delete_tileset(self, tileset_id: str) -> dict[str, Any]:

@@ -480,6 +480,8 @@ def _validate_object(
         return object_id if valid_id else None
 
     offsets: set[tuple[int, int]] = set()
+    object_visuals: list[tuple[str, Mapping[str, Any]]] = []
+    static_visual_paths: list[str] = []
     for cell_index, cell in enumerate(cells):
         cell_path = f"{path}.cells[{cell_index}]"
         if not isinstance(cell, dict):
@@ -553,6 +555,7 @@ def _validate_object(
                 rows,
                 diagnostics,
             )
+            static_visual_paths.append(cell_path)
         elif has_visual:
             _validate_visual(
                 cell.get("visual"),
@@ -561,6 +564,8 @@ def _validate_object(
                 rows,
                 diagnostics,
             )
+            if isinstance(cell.get("visual"), dict):
+                object_visuals.append((cell_path, cell["visual"]))
         elif cell.get("collision") in ("blocked", "passable_override"):
             collision = cell.get("collision")
             _diag(
@@ -580,6 +585,76 @@ def _validate_object(
                 cell_path,
                 "表示も当たり判定もない構成セルです。",
             )
+
+    if object_visuals:
+        first_path, first_visual = object_visuals[0]
+        first_choices = first_visual.get("choices")
+        synchronized = any(
+            isinstance(visual.get("choices"), list)
+            and (
+                len(visual["choices"]) > 1
+                or any(
+                    isinstance(choice, dict)
+                    and isinstance(choice.get("frames"), list)
+                    and len(choice["frames"]) > 1
+                    for choice in visual["choices"]
+                )
+            )
+            for _visual_path, visual in object_visuals
+        )
+        if synchronized and static_visual_paths:
+            for static_path in static_visual_paths:
+                _diag(
+                    diagnostics,
+                    "error",
+                    "unsynchronized_object_visual",
+                    static_path,
+                    "複数候補またはアニメーションを持つオブジェクトでは、表示セルをすべて同じvisual構造にしてください。",
+                )
+
+        if synchronized and isinstance(first_choices, list):
+            expected = (
+                first_visual.get("frame_interval"),
+                [
+                    (
+                        choice.get("id"),
+                        choice.get("weight"),
+                        len(choice.get("frames", []))
+                        if isinstance(choice, dict)
+                        and isinstance(choice.get("frames"), list)
+                        else None,
+                    )
+                    for choice in first_choices
+                    if isinstance(choice, dict)
+                ],
+            )
+            for visual_path, visual in object_visuals[1:]:
+                choices = visual.get("choices")
+                actual = (
+                    visual.get("frame_interval"),
+                    [
+                        (
+                            choice.get("id"),
+                            choice.get("weight"),
+                            len(choice.get("frames", []))
+                            if isinstance(choice, dict)
+                            and isinstance(choice.get("frames"), list)
+                            else None,
+                        )
+                        for choice in choices
+                        if isinstance(choice, dict)
+                    ]
+                    if isinstance(choices, list)
+                    else None,
+                )
+                if actual != expected:
+                    _diag(
+                        diagnostics,
+                        "error",
+                        "unsynchronized_object_visual",
+                        visual_path,
+                        f"オブジェクトの表示候補ID、重み、フレーム数、間隔を{first_path}.visualと揃えてください。",
+                    )
     return object_id if valid_id else None
 
 

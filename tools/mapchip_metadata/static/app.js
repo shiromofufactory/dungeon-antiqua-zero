@@ -250,10 +250,12 @@ function updateSaveState(kind = null, text = null) {
   else if (hasErrors) element.classList.add("error");
   else if (state.dirty) element.classList.add("dirty");
   else element.classList.add("saved");
-  element.textContent = text || (hasErrors ? "要修正" : state.dirty ? "未保存" : "保存済み");
+  element.textContent = text || (hasErrors
+    ? state.dirty ? "未保存・エラー" : "保存済み・エラー"
+    : state.dirty ? "未保存" : "保存済み");
   byId("undo-button").disabled = state.history.length === 0;
   byId("redo-button").disabled = state.future.length === 0;
-  byId("save-button").disabled = hasErrors;
+  byId("save-button").disabled = !state.data;
 }
 
 function commit(mutator) {
@@ -301,7 +303,7 @@ function normalizeSelectionIndexes() {
   const boundaries = grounds[state.groundIndex]?.boundaries || [];
   state.boundaryIndex = Math.max(0, Math.min(state.boundaryIndex, boundaries.length - 1));
   state.objectIndex = Math.max(0, Math.min(state.objectIndex, objects.length - 1));
-  const visual = currentVisual();
+  const visual = activeVisual();
   state.choiceIndex = Math.max(0, Math.min(state.choiceIndex, (visual?.choices?.length || 1) - 1));
   const frames = visual?.choices?.[state.choiceIndex]?.frames || [];
   state.frameIndex = Math.max(0, Math.min(state.frameIndex, Math.max(0, frames.length - 1)));
@@ -328,6 +330,43 @@ function currentVisual() {
   if (state.tab === "boundary") return currentBoundary()?.visual || null;
   if (state.tab === "ground") return currentGround()?.base_visual || null;
   return null;
+}
+
+function objectDisplayCells(object = currentObject()) {
+  return (object?.cells || []).filter((cell) => cell.tile || cell.visual);
+}
+
+function currentObjectVisual() {
+  const cell = objectDisplayCells()[0];
+  if (!cell) return null;
+  return cell.visual || singleTileVisual(cell.tile);
+}
+
+function activeVisual() {
+  return state.tab === "object" ? currentObjectVisual() : currentVisual();
+}
+
+function normalizeObjectVisuals(object = currentObject()) {
+  for (const cell of objectDisplayCells(object)) {
+    if (cell.visual) continue;
+    cell.visual = singleTileVisual(cell.tile);
+    delete cell.tile;
+  }
+}
+
+function objectSelectionMatches(object = currentObject()) {
+  return Boolean(
+    object
+    && state.selection.width === object.size[0]
+    && state.selection.height === object.size[1]
+  );
+}
+
+function selectedObjectTile(cell) {
+  return [
+    state.selection.x + cell.offset[0],
+    state.selection.y + cell.offset[1],
+  ];
 }
 
 function uniqueId(base, items) {
@@ -440,6 +479,32 @@ function tileThumbImage(tile) {
 function tileThumb(tile) {
   const [column, row] = tile || [0, 0];
   return `${tileThumbImage(tile)}<span>${column},${row}</span>`;
+}
+
+function objectFrameTiles(object, choiceIndex, frameIndex) {
+  const byOffset = new Map();
+  for (const cell of objectDisplayCells(object)) {
+    let tile = cell.tile || null;
+    if (cell.visual) {
+      const choice = cell.visual.choices?.[choiceIndex];
+      const frames = choice?.frames || [];
+      tile = frames.length ? frames[frameIndex % frames.length]?.tile : null;
+    }
+    byOffset.set(cell.offset.join(","), tile);
+  }
+  const tiles = [];
+  for (let y = 0; y < object.size[1]; y += 1) {
+    for (let x = 0; x < object.size[0]; x += 1) {
+      tiles.push(byOffset.get(`${x},${y}`) || null);
+    }
+  }
+  return tiles;
+}
+
+function objectFrameThumb(object, choiceIndex, frameIndex) {
+  return `<span class="object-frame-thumb" style="--object-columns:${object.size[0]}">
+    ${objectFrameTiles(object, choiceIndex, frameIndex).map((tile) => tile ? tileThumbImage(tile) : `<span class="tile-thumb empty"></span>`).join("")}
+  </span>`;
 }
 
 function renderDefinitionList(items, activeIndex, action, addAction, addLabel, baseIndex = null) {
@@ -559,6 +624,48 @@ function renderBoundaryEditor() {
     ${rule ? `<div class="section"><div class="section-title"><h3>境界表示</h3></div>${renderVisualEditor(rule.visual)}</div>` : ""}`;
 }
 
+function renderObjectVisualEditor(object) {
+  const visual = currentObjectVisual();
+  if (!visual) return `<div class="empty-state">表示を持つ構成セルがありません。</div>`;
+  const choices = visual.choices || [];
+  const selectionMatches = objectSelectionMatches(object);
+  const selectionLabel = `[${state.selection.x}, ${state.selection.y}] ${state.selection.width}×${state.selection.height}`;
+  return `
+    <div class="form-grid">
+      <div class="field">
+        <label>フレーム間隔（60fps）</label>
+        <input type="number" min="1" value="${escapeHtml(visual.frame_interval)}" data-change="object-visual-interval">
+      </div>
+      <div class="field">
+        <label>現在のソース選択</label>
+        <div class="row"><code>${selectionLabel}</code></div>
+      </div>
+    </div>
+    <div class="frame-help ${selectionMatches ? "" : "error-text"}">候補の追加・置換には、オブジェクトと同じ ${object.size[0]}×${object.size[1]} の矩形を選択してください。</div>
+    ${choices.map((choice, choiceIndex) => `
+      <div class="choice-card ${choiceIndex === state.choiceIndex ? "active" : ""}">
+        <div class="choice-head">
+          <span class="choice-number">表示候補 ${choiceIndex + 1}</span>
+          <div class="field"><label>重み</label><input type="number" min="0" value="${escapeHtml(choice.weight)}" data-change="object-choice-weight" data-choice="${choiceIndex}"></div>
+          <button type="button" class="button danger small" data-action="object-delete-choice" data-choice="${choiceIndex}" ${choices.length <= 1 ? "disabled" : ""}>削除</button>
+        </div>
+        <div class="frames object-frames">
+          ${(choice.frames || []).map((_frame, frameIndex) => `
+            <button type="button" class="object-frame-button ${choiceIndex === state.choiceIndex && frameIndex === state.frameIndex ? "active" : ""}"
+              data-action="object-set-frame" data-choice="${choiceIndex}" data-frame="${frameIndex}"
+              title="現在の同寸法の矩形で置き換える" aria-label="表示候補 ${choiceIndex + 1} のフレーム ${frameIndex + 1} を現在の矩形選択で置き換える">
+              ${objectFrameThumb(object, choiceIndex, frameIndex)}
+              <span>frame ${frameIndex + 1}</span>
+            </button>`).join("")}
+          <button type="button" class="object-frame-button add" data-action="object-add-frame" data-choice="${choiceIndex}" ${selectionMatches ? "" : "disabled"}>＋<span>frame</span></button>
+        </div>
+      </div>`).join("")}
+    <div class="row between" style="margin-top:9px">
+      <button type="button" class="button ghost small" data-action="object-add-choice" ${selectionMatches ? "" : "disabled"}>＋ 表示候補</button>
+      <button type="button" class="button danger small" data-action="object-delete-frame">フレーム削除</button>
+    </div>`;
+}
+
 function renderObjectEditor() {
   const objects = state.data.objects || [];
   const object = currentObject();
@@ -606,6 +713,10 @@ function renderObjectEditor() {
     <div class="section">
       <div class="section-title"><h3>構成セル</h3><span class="subtle">左: 可／不可・右: 通行可上書き</span></div>
       <div class="footprint-grid" style="--object-columns:${width}">${grid.join("")}</div>
+    </div>
+    <div class="section">
+      <div class="section-title"><h3>表示</h3><span class="subtle">候補単位で矩形を選択</span></div>
+      ${renderObjectVisualEditor(object)}
     </div>`;
 }
 
@@ -725,7 +836,7 @@ function drawGroundPreview(now) {
 
 function drawVisualSample(now) {
   const canvas = byId("visual-preview-canvas");
-  const visual = currentVisual();
+  const visual = activeVisual();
   if (!canvas || !visual) return;
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
@@ -744,13 +855,22 @@ function drawObjectPreview(now) {
   if (!canvas || !object) return;
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
+  const visual = currentObjectVisual();
+  const selectedChoice = choiceFor(visual, `${object.id}:object`);
+  const selectedChoiceIndex = Math.max(0, (visual?.choices || []).findIndex((choice) => choice.id === selectedChoice?.id));
+  const frameCount = selectedChoice?.frames?.length || 1;
+  const interval = Math.max(1, Number(visual?.frame_interval) || 1);
+  const selectedFrameIndex = state.previewPaused
+    ? 0
+    : Math.floor((now - state.previewStartedAt) / (1000 / 60 * interval)) % frameCount;
   for (const cell of object.cells) {
     const x = cell.offset[0] * 48;
     const y = cell.offset[1] * 48;
     if (cell.tile) drawTile(context, cell.tile, x, y, 48);
     else if (cell.visual) {
-      const choice = choiceFor(cell.visual, `${cell.offset.join(",")}:object`);
-      const frame = frameFor(cell.visual, choice, now);
+      const choice = cell.visual.choices?.[selectedChoiceIndex];
+      const frames = choice?.frames || [];
+      const frame = frames.length ? frames[selectedFrameIndex % frames.length] : null;
       drawTile(context, frame?.tile, x, y, 48);
     }
     if (state.previewShowCollision && cell.collision === "blocked") {
@@ -851,7 +971,15 @@ async function save() {
       state.objectOrigins = (state.data.objects || []).map((object) => object.id);
       await refreshCatalog();
       const updatedCount = result.updated_map_ids?.length || 0;
-      showToast(updatedCount ? `メタデータを保存し、${updatedCount}件のマップを更新しました。` : "メタデータを保存しました。");
+      const removedCount = result.removed_map_object_count || 0;
+      const errorCount = state.diagnostics.filter((item) => item.severity === "error").length;
+      const details = [];
+      if (updatedCount) details.push(`${updatedCount}件のマップを更新`);
+      if (removedCount) details.push(`配置済みオブジェクト${removedCount}件を削除`);
+      if (errorCount) details.push(`エラー${errorCount}件を保持`);
+      showToast(details.length
+        ? `メタデータを保存しました（${details.join("、")}）。`
+        : "メタデータを保存しました。");
     } else {
       showToast("エラーを修正してから保存してください。", true);
     }
@@ -906,9 +1034,86 @@ function mutateVisual(action, element) {
   return true;
 }
 
+function mutateObjectVisual(action, element) {
+  if (!action.startsWith("object-") || ![
+    "object-add-choice",
+    "object-delete-choice",
+    "object-add-frame",
+    "object-set-frame",
+    "object-delete-frame",
+  ].includes(action)) return false;
+
+  const object = currentObject();
+  const visual = currentObjectVisual();
+  if (!object || !visual) return true;
+  const needsSelection = ["object-add-choice", "object-add-frame", "object-set-frame"].includes(action);
+  if (needsSelection && !objectSelectionMatches(object)) {
+    showToast(`オブジェクトと同じ ${object.size[0]}×${object.size[1]} の矩形を選択してください。`, true);
+    return true;
+  }
+
+  if (action === "object-add-choice") {
+    const id = uniqueId("variant", visual.choices);
+    commit(() => {
+      normalizeObjectVisuals(object);
+      for (const cell of objectDisplayCells(object)) {
+        cell.visual.choices.push({
+          id,
+          weight: 1,
+          frames: [{ tile: selectedObjectTile(cell) }],
+        });
+      }
+      state.choiceIndex = objectDisplayCells(object)[0].visual.choices.length - 1;
+      state.frameIndex = 0;
+    });
+  } else if (action === "object-delete-choice") {
+    if (visual.choices.length <= 1) return true;
+    const choiceIndex = Number(element.dataset.choice);
+    commit(() => {
+      normalizeObjectVisuals(object);
+      for (const cell of objectDisplayCells(object)) cell.visual.choices.splice(choiceIndex, 1);
+    });
+  } else if (action === "object-add-frame") {
+    const choiceIndex = Number(element.dataset.choice);
+    commit(() => {
+      normalizeObjectVisuals(object);
+      for (const cell of objectDisplayCells(object)) {
+        cell.visual.choices[choiceIndex].frames.push({ tile: selectedObjectTile(cell) });
+      }
+      state.choiceIndex = choiceIndex;
+      state.frameIndex = objectDisplayCells(object)[0].visual.choices[choiceIndex].frames.length - 1;
+    });
+  } else if (action === "object-set-frame") {
+    const choiceIndex = Number(element.dataset.choice);
+    const frameIndex = Number(element.dataset.frame);
+    state.choiceIndex = choiceIndex;
+    state.frameIndex = frameIndex;
+    commit(() => {
+      normalizeObjectVisuals(object);
+      for (const cell of objectDisplayCells(object)) {
+        cell.visual.choices[choiceIndex].frames[frameIndex].tile = selectedObjectTile(cell);
+      }
+    });
+  } else if (action === "object-delete-frame") {
+    const frames = visual.choices[state.choiceIndex]?.frames;
+    if (!frames || frames.length <= 1) {
+      showToast("フレームは1件以上必要です。", true);
+      return true;
+    }
+    commit(() => {
+      normalizeObjectVisuals(object);
+      for (const cell of objectDisplayCells(object)) {
+        cell.visual.choices[state.choiceIndex].frames.splice(state.frameIndex, 1);
+      }
+    });
+  }
+  return true;
+}
+
 function handleAction(element) {
   const action = element.dataset.action;
   if (!action) return;
+  if (mutateObjectVisual(action, element)) return;
   if (mutateVisual(action, element)) return;
   const grounds = state.data.grounds;
   const objects = state.data.objects;
@@ -963,12 +1168,16 @@ function handleAction(element) {
     });
   } else if (action === "select-object") {
     state.objectIndex = Number(element.dataset.index);
+    state.choiceIndex = 0;
+    state.frameIndex = 0;
     renderAll();
   } else if (action === "add-object") {
     commit(() => {
       objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
       state.objectOrigins.push(null);
       state.objectIndex = objects.length - 1;
+      state.choiceIndex = 0;
+      state.frameIndex = 0;
     });
   } else if (action === "object-from-selection") {
     commit(() => {
@@ -986,6 +1195,8 @@ function handleAction(element) {
           object.cells.push({ offset: [x, y], collision: "blocked", tile: [state.selection.x + x, state.selection.y + y] });
         }
       }
+      state.choiceIndex = 0;
+      state.frameIndex = 0;
     });
   } else if (action === "delete-object") {
     if (!window.confirm(`オブジェクト ${currentObject().id} を削除しますか？`)) return;
@@ -1034,6 +1245,15 @@ function handleChange(element) {
   else if (action === "ground-collision") commit(() => { ground.collision = value; });
   else if (action === "visual-interval") commit(() => { visual.frame_interval = Number(value); });
   else if (action === "choice-weight") commit(() => { visual.choices[Number(element.dataset.choice)].weight = Number(value); });
+  else if (action === "object-visual-interval") commit(() => {
+    normalizeObjectVisuals(object);
+    for (const cell of objectDisplayCells(object)) cell.visual.frame_interval = Number(value);
+  });
+  else if (action === "object-choice-weight") commit(() => {
+    normalizeObjectVisuals(object);
+    const choiceIndex = Number(element.dataset.choice);
+    for (const cell of objectDisplayCells(object)) cell.visual.choices[choiceIndex].weight = Number(value);
+  });
   else if (action === "object-id") commit(() => { object.id = value; });
   else if (action === "object-width") commit(() => { object.size[0] = Number(value); });
   else if (action === "object-height") commit(() => { object.size[1] = Number(value); });

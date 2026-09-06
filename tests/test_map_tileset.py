@@ -215,6 +215,40 @@ class MapTilesetTest(unittest.TestCase):
         self.assertIn("invalid_collision", codes)
         self.assertIn("invalid_object_draw_group", codes)
 
+    def test_object_visual_choices_must_be_synchronized_across_cells(self) -> None:
+        data = initial_worldmap_tileset()
+        visual = {
+            "frame_interval": 6,
+            "choices": [
+                {"id": "default", "weight": 3, "frames": [{"tile": [0, 0]}]},
+                {"id": "variant", "weight": 1, "frames": [{"tile": [0, 1]}]},
+            ],
+        }
+        data["objects"] = [
+            {
+                "id": "rocks",
+                "size": [2, 1],
+                "default_draw_group": "object",
+                "cells": [
+                    {"offset": [0, 0], "collision": "blocked", "visual": deepcopy(visual)},
+                    {"offset": [1, 0], "collision": "blocked", "visual": deepcopy(visual)},
+                ],
+            }
+        ]
+
+        diagnostics, _ = validate_tileset(data, image_path=self.image_path)
+        self.assertNotIn(
+            "unsynchronized_object_visual",
+            {item.code for item in diagnostics if item.severity == "error"},
+        )
+
+        data["objects"][0]["cells"][1]["visual"]["choices"][1]["weight"] = 2
+        diagnostics, _ = validate_tileset(data, image_path=self.image_path)
+        self.assertIn(
+            "unsynchronized_object_visual",
+            {item.code for item in diagnostics if item.severity == "error"},
+        )
+
     def test_accepts_reserved_transparent_color_in_image_margin(self) -> None:
         Image.new("RGBA", (33, 18), (255, 0, 128, 255)).save(self.image_path)
 

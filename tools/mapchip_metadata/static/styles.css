@@ -300,7 +300,15 @@ input:focus, select:focus { border-color: var(--accent-dark); box-shadow: 0 0 0 
 .frame-button.active { border-color: var(--accent); color: var(--accent); }
 .frame-button:hover { border-color: var(--accent-dark); color: var(--text); }
 .frame-help { margin: 3px 0 7px; color: var(--muted); font-size: 11px; }
+.frame-help.error-text { color: #ffaea4; }
 .tile-thumb { width: 34px; height: 34px; border-radius: 3px; image-rendering: pixelated; background-repeat: no-repeat; background-color: #181a17; }
+.tile-thumb.empty { display: block; background: #11140f; }
+.object-frames { align-items: flex-start; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 3px; }
+.object-frame-button { display: flex; flex: 0 0 auto; flex-direction: column; align-items: center; gap: 5px; padding: 5px; border: 1px solid var(--line); border-radius: 6px; background: #11140f; cursor: pointer; color: var(--muted); font-size: 10px; }
+.object-frame-button.active { border-color: var(--accent); color: var(--accent); }
+.object-frame-button:hover:not(:disabled) { border-color: var(--accent-dark); color: var(--text); }
+.object-frame-button.add { align-self: stretch; min-width: 58px; justify-content: center; }
+.object-frame-thumb { display: grid; grid-template-columns: repeat(var(--object-columns, 1), 34px); gap: 1px; }
 
 .neighbor-grid, .footprint-grid, .preview-ground-grid {
   display: grid;
