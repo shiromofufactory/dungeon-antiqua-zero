@@ -83,7 +83,10 @@ class BgmPlayerTest(unittest.TestCase):
         play_se("confirm", pyxel_api=pyxel)
 
         pyxel.play.assert_called_once_with(1, 9)
-        self.assertEqual(list_se_ids(), ("alert", "confirm", "teleport"))
+        self.assertEqual(
+            list_se_ids(),
+            ("alert", "confirm", "teleport", "treasure_open"),
+        )
         with self.assertRaises(AudioResourceError):
             play_se("missing", pyxel_api=pyxel)
 

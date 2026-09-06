@@ -19,7 +19,7 @@ DEFAULT_FIELD_MOVE_SPEED = 1
 INTERIOR_FIELD_MOVE_SPEED = 2
 DEFAULT_ROAM_WAIT_MIN = 30
 DEFAULT_ROAM_WAIT_MAX = 90
-TREASURE_ANIMATION_FRAME_COUNT = 10
+TREASURE_ANIMATION_FRAME_COUNT = 4
 
 
 @dataclass(frozen=True)
@@ -343,14 +343,27 @@ class FieldActors:
             if not actor.movement.is_moving:
                 actor.roam_wait_frames = self._next_roam_wait()
 
-    def start_treasure_animation(self, actor_id: str, *, opened: bool) -> None:
+    def start_treasure_opening(self, actor_id: str) -> None:
         actor = self.actor(actor_id)
         if actor.kind != "treasure":
             raise ValueError("treasure animation requires a treasure actor")
         if actor.treasure_frame != 0 or actor.treasure_animation:
             raise ValueError("treasure actor is not closed")
         actor.treasure_frame = 1
-        actor.treasure_animation = (2,) if opened else (2, 1, 0)
+        actor.treasure_animation = (2,)
+        actor.treasure_animation_elapsed = 0
+
+    def start_treasure_closing(self, actor_id: str) -> None:
+        actor = self.actor(actor_id)
+        if actor.kind != "treasure":
+            raise ValueError("treasure animation requires a treasure actor")
+        if actor.treasure_frame == 1 and actor.treasure_animation == (2,):
+            actor.treasure_animation = (2, 1, 0)
+            return
+        if actor.treasure_frame != 2 or actor.treasure_animation:
+            raise ValueError("treasure actor is not ready to close")
+        actor.treasure_frame = 1
+        actor.treasure_animation = (0,)
         actor.treasure_animation_elapsed = 0
 
     def update_treasure_animations(self) -> None:

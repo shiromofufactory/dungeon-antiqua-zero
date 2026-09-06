@@ -12,6 +12,10 @@
     "teleport": {
       "channel": 0,
       "sound": 8
+    },
+    "treasure_open": {
+      "channel": 0,
+      "sound": 25
     }
   }
 }

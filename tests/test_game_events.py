@@ -111,10 +111,13 @@ class GameEventTriggerTest(unittest.TestCase):
         game.fonts = Mock()
         game.texts = Mock()
         game.texts.formatted_text.return_value = "宝箱には　５０Ｇが入っていた！"
+        game.field.facing = Direction.LEFT
 
-        game._update_field(InputState(held_direction=Direction.RIGHT))
+        with patch("game.play_se") as play_se:
+            game._update_field(InputState(held_direction=Direction.RIGHT))
 
         self.assertEqual(game.field.position, FieldPosition(1, 1))
+        self.assertIs(game.field.facing, Direction.RIGHT)
         self.assertEqual(game.save_data.gold, 60)
         self.assertIn(("test_map", "gold_chest"), game.save_data.opened_treasures)
         self.assertEqual(game.field_actors.actor("gold_chest").treasure_frame, 1)
@@ -128,6 +131,7 @@ class GameEventTriggerTest(unittest.TestCase):
             ANY,
             {"AMOUNT": "５０"},
         )
+        play_se.assert_called_once_with("treasure_open")
 
     @patch("game.MessageOverlay")
     def test_opened_treasure_has_no_special_reaction(
@@ -157,7 +161,8 @@ class GameEventTriggerTest(unittest.TestCase):
             opened_treasure_ids=("gold_chest",),
         )
 
-        game._update_field(InputState(held_direction=Direction.RIGHT))
+        with patch("game.play_se") as play_se:
+            game._update_field(InputState(held_direction=Direction.RIGHT))
 
         self.assertEqual(game.field.position, FieldPosition(1, 1))
         self.assertEqual(game.save_data.gold, 60)
@@ -165,6 +170,54 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertIsNone(game.event_release_direction)
         self.assertFalse(game.event_release_confirm)
         message_overlay.assert_not_called()
+        play_se.assert_not_called()
+
+    @patch("game.MessageOverlay")
+    def test_capacity_failure_starts_closing_after_the_message_finishes(
+        self,
+        message_overlay: Mock,
+    ) -> None:
+        actor = MapActor(
+            "gold_chest",
+            MapCell(2, 1),
+            "treasure",
+            0,
+            contents=MapTreasureContents("gold", amount=50),
+        )
+        game = game_for(None, actors=(actor,))
+        game.save_data = SaveData(gold=999_980)
+        game.inventory_system = InventorySystem({})
+        game.treasure_system = TreasureSystem(
+            save_data=game.save_data,
+            inventory=game.inventory_system,
+        )
+        game.character_states = {}
+        game.settings = Settings()
+        game.fonts = Mock()
+        game.texts = Mock()
+        game.texts.formatted_text.return_value = "宝箱には　５０Ｇが入っていた！"
+        game.texts.text.return_value = "しかし、これ以上持つことができない"
+
+        with patch("game.play_se") as play_se:
+            game._update_field(InputState(held_direction=Direction.RIGHT))
+        treasure = game.field_actors.actor("gold_chest")
+        self.assertEqual(game.pending_treasure_close_actor_id, "gold_chest")
+        self.assertEqual(treasure.treasure_animation, (2,))
+
+        for _frame in range(100):
+            game.field_actors.update_treasure_animations()
+        self.assertEqual(treasure.treasure_frame, 2)
+        self.assertEqual(treasure.treasure_animation, ())
+
+        game._finish_treasure_message()
+
+        self.assertIsNone(game.treasure_message)
+        self.assertIsNone(game.pending_treasure_close_actor_id)
+        self.assertEqual(treasure.treasure_frame, 1)
+        self.assertEqual(treasure.treasure_animation, (0,))
+        self.assertEqual(game.save_data.gold, 999_980)
+        self.assertEqual(game.save_data.opened_treasures, set())
+        play_se.assert_not_called()
 
     def test_touch_trigger_precedes_movement(self) -> None:
         trigger = MapEventTrigger(

@@ -177,6 +177,7 @@ MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
 TREASURE_GOLD_TEXT_KEY = "treasure.found_gold"
 TREASURE_ITEM_TEXT_KEY = "treasure.found_item"
 TREASURE_CAPACITY_TEXT_KEY = "treasure.capacity_exceeded"
+TREASURE_OPEN_SE_ID = "treasure_open"
 MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
@@ -476,6 +477,7 @@ class Game:
         self.event_effect = None
         self.event_message: EventMessageOverlay | None = None
         self.treasure_message: MessageOverlay | None = None
+        self.pending_treasure_close_actor_id: str | None = None
         self.event_move_remaining = 0
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
@@ -2226,6 +2228,14 @@ class Game:
 
         self.event_release_direction = release_direction
         self.event_release_confirm = release_confirm
+        dx = x - self.field.position.x
+        dy = y - self.field.position.y
+        if abs(dx) + abs(dy) == 1:
+            self.field.facing = next(
+                direction
+                for direction in Direction
+                if (direction.dx, direction.dy) == (dx, dy)
+            )
 
         contents = actor.contents
         if contents is None:
@@ -2250,13 +2260,24 @@ class Game:
         lines = [first_line]
         if not opened:
             lines.append(self.texts.text(TREASURE_CAPACITY_TEXT_KEY, localizer))
-        actors.start_treasure_animation(actor.id, opened=opened)
+        else:
+            play_se(TREASURE_OPEN_SE_ID)
+        actors.start_treasure_opening(actor.id)
+        self.pending_treasure_close_actor_id = None if opened else actor.id
         self.treasure_message = MessageOverlay(
             lines=tuple(lines),
             settings=self.settings,
             fonts=self.fonts,
         )
         return True
+
+    def _finish_treasure_message(self) -> None:
+        self.treasure_message = None
+        actor_id = getattr(self, "pending_treasure_close_actor_id", None)
+        self.pending_treasure_close_actor_id = None
+        field_actors = getattr(self, "field_actors", None)
+        if actor_id is not None and field_actors is not None:
+            field_actors.start_treasure_closing(actor_id)
 
     def _update_field(self, input_state: InputState) -> None:
         if self._release_latch_blocks_field(input_state):
@@ -2333,7 +2354,7 @@ class Game:
             treasure_message = getattr(self, "treasure_message", None)
             if treasure_message is not None:
                 if treasure_message.update(input_state):
-                    self.treasure_message = None
+                    self._finish_treasure_message()
                 return
             if getattr(self, "event_runner", None) is not None:
                 self._update_event(input_state)

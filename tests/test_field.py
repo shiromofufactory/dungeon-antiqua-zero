@@ -236,7 +236,7 @@ class FieldMovementTest(unittest.TestCase):
         self.assertEqual(actors.actor("villager").movement.world_x, 17)
         self.assertTrue(actors.actor("villager").movement.is_moving)
 
-    def test_treasure_animation_uses_fifteen_frames_per_image(self) -> None:
+    def test_treasure_animation_uses_the_configured_frames_per_image(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
         treasure = MapActor(
             "chest",
@@ -248,14 +248,25 @@ class FieldMovementTest(unittest.TestCase):
         object.__setattr__(map_data, "actors", (treasure,))
         actors = FieldActors(map_data)
 
-        actors.start_treasure_animation("chest", opened=False)
+        actors.start_treasure_opening("chest")
         self.assertEqual(actors.actor("chest").treasure_frame, 1)
-        for expected in (2, 1, 0):
-            for _frame in range(TREASURE_ANIMATION_FRAME_COUNT - 1):
-                actors.update_treasure_animations()
-                self.assertNotEqual(actors.actor("chest").treasure_frame, expected)
+        for _frame in range(TREASURE_ANIMATION_FRAME_COUNT - 1):
             actors.update_treasure_animations()
-            self.assertEqual(actors.actor("chest").treasure_frame, expected)
+            self.assertEqual(actors.actor("chest").treasure_frame, 1)
+        actors.update_treasure_animations()
+        self.assertEqual(actors.actor("chest").treasure_frame, 2)
+
+        for _frame in range(TREASURE_ANIMATION_FRAME_COUNT * 2):
+            actors.update_treasure_animations()
+        self.assertEqual(actors.actor("chest").treasure_frame, 2)
+
+        actors.start_treasure_closing("chest")
+        self.assertEqual(actors.actor("chest").treasure_frame, 1)
+        for _frame in range(TREASURE_ANIMATION_FRAME_COUNT - 1):
+            actors.update_treasure_animations()
+            self.assertEqual(actors.actor("chest").treasure_frame, 1)
+        actors.update_treasure_animations()
+        self.assertEqual(actors.actor("chest").treasure_frame, 0)
 
     def test_opened_treasure_starts_on_the_final_image(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
@@ -429,7 +440,7 @@ class FieldRendererTest(unittest.TestCase):
         object.__setattr__(map_data, "actors", (treasure,))
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
         actors = FieldActors(map_data)
-        actors.start_treasure_animation("chest", opened=True)
+        actors.start_treasure_opening("chest")
         treasure_image = Mock(width=48, height=16)
         pyxel = Mock(frame_count=0)
         renderer = FieldRenderer(
