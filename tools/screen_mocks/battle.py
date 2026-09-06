@@ -23,7 +23,7 @@ from ui import CursorTarget, WindowFactory, WindowText
 
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
-MONSTERS_IMAGE_IDS = ["monsters/1"]
+MONSTERS_IMAGE_IDS = ["monsters/1", "monsters/3"]
 
 
 class BattleScreenMock:
@@ -82,10 +82,26 @@ class BattleScreenMock:
         for i in range(5):
             window = windows.create(52, 16 + i * 7, 7, 5, transparent=True)
             name = ("フィオラ", "セリオン", "アルヴァン", "エリカ", "ラグナ")[i]
+            # 現在アクティブなキャラクターは白文字、それ以外は灰色
             c = 5 if i == 0 else 4
             window.add_text(name, 0, 0, color=c)
             window.add_text("９９９／９９９", 0, 4, font=font_6x8, color=c)
             self.windows.append(window)
+
+        for i in range(5):
+            x = (4, 4, 68, 68, 68)[i]
+            y = (56, 120, 24, 88, 152)[i]
+            window = windows.create(x // 4 + 2, y // 4 + 15, 20, 4, transparent=True)
+            name = (
+                "ヒュージスパイダー",
+                "ヒュージスパイダー",
+                "コヨーテ",
+                "コヨーテ",
+                "コヨーテ",
+            )[i]
+            window.add_text(name, 0, 0, color=4)
+            self.windows.append(window)
+
         pyxel.run(self.update, self.draw)
 
     def update(self) -> None:
@@ -124,9 +140,12 @@ class BattleScreenMock:
         )
 
     def _draw_party(self) -> None:
-        # キャラ絵（仮）
+        # キャラ絵
         for i in range(5):
+            # 後衛の場合はX座標を16下げる
             x = 156 + i * 4 + (16 if i in (1, 2, 4) else 0)
+            u = 0  # 立ち絵のリソース画像X座標開始位置は0
+            v = (0, 16, 32, 48, 64)[i]
             pyxel.blt(
                 x,
                 64 + i * 28,
@@ -139,11 +158,11 @@ class BattleScreenMock:
             )
 
     def _draw_monsters(self) -> None:
-        # モンスター絵（仮）
+        # モンスター
         for i in range(5):
             x = (4, 4, 68, 68, 68)[i]
             y = (56, 120, 24, 88, 152)[i]
-            pat = (0, 0, 0, 0, 0)[i]
+            pat = (0, 0, 1, 1, 1)[i]
             pyxel.blt(
                 x,
                 y,
@@ -156,18 +175,18 @@ class BattleScreenMock:
             )
 
     def _draw_timeline(self) -> None:
-        # タイムライン（仮）
+        # タイムライン
         base_x, base_y = 70, 220
         for i in range(6):
-            u = (0, 2, 1, 3, 0, 0)[i]
-            v = (3, 4, 4, 4, 0, 4)[i]
-            c = 13 if i in (0, 4) else 49
+            u = (0, 224, 128, 224, 64, 224)[i]
+            v = (0, 16, 16, 16, 0, 16)[i]
+            c = (13, 49, 49, 49, 13, 49)[i]
             pyxel.blt(
                 base_x + i * 20,
                 base_y,
                 1,
-                u * 16,
-                v * 16,
+                u,
+                v,
                 16,
                 16,
                 TRANSPARENT_INDEX,
