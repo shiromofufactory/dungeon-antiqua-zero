@@ -38,6 +38,7 @@ class MapchipMetadataServerTest(unittest.TestCase):
             self.content_root,
             "worldmap",
             token="test-token",
+            runtime_root=self.content_root / "runtime",
         )
         self.server = create_server(self.application, 0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -76,6 +77,39 @@ class MapchipMetadataServerTest(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             self.get_json("/api/document")
         self.assertEqual(context.exception.code, 403)
+
+    def test_source_tiles_show_usage_category_and_unused_state(self) -> None:
+        with urlopen(f"{self.base_url}/?token=test-token", timeout=2) as response:
+            page = response.read().decode("utf-8")
+        with urlopen(f"{self.base_url}/app.js", timeout=2) as response:
+            script = response.read().decode("utf-8")
+
+        self.assertIn('id="usage-summary"', page)
+        self.assertIn('class="usage-dot ground"', page)
+        self.assertIn('class="usage-dot boundary"', page)
+        self.assertIn('class="usage-dot object"', page)
+        self.assertIn('class="usage-dot unused"', page)
+        self.assertIn('id="save-button" class="button primary" type="button" disabled', page)
+        self.assertIn('byId("save-button").disabled = !canSave()', script)
+        self.assertIn('if (!canSave()) return;', script)
+        self.assertIn("function sourceTileUsage()", script)
+        self.assertIn("function drawSourceUsage(context, zoom)", script)
+        self.assertIn('addVisualUsage(usage, ground.base_visual, "ground")', script)
+        self.assertIn('addVisualUsage(usage, boundary.visual, "boundary")', script)
+        self.assertIn('addVisualUsage(usage, cell.visual, "object")', script)
+
+    def test_ground_and_object_definitions_are_drag_reorderable(self) -> None:
+        with urlopen(f"{self.base_url}/app.js", timeout=2) as response:
+            script = response.read().decode("utf-8")
+
+        self.assertIn('data-reorder-kind="${reorderKind}"', script)
+        self.assertIn('index === baseIndex ? "" : "reorderable"', script)
+        self.assertIn("function reorderDefinitions(kind, fromIndex, insertionIndex)", script)
+        self.assertIn('const minimumIndex = kind === "ground" ? 1 : 0', script)
+        self.assertIn("state.objectOrigins.splice(fromIndex, 1)", script)
+        self.assertIn('addEventListener("pointerdown", handleDefinitionPointerDown)', script)
+        self.assertIn('addEventListener("pointermove", handleDefinitionPointerMove)', script)
+        self.assertIn("finishDefinitionPointerDrag(event)", script)
 
     def test_renews_session_token_only_for_browser_ui(self) -> None:
         with self.assertRaises(HTTPError) as context:
@@ -203,6 +237,56 @@ class MapchipMetadataServerTest(unittest.TestCase):
                 (source_root / f"{map_id}.json").read_text(encoding="utf-8")
             )
             self.assertEqual(saved_map["objects"][0]["definition_id"], "wu1")
+
+    def test_regenerates_referencing_map_after_draw_group_change(self) -> None:
+        tileset = initial_worldmap_tileset()
+        tileset["objects"] = [
+            {
+                "id": "roof",
+                "size": [1, 1],
+                "default_draw_group": "object",
+                "cells": [
+                    {
+                        "offset": [0, 0],
+                        "collision": "passable",
+                        "tile": [0, 0],
+                    }
+                ],
+            }
+        ]
+        save_tileset(self.application.metadata_path, tileset)
+        source = initial_map_source("forest", tileset, "world", 16, 15)
+        source["objects"] = [
+            {
+                "id": "roof_1",
+                "definition_id": "roof",
+                "origin": [2, 2],
+                "order": 0,
+            }
+        ]
+        save_map_source(
+            self.content_root / "maps" / "sources" / "forest.json",
+            source,
+        )
+
+        first = self.post_json("/api/save", {"data": tileset})
+        runtime_path = self.application.runtime_root / "forest.json"
+        self.assertEqual(first["generated_map_ids"], ["forest"])
+        self.assertEqual(
+            json.loads(runtime_path.read_text(encoding="utf-8"))["object_tiles"][0]["draw_group"],
+            "object",
+        )
+
+        changed = json.loads(json.dumps(tileset))
+        changed["objects"][0]["default_draw_group"] = "object_foreground"
+        result = self.post_json("/api/save", {"data": changed})
+
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["generated_map_ids"], ["forest"])
+        self.assertEqual(
+            json.loads(runtime_path.read_text(encoding="utf-8"))["object_tiles"][0]["draw_group"],
+            "object_foreground",
+        )
 
     def test_removes_placed_objects_when_their_definition_is_removed(self) -> None:
         tileset = initial_worldmap_tileset()

@@ -118,6 +118,7 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertEqual(payload["data"]["namespace"], "sample")
         self.assertEqual(payload["catalogs"]["character_keys"], ["Fiora"])
         self.assertEqual(payload["catalogs"]["item_keys"], ["POTION"])
+
         self.assertEqual(payload["catalogs"]["flag_ids"], ["story.done"])
         self.assertEqual(payload["flags"][0]["flag_id"], "story.done")
         self.assertEqual(payload["catalogs"]["message_ids"], ["sample.hello"])
@@ -133,6 +134,16 @@ class EventEditorServerTest(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             self.get_json("/api/document")
         self.assertEqual(context.exception.code, 403)
+
+    def test_save_button_is_disabled_only_without_unsaved_changes(self) -> None:
+        with urlopen(f"{self.base_url}/?token=test-token", timeout=2) as response:
+            page = response.read().decode("utf-8")
+        with urlopen(f"{self.base_url}/app.js", timeout=2) as response:
+            script = response.read().decode("utf-8")
+
+        self.assertIn('id="save" class="primary" disabled', page)
+        self.assertIn('$("save").disabled = !canSave()', script)
+        self.assertIn('if (!canSave()) return;', script)
 
     def test_validates_saves_and_compiles_event_source(self) -> None:
         data = {

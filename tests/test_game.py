@@ -868,12 +868,14 @@ class GameTest(unittest.TestCase):
         )
         world_map = object()
         target_map = Mock()
+        target_map.sites = ()
         target_map.arrival_point.return_value = arrival
         mock = Game.__new__(Game)
         mock.field = Mock(arrived_position=FieldPosition(2, 2))
         mock.world_map = world_map
         mock.current_map = world_map
         mock.world_sites = WorldSiteCatalog((site,))
+        mock.current_sites = mock.world_sites
         mock.map_resources = Mock()
         mock.map_resources.map.return_value = target_map
         mock.travel_system = Mock()
@@ -920,6 +922,7 @@ class GameTest(unittest.TestCase):
         mock.world_map = world_map
         mock.current_map = world_map
         mock.world_sites = WorldSiteCatalog((site,))
+        mock.current_sites = mock.world_sites
         mock.map_resources = Mock()
         mock.map_resources.map.side_effect = MapResourceError("missing")
         mock.travel_system = Mock()
@@ -929,6 +932,62 @@ class GameTest(unittest.TestCase):
 
         mock.travel_system.enter_site.assert_not_called()
         self.assertIsNone(mock.pending_screen_change)
+
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
+    def test_nonworld_move_source_returns_to_world_without_marking_site_visited(
+        self,
+        field_movement_class: Mock,
+        field_renderer_class: Mock,
+    ) -> None:
+        exit_site = WorldSite(
+            id="exit_to_world",
+            name_text_key="location.exit_to_world",
+            entrance_cells=(MapCell(2, 2),),
+            destination=MapDestination("worldmap", "from_dungeon"),
+        )
+        arrival = MapArrivalPoint(
+            "from_dungeon",
+            MapCell(8, 9),
+            "down",
+            False,
+            None,
+        )
+        dungeon_map = object()
+        world_map = Mock(sites=())
+        world_map.arrival_point.return_value = arrival
+        mock = Game.__new__(Game)
+        mock.field = Mock(arrived_position=FieldPosition(2, 2))
+        mock.world_map = world_map
+        mock.current_map = dungeon_map
+        mock.world_sites = WorldSiteCatalog(())
+        mock.current_sites = WorldSiteCatalog((exit_site,))
+        mock.map_resources = Mock()
+        mock.map_resources.map.return_value = world_map
+        mock.travel_system = Mock()
+        mock.save_data = SaveData()
+        mock.fade = FadeThroughBlack()
+        mock.pending_screen_change = None
+        mock.pending_site = None
+        mock.pending_target_map = None
+        mock.pending_target_arrival = None
+
+        mock._handle_arrived_site()
+        mock._apply_pending_screen_change()
+
+        mock.travel_system.enter_site.assert_not_called()
+        self.assertIs(mock.current_map, world_map)
+        self.assertEqual(mock.current_sites.sites, ())
+        field_movement_class.assert_called_once_with(
+            world_map,
+            start=FieldPosition(8, 9),
+            facing=Direction.DOWN,
+        )
+        field_renderer_class.assert_called_once_with(
+            world_map,
+            screen_width=256,
+            screen_height=240,
+        )
 
     def test_debug_teleport_targets_use_visited_sites_and_localized_names(
         self,
@@ -1036,7 +1095,7 @@ class GameTest(unittest.TestCase):
             True,
             "sample_town",
         )
-        target_map = Mock()
+        target_map = Mock(sites=())
         party = (Mock(),)
         mock = Game.__new__(Game)
         mock.pending_target_map = target_map
@@ -1702,7 +1761,7 @@ class GameTest(unittest.TestCase):
         loaded.character_states = {"Fiora": loaded.active_party[0]}
         loaded.inventory = Mock()
         mock.pending_loaded_state = loaded
-        mock.pending_loaded_map = Mock()
+        mock.pending_loaded_map = Mock(sites=())
         mock.pending_loaded_field = Mock()
         mock.pending_loaded_renderer = Mock()
         mock.pending_load_slot = 4

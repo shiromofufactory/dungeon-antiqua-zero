@@ -760,15 +760,7 @@ def _validate_sites(
             "sitesは配列で指定してください。",
         )
         return
-    if value and profile != "world":
-        _diagnostic(
-            diagnostics,
-            "error",
-            "sites_require_world_profile",
-            "sites",
-            "拠点はworld profileのマップにだけ配置できます。",
-        )
-
+    site_label = "拠点" if profile == "world" else "移動口"
     site_ids: set[str] = set()
     occupied_entrances: dict[tuple[int, int], str] = {}
     for index, site in enumerate(value):
@@ -779,7 +771,7 @@ def _validate_sites(
                 "error",
                 "invalid_site",
                 path,
-                "拠点はobjectで指定してください。",
+                f"{site_label}はobjectで指定してください。",
             )
             continue
 
@@ -790,7 +782,7 @@ def _validate_sites(
                 "error",
                 "invalid_id",
                 f"{path}.id",
-                "拠点IDはlower_snake_caseで指定してください。",
+                f"{site_label}IDはlower_snake_caseで指定してください。",
             )
         elif site_id in site_ids:
             _diagnostic(
@@ -798,7 +790,7 @@ def _validate_sites(
                 "error",
                 "duplicate_site_id",
                 f"{path}.id",
-                f"拠点IDが重複しています: {site_id}",
+                f"{site_label}IDが重複しています: {site_id}",
             )
         else:
             site_ids.add(site_id)
@@ -809,7 +801,11 @@ def _validate_sites(
                 "error",
                 "site_name_text_key_is_automatic",
                 f"{path}.name_text_key",
-                "拠点名の文言キーは拠点IDから自動生成されるため指定できません。",
+                (
+                    "拠点名の文言キーは拠点IDから自動生成されるため指定できません。"
+                    if profile == "world"
+                    else "移動口には名称の文言キーを指定できません。"
+                ),
             )
         if "teleport_destination" in site:
             _diagnostic(
@@ -883,7 +879,7 @@ def _validate_sites(
                             "error",
                             "overlapping_site_entrance",
                             offset_path,
-                            f"入口セル{list(position)}は拠点{previous_site}と重複しています。",
+                            f"入口セル{list(position)}は{site_label}{previous_site}と重複しています。",
                         )
                     elif isinstance(site_id, str):
                         occupied_entrances[position] = site_id
@@ -1039,7 +1035,7 @@ def validate_map_links(
             if not isinstance(site, Mapping):
                 continue
             site_id = site.get("id")
-            if isinstance(site_id, str):
+            if source.get("profile") == "world" and isinstance(site_id, str):
                 site_occurrences.setdefault(site_id, []).append((map_id, index))
 
             destination = site.get("destination")
@@ -1293,9 +1289,15 @@ def _resolve_event_triggers(
 def resolve_map(
     data: Mapping[str, Any],
     tileset: Mapping[str, Any],
+    *,
+    permitted_error_codes: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     diagnostics = validate_map_source(data, tileset)
-    errors = [item for item in diagnostics if item.severity == "error"]
+    errors = [
+        item
+        for item in diagnostics
+        if item.severity == "error" and item.code not in permitted_error_codes
+    ]
     if errors:
         raise MapSourceError(errors[0].message)
 

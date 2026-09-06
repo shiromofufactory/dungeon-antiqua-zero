@@ -15,12 +15,15 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import webbrowser
 
 from scripts.map_pipeline import (
+    compile_map,
+    CompiledMap,
     Diagnostic,
     initial_tileset,
     initial_worldmap_tileset,
     load_map_source,
     load_tileset,
     resolve_source_image,
+    save_compiled_map,
     save_map_source,
     save_tileset,
     validate_tileset,
@@ -61,6 +64,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=content_root,
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--runtime-root",
+        type=Path,
+        default=PROJECT_ROOT / "app" / "maps",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument(
         "--no-browser",
@@ -86,6 +95,7 @@ class MetadataApplication:
         tileset_id: str,
         token: str | None = None,
         palette_path: Path | None = None,
+        runtime_root: Path | None = None,
     ):
         if not _valid_tileset_name(tileset_id):
             raise ValueError("タイルセットIDが不正です。")
@@ -100,6 +110,7 @@ class MetadataApplication:
         self.palette_path = (
             palette_path or PROJECT_ROOT / "app" / "assets.pyxpal"
         ).resolve()
+        self.runtime_root = runtime_root.resolve() if runtime_root is not None else None
         self.token = token or secrets.token_urlsafe(24)
 
     def metadata_path_for(self, tileset_id: str) -> Path:
@@ -400,6 +411,47 @@ class MetadataApplication:
                 updates.append((path, original, updated))
         return updates, diagnostics, removed_instance_count
 
+    def _compile_referencing_maps(
+        self,
+        data: Mapping[str, Any],
+        map_updates: list[tuple[Path, dict[str, Any], dict[str, Any]]],
+        diagnostics: list[dict[str, str]],
+    ) -> list[tuple[str, CompiledMap]]:
+        if self.runtime_root is None or any(
+            item.get("severity") == "error" for item in diagnostics
+        ):
+            return []
+        tileset_id = data.get("tileset_id")
+        if not isinstance(tileset_id, str):
+            return []
+        replacements = {path: updated for path, _original, updated in map_updates}
+        source_root = self.content_root / "maps" / "sources"
+        if not source_root.is_dir():
+            return []
+        image_path = self.source_image(data)
+        compiled_maps = []
+        for path in sorted(source_root.glob("*.json")):
+            source = replacements.get(path)
+            if source is None:
+                source = load_map_source(path)
+            if source.get("tileset_id") != tileset_id:
+                continue
+            map_id = source.get("map_id", path.stem)
+            try:
+                compiled = compile_map(source, data, image_path, self.palette_path)
+            except (OSError, ValueError) as error:
+                diagnostics.append(
+                    Diagnostic(
+                        "warning",
+                        "referencing_map_not_generated",
+                        f"maps/sources/{path.name}",
+                        f"参照マップ{map_id}のゲーム用データは更新できませんでした: {error}",
+                    ).as_dict()
+                )
+                continue
+            compiled_maps.append((str(map_id), compiled))
+        return compiled_maps
+
     def save(
         self,
         data: object,
@@ -430,12 +482,20 @@ class MetadataApplication:
             self._prepare_map_object_updates(data, object_id_renames)
         )
         diagnostics.extend(update_diagnostics)
+        compiled_maps = self._compile_referencing_maps(
+            data,
+            map_updates,
+            diagnostics,
+        )
         written_maps: list[tuple[Path, dict[str, Any]]] = []
         try:
             for path, original, updated in map_updates:
                 save_map_source(path, updated)
                 written_maps.append((path, original))
             save_tileset(metadata_path, data)
+            if self.runtime_root is not None:
+                for map_id, compiled in compiled_maps:
+                    save_compiled_map(self.runtime_root / f"{map_id}.json", compiled)
         except BaseException:
             for path, original in written_maps:
                 save_map_source(path, original)
@@ -448,6 +508,7 @@ class MetadataApplication:
                 updated.get("map_id", path.stem)
                 for path, _original, updated in map_updates
             ],
+            "generated_map_ids": [map_id for map_id, _compiled in compiled_maps],
             "removed_map_object_count": removed_instance_count,
         }
 
@@ -673,6 +734,7 @@ def main(argv: list[str] | None = None) -> int:
         application = MetadataApplication(
             args.content_root,
             args.tileset,
+            runtime_root=args.runtime_root,
         )
         server = create_server(application, args.port)
     except (OSError, ValueError) as error:

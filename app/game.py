@@ -445,6 +445,7 @@ class Game:
         self.world_map = self.map_resources.map(WORLD_MAP_ID)
         self.current_map = self.world_map
         self.world_sites = WorldSiteCatalog(self.world_map.sites)
+        self.current_sites = WorldSiteCatalog(self.current_map.sites)
         self.travel_system = TravelSystem(self.world_sites, self.map_resources)
         self.field = FieldMovement(
             self.world_map,
@@ -811,9 +812,9 @@ class Game:
         """Enter a site only after movement completes on an entrance cell."""
 
         arrived = getattr(self.field, "arrived_position", None)
-        if not isinstance(arrived, FieldPosition) or self.current_map is not self.world_map:
+        if not isinstance(arrived, FieldPosition):
             return
-        site = self.world_sites.entrance_at(arrived.x, arrived.y)
+        site = self.current_sites.entrance_at(arrived.x, arrived.y)
         if site is None:
             return
         if not self._stage_map_destination(site.destination):
@@ -846,6 +847,7 @@ class Game:
         if target_map is None or arrival is None:
             raise RuntimeError("map change has incomplete destination data")
         self.current_map = target_map
+        self.current_sites = WorldSiteCatalog(target_map.sites)
         self.field = FieldMovement(
             target_map,
             start=FieldPosition(arrival.position.x, arrival.position.y),
@@ -865,7 +867,8 @@ class Game:
         site = self.pending_site
         if site is None:
             raise RuntimeError("site map change has no entered site")
-        self.travel_system.enter_site(self.save_data, site)
+        if self.current_map is self.world_map:
+            self.travel_system.enter_site(self.save_data, site)
         self._apply_pending_map_destination()
         self.pending_site = None
 
@@ -1639,6 +1642,7 @@ class Game:
             self.character_states = loaded.character_states
             self.inventory_system = loaded.inventory
             self.current_map = self.pending_loaded_map
+            self.current_sites = WorldSiteCatalog(self.current_map.sites)
             self.field = self.pending_loaded_field
             self.field_renderer = self.pending_loaded_renderer
             self.current_save_slot = self.pending_load_slot

@@ -41,6 +41,7 @@ DEFAULT_PORT = 8767
 SESSION_CLIENT_HEADER = "map-editor-ui"
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 SITE_NAME_TEXT_PREFIX = "location."
+PREVIEW_PERMITTED_MAP_ERROR_CODES = frozenset(("map_edge_not_base_ground",))
 ACTOR_ASSETS = {
     "prop": {
         "path": Path("actors/props.png"),
@@ -266,6 +267,7 @@ class MapEditorApplication:
             {
                 site.get("id")
                 for source in self.map_sources(current).values()
+                if source.get("profile") == "world"
                 for site in source.get("sites", [])
                 if isinstance(site, Mapping) and isinstance(site.get("id"), str)
             }
@@ -303,6 +305,8 @@ class MapEditorApplication:
         return f"{SITE_NAME_TEXT_PREFIX}{site_id}"
 
     def site_names_ja(self, data: Mapping[str, Any]) -> dict[str, str]:
+        if data.get("profile") != "world":
+            return {}
         records = {
             record.get("text_key"): record
             for record in self.load_text_records()
@@ -326,6 +330,8 @@ class MapEditorApplication:
         site_names_ja: object,
     ) -> list[Diagnostic]:
         if not isinstance(data, Mapping):
+            return []
+        if data.get("profile") != "world":
             return []
         sites = data.get("sites")
         if not isinstance(sites, list):
@@ -405,7 +411,11 @@ class MapEditorApplication:
         )
         if not tileset_has_errors:
             try:
-                resolved = resolve_map(data, tileset)
+                resolved = resolve_map(
+                    data,
+                    tileset,
+                    permitted_error_codes=PREVIEW_PERMITTED_MAP_ERROR_CODES,
+                )
             except ValueError as error:
                 if has_errors:
                     preview_data = {
@@ -416,7 +426,11 @@ class MapEditorApplication:
                         "event_triggers": [],
                     }
                     try:
-                        resolved = resolve_map(preview_data, tileset)
+                        resolved = resolve_map(
+                            preview_data,
+                            tileset,
+                            permitted_error_codes=PREVIEW_PERMITTED_MAP_ERROR_CODES,
+                        )
                     except ValueError:
                         pass
                 else:
@@ -601,6 +615,8 @@ class MapEditorApplication:
         data: Mapping[str, Any],
         site_names_ja: object,
     ) -> None:
+        if data.get("profile") != "world":
+            return
         if not isinstance(site_names_ja, Mapping):
             raise ValueError("拠点の日本語名が不正です。")
         sites = data.get("sites", [])

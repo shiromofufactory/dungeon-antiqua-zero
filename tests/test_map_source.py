@@ -90,6 +90,12 @@ class MapSourceTest(unittest.TestCase):
         source["grounds"][0][4] = "path"
         codes = {item.code for item in validate_map_source(source, town_tileset)}
         self.assertIn("map_edge_not_base_ground", codes)
+        preview = resolve_map(
+            source,
+            town_tileset,
+            permitted_error_codes=frozenset(("map_edge_not_base_ground",)),
+        )
+        self.assertEqual(preview["ground_cells"][4]["layers"][-1]["ground_id"], "path")
 
         with self.assertRaisesRegex(ValueError, "幅16"):
             initial_map_source("too_small", town_tileset, "town", 15, 15)
@@ -343,6 +349,37 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(compiled.runtime["sites"], [expected_site])
         self.assertEqual(compiled.runtime["arrival_points"], source["arrival_points"])
 
+    def test_allows_unnamed_move_source_on_dungeon_map(self) -> None:
+        tileset = initial_tileset(
+            "dungeon",
+            "mapchips/dungeon",
+            "dungeon",
+            "floor",
+            "passable",
+        )
+        source = initial_map_source("sample_dungeon", tileset, "dungeon", 16, 15)
+        source["sites"] = [
+            {
+                "id": "exit_to_world",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {
+                    "map_id": "worldmap",
+                    "arrival_id": "sample_dungeon_world",
+                },
+            }
+        ]
+
+        diagnostics = validate_map_source(source, tileset)
+        resolved = resolve_map(source, tileset)
+
+        self.assertEqual(
+            [item for item in diagnostics if item.severity == "error"],
+            [],
+        )
+        self.assertEqual(resolved["sites"][0]["id"], "exit_to_world")
+        self.assertEqual(resolved["sites"][0]["entrance_cells"], [[2, 2]])
+
     def test_rejects_invalid_site_cells_and_missing_anchor(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["sites"] = [
@@ -506,6 +543,58 @@ class MapSourceTest(unittest.TestCase):
             duplicate_paths,
             {"first_world.sites[0].id", "second_world.sites[0].id"},
         )
+
+    def test_nonworld_move_source_is_not_a_global_or_teleport_site(self) -> None:
+        world = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        world["grounds"][2][2] = "plain"
+        world["sites"] = [
+            {
+                "id": "shared_id",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {"map_id": "dungeon", "arrival_id": "from_world"},
+            }
+        ]
+        dungeon = initial_map_source("dungeon", self.tileset, "dungeon", 16, 15)
+        dungeon["grounds"][2][2] = "plain"
+        dungeon["arrival_points"] = [
+            {
+                "id": "from_world",
+                "position": [2, 2],
+                "facing": "down",
+                "teleport_enabled": False,
+                "site_id": None,
+            }
+        ]
+        dungeon["sites"] = [
+            {
+                "id": "shared_id",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {"map_id": "test_world", "arrival_id": "return"},
+            },
+            {
+                "id": "local_exit_only",
+                "anchor": {"kind": "cell", "position": [3, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {"map_id": "test_world", "arrival_id": "return"},
+            },
+        ]
+        world["arrival_points"] = [
+            {
+                "id": "return",
+                "position": [3, 2],
+                "facing": "down",
+                "teleport_enabled": True,
+                "site_id": "local_exit_only",
+            }
+        ]
+
+        diagnostics = validate_map_links({"test_world": world, "dungeon": dungeon})
+
+        codes = {item.code for item in diagnostics}
+        self.assertNotIn("duplicate_global_site_id", codes)
+        self.assertIn("unknown_arrival_site_id", codes)
 
     def test_validates_teleport_arrival_site_links(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)

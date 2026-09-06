@@ -77,6 +77,7 @@ code { padding: .08rem .3rem; border-radius: 4px; background: rgba(0,0,0,.26); c
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .map-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
 .map-controls label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.map-controls label[hidden] { display: none; }
 .map-controls input { accent-color: var(--pink); }
 .map-scroll { min-width: 0; min-height: 0; overflow: auto; background-color: #161915; background-image: linear-gradient(45deg,#21251e 25%,transparent 25%),linear-gradient(-45deg,#21251e 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#21251e 75%),linear-gradient(-45deg,transparent 75%,#21251e 75%); background-size: 16px 16px; background-position: 0 0,0 8px,8px -8px,-8px 0; }
 #map-canvas { display: block; image-rendering: pixelated; cursor: crosshair; touch-action: none; }

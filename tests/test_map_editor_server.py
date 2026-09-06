@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from PIL import Image
 
 from scripts.map_pipeline import (
+    initial_map_source,
     initial_tileset,
     initial_worldmap_tileset,
     load_map_source,
@@ -167,9 +168,27 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('id="new-map-dialog"', page)
         self.assertIn('id="change-map-tileset-dialog"', page)
         self.assertIn('id="delete-map-button"', page)
+        self.assertIn('id="save-button" class="button primary" type="button" disabled', page)
+        self.assertIn('id="ground-only-toggle"', page)
         self.assertIn("function renderMapSelector()", script)
+        self.assertIn('byId("save-button").disabled = !canSave()', script)
+        self.assertIn('if (!canSave()) return;', script)
         self.assertIn('api("/api/change-tileset"', script)
         self.assertIn('api("/api/delete"', script)
+
+    def test_ground_editing_tools_and_object_footprint_preview_are_available(self) -> None:
+        page = self.get_text("/")
+        script = self.get_text("/app.js")
+
+        self.assertIn("地面だけを表示する", page)
+        self.assertIn('data-action="select-ground-tool"', script)
+        self.assertIn('data-tool="rectangle"', script)
+        self.assertIn("function paintGroundRectangle(rect)", script)
+        self.assertIn('kind: "ground_rectangle"', script)
+        self.assertIn("function drawGroundPaintPreview(context, scale)", script)
+        self.assertIn("function drawObjectPlacementPreview(context, scale)", script)
+        self.assertIn("definition.size[0] * scale", script)
+        self.assertIn("context.setLineDash", script)
 
     def test_lists_creates_saves_and_reopens_town_map(self) -> None:
         catalog = self.get_json("/api/catalog?token=test-token")
@@ -267,7 +286,29 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("function prioritizeMapSelectionCandidates(candidates)", script)
         self.assertIn("candidate.tab === state.tab", script)
         self.assertIn("function selectAnyAt(cell)", script)
-        self.assertIn("const candidate = selectAnyAt(cell)", script)
+        self.assertIn("selectAnyAt(drag.start)", script)
+
+    def test_right_drag_selects_and_bulk_edits_all_placed_kinds(self) -> None:
+        script = self.get_text("/app.js")
+
+        self.assertIn("function rangeSelectionItems(rect)", script)
+        self.assertIn('items.push({ kind: "object", id: instance.id })', script)
+        self.assertIn('items.push({ kind: "site", id: site.id })', script)
+        self.assertIn('items.push({ kind: "arrival", id: arrival.id })', script)
+        self.assertIn('items.push({ kind: "actor", id: actor.id })', script)
+        self.assertIn('items.push({ kind: "trigger", id: trigger.id })', script)
+        self.assertIn("function beginRangeSelection(event, cell)", script)
+        self.assertIn("function beginBulkDrag(event, cell)", script)
+        self.assertIn("function validBulkDelta(delta)", script)
+        self.assertIn("function deleteBulkSelection()", script)
+        self.assertIn('data-action="delete-bulk-selection"', script)
+        self.assertIn('state.pointerDrag.kind === "range_selection"', script)
+        self.assertIn('state.pointerDrag.kind === "bulk"', script)
+        self.assertIn("drawRangeSelection(context, scale)", script)
+        self.assertIn("function clearBulkSelectionWithEscape(event)", script)
+        self.assertIn('event.key !== "Escape"', script)
+        self.assertIn('document.querySelector("dialog[open]")', script)
+        self.assertIn("if (clearBulkSelectionWithEscape(event)) return", script)
 
     def test_tab_change_clears_other_selections_and_object_trigger_has_own_tool(self) -> None:
         script = self.get_text("/app.js")
@@ -373,6 +414,69 @@ class MapEditorServerTest(unittest.TestCase):
         )
         self.assertIsNotNone(result["resolved"])
 
+    def test_saves_unnamed_move_source_on_nonworld_map(self) -> None:
+        world = self.get_json("/api/document?token=test-token")["data"]
+        world["grounds"][2][2] = "plain"
+        world["sites"] = [
+            {
+                "id": "site_1",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {"map_id": "", "arrival_id": ""},
+            }
+        ]
+        save_map_source(self.application.source_path, world)
+
+        tileset = self.application.load_tileset("village")
+        data = initial_map_source(
+            "sample_village",
+            tileset,
+            "town",
+            16,
+            15,
+        )
+        data["arrival_points"] = [
+            {
+                "id": "from_inside",
+                "position": [3, 2],
+                "facing": "down",
+                "teleport_enabled": False,
+                "site_id": None,
+            }
+        ]
+        data["sites"] = [
+            {
+                "id": "site_1",
+                "anchor": {"kind": "cell", "position": [2, 2]},
+                "entrance_offsets": [[0, 0]],
+                "destination": {
+                    "map_id": "sample_village",
+                    "arrival_id": "from_inside",
+                },
+            }
+        ]
+
+        result = self.post_json("/api/save", data)
+
+        self.assertTrue(result["saved"])
+        self.assertTrue(
+            {
+                "sites_require_world_profile",
+                "duplicate_global_site_id",
+                "missing_site_name_ja",
+            }.isdisjoint(item["code"] for item in result["diagnostics"])
+        )
+        self.assertEqual(self.application.site_names_ja(data), {})
+        self.assertFalse(self.application.texts_path.exists())
+        self.assertEqual(self.application.site_options(data), ["site_1"])
+
+        script = self.get_text("/app.js")
+        self.assertIn('const siteLabel = isWorld ? "拠点" : "移動口"', script)
+        self.assertIn("function uniqueSiteId(base)", script)
+        self.assertIn("座標${siteLabel}を追加", script)
+        self.assertIn("この移動口の名称はゲーム中に表示されません。", script)
+        self.assertNotIn("拠点はworld profileで編集します。", script)
+
     def test_keeps_visual_preview_for_incomplete_site(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]
         data["grounds"][2][2] = "plain"
@@ -456,6 +560,11 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertFalse(self.application.source_path.exists())
         self.assertIn("map_edge_not_base_ground", {item["code"] for item in result["diagnostics"]})
+        self.assertIsNotNone(result["resolved"])
+        self.assertEqual(
+            result["resolved"]["ground_cells"][0]["layers"][-1]["ground_id"],
+            "plain",
+        )
 
 
 if __name__ == "__main__":

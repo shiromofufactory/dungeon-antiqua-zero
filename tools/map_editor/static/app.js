@@ -24,12 +24,15 @@ const state = {
   future: [],
   tab: "ground",
   groundId: null,
+  groundTool: "brush",
   objectId: null,
   selectedInstanceId: null,
   selectedSiteId: null,
   selectedArrivalId: null,
   selectedActorId: null,
   selectedTriggerId: null,
+  bulkSelection: [],
+  selectionRect: null,
   eventTool: "select",
   travelTool: "select",
   resizeHorizontal: "right",
@@ -37,10 +40,13 @@ const state = {
   zoom: 2,
   showGrid: true,
   showCollision: false,
+  showGroundOnly: false,
   paused: false,
   animationStartedAt: performance.now(),
   pointerStroke: null,
   pointerDrag: null,
+  groundPaintRect: null,
+  hoveredCell: null,
   resolveTimer: null,
   resolveRevision: 0,
   siteNameEditing: false,
@@ -164,9 +170,15 @@ function applyDocumentPayload(payload) {
   state.selectedArrivalId = null;
   state.selectedActorId = null;
   state.selectedTriggerId = null;
+  state.bulkSelection = [];
+  state.selectionRect = null;
+  state.groundTool = "brush";
+  state.groundPaintRect = null;
+  state.hoveredCell = null;
   state.zoom = 2;
   state.showGrid = true;
   state.showCollision = false;
+  state.showGroundOnly = false;
   restoreUiSettings();
   rawImage.onload = prepareSourceImage;
   rawImage.onerror = () => showToast("マップチップ画像を表示できません。", true);
@@ -224,7 +236,7 @@ function settingsKey() {
 function saveUiSettings() {
   if (!state.data) return;
   try {
-    localStorage.setItem(settingsKey(), JSON.stringify({ zoom: state.zoom, showGrid: state.showGrid, showCollision: state.showCollision }));
+    localStorage.setItem(settingsKey(), JSON.stringify({ zoom: state.zoom, showGrid: state.showGrid, showCollision: state.showCollision, showGroundOnly: state.showGroundOnly }));
   } catch (_error) {}
 }
 
@@ -235,7 +247,12 @@ function restoreUiSettings() {
     if (Number.isInteger(settings.zoom)) state.zoom = Math.max(1, Math.min(4, settings.zoom));
     if (typeof settings.showGrid === "boolean") state.showGrid = settings.showGrid;
     if (typeof settings.showCollision === "boolean") state.showCollision = settings.showCollision;
+    if (typeof settings.showGroundOnly === "boolean") state.showGroundOnly = settings.showGroundOnly;
   } catch (_error) {}
+}
+
+function canSave() {
+  return Boolean(state.data) && (state.dirty || state.diagnostics.some((issue) => issue.severity === "error"));
 }
 
 function updateSaveState(kind = null, text = null) {
@@ -249,7 +266,7 @@ function updateSaveState(kind = null, text = null) {
   element.textContent = text || (errors ? "要修正" : state.dirty ? "未保存" : "保存済み");
   byId("undo-button").disabled = state.history.length === 0;
   byId("redo-button").disabled = state.future.length === 0;
-  byId("save-button").disabled = errors;
+  byId("save-button").disabled = !canSave();
 }
 
 function beginChange() {
@@ -317,6 +334,37 @@ function normalizeSelections() {
   if (!state.data?.arrival_points?.some((arrival) => arrival.id === state.selectedArrivalId)) state.selectedArrivalId = null;
   if (!state.data?.actors?.some((actor) => actor.id === state.selectedActorId)) state.selectedActorId = null;
   if (!state.data?.event_triggers?.some((trigger) => trigger.id === state.selectedTriggerId)) state.selectedTriggerId = null;
+  state.bulkSelection = (state.bulkSelection || []).filter((item) => bulkItemExists(item));
+  if (!state.bulkSelection.length) state.selectionRect = null;
+}
+
+function clearSingleSelections() {
+  state.selectedInstanceId = null;
+  state.selectedSiteId = null;
+  state.selectedArrivalId = null;
+  state.selectedActorId = null;
+  state.selectedTriggerId = null;
+}
+
+function clearBulkSelection() {
+  state.bulkSelection = [];
+  state.selectionRect = null;
+}
+
+function bulkItemExists(item) {
+  if (!state.data || !item) return false;
+  const collections = {
+    object: state.data.objects,
+    site: state.data.sites,
+    arrival: state.data.arrival_points,
+    actor: state.data.actors,
+    trigger: standaloneTriggers(),
+  };
+  return Boolean(collections[item.kind]?.some((record) => record.id === item.id));
+}
+
+function isBulkSelected(kind, id) {
+  return state.bulkSelection.some((item) => item.kind === kind && item.id === id);
 }
 
 function clearSelectionsOutsideTab(tab) {
@@ -513,7 +561,12 @@ function renderPalette() {
   if (state.tab === "ground") {
     container.innerHTML = `
       <div class="section">
-        <div class="section-title"><h2>地面ブラシ</h2><span class="subtle">ドラッグで塗布</span></div>
+        <div class="section-title"><h2>地面</h2><span class="subtle">塗り方を選択</span></div>
+        <div class="row" role="group" aria-label="地面の塗り方" style="margin-bottom:9px">
+          <button class="button small ${state.groundTool === "brush" ? "secondary" : "ghost"}" type="button" data-action="select-ground-tool" data-tool="brush" aria-pressed="${state.groundTool === "brush"}">ブラシ</button>
+          <button class="button small ${state.groundTool === "rectangle" ? "secondary" : "ghost"}" type="button" data-action="select-ground-tool" data-tool="rectangle" aria-pressed="${state.groundTool === "rectangle"}">矩形塗り</button>
+        </div>
+        <p class="subtle" style="margin-bottom:9px">${state.groundTool === "rectangle" ? "左ドラッグした矩形をまとめて塗ります。" : "左ドラッグで通過したセルを塗ります。"}</p>
         <div class="palette-list">${state.tileset.grounds.map((ground, index) => `
           <button class="palette-item ${ground.id === state.groundId ? "active" : ""}" type="button" data-action="select-ground" data-id="${escapeHtml(ground.id)}">
             <canvas data-ground-thumb="${index}" width="48" height="48"></canvas><span>${escapeHtml(ground.id)}</span>
@@ -529,16 +582,16 @@ function renderPalette() {
           </button>`).join("") || `<div class="empty-state">オブジェクト定義がありません。</div>`}</div>
         </div>`;
   } else if (state.tab === "site") {
+    const isWorld = state.data.profile === "world";
+    const siteLabel = isWorld ? "拠点" : "移動口";
     container.innerHTML = `
       <div class="section">
-        <div class="section-title"><h2>拠点</h2><span class="subtle">${state.data.sites.length}件</span></div>
+        <div class="section-title"><h2>${siteLabel}</h2><span class="subtle">${state.data.sites.length}件</span></div>
         <div class="travel-list">${state.data.sites.map((site) => `
           <button class="travel-item ${site.id === state.selectedSiteId ? "active" : ""}" type="button" data-action="select-site" data-id="${escapeHtml(site.id)}">
-            <strong>${escapeHtml(site.id)}</strong>${escapeHtml(state.siteNamesJa[site.id] || "日本語名未入力")}
-          </button>`).join("") || `<div class="empty-state">拠点がありません。</div>`}</div>
-        ${state.data.profile === "world"
-          ? `<div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-site">座標拠点を追加</button></div>`
-          : `<div class="empty-state">拠点はworld profileで編集します。</div>`}
+            <strong>${escapeHtml(site.id)}</strong>${isWorld ? escapeHtml(state.siteNamesJa[site.id] || "日本語名未入力") : "名称表示なし"}
+          </button>`).join("") || `<div class="empty-state">${siteLabel}がありません。</div>`}</div>
+        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-site">座標${siteLabel}を追加</button></div>
       </div>
       <div class="section">
         <div class="section-title"><h2>到着地点</h2><span class="subtle">${state.data.arrival_points.length}件</span></div>
@@ -636,6 +689,16 @@ function siteNameTextKey(siteId) {
   return `location.${siteId}`;
 }
 
+function bulkSelectionSummary() {
+  const labels = { object: "オブジェクト", site: "拠点", arrival: "到着地点", actor: "actor", trigger: "トリガー" };
+  const counts = new Map();
+  for (const item of state.bulkSelection) counts.set(item.kind, (counts.get(item.kind) || 0) + 1);
+  return Object.entries(labels)
+    .filter(([kind]) => counts.has(kind))
+    .map(([kind, label]) => `${label} ${counts.get(kind)}`)
+    .join(" / ");
+}
+
 function availableDestinations() {
   const options = state.destinationOptions.map((option) => ({
     map_id: option.map_id,
@@ -663,7 +726,8 @@ function destinationArrivalOptions(mapId, selected) {
 }
 
 function availableSiteIds() {
-  return [...new Set([...state.siteOptions, ...state.data.sites.map((site) => site.id)])].sort();
+  const localWorldSiteIds = state.data.profile === "world" ? state.data.sites.map((site) => site.id) : [];
+  return [...new Set([...state.siteOptions, ...localWorldSiteIds])].sort();
 }
 
 function siteIdOptions(selected) {
@@ -688,6 +752,14 @@ function renderInspector() {
   const trigger = currentTrigger();
   const linkedActorTrigger = actor ? actorTrigger(actor.id) : null;
   const attachedSite = instance ? siteForObject(instance.id) : null;
+  const isWorld = state.data.profile === "world";
+  const siteLabel = isWorld ? "拠点" : "移動口";
+  const bulkInspector = state.bulkSelection.length ? `
+    <div class="section bulk-selection-inspector">
+      <div class="section-title"><h2>範囲選択</h2><span class="subtle">${state.bulkSelection.length}件</span></div>
+      <div class="instance-card"><strong>${escapeHtml(bulkSelectionSummary())}</strong>選択対象を左ドラッグすると、まとめて移動できます。</div>
+      <div class="row end" style="margin-top:9px"><button class="button danger small" type="button" data-action="delete-bulk-selection">選択範囲を削除</button></div>
+    </div>` : "";
   const objectInspector = `
     <div class="section">
       <div class="section-title"><h2>選択オブジェクト</h2><span class="subtle">配置数 ${state.data.objects.length}</span></div>
@@ -697,29 +769,29 @@ function renderInspector() {
           <div class="row"><button class="button ghost small" type="button" data-action="object-back">背面へ</button><button class="button ghost small" type="button" data-action="object-front">前面へ</button></div>
           <button class="button danger small" type="button" data-action="delete-instance">配置を削除</button>
         </div>
-        ${state.data.profile === "world" ? `<div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="${attachedSite ? "open-attached-site" : "attach-site"}">${attachedSite ? `拠点 ${escapeHtml(attachedSite.id)} を編集` : "拠点として設定"}</button></div>` : ""}`
+        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="${attachedSite ? "open-attached-site" : "attach-site"}">${attachedSite ? `${siteLabel} ${escapeHtml(attachedSite.id)} を編集` : `${siteLabel}として設定`}</button></div>`
         : `<div class="empty-state">マップ上のオブジェクトを右クリックすると選択できます。</div>`}
     </div>`;
   const siteInspector = `
     <div class="section">
-      <div class="section-title"><h2>選択拠点</h2><span class="subtle">${state.data.sites.length}件</span></div>
+      <div class="section-title"><h2>選択${siteLabel}</h2><span class="subtle">${state.data.sites.length}件</span></div>
       ${site ? `
         <div class="instance-card"><strong>${escapeHtml(site.id)}</strong>アンカー: ${site.anchor.kind === "object" ? `オブジェクト ${escapeHtml(site.anchor.object_id)}` : `セル ${site.anchor.position.join(", ")}`}<br>入口: ${site.entrance_offsets.length}セル</div>
         <div class="form-grid" style="margin-top:9px">
           <div class="field full">
-            <label>拠点ID</label>
+            <label>${siteLabel}ID</label>
             <input type="text" value="${escapeHtml(site.id)}" data-site-field="id">
-            <div class="field-note">文言キー：${escapeHtml(siteNameTextKey(site.id))}</div>
+            ${isWorld ? `<div class="field-note">文言キー：${escapeHtml(siteNameTextKey(site.id))}</div>` : `<div class="field-note">この移動口の名称はゲーム中に表示されません。</div>`}
           </div>
-          <div class="field full"><label>日本語名</label><input type="text" value="${escapeHtml(state.siteNamesJa[site.id] || "")}" data-site-name-ja="true"></div>
+          ${isWorld ? `<div class="field full"><label>日本語名</label><input type="text" value="${escapeHtml(state.siteNamesJa[site.id] || "")}" data-site-name-ja="true"></div>` : ""}
           <div class="field"><label>移動先マップID</label><select data-site-field="destination.map_id">${destinationMapOptions(site.destination.map_id)}</select></div>
           <div class="field"><label>移動先到着地点ID</label><select data-site-field="destination.arrival_id">${destinationArrivalOptions(site.destination.map_id, site.destination.arrival_id)}</select></div>
         </div>
         <div class="row" style="margin-top:9px">
           <button class="button ghost small" type="button" data-action="edit-site-entrances">入口セルを編集</button>
         </div>
-        <div class="row end" style="margin-top:9px"><button class="button danger small" type="button" data-action="delete-site">拠点を削除</button></div>
-      ` : `<div class="empty-state">左の一覧またはキャンバスから拠点を選択してください。</div>`}
+        <div class="row end" style="margin-top:9px"><button class="button danger small" type="button" data-action="delete-site">${siteLabel}を削除</button></div>
+      ` : `<div class="empty-state">左の一覧またはキャンバスから${siteLabel}を選択してください。</div>`}
     </div>
     <div class="section">
       <div class="section-title"><h2>選択到着地点</h2><span class="subtle">${state.data.arrival_points.length}件</span></div>
@@ -768,6 +840,7 @@ function renderInspector() {
         <button class="button secondary small" type="button" data-action="resize-map">寸法を反映</button>
       </div>
     </div>
+    ${bulkInspector}
     ${state.tab === "site" ? siteInspector : state.tab === "event" ? eventInspector : objectInspector}`;
   drawSelectedActorSprite();
 }
@@ -788,6 +861,8 @@ function renderAll() {
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === state.tab));
   byId("grid-toggle").checked = state.showGrid;
   byId("collision-toggle").checked = state.showCollision;
+  byId("ground-only-toggle").checked = state.showGroundOnly;
+  byId("ground-only-control").hidden = state.tab !== "ground";
   byId("animation-toggle").textContent = state.paused ? "再生" : "一時停止";
   byId("zoom-label").textContent = `${state.zoom}×`;
   byId("map-title").textContent = state.data.map_id;
@@ -871,7 +946,7 @@ function drawCellSelectionFrame(context, position, scale) {
 function drawTravelMarkers(context, scale) {
   const emphasized = state.tab === "site";
   for (const site of state.data.sites) {
-    const selected = site.id === state.selectedSiteId;
+    const selected = site.id === state.selectedSiteId || isBulkSelected("site", site.id);
     const origin = siteAnchorPosition(site);
     context.lineWidth = Math.max(selected ? 3 : emphasized ? 2.5 : 2, state.zoom);
     for (const entrance of siteEntrancePositions(site)) {
@@ -892,7 +967,7 @@ function drawTravelMarkers(context, scale) {
     }
   }
   for (const arrival of state.data.arrival_points) {
-    const selected = arrival.id === state.selectedArrivalId;
+    const selected = arrival.id === state.selectedArrivalId || isBulkSelected("arrival", arrival.id);
     const color = selected ? "#91f090" : emphasized ? "#66db79" : "rgba(75,150,82,.78)";
     context.fillStyle = selected ? "rgba(95,232,120,.52)" : emphasized ? "rgba(95,232,120,.40)" : "rgba(95,232,120,.22)";
     context.strokeStyle = color;
@@ -907,7 +982,7 @@ function drawTravelMarkers(context, scale) {
 function drawEventMarkers(context, scale) {
   const emphasized = state.tab === "event";
   for (const trigger of standaloneTriggers()) {
-    const selected = trigger.id === state.selectedTriggerId;
+    const selected = trigger.id === state.selectedTriggerId || isBulkSelected("trigger", trigger.id);
     context.fillStyle = selected ? "rgba(255,79,163,.52)" : emphasized ? "rgba(224,184,90,.40)" : "rgba(224,184,90,.22)";
     context.strokeStyle = selected ? "#ff67bd" : emphasized ? "#e9c45c" : "rgba(208,169,78,.78)";
     context.lineWidth = Math.max(selected ? 3 : emphasized ? 2.5 : 2, state.zoom);
@@ -920,7 +995,7 @@ function drawEventMarkers(context, scale) {
 
 function drawActors(context, scale) {
   for (const actor of state.data.actors) {
-    const selected = actor.id === state.selectedActorId;
+    const selected = actor.id === state.selectedActorId || isBulkSelected("actor", actor.id);
     const rendered = drawActorOnMap(context, actor, scale);
     if (!rendered) {
       const centerX = (actor.position[0] + .5) * scale;
@@ -931,7 +1006,57 @@ function drawActors(context, scale) {
       context.fill();
       if (actor.kind !== "prop") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
     }
+    if (selected) drawCellSelectionFrame(context, actor.position, scale);
   }
+}
+
+function drawRangeSelection(context, scale) {
+  if (!state.selectionRect) return;
+  const { left, top, right, bottom } = state.selectionRect;
+  context.save();
+  context.fillStyle = "rgba(255,79,163,.10)";
+  context.strokeStyle = "#ff67bd";
+  context.lineWidth = Math.max(2, state.zoom);
+  context.setLineDash([Math.max(4, state.zoom * 3), Math.max(3, state.zoom * 2)]);
+  context.fillRect(left * scale, top * scale, (right - left + 1) * scale, (bottom - top + 1) * scale);
+  context.strokeRect(left * scale + 1, top * scale + 1, (right - left + 1) * scale - 2, (bottom - top + 1) * scale - 2);
+  context.restore();
+}
+
+function drawGroundPaintPreview(context, scale) {
+  if (!state.groundPaintRect) return;
+  const { left, top, right, bottom } = state.groundPaintRect;
+  context.save();
+  context.fillStyle = "rgba(224,184,90,.14)";
+  context.strokeStyle = "#f0cf7e";
+  context.lineWidth = Math.max(2, state.zoom);
+  context.setLineDash([Math.max(4, state.zoom * 3), Math.max(3, state.zoom * 2)]);
+  context.fillRect(left * scale, top * scale, (right - left + 1) * scale, (bottom - top + 1) * scale);
+  context.strokeRect(left * scale + 1, top * scale + 1, (right - left + 1) * scale - 2, (bottom - top + 1) * scale - 2);
+  context.restore();
+}
+
+function drawObjectPlacementPreview(context, scale) {
+  if (state.tab !== "object" || !state.hoveredCell || state.pointerDrag || state.bulkSelection.length) return;
+  const definition = state.tileset.objects.find((object) => object.id === state.objectId);
+  if (!definition) return;
+  const selected = currentInstance();
+  if (selected && instanceOccupies(selected, ...state.hoveredCell)) return;
+  const [x, y] = state.hoveredCell;
+  const valid = x + definition.size[0] <= state.data.size[0]
+    && y + definition.size[1] <= state.data.size[1]
+    && !state.data.objects.some((instance) => instance.origin[0] === x && instance.origin[1] === y);
+  context.save();
+  context.fillStyle = valid ? "rgba(114,183,119,.12)" : "rgba(227,119,107,.14)";
+  context.setLineDash([Math.max(4, state.zoom * 3), Math.max(3, state.zoom * 2)]);
+  context.fillRect(x * scale, y * scale, definition.size[0] * scale, definition.size[1] * scale);
+  context.strokeStyle = "rgba(12,18,11,.88)";
+  context.lineWidth = Math.max(4, state.zoom * 2);
+  context.strokeRect(x * scale + 1, y * scale + 1, definition.size[0] * scale - 2, definition.size[1] * scale - 2);
+  context.strokeStyle = valid ? "#d8ffd9" : "#ff8f84";
+  context.lineWidth = Math.max(2, state.zoom);
+  context.strokeRect(x * scale + 1, y * scale + 1, definition.size[0] * scale - 2, definition.size[1] * scale - 2);
+  context.restore();
 }
 
 function drawMap(now) {
@@ -946,6 +1071,7 @@ function drawMap(now) {
     canvas.height = targetHeight;
   }
   const context = canvas.getContext("2d");
+  const groundOnly = state.tab === "ground" && state.showGroundOnly;
   context.clearRect(0, 0, canvas.width, canvas.height);
   if (state.resolved) {
     state.resolved.ground_cells.forEach((cell, index) => {
@@ -953,11 +1079,11 @@ function drawMap(now) {
       const y = Math.floor(index / width) * scale;
       for (const layer of cell.layers) drawSourceTile(context, frameTile(layer, now), x, y, scale);
     });
-    for (const cell of state.resolved.object_cells) {
+    if (!groundOnly) for (const cell of state.resolved.object_cells) {
       if (cell.draw_group === "object_foreground") continue;
       drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
     }
-    if (state.showCollision) {
+    if (state.showCollision && !groundOnly) {
       context.fillStyle = "rgba(239,91,80,.32)";
       context.strokeStyle = "rgba(255,130,118,.9)";
       context.lineWidth = Math.max(1, state.zoom);
@@ -970,15 +1096,14 @@ function drawMap(now) {
       });
     }
   }
-  drawActors(context, scale);
-  if (state.resolved) {
+  if (!groundOnly) drawActors(context, scale);
+  if (state.resolved && !groundOnly) {
     for (const cell of state.resolved.object_cells) {
       if (cell.draw_group !== "object_foreground") continue;
       drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
     }
   }
-  const selected = currentInstance();
-  if (selected) {
+  if (!groundOnly) for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
     const definition = state.tileset.objects.find((object) => object.id === selected.definition_id);
     if (definition) {
       context.strokeStyle = "#ff4fa3";
@@ -986,9 +1111,11 @@ function drawMap(now) {
       context.strokeRect(selected.origin[0] * scale + 1, selected.origin[1] * scale + 1, definition.size[0] * scale - 2, definition.size[1] * scale - 2);
     }
   }
-  drawTravelMarkers(context, scale);
-  drawEventMarkers(context, scale);
-  if (currentActor()) drawCellSelectionFrame(context, currentActor().position, scale);
+  if (!groundOnly) {
+    drawTravelMarkers(context, scale);
+    drawEventMarkers(context, scale);
+    drawRangeSelection(context, scale);
+  }
   if (state.showGrid) {
     context.strokeStyle = "rgba(238,233,215,.18)";
     context.lineWidth = 1;
@@ -997,6 +1124,8 @@ function drawMap(now) {
     for (let y = 0; y <= height; y += 1) { context.moveTo(0, y * scale + .5); context.lineTo(targetWidth, y * scale + .5); }
     context.stroke();
   }
+  drawGroundPaintPreview(context, scale);
+  drawObjectPlacementPreview(context, scale);
 }
 
 function animationLoop(now) {
@@ -1006,8 +1135,10 @@ function animationLoop(now) {
 
 function updateToolStatus() {
   if (!state.data) return;
-  if (state.tab === "ground") byId("tool-status").textContent = `地面ブラシ: ${state.groundId || "—"}`;
-  else if (state.tab === "object") byId("tool-status").textContent = `左: ${state.objectId || "—"}を配置 / 右: 選択・移動 / 選択後は左ドラッグでも移動`;
+  const rangeHint = "右ドラッグ: 配置要素を範囲選択";
+  if (state.bulkSelection.length) byId("tool-status").textContent = `${state.bulkSelection.length}件を範囲選択中 / 選択対象を左ドラッグ: 一括移動 / Delete: 一括削除`;
+  else if (state.tab === "ground") byId("tool-status").textContent = `${state.groundTool === "rectangle" ? "矩形塗り" : "地面ブラシ"}: ${state.groundId || "—"} / ${rangeHint}`;
+  else if (state.tab === "object") byId("tool-status").textContent = `左: ${state.objectId || "—"}を配置 / 右クリック: 選択 / ${rangeHint}`;
   else if (state.tab === "site") {
     const selectedSite = currentSite();
     const labels = {
@@ -1017,7 +1148,7 @@ function updateToolStatus() {
       create_arrival: "到着地点にするセルを選択",
       move_arrival: "到着地点の新しいセルを選択",
     };
-    byId("tool-status").textContent = labels[state.travelTool] || labels.select;
+    byId("tool-status").textContent = `${labels[state.travelTool] || labels.select} / ${rangeHint}`;
   } else {
     const labels = {
       select: "actorまたはtriggerを選択",
@@ -1027,7 +1158,7 @@ function updateToolStatus() {
       move_actor: "actorの新しいセルを選択",
       trigger_offsets: "trigger対象セルをクリックして追加・解除",
     };
-    byId("tool-status").textContent = labels[state.eventTool] || labels.select;
+    byId("tool-status").textContent = `${labels[state.eventTool] || labels.select} / ${rangeHint}`;
   }
 }
 
@@ -1041,10 +1172,313 @@ function mapCellFromPointer(event) {
   return [x, y];
 }
 
+function normalizedCellRect(start, end) {
+  return {
+    left: Math.min(start[0], end[0]),
+    top: Math.min(start[1], end[1]),
+    right: Math.max(start[0], end[0]),
+    bottom: Math.max(start[1], end[1]),
+  };
+}
+
+function pointInCellRect(position, rect) {
+  return Boolean(position && position[0] >= rect.left && position[0] <= rect.right
+    && position[1] >= rect.top && position[1] <= rect.bottom);
+}
+
+function rangeSelectionItems(rect) {
+  const items = [];
+  for (const instance of state.data.objects) {
+    const definition = objectDefinition(instance);
+    if (definition?.cells.some((cell) => pointInCellRect(addPoint(instance.origin, cell.offset), rect))) {
+      items.push({ kind: "object", id: instance.id });
+    }
+  }
+  for (const site of state.data.sites) {
+    const origin = siteAnchorPosition(site);
+    if (siteEntrancePositions(site).some((position) => pointInCellRect(position, rect))
+      || (site.anchor?.kind === "cell" && pointInCellRect(origin, rect))) {
+      items.push({ kind: "site", id: site.id });
+    }
+  }
+  for (const arrival of state.data.arrival_points) {
+    if (pointInCellRect(arrival.position, rect)) items.push({ kind: "arrival", id: arrival.id });
+  }
+  for (const actor of state.data.actors) {
+    if (pointInCellRect(actor.position, rect)) items.push({ kind: "actor", id: actor.id });
+  }
+  for (const trigger of standaloneTriggers()) {
+    if (triggerPositions(trigger).some((position) => pointInCellRect(position, rect))) {
+      items.push({ kind: "trigger", id: trigger.id });
+    }
+  }
+  return items;
+}
+
+function beginRangeSelection(event, cell) {
+  const selectedObject = currentInstance();
+  state.selectionRect = null;
+  state.pointerDrag = {
+    kind: "range_selection",
+    changed: false,
+    pointerId: event.pointerId,
+    start: [...cell],
+    last: [...cell],
+    draggableObjectId: selectedObject && instanceOccupies(selectedObject, ...cell) ? selectedObject.id : null,
+  };
+  mapCanvas.setPointerCapture(event.pointerId);
+}
+
+function updateRangeSelection(event, cell) {
+  if (state.pointerDrag?.kind !== "range_selection") return;
+  if (cell[0] === state.pointerDrag.last[0] && cell[1] === state.pointerDrag.last[1]) return;
+  if (!state.pointerDrag.changed && state.pointerDrag.draggableObjectId
+    && state.pointerDrag.draggableObjectId === state.selectedInstanceId) {
+    const start = [...state.pointerDrag.start];
+    beginObjectDrag(event, start);
+    dragObjectTo(cell);
+    return;
+  }
+  if (!state.pointerDrag.changed) {
+    clearSingleSelections();
+    clearBulkSelection();
+    state.travelTool = "select";
+    state.eventTool = "select";
+  }
+  state.pointerDrag.last = [...cell];
+  state.pointerDrag.changed = true;
+  state.selectionRect = normalizedCellRect(state.pointerDrag.start, cell);
+  drawMap(performance.now());
+}
+
+function bulkItemOccupiesCell(item, cell) {
+  if (item.kind === "object") {
+    const instance = state.data.objects.find((record) => record.id === item.id);
+    return Boolean(instance && instanceOccupies(instance, ...cell));
+  }
+  if (item.kind === "site") {
+    const site = state.data.sites.find((record) => record.id === item.id);
+    const origin = siteAnchorPosition(site);
+    return Boolean(site && (siteEntrancePositions(site).some((position) => position[0] === cell[0] && position[1] === cell[1])
+      || (site.anchor?.kind === "cell" && origin?.[0] === cell[0] && origin?.[1] === cell[1])));
+  }
+  if (item.kind === "arrival") {
+    const arrival = state.data.arrival_points.find((record) => record.id === item.id);
+    return Boolean(arrival && arrival.position[0] === cell[0] && arrival.position[1] === cell[1]);
+  }
+  if (item.kind === "actor") {
+    const actor = state.data.actors.find((record) => record.id === item.id);
+    return Boolean(actor && actor.position[0] === cell[0] && actor.position[1] === cell[1]);
+  }
+  const trigger = standaloneTriggers().find((record) => record.id === item.id);
+  return Boolean(trigger && triggerPositions(trigger).some((position) => position[0] === cell[0] && position[1] === cell[1]));
+}
+
+function bulkMoveDescriptors() {
+  const descriptors = [];
+  for (const item of state.bulkSelection) {
+    if (item.kind === "object") {
+      const record = state.data.objects.find((candidate) => candidate.id === item.id);
+      if (record) descriptors.push({ kind: item.kind, id: item.id, position: [...record.origin] });
+    } else if (item.kind === "site") {
+      const record = state.data.sites.find((candidate) => candidate.id === item.id);
+      if (record?.anchor?.kind === "cell") descriptors.push({ kind: item.kind, id: item.id, position: [...record.anchor.position] });
+    } else if (item.kind === "arrival") {
+      const record = state.data.arrival_points.find((candidate) => candidate.id === item.id);
+      if (record) descriptors.push({ kind: item.kind, id: item.id, position: [...record.position] });
+    } else if (item.kind === "actor") {
+      const record = state.data.actors.find((candidate) => candidate.id === item.id);
+      if (record) descriptors.push({ kind: item.kind, id: item.id, position: [...record.position] });
+    } else if (item.kind === "trigger") {
+      const record = standaloneTriggers().find((candidate) => candidate.id === item.id);
+      if (record?.anchor?.kind === "cell") descriptors.push({ kind: item.kind, id: item.id, position: [...record.anchor.position] });
+    }
+  }
+  return descriptors;
+}
+
+function beginBulkDrag(event, cell) {
+  if (!state.bulkSelection.some((item) => bulkItemOccupiesCell(item, cell))) return false;
+  const descriptors = bulkMoveDescriptors();
+  if (!descriptors.length) {
+    showToast("選択対象は別のアンカーに追従するため、単独では移動できません。", true);
+    return true;
+  }
+  beginChange();
+  state.pointerDrag = {
+    kind: "bulk",
+    changed: false,
+    pointerId: event.pointerId,
+    start: [...cell],
+    delta: [0, 0],
+    descriptors,
+    originalRect: state.selectionRect ? { ...state.selectionRect } : null,
+  };
+  mapCanvas.setPointerCapture(event.pointerId);
+  return true;
+}
+
+function candidatePosition(descriptor, delta) {
+  return [descriptor.position[0] + delta[0], descriptor.position[1] + delta[1]];
+}
+
+function validBulkDelta(delta) {
+  const [width, height] = state.data.size;
+  const inBounds = (position) => position[0] >= 0 && position[1] >= 0 && position[0] < width && position[1] < height;
+  const movedObjects = new Map();
+  const movedActors = new Map();
+  for (const descriptor of state.pointerDrag.descriptors) {
+    const position = candidatePosition(descriptor, delta);
+    if (descriptor.kind === "object") {
+      const instance = state.data.objects.find((record) => record.id === descriptor.id);
+      const definition = objectDefinition(instance);
+      if (!definition || position[0] < 0 || position[1] < 0
+        || position[0] + definition.size[0] > width || position[1] + definition.size[1] > height) return false;
+      movedObjects.set(descriptor.id, position);
+    } else if (!inBounds(position)) return false;
+    if (descriptor.kind === "actor") movedActors.set(descriptor.id, position);
+    if (descriptor.kind === "site") {
+      const site = state.data.sites.find((record) => record.id === descriptor.id);
+      if (site && site.entrance_offsets.some((offset) => !inBounds(addPoint(position, offset)))) return false;
+    } else if (descriptor.kind === "trigger") {
+      const trigger = state.data.event_triggers.find((record) => record.id === descriptor.id);
+      if (trigger && trigger.offsets.some((offset) => !inBounds(addPoint(position, offset)))) return false;
+    }
+  }
+  const origins = new Set();
+  for (const instance of state.data.objects) {
+    const origin = movedObjects.get(instance.id) || instance.origin;
+    const key = origin.join(",");
+    if (origins.has(key)) return false;
+    origins.add(key);
+  }
+  for (const site of state.data.sites) {
+    if (site.anchor?.kind !== "object" || !movedObjects.has(site.anchor.object_id)) continue;
+    const origin = movedObjects.get(site.anchor.object_id);
+    if (site.entrance_offsets.some((offset) => !inBounds(addPoint(origin, offset)))) return false;
+  }
+  for (const trigger of state.data.event_triggers) {
+    let origin = null;
+    if (trigger.anchor?.kind === "object") origin = movedObjects.get(trigger.anchor.object_id) || null;
+    else if (trigger.anchor?.kind === "actor") origin = movedActors.get(trigger.anchor.actor_id) || null;
+    if (origin && trigger.offsets.some((offset) => !inBounds(addPoint(origin, offset)))) return false;
+  }
+  return true;
+}
+
+function dragBulkTo(cell) {
+  if (state.pointerDrag?.kind !== "bulk") return;
+  const delta = [cell[0] - state.pointerDrag.start[0], cell[1] - state.pointerDrag.start[1]];
+  if (delta[0] === state.pointerDrag.delta[0] && delta[1] === state.pointerDrag.delta[1]) return;
+  if (!validBulkDelta(delta)) return;
+  for (const descriptor of state.pointerDrag.descriptors) {
+    const position = candidatePosition(descriptor, delta);
+    if (descriptor.kind === "object") state.data.objects.find((record) => record.id === descriptor.id).origin = position;
+    else if (descriptor.kind === "site") state.data.sites.find((record) => record.id === descriptor.id).anchor.position = position;
+    else if (descriptor.kind === "arrival") state.data.arrival_points.find((record) => record.id === descriptor.id).position = position;
+    else if (descriptor.kind === "actor") state.data.actors.find((record) => record.id === descriptor.id).position = position;
+    else state.data.event_triggers.find((record) => record.id === descriptor.id).anchor.position = position;
+  }
+  if (state.pointerDrag.originalRect) {
+    const rect = state.pointerDrag.originalRect;
+    state.selectionRect = {
+      left: rect.left + delta[0], top: rect.top + delta[1],
+      right: rect.right + delta[0], bottom: rect.bottom + delta[1],
+    };
+  }
+  state.pointerDrag.delta = delta;
+  state.pointerDrag.changed = delta[0] !== 0 || delta[1] !== 0;
+  state.dirty = true;
+  renderInspector();
+  drawMap(performance.now());
+  updateSaveState();
+  scheduleResolution(0);
+}
+
+function deleteBulkSelection() {
+  if (!state.bulkSelection.length) return;
+  commit(() => {
+    const objectIds = new Set(state.bulkSelection.filter((item) => item.kind === "object").map((item) => item.id));
+    const siteIds = new Set(state.bulkSelection.filter((item) => item.kind === "site").map((item) => item.id));
+    const arrivalIds = new Set(state.bulkSelection.filter((item) => item.kind === "arrival").map((item) => item.id));
+    const actorIds = new Set(state.bulkSelection.filter((item) => item.kind === "actor").map((item) => item.id));
+    const triggerIds = new Set(state.bulkSelection.filter((item) => item.kind === "trigger").map((item) => item.id));
+    const removedSiteIds = new Set(siteIds);
+    state.data.objects = state.data.objects.filter((instance) => !objectIds.has(instance.id));
+    state.data.sites = state.data.sites.filter((site) => {
+      const remove = siteIds.has(site.id) || (site.anchor?.kind === "object" && objectIds.has(site.anchor.object_id));
+      if (remove) {
+        removedSiteIds.add(site.id);
+        delete state.siteNamesJa[site.id];
+      }
+      return !remove;
+    });
+    state.siteOptions = state.siteOptions.filter((siteId) => !removedSiteIds.has(siteId));
+    state.data.arrival_points = state.data.arrival_points.filter((arrival) => !arrivalIds.has(arrival.id));
+    state.data.actors = state.data.actors.filter((actor) => !actorIds.has(actor.id));
+    state.data.event_triggers = state.data.event_triggers.filter((trigger) => !triggerIds.has(trigger.id)
+      && !(trigger.anchor?.kind === "object" && objectIds.has(trigger.anchor.object_id))
+      && !(trigger.anchor?.kind === "actor" && actorIds.has(trigger.anchor.actor_id)));
+    clearSingleSelections();
+    state.bulkSelection = [];
+    state.selectionRect = null;
+  });
+}
+
+function clearBulkSelectionWithEscape(event) {
+  if (event.key !== "Escape" || !state.bulkSelection.length || state.pointerDrag || state.pointerStroke) return false;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName) || event.target.isContentEditable) return false;
+  if (document.querySelector("dialog[open]")) return false;
+  event.preventDefault();
+  clearBulkSelection();
+  renderAll();
+  showToast("範囲選択を解除しました。");
+  return true;
+}
+
 function paintGround(x, y) {
   if (state.data.grounds[y][x] === state.groundId) return false;
   state.data.grounds[y][x] = state.groundId;
   return true;
+}
+
+function paintGroundRectangle(rect) {
+  let changed = false;
+  for (let y = rect.top; y <= rect.bottom; y += 1) {
+    for (let x = rect.left; x <= rect.right; x += 1) changed = paintGround(x, y) || changed;
+  }
+  return changed;
+}
+
+function beginGroundRectangle(event, cell) {
+  beginChange();
+  state.pointerDrag = { kind: "ground_rectangle", changed: false, pointerId: event.pointerId, start: [...cell], last: [...cell] };
+  state.groundPaintRect = normalizedCellRect(cell, cell);
+  mapCanvas.setPointerCapture(event.pointerId);
+  drawMap(performance.now());
+}
+
+function updateGroundRectangle(cell) {
+  if (state.pointerDrag?.kind !== "ground_rectangle") return;
+  if (cell[0] === state.pointerDrag.last[0] && cell[1] === state.pointerDrag.last[1]) return;
+  state.pointerDrag.last = [...cell];
+  state.pointerDrag.changed = true;
+  state.groundPaintRect = normalizedCellRect(state.pointerDrag.start, cell);
+  drawMap(performance.now());
+}
+
+function finishGroundRectangle(event) {
+  const rect = state.groundPaintRect;
+  const changed = Boolean(rect && paintGroundRectangle(rect));
+  if (!changed) state.history.pop();
+  else {
+    state.dirty = true;
+    scheduleResolution(0);
+  }
+  state.pointerDrag = null;
+  state.groundPaintRect = null;
+  if (mapCanvas.hasPointerCapture(event.pointerId)) mapCanvas.releasePointerCapture(event.pointerId);
+  renderAll();
 }
 
 function uniqueInstanceId(definitionId) {
@@ -1060,6 +1494,13 @@ function uniqueRecordId(base, records) {
   let suffix = 2;
   while (used.has(`${base}_${suffix}`)) suffix += 1;
   return `${base}_${suffix}`;
+}
+
+function uniqueSiteId(base) {
+  const records = state.data.profile === "world"
+    ? [...state.data.sites, ...state.siteOptions.map((id) => ({ id }))]
+    : state.data.sites;
+  return uniqueRecordId(base, records);
 }
 
 function defaultSiteNameJa() {
@@ -1085,13 +1526,13 @@ function attachSiteToObject() {
   const instance = currentInstance();
   const definition = objectDefinition(instance);
   if (!instance || !definition || siteForObject(instance.id)) return;
-  const siteId = uniqueRecordId(instance.id, state.data.sites);
+  const siteId = uniqueSiteId(instance.id);
   const offsets = definition.cells.length
     ? [...new Map(definition.cells.map((cell) => [cell.offset.join(","), [...cell.offset]])).values()]
     : [[0, 0]];
   commit(() => {
     state.data.sites.push(defaultSite(siteId, { kind: "object", object_id: instance.id }, offsets));
-    state.siteNamesJa[siteId] = defaultSiteNameJa();
+    if (state.data.profile === "world") state.siteNamesJa[siteId] = defaultSiteNameJa();
     state.selectedSiteId = siteId;
     state.selectedArrivalId = null;
     state.tab = "site";
@@ -1100,10 +1541,10 @@ function attachSiteToObject() {
 }
 
 function createCellSite(position) {
-  const siteId = uniqueRecordId("site_1", state.data.sites);
+  const siteId = uniqueSiteId("site_1");
   commit(() => {
     state.data.sites.push(defaultSite(siteId, { kind: "cell", position: [...position] }, [[0, 0]]));
-    state.siteNamesJa[siteId] = defaultSiteNameJa();
+    if (state.data.profile === "world") state.siteNamesJa[siteId] = defaultSiteNameJa();
     state.selectedSiteId = siteId;
     state.selectedArrivalId = null;
     state.travelTool = "select";
@@ -1270,11 +1711,8 @@ function selectAnyAt(cell) {
   const candidates = prioritizeMapSelectionCandidates(mapSelectionCandidatesAt(cell));
   const selectedIndex = candidates.findIndex(isMapSelectionCandidateSelected);
   const candidate = candidates.length ? candidates[(selectedIndex + 1) % candidates.length] : null;
-  state.selectedInstanceId = null;
-  state.selectedSiteId = null;
-  state.selectedArrivalId = null;
-  state.selectedActorId = null;
-  state.selectedTriggerId = null;
+  clearSingleSelections();
+  clearBulkSelection();
   state.travelTool = "select";
   state.eventTool = "select";
   if (!candidate) {
@@ -1337,6 +1775,7 @@ function placeObject(x, y) {
     return;
   }
   commit(() => {
+    clearBulkSelection();
     const order = state.data.objects.length ? Math.max(...state.data.objects.map((instance) => instance.order)) + 1 : 0;
     const instance = { id: uniqueInstanceId(definition.id), definition_id: definition.id, origin: [x, y], order };
     state.data.objects.push(instance);
@@ -1448,9 +1887,15 @@ function dragSiteAnchorTo(cell) {
 
 function handlePaletteAction(element) {
   const action = element.dataset.action;
+  clearBulkSelection();
   if (action === "select-ground") {
     state.groundId = element.dataset.id;
     renderPalette();
+  } else if (action === "select-ground-tool") {
+    state.groundTool = element.dataset.tool;
+    state.groundPaintRect = null;
+    renderPalette();
+    drawMap(performance.now());
   } else if (action === "select-object-definition") {
     state.objectId = element.dataset.id;
     state.selectedInstanceId = null;
@@ -1559,9 +2004,22 @@ function handleInspectorAction(element) {
   const action = element.dataset.action;
   if (action === "resize-map") resizeMap();
   else if (action === "reroll") commit(() => { state.data.visual_seed += 1; });
+  else if (action === "delete-bulk-selection") deleteBulkSelection();
   else if (action === "delete-instance") commit(() => {
-    const index = state.data.objects.findIndex((instance) => instance.id === state.selectedInstanceId);
+    const objectId = state.selectedInstanceId;
+    const index = state.data.objects.findIndex((instance) => instance.id === objectId);
     if (index >= 0) state.data.objects.splice(index, 1);
+    const removedSiteIds = new Set();
+    state.data.sites = state.data.sites.filter((site) => {
+      const remove = site.anchor?.kind === "object" && site.anchor.object_id === objectId;
+      if (remove) {
+        removedSiteIds.add(site.id);
+        delete state.siteNamesJa[site.id];
+      }
+      return !remove;
+    });
+    state.siteOptions = state.siteOptions.filter((siteId) => !removedSiteIds.has(siteId));
+    state.data.event_triggers = state.data.event_triggers.filter((trigger) => !(trigger.anchor?.kind === "object" && trigger.anchor.object_id === objectId));
     state.selectedInstanceId = null;
   });
   else if (action === "object-front" || action === "object-back") commit(() => {
@@ -1644,7 +2102,7 @@ function updateSiteField(path, value) {
       const previousId = site.id;
       site.id = value;
       state.selectedSiteId = value;
-      state.siteNamesJa[value] = state.siteNamesJa[previousId] || "";
+      if (state.data.profile === "world") state.siteNamesJa[value] = state.siteNamesJa[previousId] || "";
       delete state.siteNamesJa[previousId];
       state.siteOptions = state.siteOptions.filter((item) => item !== previousId);
       for (const arrival of state.data.arrival_points) {
@@ -1753,6 +2211,7 @@ function scheduleResolution(delay = 70) {
 }
 
 async function save() {
+  if (!canSave()) return;
   updateSaveState("dirty", "保存・生成中…");
   try {
     const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
@@ -1939,6 +2398,7 @@ byId("zoom-in").addEventListener("click", () => { state.zoom = Math.min(4, state
 byId("zoom-out").addEventListener("click", () => { state.zoom = Math.max(1, state.zoom - 1); saveUiSettings(); renderAll(); });
 byId("grid-toggle").addEventListener("change", (event) => { state.showGrid = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
 byId("collision-toggle").addEventListener("change", (event) => { state.showCollision = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
+byId("ground-only-toggle").addEventListener("change", (event) => { state.showGroundOnly = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
 byId("animation-toggle").addEventListener("click", () => {
   state.paused = !state.paused;
   if (!state.paused) state.animationStartedAt = performance.now();
@@ -1949,14 +2409,21 @@ const mapCanvas = byId("map-canvas");
 mapCanvas.addEventListener("pointerdown", (event) => {
   const cell = mapCellFromPointer(event);
   if (!cell) return;
+  state.hoveredCell = [...cell];
   if (event.button === 2) {
     event.preventDefault();
-    const candidate = selectAnyAt(cell);
-    if (candidate?.kind === "object") beginObjectDrag(event, cell);
+    if (beginBulkDrag(event, cell)) return;
+    beginRangeSelection(event, cell);
     return;
   }
   if (event.button !== 0) return;
+  if (beginBulkDrag(event, cell)) return;
+  if (state.bulkSelection.length) clearBulkSelection();
   if (state.tab === "ground") {
+    if (state.groundTool === "rectangle") {
+      beginGroundRectangle(event, cell);
+      return;
+    }
     beginChange();
     state.pointerStroke = { changed: false, last: null, pointerId: event.pointerId };
     mapCanvas.setPointerCapture(event.pointerId);
@@ -1971,11 +2438,16 @@ mapCanvas.addEventListener("pointerdown", (event) => {
 mapCanvas.addEventListener("pointermove", (event) => {
   const cell = mapCellFromPointer(event);
   byId("cursor-status").textContent = cell ? `セル ${cell[0]}, ${cell[1]}` : "セル —";
+  state.hoveredCell = cell ? [...cell] : null;
   if (cell && state.pointerDrag) {
     if (state.pointerDrag.kind === "object") dragObjectTo(cell);
     else if (state.pointerDrag.kind === "site_anchor") dragSiteAnchorTo(cell);
+    else if (state.pointerDrag.kind === "range_selection") updateRangeSelection(event, cell);
+    else if (state.pointerDrag.kind === "bulk") dragBulkTo(cell);
+    else if (state.pointerDrag.kind === "ground_rectangle") updateGroundRectangle(cell);
     return;
   }
+  if (!state.pointerStroke) drawMap(performance.now());
   if (!cell || !state.pointerStroke || state.pointerStroke.last === cell.join(",")) return;
   state.pointerStroke.last = cell.join(",");
   if (paintGround(...cell)) {
@@ -1987,6 +2459,26 @@ mapCanvas.addEventListener("pointermove", (event) => {
 });
 mapCanvas.addEventListener("pointerup", (event) => {
   if (state.pointerDrag) {
+    if (state.pointerDrag.kind === "ground_rectangle") {
+      finishGroundRectangle(event);
+      return;
+    }
+    if (state.pointerDrag.kind === "range_selection") {
+      const drag = state.pointerDrag;
+      state.pointerDrag = null;
+      if (drag.changed) {
+        state.bulkSelection = rangeSelectionItems(state.selectionRect);
+        clearSingleSelections();
+        if (!state.bulkSelection.length) state.selectionRect = null;
+        showToast(state.bulkSelection.length ? `${state.bulkSelection.length}件を選択しました。` : "範囲内に配置要素はありません。");
+      } else {
+        state.selectionRect = null;
+        selectAnyAt(drag.start);
+      }
+      if (mapCanvas.hasPointerCapture(event.pointerId)) mapCanvas.releasePointerCapture(event.pointerId);
+      renderAll();
+      return;
+    }
     if (!state.pointerDrag.changed) state.history.pop();
     state.pointerDrag = null;
     if (mapCanvas.hasPointerCapture(event.pointerId)) mapCanvas.releasePointerCapture(event.pointerId);
@@ -2002,17 +2494,29 @@ mapCanvas.addEventListener("pointerup", (event) => {
 });
 mapCanvas.addEventListener("pointercancel", () => {
   if (state.pointerStroke && !state.pointerStroke.changed) state.history.pop();
-  if (state.pointerDrag && !state.pointerDrag.changed) state.history.pop();
+  if (state.pointerDrag?.kind === "ground_rectangle") state.history.pop();
+  else if (state.pointerDrag && state.pointerDrag.kind !== "range_selection" && !state.pointerDrag.changed) state.history.pop();
+  if (state.pointerDrag?.kind === "range_selection") state.selectionRect = null;
   state.pointerStroke = null;
   state.pointerDrag = null;
+  state.groundPaintRect = null;
   renderAll();
 });
 mapCanvas.addEventListener("contextmenu", (event) => event.preventDefault());
-mapCanvas.addEventListener("pointerleave", () => { byId("cursor-status").textContent = "セル —"; });
+mapCanvas.addEventListener("pointerleave", () => {
+  byId("cursor-status").textContent = "セル —";
+  state.hoveredCell = null;
+  drawMap(performance.now());
+});
 
 window.addEventListener("keydown", (event) => {
+  if (clearBulkSelectionWithEscape(event)) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); save(); }
   else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
+  else if ((event.key === "Delete" || event.key === "Backspace") && state.bulkSelection.length && !["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
+    event.preventDefault();
+    deleteBulkSelection();
+  }
   else if ((event.key === "Delete" || event.key === "Backspace") && state.tab === "object" && state.selectedInstanceId && event.target.tagName !== "INPUT") {
     event.preventDefault();
     handleInspectorAction({ dataset: { action: "delete-instance" } });

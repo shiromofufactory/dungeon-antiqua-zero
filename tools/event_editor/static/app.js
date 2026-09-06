@@ -232,12 +232,16 @@ function renderNamespaceControls() {
   ).join("");
 }
 
+function canSave() {
+  return Boolean(state.data) && (state.dirty || state.diagnostics.some((item) => item.severity === "error"));
+}
+
 function updateStatus() {
   const errors = state.diagnostics.some((item) => item.severity === "error");
   const node = $("save-state");
   node.className = `pill ${errors ? "error" : state.dirty ? "dirty" : "saved"}`;
   node.textContent = errors ? "要修正" : state.dirty ? "未保存" : "保存済み";
-  $("save").disabled = errors;
+  $("save").disabled = !canSave();
   $("undo").disabled = !state.history.length;
   $("redo").disabled = !state.future.length;
 }
@@ -577,6 +581,7 @@ function schedule(delay = 100) {
 }
 
 async function save() {
+  if (!canSave()) return;
   try {
     const result = await api("/api/save", {method: "POST", body: requestBody()});
     state.diagnostics = result.diagnostics;

@@ -527,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata_tileset_id,
             token=token,
             palette_path=args.palette,
+            runtime_root=args.map_runtime_root,
         )
         server = create_server(
             map_application,

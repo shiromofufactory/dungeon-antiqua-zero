@@ -33,6 +33,8 @@ const state = {
   selection: { x: 0, y: 0, width: 1, height: 1 },
   zoom: 3,
   dragStart: null,
+  definitionDrag: null,
+  suppressDefinitionClickUntil: 0,
   previewGrounds: [],
   previewShowCollision: false,
   previewPaused: false,
@@ -242,6 +244,10 @@ function showToast(message, error = false) {
   showToast.timer = window.setTimeout(() => toast.classList.remove("visible"), 2400);
 }
 
+function canSave() {
+  return Boolean(state.data) && (state.dirty || state.diagnostics.some((issue) => issue.severity === "error"));
+}
+
 function updateSaveState(kind = null, text = null) {
   const element = byId("save-state");
   const hasErrors = state.diagnostics.some((issue) => issue.severity === "error");
@@ -255,7 +261,7 @@ function updateSaveState(kind = null, text = null) {
     : state.dirty ? "未保存" : "保存済み");
   byId("undo-button").disabled = state.history.length === 0;
   byId("redo-button").disabled = state.future.length === 0;
-  byId("save-button").disabled = !state.data;
+  byId("save-button").disabled = !canSave();
 }
 
 function commit(mutator) {
@@ -405,6 +411,71 @@ function prepareProcessedImage() {
   renderPreview();
 }
 
+function addVisualUsage(usage, visual, category) {
+  for (const choice of visual?.choices || []) {
+    for (const frame of choice?.frames || []) {
+      const tile = frame?.tile;
+      if (!Array.isArray(tile) || tile.length !== 2) continue;
+      const key = tile.join(",");
+      if (!usage.has(key)) usage.set(key, new Set());
+      usage.get(key).add(category);
+    }
+  }
+}
+
+function sourceTileUsage() {
+  const usage = new Map();
+  for (const ground of state.data?.grounds || []) {
+    addVisualUsage(usage, ground.base_visual, "ground");
+    for (const boundary of ground.boundaries || []) addVisualUsage(usage, boundary.visual, "boundary");
+  }
+  for (const object of state.data?.objects || []) {
+    for (const cell of object.cells || []) {
+      if (Array.isArray(cell.tile)) {
+        const key = cell.tile.join(",");
+        if (!usage.has(key)) usage.set(key, new Set());
+        usage.get(key).add("object");
+      }
+      addVisualUsage(usage, cell.visual, "object");
+    }
+  }
+  return usage;
+}
+
+function drawSourceUsage(context, zoom) {
+  const usage = sourceTileUsage();
+  const categories = [
+    ["ground", "#72b777"],
+    ["boundary", "#61b9e8"],
+    ["object", "#e89b61"],
+  ];
+  let usedCount = 0;
+  for (let row = 0; row < state.imageInfo.rows; row += 1) {
+    for (let column = 0; column < state.imageInfo.columns; column += 1) {
+      const x = column * 16 * zoom;
+      const y = row * 16 * zoom;
+      const categoriesUsed = usage.get(`${column},${row}`);
+      if (!categoriesUsed?.size) {
+        context.fillStyle = "rgba(8,10,7,.52)";
+        context.fillRect(x, y, 16 * zoom, 16 * zoom);
+        continue;
+      }
+      usedCount += 1;
+      context.fillStyle = "rgba(255,255,255,.05)";
+      context.fillRect(x, y, 16 * zoom, 16 * zoom);
+      let markerIndex = 0;
+      for (const [category, color] of categories) {
+        if (!categoriesUsed.has(category)) continue;
+        context.fillStyle = color;
+        context.fillRect(x + markerIndex * 4 * zoom + zoom, y + zoom, 3 * zoom, 3 * zoom);
+        markerIndex += 1;
+      }
+    }
+  }
+  const summary = byId("usage-summary");
+  if (summary) summary.textContent = `使用 ${usedCount} / 未使用 ${state.imageInfo.columns * state.imageInfo.rows - usedCount}`;
+}
+
 function drawSource() {
   if (!state.imageInfo || !processedImage.width) return;
   const canvas = byId("source-canvas");
@@ -415,6 +486,7 @@ function drawSource() {
   context.imageSmoothingEnabled = false;
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(processedImage, 0, 0, canvas.width, canvas.height);
+  drawSourceUsage(context, zoom);
 
   context.lineWidth = 1;
   context.strokeStyle = "rgba(238, 233, 215, .34)";
@@ -507,12 +579,103 @@ function objectFrameThumb(object, choiceIndex, frameIndex) {
   </span>`;
 }
 
-function renderDefinitionList(items, activeIndex, action, addAction, addLabel, baseIndex = null) {
+function renderDefinitionList(items, activeIndex, action, addAction, addLabel, reorderKind, baseIndex = null) {
   const chips = items.map((item, index) => `
-    <button type="button" class="definition-chip ${index === activeIndex ? "active" : ""}"
-      data-action="${action}" data-index="${index}">${escapeHtml(item.id || `#${index + 1}`)}${index === baseIndex ? " · ベース" : ""}</button>
+    <button type="button" class="definition-chip ${index === activeIndex ? "active" : ""} ${index === baseIndex ? "" : "reorderable"}"
+      data-action="${action}" data-index="${index}" data-reorder-kind="${reorderKind}"
+      title="${index === baseIndex ? "ベース地面は先頭固定です" : "ドラッグで表示順を変更"}">${escapeHtml(item.id || `#${index + 1}`)}${index === baseIndex ? " · ベース" : ""}</button>
   `).join("");
   return `<div class="definition-list">${chips}<button type="button" class="definition-chip" data-action="${addAction}">＋ ${addLabel}</button></div>`;
+}
+
+function clearDefinitionDropIndicators() {
+  byId("editor-content").querySelectorAll(".definition-chip.drop-before, .definition-chip.drop-after")
+    .forEach((chip) => chip.classList.remove("drop-before", "drop-after"));
+}
+
+function reorderDefinitions(kind, fromIndex, insertionIndex) {
+  const items = kind === "ground" ? state.data.grounds : state.data.objects;
+  const minimumIndex = kind === "ground" ? 1 : 0;
+  if (!items || fromIndex < minimumIndex || fromIndex >= items.length) return;
+  const clampedInsertion = Math.max(minimumIndex, Math.min(insertionIndex, items.length));
+  const destinationIndex = clampedInsertion > fromIndex ? clampedInsertion - 1 : clampedInsertion;
+  if (destinationIndex === fromIndex) return;
+  const activeItem = kind === "ground" ? currentGround() : currentObject();
+  const movedLabel = items[fromIndex].id;
+  commit(() => {
+    const [item] = items.splice(fromIndex, 1);
+    items.splice(destinationIndex, 0, item);
+    if (kind === "object") {
+      const [origin] = state.objectOrigins.splice(fromIndex, 1);
+      state.objectOrigins.splice(destinationIndex, 0, origin);
+      state.objectIndex = items.indexOf(activeItem);
+    } else {
+      state.groundIndex = items.indexOf(activeItem);
+      state.boundaryIndex = 0;
+    }
+  });
+  showToast(`${movedLabel} の表示順を変更しました。`);
+}
+
+function updateDefinitionDropTarget(event) {
+  const drag = state.definitionDrag;
+  if (!drag) return;
+  const chip = document.elementFromPoint(event.clientX, event.clientY)?.closest(".definition-chip[data-reorder-kind]");
+  if (!chip || chip.dataset.reorderKind !== drag.kind) {
+    clearDefinitionDropIndicators();
+    return;
+  }
+  const rect = chip.getBoundingClientRect();
+  let after = event.clientX >= rect.left + rect.width / 2;
+  if (drag.kind === "ground" && Number(chip.dataset.index) === 0) after = true;
+  let insertionIndex = Number(chip.dataset.index) + (after ? 1 : 0);
+  if (drag.kind === "ground") insertionIndex = Math.max(1, insertionIndex);
+  drag.insertionIndex = insertionIndex;
+  clearDefinitionDropIndicators();
+  chip.classList.add(after ? "drop-after" : "drop-before");
+}
+
+function handleDefinitionPointerDown(event) {
+  if (event.button !== 0) return;
+  const chip = event.target.closest(".definition-chip.reorderable[data-reorder-kind]");
+  if (!chip) return;
+  const fromIndex = Number(chip.dataset.index);
+  if (!Number.isInteger(fromIndex)) return;
+  state.definitionDrag = {
+    kind: chip.dataset.reorderKind,
+    fromIndex,
+    insertionIndex: fromIndex,
+    startX: event.clientX,
+    startY: event.clientY,
+    pointerId: event.pointerId,
+    active: false,
+    chip,
+  };
+  chip.setPointerCapture(event.pointerId);
+}
+
+function handleDefinitionPointerMove(event) {
+  const drag = state.definitionDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+  event.preventDefault();
+  if (!drag.active) {
+    drag.active = true;
+    drag.chip.classList.add("dragging");
+    state.suppressDefinitionClickUntil = performance.now() + 250;
+  }
+  updateDefinitionDropTarget(event);
+}
+
+function finishDefinitionPointerDrag(event, cancelled = false) {
+  const drag = state.definitionDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (drag.chip.hasPointerCapture(event.pointerId)) drag.chip.releasePointerCapture(event.pointerId);
+  state.definitionDrag = null;
+  if (drag.active) state.suppressDefinitionClickUntil = performance.now() + 250;
+  clearDefinitionDropIndicators();
+  drag.chip.classList.remove("dragging");
+  if (drag.active && !cancelled) reorderDefinitions(drag.kind, drag.fromIndex, drag.insertionIndex);
 }
 
 function renderBoundaryRuleList(items) {
@@ -572,7 +735,7 @@ function renderGroundEditor() {
   return `
     <div class="section">
       <div class="section-title"><h3>地面定義</h3><span class="subtle">最上位地面を1セルに保存</span></div>
-      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", 0)}
+      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", "ground", 0)}
       <div class="divider"></div>
       <div class="form-grid">
         <div class="field"><label>地面ID${state.groundIndex === 0 ? "（ベース・変更不可）" : ""}</label><input type="text" value="${escapeHtml(ground.id)}" data-change="ground-id" ${state.groundIndex === 0 ? "disabled" : ""}></div>
@@ -599,7 +762,7 @@ function renderBoundaryEditor() {
   return `
     <div class="section">
       <div class="section-title"><h3>対象地面</h3><span class="subtle">親を含むかでsame判定</span></div>
-      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", 0)}
+      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", "ground", 0)}
     </div>
     <div class="section">
       <div class="section-title"><h3>境界ルール</h3><span class="subtle">左から順に最初の一致を採用</span></div>
@@ -672,7 +835,7 @@ function renderObjectEditor() {
   if (!object) return `
     <div class="section">
       <div class="section-title"><h3>オブジェクト定義</h3></div>
-      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "空オブジェクト")}
+      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "空オブジェクト", "object")}
       <div class="empty-state" style="margin-top:10px">空オブジェクトを追加するか、ソース画像を矩形選択して生成してください。</div>
       <div class="row end" style="margin-top:10px"><button type="button" class="button primary" data-action="object-from-selection">選択矩形から生成</button></div>
     </div>`;
@@ -697,7 +860,7 @@ function renderObjectEditor() {
   return `
     <div class="section">
       <div class="section-title"><h3>オブジェクト定義</h3><span class="subtle">起点は左上</span></div>
-      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "空オブジェクト")}
+      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "空オブジェクト", "object")}
       <div class="divider"></div>
       <div class="form-grid">
         <div class="field full"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
@@ -955,6 +1118,7 @@ function scheduleValidation() {
 }
 
 async function save() {
+  if (!canSave()) return;
   updateSaveState("dirty", "保存中…");
   try {
     const objectIdRenames = {};
@@ -971,10 +1135,12 @@ async function save() {
       state.objectOrigins = (state.data.objects || []).map((object) => object.id);
       await refreshCatalog();
       const updatedCount = result.updated_map_ids?.length || 0;
+      const generatedCount = result.generated_map_ids?.length || 0;
       const removedCount = result.removed_map_object_count || 0;
       const errorCount = state.diagnostics.filter((item) => item.severity === "error").length;
       const details = [];
       if (updatedCount) details.push(`${updatedCount}件のマップを更新`);
+      if (generatedCount) details.push(`${generatedCount}件のゲーム用マップを再生成`);
       if (removedCount) details.push(`配置済みオブジェクト${removedCount}件を削除`);
       if (errorCount) details.push(`エラー${errorCount}件を保持`);
       showToast(details.length
@@ -1113,6 +1279,8 @@ function mutateObjectVisual(action, element) {
 function handleAction(element) {
   const action = element.dataset.action;
   if (!action) return;
+  if ((action === "select-ground" || action === "select-object")
+    && performance.now() < state.suppressDefinitionClickUntil) return;
   if (mutateObjectVisual(action, element)) return;
   if (mutateVisual(action, element)) return;
   const grounds = state.data.grounds;
@@ -1371,6 +1539,10 @@ byId("editor-content").addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]");
   if (target) handleAction(target);
 });
+byId("editor-content").addEventListener("pointerdown", handleDefinitionPointerDown);
+byId("editor-content").addEventListener("pointermove", handleDefinitionPointerMove);
+byId("editor-content").addEventListener("pointerup", (event) => finishDefinitionPointerDrag(event));
+byId("editor-content").addEventListener("pointercancel", (event) => finishDefinitionPointerDrag(event, true));
 byId("editor-content").addEventListener("contextmenu", (event) => {
   const target = event.target.closest('[data-action="toggle-object-cell-collision"]');
   if (!target) return;

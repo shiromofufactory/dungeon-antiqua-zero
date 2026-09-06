@@ -97,6 +97,7 @@ class EditorServerTest(unittest.TestCase):
             "worldmap",
             token="shared-token",
             palette_path=palette_path,
+            runtime_root=app_root / "maps",
         )
         self.server = create_server(
             self.map_application,
