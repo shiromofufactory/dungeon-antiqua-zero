@@ -106,7 +106,8 @@
 
 - JSON変更時は少なくとも全対象ファイルをパースする。
 - 共有JSON変更時は `npm run content:validate` と `npm run content:sync` を実行する。
-- ゲーム用JSONが正本と一致するかは `npm run content:check` で確認する。
+- ゲーム用JSONが正本と一致するかは `node scripts/sync-content.mjs --check` で確認する。
+  この検証コマンドは `package.json` のnpm scriptsへ復元しない。
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。
 - ゲームルールは可能な範囲でPyxel非依存のテストを用意する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。
