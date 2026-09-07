@@ -56,6 +56,7 @@ app/
 ├── main.py                   # Pyxel初期化、共通資産読込、Game生成、pyxel.run
 ├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
+├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
 ├── world_sites.py            # ワールド拠点のセル検索と訪問済み候補の抽出

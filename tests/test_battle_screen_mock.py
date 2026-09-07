@@ -10,6 +10,9 @@ from tools.screen_mocks.battle import (
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
+    FORMATION_MOVE_FRAME_COUNT,
+    FORMATION_SPRITE_STEP_X,
+    FORMATION_WALK_PATTERN_FRAME_COUNT,
     MONSTER_BLINK_FRAME_COUNT,
     MONSTER_ENTRANCE_FRAME_COUNTS,
     MONSTER_POSITIONS,
@@ -37,6 +40,7 @@ from tools.screen_mocks.battle import (
     member_attack_reach,
     selectable_attack_target_indexes,
 )
+from battle_commands import BattleCommand, BattleCommandOption
 from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
@@ -923,7 +927,15 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = Mock()
         new_cursor = Mock()
         mock.command_window.set_cursor.return_value = new_cursor
-        mock._active_member_attack_targets = Mock(return_value=())
+        mock._active_member_command_options = Mock(
+            return_value=(
+                BattleCommandOption(BattleCommand.DEFEND),
+                BattleCommandOption(BattleCommand.SPELL),
+                BattleCommandOption(BattleCommand.ESCAPE),
+                BattleCommandOption(BattleCommand.ITEM),
+                BattleCommandOption(BattleCommand.FORMATION),
+            )
+        )
 
         mock._refresh_command_options()
 
@@ -951,6 +963,110 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window.clear_texts.assert_called_once_with()
         mock.command_window.clear_cursor.assert_called_once_with()
         self.assertIs(mock.command_cursor, new_cursor)
+
+    def test_disabled_formation_is_grey_and_not_selectable(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.command_window = Mock()
+        mock.command_window.set_cursor.return_value = Mock()
+        mock._active_member_command_options = Mock(
+            return_value=(
+                BattleCommandOption(BattleCommand.ATTACK),
+                BattleCommandOption(BattleCommand.DEFEND),
+                BattleCommandOption(BattleCommand.SPELL),
+                BattleCommandOption(BattleCommand.ESCAPE),
+                BattleCommandOption(BattleCommand.ITEM),
+                BattleCommandOption(BattleCommand.FORMATION, enabled=False),
+            )
+        )
+
+        mock._refresh_command_options()
+
+        self.assertIn(
+            call("こうたい", 18, 8, color=3),
+            mock.command_window.add_text.call_args_list,
+        )
+        targets = mock.command_window.set_cursor.call_args.args[0]
+        formation = next(
+            target for target in targets if target.key is BattleCommand.FORMATION
+        )
+        self.assertFalse(formation.selectable)
+
+    def test_formation_walk_swaps_row_and_uses_alternate_sprite(self) -> None:
+        party = list(
+            load_mock_party(
+                load_mock_items(),
+                load_mock_skills(),
+                character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+                internal_level=MAX_INTERNAL_LEVEL,
+            )
+        )
+        for member in party:
+            member.formation_row = FormationRow.FRONT
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = tuple(party)
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member)
+            for member in party
+        )
+        mock.monsters = tuple(
+            SimpleNamespace(is_front_row=True)
+            for _index in range(2)
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.COMMAND
+        mock.selected_command = None
+        mock.command_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._complete_current_turn = Mock()
+
+        self.assertTrue(mock._begin_formation_change())
+
+        self.assertIs(party[0].formation_row, FormationRow.BACK)
+        self.assertIs(mock.phase, BattleMockPhase.FORMATION)
+        self.assertEqual(mock.formation_start_x, 156)
+        self.assertEqual(mock.formation_destination_x, 172)
+        self.assertEqual(mock._party_draw_position(0), (156, 64))
+        self.assertEqual(mock._party_sprite_source_x(0), 0)
+        mock.formation_animation_frame = FORMATION_WALK_PATTERN_FRAME_COUNT
+        self.assertEqual(
+            mock._party_sprite_source_x(0),
+            FORMATION_SPRITE_STEP_X,
+        )
+        self.assertEqual(mock._party_draw_position(0), (160, 64))
+        mock.formation_animation_frame = 0
+
+        for _frame in range(FORMATION_MOVE_FRAME_COUNT):
+            mock._update_formation_animation()
+
+        self.assertIsNone(mock.formation_actor_index)
+        mock._complete_current_turn.assert_called_once_with()
+        mock.command_window.close_immediately.assert_called_once_with()
+
+    def test_disabled_formation_does_not_start_animation(self) -> None:
+        party = list(
+            load_mock_party(
+                load_mock_items(),
+                load_mock_skills(),
+                character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+                internal_level=MAX_INTERNAL_LEVEL,
+            )
+        )
+        party[0].formation_row = FormationRow.BACK
+        party[1].formation_row = FormationRow.BACK
+        party[2].formation_row = FormationRow.FRONT
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = tuple(party)
+        mock.monsters = tuple(
+            SimpleNamespace(is_front_row=True)
+            for _index in range(2)
+        )
+        mock.active_party_index = 2
+        mock.command_window = Mock()
+
+        self.assertFalse(mock._begin_formation_change())
+
+        self.assertIs(party[2].formation_row, FormationRow.FRONT)
+        mock.command_window.close_immediately.assert_not_called()
 
     def test_target_cursor_uses_window_cursor_rendering(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

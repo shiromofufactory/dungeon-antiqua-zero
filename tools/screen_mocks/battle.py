@@ -15,6 +15,7 @@ from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
     load_mock_skills,
+    load_mock_spells,
 )
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
@@ -24,9 +25,17 @@ from tools.screen_mocks._runtime import (
     create_mock_input_reader,
     initialize_screen_mock,
 )
+from battle_commands import (
+    BattleCommand,
+    BattleCommandContext,
+    BattleCommandOption,
+    formation_change_enabled,
+    member_attack_reach,
+    resolve_battle_commands,
+    selectable_attack_target_indexes,
+)
 from localization import Localizer, ascii_to_fullwidth
 from member import (
-    EquipmentSlot,
     MAX_INTERNAL_LEVEL,
     FormationRow,
     Member,
@@ -43,7 +52,7 @@ from resources import (
 )
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
-from ui import CursorTarget, Window, WindowFactory, WindowText
+from ui import DISABLED_COLOR, CursorTarget, Window, WindowFactory, WindowText
 from ui.formation_arrow import (
     FORMATION_ARROW_BANK,
     FORMATION_ARROW_COLKEY,
@@ -119,6 +128,9 @@ DA2_BLINK_VISIBLE_FRAMES = 3
 MONSTER_BLINK_FRAME_COUNT = DA2_BLINK_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_PERIOD = DA2_BLINK_PERIOD * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_VISIBLE_FRAMES = DA2_BLINK_VISIBLE_FRAMES * FPS // DA2_REFERENCE_FPS
+FORMATION_MOVE_FRAME_COUNT = 8
+FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
+FORMATION_SPRITE_STEP_X = 16
 COMMAND_OPTIONS = (
     ("attack", "こうげき", 4, 2, 2, 2),
     ("defend", "ぼうぎょ", 4, 5, 2, 5),
@@ -127,11 +139,21 @@ COMMAND_OPTIONS = (
     ("item", "アイテム", 18, 5, 16, 5),
     ("formation", "こうたい", 18, 8, 16, 8),
 )
-COMMAND_OPTIONS_WITHOUT_ATTACK = (
-    ("defend", "ぼうぎょ", 4, 2, 2, 2),
-    ("spell", "じゅもん", 4, 5, 2, 5),
-    *COMMAND_OPTIONS[3:],
+COMMAND_LABELS = {
+    BattleCommand.ATTACK: "こうげき",
+    BattleCommand.DEFEND: "ぼうぎょ",
+    BattleCommand.SPELL: "じゅもん",
+    BattleCommand.ESCAPE: "にげる",
+    BattleCommand.ITEM: "アイテム",
+    BattleCommand.FORMATION: "こうたい",
+}
+COMMAND_COLUMNS = (
+    (BattleCommand.ATTACK, BattleCommand.DEFEND, BattleCommand.SPELL),
+    (BattleCommand.ESCAPE, BattleCommand.ITEM, BattleCommand.FORMATION),
 )
+COMMAND_TEXT_X = (4, 18)
+COMMAND_CURSOR_X = (2, 16)
+COMMAND_ROW_Y = (2, 5, 8)
 DA2_MONSTER_TARGET_ORDER = {
     Direction.LEFT: (
         (2, 4, 1, 3),
@@ -177,6 +199,7 @@ class BattleMockPhase(StrEnum):
     COMMAND = "command"
     TARGET = "target"
     ESCAPE_CONFIRMATION = "escape_confirmation"
+    FORMATION = "formation"
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
 
@@ -296,43 +319,6 @@ class BattleMockMonster:
         return localizer.text(self.names, "name")
 
 
-def member_attack_reach(member: Member) -> int:
-    """Return the shortest reach among weapons used by one member."""
-
-    weapons = tuple(
-        weapon
-        for slot in (EquipmentSlot.RIGHT, EquipmentSlot.LEFT)
-        if (weapon := member.equipment.weapon_at(slot)) is not None
-    )
-    # An unarmed attack follows the same range rule as a reach-1 weapon.
-    return min((weapon.reach for weapon in weapons), default=1)
-
-
-def selectable_attack_target_indexes(
-    *,
-    attacker_is_front_row: bool,
-    weapon_reach: int,
-    monsters: tuple[BattleMockMonster, ...],
-) -> tuple[int, ...]:
-    """Return targetable monster indexes for one normal attack."""
-
-    if not isinstance(attacker_is_front_row, bool):
-        raise TypeError("attacker_is_front_row must be a boolean")
-    if isinstance(weapon_reach, bool) or weapon_reach not in (1, 2, 3):
-        raise ValueError("weapon_reach must be 1, 2, or 3")
-
-    if weapon_reach == 1 and not attacker_is_front_row:
-        return ()
-    can_target_back_row = weapon_reach == 3 or (
-        weapon_reach == 2 and attacker_is_front_row
-    )
-    return tuple(
-        index
-        for index, monster in enumerate(monsters)
-        if monster.is_front_row or can_target_back_row
-    )
-
-
 def _records_by_key(
     records: tuple[dict[str, object], ...] | list[dict[str, object]],
     *,
@@ -393,6 +379,7 @@ class BattleScreenMock:
             character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
             internal_level=MAX_INTERNAL_LEVEL,
         )
+        self.spells = tuple(load_mock_spells().values())
         for member in self.party:
             if member.definition.key in BATTLE_MOCK_FRONT_CHARACTER_KEYS:
                 member.formation_row = FormationRow.FRONT
@@ -505,6 +492,10 @@ class BattleScreenMock:
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
         self.timeline_animation_frame = 0
+        self.formation_animation_frame = 0
+        self.formation_actor_index: int | None = None
+        self.formation_start_x = 0
+        self.formation_destination_x = 0
         self.entrance_animation_frame = 0
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.selected_command: str | None = None
@@ -556,6 +547,9 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.ESCAPE_CONFIRMATION:
             self._update_escape_confirmation(input_state)
             return
+        if self.phase is BattleMockPhase.FORMATION:
+            self._update_formation_animation()
+            return
         if self.phase is BattleMockPhase.TIMELINE:
             self._update_timeline_animation()
             return
@@ -574,13 +568,15 @@ class BattleScreenMock:
                 self.command_window.open()
             elif self.command_window.is_open:
                 command = self.command_cursor.selected_key
-                if command == "attack":
+                if command == BattleCommand.ATTACK:
                     self._begin_attack_target_selection()
-                elif command == "spell":
+                elif command == BattleCommand.SPELL:
                     self._restart_battle_mock()
                     return
-                elif command == "escape":
+                elif command == BattleCommand.ESCAPE:
                     self._begin_escape_confirmation()
+                elif command == BattleCommand.FORMATION:
+                    self._begin_formation_change()
                 else:
                     self.selected_command = command
                     self._complete_current_turn()
@@ -600,6 +596,10 @@ class BattleScreenMock:
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
+        self.formation_animation_frame = 0
+        self.formation_actor_index = None
+        self.formation_start_x = 0
+        self.formation_destination_x = 0
         self.entrance_animation_frame = 0
         self.selected_command = None
         self.selectable_target_indexes = ()
@@ -669,6 +669,43 @@ class BattleScreenMock:
         self.escape_cursor.active = False
         self.command_cursor.active = True
         self.command_window.open()
+
+    def _begin_formation_change(self) -> bool:
+        """Swap the active member's row and start the walking animation."""
+
+        if self.active_party_index is None:
+            return False
+        index = self.active_party_index
+        member = self.party[index]
+        if len(self.party) <= 1 or not formation_change_enabled(
+            member,
+            self.party,
+        ):
+            return False
+        self.formation_actor_index = index
+        self.formation_start_x = self._party_sprite_x(index)
+        member.formation_row = (
+            FormationRow.BACK
+            if member.formation_row is FormationRow.FRONT
+            else FormationRow.FRONT
+        )
+        self.formation_destination_x = self._party_sprite_x(index)
+        self.formation_animation_frame = 0
+        self.phase = BattleMockPhase.FORMATION
+        self.selected_command = BattleCommand.FORMATION
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        return True
+
+    def _update_formation_animation(self) -> None:
+        """Advance one formation walk and then complete the actor's turn."""
+
+        self.formation_animation_frame += 1
+        if self.formation_animation_frame < FORMATION_MOVE_FRAME_COUNT:
+            return
+        self.formation_animation_frame = FORMATION_MOVE_FRAME_COUNT
+        self.formation_actor_index = None
+        self._complete_current_turn()
 
     def _begin_attack_target_selection(self) -> bool:
         selectable = self._active_member_attack_targets()
@@ -788,20 +825,62 @@ class BattleScreenMock:
             monsters=self.monsters,
         )
 
-    def _refresh_command_options(self) -> None:
-        options = (
-            COMMAND_OPTIONS
-            if self._active_member_attack_targets()
-            else COMMAND_OPTIONS_WITHOUT_ATTACK
+    def _active_member_command_options(self) -> tuple[BattleCommandOption, ...]:
+        """Ask the Pyxel-independent rules for this actor's command state."""
+
+        if self.active_party_index is None:
+            return ()
+        return resolve_battle_commands(
+            self.party[self.active_party_index],
+            self.party,
+            self.monsters,
+            context=BattleCommandContext(spells=self.spells),
         )
+
+    def _refresh_command_options(self) -> None:
+        options_by_command = {
+            option.command: option
+            for option in self._active_member_command_options()
+        }
+        placements = []
+        for column_index, commands in enumerate(COMMAND_COLUMNS):
+            visible = [
+                options_by_command[command]
+                for command in commands
+                if command in options_by_command
+            ]
+            placements.extend(
+                (
+                    option,
+                    COMMAND_LABELS[option.command],
+                    COMMAND_TEXT_X[column_index],
+                    COMMAND_ROW_Y[row_index],
+                    COMMAND_CURSOR_X[column_index],
+                    COMMAND_ROW_Y[row_index],
+                )
+                for row_index, option in enumerate(visible)
+            )
         self.command_window.clear_texts()
-        for _, label, text_x, text_y, _, _ in options:
-            self.command_window.add_text(label, text_x, text_y)
+        for option, label, text_x, text_y, _, _ in placements:
+            if option.enabled:
+                self.command_window.add_text(label, text_x, text_y)
+            else:
+                self.command_window.add_text(
+                    label,
+                    text_x,
+                    text_y,
+                    color=DISABLED_COLOR,
+                )
         self.command_window.clear_cursor()
         self.command_cursor = self.command_window.set_cursor(
             tuple(
-                CursorTarget(cursor_x, cursor_y, key=key)
-                for key, _, _, _, cursor_x, cursor_y in options
+                CursorTarget(
+                    cursor_x,
+                    cursor_y,
+                    key=option.command,
+                    selectable=option.enabled,
+                )
+                for option, _, _, _, cursor_x, cursor_y in placements
             )
         )
 
@@ -873,7 +952,7 @@ class BattleScreenMock:
                 x,
                 y,
                 self.character_sprites,
-                0,
+                self._party_sprite_source_x(index),
                 visual.battle_sprite * 32,
                 16,
                 32,
@@ -883,6 +962,16 @@ class BattleScreenMock:
     def _party_draw_position(self, index: int) -> tuple[int, int] | None:
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
+        if (
+            self.phase is BattleMockPhase.FORMATION
+            and index == self.formation_actor_index
+        ):
+            x = self.formation_start_x + (
+                (self.formation_destination_x - self.formation_start_x)
+                * self.formation_animation_frame
+                // FORMATION_MOVE_FRAME_COUNT
+            )
+            return x, target_y
         if self.phase is not BattleMockPhase.ENTRANCE:
             return target_x, target_y
 
@@ -915,9 +1004,21 @@ class BattleScreenMock:
             x += 16
         return x
 
+    def _party_sprite_source_x(self, index: int) -> int:
+        if (
+            self.phase is BattleMockPhase.FORMATION
+            and index == self.formation_actor_index
+        ):
+            pattern = (
+                self.formation_animation_frame
+                // FORMATION_WALK_PATTERN_FRAME_COUNT
+            ) % 2
+            return pattern * FORMATION_SPRITE_STEP_X
+        return 0
+
     def _draw_active_party_arrow(self) -> None:
         if (
-            self.phase is BattleMockPhase.ENTRANCE
+            self.phase in (BattleMockPhase.ENTRANCE, BattleMockPhase.FORMATION)
             or self.active_party_index is None
         ):
             return
