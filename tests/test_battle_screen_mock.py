@@ -91,7 +91,7 @@ from rendering import (
     FadeThroughBlack,
     MonsterDeathAnimation,
 )
-from ui import Window
+from ui import CursorTarget, Window, WindowCursor
 
 
 _JAPANESE_COMMAND_LABELS = {
@@ -1177,7 +1177,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ascii_to_fullwidth(f"ＭＰ {mock.party[0].mp:03d}"),
         )
 
-    def test_using_a_spell_spends_mp_and_finishes_the_turn(self) -> None:
+    def test_using_a_spell_starts_target_selection_without_spending_mp(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -1190,14 +1190,14 @@ class BattleScreenMockTest(unittest.TestCase):
         spell = load_mock_spells()["FIRE1"]
         mock.spell_candidates = (spell,)
         mock.spell_cursor = Mock(selected_key=spell.key)
-        mock._complete_current_turn = Mock()
+        mock._begin_action_target_selection = Mock(return_value=True)
         before_mp = mock.party[0].mp
 
         self.assertTrue(mock._use_selected_spell())
-        self.assertEqual(mock.party[0].mp, before_mp - spell.mp)
-        mock._complete_current_turn.assert_called_once_with()
+        self.assertEqual(mock.party[0].mp, before_mp)
+        mock._begin_action_target_selection.assert_called_once_with(spell)
 
-    def test_using_a_breaking_consumable_removes_it_after_selection(self) -> None:
+    def test_using_a_breaking_consumable_starts_target_selection_before_removal(self) -> None:
         items = load_mock_items()
         potion = items["POTION"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -1208,11 +1208,142 @@ class BattleScreenMockTest(unittest.TestCase):
         from systems import InventorySystem
 
         mock.inventory_system = InventorySystem.with_one_each(items)
-        mock._complete_current_turn = Mock()
+        mock._begin_action_target_selection = Mock(return_value=True)
 
         self.assertTrue(mock._use_selected_item())
+        self.assertEqual(mock.inventory_system.quantity(potion), 1)
+        mock._begin_action_target_selection.assert_called_once_with(
+            mock.spells[potion.use_spell_key],
+            item_candidate=mock.item_candidates[0],
+        )
+
+    def test_spell_mp_is_spent_only_after_target_confirmation(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.pending_item_candidate = None
+        mock.pending_spell = load_mock_spells()["FIRE1"]
+        mock._complete_current_turn = Mock()
+        before_mp = mock.party[0].mp
+
+        self.assertTrue(mock._confirm_action_target_selection())
+        self.assertEqual(mock.party[0].mp, before_mp - mock.pending_spell.mp)
+        mock._complete_current_turn.assert_called_once_with()
+
+    def test_breaking_item_is_removed_only_after_target_confirmation(self) -> None:
+        items = load_mock_items()
+        potion = items["POTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem.with_one_each(items)
+        mock.active_party_index = 0
+        mock.pending_item_candidate = BattleItemCandidate(potion)
+        mock.pending_spell = None
+        mock._complete_current_turn = Mock()
+
+        self.assertTrue(mock._confirm_action_target_selection())
         self.assertEqual(mock.inventory_system.quantity(potion), 0)
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_target_cancel_returns_to_the_item_list_without_consuming_it(self) -> None:
+        items = load_mock_items()
+        potion = items["POTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.pending_item_candidate = BattleItemCandidate(potion)
+        mock.pending_spell = None
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.selectable_party_target_indexes = ()
+        mock.selected_party_target_index = None
+        mock.action_targets_enemy = False
+        mock.action_targets_all = False
+        mock.target_cursor = Mock()
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock._refresh_monster_name_colors = Mock()
+        mock.item_window = Mock()
+        mock._refresh_item_options = Mock()
+
+        mock._cancel_action_target_selection()
+
+        self.assertIs(mock.phase, BattleMockPhase.ITEM)
+        self.assertIs(mock.selected_command, BattleCommand.ITEM)
+        mock.item_window.open_immediately.assert_called_once_with()
+        mock._refresh_item_options.assert_called_once_with()
+
+    def test_item_effect_targeting_uses_its_resolved_spell_target_flags(self) -> None:
+        spell = load_mock_spells()["FIRE1"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (SimpleNamespace(is_alive=True), SimpleNamespace(is_alive=True))
+        mock.target_window = Window(0, 0, 64, 60, transparent=True)
+        mock.target_cursor = WindowCursor(
+            mock.target_window,
+            tuple(
+                CursorTarget((x + 8) // 4, (y + 16) // 4, key=index)
+                for index, (x, y) in enumerate(MONSTER_POSITIONS[:2])
+            ),
+            active=False,
+        )
+        mock.party_target_window = Window(0, 0, 64, 60, transparent=True)
+        mock.item_window = Mock()
+        mock.item_guide_window = Mock()
+        mock._close_spell_windows = Mock()
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(mock._begin_action_target_selection(spell))
+
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_TARGET)
+        self.assertTrue(mock.action_targets_enemy)
+        self.assertFalse(mock.action_targets_all)
+        self.assertEqual(mock.selected_target_index, 1)
+        self.assertTrue(mock.target_cursor.active)
+
+    def test_allied_all_target_creates_one_cursor_for_each_living_member(self) -> None:
+        spell = load_mock_spells()["TELEPORT"]
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.target_cursor = Mock(active=False)
+        mock.party_target_window = Window(0, 0, 64, 60, transparent=True)
+        mock._party_sprite_x = Mock(side_effect=(156, 160, 164))
+        mock.item_window = Mock()
+        mock.item_guide_window = Mock()
+        mock._close_spell_windows = Mock()
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(mock._begin_action_target_selection(spell))
+
+        self.assertFalse(mock.action_targets_enemy)
+        self.assertTrue(mock.action_targets_all)
+        self.assertEqual(mock.selectable_party_target_indexes, (0, 1, 2))
+        self.assertEqual(len(mock.all_target_cursors), 3)
+        self.assertFalse(mock.party_target_cursor.active)
+
+    def test_all_target_cursors_blink_on_alternating_frames(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_all = True
+        mock.all_target_cursors = (Mock(), Mock())
+
+        with patch("tools.screen_mocks.battle.pyxel.frame_count", 20):
+            mock._draw_target_cursor()
+        self.assertEqual([cursor.draw.call_count for cursor in mock.all_target_cursors], [1, 1])
+
+        with patch("tools.screen_mocks.battle.pyxel.frame_count", 21):
+            mock._draw_target_cursor()
+        self.assertEqual([cursor.draw.call_count for cursor in mock.all_target_cursors], [1, 1])
 
     def test_equipment_without_a_use_effect_stays_selectable_but_is_not_used(self) -> None:
         items = load_mock_items()

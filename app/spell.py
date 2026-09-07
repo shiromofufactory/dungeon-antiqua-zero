@@ -82,6 +82,8 @@ class Spell:
     mp: int
     on_camp: bool
     on_battle: bool
+    to_enemy: bool
+    to_all: bool
     intensity: int
     descriptions: Mapping[str, tuple[str, ...]]
 
@@ -134,6 +136,8 @@ class Spell:
             mp=_integer(record, "mp", 0),
             on_camp=_flag(record, "on_camp"),
             on_battle=_flag(record, "on_battle"),
+            to_enemy=_flag(record, "to_enemy"),
+            to_all=_flag(record, "to_all"),
             intensity=_integer(record, "intensity", 0),
             descriptions=MappingProxyType(descriptions),
         )

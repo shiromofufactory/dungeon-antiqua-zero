@@ -278,6 +278,7 @@ class BattleMockPhase(StrEnum):
     ITEM = "item"
     SPELL = "spell"
     TARGET = "target"
+    ACTION_TARGET = "action_target"
     ESCAPE_CONFIRMATION = "escape_confirmation"
     ESCAPE_MESSAGE = "escape_message"
     ESCAPE = "escape"
@@ -626,6 +627,9 @@ class BattleScreenMock:
             )
         )
         self.target_cursor.active = False
+        self.party_target_window = windows.create(0, 0, 64, 60, transparent=True)
+        self.party_target_cursor: WindowCursor | None = None
+        self.all_target_cursors: tuple[WindowCursor, ...] = ()
         self.escape_message_window = windows.create(
             *ESCAPE_MESSAGE_WINDOW_GRID,
             (
@@ -699,6 +703,12 @@ class BattleScreenMock:
         self.input_device = InputDevice.KEYBOARD
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
+        self.selectable_party_target_indexes: tuple[int, ...] = ()
+        self.selected_party_target_index: int | None = None
+        self.action_targets_enemy = False
+        self.action_targets_all = False
+        self.pending_item_candidate: BattleItemCandidate | None = None
+        self.pending_spell: Spell | None = None
         self.command_guide_command: BattleCommand | None = None
         self.command_guide_timer = 0
         self.command_guide_visible = False
@@ -804,6 +814,9 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.TARGET:
             self._update_target_selection(input_state)
             return
+        if self.phase is BattleMockPhase.ACTION_TARGET:
+            self._update_action_target_selection(input_state)
+            return
         if self.phase is BattleMockPhase.ITEM:
             self._update_item_selection(input_state)
             return
@@ -908,6 +921,14 @@ class BattleScreenMock:
         self.spell_scroll_offset = 0
         self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
+        self.selectable_party_target_indexes = ()
+        self.selected_party_target_index = None
+        self.action_targets_enemy = False
+        self.action_targets_all = False
+        self.pending_item_candidate = None
+        self.pending_spell = None
+        self.party_target_cursor = None
+        self.all_target_cursors = ()
         self._hide_command_guide()
         self.item_guide_window.close_immediately()
         self.item_guide_window.clear_texts()
@@ -1417,7 +1438,7 @@ class BattleScreenMock:
         self.command_window.open_immediately()
 
     def _use_selected_item(self) -> bool:
-        """Consume a selected consumable or break the selected equipped item."""
+        """Begin target selection for the selected item's use effect."""
 
         candidate = self.selected_item_candidate
         if candidate is None or self.active_party_index is None:
@@ -1425,17 +1446,13 @@ class BattleScreenMock:
         item = candidate.item
         if not self._item_is_usable_in_battle(item):
             return False
-        if item.breaks_on_use:
-            if candidate.equipment_slot is None:
-                if not self.inventory_system.remove(item):
-                    return False
-            else:
-                member = self.party[self.active_party_index]
-                member.equipment = member.equipment.replaced(
-                    {candidate.equipment_slot: None}
-                )
-        self._complete_current_turn()
-        return True
+        spell = self.spells.get(item.use_spell_key)
+        if spell is None:
+            return False
+        return self._begin_action_target_selection(
+            spell,
+            item_candidate=candidate,
+        )
 
     def _active_member_spell_candidates(self) -> tuple[Spell, ...]:
         """Return the active member's learned spells that work in battle."""
@@ -1707,7 +1724,7 @@ class BattleScreenMock:
         self.command_window.open_immediately()
 
     def _use_selected_spell(self) -> bool:
-        """Spend the selected spell's MP and finish this mock battle turn."""
+        """Begin target selection for the selected spell."""
 
         if self.active_party_index is None:
             return False
@@ -1715,9 +1732,211 @@ class BattleScreenMock:
         member = self.party[self.active_party_index]
         if spell is None or member.mp < spell.mp:
             return False
-        member.mp -= spell.mp
+        return self._begin_action_target_selection(spell)
+
+    def _begin_action_target_selection(
+        self,
+        spell: Spell,
+        *,
+        item_candidate: BattleItemCandidate | None = None,
+    ) -> bool:
+        """Select the targets specified by an item effect or a spell record."""
+
+        if spell.to_enemy:
+            selectable = tuple(
+                index for index, monster in enumerate(self.monsters) if monster.is_alive
+            )
+            if not selectable:
+                return False
+            self.selectable_target_indexes = selectable
+            self.selected_target_index = None if spell.to_all else selectable[-1]
+            self.selectable_party_target_indexes = ()
+            self.selected_party_target_index = None
+            self.target_cursor.active = not spell.to_all
+            if self.selected_target_index is not None:
+                self.target_cursor.select_key(self.selected_target_index)
+            target_positions = tuple(
+                target
+                for target in self.target_cursor.targets
+                if target.key in selectable
+            )
+            self.party_target_cursor = None
+            self.all_target_cursors = self._make_all_target_cursors(
+                self.target_window,
+                target_positions,
+            )
+        else:
+            selectable = tuple(
+                index for index, member in enumerate(self.party) if member.hp > 0
+            )
+            if not selectable:
+                return False
+            party_targets = tuple(
+                CursorTarget(
+                    (self._party_sprite_x(index) - 8) // 4,
+                    (PARTY_SPRITE_Y[index] + 8) // 4,
+                    key=index,
+                )
+                for index in selectable
+            )
+            self.selectable_target_indexes = ()
+            self.selected_target_index = None
+            self.selectable_party_target_indexes = selectable
+            self.selected_party_target_index = None if spell.to_all else selectable[0]
+            self.target_cursor.active = False
+            self.party_target_cursor = WindowCursor(
+                self.party_target_window,
+                party_targets,
+                active=not spell.to_all,
+            )
+            if self.selected_party_target_index is not None:
+                self.party_target_cursor.select_key(self.selected_party_target_index)
+            self.all_target_cursors = self._make_all_target_cursors(
+                self.party_target_window,
+                party_targets,
+            )
+
+        self.pending_item_candidate = item_candidate
+        self.pending_spell = spell if item_candidate is None else None
+        self.action_targets_enemy = spell.to_enemy
+        self.action_targets_all = spell.to_all
+        self.selected_command = (
+            BattleCommand.ITEM if item_candidate is not None else BattleCommand.SPELL
+        )
+        self.phase = BattleMockPhase.ACTION_TARGET
+        self.item_window.close_immediately()
+        self.item_guide_window.close_immediately()
+        self._close_spell_windows()
+        self._refresh_monster_name_colors()
+        return True
+
+    @staticmethod
+    def _make_all_target_cursors(
+        window: Window,
+        targets: tuple[CursorTarget, ...],
+    ) -> tuple[WindowCursor, ...]:
+        """Create one independently drawable cursor for every all-target marker."""
+
+        return tuple(WindowCursor(window, (target,)) for target in targets)
+
+    def _update_action_target_selection(self, input_state: InputState) -> None:
+        """Confirm a spell/item target, or return to its selection window."""
+
+        if input_state.cancel.triggered:
+            self._cancel_action_target_selection()
+            return
+        if input_state.confirm.triggered:
+            self._confirm_action_target_selection()
+            return
+        if not self.action_targets_all:
+            navigation = input_state.navigation
+            if navigation is not None:
+                if self.action_targets_enemy:
+                    self._move_target(navigation)
+                else:
+                    self._move_party_target(navigation)
+        self._update_action_target_cursors()
+
+    def _update_action_target_cursors(self) -> None:
+        """Advance the selected target cursor without moving it automatically."""
+
+        if self.action_targets_all:
+            for cursor in self.all_target_cursors:
+                cursor.update()
+            return
+        if self.action_targets_enemy:
+            self.target_cursor.update()
+        elif self.party_target_cursor is not None:
+            self.party_target_cursor.update()
+
+    def _move_party_target(self, direction: Direction) -> bool:
+        """Cycle the selectable party targets with any directional input."""
+
+        selected = self.selected_party_target_index
+        if selected is None or not self.selectable_party_target_indexes:
+            return False
+        distance = direction.dx or direction.dy
+        if not distance:
+            return False
+        candidates = self.selectable_party_target_indexes
+        index = (candidates.index(selected) + distance) % len(candidates)
+        target = candidates[index]
+        self.selected_party_target_index = target
+        if self.party_target_cursor is not None:
+            self.party_target_cursor.select_key(target)
+        return target != selected
+
+    def _confirm_action_target_selection(self) -> bool:
+        """Pay the selected action's cost only after its target is confirmed."""
+
+        item_candidate = self.pending_item_candidate
+        spell = self.pending_spell
+        if item_candidate is not None:
+            if not self._commit_item_use(item_candidate):
+                return False
+        elif spell is not None:
+            if self.active_party_index is None:
+                return False
+            member = self.party[self.active_party_index]
+            if member.mp < spell.mp:
+                return False
+            member.mp -= spell.mp
+        else:
+            return False
         self._complete_current_turn()
         return True
+
+    def _commit_item_use(self, candidate: BattleItemCandidate) -> bool:
+        """Remove an item or equipped gear only when its use was confirmed."""
+
+        item = candidate.item
+        if not item.breaks_on_use:
+            return True
+        if candidate.equipment_slot is None:
+            return self.inventory_system.remove(item)
+        if self.active_party_index is None:
+            return False
+        member = self.party[self.active_party_index]
+        member.equipment = member.equipment.replaced({candidate.equipment_slot: None})
+        return True
+
+    def _cancel_action_target_selection(self) -> None:
+        """Restore the item or spell list without spending a resource."""
+
+        item_candidate = self.pending_item_candidate
+        spell = self.pending_spell
+        self._clear_action_target_state()
+        if item_candidate is not None:
+            self.phase = BattleMockPhase.ITEM
+            self.selected_command = BattleCommand.ITEM
+            self.item_window.open_immediately()
+            self._refresh_item_options()
+            return
+        if spell is not None:
+            self.phase = BattleMockPhase.SPELL
+            self.selected_command = BattleCommand.SPELL
+            self.spell_window.open_immediately()
+            self._refresh_spell_options()
+            return
+        self._open_member_command_menu()
+
+    def _clear_action_target_state(self) -> None:
+        """Discard transient item/spell targeting state and hide its cursors."""
+
+        self.selectable_target_indexes = ()
+        self.selected_target_index = None
+        self.selectable_party_target_indexes = ()
+        self.selected_party_target_index = None
+        self.action_targets_enemy = False
+        self.action_targets_all = False
+        self.pending_item_candidate = None
+        self.pending_spell = None
+        self.target_cursor.active = False
+        if self.party_target_cursor is not None:
+            self.party_target_cursor.active = False
+        self.party_target_cursor = None
+        self.all_target_cursors = ()
+        self._refresh_monster_name_colors()
 
     def _begin_attack_target_selection(self) -> bool:
         selectable = self._active_member_attack_targets()
@@ -1827,6 +2046,16 @@ class BattleScreenMock:
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
+        self.selectable_party_target_indexes = ()
+        self.selected_party_target_index = None
+        self.action_targets_enemy = False
+        self.action_targets_all = False
+        self.pending_item_candidate = None
+        self.pending_spell = None
+        if self.party_target_cursor is not None:
+            self.party_target_cursor.active = False
+        self.party_target_cursor = None
+        self.all_target_cursors = ()
         self.item_candidates = ()
         self.selected_item_index = 0
         self.item_scroll_offset = 0
@@ -2401,9 +2630,21 @@ class BattleScreenMock:
         return target_x - initial_offset * remaining // duration
 
     def _draw_target_cursor(self) -> None:
-        if self.phase is not BattleMockPhase.TARGET:
+        if self.phase is BattleMockPhase.TARGET:
+            self.target_cursor.draw()
             return
-        self.target_cursor.draw()
+        if self.phase is not BattleMockPhase.ACTION_TARGET:
+            return
+        if self.action_targets_all:
+            # DA2 draws every cursor on alternating frames for all-target effects.
+            if pyxel.frame_count % 2 == 0:
+                for cursor in self.all_target_cursors:
+                    cursor.draw()
+            return
+        if self.action_targets_enemy:
+            self.target_cursor.draw()
+        elif self.party_target_cursor is not None:
+            self.party_target_cursor.draw()
 
     def _draw_timeline(self) -> None:
         if self.phase is BattleMockPhase.ENTRANCE:
@@ -2535,6 +2776,10 @@ class BattleScreenMock:
         global_command_window = getattr(self, "global_command_window", None)
         show_monster_names = (
             self.phase is BattleMockPhase.TARGET
+            or (
+                self.phase is BattleMockPhase.ACTION_TARGET
+                and self.action_targets_enemy
+            )
             or (self.phase is BattleMockPhase.INITIAL and self.command_window.is_closed)
             or (
                 self.phase is BattleMockPhase.GLOBAL_COMMAND

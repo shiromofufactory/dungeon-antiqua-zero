@@ -26,6 +26,8 @@ class SpellTest(unittest.TestCase):
         self.assertEqual(spell.level, 1)
         self.assertEqual(spell.mp, 2)
         self.assertFalse(spell.on_camp)
+        self.assertTrue(spell.to_enemy)
+        self.assertFalse(spell.to_all)
         self.assertEqual(
             spell.localized_name(Localizer(Language.JAPANESE)),
             "ファイア１",
