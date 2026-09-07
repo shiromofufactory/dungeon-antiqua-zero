@@ -14,6 +14,10 @@ from tools.screen_mocks.battle import (
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
     DEFEND_SPRITE_SOURCE_X,
+    ESCAPE_RUN_DESTINATION_X,
+    ESCAPE_FADE_DELAY_FRAME_COUNT,
+    ESCAPE_RUN_PATTERN_FRAME_COUNT,
+    ESCAPE_RUN_SPEED,
     FORMATION_MOVE_FRAME_COUNT,
     FORMATION_SPRITE_STEP_X,
     FORMATION_WALK_PATTERN_FRAME_COUNT,
@@ -262,6 +266,8 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertFalse(mock.target_cursor.active)
         self.assertFalse(mock.escape_cursor.active)
+        self.assertEqual(mock.escape_animation_frame, 0)
+        self.assertEqual(mock.escape_start_x, ())
         first_member = mock.party[0]
         self.assertIn(
             ascii_to_fullwidth(
@@ -1499,17 +1505,152 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window.close_immediately.assert_called_once_with()
         mock.escape_cursor.select_key.assert_called_once_with("yes")
 
-    def test_confirming_escape_yes_quits_mock(self) -> None:
+    def test_confirming_escape_yes_starts_run_without_quitting_immediately(
+        self,
+    ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.escape_cursor = Mock(selected_key="yes")
         mock.command_window = Mock(is_closed=True)
+        mock._begin_escape_animation = Mock()
 
         with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
             mock._update_escape_confirmation(
                 InputState(confirm=InputButton(triggered=True, held=True))
             )
 
+        mock._begin_escape_animation.assert_called_once_with()
+        quit_game.assert_not_called()
+
+    def test_escape_animation_hides_selection_and_stops_bgm(self) -> None:
+        members = (
+            SimpleNamespace(formation_row=FormationRow.FRONT),
+            SimpleNamespace(formation_row=FormationRow.BACK),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member)
+            for member in members
+        )
+        mock.phase = BattleMockPhase.ESCAPE_CONFIRMATION
+        mock.active_party_index = 0
+        mock.command_cursor = Mock(active=False)
+        mock.escape_cursor = Mock(active=True)
+        mock._refresh_party_text_colors = Mock()
+        mock.bgm = Mock()
+
+        mock._begin_escape_animation()
+
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE)
+        self.assertEqual(mock.escape_animation_frame, 0)
+        self.assertEqual(mock.escape_start_x, (156, 176))
+        self.assertFalse(mock.escape_fade.is_active)
+        self.assertEqual(mock.escape_fade.visible_rate, 1.0)
+        self.assertFalse(mock.escape_fade_covered)
+        self.assertIsNone(mock.active_party_index)
+        self.assertFalse(mock.command_cursor.active)
+        self.assertFalse(mock.escape_cursor.active)
+        mock._refresh_party_text_colors.assert_called_once_with()
+        mock.bgm.stop.assert_called_once_with()
+
+    def test_escape_run_uses_da2_speed_walk_pattern_and_right_facing_sprite(
+        self,
+    ) -> None:
+        member = SimpleNamespace(formation_row=FormationRow.FRONT)
+        visual = SimpleNamespace(member=member, battle_sprite=2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (visual,)
+        mock.character_sprites = object()
+        mock.phase = BattleMockPhase.ESCAPE
+        mock.escape_start_x = (156,)
+        mock.escape_animation_frame = ESCAPE_RUN_PATTERN_FRAME_COUNT
+
+        self.assertEqual(ESCAPE_RUN_SPEED, 4)
+        self.assertEqual(
+            mock._party_draw_position(0),
+            (
+                156 + ESCAPE_RUN_SPEED * ESCAPE_RUN_PATTERN_FRAME_COUNT,
+                64,
+            ),
+        )
+        self.assertEqual(mock._party_sprite_source_x(0), 16)
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
+
+        blt.assert_called_once_with(
+            156 + ESCAPE_RUN_SPEED * ESCAPE_RUN_PATTERN_FRAME_COUNT,
+            64,
+            mock.character_sprites,
+            16,
+            64,
+            -16,
+            32,
+            1,
+        )
+
+    def test_escape_run_quits_after_every_member_reaches_da2_destination(
+        self,
+    ) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (object(), object())
+        mock.escape_start_x = (
+            ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED,
+            ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED * 2,
+        )
+        mock.escape_animation_frame = 0
+        mock._update_escape_fade = Mock()
+
+        with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
+            mock._update_escape_animation()
+            quit_game.assert_not_called()
+            mock._update_escape_animation()
+
+        self.assertEqual(mock.escape_animation_frame, 2)
+        self.assertEqual(mock._update_escape_fade.call_count, 2)
         quit_game.assert_called_once_with()
+
+    def test_escape_fade_reaches_black_and_does_not_fade_back_in(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        mock.escape_fade_covered = False
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.escape_animation_frame = ESCAPE_FADE_DELAY_FRAME_COUNT
+
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_escape_fade()
+
+        self.assertTrue(mock.escape_fade_covered)
+        self.assertEqual(mock.escape_fade.visible_rate, 0.0)
+        mock.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=0.0,
+            target_color=0x000000,
+        )
+        update_count = mock.palette_shifter.set_global_mix.call_count
+
+        mock._update_escape_fade()
+
+        self.assertEqual(
+            mock.palette_shifter.set_global_mix.call_count,
+            update_count,
+        )
+
+    def test_escape_fade_waits_twelve_frames_before_starting(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        mock.escape_fade_covered = False
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.escape_animation_frame = ESCAPE_FADE_DELAY_FRAME_COUNT - 1
+
+        mock._update_escape_fade()
+
+        self.assertFalse(mock.escape_fade.is_active)
+        mock.palette_shifter.set_global_mix.assert_not_called()
+
+        mock.escape_animation_frame = ESCAPE_FADE_DELAY_FRAME_COUNT
+        mock._update_escape_fade()
+
+        self.assertTrue(mock.escape_fade.is_active)
+        mock.palette_shifter.set_global_mix.assert_called_once()
 
     def test_escape_no_returns_to_command_selection(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -1626,6 +1767,13 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_windows()
         for status_window in party_status_windows:
             status_window.draw.assert_called_once_with()
+
+        for status_window in party_status_windows:
+            status_window.reset_mock()
+        mock.phase = BattleMockPhase.ESCAPE
+        mock._draw_windows()
+        for status_window in party_status_windows:
+            status_window.draw.assert_not_called()
 
     def test_cancel_input_closes_command_and_returns_to_button_wait(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

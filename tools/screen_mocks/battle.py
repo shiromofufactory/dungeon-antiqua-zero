@@ -49,6 +49,7 @@ from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_PALETTE_BASE_RATE,
+    FadeEvent,
     FadeThroughBlack,
     MonsterDeathAnimation,
 )
@@ -113,6 +114,11 @@ ESCAPE_CHOICE_CURSOR_X = 2
 ESCAPE_YES_Y = 2
 ESCAPE_NO_Y = 5
 DA2_REFERENCE_FPS = 30
+DA2_ESCAPE_RUN_SPEED = 12
+ESCAPE_RUN_SPEED = DA2_ESCAPE_RUN_SPEED * DA2_REFERENCE_FPS // FPS
+ESCAPE_RUN_DESTINATION_X = SCREEN_WIDTH + 4
+ESCAPE_RUN_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
+ESCAPE_FADE_DELAY_FRAME_COUNT = 6
 DA2_MONSTER_ENTRANCE_SLIDE_STEPS = (8, 8, 7, 7, 6)
 DA2_MONSTER_ENTRANCE_STEP_DISTANCE = 24
 MONSTER_ENTRANCE_FRAME_COUNTS = tuple(
@@ -218,6 +224,7 @@ class BattleMockPhase(StrEnum):
     COMMAND = "command"
     TARGET = "target"
     ESCAPE_CONFIRMATION = "escape_confirmation"
+    ESCAPE = "escape"
     FORMATION = "formation"
     MONSTER_DEATH = "monster_death"
     TIMELINE = "timeline"
@@ -531,6 +538,10 @@ class BattleScreenMock:
         self.formation_actor_index: int | None = None
         self.formation_start_x = 0
         self.formation_destination_x = 0
+        self.escape_animation_frame = 0
+        self.escape_start_x: tuple[int, ...] = ()
+        self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.escape_fade_covered = False
         self.monster_death_animation: MonsterDeathAnimation | None = None
         self.dying_monster_index: int | None = None
         self.entrance_animation_frame = 0
@@ -591,6 +602,9 @@ class BattleScreenMock:
             return
         if self.phase is BattleMockPhase.ESCAPE_CONFIRMATION:
             self._update_escape_confirmation(input_state)
+            return
+        if self.phase is BattleMockPhase.ESCAPE:
+            self._update_escape_animation()
             return
         if self.phase is BattleMockPhase.FORMATION:
             self._update_formation_animation()
@@ -653,6 +667,10 @@ class BattleScreenMock:
         self.formation_actor_index = None
         self.formation_start_x = 0
         self.formation_destination_x = 0
+        self.escape_animation_frame = 0
+        self.escape_start_x = ()
+        self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.escape_fade_covered = False
         self.monster_death_animation = None
         self.dying_monster_index = None
         self.entrance_animation_frame = 0
@@ -721,11 +739,55 @@ class BattleScreenMock:
             return
         if input_state.confirm.triggered:
             if self.escape_cursor.selected_key == "yes":
-                pyxel.quit()
+                self._begin_escape_animation()
             else:
                 self._cancel_escape_confirmation()
             return
         self.escape_cursor.update(input_state.navigation)
+
+    def _begin_escape_animation(self) -> None:
+        """Start the DA2-style party run toward the right screen edge."""
+
+        self.phase = BattleMockPhase.ESCAPE
+        self.escape_animation_frame = 0
+        self.escape_start_x = tuple(
+            self._party_sprite_x(index) for index in range(len(self.party_visuals))
+        )
+        self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.escape_fade_covered = False
+        self.active_party_index = None
+        self.command_cursor.active = False
+        self.escape_cursor.active = False
+        self._refresh_party_text_colors()
+        self.bgm.stop()
+
+    def _update_escape_animation(self) -> None:
+        """Run all party members offscreen and finish the battle mock."""
+
+        self._update_escape_fade()
+        self.escape_animation_frame += 1
+        if all(
+            self._escape_party_x(index) >= ESCAPE_RUN_DESTINATION_X
+            for index in range(len(self.party_visuals))
+        ):
+            pyxel.quit()
+
+    def _update_escape_fade(self) -> None:
+        """Fade to black once and hold the covered frame until mock exit."""
+
+        if self.escape_fade_covered:
+            return
+        if self.escape_animation_frame < ESCAPE_FADE_DELAY_FRAME_COUNT:
+            return
+        if not self.escape_fade.is_active:
+            self.escape_fade.start()
+        event = self.escape_fade.update()
+        self.palette_shifter.set_global_mix(
+            base_rate=self.escape_fade.visible_rate,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+        if event is FadeEvent.COVERED:
+            self.escape_fade_covered = True
 
     def _cancel_escape_confirmation(self) -> None:
         self.phase = BattleMockPhase.COMMAND
@@ -1097,13 +1159,14 @@ class BattleScreenMock:
             if position is None:
                 continue
             x, y = position
+            width = -16 if self.phase is BattleMockPhase.ESCAPE else 16
             pyxel.blt(
                 x,
                 y,
                 self.character_sprites,
                 self._party_sprite_source_x(index),
                 visual.battle_sprite * 32,
-                16,
+                width,
                 32,
                 TRANSPARENT_INDEX,
             )
@@ -1111,6 +1174,8 @@ class BattleScreenMock:
     def _party_draw_position(self, index: int) -> tuple[int, int] | None:
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
+        if self.phase is BattleMockPhase.ESCAPE:
+            return self._escape_party_x(index), target_y
         if (
             self.phase is BattleMockPhase.FORMATION
             and index == self.formation_actor_index
@@ -1147,6 +1212,14 @@ class BattleScreenMock:
         )
         return x, linear_y - jump
 
+    def _escape_party_x(self, index: int) -> int:
+        """Return one member's rightward run position for the current frame."""
+
+        return min(
+            self.escape_start_x[index] + self.escape_animation_frame * ESCAPE_RUN_SPEED,
+            ESCAPE_RUN_DESTINATION_X,
+        )
+
     def _party_sprite_x(self, index: int) -> int:
         x = 156 + index * 4
         if self.party_visuals[index].member.formation_row is FormationRow.BACK:
@@ -1154,6 +1227,11 @@ class BattleScreenMock:
         return x
 
     def _party_sprite_source_x(self, index: int) -> int:
+        if self.phase is BattleMockPhase.ESCAPE:
+            pattern = (
+                self.escape_animation_frame // ESCAPE_RUN_PATTERN_FRAME_COUNT
+            ) % 2
+            return pattern * FORMATION_SPRITE_STEP_X
         if (
             self.phase is BattleMockPhase.FORMATION
             and index == self.formation_actor_index
@@ -1374,7 +1452,7 @@ class BattleScreenMock:
         pyxel.rect(x, y + 18, 16, 1, color - 1)
 
     def _draw_windows(self) -> None:
-        hide_party_status = (
+        hide_party_status = self.phase is BattleMockPhase.ESCAPE or (
             self.phase is BattleMockPhase.ENTRANCE
             and self.entrance_animation_frame < PARTY_ENTRANCE_COMPLETE_FRAME
         )
