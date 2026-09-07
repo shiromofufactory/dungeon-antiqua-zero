@@ -50,6 +50,7 @@ from monster import (
 from input import Direction, InputState
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
+    DIMMED_PALETTE,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_PALETTE_BASE_RATE,
     FadeEvent,
@@ -80,15 +81,6 @@ from ui import (
     WindowFactory,
     WindowText,
 )
-from ui.formation_arrow import (
-    FORMATION_ARROW_BANK,
-    FORMATION_ARROW_COLKEY,
-    FORMATION_ARROW_FRAME_DURATION,
-    FORMATION_ARROW_HEIGHT,
-    FORMATION_ARROW_RIGHT_X,
-    FORMATION_ARROW_WIDTH,
-    FORMATION_ARROW_Y,
-)
 from item_detail import ItemDetailContext, item_detail_lines
 
 BACKGROUND_IMAGE_ID = "background/bg_nector"
@@ -105,6 +97,13 @@ BATTLE_MOCK_MONSTER_KEYS = (
 BATTLE_MOCK_FRONT_MONSTER_INDEXES = frozenset((2, 3, 4))
 BATTLE_MOCK_FRONT_CHARACTER_KEYS = frozenset(("Cerion",))
 PARTY_SPRITE_Y = (64, 92, 120)
+# Pyxel can remap only four 16-color palette blocks.  The battle mock does
+# not use its default dimmed block, so the active-member pulse owns that slot.
+ACTIVE_PARTY_PULSE_PALETTE = DIMMED_PALETTE
+ACTIVE_PARTY_PULSE_TARGET_COLOR = 0xFFFFFF
+ACTIVE_PARTY_PULSE_MIN_BASE_RATE = 0.5
+ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT = 90
+ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT // 2
 MONSTER_POSITIONS = ((4, 56), (4, 120), (68, 24), (68, 88), (68, 152))
 TIMELINE_BASE_X = 70
 TIMELINE_BASE_Y = 220
@@ -646,6 +645,7 @@ class BattleScreenMock:
         self.escape_cursor.active = False
         self.phase = BattleMockPhase.INITIAL
         self.active_party_index: int | None = 0
+        self.active_party_pulse_frame = 0
         self.blinking_monster_index: int | None = None
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
@@ -733,6 +733,8 @@ class BattleScreenMock:
         if input_state.menu.triggered:
             self._restart_battle_mock()
             return
+        if hasattr(self, "active_party_pulse_frame"):
+            self._update_active_party_pulse()
         if self.phase not in (BattleMockPhase.COMMAND, BattleMockPhase.ITEM):
             self._hide_command_guide()
         if self.phase is BattleMockPhase.ENTRANCE:
@@ -814,6 +816,8 @@ class BattleScreenMock:
         self.timeline = self.party_visuals + self.monsters
         self.phase = BattleMockPhase.ENTRANCE
         self.active_party_index = 0
+        self.active_party_pulse_frame = 0
+        self._sync_active_party_pulse_palette()
         self.blinking_monster_index = None
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase = None
@@ -1680,11 +1684,55 @@ class BattleScreenMock:
     def _start_timeline_animation(self) -> None:
         self.phase = BattleMockPhase.TIMELINE
         self.active_party_index = None
+        if hasattr(self, "active_party_pulse_frame"):
+            self.active_party_pulse_frame = 0
+            self._sync_active_party_pulse_palette()
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.timeline_animation_phase = TimelineAnimationPhase.DROP
         self.timeline_animation_frame = 0
         self._refresh_party_text_colors()
+
+    def _active_party_pulse_is_visible(self) -> bool:
+        """Return whether the current actor's palette pulse should be drawn."""
+
+        return (
+            self.phase
+            in (
+                BattleMockPhase.COMMAND,
+                BattleMockPhase.ITEM,
+                BattleMockPhase.SPELL,
+                BattleMockPhase.TARGET,
+                BattleMockPhase.ESCAPE_CONFIRMATION,
+            )
+            and getattr(self, "active_party_index", None) is not None
+        )
+
+    def _update_active_party_pulse(self) -> None:
+        """Advance the current actor's whiteward palette pulse."""
+
+        if self._active_party_pulse_is_visible():
+            self.active_party_pulse_frame = (
+                self.active_party_pulse_frame + 1
+            ) % ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT
+        else:
+            self.active_party_pulse_frame = 0
+        self._sync_active_party_pulse_palette()
+
+    def _sync_active_party_pulse_palette(self) -> None:
+        """Apply the pulse frame as a scoped palette variant."""
+
+        half_cycle = ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT
+        distance_from_peak = abs(half_cycle - self.active_party_pulse_frame)
+        progress_to_normal = distance_from_peak / half_cycle
+        base_rate = ACTIVE_PARTY_PULSE_MIN_BASE_RATE + (
+            (1.0 - ACTIVE_PARTY_PULSE_MIN_BASE_RATE) * progress_to_normal
+        )
+        self.palette_shifter.define_mix(
+            ACTIVE_PARTY_PULSE_PALETTE,
+            base_rate=base_rate,
+            target_color=ACTIVE_PARTY_PULSE_TARGET_COLOR,
+        )
 
     def _update_timeline_animation(self) -> None:
         self.command_window.update(None)
@@ -1937,7 +1985,6 @@ class BattleScreenMock:
 
         self._draw_background()
         self._draw_party()
-        self._draw_active_party_arrow()
         self._draw_monsters()
         self._draw_timeline()
         self._draw_windows()
@@ -1965,6 +2012,22 @@ class BattleScreenMock:
                 BattleMockPhase.ESCAPE,
             ) or index in getattr(self, "escaping_party_indexes", ())
             width = -16 if is_escaping else 16
+            if (
+                self._active_party_pulse_is_visible()
+                and index == self.active_party_index
+            ):
+                with self.palette_shifter.shifted(ACTIVE_PARTY_PULSE_PALETTE):
+                    pyxel.blt(
+                        x,
+                        y,
+                        self.character_sprites,
+                        self._party_sprite_source_x(index),
+                        visual.battle_sprite * 32,
+                        width,
+                        32,
+                        TRANSPARENT_INDEX,
+                    )
+                continue
             pyxel.blt(
                 x,
                 y,
@@ -2050,25 +2113,6 @@ class BattleScreenMock:
         if index in getattr(self, "defending_party_indexes", ()):
             return DEFEND_SPRITE_SOURCE_X
         return 0
-
-    def _draw_active_party_arrow(self) -> None:
-        if (
-            self.phase in (BattleMockPhase.ENTRANCE, BattleMockPhase.FORMATION)
-            or self.active_party_index is None
-        ):
-            return
-        index = self.active_party_index
-        frame = (pyxel.frame_count // FORMATION_ARROW_FRAME_DURATION) % 2
-        pyxel.blt(
-            self._party_sprite_x(index) - FORMATION_ARROW_WIDTH,
-            PARTY_SPRITE_Y[index] + (32 - FORMATION_ARROW_HEIGHT) // 2,
-            FORMATION_ARROW_BANK,
-            FORMATION_ARROW_RIGHT_X[frame],
-            FORMATION_ARROW_Y,
-            FORMATION_ARROW_WIDTH,
-            FORMATION_ARROW_HEIGHT,
-            FORMATION_ARROW_COLKEY,
-        )
 
     def _draw_monsters(self) -> None:
         for index, (monster, (_, y)) in enumerate(

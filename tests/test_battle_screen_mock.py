@@ -10,6 +10,10 @@ from tools.screen_mocks.battle import (
     BATTLE_BGM_ID,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+    ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT,
+    ACTIVE_PARTY_PULSE_MIN_BASE_RATE,
+    ACTIVE_PARTY_PULSE_PALETTE,
+    ACTIVE_PARTY_PULSE_TARGET_COLOR,
     COMMAND_GUIDE_DELAY_FRAME_COUNT,
     COMMAND_GUIDE_FIRST_Y,
     COMMAND_GUIDE_LINE_SPACING,
@@ -85,15 +89,6 @@ from rendering import (
     FadeThroughBlack,
     MonsterDeathAnimation,
 )
-from ui.formation_arrow import (
-    FORMATION_ARROW_BANK,
-    FORMATION_ARROW_COLKEY,
-    FORMATION_ARROW_FRAME_DURATION,
-    FORMATION_ARROW_HEIGHT,
-    FORMATION_ARROW_RIGHT_X,
-    FORMATION_ARROW_WIDTH,
-    FORMATION_ARROW_Y,
-)
 from ui import Window
 
 
@@ -119,7 +114,6 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock._draw_background = Mock()
         mock._draw_party = Mock()
-        mock._draw_active_party_arrow = Mock()
         mock._draw_monsters = Mock()
         mock._draw_target_cursor = Mock()
         mock._draw_timeline = Mock()
@@ -128,7 +122,6 @@ class BattleScreenMockTest(unittest.TestCase):
         manager = Mock()
         manager.attach_mock(mock._draw_background, "background")
         manager.attach_mock(mock._draw_party, "party")
-        manager.attach_mock(mock._draw_active_party_arrow, "actor_arrow")
         manager.attach_mock(mock._draw_monsters, "monsters")
         manager.attach_mock(mock._draw_target_cursor, "target")
         manager.attach_mock(mock._draw_timeline, "timeline")
@@ -141,7 +134,6 @@ class BattleScreenMockTest(unittest.TestCase):
             [
                 call.background(),
                 call.party(),
-                call.actor_arrow(),
                 call.monsters(),
                 call.timeline(),
                 call.windows(),
@@ -294,10 +286,20 @@ class BattleScreenMockTest(unittest.TestCase):
             base_rate=0.0,
             target_color=0x000000,
         )
-        palette_shifter.define_mix.assert_called_once_with(
-            UNSELECTABLE_TARGET_PALETTE,
-            base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
-            target_color=0x858585,
+        self.assertEqual(
+            palette_shifter.define_mix.call_args_list,
+            [
+                call(
+                    UNSELECTABLE_TARGET_PALETTE,
+                    base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
+                    target_color=0x858585,
+                ),
+                call(
+                    ACTIVE_PARTY_PULSE_PALETTE,
+                    base_rate=1.0,
+                    target_color=ACTIVE_PARTY_PULSE_TARGET_COLOR,
+                ),
+            ],
         )
         self.assertIs(mock.party[1].formation_row, FormationRow.FRONT)
         self.assertEqual(
@@ -1418,38 +1420,69 @@ class BattleScreenMockTest(unittest.TestCase):
             [5, 4, 4],
         )
 
-    def test_active_member_draws_shared_blinking_right_arrow(self) -> None:
+    def test_active_member_draws_with_the_whiteward_pulse_palette(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.active_party_index = 1
         mock.party_visuals = (
             SimpleNamespace(
-                member=SimpleNamespace(formation_row=FormationRow.FRONT)
+                member=SimpleNamespace(formation_row=FormationRow.FRONT),
+                battle_sprite=0,
             ),
             SimpleNamespace(
-                member=SimpleNamespace(formation_row=FormationRow.FRONT)
+                member=SimpleNamespace(formation_row=FormationRow.FRONT),
+                battle_sprite=1,
             ),
         )
+        mock.character_sprites = object()
         mock.phase = BattleMockPhase.COMMAND
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
 
-        with (
-            patch(
-                "tools.screen_mocks.battle.pyxel.frame_count",
-                FORMATION_ARROW_FRAME_DURATION,
-            ),
-            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
-        ):
-            mock._draw_active_party_arrow()
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
 
-        blt.assert_called_once_with(
-            160 - FORMATION_ARROW_WIDTH,
-            92 + (32 - FORMATION_ARROW_HEIGHT) // 2,
-            FORMATION_ARROW_BANK,
-            FORMATION_ARROW_RIGHT_X[1],
-            FORMATION_ARROW_Y,
-            FORMATION_ARROW_WIDTH,
-            FORMATION_ARROW_HEIGHT,
-            FORMATION_ARROW_COLKEY,
+        mock.palette_shifter.shifted.assert_called_once_with(ACTIVE_PARTY_PULSE_PALETTE)
+        self.assertEqual(blt.call_count, 2)
+
+    def test_active_party_pulse_reaches_its_whiteward_peak_mid_cycle(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_pulse_frame = ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT // 2
+        mock.palette_shifter = Mock()
+
+        mock._sync_active_party_pulse_palette()
+
+        mock.palette_shifter.define_mix.assert_called_once_with(
+            ACTIVE_PARTY_PULSE_PALETTE,
+            base_rate=ACTIVE_PARTY_PULSE_MIN_BASE_RATE,
+            target_color=ACTIVE_PARTY_PULSE_TARGET_COLOR,
         )
+
+    def test_active_party_pulse_ends_when_command_input_is_complete(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+
+        for phase in (
+            BattleMockPhase.COMMAND,
+            BattleMockPhase.ITEM,
+            BattleMockPhase.SPELL,
+            BattleMockPhase.TARGET,
+            BattleMockPhase.ESCAPE_CONFIRMATION,
+        ):
+            mock.phase = phase
+            self.assertTrue(mock._active_party_pulse_is_visible())
+
+        for phase in (
+            BattleMockPhase.INITIAL,
+            BattleMockPhase.ENTRANCE,
+            BattleMockPhase.FORMATION,
+            BattleMockPhase.MONSTER_DEATH,
+            BattleMockPhase.TIMELINE,
+            BattleMockPhase.MONSTER_ACTION,
+            BattleMockPhase.ESCAPE_MESSAGE,
+            BattleMockPhase.ESCAPE,
+        ):
+            mock.phase = phase
+            self.assertFalse(mock._active_party_pulse_is_visible())
 
     def test_timeline_displays_six_entries_and_brings_seventh_into_view(
         self,
