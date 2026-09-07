@@ -75,12 +75,34 @@ class FadeThroughBlackTest(unittest.TestCase):
         self.assertIs(fade.update(), FadeEvent.NONE)
         self.assertEqual(fade.visible_rate, 1.0)
 
+    def test_can_start_directly_from_black_and_fade_in(self) -> None:
+        fade = FadeThroughBlack()
+
+        fade.start_fade_in()
+
+        self.assertIs(fade.phase, FadePhase.FADING_IN)
+        self.assertEqual(fade.visible_rate, 0.0)
+        rates = []
+        events = []
+        for _frame in range(fade.frame_count):
+            events.append(fade.update())
+            rates.append(fade.visible_rate)
+        self.assertEqual(
+            rates,
+            [frame / fade.frame_count for frame in range(1, fade.frame_count + 1)],
+        )
+        self.assertEqual(events[-1], FadeEvent.FINISHED)
+        self.assertFalse(fade.is_active)
+
     def test_rejects_a_second_start_while_active(self) -> None:
         fade = FadeThroughBlack()
         fade.start()
 
         with self.assertRaisesRegex(RuntimeError, "already active"):
             fade.start()
+
+        with self.assertRaisesRegex(RuntimeError, "already active"):
+            fade.start_fade_in()
 
     def test_rejects_invalid_frame_counts(self) -> None:
         for frame_count in (True, 1.5, "8"):

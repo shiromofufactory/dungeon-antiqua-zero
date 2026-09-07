@@ -5,9 +5,19 @@ from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from tools.screen_mocks.battle import (
+    BATTLE_ENTRANCE_FRAME_COUNT,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+    DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
+    DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
     MONSTER_BLINK_FRAME_COUNT,
+    MONSTER_ENTRANCE_FRAME_COUNTS,
+    MONSTER_POSITIONS,
+    PARTY_ENTRANCE_COMPLETE_FRAME,
+    PARTY_ENTRANCE_FRAME_COUNT,
+    PARTY_ENTRANCE_OFFSET_Y,
+    PARTY_ENTRANCE_START_X,
+    PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
     BattleMockCharacter,
     BattleMockMonster,
     BattleMockPhase,
@@ -17,6 +27,9 @@ from tools.screen_mocks.battle import (
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
     TIMELINE_ANIMATION_FRAME_COUNT,
+    TIMELINE_ENTRANCE_COMPLETE_FRAME,
+    TIMELINE_ENTRANCE_FRAME_COUNT,
+    TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT,
     TIMELINE_VISIBLE_ENTRY_COUNT,
     TimelineAnimationPhase,
     WindowText,
@@ -27,6 +40,7 @@ from tools.screen_mocks.battle import (
 from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
+from rendering import DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
 from ui.formation_arrow import (
     FORMATION_ARROW_BANK,
     FORMATION_ARROW_COLKEY,
@@ -116,7 +130,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_mock_initializes_display_data_from_generated_records(self) -> None:
         with (
-            patch("tools.screen_mocks.battle.initialize_screen_mock"),
+            patch("tools.screen_mocks.battle.initialize_screen_mock") as initialize,
             patch("tools.screen_mocks.battle.create_mock_input_reader"),
             patch("tools.screen_mocks.battle.ImageResources") as images,
             patch("tools.screen_mocks.battle.FontResources") as fonts,
@@ -127,16 +141,20 @@ class BattleScreenMockTest(unittest.TestCase):
                 width=SCREEN_WIDTH,
                 height=SCREEN_HEIGHT,
             )
+            palette_shifter = Mock(base_colors=(0x000000,))
+            initialize.return_value = palette_shifter
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             windows.return_value.create.return_value = Mock()
             command_cursor = Mock()
             target_cursor = Mock()
             escape_cursor = Mock()
+            restarted_command_cursor = Mock()
             windows.return_value.create.return_value.set_cursor.side_effect = (
                 command_cursor,
                 target_cursor,
                 escape_cursor,
+                restarted_command_cursor,
             )
 
             mock = BattleScreenMock()
@@ -170,6 +188,14 @@ class BattleScreenMockTest(unittest.TestCase):
             BATTLE_MOCK_MONSTER_KEYS,
         )
         self.assertEqual(mock.timeline, mock.party_visuals + mock.monsters)
+        self.assertIs(mock.phase, BattleMockPhase.ENTRANCE)
+        self.assertEqual(mock.entrance_animation_frame, 0)
+        self.assertTrue(mock.entrance_fade.is_active)
+        self.assertFalse(mock.command_cursor.active)
+        palette_shifter.set_global_mix.assert_called_with(
+            base_rate=0.0,
+            target_color=0x000000,
+        )
         self.assertIs(mock.party[1].formation_row, FormationRow.FRONT)
         self.assertEqual(
             [monster.is_front_row for monster in mock.monsters],
@@ -213,6 +239,54 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIn("はい", created_texts)
         self.assertIn("いいえ", created_texts)
 
+    def test_entrance_blocks_input_until_all_animations_finish(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock._update_entrance_animation = Mock()
+        mock.command_window = Mock()
+
+        mock.update()
+
+        mock._update_entrance_animation.assert_called_once_with()
+        mock.command_window.open.assert_not_called()
+
+    def test_entrance_fades_in_then_opens_first_command_turn(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.entrance_animation_frame = 0
+        mock.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        mock.entrance_fade.start_fade_in()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_entrance_animation()
+
+        self.assertIs(mock.phase, BattleMockPhase.ENTRANCE)
+        self.assertFalse(mock.entrance_fade.is_active)
+        mock.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=1.0,
+            target_color=0x000000,
+        )
+
+        for _frame in range(
+            BATTLE_ENTRANCE_FRAME_COUNT - DEFAULT_FADE_FRAME_COUNT
+        ):
+            mock._update_entrance_animation()
+
+        self.assertEqual(
+            mock.entrance_animation_frame,
+            BATTLE_ENTRANCE_FRAME_COUNT,
+        )
+        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
+        self.assertTrue(mock.command_cursor.active)
+        mock.command_window.open.assert_called_once_with()
+
     def test_party_sprites_use_member_formation_and_data_sprite_index(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
@@ -226,6 +300,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 battle_sprite=4,
             ),
         )
+        mock.phase = BattleMockPhase.COMMAND
 
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock._draw_party()
@@ -238,6 +313,54 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
+    def test_party_entrance_jumps_quickly_with_two_frame_stagger(
+        self,
+    ) -> None:
+        self.assertEqual(PARTY_ENTRANCE_START_X, SCREEN_WIDTH)
+        self.assertEqual(PARTY_ENTRANCE_FRAME_COUNT, 10)
+        self.assertEqual(PARTY_ENTRANCE_STAGGER_FRAME_COUNT, 2)
+        self.assertEqual(PARTY_ENTRANCE_COMPLETE_FRAME, 14)
+        self.assertEqual(BATTLE_ENTRANCE_FRAME_COUNT, 20)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.party_visuals = tuple(
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.FRONT)
+            )
+            for _index in range(3)
+        )
+
+        mock.entrance_animation_frame = 0
+        self.assertEqual(
+            mock._party_draw_position(0),
+            (PARTY_ENTRANCE_START_X, 64 + PARTY_ENTRANCE_OFFSET_Y),
+        )
+        self.assertIsNone(mock._party_draw_position(1))
+
+        mock.entrance_animation_frame = PARTY_ENTRANCE_STAGGER_FRAME_COUNT
+        self.assertEqual(
+            mock._party_draw_position(1),
+            (PARTY_ENTRANCE_START_X, 92 + PARTY_ENTRANCE_OFFSET_Y),
+        )
+
+        mock.entrance_animation_frame = PARTY_ENTRANCE_FRAME_COUNT // 2
+        midpoint = mock._party_draw_position(0)
+        self.assertIsNotNone(midpoint)
+        assert midpoint is not None
+        self.assertGreater(midpoint[0], 156)
+        self.assertLess(midpoint[0], PARTY_ENTRANCE_START_X)
+        self.assertLess(midpoint[1], 64 + PARTY_ENTRANCE_OFFSET_Y)
+
+        for index in range(3):
+            mock.entrance_animation_frame = (
+                PARTY_ENTRANCE_FRAME_COUNT
+                + index * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
+            )
+            self.assertEqual(
+                mock._party_draw_position(index),
+                (156 + index * 4, (64, 92, 120)[index]),
+            )
+
     def test_monster_images_and_timeline_icons_use_display_data(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         image = object()
@@ -247,6 +370,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.monster_images = {"Coyote": image}
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
+        mock.phase = BattleMockPhase.COMMAND
         mock.timeline = (
             SimpleNamespace(icon_x=224, icon_y=16),
         )
@@ -267,6 +391,24 @@ class BattleScreenMockTest(unittest.TestCase):
                 call(74, 216, 0, 88, 16, 8, 8, 1),
             ],
         )
+
+    def test_monster_entrance_matches_da2_slide_timing_at_sixty_fps(self) -> None:
+        self.assertEqual(MONSTER_ENTRANCE_FRAME_COUNTS, (16, 16, 14, 14, 12))
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.entrance_animation_frame = 0
+
+        for index, ((target_x, _target_y), slide_steps) in enumerate(
+            zip(MONSTER_POSITIONS, DA2_MONSTER_ENTRANCE_SLIDE_STEPS)
+        ):
+            self.assertEqual(
+                mock._monster_draw_x(index),
+                target_x - slide_steps * DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
+            )
+
+        for index, duration in enumerate(MONSTER_ENTRANCE_FRAME_COUNTS):
+            mock.entrance_animation_frame = duration
+            self.assertEqual(mock._monster_draw_x(index), MONSTER_POSITIONS[index][0])
 
     def test_attack_reach_and_rows_determine_selectable_targets(self) -> None:
         monsters = tuple(
@@ -482,6 +624,25 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_command, "defend")
         mock._complete_current_turn.assert_called_once_with()
 
+    def test_spell_command_restarts_battle_mock_for_debugging(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.command_cursor = Mock(selected_key="spell")
+        mock.command_window = Mock(is_closed=False, is_open=True)
+        mock.selected_command = None
+        mock._restart_battle_mock = Mock()
+        mock._complete_current_turn = Mock()
+
+        mock.update()
+
+        mock._restart_battle_mock.assert_called_once_with()
+        mock._complete_current_turn.assert_not_called()
+        mock.command_window.update.assert_not_called()
+
     def test_timeline_cycles_through_every_combatant_and_returns_actor_to_tail(
         self,
     ) -> None:
@@ -617,6 +778,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 member=SimpleNamespace(formation_row=FormationRow.FRONT)
             ),
         )
+        mock.phase = BattleMockPhase.COMMAND
 
         with (
             patch(
@@ -642,6 +804,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self,
     ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
         mock.timeline = tuple(
             SimpleNamespace(icon_x=index * 16, icon_y=0)
             for index in range(8)
@@ -693,6 +856,49 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(len(blt.call_args_list), TIMELINE_VISIBLE_ENTRY_COUNT + 1)
 
+    def test_timeline_enters_from_right_with_two_frame_stagger(self) -> None:
+        self.assertEqual(TIMELINE_ENTRANCE_FRAME_COUNT, 10)
+        self.assertEqual(TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT, 2)
+        self.assertEqual(TIMELINE_ENTRANCE_COMPLETE_FRAME, 20)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.timeline = tuple(
+            SimpleNamespace(icon_x=index * 16, icon_y=0)
+            for index in range(8)
+        )
+        mock.timeline_animation_phase = None
+
+        mock.entrance_animation_frame = 0
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.rect"),
+        ):
+            mock._draw_timeline()
+        self.assertEqual(
+            [entry.args[:2] for entry in blt.call_args_list],
+            [(256, 220)],
+        )
+
+        mock.entrance_animation_frame = 2
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.rect"),
+        ):
+            mock._draw_timeline()
+        self.assertEqual(len(blt.call_args_list), 2)
+        self.assertEqual(blt.call_args_list[-1].args[:2], (256, 220))
+
+        mock.entrance_animation_frame = TIMELINE_ENTRANCE_COMPLETE_FRAME
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.rect"),
+        ):
+            mock._draw_timeline()
+        self.assertEqual(
+            [entry.args[:2] for entry in blt.call_args_list],
+            [(70 + index * 20, 220) for index in range(6)],
+        )
+
     def test_monster_blink_uses_da2_six_frame_visibility_cycle(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         image = object()
@@ -701,6 +907,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock.monster_images = {"Giant Spider": image}
         mock.blinking_monster_index = 0
+        mock.phase = BattleMockPhase.MONSTER_ACTION
 
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
@@ -917,6 +1124,29 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_windows()
         mock.escape_message_window.draw.assert_called_once_with()
         mock.escape_choice_window.draw.assert_called_once_with()
+
+    def test_party_status_appears_after_every_party_member_lands(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        command_window = Mock()
+        party_status_windows = [Mock(), Mock(), Mock()]
+        mock.windows = [command_window, *party_status_windows]
+        mock.party_status_windows = party_status_windows
+        mock.monster_name_windows = []
+        mock.escape_message_window = Mock()
+        mock.escape_choice_window = Mock()
+        mock.command_window = command_window
+        mock.phase = BattleMockPhase.ENTRANCE
+
+        mock.entrance_animation_frame = PARTY_ENTRANCE_COMPLETE_FRAME - 1
+        mock._draw_windows()
+        command_window.draw.assert_called_once_with()
+        for status_window in party_status_windows:
+            status_window.draw.assert_not_called()
+
+        mock.entrance_animation_frame = PARTY_ENTRANCE_COMPLETE_FRAME
+        mock._draw_windows()
+        for status_window in party_status_windows:
+            status_window.draw.assert_called_once_with()
 
     def test_cancel_input_closes_command_and_returns_to_button_wait(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

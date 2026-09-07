@@ -74,6 +74,14 @@ class FadeThroughBlack:
         self._phase = FadePhase.FADING_OUT
         self._elapsed_frames = 0
 
+    def start_fade_in(self) -> None:
+        """Start directly from black and fade into the current screen."""
+
+        if self.is_active:
+            raise RuntimeError("fade transition is already active")
+        self._phase = FadePhase.FADING_IN
+        self._elapsed_frames = 0
+
     def update(self) -> FadeEvent:
         """Advance one frame and report a transition milestone."""
 

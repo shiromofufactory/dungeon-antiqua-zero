@@ -32,6 +32,7 @@ from member import (
     Member,
 )
 from input import Direction, InputState
+from rendering import DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -82,6 +83,36 @@ ESCAPE_CHOICE_CURSOR_X = 2
 ESCAPE_YES_Y = 2
 ESCAPE_NO_Y = 5
 DA2_REFERENCE_FPS = 30
+DA2_MONSTER_ENTRANCE_SLIDE_STEPS = (8, 8, 7, 7, 6)
+DA2_MONSTER_ENTRANCE_STEP_DISTANCE = 24
+MONSTER_ENTRANCE_FRAME_COUNTS = tuple(
+    step_count * FPS // DA2_REFERENCE_FPS
+    for step_count in DA2_MONSTER_ENTRANCE_SLIDE_STEPS
+)
+PARTY_ENTRANCE_FRAME_COUNT = 10
+PARTY_ENTRANCE_STAGGER_FRAME_COUNT = 2
+PARTY_ENTRANCE_START_X = SCREEN_WIDTH
+PARTY_ENTRANCE_OFFSET_Y = -24
+PARTY_ENTRANCE_JUMP_HEIGHT = 24
+PARTY_ENTRANCE_COMPLETE_FRAME = (
+    PARTY_ENTRANCE_FRAME_COUNT
+    + (len(BATTLE_MOCK_PARTY_CHARACTER_KEYS) - 1)
+    * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
+)
+TIMELINE_ENTRANCE_FRAME_COUNT = 10
+TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT = 2
+TIMELINE_ENTRANCE_START_X = SCREEN_WIDTH
+TIMELINE_ENTRANCE_COMPLETE_FRAME = (
+    TIMELINE_ENTRANCE_FRAME_COUNT
+    + (TIMELINE_VISIBLE_ENTRY_COUNT - 1)
+    * TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT
+)
+BATTLE_ENTRANCE_FRAME_COUNT = max(
+    PARTY_ENTRANCE_COMPLETE_FRAME,
+    TIMELINE_ENTRANCE_COMPLETE_FRAME,
+    max(MONSTER_ENTRANCE_FRAME_COUNTS),
+    DEFAULT_FADE_FRAME_COUNT,
+)
 DA2_BLINK_FRAME_COUNT = 11
 DA2_BLINK_PERIOD = 6
 DA2_BLINK_VISIBLE_FRAMES = 3
@@ -141,6 +172,7 @@ class BattleMockDataError(ValueError):
 class BattleMockPhase(StrEnum):
     """Interactive phases implemented by the standalone battle mock."""
 
+    ENTRANCE = "entrance"
     INITIAL = "initial"
     COMMAND = "command"
     TARGET = "target"
@@ -329,7 +361,9 @@ def _record_for_key(
 
 class BattleScreenMock:
     def __init__(self) -> None:
-        initialize_screen_mock("Dungeon Antiqua ZERO Battle Screen Mock")
+        self.palette_shifter = initialize_screen_mock(
+            "Dungeon Antiqua ZERO Battle Screen Mock"
+        )
         self.input_reader = create_mock_input_reader()
 
         resources = ImageResources()
@@ -471,6 +505,8 @@ class BattleScreenMock:
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
         self.timeline_animation_frame = 0
+        self.entrance_animation_frame = 0
+        self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.selected_command: str | None = None
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
@@ -506,10 +542,14 @@ class BattleScreenMock:
             window.add_text(monster.display_name(self.localizer), 0, 0, color=4)
             self.monster_name_windows.append(window)
 
+        self._restart_battle_mock()
         pyxel.run(self.update, self.draw)
 
     def update(self) -> None:
         input_state = self.input_reader.poll()
+        if self.phase is BattleMockPhase.ENTRANCE:
+            self._update_entrance_animation()
+            return
         if self.phase is BattleMockPhase.MONSTER_ACTION:
             self._update_monster_action()
             return
@@ -536,6 +576,9 @@ class BattleScreenMock:
                 command = self.command_cursor.selected_key
                 if command == "attack":
                     self._begin_attack_target_selection()
+                elif command == "spell":
+                    self._restart_battle_mock()
+                    return
                 elif command == "escape":
                     self._begin_escape_confirmation()
                 else:
@@ -546,6 +589,47 @@ class BattleScreenMock:
             input_state.navigation if self.phase is BattleMockPhase.COMMAND else None
         )
         self.command_window.update(navigation)
+
+    def _restart_battle_mock(self) -> None:
+        """Reset the mock and replay its battle entrance presentation."""
+
+        self.timeline = self.party_visuals + self.monsters
+        self.phase = BattleMockPhase.ENTRANCE
+        self.active_party_index = 0
+        self.blinking_monster_index = None
+        self.monster_blink_frames_remaining = 0
+        self.timeline_animation_phase = None
+        self.timeline_animation_frame = 0
+        self.entrance_animation_frame = 0
+        self.selected_command = None
+        self.selectable_target_indexes = ()
+        self.selected_target_index = None
+        self.target_cursor.active = False
+        self.escape_cursor.active = False
+        self.command_window.close_immediately()
+        self._refresh_command_options()
+        self.command_cursor.active = False
+        self._refresh_party_text_colors()
+        self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.entrance_fade.start_fade_in()
+        self.palette_shifter.set_global_mix(
+            base_rate=0.0,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+
+    def _update_entrance_animation(self) -> None:
+        if self.entrance_fade.is_active:
+            self.entrance_fade.update()
+            self.palette_shifter.set_global_mix(
+                base_rate=self.entrance_fade.visible_rate,
+                target_color=self.palette_shifter.base_colors[0],
+            )
+        self.entrance_animation_frame += 1
+        if self.entrance_animation_frame >= BATTLE_ENTRANCE_FRAME_COUNT:
+            self.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT
+            self.phase = BattleMockPhase.COMMAND
+            self.command_cursor.active = True
+            self.command_window.open()
 
     def _return_to_button_wait(self) -> None:
         self.phase = BattleMockPhase.INITIAL
@@ -780,9 +864,13 @@ class BattleScreenMock:
         )
 
     def _draw_party(self) -> None:
-        for index, (visual, y) in enumerate(zip(self.party_visuals, PARTY_SPRITE_Y)):
+        for index, visual in enumerate(self.party_visuals):
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
             pyxel.blt(
-                self._party_sprite_x(index),
+                x,
                 y,
                 self.character_sprites,
                 0,
@@ -792,6 +880,35 @@ class BattleScreenMock:
                 TRANSPARENT_INDEX,
             )
 
+    def _party_draw_position(self, index: int) -> tuple[int, int] | None:
+        target_x = self._party_sprite_x(index)
+        target_y = PARTY_SPRITE_Y[index]
+        if self.phase is not BattleMockPhase.ENTRANCE:
+            return target_x, target_y
+
+        delay = index * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
+        elapsed = self.entrance_animation_frame - delay
+        if elapsed < 0:
+            return None
+        elapsed = min(elapsed, PARTY_ENTRANCE_FRAME_COUNT)
+        remaining = PARTY_ENTRANCE_FRAME_COUNT - elapsed
+        x = target_x + (
+            (PARTY_ENTRANCE_START_X - target_x)
+            * remaining
+            // PARTY_ENTRANCE_FRAME_COUNT
+        )
+        linear_y = target_y + PARTY_ENTRANCE_OFFSET_Y * remaining // (
+            PARTY_ENTRANCE_FRAME_COUNT
+        )
+        jump = (
+            4
+            * PARTY_ENTRANCE_JUMP_HEIGHT
+            * elapsed
+            * remaining
+            // (PARTY_ENTRANCE_FRAME_COUNT**2)
+        )
+        return x, linear_y - jump
+
     def _party_sprite_x(self, index: int) -> int:
         x = 156 + index * 4
         if self.party_visuals[index].member.formation_row is FormationRow.BACK:
@@ -799,7 +916,10 @@ class BattleScreenMock:
         return x
 
     def _draw_active_party_arrow(self) -> None:
-        if self.active_party_index is None:
+        if (
+            self.phase is BattleMockPhase.ENTRANCE
+            or self.active_party_index is None
+        ):
             return
         index = self.active_party_index
         frame = (pyxel.frame_count // FORMATION_ARROW_FRAME_DURATION) % 2
@@ -815,7 +935,7 @@ class BattleScreenMock:
         )
 
     def _draw_monsters(self) -> None:
-        for index, (monster, (x, y)) in enumerate(
+        for index, (monster, (_, y)) in enumerate(
             zip(self.monsters, MONSTER_POSITIONS)
         ):
             if (
@@ -825,6 +945,7 @@ class BattleScreenMock:
                 >= MONSTER_BLINK_VISIBLE_FRAMES
             ):
                 continue
+            x = self._monster_draw_x(index)
             pyxel.blt(
                 x,
                 y,
@@ -836,12 +957,35 @@ class BattleScreenMock:
                 TRANSPARENT_INDEX,
             )
 
+    def _monster_draw_x(self, index: int) -> int:
+        target_x = MONSTER_POSITIONS[index][0]
+        if self.phase is not BattleMockPhase.ENTRANCE:
+            return target_x
+
+        duration = MONSTER_ENTRANCE_FRAME_COUNTS[index]
+        elapsed = min(self.entrance_animation_frame, duration)
+        remaining = duration - elapsed
+        initial_offset = (
+            DA2_MONSTER_ENTRANCE_SLIDE_STEPS[index]
+            * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
+        )
+        return target_x - initial_offset * remaining // duration
+
     def _draw_target_cursor(self) -> None:
         if self.phase is not BattleMockPhase.TARGET:
             return
         self.target_cursor.draw()
 
     def _draw_timeline(self) -> None:
+        if self.phase is BattleMockPhase.ENTRANCE:
+            for index, entry in enumerate(
+                self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]
+            ):
+                x = self._timeline_entrance_x(index)
+                if x is None:
+                    continue
+                self._draw_timeline_entry(entry, x, TIMELINE_BASE_Y)
+            return
         if self.timeline_animation_phase is TimelineAnimationPhase.DROP:
             drop = (
                 TIMELINE_DROP_DISTANCE
@@ -917,6 +1061,20 @@ class BattleScreenMock:
             TRANSPARENT_INDEX,
         )
 
+    def _timeline_entrance_x(self, index: int) -> int | None:
+        delay = index * TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT
+        elapsed = self.entrance_animation_frame - delay
+        if elapsed < 0:
+            return None
+        elapsed = min(elapsed, TIMELINE_ENTRANCE_FRAME_COUNT)
+        remaining = TIMELINE_ENTRANCE_FRAME_COUNT - elapsed
+        target_x = TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING
+        return target_x + (
+            (TIMELINE_ENTRANCE_START_X - target_x)
+            * remaining
+            // TIMELINE_ENTRANCE_FRAME_COUNT
+        )
+
     @staticmethod
     def _draw_timeline_entry(
         entry: BattleMockCharacter | BattleMockMonster,
@@ -938,7 +1096,16 @@ class BattleScreenMock:
         pyxel.rect(x, y + 18, 16, 1, color - 1)
 
     def _draw_windows(self) -> None:
+        hide_party_status = (
+            self.phase is BattleMockPhase.ENTRANCE
+            and self.entrance_animation_frame < PARTY_ENTRANCE_COMPLETE_FRAME
+        )
         for window in self.windows:
+            if hide_party_status and any(
+                window is status_window
+                for status_window in self.party_status_windows
+            ):
+                continue
             window.draw()
         if self.phase is BattleMockPhase.TARGET or (
             self.phase is BattleMockPhase.INITIAL and self.command_window.is_closed

@@ -649,6 +649,8 @@ Sceneへ置かないものは次のとおり。
 フェードイン6フレームで構成する。`rendering.fade.FadeThroughBlack` は
 `IDLE`、`FADING_OUT`、`FADING_IN` の段階と経過フレームだけを保持し、
 フェードアウト完了時に `COVERED`、フェードイン完了時に `FINISHED` を返す。
+すでに黒い画面から表示を開始する演出では `start_fade_in()` を使い、画面固有のフェード計算を
+追加しない。
 画面やOverlayの差し替えは `COVERED` を受け取ったSceneManagerが1回だけ適用し、
 フェード自身へコールバックや遷移先を保持させない。フェード中は通常入力をSceneやOverlayへ
 渡さない。開発用画面モックでは、そのComposition RootがSceneManagerと同じ調停を担当する。
