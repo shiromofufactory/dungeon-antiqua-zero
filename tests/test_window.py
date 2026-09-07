@@ -333,6 +333,20 @@ class WindowTest(unittest.TestCase):
             window.draw()
         draw_contents.assert_not_called()
 
+    def test_window_can_close_immediately_without_animation(self) -> None:
+        window = Window(1, 2, 8, 6, opened=False)
+        window.open()
+        window.update()
+
+        window.close_immediately()
+
+        self.assertTrue(window.is_closed)
+        self.assertFalse(window.is_animating)
+        self.assertEqual(window.visible_height, 0)
+        with patch.object(window, "_draw_animation_contents") as draw_contents:
+            window.draw()
+        draw_contents.assert_not_called()
+
     def test_opening_and_closing_can_reverse_from_current_height(self) -> None:
         window = Window(0, 0, 8, 8, opened=False)
 

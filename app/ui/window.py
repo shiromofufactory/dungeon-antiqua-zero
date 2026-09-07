@@ -345,6 +345,12 @@ class Window:
         if self._state in (WindowState.OPEN, WindowState.OPENING):
             self._state = WindowState.CLOSING
 
+    def close_immediately(self) -> None:
+        """Close without playing the closing animation."""
+
+        self._visible_height = 0
+        self._state = WindowState.CLOSED
+
     def update(self, navigation: NavigationDirection | None = None) -> bool:
         """Advance the opening/closing animation or update the cursor.
 
