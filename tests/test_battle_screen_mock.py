@@ -45,6 +45,9 @@ from tools.screen_mocks.battle import (
     MAX_INTERNAL_LEVEL,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
+    SPELL_GUIDE_WINDOW_GRID,
+    SPELL_MP_WINDOW_GRID,
+    SPELL_WINDOW_GRID,
     TIMELINE_ANIMATION_FRAME_COUNT,
     TIMELINE_ENTRANCE_COMPLETE_FRAME,
     TIMELINE_ENTRANCE_FRAME_COUNT,
@@ -91,6 +94,7 @@ from ui.formation_arrow import (
     FORMATION_ARROW_WIDTH,
     FORMATION_ARROW_Y,
 )
+from ui import Window
 
 
 _JAPANESE_COMMAND_LABELS = {
@@ -229,6 +233,18 @@ class BattleScreenMockTest(unittest.TestCase):
             ITEM_GUIDE_WINDOW_GRID,
         )
         self.assertFalse(item_guide_window_call.kwargs["opened"])
+        self.assertEqual(
+            windows.return_value.create.call_args_list[4].args[:4],
+            SPELL_WINDOW_GRID,
+        )
+        self.assertEqual(
+            windows.return_value.create.call_args_list[5].args[:4],
+            SPELL_GUIDE_WINDOW_GRID,
+        )
+        self.assertEqual(
+            windows.return_value.create.call_args_list[6].args[:4],
+            SPELL_MP_WINDOW_GRID,
+        )
 
         self.assertEqual(
             tuple(member.definition.key for member in mock.party),
@@ -1024,6 +1040,152 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertGreater(mock.item_guide_window.add_text.call_count, 0)
         mock.command_guide_window.open_immediately.assert_not_called()
 
+    def test_spell_candidates_are_learned_battle_spells_only(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.spells = load_mock_spells()
+
+        candidates = mock._active_member_spell_candidates()
+
+        self.assertTrue(candidates)
+        self.assertTrue(all(spell.on_battle for spell in candidates))
+        self.assertTrue(
+            all(spell.is_learned_by(mock.party[0]) for spell in candidates)
+        )
+        self.assertTrue(all(spell.type != "item" for spell in candidates))
+
+    def test_spell_list_uses_three_school_columns_across_the_full_width(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.spell_candidates = tuple(
+            load_mock_spells()[key] for key in ("FIRE1", "HEALING1", "POISON1")
+        )
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.spell_window = Mock()
+        mock.spell_window.set_cursor.return_value = Mock()
+        mock.spell_cursor = None
+        mock._refresh_spell_guide = Mock()
+
+        mock._refresh_spell_options()
+
+        self.assertEqual(SPELL_WINDOW_GRID, (0, 0, 64, 13))
+        self.assertEqual(mock.spell_window.add_text.call_count, 3)
+        targets = mock.spell_window.set_cursor.call_args.args[0]
+        self.assertEqual(
+            [(target.x, target.y, target.key) for target in targets],
+            [(2, 2, "FIRE1"), (22, 2, "HEALING1"), (42, 2, "POISON1")],
+        )
+
+    def test_spell_scrolling_keeps_all_school_columns_on_the_same_levels(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        spells = load_mock_spells()
+        mock.spell_candidates = tuple(
+            spells[key]
+            for key in (
+                "FIRE1",
+                "SLOW",
+                "SPARK",
+                "FREEZE1",
+                "HEALING1",
+                "PROTECTION",
+                "CURE",
+                "SILENCE",
+                "POISON1",
+                "SLEEP",
+                "ARMOR BREAK",
+                "FADE",
+            )
+        )
+        mock.spell_scroll_offset = 0
+        mock.spell_cursor = None
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.spell_window = Window(*SPELL_WINDOW_GRID)
+        mock._refresh_spell_guide = Mock()
+
+        mock._refresh_spell_options()
+        for _ in range(3):
+            self.assertTrue(mock._move_spell(Direction.DOWN))
+
+        self.assertEqual(mock.spell_scroll_offset, 1)
+        self.assertEqual(
+            [target.key for target in mock.spell_cursor.targets if target.y == 2],
+            ["SLOW", "PROTECTION", "SLEEP"],
+        )
+
+    def test_spell_guide_and_mp_windows_open_immediately_at_the_bottom(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.spell_candidates = (load_mock_spells()["FIRE1"],)
+        mock.spell_cursor = Mock(selected_key="FIRE1")
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.spell_guide_window = Mock()
+        mock.spell_mp_window = Mock()
+
+        mock._refresh_spell_guide()
+
+        self.assertEqual(SPELL_GUIDE_WINDOW_GRID, (0, 50, 36, 10))
+        self.assertEqual(SPELL_MP_WINDOW_GRID, (36, 50, 28, 10))
+        mock.spell_guide_window.open_immediately.assert_called_once_with()
+        mock.spell_mp_window.open_immediately.assert_called_once_with()
+        self.assertGreater(mock.spell_guide_window.add_text.call_count, 0)
+        self.assertEqual(mock.spell_mp_window.add_text.call_count, 2)
+        self.assertEqual(
+            mock.spell_mp_window.add_text.call_args_list[0].args[0],
+            ascii_to_fullwidth(
+                f"ＭＰ {mock.party[0].mp:03d}/{mock.party[0].max_mp:03d}"
+            ),
+        )
+
+    def test_using_a_spell_spends_mp_and_finishes_the_turn(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        spell = load_mock_spells()["FIRE1"]
+        mock.spell_candidates = (spell,)
+        mock.spell_cursor = Mock(selected_key=spell.key)
+        mock._complete_current_turn = Mock()
+        before_mp = mock.party[0].mp
+
+        self.assertTrue(mock._use_selected_spell())
+        self.assertEqual(mock.party[0].mp, before_mp - spell.mp)
+        mock._complete_current_turn.assert_called_once_with()
+
     def test_using_a_breaking_consumable_removes_it_after_selection(self) -> None:
         items = load_mock_items()
         potion = items["POTION"]
@@ -1087,7 +1249,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.defending_party_indexes, set())
         self.assertIs(mock.phase, BattleMockPhase.COMMAND)
 
-    def test_spell_command_restarts_battle_mock_for_debugging(self) -> None:
+    def test_spell_command_opens_spell_selection(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.COMMAND
         mock.input_reader = Mock()
@@ -1097,14 +1259,27 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_cursor = Mock(selected_key="spell")
         mock.command_window = Mock(is_closed=False, is_open=True)
         mock.selected_command = None
-        mock._restart_battle_mock = Mock()
+        mock._begin_spell_selection = Mock(return_value=True)
         mock._complete_current_turn = Mock()
 
         mock.update()
 
-        mock._restart_battle_mock.assert_called_once_with()
+        mock._begin_spell_selection.assert_called_once_with()
         mock._complete_current_turn.assert_not_called()
-        mock.command_window.update.assert_not_called()
+        mock.command_window.update.assert_called_once_with(None)
+
+    def test_menu_input_restarts_the_mock_from_any_phase(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.SPELL
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            menu=InputButton(triggered=True, held=True)
+        )
+        mock._restart_battle_mock = Mock()
+
+        mock.update()
+
+        mock._restart_battle_mock.assert_called_once_with()
 
     def test_battle_bgm_restarts_from_the_beginning_for_each_mock_reset(
         self,

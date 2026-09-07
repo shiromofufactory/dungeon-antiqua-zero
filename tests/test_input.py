@@ -135,6 +135,13 @@ class PyxelInputReaderTest(unittest.TestCase):
         self.assertNotIn(pyxel.KEY_LSHIFT, bindings.previous_page)
         self.assertNotIn(pyxel.KEY_RSHIFT, bindings.next_page)
 
+    def test_default_menu_binding_accepts_keyboard_s_and_gamepad_x_or_y(self) -> None:
+        bindings = InputBindings.default()
+
+        self.assertIn(pyxel.KEY_S, bindings.menu)
+        self.assertIn(pyxel.GAMEPAD1_BUTTON_X, bindings.menu)
+        self.assertIn(pyxel.GAMEPAD1_BUTTON_Y, bindings.menu)
+
     def test_analog_axis_uses_deadzone_and_logical_repeat(self) -> None:
         backend = FakePyxelInput()
         reader = PyxelInputReader(
