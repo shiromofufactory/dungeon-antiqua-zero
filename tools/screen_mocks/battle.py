@@ -550,6 +550,7 @@ class BattleScreenMock:
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
         self.defending_party_indexes: set[int] = set()
+        self.escaping_party_indexes: set[int] = set()
         self.windows = [command_window]
         self.monster_name_windows: list[Window] = []
         self.monster_name_texts: list[WindowText] = []
@@ -678,6 +679,7 @@ class BattleScreenMock:
         self.selectable_target_indexes = ()
         self.selected_target_index = None
         self.defending_party_indexes.clear()
+        self.escaping_party_indexes.clear()
         self.target_cursor.active = False
         self.escape_cursor.active = False
         self.command_window.close_immediately()
@@ -739,11 +741,32 @@ class BattleScreenMock:
             return
         if input_state.confirm.triggered:
             if self.escape_cursor.selected_key == "yes":
-                self._begin_escape_animation()
+                self._accept_escape_confirmation()
             else:
                 self._cancel_escape_confirmation()
             return
         self.escape_cursor.update(input_state.navigation)
+
+    def _accept_escape_confirmation(self) -> None:
+        """Put the current member into escape state and complete their turn."""
+
+        if self.active_party_index is None:
+            raise RuntimeError("escape confirmation requires an active member")
+        self.escape_cursor.active = False
+        all_members_ready = self._mark_party_member_escaping(
+            self.active_party_index
+        )
+        if all_members_ready:
+            self._begin_escape_animation()
+            return
+        self._complete_current_turn()
+
+    def _mark_party_member_escaping(self, index: int) -> bool:
+        """Reverse one member and report whether the whole party is ready."""
+
+        self.escaping_party_indexes.add(index)
+        self.defending_party_indexes.discard(index)
+        return len(self.escaping_party_indexes) == len(self.party_visuals)
 
     def _begin_escape_animation(self) -> None:
         """Start the DA2-style party run toward the right screen edge."""
@@ -985,11 +1008,20 @@ class BattleScreenMock:
                 for index, visual in enumerate(self.party_visuals)
                 if visual is actor
             )
+            self.blinking_monster_index = None
+            self.monster_blink_frames_remaining = 0
+            if getattr(self, "escaping_party_indexes", ()):
+                all_members_ready = self._mark_party_member_escaping(
+                    self.active_party_index
+                )
+                if all_members_ready:
+                    self._begin_escape_animation()
+                else:
+                    self._start_timeline_animation()
+                return
             self.defending_party_indexes.discard(self.active_party_index)
             self.phase = BattleMockPhase.COMMAND
             self.command_cursor.active = True
-            self.blinking_monster_index = None
-            self.monster_blink_frames_remaining = 0
             self._refresh_command_options()
             self.command_window.open()
         else:
@@ -1159,7 +1191,11 @@ class BattleScreenMock:
             if position is None:
                 continue
             x, y = position
-            width = -16 if self.phase is BattleMockPhase.ESCAPE else 16
+            is_escaping = (
+                self.phase is BattleMockPhase.ESCAPE
+                or index in getattr(self, "escaping_party_indexes", ())
+            )
+            width = -16 if is_escaping else 16
             pyxel.blt(
                 x,
                 y,
@@ -1232,6 +1268,8 @@ class BattleScreenMock:
                 self.escape_animation_frame // ESCAPE_RUN_PATTERN_FRAME_COUNT
             ) % 2
             return pattern * FORMATION_SPRITE_STEP_X
+        if index in getattr(self, "escaping_party_indexes", ()):
+            return 0
         if (
             self.phase is BattleMockPhase.FORMATION
             and index == self.formation_actor_index

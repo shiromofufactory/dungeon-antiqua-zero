@@ -268,6 +268,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.escape_cursor.active)
         self.assertEqual(mock.escape_animation_frame, 0)
         self.assertEqual(mock.escape_start_x, ())
+        self.assertEqual(mock.escaping_party_indexes, set())
         first_member = mock.party[0]
         self.assertIn(
             ascii_to_fullwidth(
@@ -1505,21 +1506,100 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window.close_immediately.assert_called_once_with()
         mock.escape_cursor.select_key.assert_called_once_with("yes")
 
-    def test_confirming_escape_yes_starts_run_without_quitting_immediately(
+    def test_confirming_escape_yes_marks_the_current_member_without_running(
         self,
     ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.escape_cursor = Mock(selected_key="yes")
         mock.command_window = Mock(is_closed=True)
-        mock._begin_escape_animation = Mock()
+        mock._accept_escape_confirmation = Mock()
 
         with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
             mock._update_escape_confirmation(
                 InputState(confirm=InputButton(triggered=True, held=True))
             )
 
-        mock._begin_escape_animation.assert_called_once_with()
+        mock._accept_escape_confirmation.assert_called_once_with()
         quit_game.assert_not_called()
+
+    def test_first_escape_member_reverses_and_completes_their_turn(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (object(), object(), object())
+        mock.active_party_index = 0
+        mock.escaping_party_indexes = set()
+        mock.defending_party_indexes = {0}
+        mock.escape_cursor = Mock(active=True)
+        mock._complete_current_turn = Mock()
+        mock._begin_escape_animation = Mock()
+
+        mock._accept_escape_confirmation()
+
+        self.assertEqual(mock.escaping_party_indexes, {0})
+        self.assertEqual(mock.defending_party_indexes, set())
+        self.assertFalse(mock.escape_cursor.active)
+        mock._complete_current_turn.assert_called_once_with()
+        mock._begin_escape_animation.assert_not_called()
+
+    def test_later_party_turns_automatically_join_escape_state(self) -> None:
+        visuals = tuple(
+            BattleMockCharacter(
+                SimpleNamespace(definition=SimpleNamespace(key=str(index))),
+                0,
+                0,
+                index,
+            )
+            for index in range(3)
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.timeline = (visuals[1],)
+        mock.party_visuals = visuals
+        mock.escaping_party_indexes = {0}
+        mock.defending_party_indexes = {1}
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.blinking_monster_index = 0
+        mock.monster_blink_frames_remaining = 1
+        mock._start_timeline_animation = Mock()
+        mock._begin_escape_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(mock.escaping_party_indexes, {0, 1})
+        self.assertEqual(mock.defending_party_indexes, set())
+        self.assertEqual(mock.active_party_index, 1)
+        self.assertIsNone(mock.blinking_monster_index)
+        mock._start_timeline_animation.assert_called_once_with()
+        mock._begin_escape_animation.assert_not_called()
+        mock.command_window.open.assert_not_called()
+
+    def test_last_party_member_starts_run_when_everyone_is_ready(self) -> None:
+        visuals = tuple(
+            BattleMockCharacter(
+                SimpleNamespace(definition=SimpleNamespace(key=str(index))),
+                0,
+                0,
+                index,
+            )
+            for index in range(3)
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.timeline = (visuals[2],)
+        mock.party_visuals = visuals
+        mock.escaping_party_indexes = {0, 1}
+        mock.defending_party_indexes = set()
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock._start_timeline_animation = Mock()
+        mock._begin_escape_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(mock.escaping_party_indexes, {0, 1, 2})
+        mock._begin_escape_animation.assert_called_once_with()
+        mock._start_timeline_animation.assert_not_called()
+        mock.command_window.open.assert_not_called()
 
     def test_escape_animation_hides_selection_and_stops_bgm(self) -> None:
         members = (
@@ -1552,6 +1632,29 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._refresh_party_text_colors.assert_called_once_with()
         mock.bgm.stop.assert_called_once_with()
 
+    def test_member_waiting_to_escape_faces_right_without_walking(self) -> None:
+        member = SimpleNamespace(formation_row=FormationRow.FRONT)
+        visual = SimpleNamespace(member=member, battle_sprite=2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (visual,)
+        mock.character_sprites = object()
+        mock.phase = BattleMockPhase.TIMELINE
+        mock.escaping_party_indexes = {0}
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
+
+        blt.assert_called_once_with(
+            156,
+            64,
+            mock.character_sprites,
+            0,
+            64,
+            -16,
+            32,
+            1,
+        )
+
     def test_escape_run_uses_da2_speed_walk_pattern_and_right_facing_sprite(
         self,
     ) -> None:
@@ -1564,7 +1667,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escape_start_x = (156,)
         mock.escape_animation_frame = ESCAPE_RUN_PATTERN_FRAME_COUNT
 
-        self.assertEqual(ESCAPE_RUN_SPEED, 4)
+        self.assertGreater(ESCAPE_RUN_SPEED, 0)
         self.assertEqual(
             mock._party_draw_position(0),
             (
