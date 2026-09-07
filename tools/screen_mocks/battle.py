@@ -15,6 +15,7 @@ from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
     load_mock_skills,
+    load_mock_spells,
 )
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
@@ -33,8 +34,10 @@ from battle_commands import (
     resolve_battle_commands,
     selectable_attack_target_indexes,
 )
+from item import Item, ItemEquipType
 from localization import Localizer, ascii_to_fullwidth
 from member import (
+    EquipmentSlot,
     MAX_INTERNAL_LEVEL,
     FormationRow,
     Member,
@@ -64,6 +67,7 @@ from resources import (
     load_record_array,
 )
 from state import Language, Settings
+from systems import InventorySystem
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
     DEFAULT_TEXT_COLOR,
@@ -71,6 +75,7 @@ from ui import (
     RESERVE_MEMBER_TEXT_COLOR,
     CursorTarget,
     Window,
+    WindowCursor,
     WindowFactory,
     WindowText,
 )
@@ -83,6 +88,7 @@ from ui.formation_arrow import (
     FORMATION_ARROW_WIDTH,
     FORMATION_ARROW_Y,
 )
+from item_detail import ItemDetailContext, item_detail_lines
 
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
@@ -114,10 +120,18 @@ ESCAPE_CHOICE_CURSOR_X = 2
 ESCAPE_YES_Y = 2
 ESCAPE_NO_Y = 5
 COMMAND_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
+ITEM_GUIDE_WINDOW_GRID = (0, 0, 32, 13)
+ITEM_WINDOW_GRID = (32, 0, 32, 13)
 COMMAND_GUIDE_TEXT_X = 2
 COMMAND_GUIDE_FIRST_Y = 2
 COMMAND_GUIDE_LINE_SPACING = 3
 COMMAND_GUIDE_MAX_LINES = 3
+ITEM_VISIBLE_COUNT = 3
+ITEM_TEXT_X = 4
+ITEM_COUNT_X = 26
+ITEM_CURSOR_X = 2
+ITEM_FIRST_Y = 2
+ITEM_ROW_HEIGHT = 3
 DA2_REFERENCE_FPS = 30
 DA2_ESCAPE_RUN_SPEED = 12
 ESCAPE_RUN_SPEED = DA2_ESCAPE_RUN_SPEED * DA2_REFERENCE_FPS // FPS
@@ -237,6 +251,7 @@ class BattleMockPhase(StrEnum):
     ENTRANCE = "entrance"
     INITIAL = "initial"
     COMMAND = "command"
+    ITEM = "item"
     TARGET = "target"
     ESCAPE_CONFIRMATION = "escape_confirmation"
     ESCAPE_MESSAGE = "escape_message"
@@ -380,6 +395,18 @@ class BattleMockMonster:
         self.is_front_row = self.initial_is_front_row
 
 
+@dataclass(frozen=True)
+class BattleItemCandidate:
+    """One DA2-style battle item and the place from which it is used."""
+
+    item: Item
+    equipment_slot: EquipmentSlot | None = None
+
+    @property
+    def is_equipped(self) -> bool:
+        return self.equipment_slot is not None
+
+
 def _records_by_key(
     records: tuple[dict[str, object], ...] | list[dict[str, object]],
     *,
@@ -436,6 +463,11 @@ class BattleScreenMock:
         self.localizer = Localizer(settings.language)
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         items = load_mock_items()
+        self.spells = load_mock_spells()
+        self.item_catalog = items
+        # Battle mocks deliberately start with the same complete one-each
+        # inventory as the standalone item and equipment mocks.
+        self.inventory_system = InventorySystem.with_one_each(self.item_catalog)
         character_records = _records_by_key(
             load_mock_character_records(),
             label="character",
@@ -497,8 +529,22 @@ class BattleScreenMock:
             thin_frame=True,
             opened=False,
         )
+        item_guide_window = windows.create(
+            *ITEM_GUIDE_WINDOW_GRID,
+            (),
+            thin_frame=True,
+            opened=False,
+        )
+        item_window = windows.create(
+            *ITEM_WINDOW_GRID,
+            (),
+            thin_frame=True,
+            opened=False,
+        )
         self.command_guide_window = command_guide_window
         self.command_window = command_window
+        self.item_guide_window = item_guide_window
+        self.item_window = item_window
         self.command_cursor = command_window.set_cursor(())
         self.target_window = windows.create(0, 0, 64, 60, transparent=True)
         self.target_cursor = self.target_window.set_cursor(
@@ -584,9 +630,18 @@ class BattleScreenMock:
         self.command_guide_command: BattleCommand | None = None
         self.command_guide_timer = 0
         self.command_guide_visible = False
+        self.item_candidates: tuple[BattleItemCandidate, ...] = ()
+        self.selected_item_index = 0
+        self.item_scroll_offset = 0
+        self.item_cursor: WindowCursor | None = None
         self.defending_party_indexes: set[int] = set()
         self.escaping_party_indexes: set[int] = set()
-        self.windows = [command_guide_window, command_window]
+        self.windows = [
+            command_guide_window,
+            command_window,
+            item_guide_window,
+            item_window,
+        ]
         self.monster_name_windows: list[Window] = []
         self.monster_name_texts: list[WindowText] = []
         self.party_status_windows: list[Window] = []
@@ -630,7 +685,7 @@ class BattleScreenMock:
 
     def update(self) -> None:
         input_state = self.input_reader.poll()
-        if self.phase is not BattleMockPhase.COMMAND:
+        if self.phase not in (BattleMockPhase.COMMAND, BattleMockPhase.ITEM):
             self._hide_command_guide()
         if self.phase is BattleMockPhase.ENTRANCE:
             self._update_entrance_animation()
@@ -659,6 +714,9 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.TARGET:
             self._update_target_selection(input_state)
             return
+        if self.phase is BattleMockPhase.ITEM:
+            self._update_item_selection(input_state)
+            return
 
         if input_state.cancel.triggered:
             self._return_to_button_wait()
@@ -682,6 +740,8 @@ class BattleScreenMock:
                     self._begin_formation_change()
                 elif command == BattleCommand.DEFEND:
                     self._begin_defense()
+                elif command == BattleCommand.ITEM:
+                    self._begin_item_selection()
                 else:
                     self.selected_command = command
                     self._complete_current_turn()
@@ -696,6 +756,7 @@ class BattleScreenMock:
         """Reset the mock and replay its battle entrance presentation."""
 
         self._restart_battle_bgm()
+        self.inventory_system = InventorySystem.with_one_each(self.item_catalog)
         for monster in self.monsters:
             monster.restore()
         self.timeline = self.party_visuals + self.monsters
@@ -719,12 +780,19 @@ class BattleScreenMock:
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
+        self.item_candidates = ()
+        self.selected_item_index = 0
+        self.item_scroll_offset = 0
+        self.item_cursor = None
         self._hide_command_guide()
+        self.item_guide_window.close_immediately()
+        self.item_guide_window.clear_texts()
         self.defending_party_indexes.clear()
         self.escaping_party_indexes.clear()
         self.target_cursor.active = False
         self.escape_cursor.active = False
         self.command_window.close_immediately()
+        self.item_window.close_immediately()
         self._refresh_command_options()
         self.command_cursor.active = False
         self._refresh_party_text_colors()
@@ -761,9 +829,20 @@ class BattleScreenMock:
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
+        self.item_candidates = ()
+        self.selected_item_index = 0
+        self.item_scroll_offset = 0
+        self.item_cursor = None
         self.command_cursor.active = False
         self.target_cursor.active = False
         self.command_window.close_immediately()
+        item_window = getattr(self, "item_window", None)
+        if item_window is not None:
+            item_window.close_immediately()
+        item_guide_window = getattr(self, "item_guide_window", None)
+        if item_guide_window is not None:
+            item_guide_window.close_immediately()
+            item_guide_window.clear_texts()
         self._hide_command_guide()
         self._refresh_monster_name_colors()
 
@@ -917,6 +996,213 @@ class BattleScreenMock:
         self.formation_actor_index = None
         self._complete_current_turn()
 
+    def _active_member_item_candidates(self) -> tuple[BattleItemCandidate, ...]:
+        """Return DA2-style equipment followed by owned usable consumables.
+
+        There is no command-reservation filtering here: ZERO executes each
+        party member's selected command before the next member chooses one.
+        """
+
+        if self.active_party_index is None:
+            return ()
+        member = self.party[self.active_party_index]
+        equipped = tuple(
+            BattleItemCandidate(item, slot)
+            for slot in EquipmentSlot
+            if (
+                (item := member.equipment.item_at(slot)) is not None
+                and (
+                    item.is_weapon
+                    or item.equip_type is ItemEquipType.ARM
+                )
+            )
+        )
+        consumables = tuple(
+            BattleItemCandidate(item)
+            for item in self.inventory_system.items
+            if (
+                item.equip_type is ItemEquipType.ITEM
+                and item.subtype == "ITEM"
+                and self._item_is_usable_in_battle(item)
+            )
+        )
+        return (*equipped, *consumables)
+
+    def _item_is_usable_in_battle(self, item: Item) -> bool:
+        """Return whether an item's resolved use effect permits battle use."""
+
+        if not item.use_spell_key:
+            return False
+        spell = self.spells.get(item.use_spell_key)
+        return spell is not None and spell.on_battle
+
+    @property
+    def selected_item_candidate(self) -> BattleItemCandidate | None:
+        """Return the selected item candidate, if its index is still valid."""
+
+        if not 0 <= self.selected_item_index < len(self.item_candidates):
+            return None
+        return self.item_candidates[self.selected_item_index]
+
+    def _begin_item_selection(self) -> bool:
+        """Replace the command contents with the current actor's item list."""
+
+        candidates = self._active_member_item_candidates()
+        if not candidates:
+            return False
+        self.phase = BattleMockPhase.ITEM
+        self.selected_command = BattleCommand.ITEM
+        self.item_candidates = candidates
+        self.selected_item_index = 0
+        self.item_scroll_offset = 0
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self.item_window.open_immediately()
+        self._hide_command_guide()
+        self._refresh_item_options()
+        return True
+
+    def _refresh_item_options(self) -> None:
+        """Draw up to three candidates over the command window and their guide."""
+
+        selected = self.selected_item_candidate
+        visible = self.item_candidates[
+            self.item_scroll_offset : self.item_scroll_offset + ITEM_VISIBLE_COUNT
+        ]
+        self.item_window.vertical_navigation = (
+            len(self.item_candidates) > ITEM_VISIBLE_COUNT
+        )
+        self.item_window.set_vertical_navigation_pressed()
+        self.item_window.clear_texts()
+        self.item_window.clear_cursor()
+        for row, candidate in enumerate(visible):
+            item = candidate.item
+            y = ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT
+            prefix = "＃" if candidate.is_equipped else ""
+            self.item_window.add_text(
+                prefix + item.localized_name(self.localizer),
+                ITEM_TEXT_X,
+                y,
+            )
+            if not candidate.is_equipped:
+                self.item_window.add_text(
+                    ascii_to_fullwidth(str(self.inventory_system.quantity(item))),
+                    ITEM_COUNT_X,
+                    y,
+                )
+        self.item_cursor = self.item_window.set_cursor(
+            tuple(
+                CursorTarget(
+                    ITEM_CURSOR_X,
+                    ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT,
+                    key=self.item_scroll_offset + row,
+                )
+                for row in range(len(visible))
+            )
+        )
+        if selected is not None:
+            self.item_cursor.select_key(self.selected_item_index)
+        self._refresh_item_guide()
+
+    def _refresh_item_guide(self) -> None:
+        """Show the battle-use effect of the selected item beside its list."""
+
+        self.item_guide_window.close_immediately()
+        self.item_guide_window.clear_texts()
+        candidate = self.selected_item_candidate
+        if candidate is None:
+            return
+        for index, line in enumerate(
+            item_detail_lines(
+                candidate.item,
+                self.spells,
+                self.localizer,
+                self.texts,
+                context=ItemDetailContext.BATTLE,
+            )[:COMMAND_GUIDE_MAX_LINES]
+        ):
+            if line:
+                self.item_guide_window.add_text(
+                    line,
+                    COMMAND_GUIDE_TEXT_X,
+                    COMMAND_GUIDE_FIRST_Y + index * COMMAND_GUIDE_LINE_SPACING,
+                )
+        self.item_guide_window.open_immediately()
+
+    def _move_item(self, distance: int) -> bool:
+        """Move through the complete candidate list while keeping three rows visible."""
+
+        if distance not in (-1, 1) or not self.item_candidates:
+            return False
+        previous = self.selected_item_index
+        self.selected_item_index = (
+            self.selected_item_index + distance
+        ) % len(self.item_candidates)
+        if self.selected_item_index < self.item_scroll_offset:
+            self.item_scroll_offset = self.selected_item_index
+        elif self.selected_item_index >= self.item_scroll_offset + ITEM_VISIBLE_COUNT:
+            self.item_scroll_offset = (
+                self.selected_item_index - ITEM_VISIBLE_COUNT + 1
+            )
+        if self.selected_item_index != previous:
+            self._refresh_item_options()
+            return True
+        return False
+
+    def _update_item_selection(self, input_state: InputState) -> None:
+        """Accept a battle item, or restore the command list on cancellation."""
+
+        if input_state.cancel.triggered:
+            self._cancel_item_selection()
+            return
+        if input_state.confirm.triggered:
+            self._use_selected_item()
+            return
+        navigation = input_state.navigation
+        if navigation is not None and navigation.dy:
+            self._move_item(navigation.dy)
+        self.item_window.set_vertical_navigation_pressed(
+            0 if navigation is None else navigation.dy
+        )
+        if self.item_cursor is not None:
+            self.item_cursor.update()
+
+    def _cancel_item_selection(self) -> None:
+        self.phase = BattleMockPhase.COMMAND
+        self.selected_command = None
+        self.item_candidates = ()
+        self.selected_item_index = 0
+        self.item_scroll_offset = 0
+        self.item_cursor = None
+        self.item_window.close_immediately()
+        self.item_guide_window.close_immediately()
+        self.item_guide_window.clear_texts()
+        self._refresh_command_options()
+        self.command_cursor.active = True
+        self.command_cursor.select_key(BattleCommand.ITEM)
+        self.command_window.open_immediately()
+
+    def _use_selected_item(self) -> bool:
+        """Consume a selected consumable or break the selected equipped item."""
+
+        candidate = self.selected_item_candidate
+        if candidate is None or self.active_party_index is None:
+            return False
+        item = candidate.item
+        if not self._item_is_usable_in_battle(item):
+            return False
+        if item.breaks_on_use:
+            if candidate.equipment_slot is None:
+                if not self.inventory_system.remove(item):
+                    return False
+            else:
+                member = self.party[self.active_party_index]
+                member.equipment = member.equipment.replaced(
+                    {candidate.equipment_slot: None}
+                )
+        self._complete_current_turn()
+        return True
+
     def _begin_attack_target_selection(self) -> bool:
         selectable = self._active_member_attack_targets()
         if not selectable:
@@ -1022,7 +1308,20 @@ class BattleScreenMock:
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
+        self.item_candidates = ()
+        self.selected_item_index = 0
+        self.item_scroll_offset = 0
+        self.item_cursor = None
         self.target_cursor.active = False
+        item_window = getattr(self, "item_window", None)
+        if item_window is not None:
+            item_window.close_immediately()
+        item_guide_window = getattr(self, "item_guide_window", None)
+        if item_guide_window is not None:
+            item_guide_window.close_immediately()
+            item_guide_window.clear_texts()
+        self.command_guide_window.close_immediately()
+        self.command_guide_window.clear_texts()
         self._start_timeline_animation()
 
     def _start_timeline_animation(self) -> None:
@@ -1106,7 +1405,9 @@ class BattleScreenMock:
             self.party[self.active_party_index],
             self.party,
             self.monsters,
-            context=BattleCommandContext(),
+            context=BattleCommandContext(
+                item_available=bool(self._active_member_item_candidates()),
+            ),
         )
 
     def _refresh_command_options(self) -> None:
@@ -1133,6 +1434,8 @@ class BattleScreenMock:
                 )
                 for row_index, option in enumerate(visible)
             )
+        self.command_window.vertical_navigation = False
+        self.command_window.set_vertical_navigation_pressed()
         self.command_window.clear_texts()
         for option, label, text_x, text_y, _, _ in placements:
             if option.enabled:

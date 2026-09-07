@@ -26,6 +26,8 @@ from tools.screen_mocks.battle import (
     FORMATION_MOVE_FRAME_COUNT,
     FORMATION_SPRITE_STEP_X,
     FORMATION_WALK_PATTERN_FRAME_COUNT,
+    ITEM_WINDOW_GRID,
+    ITEM_GUIDE_WINDOW_GRID,
     MONSTER_BLINK_FRAME_COUNT,
     MONSTER_ENTRANCE_FRAME_COUNTS,
     MONSTER_POSITIONS,
@@ -35,6 +37,7 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
     BattleMockCharacter,
+    BattleItemCandidate,
     BattleMockMonster,
     BattleMockPhase,
     BattleScreenMock,
@@ -57,10 +60,16 @@ from tools.screen_mocks.battle import (
 )
 from battle_commands import BattleCommand, BattleCommandOption
 from localization import Localizer
+from member import EquipmentSlot
 from state import Language
 from text_catalog import TextCatalog
 from tools._bootstrap import APP_ROOT
-from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
+from tools.screen_mocks._fixtures import (
+    load_mock_items,
+    load_mock_party,
+    load_mock_skills,
+    load_mock_spells,
+)
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
 from monster import MonsterBattleState
@@ -214,6 +223,12 @@ class BattleScreenMockTest(unittest.TestCase):
             COMMAND_GUIDE_WINDOW_GRID,
         )
         self.assertFalse(guide_window_call.kwargs["opened"])
+        item_guide_window_call = windows.return_value.create.call_args_list[2]
+        self.assertEqual(
+            item_guide_window_call.args[:4],
+            ITEM_GUIDE_WINDOW_GRID,
+        )
+        self.assertFalse(item_guide_window_call.kwargs["opened"])
 
         self.assertEqual(
             tuple(member.definition.key for member in mock.party),
@@ -245,6 +260,16 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertTrue(all(monster.state.hp == 2 for monster in mock.monsters))
         self.assertEqual(mock.timeline, mock.party_visuals + mock.monsters)
+        self.assertEqual(
+            mock.inventory_system.catalog_count,
+            len(load_mock_items()),
+        )
+        self.assertTrue(
+            all(
+                mock.inventory_system.quantity(item) == 1
+                for item in load_mock_items().values()
+            )
+        )
         self.assertIs(mock.phase, BattleMockPhase.ENTRANCE)
         self.assertEqual(mock.entrance_animation_frame, 0)
         self.assertTrue(mock.entrance_fade.is_active)
@@ -859,7 +884,7 @@ class BattleScreenMockTest(unittest.TestCase):
         dither.assert_not_called()
         self.assertEqual(blt.call_count, 2)
 
-    def test_non_attack_command_also_completes_current_turn(self) -> None:
+    def test_non_item_non_attack_command_also_completes_current_turn(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.COMMAND
         mock.input_reader = Mock()
@@ -867,7 +892,7 @@ class BattleScreenMockTest(unittest.TestCase):
             confirm=InputButton(triggered=True, held=True)
         )
         mock.command_cursor = Mock()
-        mock.command_cursor.selected_key = "item"
+        mock.command_cursor.selected_key = "hide"
         mock.command_window = Mock()
         mock.command_window.is_closed = False
         mock.command_window.is_open = True
@@ -876,8 +901,160 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock.update()
 
-        self.assertEqual(mock.selected_command, "item")
+        self.assertEqual(mock.selected_command, "hide")
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_item_command_opens_item_selection_instead_of_completing_turn(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.command_cursor = Mock(selected_key=BattleCommand.ITEM)
+        mock.command_window = Mock(is_closed=False, is_open=True)
+        mock._begin_item_selection = Mock(return_value=True)
+        mock._complete_current_turn = Mock()
+
+        mock.update()
+
+        mock._begin_item_selection.assert_called_once_with()
+        mock._complete_current_turn.assert_not_called()
+        mock.command_window.update.assert_called_once_with(None)
+
+    def test_item_candidates_use_equipment_then_owned_consumables(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        member = mock.party[0]
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.ARM: items["TELEPORT RING"]}
+        )
+        mock.active_party_index = 0
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem.with_one_each(items)
+        mock.spells = load_mock_spells()
+
+        candidates = mock._active_member_item_candidates()
+
+        self.assertEqual(
+            tuple(candidate.item.key for candidate in candidates[:7]),
+            (
+                "DAGGER",
+                "TELEPORT RING",
+                "POTION",
+                "REMEDY",
+                "MANA DROP",
+                "PANACEA",
+                "DIVINE TEAR",
+            ),
+        )
+        self.assertTrue(candidates[0].is_equipped)
+        self.assertTrue(candidates[1].is_equipped)
+        self.assertTrue(all(not candidate.is_equipped for candidate in candidates[2:]))
+        candidate_keys = {candidate.item.key for candidate in candidates}
+        self.assertNotIn("FRUIT of STR", candidate_keys)
+        self.assertNotIn("FRUIT of AGI", candidate_keys)
+        self.assertNotIn("FRUIT of MAG", candidate_keys)
+        self.assertNotIn("NECTOR", candidate_keys)
+
+    def test_item_list_uses_its_own_wider_window_with_three_candidates(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.item_candidates = tuple(
+            BattleItemCandidate(items[key])
+            for key in ("POTION", "REMEDY", "MANA DROP", "PANACEA")
+        )
+        mock.selected_item_index = 0
+        mock.item_scroll_offset = 0
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem.with_one_each(items)
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.item_window = Mock()
+        mock.item_window.set_cursor.return_value = Mock()
+        mock._refresh_item_guide = Mock()
+
+        mock._refresh_item_options()
+
+        self.assertEqual(ITEM_WINDOW_GRID, (32, 0, 32, 13))
+        self.assertEqual(mock.item_window.add_text.call_count, 6)
+        self.assertTrue(mock.item_window.vertical_navigation)
+        targets = mock.item_window.set_cursor.call_args.args[0]
+        self.assertEqual(len(targets), 3)
+        self.assertEqual(tuple(target.key for target in targets), (0, 1, 2))
+        mock._refresh_item_guide.assert_called_once_with()
+
+    def test_item_guide_stays_open_while_item_selection_is_active(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ITEM
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState()
+        mock.item_guide_window = Mock()
+        mock._update_item_selection = Mock()
+
+        mock.update()
+
+        mock.item_guide_window.close_immediately.assert_not_called()
+        mock._update_item_selection.assert_called_once_with(
+            mock.input_reader.poll.return_value
+        )
+
+    def test_item_guide_opens_immediately_in_its_own_window(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.item_candidates = (BattleItemCandidate(items["POTION"]),)
+        mock.selected_item_index = 0
+        mock.spells = load_mock_spells()
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.item_guide_window = Mock()
+        mock.command_guide_window = Mock()
+
+        mock._refresh_item_guide()
+
+        self.assertEqual(ITEM_GUIDE_WINDOW_GRID, (0, 0, 32, 13))
+        mock.item_guide_window.open_immediately.assert_called_once_with()
+        self.assertGreater(mock.item_guide_window.add_text.call_count, 0)
+        mock.command_guide_window.open_immediately.assert_not_called()
+
+    def test_using_a_breaking_consumable_removes_it_after_selection(self) -> None:
+        items = load_mock_items()
+        potion = items["POTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.item_candidates = (BattleItemCandidate(potion),)
+        mock.selected_item_index = 0
+        mock.active_party_index = 0
+        mock.spells = load_mock_spells()
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem.with_one_each(items)
+        mock._complete_current_turn = Mock()
+
+        self.assertTrue(mock._use_selected_item())
+        self.assertEqual(mock.inventory_system.quantity(potion), 0)
+        mock._complete_current_turn.assert_called_once_with()
+
+    def test_equipment_without_a_use_effect_stays_selectable_but_is_not_used(self) -> None:
+        items = load_mock_items()
+        dagger = items["DAGGER"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.item_candidates = (
+            BattleItemCandidate(dagger, EquipmentSlot.RIGHT),
+        )
+        mock.selected_item_index = 0
+        mock.active_party_index = 0
+        mock.spells = load_mock_spells()
+        mock._complete_current_turn = Mock()
+
+        self.assertFalse(mock._use_selected_item())
+        mock._complete_current_turn.assert_not_called()
 
     def test_defense_persists_until_the_member_next_becomes_active(self) -> None:
         visual = BattleMockCharacter(
