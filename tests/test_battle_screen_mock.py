@@ -10,6 +10,12 @@ from tools.screen_mocks.battle import (
     BATTLE_BGM_ID,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+    COMMAND_GUIDE_DELAY_FRAME_COUNT,
+    COMMAND_GUIDE_FIRST_Y,
+    COMMAND_GUIDE_LINE_SPACING,
+    COMMAND_GUIDE_TEXT_KEYS,
+    COMMAND_GUIDE_TEXT_X,
+    COMMAND_GUIDE_WINDOW_GRID,
     COMMAND_TEXT_KEYS,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
@@ -201,6 +207,13 @@ class BattleScreenMockTest(unittest.TestCase):
             )
 
             mock = BattleScreenMock()
+
+        guide_window_call = windows.return_value.create.call_args_list[0]
+        self.assertEqual(
+            guide_window_call.args[:4],
+            COMMAND_GUIDE_WINDOW_GRID,
+        )
+        self.assertFalse(guide_window_call.kwargs["opened"])
 
         self.assertEqual(
             tuple(member.definition.key for member in mock.party),
@@ -1321,6 +1334,78 @@ class BattleScreenMockTest(unittest.TestCase):
                 texts.text(key, localizer)
                 for key in COMMAND_TEXT_KEYS.values()
             )
+        )
+
+    def test_command_guide_waits_at_the_same_command_then_shows_three_lines(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.command_window = Mock(is_open=True)
+        mock.command_cursor = Mock(selected_key=BattleCommand.ATTACK)
+        mock.command_guide_window = Mock()
+        mock.command_guide_command = None
+        mock.command_guide_timer = 0
+        mock.command_guide_visible = False
+        mock._command_guide_lines = Mock(
+            return_value=("line one", "line two", "line three", "line four")
+        )
+
+        for _frame in range(COMMAND_GUIDE_DELAY_FRAME_COUNT):
+            mock._update_command_guide()
+
+        self.assertEqual(COMMAND_GUIDE_DELAY_FRAME_COUNT, 30)
+        self.assertIs(mock.command_guide_command, BattleCommand.ATTACK)
+        self.assertTrue(mock.command_guide_visible)
+        mock.command_guide_window.add_text.assert_has_calls(
+            [
+                call("line one", COMMAND_GUIDE_TEXT_X, COMMAND_GUIDE_FIRST_Y),
+                call(
+                    "line two",
+                    COMMAND_GUIDE_TEXT_X,
+                    COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING,
+                ),
+                call(
+                    "line three",
+                    COMMAND_GUIDE_TEXT_X,
+                    COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 2,
+                ),
+            ]
+        )
+        self.assertNotIn(
+            call(
+                "line four",
+                COMMAND_GUIDE_TEXT_X,
+                COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 3,
+            ),
+            mock.command_guide_window.add_text.call_args_list,
+        )
+        mock.command_guide_window.open_immediately.assert_called_once_with()
+        mock.command_guide_window.open.assert_not_called()
+
+        mock.command_cursor.selected_key = BattleCommand.FOCUS
+        mock._update_command_guide()
+
+        self.assertIs(mock.command_guide_command, BattleCommand.FOCUS)
+        self.assertEqual(mock.command_guide_timer, 1)
+        self.assertFalse(mock.command_guide_visible)
+
+    def test_guide_reuses_da2_text_and_falls_back_to_new_command_name(self) -> None:
+        self.assertEqual(
+            COMMAND_GUIDE_TEXT_KEYS[BattleCommand.DEFEND],
+            "battle.guide.defend",
+        )
+        self.assertNotIn(BattleCommand.FOCUS, COMMAND_GUIDE_TEXT_KEYS)
+        texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        localizer = Localizer(Language.JAPANESE)
+        self.assertEqual(
+            texts.lines(COMMAND_GUIDE_TEXT_KEYS[BattleCommand.ATTACK], localizer),
+            (
+                ascii_to_fullwidth("もっている ぶきで"),
+                ascii_to_fullwidth("てきを こうげきする"),
+            ),
+        )
+        self.assertEqual(
+            texts.lines(COMMAND_TEXT_KEYS[BattleCommand.FOCUS], localizer),
+            ("ためる",),
         )
 
     def test_formation_walk_swaps_row_and_uses_alternate_sprite(self) -> None:

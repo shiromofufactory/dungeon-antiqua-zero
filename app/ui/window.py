@@ -333,6 +333,12 @@ class Window:
         if self._state in (WindowState.CLOSED, WindowState.CLOSING):
             self._state = WindowState.OPENING
 
+    def open_immediately(self) -> None:
+        """Open at its full height without playing the opening animation."""
+
+        self._visible_height = self.pixel_height
+        self._state = WindowState.OPEN
+
     def restart_opening(self) -> None:
         """Restart opening from the center without replacing window contents."""
 

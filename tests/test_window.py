@@ -283,6 +283,14 @@ class WindowTest(unittest.TestCase):
         draw_contents.assert_called_once_with()
         clip.assert_not_called()
 
+    def test_open_immediately_skips_opening_animation(self) -> None:
+        window = Window(1, 2, 8, 6, opened=False)
+
+        window.open_immediately()
+
+        self.assertTrue(window.is_open)
+        self.assertEqual(window.visible_height, window.pixel_height)
+
     def test_opening_frame_moves_with_visible_window_edges(self) -> None:
         window = Window(1, 2, 8, 6, opened=False)
         window.open()

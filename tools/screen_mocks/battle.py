@@ -113,6 +113,11 @@ ESCAPE_CHOICE_TEXT_X = 4
 ESCAPE_CHOICE_CURSOR_X = 2
 ESCAPE_YES_Y = 2
 ESCAPE_NO_Y = 5
+COMMAND_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
+COMMAND_GUIDE_TEXT_X = 2
+COMMAND_GUIDE_FIRST_Y = 2
+COMMAND_GUIDE_LINE_SPACING = 3
+COMMAND_GUIDE_MAX_LINES = 3
 DA2_REFERENCE_FPS = 30
 DA2_ESCAPE_RUN_SPEED = 12
 ESCAPE_RUN_SPEED = DA2_ESCAPE_RUN_SPEED * DA2_REFERENCE_FPS // FPS
@@ -156,6 +161,7 @@ UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
 UNSELECTABLE_TARGET_PALETTE_BASE_RATE = 0.5
 FORMATION_MOVE_FRAME_COUNT = 8
 FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
+COMMAND_GUIDE_DELAY_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
 DEFEND_SPRITE_SOURCE_X = 16 * 7
 COMMAND_TEXT_KEYS = {
@@ -174,6 +180,16 @@ COMMAND_TEXT_KEYS = {
     BattleCommand.ESCAPE: "battle.command.escape",
     BattleCommand.ITEM: "battle.command.item",
     BattleCommand.FORMATION: "battle.command.formation",
+}
+COMMAND_GUIDE_TEXT_KEYS = {
+    BattleCommand.ATTACK: "battle.guide.attack",
+    BattleCommand.SPELL: "battle.guide.spell",
+    BattleCommand.HIDE: "battle.guide.hide",
+    BattleCommand.IDENTIFY: "battle.guide.identify",
+    BattleCommand.PRAY: "battle.guide.pray",
+    BattleCommand.COVER: "battle.guide.cover",
+    BattleCommand.DEFEND: "battle.guide.defend",
+    BattleCommand.ITEM: "battle.guide.item",
 }
 COMMAND_TEXT_X = (4, 18)
 COMMAND_CURSOR_X = (2, 16)
@@ -466,6 +482,12 @@ class BattleScreenMock:
         fonts = FontResources()
         windows = WindowFactory(fonts.font_for(settings.language))
         font_6x8 = fonts.font_for(Language.ENGLISH)
+        command_guide_window = windows.create(
+            *COMMAND_GUIDE_WINDOW_GRID,
+            (),
+            thin_frame=True,
+            opened=False,
+        )
         command_window = windows.create(
             34,
             0,
@@ -475,6 +497,7 @@ class BattleScreenMock:
             thin_frame=True,
             opened=False,
         )
+        self.command_guide_window = command_guide_window
         self.command_window = command_window
         self.command_cursor = command_window.set_cursor(())
         self.target_window = windows.create(0, 0, 64, 60, transparent=True)
@@ -558,9 +581,12 @@ class BattleScreenMock:
         self.selected_command: str | None = None
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
+        self.command_guide_command: BattleCommand | None = None
+        self.command_guide_timer = 0
+        self.command_guide_visible = False
         self.defending_party_indexes: set[int] = set()
         self.escaping_party_indexes: set[int] = set()
-        self.windows = [command_window]
+        self.windows = [command_guide_window, command_window]
         self.monster_name_windows: list[Window] = []
         self.monster_name_texts: list[WindowText] = []
         self.party_status_windows: list[Window] = []
@@ -604,6 +630,8 @@ class BattleScreenMock:
 
     def update(self) -> None:
         input_state = self.input_reader.poll()
+        if self.phase is not BattleMockPhase.COMMAND:
+            self._hide_command_guide()
         if self.phase is BattleMockPhase.ENTRANCE:
             self._update_entrance_animation()
             return
@@ -662,6 +690,7 @@ class BattleScreenMock:
             input_state.navigation if self.phase is BattleMockPhase.COMMAND else None
         )
         self.command_window.update(navigation)
+        self._update_command_guide()
 
     def _restart_battle_mock(self) -> None:
         """Reset the mock and replay its battle entrance presentation."""
@@ -690,6 +719,7 @@ class BattleScreenMock:
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
+        self._hide_command_guide()
         self.defending_party_indexes.clear()
         self.escaping_party_indexes.clear()
         self.target_cursor.active = False
@@ -734,6 +764,7 @@ class BattleScreenMock:
         self.command_cursor.active = False
         self.target_cursor.active = False
         self.command_window.close_immediately()
+        self._hide_command_guide()
         self._refresh_monster_name_colors()
 
     def _begin_escape_confirmation(self) -> None:
@@ -836,6 +867,7 @@ class BattleScreenMock:
         self.selected_command = None
         self.escape_cursor.active = False
         self.command_cursor.active = True
+        self._hide_command_guide()
         self.command_window.open()
 
     def _begin_formation_change(self) -> bool:
@@ -1041,6 +1073,7 @@ class BattleScreenMock:
             self.defending_party_indexes.discard(self.active_party_index)
             self.phase = BattleMockPhase.COMMAND
             self.command_cursor.active = True
+            self._hide_command_guide()
             self._refresh_command_options()
             self.command_window.open()
         else:
@@ -1128,6 +1161,67 @@ class BattleScreenMock:
         """Resolve one command's localized display label from the text catalog."""
 
         return self.texts.text(COMMAND_TEXT_KEYS[command], self.localizer)
+
+    def _command_guide_lines(self, command: BattleCommand) -> tuple[str, ...]:
+        """Return DA2-derived guide text or the command name as a placeholder."""
+
+        key = COMMAND_GUIDE_TEXT_KEYS.get(command, COMMAND_TEXT_KEYS[command])
+        return self.texts.lines(key, self.localizer)
+
+    def _update_command_guide(self) -> None:
+        """Show a guide after the command cursor stays on one entry briefly."""
+
+        guide_window = getattr(self, "command_guide_window", None)
+        if guide_window is None:
+            return
+        if (
+            self.phase is not BattleMockPhase.COMMAND
+            or not self.command_window.is_open
+            or not isinstance(self.command_cursor.selected_key, BattleCommand)
+        ):
+            self._hide_command_guide()
+            return
+
+        command = self.command_cursor.selected_key
+        if command is not self.command_guide_command:
+            self.command_guide_command = command
+            self.command_guide_timer = 1
+            self.command_guide_visible = False
+            guide_window.close_immediately()
+            guide_window.clear_texts()
+        else:
+            self.command_guide_timer = min(
+                self.command_guide_timer + 1,
+                COMMAND_GUIDE_DELAY_FRAME_COUNT,
+            )
+
+        if (
+            self.command_guide_timer == COMMAND_GUIDE_DELAY_FRAME_COUNT
+            and not self.command_guide_visible
+        ):
+            guide_window.clear_texts()
+            for index, line in enumerate(
+                self._command_guide_lines(command)[:COMMAND_GUIDE_MAX_LINES]
+            ):
+                guide_window.add_text(
+                    line,
+                    COMMAND_GUIDE_TEXT_X,
+                    COMMAND_GUIDE_FIRST_Y + index * COMMAND_GUIDE_LINE_SPACING,
+                )
+            guide_window.open_immediately()
+            self.command_guide_visible = True
+
+    def _hide_command_guide(self) -> None:
+        """Clear the delayed command guide outside command selection."""
+
+        guide_window = getattr(self, "command_guide_window", None)
+        if guide_window is None:
+            return
+        self.command_guide_command = None
+        self.command_guide_timer = 0
+        self.command_guide_visible = False
+        guide_window.close_immediately()
+        guide_window.clear_texts()
 
     def _update_monster_action(self) -> None:
         self.command_window.update(None)
