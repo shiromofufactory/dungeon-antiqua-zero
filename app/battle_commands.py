@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
 if __package__ == "":
-    from member import EquipmentSlot, Member
-    from spell import Spell
+    from member import EquipmentSlot, Member, SPELL_PROFICIENCY_KINDS
 else:
-    from .member import EquipmentSlot, Member
-    from .spell import Spell
+    from .member import EquipmentSlot, Member, SPELL_PROFICIENCY_KINDS
 
 
 class BattleTarget(Protocol):
@@ -29,8 +27,17 @@ class BattleCommand(StrEnum):
     """Stable command keys shared by battle rules and presentation."""
 
     ATTACK = "attack"
-    DEFEND = "defend"
     SPELL = "spell"
+    AIM = "aim"
+    HIDE = "hide"
+    IDENTIFY = "identify"
+    PRAY = "pray"
+    COVER = "cover"
+    IAI = "iai"
+    FOCUS = "focus"
+    BREATH = "breath"
+    MP_SHARE = "mp_share"
+    DEFEND = "defend"
     ESCAPE = "escape"
     ITEM = "item"
     FORMATION = "formation"
@@ -40,34 +47,19 @@ class BattleCommand(StrEnum):
 class BattleCommandContext:
     """Situation-dependent capabilities supplied by the battle scene.
 
-    The member supplies equipment and skill state. The spell catalog and
-    event-acquired keys let the resolver apply learning, battle-use, and MP
-    rules. Item and escape flags remain explicit battle-state inputs. This
-    boundary can incorporate new rules without coupling them to Pyxel or a
-    screen mock.
+    The member supplies equipment, base spell aptitude, and skill state.
+    Battle state supplies temporary restrictions and the availability of
+    escape and items. This boundary can incorporate new rules without
+    coupling them to Pyxel or a screen mock.
     """
 
-    spells: tuple[Spell, ...] = ()
-    event_spell_keys: frozenset[str] = frozenset()
-    spell_available: bool | None = None
+    silenced: bool = False
     item_available: bool = True
     escape_available: bool = True
 
     def __post_init__(self) -> None:
-        if not isinstance(self.spells, tuple) or not all(
-            isinstance(spell, Spell) for spell in self.spells
-        ):
-            raise TypeError("spells must be a tuple of Spell values")
-        if not isinstance(self.event_spell_keys, frozenset) or not all(
-            isinstance(key, str) for key in self.event_spell_keys
-        ):
-            raise TypeError("event_spell_keys must be a frozenset of strings")
-        if self.spell_available is not None and not isinstance(
-            self.spell_available,
-            bool,
-        ):
-            raise TypeError("spell_available must be a boolean or None")
         for field_name in (
+            "silenced",
             "item_available",
             "escape_available",
         ):
@@ -136,20 +128,26 @@ def formation_change_enabled(member: Member, party: Sequence[Member]) -> bool:
     return sum(candidate.is_front_row for candidate in party) >= 2
 
 
-def member_can_cast_battle_spell(
-    member: Member,
-    spells: Collection[Spell],
-    *,
-    event_spell_keys: Collection[str] = (),
-) -> bool:
-    """Return whether the member knows an affordable battle spell."""
+def member_has_spell_aptitude(member: Member) -> bool:
+    """Return whether the member's base abilities permit any spell school."""
 
     return any(
-        spell.on_battle
-        and member.mp >= spell.mp
-        and spell.is_learned_by(member, event_spell_keys)
-        for spell in spells
+        member.proficiency(kind).aptitude.value >= 1
+        for kind in SPELL_PROFICIENCY_KINDS
     )
+
+
+_SKILL_COMMANDS = (
+    ("Aim", BattleCommand.AIM),
+    ("Hide", BattleCommand.HIDE),
+    ("Identify", BattleCommand.IDENTIFY),
+    ("Pray", BattleCommand.PRAY),
+    ("Cover", BattleCommand.COVER),
+    ("Iai", BattleCommand.IAI),
+    ("Focus", BattleCommand.FOCUS),
+    ("Breath", BattleCommand.BREATH),
+    ("MP share", BattleCommand.MP_SHARE),
+)
 
 
 def resolve_battle_commands(
@@ -168,49 +166,55 @@ def resolve_battle_commands(
     current = BattleCommandContext() if context is None else context
     if not isinstance(current, BattleCommandContext):
         raise TypeError("context must be a BattleCommandContext")
-    spell_available = current.spell_available
-    if spell_available is None:
-        spell_available = member_can_cast_battle_spell(
-            member,
-            current.spells,
-            event_spell_keys=current.event_spell_keys,
-        )
-
-    commands: list[BattleCommandOption] = []
+    left_commands: list[BattleCommandOption] = []
     attack_targets = selectable_attack_target_indexes(
         attacker_is_front_row=member.is_front_row,
         weapon_reach=member_attack_reach(member),
         monsters=monsters,
     )
-    # The existing battle UI removes normal attack rather than greying it out
-    # when no valid target exists.
+    # Normal attack is removed, rather than greyed out, when no valid target
+    # exists. In particular, a back-row member with a short-range weapon has
+    # no attack target.
     if attack_targets:
-        commands.append(BattleCommandOption(BattleCommand.ATTACK))
-    commands.extend(
-        (
-            BattleCommandOption(BattleCommand.DEFEND),
+        left_commands.append(BattleCommandOption(BattleCommand.ATTACK))
+    if len(left_commands) < 3 and member_has_spell_aptitude(member):
+        left_commands.append(
             BattleCommandOption(
                 BattleCommand.SPELL,
-                enabled=spell_available,
-            ),
-            BattleCommandOption(
-                BattleCommand.ESCAPE,
-                enabled=current.escape_available,
-            ),
-            BattleCommandOption(
-                BattleCommand.ITEM,
-                enabled=current.item_available,
-            ),
+                enabled=not current.silenced,
+            )
         )
-    )
+    for skill_key, command in _SKILL_COMMANDS:
+        if len(left_commands) == 3:
+            break
+        if not member.has_skill(skill_key):
+            continue
+        left_commands.append(BattleCommandOption(command))
+    if len(left_commands) < 3:
+        left_commands.append(BattleCommandOption(BattleCommand.DEFEND))
+
+    right_commands = [
+        BattleCommandOption(
+            BattleCommand.ESCAPE,
+            enabled=current.escape_available,
+        ),
+        BattleCommandOption(
+            BattleCommand.ITEM,
+            enabled=current.item_available,
+        ),
+    ]
     if len(party) > 1:
-        commands.append(
+        right_commands.append(
             BattleCommandOption(
                 BattleCommand.FORMATION,
                 enabled=formation_change_enabled(member, party),
             )
         )
-    return tuple(commands)
+    elif not any(
+        option.command is BattleCommand.DEFEND for option in left_commands
+    ):
+        right_commands.append(BattleCommandOption(BattleCommand.DEFEND))
+    return tuple((*left_commands, *right_commands))
 
 
 __all__ = [
@@ -220,7 +224,7 @@ __all__ = [
     "BattleTarget",
     "formation_change_enabled",
     "member_attack_reach",
-    "member_can_cast_battle_spell",
+    "member_has_spell_aptitude",
     "resolve_battle_commands",
     "selectable_attack_target_indexes",
 ]

@@ -7,6 +7,7 @@ from battle_commands import (
     BattleCommand,
     BattleCommandContext,
     formation_change_enabled,
+    member_has_spell_aptitude,
     resolve_battle_commands,
     selectable_attack_target_indexes,
 )
@@ -15,7 +16,6 @@ from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
     load_mock_skills,
-    load_mock_spells,
 )
 
 
@@ -104,13 +104,53 @@ class BattleCommandRulesTest(unittest.TestCase):
             tuple(option.command for option in commands),
         )
 
-    def test_scene_capabilities_disable_commands_without_ui_knowledge(self) -> None:
+    def test_left_column_evaluates_in_order_and_stops_after_three(self) -> None:
+        skills = load_mock_skills()
+        self.party[0].skills.extend(
+            (skills["Focus"], skills["Aim"], skills["Hide"])
+        )
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party,
+            self.monsters,
+        )
+
+        self.assertEqual(
+            tuple(option.command for option in commands),
+            (
+                BattleCommand.ATTACK,
+                BattleCommand.SPELL,
+                BattleCommand.AIM,
+                BattleCommand.ESCAPE,
+                BattleCommand.ITEM,
+                BattleCommand.FORMATION,
+            ),
+        )
+
+    def test_skills_fill_left_column_after_missing_attack(self) -> None:
+        skills = load_mock_skills()
+        self.party[0].formation_row = FormationRow.BACK
+        self.party[0].skills.extend((skills["Aim"], skills["Hide"]))
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party,
+            self.monsters,
+        )
+
+        self.assertEqual(
+            tuple(option.command for option in commands[:3]),
+            (BattleCommand.SPELL, BattleCommand.AIM, BattleCommand.HIDE),
+        )
+
+    def test_silence_disables_visible_spell_without_hiding_it(self) -> None:
         commands = resolve_battle_commands(
             self.party[0],
             self.party,
             self.monsters,
             context=BattleCommandContext(
-                spell_available=False,
+                silenced=True,
                 item_available=False,
                 escape_available=False,
             ),
@@ -124,14 +164,11 @@ class BattleCommandRulesTest(unittest.TestCase):
         self.assertFalse(enabled_by_command[BattleCommand.ITEM])
         self.assertFalse(enabled_by_command[BattleCommand.ESCAPE])
 
-    def test_learned_affordable_battle_spell_enables_spell_command(self) -> None:
+    def test_base_spell_aptitude_shows_spell_without_spell_catalog(self) -> None:
         commands = resolve_battle_commands(
             self.party[0],
             self.party,
             self.monsters,
-            context=BattleCommandContext(
-                spells=tuple(load_mock_spells().values()),
-            ),
         )
 
         spell = next(
@@ -140,6 +177,31 @@ class BattleCommandRulesTest(unittest.TestCase):
             if option.command is BattleCommand.SPELL
         )
         self.assertTrue(spell.enabled)
+        self.assertTrue(member_has_spell_aptitude(self.party[0]))
+
+    def test_single_member_uses_right_slot_for_defend_only_when_left_is_full(
+        self,
+    ) -> None:
+        skills = load_mock_skills()
+        self.party[0].skills.append(skills["Aim"])
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party[:1],
+            self.monsters,
+        )
+
+        self.assertEqual(
+            tuple(option.command for option in commands),
+            (
+                BattleCommand.ATTACK,
+                BattleCommand.SPELL,
+                BattleCommand.AIM,
+                BattleCommand.ESCAPE,
+                BattleCommand.ITEM,
+                BattleCommand.DEFEND,
+            ),
+        )
 
 
 if __name__ == "__main__":

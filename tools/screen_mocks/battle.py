@@ -15,7 +15,6 @@ from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
     load_mock_skills,
-    load_mock_spells,
 )
 from tools.screen_mocks._runner import run_screen_mock
 from tools.screen_mocks._runtime import (
@@ -55,6 +54,8 @@ from rendering import (
 )
 from resources import (
     TRANSPARENT_INDEX,
+    AudioResourceError,
+    BgmPlayer,
     FontResourceError,
     FontResources,
     ImageResourceError,
@@ -63,7 +64,15 @@ from resources import (
 )
 from state import Language, Settings
 from text_catalog import TextCatalog, TextCatalogError
-from ui import DISABLED_COLOR, CursorTarget, Window, WindowFactory, WindowText
+from ui import (
+    DEFAULT_TEXT_COLOR,
+    DISABLED_COLOR,
+    RESERVE_MEMBER_TEXT_COLOR,
+    CursorTarget,
+    Window,
+    WindowFactory,
+    WindowText,
+)
 from ui.formation_arrow import (
     FORMATION_ARROW_BANK,
     FORMATION_ARROW_COLKEY,
@@ -76,6 +85,7 @@ from ui.formation_arrow import (
 
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
+BATTLE_BGM_ID = "da3-battle1"
 BATTLE_MOCK_PARTY_CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
 BATTLE_MOCK_MONSTER_KEYS = (
     "Giant Spider",
@@ -116,16 +126,14 @@ PARTY_ENTRANCE_OFFSET_Y = -24
 PARTY_ENTRANCE_JUMP_HEIGHT = 24
 PARTY_ENTRANCE_COMPLETE_FRAME = (
     PARTY_ENTRANCE_FRAME_COUNT
-    + (len(BATTLE_MOCK_PARTY_CHARACTER_KEYS) - 1)
-    * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
+    + (len(BATTLE_MOCK_PARTY_CHARACTER_KEYS) - 1) * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
 )
 TIMELINE_ENTRANCE_FRAME_COUNT = 10
 TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT = 2
 TIMELINE_ENTRANCE_START_X = SCREEN_WIDTH
 TIMELINE_ENTRANCE_COMPLETE_FRAME = (
     TIMELINE_ENTRANCE_FRAME_COUNT
-    + (TIMELINE_VISIBLE_ENTRY_COUNT - 1)
-    * TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT
+    + (TIMELINE_VISIBLE_ENTRY_COUNT - 1) * TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT
 )
 BATTLE_ENTRANCE_FRAME_COUNT = max(
     PARTY_ENTRANCE_COMPLETE_FRAME,
@@ -144,26 +152,24 @@ UNSELECTABLE_TARGET_PALETTE_BASE_RATE = 0.5
 FORMATION_MOVE_FRAME_COUNT = 8
 FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
-COMMAND_OPTIONS = (
-    ("attack", "こうげき", 4, 2, 2, 2),
-    ("defend", "ぼうぎょ", 4, 5, 2, 5),
-    ("spell", "じゅもん", 4, 8, 2, 8),
-    ("escape", "にげる", 18, 2, 16, 2),
-    ("item", "アイテム", 18, 5, 16, 5),
-    ("formation", "こうたい", 18, 8, 16, 8),
-)
-COMMAND_LABELS = {
-    BattleCommand.ATTACK: "こうげき",
-    BattleCommand.DEFEND: "ぼうぎょ",
-    BattleCommand.SPELL: "じゅもん",
-    BattleCommand.ESCAPE: "にげる",
-    BattleCommand.ITEM: "アイテム",
-    BattleCommand.FORMATION: "こうたい",
+DEFEND_SPRITE_SOURCE_X = 16 * 7
+COMMAND_TEXT_KEYS = {
+    BattleCommand.ATTACK: "battle.command.attack",
+    BattleCommand.SPELL: "battle.command.spell",
+    BattleCommand.AIM: "battle.command.aim",
+    BattleCommand.HIDE: "battle.command.hide",
+    BattleCommand.IDENTIFY: "battle.command.identify",
+    BattleCommand.PRAY: "battle.command.pray",
+    BattleCommand.COVER: "battle.command.cover",
+    BattleCommand.IAI: "battle.command.iai",
+    BattleCommand.FOCUS: "battle.command.focus",
+    BattleCommand.BREATH: "battle.command.breath",
+    BattleCommand.MP_SHARE: "battle.command.mp_share",
+    BattleCommand.DEFEND: "battle.command.defend",
+    BattleCommand.ESCAPE: "battle.command.escape",
+    BattleCommand.ITEM: "battle.command.item",
+    BattleCommand.FORMATION: "battle.command.formation",
 }
-COMMAND_COLUMNS = (
-    (BattleCommand.ATTACK, BattleCommand.DEFEND, BattleCommand.SPELL),
-    (BattleCommand.ESCAPE, BattleCommand.ITEM, BattleCommand.FORMATION),
-)
 COMMAND_TEXT_X = (4, 18)
 COMMAND_CURSOR_X = (2, 16)
 COMMAND_ROW_Y = (2, 5, 8)
@@ -388,6 +394,7 @@ class BattleScreenMock:
             target_color=self.palette_shifter.base_colors[DISABLED_COLOR],
         )
         self.input_reader = create_mock_input_reader()
+        self.bgm = BgmPlayer()
 
         resources = ImageResources()
         background_entry = resources.entry(BACKGROUND_IMAGE_ID)
@@ -404,7 +411,7 @@ class BattleScreenMock:
         self.character_sprites = resources.image(CH_BATTLE_IMAGE_ID)
         settings = Settings()
         self.localizer = Localizer(settings.language)
-        texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         items = load_mock_items()
         character_records = _records_by_key(
             load_mock_character_records(),
@@ -416,7 +423,6 @@ class BattleScreenMock:
             character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
             internal_level=MAX_INTERNAL_LEVEL,
         )
-        self.spells = tuple(load_mock_spells().values())
         for member in self.party:
             if member.definition.key in BATTLE_MOCK_FRONT_CHARACTER_KEYS:
                 member.formation_row = FormationRow.FRONT
@@ -458,20 +464,12 @@ class BattleScreenMock:
             0,
             30,
             13,
-            tuple(
-                WindowText(label, text_x, text_y)
-                for _, label, text_x, text_y, _, _ in COMMAND_OPTIONS
-            ),
+            (),
             thin_frame=True,
             opened=False,
         )
         self.command_window = command_window
-        self.command_cursor = command_window.set_cursor(
-            tuple(
-                CursorTarget(cursor_x, cursor_y, key=key)
-                for key, _, _, _, cursor_x, cursor_y in COMMAND_OPTIONS
-            )
-        )
+        self.command_cursor = command_window.set_cursor(())
         self.target_window = windows.create(0, 0, 64, 60, transparent=True)
         self.target_cursor = self.target_window.set_cursor(
             tuple(
@@ -488,7 +486,7 @@ class BattleScreenMock:
             *ESCAPE_MESSAGE_WINDOW_GRID,
             (
                 WindowText(
-                    texts.text("battle.escape.confirm", self.localizer),
+                    self.texts.text("battle.escape.confirm", self.localizer),
                     *ESCAPE_MESSAGE_TEXT_POSITION,
                 ),
             ),
@@ -497,12 +495,12 @@ class BattleScreenMock:
             *ESCAPE_CHOICE_WINDOW_GRID,
             (
                 WindowText(
-                    texts.text("settings.yes", self.localizer),
+                    self.texts.text("settings.yes", self.localizer),
                     ESCAPE_CHOICE_TEXT_X,
                     ESCAPE_YES_Y,
                 ),
                 WindowText(
-                    texts.text("settings.no", self.localizer),
+                    self.texts.text("settings.no", self.localizer),
                     ESCAPE_CHOICE_TEXT_X,
                     ESCAPE_NO_Y,
                 ),
@@ -540,8 +538,10 @@ class BattleScreenMock:
         self.selected_command: str | None = None
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
+        self.defending_party_indexes: set[int] = set()
         self.windows = [command_window]
         self.monster_name_windows: list[Window] = []
+        self.monster_name_texts: list[WindowText] = []
         self.party_status_windows: list[Window] = []
         self.party_status_texts: list[tuple[WindowText, WindowText]] = []
 
@@ -569,8 +569,14 @@ class BattleScreenMock:
 
         for monster, (x, y) in zip(self.monsters, MONSTER_POSITIONS):
             window = windows.create(x // 4 + 2, y // 4 + 13, 20, 4, transparent=True)
-            window.add_text(monster.display_name(self.localizer), 0, 0, color=4)
+            name_text = window.add_text(
+                monster.display_name(self.localizer),
+                0,
+                0,
+                color=RESERVE_MEMBER_TEXT_COLOR,
+            )
             self.monster_name_windows.append(window)
+            self.monster_name_texts.append(name_text)
 
         self._restart_battle_mock()
         pyxel.run(self.update, self.draw)
@@ -619,6 +625,8 @@ class BattleScreenMock:
                     self._begin_escape_confirmation()
                 elif command == BattleCommand.FORMATION:
                     self._begin_formation_change()
+                elif command == BattleCommand.DEFEND:
+                    self._begin_defense()
                 else:
                     self.selected_command = command
                     self._complete_current_turn()
@@ -631,6 +639,7 @@ class BattleScreenMock:
     def _restart_battle_mock(self) -> None:
         """Reset the mock and replay its battle entrance presentation."""
 
+        self._restart_battle_bgm()
         for monster in self.monsters:
             monster.restore()
         self.timeline = self.party_visuals + self.monsters
@@ -650,18 +659,26 @@ class BattleScreenMock:
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
+        self.defending_party_indexes.clear()
         self.target_cursor.active = False
         self.escape_cursor.active = False
         self.command_window.close_immediately()
         self._refresh_command_options()
         self.command_cursor.active = False
         self._refresh_party_text_colors()
+        self._refresh_monster_name_colors()
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.entrance_fade.start_fade_in()
         self.palette_shifter.set_global_mix(
             base_rate=0.0,
             target_color=self.palette_shifter.base_colors[0],
         )
+
+    def _restart_battle_bgm(self) -> None:
+        """Restart the battle track from its beginning for each mock reset."""
+
+        self.bgm.stop()
+        self.bgm.play(BATTLE_BGM_ID)
 
     def _update_entrance_animation(self) -> None:
         if self.entrance_fade.is_active:
@@ -685,6 +702,7 @@ class BattleScreenMock:
         self.command_cursor.active = False
         self.target_cursor.active = False
         self.command_window.close_immediately()
+        self._refresh_monster_name_colors()
 
     def _begin_escape_confirmation(self) -> None:
         self.phase = BattleMockPhase.ESCAPE_CONFIRMATION
@@ -743,6 +761,16 @@ class BattleScreenMock:
         self.command_window.close_immediately()
         return True
 
+    def _begin_defense(self) -> bool:
+        """Keep the active member in a defensive stance until their next turn."""
+
+        if self.active_party_index is None:
+            return False
+        self.defending_party_indexes.add(self.active_party_index)
+        self.selected_command = BattleCommand.DEFEND
+        self._complete_current_turn()
+        return True
+
     def _update_formation_animation(self) -> None:
         """Advance one formation walk and then complete the actor's turn."""
 
@@ -766,6 +794,7 @@ class BattleScreenMock:
         self.command_cursor.active = False
         self.target_cursor.active = True
         self.target_cursor.select_key(self.selected_target_index)
+        self._refresh_monster_name_colors()
         return True
 
     def _update_target_selection(self, input_state: InputState) -> None:
@@ -822,9 +851,7 @@ class BattleScreenMock:
         if dying_index is None:
             raise RuntimeError("monster death phase requires a target")
         defeated = self.monsters[dying_index]
-        self.timeline = tuple(
-            entry for entry in self.timeline if entry is not defeated
-        )
+        self.timeline = tuple(entry for entry in self.timeline if entry is not defeated)
         self.monster_death_animation = None
         self.dying_monster_index = None
         self._complete_current_turn()
@@ -896,6 +923,7 @@ class BattleScreenMock:
                 for index, visual in enumerate(self.party_visuals)
                 if visual is actor
             )
+            self.defending_party_indexes.discard(self.active_party_index)
             self.phase = BattleMockPhase.COMMAND
             self.command_cursor.active = True
             self.blinking_monster_index = None
@@ -932,25 +960,26 @@ class BattleScreenMock:
             self.party[self.active_party_index],
             self.party,
             self.monsters,
-            context=BattleCommandContext(spells=self.spells),
+            context=BattleCommandContext(),
         )
 
     def _refresh_command_options(self) -> None:
-        options_by_command = {
-            option.command: option
-            for option in self._active_member_command_options()
-        }
+        options = self._active_member_command_options()
+        right_start = next(
+            (
+                index
+                for index, option in enumerate(options)
+                if option.command is BattleCommand.ESCAPE
+            ),
+            len(options),
+        )
+        columns = (options[:right_start], options[right_start:])
         placements = []
-        for column_index, commands in enumerate(COMMAND_COLUMNS):
-            visible = [
-                options_by_command[command]
-                for command in commands
-                if command in options_by_command
-            ]
+        for column_index, visible in enumerate(columns):
             placements.extend(
                 (
                     option,
-                    COMMAND_LABELS[option.command],
+                    self._command_label(option.command),
                     COMMAND_TEXT_X[column_index],
                     COMMAND_ROW_Y[row_index],
                     COMMAND_CURSOR_X[column_index],
@@ -982,6 +1011,11 @@ class BattleScreenMock:
             )
         )
 
+    def _command_label(self, command: BattleCommand) -> str:
+        """Resolve one command's localized display label from the text catalog."""
+
+        return self.texts.text(COMMAND_TEXT_KEYS[command], self.localizer)
+
     def _update_monster_action(self) -> None:
         self.command_window.update(None)
         if self.monster_blink_frames_remaining > 0:
@@ -999,6 +1033,23 @@ class BattleScreenMock:
                 for placement in placements
             )
             self.party_status_texts[index] = recolored
+
+    def _refresh_monster_name_colors(self) -> None:
+        """Reflect target availability in the monster-name colors."""
+
+        for index, (window, placement) in enumerate(
+            zip(self.monster_name_windows, self.monster_name_texts)
+        ):
+            selectable = (
+                self.phase is not BattleMockPhase.TARGET
+                or index in self.selectable_target_indexes
+            )
+            color = DEFAULT_TEXT_COLOR if selectable else RESERVE_MEMBER_TEXT_COLOR
+            self.monster_name_texts[index] = self._replace_text_color(
+                window,
+                placement,
+                color,
+            )
 
     @staticmethod
     def _replace_text_color(
@@ -1108,10 +1159,11 @@ class BattleScreenMock:
             and index == self.formation_actor_index
         ):
             pattern = (
-                self.formation_animation_frame
-                // FORMATION_WALK_PATTERN_FRAME_COUNT
+                self.formation_animation_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
             ) % 2
             return pattern * FORMATION_SPRITE_STEP_X
+        if index in getattr(self, "defending_party_indexes", ()):
+            return DEFEND_SPRITE_SOURCE_X
         return 0
 
     def _draw_active_party_arrow(self) -> None:
@@ -1160,9 +1212,7 @@ class BattleScreenMock:
                 if not is_unselectable_rear_target:
                     self._draw_monster_image(monster, x, y)
                     continue
-                with self.palette_shifter.shifted(
-                    UNSELECTABLE_TARGET_PALETTE
-                ):
+                with self.palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
                     self._draw_monster_image(monster, x, y)
                 continue
             animation = self.monster_death_animation
@@ -1201,8 +1251,7 @@ class BattleScreenMock:
         elapsed = min(self.entrance_animation_frame, duration)
         remaining = duration - elapsed
         initial_offset = (
-            DA2_MONSTER_ENTRANCE_SLIDE_STEPS[index]
-            * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
+            DA2_MONSTER_ENTRANCE_SLIDE_STEPS[index] * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
         )
         return target_x - initial_offset * remaining // duration
 
@@ -1213,9 +1262,7 @@ class BattleScreenMock:
 
     def _draw_timeline(self) -> None:
         if self.phase is BattleMockPhase.ENTRANCE:
-            for index, entry in enumerate(
-                self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]
-            ):
+            for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
                 x = self._timeline_entrance_x(index)
                 if x is None:
                     continue
@@ -1228,9 +1275,7 @@ class BattleScreenMock:
                 * self.timeline_animation_frame
                 // (TIMELINE_ANIMATION_FRAME_COUNT**2)
             )
-            for index, entry in enumerate(
-                self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]
-            ):
+            for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
                 y = TIMELINE_BASE_Y + (drop if index == 0 else 0)
                 self._draw_timeline_entry(
                     entry,
@@ -1257,9 +1302,9 @@ class BattleScreenMock:
                 len(self.timeline),
                 TIMELINE_VISIBLE_ENTRY_COUNT,
             )
-            destination_x = TIMELINE_BASE_X + (
-                visible_entry_count - 1
-            ) * TIMELINE_SLOT_SPACING
+            destination_x = (
+                TIMELINE_BASE_X + (visible_entry_count - 1) * TIMELINE_SLOT_SPACING
+            )
             incoming_x = TIMELINE_INCOMING_START_X - (
                 (TIMELINE_INCOMING_START_X - destination_x)
                 * self.timeline_animation_frame
@@ -1277,9 +1322,7 @@ class BattleScreenMock:
             )
             return
 
-        for index, entry in enumerate(
-            self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]
-        ):
+        for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
             self._draw_timeline_entry(
                 entry,
                 TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING,
@@ -1337,8 +1380,7 @@ class BattleScreenMock:
         )
         for window in self.windows:
             if hide_party_status and any(
-                window is status_window
-                for status_window in self.party_status_windows
+                window is status_window for status_window in self.party_status_windows
             ):
                 continue
             window.draw()
@@ -1363,6 +1405,7 @@ def main() -> int:
     return run_screen_mock(
         BattleScreenMock,
         expected_errors=(
+            AudioResourceError,
             FontResourceError,
             ImageResourceError,
             MonsterDataError,

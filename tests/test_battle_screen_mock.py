@@ -7,10 +7,13 @@ from unittest.mock import Mock, call, patch
 
 from tools.screen_mocks.battle import (
     BATTLE_ENTRANCE_FRAME_COUNT,
+    BATTLE_BGM_ID,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+    COMMAND_TEXT_KEYS,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
+    DEFEND_SPRITE_SOURCE_X,
     FORMATION_MOVE_FRAME_COUNT,
     FORMATION_SPRITE_STEP_X,
     FORMATION_WALK_PATTERN_FRAME_COUNT,
@@ -44,6 +47,10 @@ from tools.screen_mocks.battle import (
     selectable_attack_target_indexes,
 )
 from battle_commands import BattleCommand, BattleCommandOption
+from localization import Localizer
+from state import Language
+from text_catalog import TextCatalog
+from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
@@ -68,7 +75,21 @@ from ui.formation_arrow import (
 )
 
 
+_JAPANESE_COMMAND_LABELS = {
+    BattleCommand.ATTACK: "こうげき",
+    BattleCommand.SPELL: "じゅもん",
+    BattleCommand.AIM: "ねらう",
+    BattleCommand.DEFEND: "ぼうぎょ",
+    BattleCommand.ESCAPE: "にげる",
+    BattleCommand.ITEM: "アイテム",
+    BattleCommand.FORMATION: "こうたい",
+}
+
+
 class BattleScreenMockTest(unittest.TestCase):
+    def _mock_command_labels(self, mock: BattleScreenMock) -> None:
+        mock._command_label = Mock(side_effect=_JAPANESE_COMMAND_LABELS.__getitem__)
+
     def test_mock_uses_sixty_fps(self) -> None:
         self.assertEqual(FPS, 60)
 
@@ -148,6 +169,7 @@ class BattleScreenMockTest(unittest.TestCase):
         with (
             patch("tools.screen_mocks.battle.initialize_screen_mock") as initialize,
             patch("tools.screen_mocks.battle.create_mock_input_reader"),
+            patch("tools.screen_mocks.battle.BgmPlayer"),
             patch("tools.screen_mocks.battle.ImageResources") as images,
             patch("tools.screen_mocks.battle.FontResources") as fonts,
             patch("tools.screen_mocks.battle.WindowFactory") as windows,
@@ -311,7 +333,8 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         mock.command_window.open.assert_called_once_with()
 
-    def test_party_sprites_use_member_formation_and_data_sprite_index(self) -> None:
+    def test_party_sprites_use_formation_and_defense_source_images(self) -> None:
+        self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 7)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (
@@ -325,6 +348,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ),
         )
         mock.phase = BattleMockPhase.COMMAND
+        mock.defending_party_indexes = {1}
 
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock._draw_party()
@@ -333,7 +357,16 @@ class BattleScreenMockTest(unittest.TestCase):
             blt.call_args_list,
             [
                 call(156, 64, mock.character_sprites, 0, 64, 16, 32, 1),
-                call(176, 92, mock.character_sprites, 0, 128, 16, 32, 1),
+                call(
+                    176,
+                    92,
+                    mock.character_sprites,
+                    DEFEND_SPRITE_SOURCE_X,
+                    128,
+                    16,
+                    32,
+                    1,
+                ),
             ],
         )
 
@@ -474,6 +507,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.selected_command = None
         mock.selectable_target_indexes = ()
         mock.selected_target_index = None
+        mock._refresh_monster_name_colors = Mock()
 
         with patch("tools.screen_mocks.battle.member_attack_reach", return_value=1):
             self.assertTrue(mock._begin_attack_target_selection())
@@ -485,6 +519,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.command_cursor.active)
         self.assertTrue(mock.target_cursor.active)
         mock.target_cursor.select_key.assert_called_once_with(4)
+        mock._refresh_monster_name_colors.assert_called_once_with()
         mock.command_window.close_immediately.assert_not_called()
 
     def test_reach_one_back_row_member_cannot_start_target_selection(self) -> None:
@@ -812,7 +847,7 @@ class BattleScreenMockTest(unittest.TestCase):
             confirm=InputButton(triggered=True, held=True)
         )
         mock.command_cursor = Mock()
-        mock.command_cursor.selected_key = "defend"
+        mock.command_cursor.selected_key = "item"
         mock.command_window = Mock()
         mock.command_window.is_closed = False
         mock.command_window.is_open = True
@@ -821,8 +856,39 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock.update()
 
-        self.assertEqual(mock.selected_command, "defend")
+        self.assertEqual(mock.selected_command, "item")
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_defense_persists_until_the_member_next_becomes_active(self) -> None:
+        visual = BattleMockCharacter(
+            SimpleNamespace(definition=SimpleNamespace(key="Fiora")),
+            0,
+            0,
+            0,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.defending_party_indexes = set()
+        mock.selected_command = None
+        mock._complete_current_turn = Mock()
+
+        self.assertTrue(mock._begin_defense())
+        self.assertEqual(mock.defending_party_indexes, {0})
+        self.assertIs(mock.selected_command, BattleCommand.DEFEND)
+        mock._complete_current_turn.assert_called_once_with()
+
+        mock.timeline = (visual,)
+        mock.party_visuals = (visual,)
+        mock.phase = BattleMockPhase.TIMELINE
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock._refresh_command_options = Mock()
+        mock._refresh_party_text_colors = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(mock.defending_party_indexes, set())
+        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
 
     def test_spell_command_restarts_battle_mock_for_debugging(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -842,6 +908,17 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._restart_battle_mock.assert_called_once_with()
         mock._complete_current_turn.assert_not_called()
         mock.command_window.update.assert_not_called()
+
+    def test_battle_bgm_restarts_from_the_beginning_for_each_mock_reset(
+        self,
+    ) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.bgm = Mock()
+
+        mock._restart_battle_bgm()
+
+        mock.bgm.stop.assert_called_once_with()
+        mock.bgm.play.assert_called_once_with(BATTLE_BGM_ID)
 
     def test_timeline_cycles_through_every_combatant_and_returns_actor_to_tail(
         self,
@@ -878,6 +955,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = Mock()
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
+        mock.defending_party_indexes = set()
         mock._refresh_command_options = Mock()
         mock.party_status_windows = [Mock() for _ in members]
         for window in mock.party_status_windows:
@@ -1127,12 +1205,13 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_unable_to_attack_removes_attack_and_moves_left_commands_up(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.command_window = Mock()
+        self._mock_command_labels(mock)
         new_cursor = Mock()
         mock.command_window.set_cursor.return_value = new_cursor
         mock._active_member_command_options = Mock(
             return_value=(
-                BattleCommandOption(BattleCommand.DEFEND),
                 BattleCommandOption(BattleCommand.SPELL),
+                BattleCommandOption(BattleCommand.DEFEND),
                 BattleCommandOption(BattleCommand.ESCAPE),
                 BattleCommandOption(BattleCommand.ITEM),
                 BattleCommandOption(BattleCommand.FORMATION),
@@ -1144,8 +1223,8 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             mock.command_window.add_text.call_args_list,
             [
-                call("ぼうぎょ", 4, 2),
-                call("じゅもん", 4, 5),
+                call("じゅもん", 4, 2),
+                call("ぼうぎょ", 4, 5),
                 call("にげる", 18, 2),
                 call("アイテム", 18, 5),
                 call("こうたい", 18, 8),
@@ -1155,8 +1234,8 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             [(target.key, target.x, target.y) for target in targets],
             [
-                ("defend", 2, 2),
-                ("spell", 2, 5),
+                ("spell", 2, 2),
+                ("defend", 2, 5),
                 ("escape", 16, 2),
                 ("item", 16, 5),
                 ("formation", 16, 8),
@@ -1166,9 +1245,33 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window.clear_cursor.assert_called_once_with()
         self.assertIs(mock.command_cursor, new_cursor)
 
+    def test_single_member_defend_uses_the_third_right_column_slot(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.command_window = Mock()
+        self._mock_command_labels(mock)
+        mock.command_window.set_cursor.return_value = Mock()
+        mock._active_member_command_options = Mock(
+            return_value=(
+                BattleCommandOption(BattleCommand.ATTACK),
+                BattleCommandOption(BattleCommand.SPELL),
+                BattleCommandOption(BattleCommand.AIM),
+                BattleCommandOption(BattleCommand.ESCAPE),
+                BattleCommandOption(BattleCommand.ITEM),
+                BattleCommandOption(BattleCommand.DEFEND),
+            )
+        )
+
+        mock._refresh_command_options()
+
+        self.assertIn(
+            call("ぼうぎょ", 18, 8),
+            mock.command_window.add_text.call_args_list,
+        )
+
     def test_disabled_formation_is_grey_and_not_selectable(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.command_window = Mock()
+        self._mock_command_labels(mock)
         mock.command_window.set_cursor.return_value = Mock()
         mock._active_member_command_options = Mock(
             return_value=(
@@ -1192,6 +1295,26 @@ class BattleScreenMockTest(unittest.TestCase):
             target for target in targets if target.key is BattleCommand.FORMATION
         )
         self.assertFalse(formation.selectable)
+
+    def test_each_command_uses_a_battle_text_key(self) -> None:
+        self.assertEqual(
+            set(COMMAND_TEXT_KEYS),
+            set(BattleCommand),
+        )
+        self.assertTrue(
+            all(
+                key.startswith("battle.command.")
+                for key in COMMAND_TEXT_KEYS.values()
+            )
+        )
+        texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        localizer = Localizer(Language.JAPANESE)
+        self.assertTrue(
+            all(
+                texts.text(key, localizer)
+                for key in COMMAND_TEXT_KEYS.values()
+            )
+        )
 
     def test_formation_walk_swaps_row_and_uses_alternate_sprite(self) -> None:
         party = list(
@@ -1444,6 +1567,43 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escape_message_window.draw.assert_called_once_with()
         mock.escape_choice_window.draw.assert_called_once_with()
 
+    def test_monster_name_colors_follow_target_availability_and_button_wait(
+        self,
+    ) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monster_name_windows = [Mock() for _index in range(3)]
+        for window in mock.monster_name_windows:
+            window.add_text.side_effect = (
+                lambda text, x, y, **kwargs: WindowText(
+                    text,
+                    x,
+                    y,
+                    **kwargs,
+                )
+            )
+        mock.monster_name_texts = [
+            WindowText(f"monster-{index}", 0, 0, color=4)
+            for index in range(3)
+        ]
+        mock.phase = BattleMockPhase.TARGET
+        mock.selectable_target_indexes = (0, 2)
+
+        mock._refresh_monster_name_colors()
+
+        self.assertEqual(
+            [placement.color for placement in mock.monster_name_texts],
+            [5, 4, 5],
+        )
+
+        mock.phase = BattleMockPhase.INITIAL
+        mock.selectable_target_indexes = ()
+        mock._refresh_monster_name_colors()
+
+        self.assertEqual(
+            [placement.color for placement in mock.monster_name_texts],
+            [5, 5, 5],
+        )
+
     def test_party_status_appears_after_every_party_member_lands(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         command_window = Mock()
@@ -1480,6 +1640,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.selected_command = "defend"
         mock.selectable_target_indexes = (2, 3, 4)
         mock.selected_target_index = 4
+        mock._refresh_monster_name_colors = Mock()
 
         with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
             mock.update()
@@ -1490,6 +1651,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.selected_command)
         self.assertIsNone(mock.selected_target_index)
         mock.command_window.close_immediately.assert_called_once_with()
+        mock._refresh_monster_name_colors.assert_called_once_with()
         mock.command_window.update.assert_not_called()
 
 
