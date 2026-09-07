@@ -50,6 +50,7 @@ class BattleCommandRulesTest(unittest.TestCase):
             self.party,
             self.monsters,
         )
+        self.assertEqual(commands[0].command, BattleCommand.DEFEND)
         self.assertNotIn(
             BattleCommand.ATTACK,
             tuple(option.command for option in commands),
@@ -128,7 +129,7 @@ class BattleCommandRulesTest(unittest.TestCase):
             ),
         )
 
-    def test_skills_fill_left_column_after_missing_attack(self) -> None:
+    def test_defend_leads_left_column_after_missing_attack(self) -> None:
         skills = load_mock_skills()
         self.party[0].formation_row = FormationRow.BACK
         self.party[0].skills.extend((skills["Aim"], skills["Hide"]))
@@ -141,7 +142,7 @@ class BattleCommandRulesTest(unittest.TestCase):
 
         self.assertEqual(
             tuple(option.command for option in commands[:3]),
-            (BattleCommand.SPELL, BattleCommand.AIM, BattleCommand.HIDE),
+            (BattleCommand.DEFEND, BattleCommand.SPELL, BattleCommand.AIM),
         )
 
     def test_silence_disables_visible_spell_without_hiding_it(self) -> None:

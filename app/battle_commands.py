@@ -177,6 +177,10 @@ def resolve_battle_commands(
     # no attack target.
     if attack_targets:
         left_commands.append(BattleCommandOption(BattleCommand.ATTACK))
+    else:
+        # Defend takes the first left-column slot when normal attack has no
+        # target, including for a back-row member with a short-range weapon.
+        left_commands.append(BattleCommandOption(BattleCommand.DEFEND))
     if len(left_commands) < 3 and member_has_spell_aptitude(member):
         left_commands.append(
             BattleCommandOption(
@@ -190,7 +194,7 @@ def resolve_battle_commands(
         if not member.has_skill(skill_key):
             continue
         left_commands.append(BattleCommandOption(command))
-    if len(left_commands) < 3:
+    if attack_targets and len(left_commands) < 3:
         left_commands.append(BattleCommandOption(BattleCommand.DEFEND))
 
     right_commands = [

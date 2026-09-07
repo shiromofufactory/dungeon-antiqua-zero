@@ -1721,6 +1721,33 @@ class BattleScreenMockTest(unittest.TestCase):
             )
         )
 
+    def test_formation_label_and_guide_reflect_the_active_member_row(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.party = (SimpleNamespace(is_front_row=True),)
+        mock.active_party_index = 0
+
+        self.assertEqual(
+            mock._command_label(BattleCommand.FORMATION),
+            "こうたい",
+        )
+        self.assertEqual(
+            mock._command_guide_lines(BattleCommand.FORMATION),
+            ("こうたい",),
+        )
+
+        mock.party[0].is_front_row = False
+
+        self.assertEqual(
+            mock._command_label(BattleCommand.FORMATION),
+            "ぜんしん",
+        )
+        self.assertEqual(
+            mock._command_guide_lines(BattleCommand.FORMATION),
+            ("ぜんしん",),
+        )
+
     def test_command_guide_waits_at_the_same_command_then_shows_three_lines(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.COMMAND

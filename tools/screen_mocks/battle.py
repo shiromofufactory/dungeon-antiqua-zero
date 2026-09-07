@@ -209,6 +209,10 @@ COMMAND_TEXT_KEYS = {
     BattleCommand.ITEM: "battle.command.item",
     BattleCommand.FORMATION: "battle.command.formation",
 }
+FORMATION_COMMAND_TEXT_KEYS = {
+    True: "battle.command.retreat",
+    False: "battle.command.advance",
+}
 COMMAND_GUIDE_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.guide.attack",
     BattleCommand.SPELL: "battle.guide.spell",
@@ -1864,12 +1868,24 @@ class BattleScreenMock:
     def _command_label(self, command: BattleCommand) -> str:
         """Resolve one command's localized display label from the text catalog."""
 
-        return self.texts.text(COMMAND_TEXT_KEYS[command], self.localizer)
+        return self.texts.text(self._command_text_key(command), self.localizer)
+
+    def _command_text_key(self, command: BattleCommand) -> str:
+        """Resolve the context-sensitive text key for one visible command."""
+
+        if (
+            command is BattleCommand.FORMATION
+            and self.active_party_index is not None
+        ):
+            return FORMATION_COMMAND_TEXT_KEYS[
+                self.party[self.active_party_index].is_front_row
+            ]
+        return COMMAND_TEXT_KEYS[command]
 
     def _command_guide_lines(self, command: BattleCommand) -> tuple[str, ...]:
         """Return DA2-derived guide text or the command name as a placeholder."""
 
-        key = COMMAND_GUIDE_TEXT_KEYS.get(command, COMMAND_TEXT_KEYS[command])
+        key = COMMAND_GUIDE_TEXT_KEYS.get(command, self._command_text_key(command))
         return self.texts.lines(key, self.localizer)
 
     def _update_command_guide(self) -> None:
