@@ -15,7 +15,6 @@ from tools.screen_mocks.battle import (
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
     DEFEND_SPRITE_SOURCE_X,
     ESCAPE_RUN_DESTINATION_X,
-    ESCAPE_FADE_DELAY_FRAME_COUNT,
     ESCAPE_RUN_PATTERN_FRAME_COUNT,
     ESCAPE_RUN_SPEED,
     FORMATION_MOVE_FRAME_COUNT,
@@ -289,6 +288,7 @@ class BattleScreenMockTest(unittest.TestCase):
             )
         ]
         self.assertIn("ほんとうに　にげて　いいですか？", created_texts)
+        self.assertIn(ascii_to_fullwidth("にげだした..."), created_texts)
         self.assertIn("はい", created_texts)
         self.assertIn("いいえ", created_texts)
 
@@ -1620,7 +1620,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._begin_escape_animation()
 
-        self.assertIs(mock.phase, BattleMockPhase.ESCAPE)
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MESSAGE)
         self.assertEqual(mock.escape_animation_frame, 0)
         self.assertEqual(mock.escape_start_x, (156, 176))
         self.assertFalse(mock.escape_fade.is_active)
@@ -1631,6 +1631,39 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.escape_cursor.active)
         mock._refresh_party_text_colors.assert_called_once_with()
         mock.bgm.stop.assert_called_once_with()
+
+    def test_escape_message_keeps_running_until_a_button_is_pressed(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ESCAPE_MESSAGE
+        mock.escape_animation_frame = 0
+        mock.escape_fade = Mock()
+
+        mock._update_escape_message(InputState())
+
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MESSAGE)
+        self.assertEqual(mock.escape_animation_frame, 1)
+        mock.escape_fade.start.assert_not_called()
+
+        mock._update_escape_message(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE)
+        self.assertEqual(mock.escape_animation_frame, 2)
+        mock.escape_fade.start.assert_called_once_with()
+
+    def test_escape_message_accepts_cancel_button_for_acknowledgement(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ESCAPE_MESSAGE
+        mock.escape_animation_frame = 0
+        mock.escape_fade = Mock()
+
+        mock._update_escape_message(
+            InputState(cancel=InputButton(triggered=True, held=True))
+        )
+
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE)
+        mock.escape_fade.start.assert_called_once_with()
 
     def test_member_waiting_to_escape_faces_right_without_walking(self) -> None:
         member = SimpleNamespace(formation_row=FormationRow.FRONT)
@@ -1701,6 +1734,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED * 2,
         )
         mock.escape_animation_frame = 0
+        mock.escape_fade_covered = True
         mock._update_escape_fade = Mock()
 
         with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
@@ -1715,9 +1749,9 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_escape_fade_reaches_black_and_does_not_fade_back_in(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        mock.escape_fade.start()
         mock.escape_fade_covered = False
         mock.palette_shifter = Mock(base_colors=(0x000000,))
-        mock.escape_animation_frame = ESCAPE_FADE_DELAY_FRAME_COUNT
 
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_escape_fade()
@@ -1737,19 +1771,18 @@ class BattleScreenMockTest(unittest.TestCase):
             update_count,
         )
 
-    def test_escape_fade_waits_twelve_frames_before_starting(self) -> None:
+    def test_escape_fade_starts_only_after_escape_message_acknowledgement(
+        self,
+    ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         mock.escape_fade_covered = False
         mock.palette_shifter = Mock(base_colors=(0x000000,))
-        mock.escape_animation_frame = ESCAPE_FADE_DELAY_FRAME_COUNT - 1
-
-        mock._update_escape_fade()
 
         self.assertFalse(mock.escape_fade.is_active)
         mock.palette_shifter.set_global_mix.assert_not_called()
 
-        mock.escape_animation_frame = ESCAPE_FADE_DELAY_FRAME_COUNT
+        mock.escape_fade.start()
         mock._update_escape_fade()
 
         self.assertTrue(mock.escape_fade.is_active)
@@ -1778,9 +1811,11 @@ class BattleScreenMockTest(unittest.TestCase):
         base_window = Mock()
         monster_name = Mock()
         mock.windows = [base_window]
+        mock.party_status_windows = []
         mock.monsters = (SimpleNamespace(is_alive=True),)
         mock.monster_name_windows = [monster_name]
         mock.escape_message_window = Mock()
+        mock.escape_started_message_window = Mock()
         mock.escape_choice_window = Mock()
         mock.command_window = Mock(is_closed=False)
 
@@ -1810,6 +1845,10 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_windows()
         mock.escape_message_window.draw.assert_called_once_with()
         mock.escape_choice_window.draw.assert_called_once_with()
+
+        mock.phase = BattleMockPhase.ESCAPE_MESSAGE
+        mock._draw_windows()
+        mock.escape_started_message_window.draw.assert_called_once_with()
 
     def test_monster_name_colors_follow_target_availability_and_button_wait(
         self,
@@ -1856,6 +1895,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.party_status_windows = party_status_windows
         mock.monster_name_windows = []
         mock.escape_message_window = Mock()
+        mock.escape_started_message_window = Mock()
         mock.escape_choice_window = Mock()
         mock.command_window = command_window
         mock.phase = BattleMockPhase.ENTRANCE
@@ -1873,6 +1913,11 @@ class BattleScreenMockTest(unittest.TestCase):
 
         for status_window in party_status_windows:
             status_window.reset_mock()
+        mock.phase = BattleMockPhase.ESCAPE_MESSAGE
+        mock._draw_windows()
+        for status_window in party_status_windows:
+            status_window.draw.assert_not_called()
+
         mock.phase = BattleMockPhase.ESCAPE
         mock._draw_windows()
         for status_window in party_status_windows:
