@@ -46,7 +46,6 @@ from tools.screen_mocks.battle import (
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
     SPELL_GUIDE_WINDOW_GRID,
-    SPELL_MP_WINDOW_GRID,
     SPELL_WINDOW_GRID,
     TIMELINE_ANIMATION_FRAME_COUNT,
     TIMELINE_ENTRANCE_COMPLETE_FRAME,
@@ -240,10 +239,6 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             windows.return_value.create.call_args_list[5].args[:4],
             SPELL_GUIDE_WINDOW_GRID,
-        )
-        self.assertEqual(
-            windows.return_value.create.call_args_list[6].args[:4],
-            SPELL_MP_WINDOW_GRID,
         )
 
         self.assertEqual(
@@ -1061,7 +1056,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertTrue(all(spell.type != "item" for spell in candidates))
 
-    def test_spell_list_uses_three_school_columns_across_the_full_width(self) -> None:
+    def test_spell_list_uses_the_item_window_width_for_one_school(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -1078,19 +1073,21 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.spell_window = Mock()
         mock.spell_window.set_cursor.return_value = Mock()
         mock.spell_cursor = None
+        mock.spell_scroll_offset = 0
+        mock.spell_type = mock.spell_candidates[0].type
         mock._refresh_spell_guide = Mock()
 
         mock._refresh_spell_options()
 
-        self.assertEqual(SPELL_WINDOW_GRID, (0, 0, 64, 13))
-        self.assertEqual(mock.spell_window.add_text.call_count, 3)
+        self.assertEqual(SPELL_WINDOW_GRID, (32, 0, 32, 16))
+        self.assertEqual(mock.spell_window.add_text.call_count, 1)
         targets = mock.spell_window.set_cursor.call_args.args[0]
         self.assertEqual(
             [(target.x, target.y, target.key) for target in targets],
-            [(2, 2, "FIRE1"), (22, 2, "HEALING1"), (42, 2, "POISON1")],
+            [(2, 2, "FIRE1")],
         )
 
-    def test_spell_scrolling_keeps_all_school_columns_on_the_same_levels(self) -> None:
+    def test_left_and_right_switch_the_displayed_spell_school(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -1120,21 +1117,21 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock.spell_scroll_offset = 0
         mock.spell_cursor = None
+        mock.spell_type = spells["FIRE1"].type
         mock.localizer = Localizer(Language.JAPANESE)
         mock.spell_window = Window(*SPELL_WINDOW_GRID)
         mock._refresh_spell_guide = Mock()
 
         mock._refresh_spell_options()
-        for _ in range(3):
-            self.assertTrue(mock._move_spell(Direction.DOWN))
+        self.assertTrue(mock._move_spell(Direction.RIGHT))
 
-        self.assertEqual(mock.spell_scroll_offset, 1)
+        self.assertIs(mock.spell_type, spells["HEALING1"].type)
         self.assertEqual(
-            [target.key for target in mock.spell_cursor.targets if target.y == 2],
-            ["SLOW", "PROTECTION", "SLEEP"],
+            [target.key for target in mock.spell_cursor.targets],
+            ["HEALING1", "PROTECTION", "CURE", "SILENCE"],
         )
 
-    def test_spell_guide_and_mp_windows_open_immediately_at_the_bottom(self) -> None:
+    def test_spell_guide_includes_mp_and_opens_immediately_at_the_top_left(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -1149,18 +1146,14 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.localizer = Localizer(Language.JAPANESE)
         mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         mock.spell_guide_window = Mock()
-        mock.spell_mp_window = Mock()
 
         mock._refresh_spell_guide()
 
-        self.assertEqual(SPELL_GUIDE_WINDOW_GRID, (0, 50, 36, 10))
-        self.assertEqual(SPELL_MP_WINDOW_GRID, (36, 50, 28, 10))
+        self.assertEqual(SPELL_GUIDE_WINDOW_GRID, (0, 0, 32, 16))
         mock.spell_guide_window.open_immediately.assert_called_once_with()
-        mock.spell_mp_window.open_immediately.assert_called_once_with()
-        self.assertGreater(mock.spell_guide_window.add_text.call_count, 0)
-        self.assertEqual(mock.spell_mp_window.add_text.call_count, 2)
+        self.assertEqual(mock.spell_guide_window.add_text.call_count, 4)
         self.assertEqual(
-            mock.spell_mp_window.add_text.call_args_list[0].args[0],
+            mock.spell_guide_window.add_text.call_args_list[3].args[0],
             ascii_to_fullwidth(
                 f"ＭＰ {mock.party[0].mp:03d}/{mock.party[0].max_mp:03d}"
             ),

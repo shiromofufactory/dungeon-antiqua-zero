@@ -123,9 +123,8 @@ ESCAPE_NO_Y = 5
 COMMAND_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
 ITEM_GUIDE_WINDOW_GRID = (0, 0, 32, 13)
 ITEM_WINDOW_GRID = (32, 0, 32, 13)
-SPELL_WINDOW_GRID = (0, 0, 64, 13)
-SPELL_GUIDE_WINDOW_GRID = (0, 50, 36, 10)
-SPELL_MP_WINDOW_GRID = (36, 50, 28, 10)
+SPELL_WINDOW_GRID = (36, 0, 28, 16)
+SPELL_GUIDE_WINDOW_GRID = (0, 0, 36, 16)
 COMMAND_GUIDE_TEXT_X = 2
 COMMAND_GUIDE_FIRST_Y = 2
 COMMAND_GUIDE_LINE_SPACING = 3
@@ -142,11 +141,11 @@ SPELL_TYPE_ORDER = (
     SpellType.NETHER,
 )
 SPELL_DISPLAY_LEVELS = (*range(1, 10), 0)
-SPELL_TEXT_X = (4, 24, 44)
-SPELL_CURSOR_X = (2, 22, 42)
+SPELL_TEXT_X = 4
+SPELL_CURSOR_X = 2
 SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
-SPELL_VISIBLE_COUNT = 3
+SPELL_VISIBLE_COUNT = 4
 DA2_REFERENCE_FPS = 30
 DA2_ESCAPE_RUN_SPEED = 12
 ESCAPE_RUN_SPEED = DA2_ESCAPE_RUN_SPEED * DA2_REFERENCE_FPS // FPS
@@ -561,16 +560,11 @@ class BattleScreenMock:
             *SPELL_WINDOW_GRID,
             (),
             thin_frame=True,
+            horizontal_navigation=True,
             opened=False,
         )
         spell_guide_window = windows.create(
             *SPELL_GUIDE_WINDOW_GRID,
-            (),
-            thin_frame=True,
-            opened=False,
-        )
-        spell_mp_window = windows.create(
-            *SPELL_MP_WINDOW_GRID,
             (),
             thin_frame=True,
             opened=False,
@@ -581,7 +575,6 @@ class BattleScreenMock:
         self.item_window = item_window
         self.spell_window = spell_window
         self.spell_guide_window = spell_guide_window
-        self.spell_mp_window = spell_mp_window
         self.command_cursor = command_window.set_cursor(())
         self.target_window = windows.create(0, 0, 64, 60, transparent=True)
         self.target_cursor = self.target_window.set_cursor(
@@ -673,6 +666,7 @@ class BattleScreenMock:
         self.item_cursor: WindowCursor | None = None
         self.spell_candidates: tuple[Spell, ...] = ()
         self.spell_scroll_offset = 0
+        self.spell_type = SpellType.MYSTIC
         self.spell_cursor: WindowCursor | None = None
         self.defending_party_indexes: set[int] = set()
         self.escaping_party_indexes: set[int] = set()
@@ -683,7 +677,6 @@ class BattleScreenMock:
             item_window,
             spell_window,
             spell_guide_window,
-            spell_mp_window,
         ]
         self.monster_name_windows: list[Window] = []
         self.monster_name_texts: list[WindowText] = []
@@ -836,6 +829,7 @@ class BattleScreenMock:
         self.item_cursor = None
         self.spell_candidates = ()
         self.spell_scroll_offset = 0
+        self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
         self._hide_command_guide()
         self.item_guide_window.close_immediately()
@@ -867,7 +861,7 @@ class BattleScreenMock:
     def _close_spell_windows(self) -> None:
         """Hide and clear the three battle spell-selection windows."""
 
-        for name in ("spell_window", "spell_guide_window", "spell_mp_window"):
+        for name in ("spell_window", "spell_guide_window"):
             window = getattr(self, name, None)
             if window is not None:
                 window.close_immediately()
@@ -898,6 +892,7 @@ class BattleScreenMock:
         self.item_cursor = None
         self.spell_candidates = ()
         self.spell_scroll_offset = 0
+        self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
         self.command_cursor.active = False
         self.target_cursor.active = False
@@ -1078,10 +1073,7 @@ class BattleScreenMock:
             for slot in EquipmentSlot
             if (
                 (item := member.equipment.item_at(slot)) is not None
-                and (
-                    item.is_weapon
-                    or item.equip_type is ItemEquipType.ARM
-                )
+                and (item.is_weapon or item.equip_type is ItemEquipType.ARM)
             )
         )
         consumables = tuple(
@@ -1202,15 +1194,13 @@ class BattleScreenMock:
         if distance not in (-1, 1) or not self.item_candidates:
             return False
         previous = self.selected_item_index
-        self.selected_item_index = (
-            self.selected_item_index + distance
-        ) % len(self.item_candidates)
+        self.selected_item_index = (self.selected_item_index + distance) % len(
+            self.item_candidates
+        )
         if self.selected_item_index < self.item_scroll_offset:
             self.item_scroll_offset = self.selected_item_index
         elif self.selected_item_index >= self.item_scroll_offset + ITEM_VISIBLE_COUNT:
-            self.item_scroll_offset = (
-                self.selected_item_index - ITEM_VISIBLE_COUNT + 1
-            )
+            self.item_scroll_offset = self.selected_item_index - ITEM_VISIBLE_COUNT + 1
         if self.selected_item_index != previous:
             self._refresh_item_options()
             return True
@@ -1294,7 +1284,11 @@ class BattleScreenMock:
         if cursor is None or not isinstance(cursor.selected_key, str):
             return None
         return next(
-            (spell for spell in self.spell_candidates if spell.key == cursor.selected_key),
+            (
+                spell
+                for spell in self.spell_candidates
+                if spell.key == cursor.selected_key
+            ),
             None,
         )
 
@@ -1308,6 +1302,16 @@ class BattleScreenMock:
         self.selected_command = BattleCommand.SPELL
         self.spell_candidates = candidates
         self.spell_scroll_offset = 0
+        member = self.party[self.active_party_index]
+        self.spell_type = next(
+            spell_type
+            for spell_type in SPELL_TYPE_ORDER
+            if any(
+                spell.mp <= member.mp
+                for spell in self._spell_candidates_for_type(spell_type)
+            )
+            or self._spell_candidates_for_type(spell_type)
+        )
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.spell_window.open_immediately()
@@ -1316,7 +1320,7 @@ class BattleScreenMock:
         return True
 
     def _refresh_spell_options(self) -> None:
-        """Populate three visible rows for each school in the full-width list."""
+        """Populate the active school in the four-row battle spell list."""
 
         if self.active_party_index is None:
             return
@@ -1341,32 +1345,31 @@ class BattleScreenMock:
         targets: list[CursorTarget] = []
         for row, level in enumerate(visible_levels):
             y = SPELL_FIRST_Y + row * SPELL_ROW_HEIGHT
-            for column, spell_type in enumerate(SPELL_TYPE_ORDER):
-                spell = next(
-                    (
-                        candidate
-                        for candidate in self.spell_candidates
-                        if candidate.type is spell_type and candidate.level == level
-                    ),
-                    None,
-                )
-                if spell is None:
-                    continue
-                available = member.mp >= spell.mp
-                self.spell_window.add_text(
-                    spell.localized_display_name(self.localizer),
-                    SPELL_TEXT_X[column],
+            spell = next(
+                (
+                    candidate
+                    for candidate in self.spell_candidates
+                    if candidate.type is self.spell_type and candidate.level == level
+                ),
+                None,
+            )
+            if spell is None:
+                continue
+            available = member.mp >= spell.mp
+            self.spell_window.add_text(
+                spell.localized_display_name(self.localizer),
+                SPELL_TEXT_X,
+                y,
+                color=DEFAULT_TEXT_COLOR if available else DISABLED_COLOR,
+            )
+            targets.append(
+                CursorTarget(
+                    SPELL_CURSOR_X,
                     y,
-                    color=DEFAULT_TEXT_COLOR if available else DISABLED_COLOR,
+                    key=spell.key,
+                    selectable=available,
                 )
-                targets.append(
-                    CursorTarget(
-                        SPELL_CURSOR_X[column],
-                        y,
-                        key=spell.key,
-                        selectable=available,
-                    )
-                )
+            )
         self.spell_cursor = self.spell_window.set_cursor(tuple(targets))
         if selected_key is not None:
             try:
@@ -1374,7 +1377,8 @@ class BattleScreenMock:
             except ValueError:
                 pass
         self.spell_window.vertical_navigation = any(
-            spell.level not in visible_levels for spell in self.spell_candidates
+            spell.level not in visible_levels
+            for spell in self._spell_candidates_for_type(self.spell_type)
         )
         self.spell_window.set_vertical_navigation_pressed()
         self._refresh_spell_guide()
@@ -1399,45 +1403,39 @@ class BattleScreenMock:
             self.spell_scroll_offset = index - SPELL_VISIBLE_COUNT + 1
 
     def _refresh_spell_guide(self) -> None:
-        """Show the selected spell's description, current MP, and its MP cost."""
+        """Show a selected spell's guide, cost, and current MP in one window."""
 
         guide_window = self.spell_guide_window
-        mp_window = self.spell_mp_window
         guide_window.close_immediately()
         guide_window.clear_texts()
-        mp_window.close_immediately()
-        mp_window.clear_texts()
         if self.active_party_index is None:
             return
         member = self.party[self.active_party_index]
         spell = self.selected_spell
         if spell is not None:
-            for index, line in enumerate(spell.localized_description(self.localizer)[:2]):
+            for index, line in enumerate(
+                spell.localized_description(self.localizer)[:2]
+            ):
                 guide_window.add_text(
                     line,
                     COMMAND_GUIDE_TEXT_X,
                     COMMAND_GUIDE_FIRST_Y + index * COMMAND_GUIDE_LINE_SPACING,
                 )
-        mp_label = self.texts.text("menu.member.mp", self.localizer)
-        mp_window.add_text(
-            ascii_to_fullwidth(f"{mp_label} {member.mp:03d}/{member.max_mp:03d}"),
-            COMMAND_GUIDE_TEXT_X,
-            COMMAND_GUIDE_FIRST_Y,
-        )
         if spell is not None:
             cost_label = self.texts.text("spell.mp_cost", self.localizer)
-            mp_window.add_text(
+            guide_window.add_text(
                 ascii_to_fullwidth(cost_label.replace("%MP%", str(spell.mp))),
                 COMMAND_GUIDE_TEXT_X,
-                COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING,
-                color=(
-                    DEFAULT_TEXT_COLOR
-                    if member.mp >= spell.mp
-                    else DISABLED_COLOR
-                ),
+                COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 2,
+                color=(DEFAULT_TEXT_COLOR if member.mp >= spell.mp else DISABLED_COLOR),
             )
+        mp_label = self.texts.text("menu.member.mp", self.localizer)
+        guide_window.add_text(
+            ascii_to_fullwidth(f"{mp_label} {member.mp:03d}/{member.max_mp:03d}"),
+            COMMAND_GUIDE_TEXT_X,
+            COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 3,
+        )
         guide_window.open_immediately()
-        mp_window.open_immediately()
 
     def _update_spell_selection(self, input_state: InputState) -> None:
         """Choose a spell or return to the active member's command list."""
@@ -1458,7 +1456,7 @@ class BattleScreenMock:
             self.spell_cursor.update()
 
     def _move_spell(self, direction: Direction) -> bool:
-        """Move across available spells, scrolling each school column independently."""
+        """Move within a school or switch schools with left and right."""
 
         current = self.selected_spell
         if current is None or self.active_party_index is None:
@@ -1500,6 +1498,7 @@ class BattleScreenMock:
             return False
         if target is current:
             return False
+        self.spell_type = target.type
         self._ensure_selected_spell_is_visible(target)
         self._refresh_spell_options()
         self.spell_cursor.select_key(target.key)
@@ -1507,7 +1506,8 @@ class BattleScreenMock:
             self.spell_scroll_offset : self.spell_scroll_offset + SPELL_VISIBLE_COUNT
         ]
         self.spell_window.vertical_navigation = any(
-            spell.level not in visible_levels for spell in self.spell_candidates
+            spell.level not in visible_levels
+            for spell in self._spell_candidates_for_type(target.type)
         )
         self._refresh_spell_guide()
         return True
@@ -1517,6 +1517,7 @@ class BattleScreenMock:
         self.selected_command = None
         self.spell_candidates = ()
         self.spell_scroll_offset = 0
+        self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
         self._close_spell_windows()
         self._refresh_command_options()
@@ -1647,6 +1648,8 @@ class BattleScreenMock:
         self.item_scroll_offset = 0
         self.item_cursor = None
         self.spell_candidates = ()
+        self.spell_scroll_offset = 0
+        self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
         self.target_cursor.active = False
         item_window = getattr(self, "item_window", None)
