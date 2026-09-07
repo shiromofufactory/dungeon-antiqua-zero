@@ -47,7 +47,7 @@ from monster import (
     MonsterDataError,
     promote_rear_monsters_if_front_empty,
 )
-from input import Direction, InputState
+from input import Direction, InputAction, InputDevice, InputState
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
@@ -80,6 +80,7 @@ from ui import (
     WindowCursor,
     WindowFactory,
     WindowText,
+    input_icon_tag,
 )
 from item_detail import ItemDetailContext, item_detail_lines
 
@@ -120,6 +121,8 @@ ESCAPE_CHOICE_CURSOR_X = 2
 ESCAPE_YES_Y = 2
 ESCAPE_NO_Y = 5
 COMMAND_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
+GLOBAL_COMMAND_WINDOW_GRID = (49, 0, 15, 13)
+INPUT_GUIDE_WINDOW_GRID = (48, 56, 16, 4)
 ITEM_GUIDE_WINDOW_GRID = (0, 0, 32, 13)
 ITEM_WINDOW_GRID = (32, 0, 32, 13)
 SPELL_WINDOW_GRID = (36, 0, 28, 16)
@@ -226,6 +229,8 @@ COMMAND_GUIDE_TEXT_KEYS = {
 COMMAND_TEXT_X = (4, 18)
 COMMAND_CURSOR_X = (2, 16)
 COMMAND_ROW_Y = (2, 5, 8)
+GLOBAL_COMMAND_TEXT_X = 4
+GLOBAL_COMMAND_CURSOR_X = 2
 DA2_MONSTER_TARGET_ORDER = {
     Direction.LEFT: (
         (2, 4, 1, 3),
@@ -269,6 +274,7 @@ class BattleMockPhase(StrEnum):
     ENTRANCE = "entrance"
     INITIAL = "initial"
     COMMAND = "command"
+    GLOBAL_COMMAND = "global_command"
     ITEM = "item"
     SPELL = "spell"
     TARGET = "target"
@@ -279,6 +285,14 @@ class BattleMockPhase(StrEnum):
     MONSTER_DEATH = "monster_death"
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
+
+
+class BattleGlobalCommand(StrEnum):
+    """Commands that apply to the whole party rather than one member."""
+
+    FIGHT = "fight"
+    ESCAPE = "escape"
+    AUTO = "auto"
 
 
 class TimelineAnimationPhase(StrEnum):
@@ -548,6 +562,12 @@ class BattleScreenMock:
             thin_frame=True,
             opened=False,
         )
+        global_command_window = windows.create(
+            *GLOBAL_COMMAND_WINDOW_GRID,
+            (),
+            thin_frame=True,
+            opened=False,
+        )
         item_guide_window = windows.create(
             *ITEM_GUIDE_WINDOW_GRID,
             (),
@@ -581,12 +601,19 @@ class BattleScreenMock:
         )
         self.command_guide_window = command_guide_window
         self.command_window = command_window
+        self.global_command_window = global_command_window
+        self.input_guide_window = windows.create(
+            *INPUT_GUIDE_WINDOW_GRID,
+            (),
+            transparent=True,
+        )
         self.item_guide_window = item_guide_window
         self.item_window = item_window
         self.spell_window = spell_window
         self.spell_guide_window = spell_guide_window
         self.spell_mp_window = spell_mp_window
         self.command_cursor = command_window.set_cursor(())
+        self.global_command_cursor: WindowCursor | None = None
         self.target_window = windows.create(0, 0, 64, 60, transparent=True)
         self.target_cursor = self.target_window.set_cursor(
             tuple(
@@ -667,6 +694,9 @@ class BattleScreenMock:
         self.entrance_animation_frame = 0
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.selected_command: str | None = None
+        self.escape_return_phase = BattleMockPhase.COMMAND
+        self.auto_battle_active = False
+        self.input_device = InputDevice.KEYBOARD
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
         self.command_guide_command: BattleCommand | None = None
@@ -685,6 +715,7 @@ class BattleScreenMock:
         self.windows = [
             command_guide_window,
             command_window,
+            global_command_window,
             item_guide_window,
             item_window,
             spell_window,
@@ -734,6 +765,8 @@ class BattleScreenMock:
 
     def update(self) -> None:
         input_state = self.input_reader.poll()
+        self.input_device = input_state.device
+        self._refresh_input_guide()
         if input_state.menu.triggered:
             self._restart_battle_mock()
             return
@@ -743,6 +776,9 @@ class BattleScreenMock:
             self._hide_command_guide()
         if self.phase is BattleMockPhase.ENTRANCE:
             self._update_entrance_animation()
+            return
+        if getattr(self, "auto_battle_active", False) and input_state.cancel.triggered:
+            self._cancel_auto_battle()
             return
         if self.phase is BattleMockPhase.MONSTER_ACTION:
             self._update_monster_action()
@@ -774,9 +810,12 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.SPELL:
             self._update_spell_selection(input_state)
             return
+        if self.phase is BattleMockPhase.GLOBAL_COMMAND:
+            self._update_global_command_selection(input_state)
+            return
 
         if input_state.cancel.triggered:
-            self._return_to_button_wait()
+            self._open_global_command_menu()
             return
 
         if input_state.confirm.triggered:
@@ -790,8 +829,6 @@ class BattleScreenMock:
                     self._begin_attack_target_selection()
                 elif command == BattleCommand.SPELL:
                     self._begin_spell_selection()
-                elif command == BattleCommand.ESCAPE:
-                    self._begin_escape_confirmation()
                 elif command == BattleCommand.FORMATION:
                     self._begin_formation_change()
                 elif command == BattleCommand.DEFEND:
@@ -807,6 +844,27 @@ class BattleScreenMock:
         )
         self.command_window.update(navigation)
         self._update_command_guide()
+
+    def _update_global_command_selection(self, input_state: InputState) -> None:
+        """Choose a party-wide action or return to the current member's menu."""
+
+        if input_state.cancel.triggered:
+            self._open_member_command_menu()
+            return
+        if input_state.confirm.triggered and self.global_command_window.is_open:
+            command = self.global_command_cursor
+            if command is None:
+                return
+            if command.selected_key is BattleGlobalCommand.FIGHT:
+                self._open_member_command_menu()
+                return
+            if command.selected_key is BattleGlobalCommand.ESCAPE:
+                self._begin_escape_confirmation()
+                return
+            if command.selected_key is BattleGlobalCommand.AUTO:
+                self._begin_auto_battle()
+                return
+        self.global_command_window.update(input_state.navigation)
 
     def _restart_battle_mock(self) -> None:
         """Reset the mock and replay its battle entrance presentation."""
@@ -838,6 +896,8 @@ class BattleScreenMock:
         self.dying_monster_index = None
         self.entrance_animation_frame = 0
         self.selected_command = None
+        self.escape_return_phase = BattleMockPhase.COMMAND
+        self.auto_battle_active = False
         self.selectable_target_indexes = ()
         self.selected_target_index = None
         self.item_candidates = ()
@@ -857,6 +917,9 @@ class BattleScreenMock:
         self.target_cursor.active = False
         self.escape_cursor.active = False
         self.command_window.close_immediately()
+        global_command_window = getattr(self, "global_command_window", None)
+        if global_command_window is not None:
+            global_command_window.close_immediately()
         self.item_window.close_immediately()
         self._refresh_command_options()
         self.command_cursor.active = False
@@ -896,10 +959,14 @@ class BattleScreenMock:
             self.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT
             self.phase = BattleMockPhase.COMMAND
             self.command_cursor.active = True
+            self._select_initial_member_command()
             self.command_window.open()
+            self._refresh_input_guide()
 
-    def _return_to_button_wait(self) -> None:
-        self.phase = BattleMockPhase.INITIAL
+    def _open_global_command_menu(self) -> None:
+        """Replace the active member's command list with party-wide commands."""
+
+        self.phase = BattleMockPhase.GLOBAL_COMMAND
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
@@ -914,6 +981,7 @@ class BattleScreenMock:
         self.command_cursor.active = False
         self.target_cursor.active = False
         self.command_window.close_immediately()
+        self.global_command_window.close_immediately()
         item_window = getattr(self, "item_window", None)
         if item_window is not None:
             item_window.close_immediately()
@@ -923,13 +991,97 @@ class BattleScreenMock:
             item_guide_window.clear_texts()
         self._close_spell_windows()
         self._hide_command_guide()
+        self._refresh_global_command_options()
+        if self.global_command_cursor is not None:
+            self.global_command_cursor.active = True
+        self.global_command_window.open()
         self._refresh_monster_name_colors()
+        self._refresh_input_guide()
+
+    def _open_member_command_menu(self) -> None:
+        """Open the current member's command list from a party-wide choice."""
+
+        self.phase = BattleMockPhase.COMMAND
+        if self.global_command_cursor is not None:
+            self.global_command_cursor.active = False
+        self.global_command_window.close_immediately()
+        self.command_window.close_immediately()
+        self._hide_command_guide()
+        self._refresh_command_options()
+        self.command_cursor.active = True
+        self._select_initial_member_command()
+        self.command_window.open()
+        self._refresh_input_guide()
+
+    def _refresh_global_command_options(self) -> None:
+        self.global_command_window.vertical_navigation = False
+        self.global_command_window.set_vertical_navigation_pressed()
+        self.global_command_window.clear_texts()
+        self.global_command_window.clear_cursor()
+        commands = (
+            BattleGlobalCommand.FIGHT,
+            BattleGlobalCommand.ESCAPE,
+            BattleGlobalCommand.AUTO,
+        )
+        for row_index, command in enumerate(commands):
+            self.global_command_window.add_text(
+                self.texts.text(
+                    f"battle.command.{command.value}",
+                    self.localizer,
+                ),
+                GLOBAL_COMMAND_TEXT_X,
+                COMMAND_ROW_Y[row_index],
+            )
+        self.global_command_cursor = self.global_command_window.set_cursor(
+            tuple(
+                CursorTarget(
+                    GLOBAL_COMMAND_CURSOR_X,
+                    COMMAND_ROW_Y[row_index],
+                    key=command,
+                )
+                for row_index, command in enumerate(commands)
+            )
+        )
+
+    def _begin_auto_battle(self) -> None:
+        """Start automatic normal attacks and defensive fallbacks."""
+
+        self.auto_battle_active = True
+        if self.global_command_cursor is not None:
+            self.global_command_cursor.active = False
+        self.global_command_window.close_immediately()
+        self._begin_auto_action()
+        self._refresh_input_guide()
+
+    def _begin_auto_action(self) -> None:
+        """Choose the active member's automatic action for this turn."""
+
+        if self._active_member_attack_targets():
+            self._begin_attack_target_selection()
+            return
+        self._begin_defense()
+
+    def _cancel_auto_battle(self) -> None:
+        """Leave auto mode without cancelling an already-running animation."""
+
+        self.auto_battle_active = False
+        if self.phase is BattleMockPhase.TARGET:
+            self.selected_command = None
+            self.selectable_target_indexes = ()
+            self.selected_target_index = None
+            self.target_cursor.active = False
+            self._open_member_command_menu()
+        self._refresh_input_guide()
 
     def _begin_escape_confirmation(self) -> None:
+        self.escape_return_phase = self.phase
         self.phase = BattleMockPhase.ESCAPE_CONFIRMATION
         self.selected_command = "escape"
         self.command_cursor.active = False
         self.command_window.close_immediately()
+        global_command_window = getattr(self, "global_command_window", None)
+        if global_command_window is not None:
+            global_command_window.close_immediately()
         self.escape_cursor.select_key("yes")
         self.escape_cursor.active = True
 
@@ -937,8 +1089,13 @@ class BattleScreenMock:
         if input_state.cancel.triggered:
             self._cancel_escape_confirmation()
             return
-        if not self.command_window.is_closed:
+        global_command_window = getattr(self, "global_command_window", None)
+        if not self.command_window.is_closed or (
+            global_command_window is not None and not global_command_window.is_closed
+        ):
             self.command_window.update(None)
+            if global_command_window is not None:
+                global_command_window.update(None)
             return
         if input_state.confirm.triggered:
             if self.escape_cursor.selected_key == "yes":
@@ -1021,12 +1178,15 @@ class BattleScreenMock:
             self.escape_fade_covered = True
 
     def _cancel_escape_confirmation(self) -> None:
-        self.phase = BattleMockPhase.COMMAND
         self.selected_command = None
         self.escape_cursor.active = False
-        self.command_cursor.active = True
-        self._hide_command_guide()
-        self.command_window.open()
+        if (
+            getattr(self, "escape_return_phase", BattleMockPhase.COMMAND)
+            is BattleMockPhase.GLOBAL_COMMAND
+        ):
+            self._open_global_command_menu()
+            return
+        self._open_member_command_menu()
 
     def _begin_formation_change(self) -> bool:
         """Swap the active member's row and start the walking animation."""
@@ -1576,6 +1736,9 @@ class BattleScreenMock:
         return True
 
     def _update_target_selection(self, input_state: InputState) -> None:
+        if getattr(self, "auto_battle_active", False):
+            self._begin_monster_death()
+            return
         if input_state.cancel.triggered:
             self.selected_command = None
             self.selectable_target_indexes = ()
@@ -1775,11 +1938,17 @@ class BattleScreenMock:
                     self._start_timeline_animation()
                 return
             self.defending_party_indexes.discard(self.active_party_index)
+            if getattr(self, "auto_battle_active", False):
+                self._begin_auto_action()
+                self._refresh_party_text_colors()
+                return
             self.phase = BattleMockPhase.COMMAND
             self.command_cursor.active = True
             self._hide_command_guide()
             self._refresh_command_options()
+            self._select_initial_member_command()
             self.command_window.open()
+            self._refresh_input_guide()
         else:
             self.active_party_index = None
             self.phase = BattleMockPhase.MONSTER_ACTION
@@ -1821,7 +1990,7 @@ class BattleScreenMock:
             (
                 index
                 for index, option in enumerate(options)
-                if option.command is BattleCommand.ESCAPE
+                if option.command is BattleCommand.DEFEND
             ),
             len(options),
         )
@@ -1864,6 +2033,20 @@ class BattleScreenMock:
                 for option, _, _, _, cursor_x, cursor_y in placements
             )
         )
+        return options
+
+    def _select_initial_member_command(self) -> None:
+        """Start unreachable attackers on the always-available defend command."""
+
+        if not hasattr(self, "party"):
+            return
+        options = self._active_member_command_options()
+        attack = next(
+            (option for option in options if option.command is BattleCommand.ATTACK),
+            None,
+        )
+        if attack is not None and not attack.enabled:
+            self.command_cursor.select_key(BattleCommand.DEFEND)
 
     def _command_label(self, command: BattleCommand) -> str:
         """Resolve one command's localized display label from the text catalog."""
@@ -1873,10 +2056,7 @@ class BattleScreenMock:
     def _command_text_key(self, command: BattleCommand) -> str:
         """Resolve the context-sensitive text key for one visible command."""
 
-        if (
-            command is BattleCommand.FORMATION
-            and self.active_party_index is not None
-        ):
+        if command is BattleCommand.FORMATION and self.active_party_index is not None:
             return FORMATION_COMMAND_TEXT_KEYS[
                 self.party[self.active_party_index].is_front_row
             ]
@@ -1942,6 +2122,26 @@ class BattleScreenMock:
         self.command_guide_visible = False
         guide_window.close_immediately()
         guide_window.clear_texts()
+
+    def _refresh_input_guide(self) -> None:
+        """Keep the bottom-right contextual cancel guide device-aware."""
+
+        guide_window = getattr(self, "input_guide_window", None)
+        if guide_window is None:
+            return
+        label = (
+            "キャンセル"
+            if getattr(self, "auto_battle_active", False)
+            else "ぜんたい" if self.phase is BattleMockPhase.COMMAND else None
+        )
+        guide_window.clear_texts()
+        if label is None:
+            return
+        guide_window.add_text(
+            f"{input_icon_tag(InputAction.CANCEL, self.input_device)}：{label}",
+            0,
+            0,
+        )
 
     def _update_monster_action(self) -> None:
         self.command_window.update(None)
@@ -2332,9 +2532,17 @@ class BattleScreenMock:
             ):
                 continue
             window.draw()
-        if self.phase is BattleMockPhase.TARGET or (
-            self.phase is BattleMockPhase.INITIAL and self.command_window.is_closed
-        ):
+        global_command_window = getattr(self, "global_command_window", None)
+        show_monster_names = (
+            self.phase is BattleMockPhase.TARGET
+            or (self.phase is BattleMockPhase.INITIAL and self.command_window.is_closed)
+            or (
+                self.phase is BattleMockPhase.GLOBAL_COMMAND
+                and global_command_window is not None
+                and global_command_window.is_open
+            )
+        )
+        if show_monster_names:
             for monster, window in zip(
                 self.monsters,
                 self.monster_name_windows,
@@ -2344,11 +2552,19 @@ class BattleScreenMock:
         if (
             self.phase is BattleMockPhase.ESCAPE_CONFIRMATION
             and self.command_window.is_closed
+            and (global_command_window is None or global_command_window.is_closed)
         ):
             self.escape_message_window.draw()
             self.escape_choice_window.draw()
         if self.phase is BattleMockPhase.ESCAPE_MESSAGE:
             self.escape_started_message_window.draw()
+        if (
+            getattr(self, "auto_battle_active", False)
+            or self.phase is BattleMockPhase.COMMAND
+        ):
+            input_guide_window = getattr(self, "input_guide_window", None)
+            if input_guide_window is not None:
+                input_guide_window.draw()
 
 
 def main() -> int:

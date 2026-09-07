@@ -172,15 +172,12 @@ def resolve_battle_commands(
         weapon_reach=member_attack_reach(member),
         monsters=monsters,
     )
-    # Normal attack is removed, rather than greyed out, when no valid target
-    # exists. In particular, a back-row member with a short-range weapon has
-    # no attack target.
-    if attack_targets:
-        left_commands.append(BattleCommandOption(BattleCommand.ATTACK))
-    else:
-        # Defend takes the first left-column slot when normal attack has no
-        # target, including for a back-row member with a short-range weapon.
-        left_commands.append(BattleCommandOption(BattleCommand.DEFEND))
+    # Keep normal attack visible even when it cannot currently reach a target.
+    # In particular, a back-row member with a short-range weapon cannot attack
+    # until their formation changes, so the option is disabled.
+    left_commands.append(
+        BattleCommandOption(BattleCommand.ATTACK, enabled=bool(attack_targets))
+    )
     if len(left_commands) < 3 and member_has_spell_aptitude(member):
         left_commands.append(
             BattleCommandOption(
@@ -194,14 +191,8 @@ def resolve_battle_commands(
         if not member.has_skill(skill_key):
             continue
         left_commands.append(BattleCommandOption(command))
-    if attack_targets and len(left_commands) < 3:
-        left_commands.append(BattleCommandOption(BattleCommand.DEFEND))
-
     right_commands = [
-        BattleCommandOption(
-            BattleCommand.ESCAPE,
-            enabled=current.escape_available,
-        ),
+        BattleCommandOption(BattleCommand.DEFEND),
         BattleCommandOption(
             BattleCommand.ITEM,
             enabled=current.item_available,
@@ -214,10 +205,6 @@ def resolve_battle_commands(
                 enabled=formation_change_enabled(member, party),
             )
         )
-    elif not any(
-        option.command is BattleCommand.DEFEND for option in left_commands
-    ):
-        right_commands.append(BattleCommandOption(BattleCommand.DEFEND))
     return tuple((*left_commands, *right_commands))
 
 
