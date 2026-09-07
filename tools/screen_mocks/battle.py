@@ -125,6 +125,7 @@ ITEM_GUIDE_WINDOW_GRID = (0, 0, 32, 13)
 ITEM_WINDOW_GRID = (32, 0, 32, 13)
 SPELL_WINDOW_GRID = (36, 0, 28, 16)
 SPELL_GUIDE_WINDOW_GRID = (0, 0, 36, 16)
+SPELL_MP_WINDOW_GRID = (20, 9, 16, 7)
 COMMAND_GUIDE_TEXT_X = 2
 COMMAND_GUIDE_FIRST_Y = 2
 COMMAND_GUIDE_LINE_SPACING = 3
@@ -569,12 +570,19 @@ class BattleScreenMock:
             thin_frame=True,
             opened=False,
         )
+        spell_mp_window = windows.create(
+            *SPELL_MP_WINDOW_GRID,
+            (),
+            thin_frame=True,
+            opened=False,
+        )
         self.command_guide_window = command_guide_window
         self.command_window = command_window
         self.item_guide_window = item_guide_window
         self.item_window = item_window
         self.spell_window = spell_window
         self.spell_guide_window = spell_guide_window
+        self.spell_mp_window = spell_mp_window
         self.command_cursor = command_window.set_cursor(())
         self.target_window = windows.create(0, 0, 64, 60, transparent=True)
         self.target_cursor = self.target_window.set_cursor(
@@ -677,6 +685,7 @@ class BattleScreenMock:
             item_window,
             spell_window,
             spell_guide_window,
+            spell_mp_window,
         ]
         self.monster_name_windows: list[Window] = []
         self.monster_name_texts: list[WindowText] = []
@@ -859,9 +868,9 @@ class BattleScreenMock:
         self.bgm.play(BATTLE_BGM_ID)
 
     def _close_spell_windows(self) -> None:
-        """Hide and clear the three battle spell-selection windows."""
+        """Hide and clear the battle spell-selection windows."""
 
-        for name in ("spell_window", "spell_guide_window"):
+        for name in ("spell_window", "spell_guide_window", "spell_mp_window"):
             window = getattr(self, name, None)
             if window is not None:
                 window.close_immediately()
@@ -1406,8 +1415,11 @@ class BattleScreenMock:
         """Show a selected spell's guide, cost, and current MP in one window."""
 
         guide_window = self.spell_guide_window
+        mp_window = self.spell_mp_window
         guide_window.close_immediately()
         guide_window.clear_texts()
+        mp_window.close_immediately()
+        mp_window.clear_texts()
         if self.active_party_index is None:
             return
         member = self.party[self.active_party_index]
@@ -1426,16 +1438,17 @@ class BattleScreenMock:
             guide_window.add_text(
                 ascii_to_fullwidth(cost_label.replace("%MP%", str(spell.mp))),
                 COMMAND_GUIDE_TEXT_X,
-                COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 2,
+                COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 3,
                 color=(DEFAULT_TEXT_COLOR if member.mp >= spell.mp else DISABLED_COLOR),
             )
         mp_label = self.texts.text("menu.member.mp", self.localizer)
-        guide_window.add_text(
-            ascii_to_fullwidth(f"{mp_label} {member.mp:03d}/{member.max_mp:03d}"),
+        mp_window.add_text(
+            ascii_to_fullwidth(f"{mp_label} {member.mp:03d}"),
             COMMAND_GUIDE_TEXT_X,
-            COMMAND_GUIDE_FIRST_Y + COMMAND_GUIDE_LINE_SPACING * 3,
+            COMMAND_GUIDE_FIRST_Y,
         )
         guide_window.open_immediately()
+        mp_window.open_immediately()
 
     def _update_spell_selection(self, input_state: InputState) -> None:
         """Choose a spell or return to the active member's command list."""

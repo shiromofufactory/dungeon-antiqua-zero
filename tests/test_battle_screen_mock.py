@@ -46,6 +46,7 @@ from tools.screen_mocks.battle import (
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
     SPELL_GUIDE_WINDOW_GRID,
+    SPELL_MP_WINDOW_GRID,
     SPELL_WINDOW_GRID,
     TIMELINE_ANIMATION_FRAME_COUNT,
     TIMELINE_ENTRANCE_COMPLETE_FRAME,
@@ -239,6 +240,10 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             windows.return_value.create.call_args_list[5].args[:4],
             SPELL_GUIDE_WINDOW_GRID,
+        )
+        self.assertEqual(
+            windows.return_value.create.call_args_list[6].args[:4],
+            SPELL_MP_WINDOW_GRID,
         )
 
         self.assertEqual(
@@ -1079,7 +1084,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._refresh_spell_options()
 
-        self.assertEqual(SPELL_WINDOW_GRID, (32, 0, 32, 16))
+        self.assertEqual(SPELL_WINDOW_GRID, (36, 0, 28, 16))
         self.assertEqual(mock.spell_window.add_text.call_count, 1)
         targets = mock.spell_window.set_cursor.call_args.args[0]
         self.assertEqual(
@@ -1131,7 +1136,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ["HEALING1", "PROTECTION", "CURE", "SILENCE"],
         )
 
-    def test_spell_guide_includes_mp_and_opens_immediately_at_the_top_left(self) -> None:
+    def test_spell_mp_window_overlays_the_guide_bottom_right(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -1146,17 +1151,19 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.localizer = Localizer(Language.JAPANESE)
         mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         mock.spell_guide_window = Mock()
+        mock.spell_mp_window = Mock()
 
         mock._refresh_spell_guide()
 
-        self.assertEqual(SPELL_GUIDE_WINDOW_GRID, (0, 0, 32, 16))
+        self.assertEqual(SPELL_GUIDE_WINDOW_GRID, (0, 0, 36, 16))
+        self.assertEqual(SPELL_MP_WINDOW_GRID, (20, 9, 16, 7))
         mock.spell_guide_window.open_immediately.assert_called_once_with()
-        self.assertEqual(mock.spell_guide_window.add_text.call_count, 4)
+        mock.spell_mp_window.open_immediately.assert_called_once_with()
+        self.assertEqual(mock.spell_guide_window.add_text.call_count, 3)
+        self.assertEqual(mock.spell_guide_window.add_text.call_args_list[2].args[2], 11)
         self.assertEqual(
-            mock.spell_guide_window.add_text.call_args_list[3].args[0],
-            ascii_to_fullwidth(
-                f"ＭＰ {mock.party[0].mp:03d}/{mock.party[0].max_mp:03d}"
-            ),
+            mock.spell_mp_window.add_text.call_args.args[0],
+            ascii_to_fullwidth(f"ＭＰ {mock.party[0].mp:03d}"),
         )
 
     def test_using_a_spell_spends_mp_and_finishes_the_turn(self) -> None:
