@@ -57,6 +57,7 @@ app/
 ├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
+├── monster.py                # モンスター種族、戦闘ごとのHP、敵隊列ルール
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
 ├── world_sites.py            # ワールド拠点のセル検索と訪問済み候補の抽出
@@ -94,7 +95,8 @@ app/
 │   ├── images.py             # 生成済み画像bundleの本番用loader
 │   └── maps.py               # 生成済みマップとatlasの本番用loader
 ├── rendering/
-│   └── field.py              # マップ、カメラ、フィールドキャラクターの描画
+│   ├── field.py              # マップ、カメラ、フィールドキャラクターの描画
+│   └── monster_death.py      # モンスター撃破演出の段階・色・描画率
 ├── data/
 │   ├── characters.json
 │   ├── items.json
@@ -206,7 +208,8 @@ app/
 │   ├── event_messages.py    # 生成済みイベントメッセージの読込
 │   └── images.py            # manifestと画像bundleの読込・検証
 ├── rendering/
-│   └── palette.py           # 一時パレットシフトと色変換
+│   ├── palette.py           # 一時パレットシフトと色変換
+│   └── monster_death.py     # モンスター撃破演出の段階・描画パラメータ
 │
 ├── data/                    # content/dataから生成するJSON
 ├── events/                  # content/eventsから生成する実行時イベント
@@ -214,7 +217,7 @@ app/
 ├── images/                  # content/imagesから生成するmanifestと画像バイナリ
 ├── fonts/                   # フォント資産
 ├── member.py
-├── monster.py
+├── monster.py               # モンスター種族、戦闘ごとのHP、敵隊列ルール
 ├── item.py
 ├── skill.py
 └── spell.py

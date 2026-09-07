@@ -8,6 +8,7 @@ from battle_commands import (
     BattleCommandContext,
     formation_change_enabled,
     resolve_battle_commands,
+    selectable_attack_target_indexes,
 )
 from member import FormationRow, MAX_INTERNAL_LEVEL
 from tools.screen_mocks._fixtures import (
@@ -31,7 +32,7 @@ class BattleCommandRulesTest(unittest.TestCase):
         for member in self.party:
             member.formation_row = FormationRow.FRONT
         self.monsters = tuple(
-            SimpleNamespace(is_front_row=is_front_row)
+            SimpleNamespace(is_front_row=is_front_row, is_alive=True)
             for is_front_row in (False, False, False, True, True)
         )
 
@@ -52,6 +53,21 @@ class BattleCommandRulesTest(unittest.TestCase):
         self.assertNotIn(
             BattleCommand.ATTACK,
             tuple(option.command for option in commands),
+        )
+
+    def test_dead_monsters_are_not_attack_targets(self) -> None:
+        monsters = tuple(
+            SimpleNamespace(is_front_row=True, is_alive=index == 1)
+            for index in range(2)
+        )
+
+        self.assertEqual(
+            selectable_attack_target_indexes(
+                attacker_is_front_row=True,
+                weapon_reach=1,
+                monsters=monsters,
+            ),
+            (1,),
         )
 
     def test_formation_is_disabled_for_the_only_front_member(self) -> None:

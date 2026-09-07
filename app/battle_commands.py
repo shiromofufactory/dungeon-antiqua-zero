@@ -21,6 +21,9 @@ class BattleTarget(Protocol):
     @property
     def is_front_row(self) -> bool: ...
 
+    @property
+    def is_alive(self) -> bool: ...
+
 
 class BattleCommand(StrEnum):
     """Stable command keys shared by battle rules and presentation."""
@@ -119,7 +122,7 @@ def selectable_attack_target_indexes(
     return tuple(
         index
         for index, monster in enumerate(monsters)
-        if monster.is_front_row or can_target_back_row
+        if monster.is_alive and (monster.is_front_row or can_target_back_row)
     )
 
 

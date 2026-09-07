@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypeVar
 
@@ -40,8 +40,19 @@ from member import (
     FormationRow,
     Member,
 )
+from monster import (
+    MonsterBattleState,
+    MonsterDataError,
+    promote_rear_monsters_if_front_empty,
+)
 from input import Direction, InputState
-from rendering import DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
+from rendering import (
+    DEFAULT_FADE_FRAME_COUNT,
+    MONSTER_DEATH_PALETTE,
+    MONSTER_DEATH_PALETTE_BASE_RATE,
+    FadeThroughBlack,
+    MonsterDeathAnimation,
+)
 from resources import (
     TRANSPARENT_INDEX,
     FontResourceError,
@@ -73,7 +84,7 @@ BATTLE_MOCK_MONSTER_KEYS = (
     "Coyote",
     "Coyote",
 )
-BATTLE_MOCK_FRONT_MONSTER_KEYS = frozenset(("Coyote",))
+BATTLE_MOCK_FRONT_MONSTER_INDEXES = frozenset((2, 3, 4))
 BATTLE_MOCK_FRONT_CHARACTER_KEYS = frozenset(("Cerion",))
 PARTY_SPRITE_Y = (64, 92, 120)
 MONSTER_POSITIONS = ((4, 56), (4, 120), (68, 24), (68, 88), (68, 152))
@@ -128,6 +139,8 @@ DA2_BLINK_VISIBLE_FRAMES = 3
 MONSTER_BLINK_FRAME_COUNT = DA2_BLINK_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_PERIOD = DA2_BLINK_PERIOD * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_VISIBLE_FRAMES = DA2_BLINK_VISIBLE_FRAMES * FPS // DA2_REFERENCE_FPS
+UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
+UNSELECTABLE_TARGET_PALETTE_BASE_RATE = 0.5
 FORMATION_MOVE_FRAME_COUNT = 8
 FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
@@ -200,6 +213,7 @@ class BattleMockPhase(StrEnum):
     TARGET = "target"
     ESCAPE_CONFIRMATION = "escape_confirmation"
     FORMATION = "formation"
+    MONSTER_DEATH = "monster_death"
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
 
@@ -271,9 +285,9 @@ class BattleMockCharacter:
         return self.member.definition.localized_name(localizer)
 
 
-@dataclass(frozen=True)
+@dataclass
 class BattleMockMonster:
-    """Immutable monster display data resolved from one generated record."""
+    """Display data paired with mutable HP and formation state for one battle."""
 
     key: str
     names: Mapping[str, object]
@@ -283,6 +297,13 @@ class BattleMockMonster:
     icon_x: int
     icon_y: int
     is_front_row: bool
+    state: MonsterBattleState
+    initial_is_front_row: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.is_front_row, bool):
+            raise TypeError("monster formation row must be a boolean")
+        self.initial_is_front_row = self.is_front_row
 
     @classmethod
     def from_record(
@@ -309,6 +330,7 @@ class BattleMockMonster:
             icon_x=_required_nonnegative_integer(record, "icon_x", key),
             icon_y=_required_nonnegative_integer(record, "icon_y", key),
             is_front_row=is_front_row,
+            state=MonsterBattleState.from_record(record),
         )
 
     @property
@@ -317,6 +339,16 @@ class BattleMockMonster:
 
     def display_name(self, localizer: Localizer) -> str:
         return localizer.text(self.names, "name")
+
+    @property
+    def is_alive(self) -> bool:
+        return self.state.is_alive
+
+    def restore(self) -> None:
+        """Restore mutable battle values to this encounter's initial state."""
+
+        self.state.restore()
+        self.is_front_row = self.initial_is_front_row
 
 
 def _records_by_key(
@@ -349,6 +381,11 @@ class BattleScreenMock:
     def __init__(self) -> None:
         self.palette_shifter = initialize_screen_mock(
             "Dungeon Antiqua ZERO Battle Screen Mock"
+        )
+        self.palette_shifter.define_mix(
+            UNSELECTABLE_TARGET_PALETTE,
+            base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
+            target_color=self.palette_shifter.base_colors[DISABLED_COLOR],
         )
         self.input_reader = create_mock_input_reader()
 
@@ -401,9 +438,9 @@ class BattleScreenMock:
         self.monsters = tuple(
             BattleMockMonster.from_record(
                 _record_for_key(monsters_by_key, key, label="monster"),
-                is_front_row=key in BATTLE_MOCK_FRONT_MONSTER_KEYS,
+                is_front_row=index in BATTLE_MOCK_FRONT_MONSTER_INDEXES,
             )
-            for key in BATTLE_MOCK_MONSTER_KEYS
+            for index, key in enumerate(BATTLE_MOCK_MONSTER_KEYS)
         )
         self.monster_images = {
             monster.key: resources.image(monster.image_resource_id)
@@ -496,6 +533,8 @@ class BattleScreenMock:
         self.formation_actor_index: int | None = None
         self.formation_start_x = 0
         self.formation_destination_x = 0
+        self.monster_death_animation: MonsterDeathAnimation | None = None
+        self.dying_monster_index: int | None = None
         self.entrance_animation_frame = 0
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.selected_command: str | None = None
@@ -550,6 +589,9 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.FORMATION:
             self._update_formation_animation()
             return
+        if self.phase is BattleMockPhase.MONSTER_DEATH:
+            self._update_monster_death_animation()
+            return
         if self.phase is BattleMockPhase.TIMELINE:
             self._update_timeline_animation()
             return
@@ -589,6 +631,8 @@ class BattleScreenMock:
     def _restart_battle_mock(self) -> None:
         """Reset the mock and replay its battle entrance presentation."""
 
+        for monster in self.monsters:
+            monster.restore()
         self.timeline = self.party_visuals + self.monsters
         self.phase = BattleMockPhase.ENTRANCE
         self.active_party_index = 0
@@ -600,6 +644,8 @@ class BattleScreenMock:
         self.formation_actor_index = None
         self.formation_start_x = 0
         self.formation_destination_x = 0
+        self.monster_death_animation = None
+        self.dying_monster_index = None
         self.entrance_animation_frame = 0
         self.selected_command = None
         self.selectable_target_indexes = ()
@@ -733,13 +779,65 @@ class BattleScreenMock:
             return
 
         if input_state.confirm.triggered:
-            self._complete_current_turn()
+            self._begin_monster_death()
             return
 
         navigation = input_state.navigation
         if navigation is not None:
             self._move_target(navigation)
         self.target_cursor.update()
+
+    def _begin_monster_death(self) -> bool:
+        """Set the selected target's HP to zero and start its defeat effect."""
+
+        index = self.selected_target_index
+        if index is None or index not in self.selectable_target_indexes:
+            return False
+        monster = self.monsters[index]
+        if not monster.is_alive:
+            return False
+
+        monster.state.defeat()
+        promote_rear_monsters_if_front_empty(self.monsters)
+        self.phase = BattleMockPhase.MONSTER_DEATH
+        self.dying_monster_index = index
+        self.monster_death_animation = MonsterDeathAnimation()
+        self.target_cursor.active = False
+        self.command_window.close_immediately()
+        self._sync_monster_death_palette()
+        return True
+
+    def _update_monster_death_animation(self) -> None:
+        """Advance the death effect, remove its actor, and finish the turn."""
+
+        animation = self.monster_death_animation
+        if animation is None:
+            raise RuntimeError("monster death phase requires an animation")
+        animation.update()
+        if not animation.is_finished:
+            self._sync_monster_death_palette()
+            return
+
+        dying_index = self.dying_monster_index
+        if dying_index is None:
+            raise RuntimeError("monster death phase requires a target")
+        defeated = self.monsters[dying_index]
+        self.timeline = tuple(
+            entry for entry in self.timeline if entry is not defeated
+        )
+        self.monster_death_animation = None
+        self.dying_monster_index = None
+        self._complete_current_turn()
+
+    def _sync_monster_death_palette(self) -> None:
+        animation = self.monster_death_animation
+        if animation is None:
+            return
+        self.palette_shifter.define_mix(
+            MONSTER_DEATH_PALETTE,
+            base_rate=MONSTER_DEATH_PALETTE_BASE_RATE,
+            target_color=animation.palette_target_color,
+        )
 
     def _move_target(self, direction: Direction) -> bool:
         selected = self.selected_target_index
@@ -1039,6 +1137,12 @@ class BattleScreenMock:
         for index, (monster, (_, y)) in enumerate(
             zip(self.monsters, MONSTER_POSITIONS)
         ):
+            is_dying = (
+                self.phase is BattleMockPhase.MONSTER_DEATH
+                and index == self.dying_monster_index
+            )
+            if not monster.is_alive and not is_dying:
+                continue
             if (
                 index == self.blinking_monster_index
                 and self.monster_blink_frames_remaining
@@ -1047,16 +1151,46 @@ class BattleScreenMock:
             ):
                 continue
             x = self._monster_draw_x(index)
-            pyxel.blt(
-                x,
-                y,
-                self.monster_images[monster.key],
-                0,
-                0,
-                monster.width,
-                monster.height,
-                TRANSPARENT_INDEX,
-            )
+            if not is_dying:
+                is_unselectable_rear_target = (
+                    self.phase is BattleMockPhase.TARGET
+                    and not monster.is_front_row
+                    and index not in self.selectable_target_indexes
+                )
+                if not is_unselectable_rear_target:
+                    self._draw_monster_image(monster, x, y)
+                    continue
+                with self.palette_shifter.shifted(
+                    UNSELECTABLE_TARGET_PALETTE
+                ):
+                    self._draw_monster_image(monster, x, y)
+                continue
+            animation = self.monster_death_animation
+            if animation is None:
+                raise RuntimeError("dying monster requires an animation")
+            pyxel.dither(animation.opacity)
+            try:
+                with self.palette_shifter.shifted(MONSTER_DEATH_PALETTE):
+                    self._draw_monster_image(monster, x, y)
+            finally:
+                pyxel.dither(1.0)
+
+    def _draw_monster_image(
+        self,
+        monster: BattleMockMonster,
+        x: int,
+        y: int,
+    ) -> None:
+        pyxel.blt(
+            x,
+            y,
+            self.monster_images[monster.key],
+            0,
+            0,
+            monster.width,
+            monster.height,
+            TRANSPARENT_INDEX,
+        )
 
     def _monster_draw_x(self, index: int) -> int:
         target_x = MONSTER_POSITIONS[index][0]
@@ -1211,8 +1345,12 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.TARGET or (
             self.phase is BattleMockPhase.INITIAL and self.command_window.is_closed
         ):
-            for window in self.monster_name_windows:
-                window.draw()
+            for monster, window in zip(
+                self.monsters,
+                self.monster_name_windows,
+            ):
+                if monster.is_alive:
+                    window.draw()
         if (
             self.phase is BattleMockPhase.ESCAPE_CONFIRMATION
             and self.command_window.is_closed
@@ -1224,7 +1362,12 @@ class BattleScreenMock:
 def main() -> int:
     return run_screen_mock(
         BattleScreenMock,
-        expected_errors=(FontResourceError, ImageResourceError, TextCatalogError),
+        expected_errors=(
+            FontResourceError,
+            ImageResourceError,
+            MonsterDataError,
+            TextCatalogError,
+        ),
     )
 
 

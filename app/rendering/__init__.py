@@ -19,6 +19,17 @@ from .field import (
     FIELD_TREASURE_ASSET_ID,
     FieldRenderer,
 )
+from .monster_death import (
+    MONSTER_DEATH_BRIGHT_COLOR,
+    MONSTER_DEATH_BRIGHTEN_FRAME_COUNT,
+    MONSTER_DEATH_DISSOLVE_FRAME_COUNT,
+    MONSTER_DEATH_PALETTE,
+    MONSTER_DEATH_PALETTE_BASE_RATE,
+    MONSTER_DEATH_TINT_COLOR,
+    MONSTER_DEATH_TINT_FRAME_COUNT,
+    MonsterDeathAnimation,
+    MonsterDeathPhase,
+)
 from .palette import (
     DIMMED_PALETTE,
     PaletteShifter,
@@ -44,6 +55,15 @@ __all__ = [
     "FIELD_PROP_ASSET_ID",
     "FIELD_TREASURE_ASSET_ID",
     "FieldRenderer",
+    "MONSTER_DEATH_BRIGHT_COLOR",
+    "MONSTER_DEATH_BRIGHTEN_FRAME_COUNT",
+    "MONSTER_DEATH_DISSOLVE_FRAME_COUNT",
+    "MONSTER_DEATH_PALETTE",
+    "MONSTER_DEATH_PALETTE_BASE_RATE",
+    "MONSTER_DEATH_TINT_COLOR",
+    "MONSTER_DEATH_TINT_FRAME_COUNT",
+    "MonsterDeathAnimation",
+    "MonsterDeathPhase",
     "PaletteShifter",
     "create_default_palette_shifter",
     "mix_color",

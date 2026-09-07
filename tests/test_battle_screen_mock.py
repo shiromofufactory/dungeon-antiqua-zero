@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -34,6 +35,8 @@ from tools.screen_mocks.battle import (
     TIMELINE_ENTRANCE_FRAME_COUNT,
     TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT,
     TIMELINE_VISIBLE_ENTRY_COUNT,
+    UNSELECTABLE_TARGET_PALETTE,
+    UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
     TimelineAnimationPhase,
     WindowText,
     ascii_to_fullwidth,
@@ -44,7 +47,16 @@ from battle_commands import BattleCommand, BattleCommandOption
 from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputState
-from rendering import DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
+from monster import MonsterBattleState
+from rendering import (
+    DEFAULT_FADE_FRAME_COUNT,
+    MONSTER_DEATH_BRIGHTEN_FRAME_COUNT,
+    MONSTER_DEATH_DISSOLVE_FRAME_COUNT,
+    MONSTER_DEATH_PALETTE,
+    MONSTER_DEATH_TINT_FRAME_COUNT,
+    FadeThroughBlack,
+    MonsterDeathAnimation,
+)
 from ui.formation_arrow import (
     FORMATION_ARROW_BANK,
     FORMATION_ARROW_COLKEY,
@@ -145,7 +157,9 @@ class BattleScreenMockTest(unittest.TestCase):
                 width=SCREEN_WIDTH,
                 height=SCREEN_HEIGHT,
             )
-            palette_shifter = Mock(base_colors=(0x000000,))
+            palette_shifter = Mock(
+                base_colors=(0x000000, 0xFF0080, 0x4C4C4C, 0x858585),
+            )
             initialize.return_value = palette_shifter
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
@@ -191,6 +205,7 @@ class BattleScreenMockTest(unittest.TestCase):
             tuple(monster.key for monster in mock.monsters),
             BATTLE_MOCK_MONSTER_KEYS,
         )
+        self.assertTrue(all(monster.state.hp == 2 for monster in mock.monsters))
         self.assertEqual(mock.timeline, mock.party_visuals + mock.monsters)
         self.assertIs(mock.phase, BattleMockPhase.ENTRANCE)
         self.assertEqual(mock.entrance_animation_frame, 0)
@@ -200,13 +215,18 @@ class BattleScreenMockTest(unittest.TestCase):
             base_rate=0.0,
             target_color=0x000000,
         )
+        palette_shifter.define_mix.assert_called_once_with(
+            UNSELECTABLE_TARGET_PALETTE,
+            base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
+            target_color=0x858585,
+        )
         self.assertIs(mock.party[1].formation_row, FormationRow.FRONT)
         self.assertEqual(
             [monster.is_front_row for monster in mock.monsters],
-            [False, False, False, True, True],
+            [False, False, True, True, True],
         )
         self.assertEqual(member_attack_reach(mock.party[0]), 1)
-        self.assertEqual(mock._active_member_attack_targets(), (3, 4))
+        self.assertEqual(mock._active_member_attack_targets(), (2, 3, 4))
         mock.active_party_index = 1
         self.assertEqual(mock._active_member_attack_targets(), (0, 1, 2, 3, 4))
         mock.active_party_index = 0
@@ -369,7 +389,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         image = object()
         mock.monsters = (
-            SimpleNamespace(key="Coyote", width=96, height=64),
+            SimpleNamespace(key="Coyote", width=96, height=64, is_alive=True),
         )
         mock.monster_images = {"Coyote": image}
         mock.blinking_monster_index = None
@@ -416,7 +436,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_attack_reach_and_rows_determine_selectable_targets(self) -> None:
         monsters = tuple(
-            SimpleNamespace(is_front_row=is_front_row)
+            SimpleNamespace(is_front_row=is_front_row, is_alive=True)
             for is_front_row in (False, False, False, True, True)
         )
         expected = {
@@ -444,7 +464,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.party = (SimpleNamespace(is_front_row=True),)
         mock.active_party_index = 0
         mock.monsters = tuple(
-            SimpleNamespace(is_front_row=is_front_row)
+            SimpleNamespace(is_front_row=is_front_row, is_alive=True)
             for is_front_row in (False, False, False, True, True)
         )
         mock.command_cursor = SimpleNamespace(active=True)
@@ -472,7 +492,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.party = (SimpleNamespace(is_front_row=False),)
         mock.active_party_index = 0
         mock.monsters = tuple(
-            SimpleNamespace(is_front_row=is_front_row)
+            SimpleNamespace(is_front_row=is_front_row, is_alive=True)
             for is_front_row in (False, False, False, True, True)
         )
         mock.command_cursor = SimpleNamespace(active=True)
@@ -581,32 +601,208 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.selected_command)
         self.assertIsNone(mock.selected_target_index)
 
-    def test_target_confirm_closes_command_and_starts_timeline_animation(self) -> None:
+    def test_target_confirm_sets_hp_to_zero_and_starts_death_animation(self) -> None:
+        monsters = tuple(
+            BattleMockMonster(
+                key=f"monster-{index}",
+                names={},
+                image_id=str(index),
+                width=64,
+                height=64,
+                icon_x=index * 16,
+                icon_y=16,
+                is_front_row=True,
+                state=MonsterBattleState(max_hp=2),
+            )
+            for index in range(5)
+        )
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.command_cursor = SimpleNamespace(active=False)
         mock.target_cursor = SimpleNamespace(active=True)
         mock.command_window = Mock()
+        mock.palette_shifter = Mock()
+        mock.monsters = monsters
+        actor = object()
+        mock.timeline = (actor, *monsters)
         mock.phase = BattleMockPhase.TARGET
         mock.selected_command = "attack"
         mock.selectable_target_indexes = (2, 3, 4)
         mock.selected_target_index = 4
-        mock._refresh_party_text_colors = Mock()
+        mock._complete_current_turn = Mock()
 
         mock._update_target_selection(
             InputState(confirm=InputButton(triggered=True, held=True))
         )
 
         self.assertFalse(mock.target_cursor.active)
-        self.assertIsNone(mock.selected_command)
-        self.assertIsNone(mock.selected_target_index)
+        self.assertEqual(monsters[4].state.hp, 0)
+        self.assertFalse(monsters[4].is_alive)
         mock.command_window.close_immediately.assert_called_once_with()
-        self.assertIs(mock.phase, BattleMockPhase.TIMELINE)
-        self.assertIsNone(mock.active_party_index)
-        self.assertIs(
-            mock.timeline_animation_phase,
-            TimelineAnimationPhase.DROP,
+        self.assertIs(mock.phase, BattleMockPhase.MONSTER_DEATH)
+        self.assertEqual(mock.dying_monster_index, 4)
+        self.assertIsInstance(
+            mock.monster_death_animation,
+            MonsterDeathAnimation,
         )
-        self.assertEqual(mock.timeline_animation_frame, 0)
+        mock.palette_shifter.define_mix.assert_called_once()
+
+        frame_count = (
+            MONSTER_DEATH_TINT_FRAME_COUNT
+            + MONSTER_DEATH_BRIGHTEN_FRAME_COUNT
+            + MONSTER_DEATH_DISSOLVE_FRAME_COUNT
+        )
+        for _frame in range(frame_count):
+            mock._update_monster_death_animation()
+
+        self.assertNotIn(monsters[4], mock.timeline)
+        self.assertEqual(mock.timeline[0], actor)
+        self.assertIsNone(mock.dying_monster_index)
+        self.assertIsNone(mock.monster_death_animation)
+        mock._complete_current_turn.assert_called_once_with()
+
+    def test_monster_death_draw_uses_shifted_palette_and_dither(self) -> None:
+        monster = BattleMockMonster(
+            key="Coyote",
+            names={},
+            image_id="3",
+            width=64,
+            height=64,
+            icon_x=224,
+            icon_y=16,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=2),
+        )
+        monster.state.defeat()
+        animation = MonsterDeathAnimation()
+        for _frame in range(
+            MONSTER_DEATH_TINT_FRAME_COUNT
+            + MONSTER_DEATH_BRIGHTEN_FRAME_COUNT
+            + MONSTER_DEATH_DISSOLVE_FRAME_COUNT // 2
+        ):
+            animation.update()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock.monster_images = {"Coyote": object()}
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock.phase = BattleMockPhase.MONSTER_DEATH
+        mock.dying_monster_index = 0
+        mock.monster_death_animation = animation
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
+
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.dither") as dither,
+        ):
+            mock._draw_monsters()
+
+        mock.palette_shifter.shifted.assert_called_once_with(
+            MONSTER_DEATH_PALETTE
+        )
+        self.assertEqual(dither.call_args_list, [call(0.5), call(1.0)])
+        blt.assert_called_once_with(
+            4,
+            56,
+            mock.monster_images["Coyote"],
+            0,
+            0,
+            64,
+            64,
+            1,
+        )
+
+    def test_defeating_last_front_monster_promotes_living_rear_monsters(
+        self,
+    ) -> None:
+        rear_monster = BattleMockMonster(
+            key="rear",
+            names={},
+            image_id="1",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=False,
+            state=MonsterBattleState(max_hp=2),
+        )
+        front_monster = BattleMockMonster(
+            key="front",
+            names={},
+            image_id="2",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=2),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (rear_monster, front_monster)
+        mock.selectable_target_indexes = (1,)
+        mock.selected_target_index = 1
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.command_window = Mock()
+        mock.palette_shifter = Mock()
+
+        self.assertTrue(mock._begin_monster_death())
+
+        self.assertFalse(front_monster.is_alive)
+        self.assertTrue(rear_monster.is_front_row)
+
+        rear_monster.restore()
+        self.assertTrue(rear_monster.is_alive)
+        self.assertFalse(rear_monster.is_front_row)
+
+    def test_unselectable_rear_monster_uses_gray_palette_during_target_selection(
+        self,
+    ) -> None:
+        monsters = (
+            BattleMockMonster(
+                key="rear",
+                names={},
+                image_id="1",
+                width=64,
+                height=64,
+                icon_x=0,
+                icon_y=0,
+                is_front_row=False,
+                state=MonsterBattleState(max_hp=2),
+            ),
+            BattleMockMonster(
+                key="front",
+                names={},
+                image_id="2",
+                width=64,
+                height=64,
+                icon_x=0,
+                icon_y=0,
+                is_front_row=True,
+                state=MonsterBattleState(max_hp=2),
+            ),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = monsters
+        mock.monster_images = {"rear": object(), "front": object()}
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock.phase = BattleMockPhase.TARGET
+        mock.selectable_target_indexes = (1,)
+        mock.dying_monster_index = None
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
+
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.dither") as dither,
+        ):
+            mock._draw_monsters()
+
+        mock.palette_shifter.shifted.assert_called_once_with(
+            UNSELECTABLE_TARGET_PALETTE,
+        )
+        dither.assert_not_called()
+        self.assertEqual(blt.call_count, 2)
 
     def test_non_attack_command_also_completes_current_turn(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -669,6 +865,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 icon_x=128 if key == "Giant Spider" else 224,
                 icon_y=16,
                 is_front_row=key == "Coyote",
+                state=MonsterBattleState(max_hp=2),
             )
             for index, key in enumerate(BATTLE_MOCK_MONSTER_KEYS)
         )
@@ -907,7 +1104,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         image = object()
         mock.monsters = (
-            SimpleNamespace(key="Giant Spider", width=64, height=64),
+            SimpleNamespace(
+                key="Giant Spider",
+                width=64,
+                height=64,
+                is_alive=True,
+            ),
         )
         mock.monster_images = {"Giant Spider": image}
         mock.blinking_monster_index = 0
@@ -1209,6 +1411,7 @@ class BattleScreenMockTest(unittest.TestCase):
         base_window = Mock()
         monster_name = Mock()
         mock.windows = [base_window]
+        mock.monsters = (SimpleNamespace(is_alive=True),)
         mock.monster_name_windows = [monster_name]
         mock.escape_message_window = Mock()
         mock.escape_choice_window = Mock()
