@@ -48,12 +48,14 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_OFFSET_Y,
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
+    BattleActionPresentation,
     BattleMockCharacter,
     BattleGlobalCommand,
     BattleItemCandidate,
     BattleMockMonster,
     BattleMockPhase,
     BattleScreenMock,
+    BattleTargetSpellEffect,
     FormationRow,
     MAX_INTERNAL_LEVEL,
     SCREEN_HEIGHT,
@@ -86,6 +88,7 @@ from battle_timeline import (
 from localization import Localizer
 from member import EquipmentSlot
 from state import Language
+from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
@@ -103,6 +106,7 @@ from rendering import (
     MONSTER_DEATH_DISSOLVE_FRAME_COUNT,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_TINT_FRAME_COUNT,
+    SPELL_EFFECT_FLASH_PALETTE,
     FadeThroughBlack,
     MonsterDeathAnimation,
 )
@@ -132,6 +136,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_background = Mock()
         mock._draw_party = Mock()
         mock._draw_monsters = Mock()
+        mock._draw_spell_effects = Mock()
         mock._draw_monster_attack_result = Mock()
         mock._draw_target_cursor = Mock()
         mock._draw_timeline = Mock()
@@ -141,6 +146,7 @@ class BattleScreenMockTest(unittest.TestCase):
         manager.attach_mock(mock._draw_background, "background")
         manager.attach_mock(mock._draw_party, "party")
         manager.attach_mock(mock._draw_monsters, "monsters")
+        manager.attach_mock(mock._draw_spell_effects, "spell_effects")
         manager.attach_mock(mock._draw_monster_attack_result, "monster_attack")
         manager.attach_mock(mock._draw_target_cursor, "target")
         manager.attach_mock(mock._draw_timeline, "timeline")
@@ -154,6 +160,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.background(),
                 call.party(),
                 call.monsters(),
+                call.spell_effects(),
                 call.monster_attack(),
                 call.timeline(),
                 call.windows(),
@@ -205,6 +212,8 @@ class BattleScreenMockTest(unittest.TestCase):
             patch("tools.screen_mocks.battle.create_mock_input_reader"),
             patch("tools.screen_mocks.battle.BgmPlayer"),
             patch("tools.screen_mocks.battle.ImageResources") as images,
+            patch("tools.screen_mocks.battle.SpellEffectRenderer"),
+            patch("tools.screen_mocks.battle.load_spell_effects", return_value={}),
             patch("tools.screen_mocks.battle.FontResources") as fonts,
             patch("tools.screen_mocks.battle.WindowFactory") as windows,
             patch(
@@ -800,6 +809,9 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.timeline[0], actor)
         self.assertIsNone(mock.dying_monster_index)
         self.assertIsNone(mock.monster_death_animation)
+        mock.palette_shifter.remove_variant.assert_called_once_with(
+            MONSTER_DEATH_PALETTE
+        )
         mock._complete_current_turn.assert_called_once_with()
 
     def test_monster_death_draw_uses_shifted_palette_and_dither(self) -> None:
@@ -1291,6 +1303,148 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._confirm_action_target_selection())
         self.assertEqual(mock.party[0].mp, before_mp - mock.pending_spell.mp)
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_registered_spell_effect_plays_before_the_turn_completes(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["FIRE1"]
+        definition = SpellEffectDefinition.from_record(
+            spell.key,
+            {
+                "kind": "target_sprite",
+                "image_id": "effects/spells32",
+                "row": 0,
+                "frame_count": 2,
+                "frames_per_pattern": 2,
+                "offset": {"ally": [-5, -6], "enemy": [3, 4]},
+                "flash_color": 10,
+                "se_id": "spell_fire1",
+            },
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.pending_item_candidate = None
+        mock.pending_spell = spell
+        mock.spell_effects = {spell.key: definition}
+        mock.spell_effect_renderer = Mock()
+        mock.palette_shifter = Mock()
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.selectable_party_target_indexes = ()
+        mock.selected_party_target_index = None
+        mock.monsters = (SimpleNamespace(width=64, height=64),)
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock._refresh_monster_name_colors = Mock()
+        mock._complete_current_turn = Mock()
+        before_mp = mock.party[0].mp
+
+        with patch("tools.screen_mocks.battle.play_se") as play_se:
+            self.assertTrue(mock._confirm_action_target_selection())
+
+        self.assertEqual(mock.party[0].mp, before_mp - spell.mp)
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+        mock._complete_current_turn.assert_not_called()
+        assert mock.action_presentation is not None
+        target_effect = mock.action_presentation.spell_effects[0]
+        self.assertEqual((target_effect.target_side, target_effect.target_index), ("enemy", 0))
+        self.assertEqual(target_effect.player.center, (39, 92))
+        play_se.assert_called_once_with("spell_fire1")
+
+        for _frame in range(definition.total_frames - 1):
+            mock._update_action_presentation()
+        mock._complete_current_turn.assert_not_called()
+        mock._update_action_presentation()
+        mock._complete_current_turn.assert_called_once_with()
+        mock.palette_shifter.remove_variant.assert_called_once_with(
+            SPELL_EFFECT_FLASH_PALETTE
+        )
+
+    def test_all_target_spell_creates_one_effect_per_target_and_one_sound(self) -> None:
+        spell = load_mock_spells()["FIRE1"]
+        definition = SpellEffectDefinition.from_record(
+            spell.key,
+            {
+                "kind": "target_sprite",
+                "image_id": "effects/spells32",
+                "row": 0,
+                "frame_count": 1,
+                "frames_per_pattern": 4,
+                "offset": {"ally": [0, 0], "enemy": [0, 0]},
+                "flash_color": None,
+                "se_id": "spell_fire1",
+            },
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.spell_effects = {spell.key: definition}
+        mock.spell_effect_renderer = Mock()
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = True
+        mock.selectable_target_indexes = (0, 1)
+        mock.selected_target_index = None
+        mock.monsters = (
+            SimpleNamespace(width=64, height=64),
+            SimpleNamespace(width=64, height=64),
+        )
+        mock.target_cursor = SimpleNamespace(active=False)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = (Mock(), Mock())
+        mock._refresh_monster_name_colors = Mock()
+
+        with patch("tools.screen_mocks.battle.play_se") as play_se:
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        self.assertEqual(
+            [effect.target_index for effect in mock.action_presentation.spell_effects],
+            [0, 1],
+        )
+        play_se.assert_called_once_with("spell_fire1")
+
+    def test_action_presentation_composes_target_flash_and_effect_sprite(self) -> None:
+        definition = SpellEffectDefinition.from_record(
+            "FIRE1",
+            {
+                "kind": "target_sprite",
+                "image_id": "effects/spells32",
+                "row": 0,
+                "frame_count": 1,
+                "frames_per_pattern": 4,
+                "offset": {"ally": [0, 0], "enemy": [0, 0]},
+                "flash_color": 10,
+                "se_id": None,
+            },
+        )
+        player = SpellEffectPlayer(
+            definition,
+            anchor_x=40,
+            anchor_y=50,
+            target_side="enemy",
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.action_presentation = BattleActionPresentation(
+            (BattleTargetSpellEffect("enemy", 1, player),)
+        )
+        mock.spell_effect_renderer = Mock()
+        draw_target = Mock()
+
+        mock._draw_spell_effect_target("enemy", 1, draw_target)
+        mock._draw_spell_effects()
+
+        mock.spell_effect_renderer.draw_target.assert_called_once_with(
+            player, draw_target
+        )
+        mock.spell_effect_renderer.draw_effect.assert_called_once_with(player)
 
     def test_breaking_item_is_removed_only_after_target_confirmation(self) -> None:
         items = load_mock_items()

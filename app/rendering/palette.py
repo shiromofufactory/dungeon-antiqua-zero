@@ -11,6 +11,7 @@ import pyxel
 
 MIN_COLOR = 0x000000
 MAX_COLOR = 0xFFFFFF
+MAX_PALETTE_COLOR_COUNT = 256
 DIMMED_PALETTE = "dimmed"
 DIMMED_BASE_RATE = 0.5
 DIMMED_TARGET_COLOR = 0x000000
@@ -70,6 +71,10 @@ class PaletteShifter:
         self._base_colors = tuple(self._colors)
         if not self._base_colors:
             raise ValueError("palette must contain at least one color")
+        if len(self._base_colors) > MAX_PALETTE_COLOR_COUNT:
+            raise ValueError(
+                f"palette cannot contain more than {MAX_PALETTE_COLOR_COUNT} colors"
+            )
         for index, color in enumerate(self._base_colors):
             _validate_color(color, f"colors[{index}]")
         self._variants: dict[str, _PaletteVariant] = {}
@@ -109,6 +114,10 @@ class PaletteShifter:
 
         variant = self._variants.get(name)
         if variant is None:
+            if len(self._colors) + len(variant_colors) > MAX_PALETTE_COLOR_COUNT:
+                raise ValueError(
+                    "palette variants exceed Pyxel's 0-255 color-number range"
+                )
             variant = _PaletteVariant(
                 offset=len(self._colors),
                 colors=variant_colors,
@@ -127,6 +136,30 @@ class PaletteShifter:
         start = variant.offset
         end = start + len(self._base_colors)
         self._colors[start:end] = list(self._globally_mixed(variant_colors))
+
+    def remove_variant(self, name: str) -> bool:
+        """Release one named destination block and compact later blocks.
+
+        Temporary scene effects should release variants after their presentation
+        so another mutually exclusive effect can reuse Pyxel's finite 0-255
+        color-number range.
+        """
+
+        if not isinstance(name, str) or not name:
+            raise ValueError("palette variant name must be a non-empty string")
+        variant = self._variants.pop(name, None)
+        if variant is None:
+            return False
+        start = variant.offset
+        end = start + len(self._base_colors)
+        self._colors[:] = [*self._colors[:start], *self._colors[end:]]
+        for other_name, other in tuple(self._variants.items()):
+            if other.offset > start:
+                self._variants[other_name] = _PaletteVariant(
+                    offset=other.offset - len(self._base_colors),
+                    colors=other.colors,
+                )
+        return True
 
     def define_mix(
         self,

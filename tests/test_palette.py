@@ -48,6 +48,48 @@ class PaletteShifterTest(unittest.TestCase):
             [call(0, 2), call(1, 3), call()],
         )
 
+    def test_removing_variant_compacts_later_blocks_for_reuse(self) -> None:
+        colors = [0x000000, 0x101010, 0x202020]
+        remap = Mock()
+        shifter = PaletteShifter(colors, remap)
+        shifter.define_variant("first", (0x303030, 0x404040, 0x505050))
+        shifter.define_variant("second", (0x606060, 0x707070, 0x808080))
+
+        self.assertTrue(shifter.remove_variant("first"))
+        self.assertFalse(shifter.remove_variant("missing"))
+        self.assertEqual(
+            colors,
+            [0x000000, 0x101010, 0x202020, 0x606060, 0x707070, 0x808080],
+        )
+        with shifter.shifted("second"):
+            pass
+        self.assertEqual(
+            remap.call_args_list,
+            [call(0, 3), call(1, 4), call(2, 5), call()],
+        )
+
+    def test_released_sixty_two_color_block_avoids_pyxel_index_overflow(self) -> None:
+        colors = list(range(62))
+        remap = Mock()
+        shifter = PaletteShifter(colors, remap)
+        variant = tuple(range(62))
+        shifter.define_variant("dimmed", variant)
+        shifter.define_variant("unselectable", variant)
+        shifter.define_variant("spell", variant)
+        self.assertEqual(len(colors), 248)
+
+        with self.assertRaisesRegex(ValueError, "0-255"):
+            shifter.define_variant("death", variant)
+
+        self.assertTrue(shifter.remove_variant("spell"))
+        shifter.define_variant("death", variant)
+        with shifter.shifted("death"):
+            pass
+        self.assertLessEqual(
+            max(call_item.args[1] for call_item in remap.call_args_list[:-1]),
+            255,
+        )
+
     def test_rejects_unknown_variant(self) -> None:
         shifter = PaletteShifter([0x000000], Mock())
 

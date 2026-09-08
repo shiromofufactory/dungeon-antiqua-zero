@@ -6,7 +6,7 @@ import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 import pyxel
 
@@ -62,9 +62,11 @@ from rendering import (
     DIMMED_PALETTE,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_PALETTE_BASE_RATE,
+    SPELL_EFFECT_FLASH_PALETTE,
     FadeEvent,
     FadeThroughBlack,
     MonsterDeathAnimation,
+    SpellEffectRenderer,
 )
 from resources import (
     TRANSPARENT_INDEX,
@@ -79,6 +81,11 @@ from resources import (
 )
 from state import Language, Settings
 from spell import Spell, SpellType
+from spell_effect import (
+    SpellEffectDataError,
+    SpellEffectPlayer,
+    load_spell_effects,
+)
 from systems import InventorySystem
 from text_catalog import TextCatalog, TextCatalogError
 from ui import (
@@ -327,6 +334,7 @@ class BattleMockPhase(StrEnum):
     SPELL = "spell"
     TARGET = "target"
     ACTION_TARGET = "action_target"
+    ACTION_PRESENTATION = "action_presentation"
     ESCAPE_CONFIRMATION = "escape_confirmation"
     ESCAPE_MESSAGE = "escape_message"
     ESCAPE = "escape"
@@ -350,6 +358,39 @@ class TimelineAnimationPhase(StrEnum):
     DROP = "drop"
     SLIDE = "slide"
     INTERRUPT = "interrupt"
+
+
+@dataclass(frozen=True)
+class BattleTargetSpellEffect:
+    """Bind one effect timeline to the battle target it decorates."""
+
+    target_side: str
+    target_index: int
+    player: SpellEffectPlayer
+
+
+@dataclass
+class BattleActionPresentation:
+    """Own the visual layers that must finish before a turn advances.
+
+    Spell sprites are the first layer. Damage and status popups can be added as
+    sibling layers driven by the same elapsed frame without changing target
+    confirmation or turn completion.
+    """
+
+    spell_effects: tuple[BattleTargetSpellEffect, ...]
+    elapsed_frame: int = 0
+
+    @property
+    def is_complete(self) -> bool:
+        return bool(self.spell_effects) and all(
+            effect.player.completed for effect in self.spell_effects
+        )
+
+    def update(self) -> None:
+        self.elapsed_frame += 1
+        for effect in self.spell_effects:
+            effect.player.update()
 
 
 def _required_text(record: Mapping[str, object], field: str, label: str) -> str:
@@ -550,6 +591,13 @@ class BattleScreenMock:
             )
         self.background = resources.image(BACKGROUND_IMAGE_ID)
         self.character_sprites = resources.image(CH_BATTLE_IMAGE_ID)
+        self.spell_effect_renderer = SpellEffectRenderer(
+            resources,
+            self.palette_shifter,
+        )
+        self.spell_effects = load_spell_effects(
+            APP_ROOT / "effects" / "spells.json"
+        )
         settings = Settings()
         self.localizer = Localizer(settings.language)
         self.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
@@ -772,6 +820,7 @@ class BattleScreenMock:
         self.action_targets_all = False
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
+        self.action_presentation: BattleActionPresentation | None = None
         self.command_guide_command: BattleCommand | None = None
         self.command_guide_timer = 0
         self.command_guide_visible = False
@@ -885,6 +934,9 @@ class BattleScreenMock:
         if self.phase is BattleMockPhase.ACTION_TARGET:
             self._update_action_target_selection(input_state)
             return
+        if self.phase is BattleMockPhase.ACTION_PRESENTATION:
+            self._update_action_presentation()
+            return
         if self.phase is BattleMockPhase.ITEM:
             self._update_item_selection(input_state)
             return
@@ -952,6 +1004,7 @@ class BattleScreenMock:
     def _restart_battle_mock(self) -> None:
         """Reset the mock and replay its battle entrance presentation."""
 
+        self._release_transient_action_palettes()
         self._restart_battle_bgm()
         self.inventory_system = InventorySystem.with_one_each(self.item_catalog)
         for member in self.party:
@@ -1010,6 +1063,7 @@ class BattleScreenMock:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        self.action_presentation = None
         self.party_target_cursor = None
         self.all_target_cursors = ()
         self._hide_command_guide()
@@ -2010,13 +2064,20 @@ class BattleScreenMock:
         return target != selected
 
     def _confirm_action_target_selection(self) -> bool:
-        """Pay the selected action's cost only after its target is confirmed."""
+        """Pay the selected action's cost, then start its presentation."""
 
         item_candidate = self.pending_item_candidate
         spell = self.pending_spell
+        effect_spell = spell
         if item_candidate is not None:
             if not self._commit_item_use(item_candidate):
                 return False
+            use_spell_key = item_candidate.item.use_spell_key
+            effect_spell = (
+                getattr(self, "spells", {}).get(use_spell_key)
+                if use_spell_key
+                else None
+            )
         elif spell is not None:
             if self.active_party_index is None:
                 return False
@@ -2026,8 +2087,101 @@ class BattleScreenMock:
             member.mp -= spell.mp
         else:
             return False
+        if effect_spell is not None and self._begin_action_presentation(effect_spell):
+            return True
         self._complete_current_turn()
         return True
+
+    def _begin_action_presentation(self, spell: Spell) -> bool:
+        """Create target effect timelines while retaining room for result layers."""
+
+        definition = getattr(self, "spell_effects", {}).get(spell.key)
+        if definition is None:
+            return False
+        target_side = "enemy" if self.action_targets_enemy else "ally"
+        if self.action_targets_enemy:
+            indexes = (
+                self.selectable_target_indexes
+                if self.action_targets_all
+                else (
+                    ()
+                    if self.selected_target_index is None
+                    else (self.selected_target_index,)
+                )
+            )
+        else:
+            indexes = (
+                self.selectable_party_target_indexes
+                if self.action_targets_all
+                else (
+                    ()
+                    if self.selected_party_target_index is None
+                    else (self.selected_party_target_index,)
+                )
+            )
+        if not indexes:
+            return False
+
+        effects: list[BattleTargetSpellEffect] = []
+        for index in indexes:
+            anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
+            effects.append(
+                BattleTargetSpellEffect(
+                    target_side,
+                    index,
+                    SpellEffectPlayer(
+                        definition,
+                        anchor_x=anchor_x,
+                        anchor_y=anchor_y,
+                        target_side=target_side,
+                    ),
+                )
+            )
+        self.action_presentation = BattleActionPresentation(tuple(effects))
+        self.phase = BattleMockPhase.ACTION_PRESENTATION
+        self.target_cursor.active = False
+        if self.party_target_cursor is not None:
+            self.party_target_cursor.active = False
+        self.all_target_cursors = ()
+        self._refresh_monster_name_colors()
+
+        first_player = effects[0].player
+        se_id = first_player.take_start_sound()
+        for effect in effects[1:]:
+            effect.player.take_start_sound()
+        if se_id is not None:
+            play_se(se_id)
+        self.spell_effect_renderer.prepare(first_player)
+        return True
+
+    def _spell_effect_anchor(self, target_side: str, index: int) -> tuple[int, int]:
+        """Return the center of the target's actual battle sprite rectangle."""
+
+        if target_side == "ally":
+            return self._party_sprite_x(index) + 8, PARTY_SPRITE_Y[index] + 16
+        if target_side == "enemy":
+            monster = self.monsters[index]
+            _target_x, target_y = MONSTER_POSITIONS[index]
+            return (
+                self._monster_draw_x(index) + monster.width // 2,
+                target_y + monster.height // 2,
+            )
+        raise ValueError("target_side must be 'ally' or 'enemy'")
+
+    def _update_action_presentation(self) -> None:
+        """Advance every simultaneous layer, then complete the current turn."""
+
+        presentation = getattr(self, "action_presentation", None)
+        if presentation is None:
+            self._complete_current_turn()
+            return
+        presentation.update()
+        if presentation.is_complete:
+            self.action_presentation = None
+            self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
+            self._complete_current_turn()
+            return
+        self.spell_effect_renderer.prepare(presentation.spell_effects[0].player)
 
     def _commit_item_use(self, candidate: BattleItemCandidate) -> bool:
         """Remove an item or equipped gear only when its use was confirmed."""
@@ -2158,7 +2312,19 @@ class BattleScreenMock:
         self.timeline = self._timeline_order.actors
         self.monster_death_animation = None
         self.dying_monster_index = None
+        self._release_palette_variant(MONSTER_DEATH_PALETTE)
         self._complete_current_turn()
+
+    def _release_transient_action_palettes(self) -> None:
+        """Release mutually exclusive effect blocks before restarting the mock."""
+
+        self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
+        self._release_palette_variant(MONSTER_DEATH_PALETTE)
+
+    def _release_palette_variant(self, name: str) -> None:
+        palette_shifter = getattr(self, "palette_shifter", None)
+        if palette_shifter is not None:
+            palette_shifter.remove_variant(name)
 
     def _sync_monster_death_palette(self) -> None:
         animation = self.monster_death_animation
@@ -2196,6 +2362,7 @@ class BattleScreenMock:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        self.action_presentation = None
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
         self.party_target_cursor = None
@@ -2789,6 +2956,7 @@ class BattleScreenMock:
         self._draw_background()
         self._draw_party()
         self._draw_monsters()
+        self._draw_spell_effects()
         self._draw_monster_attack_result()
         self._draw_timeline()
         self._draw_windows()
@@ -2827,6 +2995,22 @@ class BattleScreenMock:
                 BattleMockPhase.ESCAPE,
             ) or index in getattr(self, "escaping_party_indexes", ())
             width = -16 if is_escaping else 16
+            if self.phase is BattleMockPhase.ACTION_PRESENTATION:
+                self._draw_spell_effect_target(
+                    "ally",
+                    index,
+                    lambda: pyxel.blt(
+                        x,
+                        y,
+                        self.character_sprites,
+                        self._party_sprite_source_x(index),
+                        visual.battle_sprite * 32,
+                        width,
+                        32,
+                        TRANSPARENT_INDEX,
+                    ),
+                )
+                continue
             if (
                 self._active_party_pulse_is_visible()
                 and index == self.active_party_index
@@ -3006,6 +3190,13 @@ class BattleScreenMock:
                 continue
             x = self._monster_draw_x(index)
             if not is_dying:
+                if self.phase is BattleMockPhase.ACTION_PRESENTATION:
+                    self._draw_spell_effect_target(
+                        "enemy",
+                        index,
+                        lambda: self._draw_monster_image(monster, x, y),
+                    )
+                    continue
                 is_unselectable_rear_target = (
                     self.phase is BattleMockPhase.TARGET
                     and not monster.is_front_row
@@ -3026,6 +3217,41 @@ class BattleScreenMock:
                     self._draw_monster_image(monster, x, y)
             finally:
                 pyxel.dither(1.0)
+
+    def _draw_spell_effect_target(
+        self,
+        target_side: str,
+        target_index: int,
+        draw_target: Callable[[], None],
+    ) -> None:
+        """Draw one target normally or through its active spell flash."""
+
+        presentation = getattr(self, "action_presentation", None)
+        if presentation is None:
+            draw_target()
+            return
+        target_effect = next(
+            (
+                effect
+                for effect in presentation.spell_effects
+                if effect.target_side == target_side
+                and effect.target_index == target_index
+            ),
+            None,
+        )
+        if target_effect is None:
+            draw_target()
+            return
+        self.spell_effect_renderer.draw_target(target_effect.player, draw_target)
+
+    def _draw_spell_effects(self) -> None:
+        """Draw effect sprites; result popups will compose after this layer."""
+
+        presentation = getattr(self, "action_presentation", None)
+        if presentation is None:
+            return
+        for effect in presentation.spell_effects:
+            self.spell_effect_renderer.draw_effect(effect.player)
 
     def _draw_monster_image(
         self,
@@ -3324,6 +3550,7 @@ def main() -> int:
             FontResourceError,
             ImageResourceError,
             MonsterDataError,
+            SpellEffectDataError,
             TextCatalogError,
         ),
     )
