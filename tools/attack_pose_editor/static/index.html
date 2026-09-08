@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DA ZERO — Attack Pose Editor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="identity">
+      <span class="eyebrow">DUNGEON ANTIQUA ZERO / BATTLE TOOL</span>
+      <h1>Attack Pose Editor</h1>
+    </div>
+    <div class="toolbar">
+      <span id="save-state" class="status-pill">読み込み中</span>
+      <button id="save-button" class="button primary" type="button" disabled>JSONを保存</button>
+    </div>
+  </header>
+
+  <main class="workspace" aria-label="攻撃ポーズ編集ワークスペース">
+    <aside class="panel character-panel" aria-labelledby="character-heading">
+      <div class="panel-heading">
+        <span class="panel-number">01</span>
+        <div><h2 id="character-heading">キャラクター</h2><p>表示確認用・保存対象外</p></div>
+      </div>
+      <div id="character-list" class="character-list"></div>
+      <div class="subheading"><span>POSE</span><strong id="pose-readout">0 / 7</strong></div>
+      <div id="pose-grid" class="pose-grid" role="listbox" aria-label="キャラクターポーズ"></div>
+    </aside>
+
+    <section class="panel main-panel" aria-labelledby="main-heading">
+      <div class="panel-heading main-heading">
+        <span class="panel-number">02</span>
+        <div><h2 id="main-heading">コンポジット</h2><p>ドラッグ・矢印キーで1px移動</p></div>
+        <div class="target-toggle" aria-label="移動対象">
+          <button type="button" data-target="origin" class="active">基準点</button>
+          <button type="button" data-target="weapon_0">武器1</button>
+          <button type="button" data-target="weapon_1">武器2</button>
+        </div>
+      </div>
+
+      <div class="canvas-stage">
+        <canvas id="main-canvas" width="64" height="64" aria-label="キャラと武器の重ね合わせ"></canvas>
+        <div class="canvas-legend"><span><i class="axis-dot"></i>可動基準点（保存対象外）</span><span>8× zoom</span></div>
+      </div>
+
+      <div class="coordinate-grid">
+        <fieldset>
+          <legend>VIEW ORIGIN</legend>
+          <label>X <input id="origin-x" type="number" min="0" max="64" step="1"></label>
+          <label>Y <input id="origin-y" type="number" min="0" max="64" step="1"></label>
+          <button id="reset-origin" class="button quiet compact" type="button">初期位置</button>
+        </fieldset>
+        <fieldset>
+          <legend id="weapon-coordinate-legend">WEAPON 1</legend>
+          <label>X <input id="weapon-x" type="number" min="-128" max="128" step="1"></label>
+          <label>Y <input id="weapon-y" type="number" min="-128" max="128" step="1"></label>
+        </fieldset>
+      </div>
+
+      <div class="layer-control">
+        <span id="layer-label">武器1の重なり</span>
+        <div class="segmented">
+          <button type="button" data-layer="back">キャラの後ろ</button>
+          <button type="button" data-layer="front">キャラの前</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="right-rail">
+      <section class="panel weapon-panel" aria-labelledby="weapon-heading">
+        <div class="panel-heading">
+          <span class="panel-number">03</span>
+          <div><h2 id="weapon-heading">武器</h2><p>image bank 0 / y 32–47</p></div>
+        </div>
+        <div class="weapon-slot-row">
+          <div class="weapon-tabs" aria-label="編集する武器">
+            <button type="button" data-weapon-slot="0" class="active">武器1</button>
+            <button type="button" data-weapon-slot="1">武器2</button>
+          </div>
+          <button id="toggle-second-weapon" class="button quiet compact" type="button">武器2を追加</button>
+        </div>
+        <div id="weapon-grid" class="weapon-grid" role="listbox" aria-label="武器画像"></div>
+        <div class="flip-control">
+          <span>IMAGE FLIP</span>
+          <div class="flip-buttons">
+            <button type="button" data-flip="flip_x" aria-pressed="false">↔ 左右反転</button>
+            <button type="button" data-flip="flip_y" aria-pressed="false">↕ 上下反転</button>
+          </div>
+        </div>
+        <div class="source-note">
+          <span id="weapon-selected-label">WEAPON 1</span>
+          <strong id="weapon-readout">IMAGE 00</strong>
+          <code>16 × 16 px</code>
+        </div>
+      </section>
+
+      <aside class="panel preset-panel" aria-labelledby="preset-heading-label">
+        <div class="preset-heading">
+          <div><span class="eyebrow">POSE LIBRARY</span><h2 id="preset-heading-label">保存ポーズ</h2></div>
+          <button id="add-pose" class="button quiet compact" type="button">＋ 新規</button>
+        </div>
+        <div id="preset-list" class="preset-list"></div>
+        <div class="preset-editor">
+          <label for="pose-id">ポーズID</label>
+          <input id="pose-id" type="text" pattern="[a-z][a-z0-9_]*" spellcheck="false">
+          <div class="preset-actions">
+            <button id="duplicate-pose" class="button quiet" type="button">複製</button>
+            <button id="delete-pose" class="button danger" type="button">削除</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

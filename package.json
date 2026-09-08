@@ -13,7 +13,8 @@
     "events-build": "python3 -B scripts/compile-events.py",
     "pyxel-edit": "pyxel edit app/assets",
     "editor": "python3 -B -m tools.editor",
-    "mock-battle": "python3 -B -m tools.screen_mocks.battle"
+    "mock-battle": "python3 -B -m tools.screen_mocks.battle",
+    "attack-pose-editor": "python3 -B -m tools.attack_pose_editor"
   },
   "engines": {
     "node": ">=20"

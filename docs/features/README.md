@@ -40,5 +40,6 @@
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)
 - [イベント](./events.md)
+- [攻撃ポーズ調整ツール](./attack-pose-editor.md)
 - [マップチップメタデータ設定ツール](./map-chip-metadata-tool.md)
 - [マップエディタ](./map-editor.md)
