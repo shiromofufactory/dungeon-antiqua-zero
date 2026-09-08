@@ -250,6 +250,11 @@ FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 COMMAND_GUIDE_DELAY_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
 DEFEND_SPRITE_SOURCE_X = 16 * 6
+ACTION_MOVE_DISTANCE = 16
+DA2_ACTION_MOVE_SPEED = 4
+ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
+BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
+SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
 COMMAND_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.command.attack",
     BattleCommand.SPELL: "battle.command.spell",
@@ -335,6 +340,7 @@ class BattleMockPhase(StrEnum):
     TARGET = "target"
     ACTION_TARGET = "action_target"
     ACTION_PRESENTATION = "action_presentation"
+    ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
     ESCAPE_MESSAGE = "escape_message"
     ESCAPE = "escape"
@@ -373,9 +379,8 @@ class BattleTargetSpellEffect:
 class BattleActionPresentation:
     """Own the visual layers that must finish before a turn advances.
 
-    Spell sprites are the first layer. Damage and status popups can be added as
-    sibling layers driven by the same elapsed frame without changing target
-    confirmation or turn completion.
+    Spell sprites share one elapsed frame. Timed popups are updated separately
+    because their lifetime must not delay the action or the following phase.
     """
 
     spell_effects: tuple[BattleTargetSpellEffect, ...]
@@ -383,14 +388,36 @@ class BattleActionPresentation:
 
     @property
     def is_complete(self) -> bool:
-        return bool(self.spell_effects) and all(
-            effect.player.completed for effect in self.spell_effects
-        )
+        return all(effect.player.completed for effect in self.spell_effects)
 
     def update(self) -> None:
         self.elapsed_frame += 1
         for effect in self.spell_effects:
             effect.player.update()
+
+
+@dataclass
+class BattleTimedPopup:
+    """A non-blocking battle popup whose timer survives phase changes."""
+
+    frames_remaining: int = 0
+
+    @property
+    def visible(self) -> bool:
+        return self.frames_remaining > 0
+
+    def show(self, frame_count: int) -> None:
+        if isinstance(frame_count, bool) or not isinstance(frame_count, int):
+            raise TypeError("popup frame_count must be an integer")
+        if frame_count <= 0:
+            raise ValueError("popup frame_count must be positive")
+        self.frames_remaining = frame_count
+
+    def update(self) -> None:
+        self.frames_remaining = max(0, self.frames_remaining - 1)
+
+    def clear(self) -> None:
+        self.frames_remaining = 0
 
 
 def _required_text(record: Mapping[str, object], field: str, label: str) -> str:
@@ -753,6 +780,10 @@ class BattleScreenMock:
                 ),
             ),
         )
+        self.battle_popup_window = windows.create(
+            *ESCAPE_MESSAGE_WINDOW_GRID,
+            (),
+        )
         self.escape_choice_window = windows.create(
             *ESCAPE_CHOICE_WINDOW_GRID,
             (
@@ -821,6 +852,12 @@ class BattleScreenMock:
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
+        self.battle_popup = BattleTimedPopup()
+        self.action_party_index: int | None = None
+        self.action_offset_x = 0
+        self.action_motion_frame = 0
+        self.action_returning = False
+        self.action_uses_cast_pose = False
         self.command_guide_command: BattleCommand | None = None
         self.command_guide_timer = 0
         self.command_guide_visible = False
@@ -897,8 +934,16 @@ class BattleScreenMock:
         if input_state.menu.triggered:
             self._restart_battle_mock()
             return
+        battle_popup = getattr(self, "battle_popup", None)
+        if battle_popup is not None:
+            battle_popup.update()
         if hasattr(self, "active_party_pulse_frame"):
             self._update_active_party_pulse()
+        self._update_action_motion()
+        if self.phase is BattleMockPhase.ACTION_RETURN:
+            if self.action_party_index is None:
+                self._complete_current_turn()
+            return
         if self.phase not in (BattleMockPhase.COMMAND, BattleMockPhase.ITEM):
             self._hide_command_guide()
         if self.phase is BattleMockPhase.ENTRANCE:
@@ -1064,6 +1109,10 @@ class BattleScreenMock:
         self.pending_item_candidate = None
         self.pending_spell = None
         self.action_presentation = None
+        battle_popup = getattr(self, "battle_popup", None)
+        if battle_popup is not None:
+            battle_popup.clear()
+        self._clear_action_motion_state()
         self.party_target_cursor = None
         self.all_target_cursors = ()
         self._hide_command_guide()
@@ -1479,6 +1528,7 @@ class BattleScreenMock:
             return False
         self.phase = BattleMockPhase.ITEM
         self.selected_command = BattleCommand.ITEM
+        self._begin_action_motion(use_cast_pose=False)
         self.item_candidates = candidates
         remembered_index = self._remembered_item_index(candidates)
         self.selected_item_index = 0 if remembered_index is None else remembered_index
@@ -1603,6 +1653,7 @@ class BattleScreenMock:
         self.selected_item_index = 0
         self.item_scroll_offset = 0
         self.item_cursor = None
+        self._begin_action_return()
         self.item_window.close_immediately()
         self.item_guide_window.close_immediately()
         self.item_guide_window.clear_texts()
@@ -1671,6 +1722,7 @@ class BattleScreenMock:
             return False
         self.phase = BattleMockPhase.SPELL
         self.selected_command = BattleCommand.SPELL
+        self._begin_action_motion(use_cast_pose=True)
         self.spell_candidates = candidates
         self.spell_scroll_offset = 0
         member = self.party[self.active_party_index]
@@ -1907,6 +1959,7 @@ class BattleScreenMock:
         self.spell_scroll_offset = 0
         self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
+        self._begin_action_return()
         self._close_spell_windows()
         self._refresh_command_options()
         self.command_cursor.active = True
@@ -2072,6 +2125,7 @@ class BattleScreenMock:
         if item_candidate is not None:
             if not self._commit_item_use(item_candidate):
                 return False
+            self._show_item_use_message(item_candidate.item)
             use_spell_key = item_candidate.item.use_spell_key
             effect_spell = (
                 getattr(self, "spells", {}).get(use_spell_key)
@@ -2085,19 +2139,24 @@ class BattleScreenMock:
             if member.mp < spell.mp:
                 return False
             member.mp -= spell.mp
+            self._show_spell_cast_message(spell)
         else:
             return False
         if effect_spell is not None and self._begin_action_presentation(effect_spell):
             return True
+        if getattr(self, "action_party_index", None) is not None:
+            self._begin_action_return(complete_turn=True)
+            return True
         self._complete_current_turn()
         return True
 
-    def _begin_action_presentation(self, spell: Spell) -> bool:
+    def _begin_action_presentation(
+        self,
+        spell: Spell,
+    ) -> bool:
         """Create target effect timelines while retaining room for result layers."""
 
         definition = getattr(self, "spell_effects", {}).get(spell.key)
-        if definition is None:
-            return False
         target_side = "enemy" if self.action_targets_enemy else "ally"
         if self.action_targets_enemy:
             indexes = (
@@ -2123,20 +2182,21 @@ class BattleScreenMock:
             return False
 
         effects: list[BattleTargetSpellEffect] = []
-        for index in indexes:
-            anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
-            effects.append(
-                BattleTargetSpellEffect(
-                    target_side,
-                    index,
-                    SpellEffectPlayer(
-                        definition,
-                        anchor_x=anchor_x,
-                        anchor_y=anchor_y,
-                        target_side=target_side,
-                    ),
+        if definition is not None:
+            for index in indexes:
+                anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
+                effects.append(
+                    BattleTargetSpellEffect(
+                        target_side,
+                        index,
+                        SpellEffectPlayer(
+                            definition,
+                            anchor_x=anchor_x,
+                            anchor_y=anchor_y,
+                            target_side=target_side,
+                        ),
+                    )
                 )
-            )
         self.action_presentation = BattleActionPresentation(tuple(effects))
         self.phase = BattleMockPhase.ACTION_PRESENTATION
         self.target_cursor.active = False
@@ -2145,14 +2205,70 @@ class BattleScreenMock:
         self.all_target_cursors = ()
         self._refresh_monster_name_colors()
 
-        first_player = effects[0].player
-        se_id = first_player.take_start_sound()
-        for effect in effects[1:]:
-            effect.player.take_start_sound()
-        if se_id is not None:
-            play_se(se_id)
-        self.spell_effect_renderer.prepare(first_player)
+        if effects:
+            first_player = effects[0].player
+            se_id = first_player.take_start_sound()
+            for effect in effects[1:]:
+                effect.player.take_start_sound()
+            if se_id is not None:
+                play_se(se_id)
+            self.spell_effect_renderer.prepare(first_player)
         return True
+
+    def _show_item_use_message(self, item: Item) -> None:
+        """Show DA2's timed item-use announcement in the common popup."""
+
+        if (
+            self.active_party_index is None
+            or getattr(self, "battle_popup_window", None) is None
+            or getattr(self, "battle_popup", None) is None
+        ):
+            return
+        actor_name = self.party_visuals[self.active_party_index].display_name(
+            self.localizer
+        )
+        message = self.texts.formatted_text(
+            "battle.item.used",
+            self.localizer,
+            {
+                "ACTOR": actor_name,
+                "ITEM": item.localized_name(self.localizer),
+            },
+        )
+        self._show_battle_popup(message, BATTLE_POPUP_FRAME_COUNT)
+
+    def _show_spell_cast_message(self, spell: Spell) -> None:
+        """Show DA2's timed spell announcement in the top message window."""
+
+        if (
+            self.active_party_index is None
+            or getattr(self, "battle_popup_window", None) is None
+            or getattr(self, "battle_popup", None) is None
+        ):
+            return
+        actor_name = self.party_visuals[self.active_party_index].display_name(
+            self.localizer
+        )
+        message = self.texts.formatted_text(
+            "battle.spell.cast",
+            self.localizer,
+            {
+                "ACTOR": actor_name,
+                "SPELL": spell.localized_name(self.localizer),
+            },
+        )
+        self._show_battle_popup(message, BATTLE_POPUP_FRAME_COUNT)
+
+    def _show_battle_popup(self, message: str, frame_count: int) -> None:
+        """Replace the common non-blocking battle popup and restart its timer."""
+
+        window = getattr(self, "battle_popup_window", None)
+        battle_popup = getattr(self, "battle_popup", None)
+        if window is None or battle_popup is None:
+            return
+        window.clear_texts()
+        window.add_text(message, *ESCAPE_MESSAGE_TEXT_POSITION)
+        battle_popup.show(frame_count)
 
     def _spell_effect_anchor(self, target_side: str, index: int) -> tuple[int, int]:
         """Return the center of the target's actual battle sprite rectangle."""
@@ -2179,9 +2295,56 @@ class BattleScreenMock:
         if presentation.is_complete:
             self.action_presentation = None
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
-            self._complete_current_turn()
+            if getattr(self, "action_party_index", None) is not None:
+                self._begin_action_return(complete_turn=True)
+            else:
+                self._complete_current_turn()
             return
-        self.spell_effect_renderer.prepare(presentation.spell_effects[0].player)
+        if presentation.spell_effects:
+            self.spell_effect_renderer.prepare(
+                presentation.spell_effects[0].player
+            )
+
+    def _begin_action_motion(self, *, use_cast_pose: bool) -> None:
+        """Move the active item user or caster toward the enemies as in DA2."""
+
+        if self.active_party_index is None:
+            return
+        self.action_party_index = self.active_party_index
+        self.action_returning = False
+        self.action_uses_cast_pose = use_cast_pose
+
+    def _begin_action_return(self, *, complete_turn: bool = False) -> None:
+        """Send the item user or caster back before optionally advancing."""
+
+        if getattr(self, "action_party_index", None) is None:
+            if complete_turn:
+                self.phase = BattleMockPhase.ACTION_RETURN
+            return
+        self.action_returning = True
+        if complete_turn:
+            self.phase = BattleMockPhase.ACTION_RETURN
+
+    def _update_action_motion(self) -> None:
+        """Advance one DA2-speed forward or backward action movement."""
+
+        if getattr(self, "action_party_index", None) is None:
+            return
+        destination = 0 if self.action_returning else ACTION_MOVE_DISTANCE
+        distance = destination - self.action_offset_x
+        if distance:
+            step = min(abs(distance), ACTION_MOVE_SPEED)
+            self.action_offset_x += step if distance > 0 else -step
+            self.action_motion_frame += 1
+        if self.action_returning and self.action_offset_x == 0:
+            self._clear_action_motion_state()
+
+    def _clear_action_motion_state(self) -> None:
+        self.action_party_index = None
+        self.action_offset_x = 0
+        self.action_motion_frame = 0
+        self.action_returning = False
+        self.action_uses_cast_pose = False
 
     def _commit_item_use(self, candidate: BattleItemCandidate) -> bool:
         """Remove an item or equipped gear only when its use was confirmed."""
@@ -2363,6 +2526,7 @@ class BattleScreenMock:
         self.pending_item_candidate = None
         self.pending_spell = None
         self.action_presentation = None
+        self._clear_action_motion_state()
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
         self.party_target_cursor = None
@@ -3054,6 +3218,8 @@ class BattleScreenMock:
             )
             return x, target_y
         if self.phase is not BattleMockPhase.ENTRANCE:
+            if index == getattr(self, "action_party_index", None):
+                target_x -= self.action_offset_x
             return target_x, target_y
 
         delay = index * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
@@ -3115,6 +3281,17 @@ class BattleScreenMock:
             and getattr(self, "monster_attack_damage", None)
         ):
             return MONSTER_DAMAGE_SPRITE_SOURCE_X
+        if index == getattr(self, "action_party_index", None):
+            if (
+                self.action_offset_x != ACTION_MOVE_DISTANCE
+                or self.action_returning
+            ):
+                pattern = (
+                    self.action_motion_frame
+                    // FORMATION_WALK_PATTERN_FRAME_COUNT
+                ) % 2
+                return pattern * FORMATION_SPRITE_STEP_X
+            return SPELL_CAST_SPRITE_SOURCE_X if self.action_uses_cast_pose else 0
         if index in getattr(self, "defending_party_indexes", ()):
             return DEFEND_SPRITE_SOURCE_X
         return 0
@@ -3533,6 +3710,9 @@ class BattleScreenMock:
             self.escape_choice_window.draw()
         if self.phase is BattleMockPhase.ESCAPE_MESSAGE:
             self.escape_started_message_window.draw()
+        battle_popup = getattr(self, "battle_popup", None)
+        if battle_popup is not None and battle_popup.visible:
+            self.battle_popup_window.draw()
         if (
             getattr(self, "auto_battle_active", False)
             or self.phase is BattleMockPhase.COMMAND

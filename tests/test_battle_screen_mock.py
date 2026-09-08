@@ -48,6 +48,10 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_OFFSET_Y,
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
+    BATTLE_POPUP_FRAME_COUNT,
+    ACTION_MOVE_DISTANCE,
+    ACTION_MOVE_SPEED,
+    SPELL_CAST_SPRITE_SOURCE_X,
     BattleActionPresentation,
     BattleMockCharacter,
     BattleGlobalCommand,
@@ -56,6 +60,7 @@ from tools.screen_mocks.battle import (
     BattleMockPhase,
     BattleScreenMock,
     BattleTargetSpellEffect,
+    BattleTimedPopup,
     FormationRow,
     MAX_INTERNAL_LEVEL,
     SCREEN_HEIGHT,
@@ -443,7 +448,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._activate_timeline_head.assert_called_once_with()
 
     def test_party_sprites_use_formation_and_defense_source_images(self) -> None:
-        self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 7)
+        self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 6)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (
@@ -478,6 +483,103 @@ class BattleScreenMockTest(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_spell_caster_advances_at_da2_speed_and_uses_defense_pose(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.FRONT)
+            ),
+        )
+        mock.phase = BattleMockPhase.SPELL
+        mock.action_party_index = None
+        mock.action_offset_x = 0
+        mock.action_motion_frame = 0
+        mock.action_returning = False
+        mock.action_uses_cast_pose = False
+
+        mock._begin_action_motion(use_cast_pose=True)
+        for _frame in range(ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED):
+            mock._update_action_motion()
+
+        self.assertEqual(ACTION_MOVE_SPEED, 2)
+        self.assertEqual(mock._party_draw_position(0), (140, 64))
+        self.assertEqual(SPELL_CAST_SPRITE_SOURCE_X, DEFEND_SPRITE_SOURCE_X)
+        self.assertEqual(
+            mock._party_sprite_source_x(0),
+            SPELL_CAST_SPRITE_SOURCE_X,
+        )
+
+    def test_cancelled_spell_caster_walks_back_to_the_original_position(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.FRONT)
+            ),
+        )
+        mock.phase = BattleMockPhase.SPELL
+        mock.action_party_index = 0
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_motion_frame = 0
+        mock.action_returning = False
+        mock.action_uses_cast_pose = True
+
+        mock._begin_action_return()
+        for _frame in range(ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED):
+            mock._update_action_motion()
+
+        self.assertIsNone(mock.action_party_index)
+        self.assertEqual(mock._party_draw_position(0), (156, 64))
+        self.assertEqual(mock._party_sprite_source_x(0), 0)
+
+    def test_item_user_advances_without_using_the_spell_cast_pose(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.FRONT)
+            ),
+        )
+        mock.phase = BattleMockPhase.ITEM
+        mock.action_party_index = None
+        mock.action_offset_x = 0
+        mock.action_motion_frame = 0
+        mock.action_returning = False
+        mock.action_uses_cast_pose = False
+
+        mock._begin_action_motion(use_cast_pose=False)
+        for _frame in range(ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED):
+            mock._update_action_motion()
+
+        self.assertEqual(mock._party_draw_position(0), (140, 64))
+        self.assertEqual(mock._party_sprite_source_x(0), 0)
+
+    def test_cancelled_item_selection_starts_the_return_movement(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ITEM
+        mock.selected_command = BattleCommand.ITEM
+        mock.item_candidates = (Mock(),)
+        mock.selected_item_index = 0
+        mock.item_scroll_offset = 0
+        mock.item_cursor = Mock()
+        mock.action_party_index = 0
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_motion_frame = 0
+        mock.action_returning = False
+        mock.action_uses_cast_pose = False
+        mock.item_window = Mock()
+        mock.item_guide_window = Mock()
+        mock._refresh_command_options = Mock()
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+
+        mock._cancel_item_selection()
+
+        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
+        self.assertTrue(mock.action_returning)
+        self.assertFalse(mock.action_uses_cast_pose)
 
     def test_party_entrance_jumps_quickly_with_two_frame_stagger(
         self,
@@ -1297,12 +1399,16 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.active_party_index = 0
         mock.pending_item_candidate = None
         mock.pending_spell = load_mock_spells()["FIRE1"]
+        mock._begin_action_presentation = Mock(return_value=True)
         mock._complete_current_turn = Mock()
         before_mp = mock.party[0].mp
 
         self.assertTrue(mock._confirm_action_target_selection())
         self.assertEqual(mock.party[0].mp, before_mp - mock.pending_spell.mp)
-        mock._complete_current_turn.assert_called_once_with()
+        mock._begin_action_presentation.assert_called_once_with(
+            mock.pending_spell,
+        )
+        mock._complete_current_turn.assert_not_called()
 
     def test_registered_spell_effect_plays_before_the_turn_completes(self) -> None:
         items = load_mock_items()
@@ -1368,6 +1474,98 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.palette_shifter.remove_variant.assert_called_once_with(
             SPELL_EFFECT_FLASH_PALETTE
         )
+
+    def test_spell_cast_message_uses_da2_text_and_escape_window_position(self) -> None:
+        spell = load_mock_spells()["FIRE1"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party_visuals = (
+            SimpleNamespace(display_name=Mock(return_value="フィオラ")),
+        )
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.battle_popup_window = Mock()
+        mock.battle_popup = BattleTimedPopup()
+
+        mock._show_spell_cast_message(spell)
+
+        mock.battle_popup_window.clear_texts.assert_called_once_with()
+        mock.battle_popup_window.add_text.assert_called_once_with(
+            "フィオラは　ファイア１をとなえた",
+            2,
+            2,
+        )
+        self.assertEqual(
+            mock.battle_popup.frames_remaining,
+            BATTLE_POPUP_FRAME_COUNT,
+        )
+
+    def test_item_use_message_uses_da2_text_in_the_common_popup(self) -> None:
+        item = load_mock_items()["POTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party_visuals = (
+            SimpleNamespace(display_name=Mock(return_value="フィオラ")),
+        )
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.battle_popup_window = Mock()
+        mock.battle_popup = BattleTimedPopup()
+
+        mock._show_item_use_message(item)
+
+        mock.battle_popup_window.add_text.assert_called_once_with(
+            "フィオラは　きずぐすりをつかった",
+            2,
+            2,
+        )
+        self.assertEqual(
+            mock.battle_popup.frames_remaining,
+            BATTLE_POPUP_FRAME_COUNT,
+        )
+
+    def test_spell_cast_message_disappears_after_da2_popup_duration(self) -> None:
+        popup = BattleTimedPopup()
+        popup.show(BATTLE_POPUP_FRAME_COUNT)
+
+        for _frame in range(BATTLE_POPUP_FRAME_COUNT - 1):
+            popup.update()
+            self.assertTrue(popup.visible)
+        popup.update()
+
+        self.assertEqual(popup.frames_remaining, 0)
+        self.assertFalse(popup.visible)
+
+    def test_spell_turn_waits_for_caster_to_return_after_presentation(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ACTION_PRESENTATION
+        mock.action_presentation = BattleActionPresentation(())
+        mock.battle_popup = BattleTimedPopup(frames_remaining=30)
+        mock.action_party_index = 0
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_motion_frame = 0
+        mock.action_returning = False
+        mock.action_uses_cast_pose = True
+        mock.palette_shifter = Mock()
+        mock._complete_current_turn = Mock()
+
+        mock._update_action_presentation()
+
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
+        self.assertTrue(mock.action_returning)
+        self.assertEqual(mock.battle_popup.frames_remaining, 30)
+        mock._complete_current_turn.assert_not_called()
+
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState()
+        mock._refresh_input_guide = Mock()
+        for _frame in range(ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED):
+            mock.update()
+
+        self.assertIsNone(mock.action_party_index)
+        self.assertEqual(mock.battle_popup.frames_remaining, 22)
+        self.assertTrue(mock.battle_popup.visible)
+        mock._complete_current_turn.assert_called_once_with()
 
     def test_all_target_spell_creates_one_effect_per_target_and_one_sound(self) -> None:
         spell = load_mock_spells()["FIRE1"]
@@ -1461,6 +1659,43 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._confirm_action_target_selection())
         self.assertEqual(mock.inventory_system.quantity(potion), 0)
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_item_confirmation_starts_effect_and_non_blocking_popup(self) -> None:
+        items = load_mock_items()
+        potion = items["POTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem.with_one_each(items)
+        mock.active_party_index = 0
+        mock.party_visuals = (
+            SimpleNamespace(display_name=Mock(return_value="フィオラ")),
+        )
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.battle_popup_window = Mock()
+        mock.battle_popup = BattleTimedPopup()
+        mock.pending_item_candidate = BattleItemCandidate(potion)
+        mock.pending_spell = None
+        mock.spells = load_mock_spells()
+        mock._begin_action_presentation = Mock(return_value=True)
+        mock._complete_current_turn = Mock()
+
+        self.assertTrue(mock._confirm_action_target_selection())
+
+        mock._begin_action_presentation.assert_called_once_with(
+            mock.spells[potion.use_spell_key]
+        )
+        mock.battle_popup_window.add_text.assert_called_once_with(
+            "フィオラは　きずぐすりをつかった",
+            2,
+            2,
+        )
+        self.assertEqual(
+            mock.battle_popup.frames_remaining,
+            BATTLE_POPUP_FRAME_COUNT,
+        )
+        mock._complete_current_turn.assert_not_called()
 
     def test_target_cancel_returns_to_the_item_list_without_consuming_it(self) -> None:
         items = load_mock_items()
@@ -2725,6 +2960,9 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(mock.selected_item_index, 3)
         self.assertEqual(mock.item_scroll_offset, 1)
+        self.assertEqual(mock.action_party_index, 1)
+        self.assertFalse(mock.action_returning)
+        self.assertFalse(mock.action_uses_cast_pose)
 
     def test_spell_selection_restores_the_active_members_last_spell(self) -> None:
         items = load_mock_items()
@@ -2750,6 +2988,9 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._begin_spell_selection())
 
         self.assertIs(mock.spell_type, remembered_spell.type)
+        self.assertEqual(mock.action_party_index, 0)
+        self.assertFalse(mock.action_returning)
+        self.assertTrue(mock.action_uses_cast_pose)
         mock._refresh_spell_options.assert_called_once_with(
             preferred_key=remembered_spell.key
         )
@@ -3080,6 +3321,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.monster_name_windows = [monster_name]
         mock.escape_message_window = Mock()
         mock.escape_started_message_window = Mock()
+        mock.battle_popup_window = Mock()
+        mock.battle_popup = BattleTimedPopup()
         mock.escape_choice_window = Mock()
         mock.command_window = Mock(is_closed=False)
         mock.global_command_window = Mock(is_closed=True, is_open=False)
@@ -3124,6 +3367,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.phase = BattleMockPhase.ESCAPE_MESSAGE
         mock._draw_windows()
         mock.escape_started_message_window.draw.assert_called_once_with()
+
+        mock.phase = BattleMockPhase.ACTION_PRESENTATION
+        mock.action_presentation = BattleActionPresentation(())
+        mock.battle_popup.show(1)
+        mock._draw_windows()
+        mock.battle_popup_window.draw.assert_called_once_with()
 
     def test_monster_name_colors_follow_target_availability_and_button_wait(
         self,
