@@ -5,6 +5,10 @@
       "channel": 1,
       "sound": 7
     },
+    "battle_hit": {
+      "channel": 0,
+      "sound": 12
+    },
     "confirm": {
       "channel": 1,
       "sound": 9

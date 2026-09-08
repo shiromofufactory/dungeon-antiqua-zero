@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -74,6 +75,7 @@ from resources import (
     ImageResourceError,
     ImageResources,
     load_record_array,
+    play_se,
 )
 from state import Language, Settings
 from spell import Spell, SpellType
@@ -95,6 +97,7 @@ from item_detail import ItemDetailContext, item_detail_lines
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
+BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_MOCK_PARTY_CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
 BATTLE_MOCK_MONSTER_KEYS = (
     "Giant Spider",
@@ -202,6 +205,37 @@ DA2_BLINK_VISIBLE_FRAMES = 3
 MONSTER_BLINK_FRAME_COUNT = DA2_BLINK_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_PERIOD = DA2_BLINK_PERIOD * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_VISIBLE_FRAMES = DA2_BLINK_VISIBLE_FRAMES * FPS // DA2_REFERENCE_FPS
+DA2_DAMAGE_VERTICAL_OFFSETS = (
+    2,
+    8,
+    14,
+    18,
+    20,
+    18,
+    14,
+    8,
+    0,
+    4,
+    6,
+    6,
+    4,
+    0,
+    0,
+    0,
+)
+DA2_MISS_VERTICAL_OFFSETS = (-1, 0, 5, 9, 12, 14, 12, 9, 5, 0, 0, 0, 0)
+MONSTER_DAMAGE_FRAME_COUNT = (
+    len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+)
+MONSTER_MISS_FRAME_COUNT = (
+    len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+)
+MONSTER_DAMAGE_SPRITE_SOURCE_X = 16 * 4
+MONSTER_DAMAGE_SHAKE_X = (8, 9)
+DAMAGE_NUMBER_SPRITE_Y = 48
+DAMAGE_NUMBER_SPRITE_SIZE = 8
+MISS_SPRITE_SOURCE_X = 80
+MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
 UNSELECTABLE_TARGET_PALETTE_BASE_RATE = 0.5
 FORMATION_MOVE_FRAME_COUNT = 8
@@ -706,6 +740,9 @@ class BattleScreenMock:
         self.active_party_pulse_frame = 0
         self.blinking_monster_index: int | None = None
         self.monster_blink_frames_remaining = 0
+        self.monster_attack_target_index: int | None = None
+        self.monster_attack_damage: int | None = None
+        self.monster_attack_animation_frame = 0
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
         self.timeline_animation_frame = 0
         self.timeline_advance: (
@@ -934,6 +971,9 @@ class BattleScreenMock:
         self._sync_active_party_pulse_palette()
         self.blinking_monster_index = None
         self.monster_blink_frames_remaining = 0
+        self.monster_attack_target_index = None
+        self.monster_attack_damage = None
+        self.monster_attack_animation_frame = 0
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
         self.timeline_advance = None
@@ -988,6 +1028,7 @@ class BattleScreenMock:
         self._refresh_command_options()
         self.command_cursor.active = False
         self._refresh_party_text_colors()
+        self._refresh_all_party_hp_texts()
         self._refresh_monster_name_colors()
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.entrance_fade.start_fade_in()
@@ -2402,6 +2443,9 @@ class BattleScreenMock:
                 index for index, monster in enumerate(self.monsters) if monster is actor
             )
             self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
+            self.monster_attack_target_index = None
+            self.monster_attack_damage = None
+            self.monster_attack_animation_frame = 0
         self._refresh_party_text_colors()
 
     def _active_member_attack_targets(self) -> tuple[int, ...]:
@@ -2619,10 +2663,79 @@ class BattleScreenMock:
 
     def _update_monster_action(self) -> None:
         self.command_window.update(None)
+        if self.monster_attack_target_index is not None:
+            self.monster_attack_animation_frame += 1
+            if (
+                self.monster_attack_animation_frame
+                >= self._monster_attack_animation_frame_count()
+            ):
+                self._finish_monster_attack()
+            return
         if self.monster_blink_frames_remaining > 0:
             self.monster_blink_frames_remaining -= 1
-        if self.monster_blink_frames_remaining == 0:
+        if self.monster_blink_frames_remaining > 0:
+            return
+        actor = self.timeline[0]
+        if not isinstance(actor, BattleMockMonster) or not actor.is_front_row:
             self._start_timeline_animation()
+            return
+        target_indexes = tuple(
+            index
+            for index, member in enumerate(self.party)
+            if member.hp > 0 and member.formation_row is FormationRow.FRONT
+        )
+        if not target_indexes:
+            self._start_timeline_animation()
+            return
+        self.monster_attack_target_index = random.choice(target_indexes)
+        self.monster_attack_damage = random.randint(0, 15)
+        self.monster_attack_animation_frame = 0
+        if self.monster_attack_damage > 0:
+            play_se(BATTLE_HIT_SE_ID)
+
+    def _monster_attack_animation_frame_count(self) -> int:
+        return (
+            MONSTER_MISS_FRAME_COUNT
+            if self.monster_attack_damage == 0
+            else MONSTER_DAMAGE_FRAME_COUNT
+        )
+
+    def _finish_monster_attack(self) -> None:
+        target_index = self.monster_attack_target_index
+        damage = self.monster_attack_damage
+        if target_index is None or damage is None:
+            raise RuntimeError("monster attack requires a target and result")
+        if damage > 0:
+            member = self.party[target_index]
+            member.hp = max(0, member.hp - damage)
+            self._refresh_party_hp_text(target_index)
+        self.monster_attack_target_index = None
+        self.monster_attack_damage = None
+        self.monster_attack_animation_frame = 0
+        self._start_timeline_animation()
+
+    def _refresh_all_party_hp_texts(self) -> None:
+        if not hasattr(self, "party_status_texts"):
+            return
+        for index in range(len(self.party_status_texts)):
+            self._refresh_party_hp_text(index)
+
+    def _refresh_party_hp_text(self, index: int) -> None:
+        window = self.party_status_windows[index]
+        name_text, hp_text = self.party_status_texts[index]
+        member = self.party[index]
+        window.remove_text(hp_text)
+        hp_text = window.add_text(
+            ascii_to_fullwidth(f"{member.hp:03d}/{member.max_hp:03d}"),
+            hp_text.x,
+            hp_text.y,
+            color=hp_text.color,
+            font=hp_text.font,
+            shadow_color=hp_text.shadow_color,
+            baseline_offset=hp_text.baseline_offset,
+            font_spans=hp_text.font_spans,
+        )
+        self.party_status_texts[index] = (name_text, hp_text)
 
     def _refresh_party_text_colors(self) -> None:
         for index, (window, placements) in enumerate(
@@ -2676,6 +2789,7 @@ class BattleScreenMock:
         self._draw_background()
         self._draw_party()
         self._draw_monsters()
+        self._draw_monster_attack_result()
         self._draw_timeline()
         self._draw_windows()
         self._draw_target_cursor()
@@ -2697,6 +2811,17 @@ class BattleScreenMock:
             if position is None:
                 continue
             x, y = position
+            if (
+                self.phase is BattleMockPhase.MONSTER_ACTION
+                and index == getattr(self, "monster_attack_target_index", None)
+                and getattr(self, "monster_attack_damage", None)
+            ):
+                shake_index = (
+                    self.monster_attack_animation_frame
+                    * DA2_REFERENCE_FPS
+                    // FPS
+                ) % len(MONSTER_DAMAGE_SHAKE_X)
+                x += MONSTER_DAMAGE_SHAKE_X[shake_index]
             is_escaping = self.phase in (
                 BattleMockPhase.ESCAPE_MESSAGE,
                 BattleMockPhase.ESCAPE,
@@ -2800,9 +2925,67 @@ class BattleScreenMock:
                 self.formation_animation_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
             ) % 2
             return pattern * FORMATION_SPRITE_STEP_X
+        if (
+            self.phase is BattleMockPhase.MONSTER_ACTION
+            and index == getattr(self, "monster_attack_target_index", None)
+            and getattr(self, "monster_attack_damage", None)
+        ):
+            return MONSTER_DAMAGE_SPRITE_SOURCE_X
         if index in getattr(self, "defending_party_indexes", ()):
             return DEFEND_SPRITE_SOURCE_X
         return 0
+
+    def _draw_monster_attack_result(self) -> None:
+        target_index = getattr(self, "monster_attack_target_index", None)
+        damage = getattr(self, "monster_attack_damage", None)
+        if (
+            getattr(self, "phase", None) is not BattleMockPhase.MONSTER_ACTION
+            or target_index is None
+            or damage is None
+        ):
+            return
+        offsets = (
+            DA2_MISS_VERTICAL_OFFSETS
+            if damage == 0
+            else DA2_DAMAGE_VERTICAL_OFFSETS
+        )
+        reference_frame = min(
+            self.monster_attack_animation_frame * DA2_REFERENCE_FPS // FPS,
+            len(offsets) - 1,
+        )
+        vertical_offset = offsets[reference_frame]
+        if vertical_offset < 0:
+            return
+        target_x = self._party_sprite_x(target_index)
+        target_y = PARTY_SPRITE_Y[target_index]
+        anchor_x = target_x + 14
+        y = target_y + 16 - vertical_offset
+        if damage == 0:
+            pyxel.blt(
+                anchor_x - MISS_SPRITE_WIDTH // 2,
+                y,
+                0,
+                MISS_SPRITE_SOURCE_X,
+                DAMAGE_NUMBER_SPRITE_Y,
+                MISS_SPRITE_WIDTH,
+                DAMAGE_NUMBER_SPRITE_SIZE,
+                TRANSPARENT_INDEX,
+            )
+            return
+        digits = str(damage)
+        x = anchor_x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
+        for digit in digits:
+            pyxel.blt(
+                x,
+                y,
+                0,
+                int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_Y,
+                DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_SIZE,
+                TRANSPARENT_INDEX,
+            )
+            x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_monsters(self) -> None:
         for index, (monster, (_, y)) in enumerate(

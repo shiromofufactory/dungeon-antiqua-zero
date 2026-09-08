@@ -24,12 +24,29 @@ FIELD_CHARACTER_COLKEY = 1
 FIELD_CHARACTER_ANIMATION_INTERVAL = 16
 FIELD_PROP_ASSET_ID = "actors/props"
 FIELD_CHARACTER_ASSET_ID = "actors/characters"
+FIELD_PLAYER_CHARACTER_ASSET_ID = "characters/ch_walk"
 FIELD_TREASURE_ASSET_ID = "actors/treasure"
 FIELD_CHARACTER_FACING_ROWS = {
     Direction.UP: 0,
     Direction.RIGHT: 1,
     Direction.DOWN: 2,
     Direction.LEFT: 3,
+}
+FIELD_PLAYER_CHARACTER_FRAME_COUNT = 3
+FIELD_PLAYER_CHARACTER_HEIGHT = 32
+FIELD_PLAYER_CHARACTER_SET_WIDTH = (
+    FIELD_CHARACTER_SIZE * FIELD_PLAYER_CHARACTER_FRAME_COUNT
+)
+FIELD_PLAYER_CHARACTER_SET_HEIGHT = FIELD_PLAYER_CHARACTER_HEIGHT * 4
+FIELD_PLAYER_CHARACTER_SETS_PER_ROW = 8
+FIELD_PLAYER_CHARACTER_STANDING_FRAME = 1
+FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL = 8
+FIELD_PLAYER_CHARACTER_WALKING_FRAMES = (2, 1, 0, 1)
+FIELD_PLAYER_CHARACTER_FACING_ROWS = {
+    Direction.DOWN: 0,
+    Direction.UP: 1,
+    Direction.LEFT: 2,
+    Direction.RIGHT: 3,
 }
 
 
@@ -64,6 +81,8 @@ class FieldRenderer:
         actors: FieldActors | None = None,
         prop_image: Any | None = None,
         actor_character_image: Any | None = None,
+        player_character_image: Any | None = None,
+        player_sprite_index: int = 0,
         treasure_image: Any | None = None,
         frame_count: int | None = None,
     ) -> None:
@@ -85,7 +104,13 @@ class FieldRenderer:
             draw_groups=("object", "object_overlay"),
         )
         characters: list[tuple[int, FieldMovement, str, int, Any | None]] = [
-            (field.world_y, field, "player", 0, None)
+            (
+                field.world_y,
+                field,
+                "player",
+                player_sprite_index,
+                player_character_image,
+            )
         ]
         if actors is not None:
             if actors.map_data is not self.map_data:
@@ -109,7 +134,16 @@ class FieldRenderer:
         for _world_y, movement, kind, sprite_index, image in sorted(
             characters, key=lambda item: item[0]
         ):
-            if kind == "prop":
+            if kind == "player":
+                self._draw_player_character(
+                    movement,
+                    camera_x,
+                    camera_y,
+                    frame_count,
+                    image=image,
+                    sprite_index=sprite_index,
+                )
+            elif kind == "prop":
                 self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
             elif kind == "treasure":
                 actor = actors.actor_at(
@@ -250,7 +284,9 @@ class FieldRenderer:
         else:
             columns = image.width // (FIELD_CHARACTER_SIZE * 2)
             if columns <= 0:
-                raise ValueError("actor character sheet must be at least 32 pixels wide")
+                raise ValueError(
+                    "actor character sheet must be at least 32 pixels wide"
+                )
             block_x = (sprite_index % columns) * FIELD_CHARACTER_SIZE * 2
             block_y = (sprite_index // columns) * FIELD_CHARACTER_SIZE * 4
             if block_y + FIELD_CHARACTER_SIZE * 4 > image.height:
@@ -266,6 +302,66 @@ class FieldRenderer:
             source_y,
             FIELD_CHARACTER_SIZE,
             FIELD_CHARACTER_SIZE,
+            FIELD_CHARACTER_COLKEY,
+        )
+
+    def _draw_player_character(
+        self,
+        field: FieldMovement,
+        camera_x: int,
+        camera_y: int,
+        frame_count: int,
+        *,
+        image: Any | None,
+        sprite_index: int,
+    ) -> None:
+        if image is None:
+            self._draw_character(
+                field,
+                camera_x,
+                camera_y,
+                frame_count,
+            )
+            return
+        if isinstance(sprite_index, bool) or not isinstance(sprite_index, int):
+            raise TypeError("player sprite_index must be an integer")
+        if sprite_index < 0:
+            raise ValueError("player sprite_index must not be negative")
+
+        block_x = (
+            sprite_index % FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+        ) * FIELD_PLAYER_CHARACTER_SET_WIDTH
+        block_y = (
+            sprite_index // FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+        ) * FIELD_PLAYER_CHARACTER_SET_HEIGHT
+        if (
+            block_x + FIELD_PLAYER_CHARACTER_SET_WIDTH > image.width
+            or block_y + FIELD_PLAYER_CHARACTER_SET_HEIGHT > image.height
+        ):
+            raise ValueError("player sprite_index is outside the walking sheet")
+
+        frame = FIELD_PLAYER_CHARACTER_STANDING_FRAME
+        if field.is_moving or field.is_walking:
+            phase = (
+                (field.walking_frame_count - 1)
+                // FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL
+                % len(FIELD_PLAYER_CHARACTER_WALKING_FRAMES)
+            )
+            frame = FIELD_PLAYER_CHARACTER_WALKING_FRAMES[phase]
+        source_x = block_x + frame * FIELD_CHARACTER_SIZE
+        source_y = (
+            block_y
+            + FIELD_PLAYER_CHARACTER_FACING_ROWS[field.facing]
+            * FIELD_PLAYER_CHARACTER_HEIGHT
+        )
+        self._pyxel.blt(
+            field.world_x - camera_x,
+            field.world_y - camera_y - FIELD_CHARACTER_SIZE,
+            image,
+            source_x,
+            source_y,
+            FIELD_CHARACTER_SIZE,
+            FIELD_PLAYER_CHARACTER_HEIGHT,
             FIELD_CHARACTER_COLKEY,
         )
 
@@ -332,6 +428,16 @@ __all__ = [
     "FIELD_CHARACTER_SIZE",
     "FIELD_CHARACTER_SOURCE_X",
     "FIELD_CHARACTER_SOURCE_Y",
+    "FIELD_PLAYER_CHARACTER_ASSET_ID",
+    "FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL",
+    "FIELD_PLAYER_CHARACTER_FACING_ROWS",
+    "FIELD_PLAYER_CHARACTER_FRAME_COUNT",
+    "FIELD_PLAYER_CHARACTER_HEIGHT",
+    "FIELD_PLAYER_CHARACTER_SET_HEIGHT",
+    "FIELD_PLAYER_CHARACTER_SET_WIDTH",
+    "FIELD_PLAYER_CHARACTER_SETS_PER_ROW",
+    "FIELD_PLAYER_CHARACTER_STANDING_FRAME",
+    "FIELD_PLAYER_CHARACTER_WALKING_FRAMES",
     "FIELD_PROP_ASSET_ID",
     "FIELD_TREASURE_ASSET_ID",
     "FieldRenderer",

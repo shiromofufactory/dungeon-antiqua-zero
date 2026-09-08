@@ -75,6 +75,7 @@ class FieldMovement:
         self.offset_y = 0
         self._moving_direction: Direction | None = None
         self._moved_this_frame = False
+        self._walking_frame_count = 0
         self._arrived_position: FieldPosition | None = None
 
     @staticmethod
@@ -102,6 +103,10 @@ class FieldMovement:
     @property
     def is_walking(self) -> bool:
         return self._moved_this_frame
+
+    @property
+    def walking_frame_count(self) -> int:
+        return self._walking_frame_count
 
     @property
     def arrived_position(self) -> FieldPosition | None:
@@ -133,6 +138,7 @@ class FieldMovement:
         self.offset_y = 0
         self._moving_direction = None
         self._moved_this_frame = False
+        self._walking_frame_count = 0
         self._arrived_position = None
 
     def update(
@@ -153,6 +159,7 @@ class FieldMovement:
         self._arrived_position = None
         if self._moving_direction is None:
             if direction is None:
+                self._walking_frame_count = 0
                 return False
             self.facing = direction
             destination_x = self.position.x + direction.dx
@@ -160,6 +167,7 @@ class FieldMovement:
             if self.map_data.is_blocked(destination_x, destination_y) or FieldPosition(
                 destination_x, destination_y
             ) in blocked_positions:
+                self._walking_frame_count = 0
                 return False
             self._moving_direction = direction
 
@@ -167,6 +175,7 @@ class FieldMovement:
         self.offset_x += active.dx * self.speed
         self.offset_y += active.dy * self.speed
         self._moved_this_frame = True
+        self._walking_frame_count += 1
         reached_next_cell = (
             abs(self.offset_x) == self.map_data.tile_size
             or abs(self.offset_y) == self.map_data.tile_size

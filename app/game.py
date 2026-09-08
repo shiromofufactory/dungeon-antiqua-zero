@@ -84,6 +84,10 @@ from rendering import (
     FadePhase,
     FadeThroughBlack,
     FIELD_CHARACTER_ASSET_ID,
+    FIELD_PLAYER_CHARACTER_ASSET_ID,
+    FIELD_PLAYER_CHARACTER_SET_HEIGHT,
+    FIELD_PLAYER_CHARACTER_SET_WIDTH,
+    FIELD_PLAYER_CHARACTER_SETS_PER_ROW,
     FIELD_PROP_ASSET_ID,
     FIELD_TREASURE_ASSET_ID,
     FieldRenderer,
@@ -473,6 +477,7 @@ class Game:
         self.field_actors: FieldActors | None = None
         self.field_prop_image = None
         self.field_actor_character_image = None
+        self.field_player_character_image = None
         self.field_treasure_image = None
         self._reset_field_actors()
         self.event_runner: EventRunner | None = None
@@ -750,6 +755,7 @@ class Game:
             self.field_actors = None
             self.field_prop_image = None
             self.field_actor_character_image = None
+            self.field_player_character_image = None
             self.field_treasure_image = None
             return
         self.field_actors = FieldActors(
@@ -796,6 +802,41 @@ class Game:
                 )
             self.field_actor_character_image = self.images.image(
                 FIELD_CHARACTER_ASSET_ID
+            )
+        self.field_player_character_image = None
+        if self.current_map.profile in ("town", "dungeon"):
+            entry = self.images.entry(FIELD_PLAYER_CHARACTER_ASSET_ID)
+            minimum_width = (
+                FIELD_PLAYER_CHARACTER_SET_WIDTH
+                * FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+            )
+            if (
+                entry.width < minimum_width
+                or entry.width % FIELD_PLAYER_CHARACTER_SET_WIDTH
+                or entry.height % FIELD_PLAYER_CHARACTER_SET_HEIGHT
+            ):
+                raise ImageResourceError(
+                    f"{FIELD_PLAYER_CHARACTER_ASSET_ID}の寸法は幅{minimum_width}px以上の"
+                    f"{FIELD_PLAYER_CHARACTER_SET_WIDTH}px単位、高さ"
+                    f"{FIELD_PLAYER_CHARACTER_SET_HEIGHT}px単位である必要があります。"
+                )
+            sprite_index = self.party[0].definition.battle_sprite
+            source_x = (
+                sprite_index % FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+            ) * FIELD_PLAYER_CHARACTER_SET_WIDTH
+            source_y = (
+                sprite_index // FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+            ) * FIELD_PLAYER_CHARACTER_SET_HEIGHT
+            if (
+                source_x + FIELD_PLAYER_CHARACTER_SET_WIDTH > entry.width
+                or source_y + FIELD_PLAYER_CHARACTER_SET_HEIGHT > entry.height
+            ):
+                raise ImageResourceError(
+                    f"{FIELD_PLAYER_CHARACTER_ASSET_ID}に先頭キャラクターの"
+                    "battle_spriteが参照する画像セットがありません。"
+                )
+            self.field_player_character_image = self.images.image(
+                FIELD_PLAYER_CHARACTER_ASSET_ID
             )
         self.field_treasure_image = None
         if treasure_actors:
@@ -2507,6 +2548,8 @@ class Game:
                         actors=self.field_actors,
                         prop_image=self.field_prop_image,
                         actor_character_image=self.field_actor_character_image,
+                        player_character_image=self.field_player_character_image,
+                        player_sprite_index=self.party[0].definition.battle_sprite,
                         treasure_image=self.field_treasure_image,
                     )
                 else:

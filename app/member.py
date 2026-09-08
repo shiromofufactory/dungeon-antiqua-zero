@@ -522,6 +522,7 @@ class CharacterDefinition:
     race: Race
     gender: Gender
     face_position: FacePosition
+    battle_sprite: int
     level_difference: int
     base_hp: int
     base_mp: int
@@ -573,6 +574,12 @@ class CharacterDefinition:
             x=record.get("face_x"),
             y=record.get("face_y"),
         )
+        battle_sprite = _validate_integer_value(
+            "battle_sprite",
+            record.get("battle_sprite", 0),
+        )
+        if battle_sprite < 0:
+            raise MemberDataError("character.battle_sprite must not be negative")
         initial_skill_keys = _string_keys(record, "skills")
         initial_equipment_keys: dict[EquipmentSlot, str] = {}
         for slot, field_name in EQUIPMENT_RECORD_FIELDS.items():
@@ -587,6 +594,7 @@ class CharacterDefinition:
             race,
             gender,
             face_position,
+            battle_sprite,
             level_difference,
             base_hp,
             base_mp,

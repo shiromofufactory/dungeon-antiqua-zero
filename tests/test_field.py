@@ -13,6 +13,9 @@ from app.field import (
 from app.input import Direction
 from app.rendering.field import (
     FIELD_CHARACTER_ANIMATION_INTERVAL,
+    FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL,
+    FIELD_PLAYER_CHARACTER_SET_HEIGHT,
+    FIELD_PLAYER_CHARACTER_SET_WIDTH,
     FieldRenderer,
 )
 from app.resources.maps import (
@@ -345,6 +348,102 @@ class FieldRendererTest(unittest.TestCase):
 
         far_field = FieldMovement(map_data, start=FieldPosition(2, 2))
         self.assertEqual(renderer.camera_position(far_field), (16, 16))
+
+    def test_draws_interior_player_from_battle_sprite_walking_set(self) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="town")
+        field = FieldMovement(
+            map_data,
+            start=FieldPosition(1, 1),
+            facing=Direction.DOWN,
+        )
+        walking_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            player_character_image=walking_image,
+            player_sprite_index=10,
+        )
+
+        block_x = (10 % 8) * FIELD_PLAYER_CHARACTER_SET_WIDTH
+        block_y = (10 // 8) * FIELD_PLAYER_CHARACTER_SET_HEIGHT
+        self.assertEqual(
+            pyxel.blt.call_args_list[-1],
+            call(
+                8,
+                -8,
+                walking_image,
+                block_x + 16,
+                block_y,
+                16,
+                32,
+                1,
+            ),
+        )
+
+    def test_interior_player_uses_down_up_left_right_rows(
+        self,
+    ) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="dungeon")
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        walking_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        for direction, source_y in (
+            (Direction.DOWN, 0),
+            (Direction.UP, 32),
+            (Direction.LEFT, 64),
+            (Direction.RIGHT, 96),
+        ):
+            with self.subTest(direction=direction):
+                field.facing = direction
+                pyxel.blt.reset_mock()
+                renderer.draw(field, player_character_image=walking_image)
+                self.assertEqual(
+                    pyxel.blt.call_args_list[-1],
+                    call(8, -8, walking_image, 16, source_y, 16, 32, 1),
+                )
+
+    def test_interior_player_cycles_right_standing_left_standing_while_moving(
+        self,
+    ) -> None:
+        map_data = compiled_map(("0000", "0000", "0000"), profile="town")
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        walking_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        expected_frames = (32,) * 4 + (16,) * 4 + (0,) * 4 + (16,) * 4
+        self.assertEqual(FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL, 4)
+        for source_x in expected_frames:
+            field.update(Direction.RIGHT)
+            pyxel.blt.reset_mock()
+            renderer.draw(field, player_character_image=walking_image)
+            self.assertEqual(pyxel.blt.call_args_list[-1].args[3], source_x)
+
+        field.update(None)
+        pyxel.blt.reset_mock()
+        renderer.draw(field, player_character_image=walking_image)
+        self.assertFalse(field.is_moving)
+        self.assertEqual(field.walking_frame_count, 0)
+        self.assertEqual(pyxel.blt.call_args_list[-1].args[3], 16)
 
     def test_draws_foreground_objects_after_player(self) -> None:
         objects = (
