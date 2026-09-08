@@ -41,5 +41,6 @@
 - [ショップ](./shop.md)
 - [イベント](./events.md)
 - [攻撃ポーズ調整ツール](./attack-pose-editor.md)
+- [呪文エフェクト設定ツール](./spell-effect-editor.md)
 - [マップチップメタデータ設定ツール](./map-chip-metadata-tool.md)
 - [マップエディタ](./map-editor.md)

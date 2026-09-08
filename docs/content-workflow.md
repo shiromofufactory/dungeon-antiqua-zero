@@ -21,6 +21,7 @@
 - privateリポジトリ `shiromofufactory/dungeon-antiqua-zero-content` として独立した履歴を持つ。
 - `data/*.json` と、制作スタッフ向けの企画文書 `docs/da0.md` の正本を管理する。
 - ゲームとポータルで共有するPNG/GIF画像の正本を `images/` で管理する。
+- 呪文エフェクトの制作設定をSheets同期外の `effects/` で管理する。
 - タイルセットメタデータと制作用マップの正本を `maps/` で管理する。
 - 通常イベント、グローバルフラグ宣言、イベントメッセージの正本を `events/` で管理する。
 - JSONの検証、Google Sheetsとの同期、スタッフポータルの生成と配備を担当する。
@@ -53,6 +54,13 @@ Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象J
 共有リポジトリ images/**/*.{png,gif}
         ├──→ portal:build ──→ dist/images ──→ スタッフポータル
         └──→ images:build ──→ app/images ──→ Pyxelゲーム
+```
+
+呪文エフェクト設定もGoogle Sheetsとは同期せず、次の経路で利用する。
+
+```text
+共有リポジトリ effects/spells.json
+        └──→ spell effect compiler ──→ app/effects/spells.json ──→ Pyxelゲーム
 ```
 
 マップの空間データはGoogle Sheetsと同期せず、次の経路で利用する。
@@ -131,6 +139,21 @@ npm run images:build:force
 ```
 
 256×256を超える画像も入力できる。実行時にはmanifestから必要な矩形を読み、Scene開始時などに独立した `pyxel.Image` またはイメージバンクへ転送する。読み込みやバンク更新は `draw()` では行わない。フレーム分割とatlas生成は、具体的な画像仕様が決まった段階で同じビルド処理へ追加する。
+
+## 呪文エフェクト制作データとゲーム用データ生成
+
+`content/effects/spells.json`は呪文エフェクト設定ツールが編集する正本とし、
+Google Sheetsとの同期対象にしない。呪文の表示名、効果、対象範囲は従来どおり
+`content/data/spells.json`が所有し、描画画像、位置、フラッシュ色、SEの設定を混在させない。
+
+ゲーム用の`app/effects/spells.json`は、正本の保存時または非対話ビルド時に、呪文キー、
+画像範囲、パレット番号、SE IDを検証して生成する。ゲーム本体は`content/effects`を直接読まず、
+生成済みデータだけを読む。保存形式とツール操作は
+[`features/spell-effect-editor.md`](./features/spell-effect-editor.md)を参照する。
+
+呪文エフェクト設定ツールで未登録Soundへ安定IDを付けた場合は、ゲーム本体が直接読む
+`app/audio/catalog.json`へ追加する。Sound本体は`assets.pyxres`で管理し、ツールはnotes、tones、
+volumes、speedを変更しない。
 
 ## マップ制作データとゲーム用データ生成
 

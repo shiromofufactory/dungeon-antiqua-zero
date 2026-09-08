@@ -46,6 +46,7 @@ from .palette import (
     create_default_palette_shifter,
     mix_color,
 )
+from .spell_effect import SPELL_EFFECT_FLASH_PALETTE, SpellEffectRenderer
 
 
 __all__ = [
@@ -85,6 +86,8 @@ __all__ = [
     "MonsterDeathAnimation",
     "MonsterDeathPhase",
     "PaletteShifter",
+    "SPELL_EFFECT_FLASH_PALETTE",
+    "SpellEffectRenderer",
     "create_default_palette_shifter",
     "mix_color",
 ]

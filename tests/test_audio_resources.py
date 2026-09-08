@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -8,11 +9,15 @@ from unittest.mock import Mock
 
 from app.resources.audio import (
     BGM_VOLUME_GAINS,
+    SE_CATALOG,
     AudioResourceError,
     BgmPlayer,
     list_bgm_ids,
+    load_se_catalog,
     list_se_ids,
     play_se,
+    reload_se_catalog,
+    se_channel_and_sound,
 )
 
 
@@ -86,12 +91,39 @@ class BgmPlayerTest(unittest.TestCase):
         play_se("confirm", pyxel_api=pyxel)
 
         pyxel.play.assert_called_once_with(1, 9)
-        self.assertEqual(
-            list_se_ids(),
-            ("alert", "battle_hit", "confirm", "teleport", "treasure_open"),
+        self.assertTrue(
+            {"alert", "battle_hit", "confirm", "teleport", "treasure_open"}
+            <= set(list_se_ids())
         )
+        self.assertEqual(se_channel_and_sound("confirm"), (1, 9))
         with self.assertRaises(AudioResourceError):
             play_se("missing", pyxel_api=pyxel)
+        with self.assertRaises(AudioResourceError):
+            se_channel_and_sound("missing")
+
+    def test_reloads_edited_catalog_without_replacing_public_mapping(self) -> None:
+        path = self.audio_dir / "catalog.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "sound_effects": {
+                        "spell_fire1": {"channel": 0, "sound": 17},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        public_mapping = SE_CATALOG
+
+        try:
+            loaded = load_se_catalog(path)
+            reloaded = reload_se_catalog(path)
+            self.assertEqual(loaded["spell_fire1"], (0, 17))
+            self.assertIs(reloaded, public_mapping)
+            self.assertEqual(se_channel_and_sound("spell_fire1"), (0, 17))
+        finally:
+            reload_se_catalog()
 
     def test_loads_and_loops_bgm_on_dedicated_channel(self) -> None:
         player = BgmPlayer(

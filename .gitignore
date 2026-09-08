@@ -5,6 +5,7 @@ app/data/
 app/images/
 app/maps/
 app/events/
+app/effects/
 scripts/node_modules
 scripts/package-lock.json
 tmp

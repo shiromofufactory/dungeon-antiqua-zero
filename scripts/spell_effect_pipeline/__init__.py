@@ -1,0 +1,41 @@
+"""Authoring-time spell-effect validation and compilation helpers."""
+
+from .model import (
+    ImageCatalogEntry,
+    SpellCatalogEntry,
+    SpellEffectCatalogs,
+    SpellEffectDiagnostic,
+    SpellEffectSourceError,
+    atomic_write,
+    compile_document,
+    definitions_from_document,
+    initial_document,
+    json_bytes,
+    load_project_catalogs,
+    load_source,
+    save_compiled,
+    save_source_and_compiled,
+    source_document_from_definitions,
+    source_sha256,
+    validate_document,
+)
+
+__all__ = [
+    "ImageCatalogEntry",
+    "SpellCatalogEntry",
+    "SpellEffectCatalogs",
+    "SpellEffectDiagnostic",
+    "SpellEffectSourceError",
+    "atomic_write",
+    "compile_document",
+    "definitions_from_document",
+    "initial_document",
+    "json_bytes",
+    "load_project_catalogs",
+    "load_source",
+    "save_compiled",
+    "save_source_and_compiled",
+    "source_document_from_definitions",
+    "source_sha256",
+    "validate_document",
+]

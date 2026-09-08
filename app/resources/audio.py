@@ -19,7 +19,7 @@ class AudioResourceError(RuntimeError):
     """Raised when a BGM asset cannot be resolved or decoded."""
 
 
-def _load_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
+def load_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -48,7 +48,17 @@ def _load_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
     return MappingProxyType(loaded)
 
 
-SE_CATALOG = _load_se_catalog()
+_SE_CATALOG_DATA = dict(load_se_catalog())
+SE_CATALOG = MappingProxyType(_SE_CATALOG_DATA)
+
+
+def reload_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
+    """Reload edited SE mappings without replacing the public mapping object."""
+
+    loaded = load_se_catalog(path)
+    _SE_CATALOG_DATA.clear()
+    _SE_CATALOG_DATA.update(loaded)
+    return SE_CATALOG
 
 
 def list_bgm_ids(audio_dir: Path | None = None) -> tuple[str, ...]:
@@ -70,10 +80,16 @@ def list_se_ids() -> tuple[str, ...]:
     return tuple(SE_CATALOG)
 
 
-def play_se(se_id: str, *, pyxel_api: Any = pyxel) -> None:
+def se_channel_and_sound(se_id: str) -> tuple[int, int]:
+    """Resolve a stable SE ID to its Pyxel channel and Sound number."""
+
     if not isinstance(se_id, str) or se_id not in SE_CATALOG:
         raise AudioResourceError(f"未定義のSE IDです: {se_id}")
-    channel, sound = SE_CATALOG[se_id]
+    return SE_CATALOG[se_id]
+
+
+def play_se(se_id: str, *, pyxel_api: Any = pyxel) -> None:
+    channel, sound = se_channel_and_sound(se_id)
     try:
         pyxel_api.play(channel, sound)
     except (KeyboardInterrupt, SystemExit):
@@ -246,6 +262,9 @@ __all__ = [
     "BgmPlayer",
     "SE_CATALOG",
     "list_bgm_ids",
+    "load_se_catalog",
     "list_se_ids",
     "play_se",
+    "reload_se_catalog",
+    "se_channel_and_sound",
 ]

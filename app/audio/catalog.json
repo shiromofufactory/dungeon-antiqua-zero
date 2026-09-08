@@ -20,6 +20,30 @@
     "treasure_open": {
       "channel": 0,
       "sound": 25
+    },
+    "spell_fire1": {
+      "channel": 1,
+      "sound": 31
+    },
+    "spell_slow": {
+      "channel": 1,
+      "sound": 34
+    },
+    "spell_healing1": {
+      "channel": 1,
+      "sound": 9
+    },
+    "spell_protection": {
+      "channel": 1,
+      "sound": 38
+    },
+    "spell_poison1": {
+      "channel": 1,
+      "sound": 41
+    },
+    "spell_sleep": {
+      "channel": 1,
+      "sound": 16
     }
   }
 }

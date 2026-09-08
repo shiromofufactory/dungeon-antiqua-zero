@@ -427,6 +427,19 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 
 戦闘など未確定画面を試作する起点は `tools/screen_mocks/` に画面単位で置く。一方、仕様が確定して本編でも使う入力、状態、描画は `app/` のField、Renderer、Overlayまたは表示部品へ置き、`tools/` から本番部品へリソースと疑似状態を注入して確認する。確定済みのフィールド、メインメニュー、ステータス、呪文、アイテム、装備、ショップは `app/game.py` から接続し、ゲーム本体から `tools/` を参照しない。
 
+呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
+そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。
+制作設定の正本はGoogle Sheets同期外の`content/effects/spells.json`、ゲーム用生成物は
+`app/effects/spells.json`とし、呪文マスターの`content/data/spells.json`へ描画設定を混在させない。
+未登録Soundへ安定した`se_id`を付ける操作は同ツールに持たせ、ゲーム本体も参照する
+`app/audio/catalog.json`へ追加する。Sound自体の編集責務はPyxel Editorに残す。
+形式検証とゲーム用索引の生成はPyxel非依存にし、ツール保存と非対話ビルドから同じ処理を使う。
+経過フレームと画像パターンの計算は`app/spell_effect.py`、Pyxel画像と対象パレットの描画は
+`app/rendering/spell_effect.py`相当が所有し、将来のBattleSceneと設定ツールで共有する。
+`SpellEffectPlayer`は対象が味方か敵かを明示的に受け取り、定義に保存された対象側のOFFSETを選ぶ。
+画面構成、保存形式、通常エフェクトと特殊エフェクトの境界は
+[`features/spell-effect-editor.md`](./features/spell-effect-editor.md)を参照する。
+
 呪文マスターの文字列enum、習得レベル、表示名・説明の解釈は `app/spell.py` が所有する。
 レベル1から9の呪文はMemberの対応する元素・神聖・暗黒熟練度以下を習得済みとし、
 レベル0は通常成長から除外してイベント習得キーがある場合だけ習得済みとする。呪文メニューOverlayは

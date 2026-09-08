@@ -13,6 +13,35 @@
 - カレントディレクトリへ依存させず、リポジトリルートから `python3 -m tools.<module>` で起動する。
 - `pyxel package app ...` の対象へ `tools/` を含めない。
 
+## Spell Effect Editor
+
+通常の呪文エフェクトについて、32px／64px画像の行と使用パターン数、1パターンの
+ゲームフレーム数、味方・敵それぞれの対象位置補正、フラッシュ色、`se_id`を編集するPyxelツールである。
+本番と同じ60fps、画像、パレット、Pyxel Soundを使って、キャラクターまたはモンスターへ
+重ねた状態を確認できる。画像ストリップは下部の全幅に表示し、64px画像を8セル同時に比較できる。
+未登録Soundはキー、Sound番号、channelを登録・試聴し、ゲーム用SEカタログへ保存できる。詳細仕様は
+[`docs/features/spell-effect-editor.md`](../docs/features/spell-effect-editor.md)を参照する。
+
+```sh
+npm run spell-effect-editor
+```
+
+起動時に本番用画像を再生成する。画面では呪文やプレビュー対象を選び、右側のボタンで値を
+変更する。`PLAY`で先頭から再生、`PAUSE`で一時停止、`STEP`で1/60秒送り、`LOOP`で
+反復を切り替える。`TEST`は選択SEだけを鳴らす。`NEW SE`ではキーを入力し、上下キーで
+Sound番号、左右キーでchannelを変更して、登録前に試聴できる。`SAVE`または`Ctrl+S`で正本、
+ゲーム用生成物、追加したSEを保存する。`Q`または`Esc`で終了し、未保存変更があれば確認画面を表示する。
+`FLASH`行の`PICK`では、0番の黒と、2〜61番を4色単位の暗色〜明色に並べた一覧から選択する。
+`ALLY`／`ENEMY`を切り替えると、OFFSET欄は選択した対象側の値を編集する。
+
+画面を開かずに検証またはゲーム用データを再生成する場合は次を使う。未設定の戦闘用呪文は
+警告になるが、特殊エフェクトを本ツールの対象外にできるよう生成は妨げない。
+
+```sh
+npm run spell-effects:validate
+npm run spell-effects:build
+```
+
 ## Image Viewer
 
 生成済み画像を本番パレットで表示する。

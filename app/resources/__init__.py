@@ -6,8 +6,11 @@ from .audio import (
     AudioResourceError,
     BgmPlayer,
     list_bgm_ids,
+    load_se_catalog,
     list_se_ids,
     play_se,
+    reload_se_catalog,
+    se_channel_and_sound,
 )
 from .data import DataResourceError, load_record_array
 from .fonts import (
@@ -86,6 +89,9 @@ __all__ = [
     "WorldSite",
     "load_record_array",
     "list_bgm_ids",
+    "load_se_catalog",
     "list_se_ids",
     "play_se",
+    "reload_se_catalog",
+    "se_channel_and_sound",
 ]

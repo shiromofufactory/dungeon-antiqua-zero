@@ -11,10 +11,13 @@
     "audio-build": "python3 scripts/build-audio.py",
     "map-build": "python3 -B scripts/compile-maps.py",
     "events-build": "python3 -B scripts/compile-events.py",
+    "spell-effects:validate": "python3 -B scripts/compile-spell-effects.py --validate-only",
+    "spell-effects:build": "python3 -B scripts/compile-spell-effects.py",
     "pyxel-edit": "pyxel edit app/assets",
     "editor": "python3 -B -m tools.editor",
     "mock-battle": "python3 -B -m tools.screen_mocks.battle",
-    "attack-pose-editor": "python3 -B -m tools.attack_pose_editor"
+    "attack-pose-editor": "python3 -B -m tools.attack_pose_editor",
+    "spell-effect-editor": "npm run image-build && python3 -B -m tools.spell_effect_editor"
   },
   "engines": {
     "node": ">=20"
