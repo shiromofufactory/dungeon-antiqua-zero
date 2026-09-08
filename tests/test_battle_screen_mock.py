@@ -58,6 +58,9 @@ from tools.screen_mocks.battle import (
     TIMELINE_ENTRANCE_COMPLETE_FRAME,
     TIMELINE_ENTRANCE_FRAME_COUNT,
     TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT,
+    TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT,
+    TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT,
+    TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT,
     TIMELINE_VISIBLE_ENTRY_COUNT,
     UNSELECTABLE_TARGET_PALETTE,
     UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
@@ -68,6 +71,11 @@ from tools.screen_mocks.battle import (
     selectable_attack_target_indexes,
 )
 from battle_commands import BattleCommand, BattleCommandOption
+from battle_timeline import (
+    TimelineEntry,
+    TimelineOrder,
+    complete_timeline_action,
+)
 from localization import Localizer
 from member import EquipmentSlot
 from state import Language
@@ -189,6 +197,10 @@ class BattleScreenMockTest(unittest.TestCase):
             patch("tools.screen_mocks.battle.ImageResources") as images,
             patch("tools.screen_mocks.battle.FontResources") as fonts,
             patch("tools.screen_mocks.battle.WindowFactory") as windows,
+            patch(
+                "battle_timeline.random.uniform",
+                side_effect=(2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+            ),
             patch("tools.screen_mocks.battle.pyxel.run"),
         ):
             images.return_value.entry.return_value = SimpleNamespace(
@@ -276,7 +288,12 @@ class BattleScreenMockTest(unittest.TestCase):
             BATTLE_MOCK_MONSTER_KEYS,
         )
         self.assertTrue(all(monster.state.hp == 2 for monster in mock.monsters))
+        self.assertTrue(all(monster.agility == 12 for monster in mock.monsters))
         self.assertEqual(mock.timeline, mock.party_visuals + mock.monsters)
+        self.assertEqual(
+            tuple(entry.gauge for entry in mock._timeline_order.entries),
+            (64.0, 58.0, 56.0, 26.0, 26.0, 26.0, 26.0, 26.0),
+        )
         self.assertEqual(
             mock.inventory_system.catalog_count,
             len(load_mock_items()),
@@ -316,6 +333,8 @@ class BattleScreenMockTest(unittest.TestCase):
             [False, False, True, True, True],
         )
         self.assertEqual(member_attack_reach(mock.party[0]), 1)
+        self.assertIsNone(mock.active_party_index)
+        mock.active_party_index = 0
         self.assertEqual(mock._active_member_attack_targets(), (2, 3, 4))
         mock.active_party_index = 1
         self.assertEqual(mock._active_member_attack_targets(), (0, 1, 2, 3, 4))
@@ -372,7 +391,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._update_entrance_animation.assert_called_once_with()
         mock.command_window.open.assert_not_called()
 
-    def test_entrance_fades_in_then_opens_first_command_turn(self) -> None:
+    def test_entrance_fades_in_then_activates_first_timeline_actor(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.ENTRANCE
         mock.entrance_animation_frame = 0
@@ -381,6 +400,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.command_cursor = Mock(active=False)
         mock.command_window = Mock()
+        mock._activate_timeline_head = Mock()
 
         for _frame in range(DEFAULT_FADE_FRAME_COUNT):
             mock._update_entrance_animation()
@@ -401,9 +421,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock.entrance_animation_frame,
             BATTLE_ENTRANCE_FRAME_COUNT,
         )
-        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
-        self.assertTrue(mock.command_cursor.active)
-        mock.command_window.open.assert_called_once_with()
+        mock._activate_timeline_head.assert_called_once_with()
 
     def test_party_sprites_use_formation_and_defense_source_images(self) -> None:
         self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 7)
@@ -720,6 +738,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 icon_y=16,
                 is_front_row=True,
                 state=MonsterBattleState(max_hp=2),
+                agility=12,
             )
             for index in range(5)
         )
@@ -731,6 +750,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.monsters = monsters
         actor = object()
         mock.timeline = (actor, *monsters)
+        mock._timeline_order = TimelineOrder(
+            tuple(
+                TimelineEntry(entry, 10, 64.0 - index)
+                for index, entry in enumerate(mock.timeline)
+            )
+        )
         mock.phase = BattleMockPhase.TARGET
         mock.selected_command = "attack"
         mock.selectable_target_indexes = (2, 3, 4)
@@ -778,6 +803,7 @@ class BattleScreenMockTest(unittest.TestCase):
             icon_y=16,
             is_front_row=True,
             state=MonsterBattleState(max_hp=2),
+            agility=12,
         )
         monster.state.defeat()
         animation = MonsterDeathAnimation()
@@ -832,6 +858,7 @@ class BattleScreenMockTest(unittest.TestCase):
             icon_y=0,
             is_front_row=False,
             state=MonsterBattleState(max_hp=2),
+            agility=12,
         )
         front_monster = BattleMockMonster(
             key="front",
@@ -843,6 +870,7 @@ class BattleScreenMockTest(unittest.TestCase):
             icon_y=0,
             is_front_row=True,
             state=MonsterBattleState(max_hp=2),
+            agility=12,
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = (rear_monster, front_monster)
@@ -875,6 +903,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 icon_y=0,
                 is_front_row=False,
                 state=MonsterBattleState(max_hp=2),
+                agility=12,
             ),
             BattleMockMonster(
                 key="front",
@@ -886,6 +915,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 icon_y=0,
                 is_front_row=True,
                 state=MonsterBattleState(max_hp=2),
+                agility=12,
             ),
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -919,16 +949,22 @@ class BattleScreenMockTest(unittest.TestCase):
             confirm=InputButton(triggered=True, held=True)
         )
         mock.command_cursor = Mock()
-        mock.command_cursor.selected_key = "hide"
+        mock.command_cursor.selected_key = BattleCommand.HIDE
         mock.command_window = Mock()
         mock.command_window.is_closed = False
         mock.command_window.is_open = True
         mock.selected_command = None
+        mock.active_party_index = 1
+        mock.last_command_by_party_index = {}
         mock._complete_current_turn = Mock()
 
         mock.update()
 
-        self.assertEqual(mock.selected_command, "hide")
+        self.assertEqual(mock.selected_command, BattleCommand.HIDE)
+        self.assertEqual(
+            mock.last_command_by_party_index,
+            {1: BattleCommand.HIDE},
+        )
         mock._complete_current_turn.assert_called_once_with()
 
     def test_item_command_opens_item_selection_instead_of_completing_turn(self) -> None:
@@ -1093,7 +1129,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.spell_type = mock.spell_candidates[0].type
         mock._refresh_spell_guide = Mock()
 
-        mock._refresh_spell_options()
+        mock._refresh_spell_options(preferred_key="FIRE1")
 
         self.assertEqual(SPELL_WINDOW_GRID, (36, 0, 28, 16))
         self.assertEqual(mock.spell_window.add_text.call_count, 1)
@@ -1101,6 +1137,9 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             [(target.x, target.y, target.key) for target in targets],
             [(2, 2, "FIRE1")],
+        )
+        mock.spell_window.set_cursor.return_value.select_key.assert_called_once_with(
+            "FIRE1"
         )
 
     def test_left_and_right_switch_the_displayed_spell_school(self) -> None:
@@ -1190,11 +1229,13 @@ class BattleScreenMockTest(unittest.TestCase):
         spell = load_mock_spells()["FIRE1"]
         mock.spell_candidates = (spell,)
         mock.spell_cursor = Mock(selected_key=spell.key)
+        mock.last_spell_key_by_party_index = {}
         mock._begin_action_target_selection = Mock(return_value=True)
         before_mp = mock.party[0].mp
 
         self.assertTrue(mock._use_selected_spell())
         self.assertEqual(mock.party[0].mp, before_mp)
+        self.assertEqual(mock.last_spell_key_by_party_index, {0: spell.key})
         mock._begin_action_target_selection.assert_called_once_with(spell)
 
     def test_using_a_breaking_consumable_starts_target_selection_before_removal(self) -> None:
@@ -1208,10 +1249,15 @@ class BattleScreenMockTest(unittest.TestCase):
         from systems import InventorySystem
 
         mock.inventory_system = InventorySystem.with_one_each(items)
+        mock.last_item_selection_by_party_index = {}
         mock._begin_action_target_selection = Mock(return_value=True)
 
         self.assertTrue(mock._use_selected_item())
         self.assertEqual(mock.inventory_system.quantity(potion), 1)
+        self.assertEqual(
+            mock.last_item_selection_by_party_index,
+            {0: (potion.key, None)},
+        )
         mock._begin_action_target_selection.assert_called_once_with(
             mock.spells[potion.use_spell_key],
             item_candidate=mock.item_candidates[0],
@@ -1434,131 +1480,48 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.bgm.stop.assert_called_once_with()
         mock.bgm.play.assert_called_once_with(BATTLE_BGM_ID)
 
-    def test_timeline_cycles_through_every_combatant_and_returns_actor_to_tail(
+    def test_timeline_animation_finishes_interrupt_then_readies_new_head(
         self,
     ) -> None:
+        actors = tuple(SimpleNamespace(agility=50) for _ in range(7))
+        order = TimelineOrder(
+            tuple(
+                TimelineEntry(actor, 50, gauge)
+                for actor, gauge in zip(actors, (64, 58, 52, 44, 38, 32, 26))
+            )
+        )
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        members = tuple(
-            SimpleNamespace(definition=SimpleNamespace(key=key))
-            for key in BATTLE_MOCK_PARTY_CHARACTER_KEYS
+        mock._timeline_order = order
+        mock.timeline = order.actors
+        mock.timeline_advance = complete_timeline_action(
+            order,
+            current_agility=50,
+            visible_count=TIMELINE_VISIBLE_ENTRY_COUNT,
         )
-        mock.party_visuals = tuple(
-            BattleMockCharacter(member, index * 16, 0, index)
-            for index, member in enumerate(members)
-        )
-        monsters = tuple(
-            BattleMockMonster(
-                key=key,
-                names={},
-                image_id=f"n-{index + 1}",
-                width=64,
-                height=64,
-                icon_x=128 if key == "Giant Spider" else 224,
-                icon_y=16,
-                is_front_row=key == "Coyote",
-                state=MonsterBattleState(max_hp=2),
-            )
-            for index, key in enumerate(BATTLE_MOCK_MONSTER_KEYS)
-        )
-        mock.monsters = monsters
-        initial_timeline = mock.party_visuals + monsters
-        mock.timeline = initial_timeline
-        mock.active_party_index = 0
-        mock.phase = BattleMockPhase.INITIAL
-        mock.command_cursor = SimpleNamespace(active=True)
+        mock.timeline_animation_phase = TimelineAnimationPhase.DROP
+        mock.timeline_animation_frame = 0
         mock.command_window = Mock()
-        mock.blinking_monster_index = None
-        mock.monster_blink_frames_remaining = 0
-        mock.defending_party_indexes = set()
-        mock._refresh_command_options = Mock()
-        mock.party_status_windows = [Mock() for _ in members]
-        for window in mock.party_status_windows:
-            window.add_text.side_effect = (
-                lambda text, x, y, **kwargs: WindowText(text, x, y, **kwargs)
-            )
-        mock.party_status_texts = [
-            (WindowText(key, 0, 0, color=4), WindowText("ＨＰ", 0, 4, color=4))
-            for key in BATTLE_MOCK_PARTY_CHARACTER_KEYS
-        ]
+        mock._activate_timeline_head = Mock()
 
-        for expected_index in range(1, len(members)):
-            mock._advance_timeline()
-            self.assertIs(mock.timeline[0], mock.party_visuals[expected_index])
-            self.assertEqual(mock.active_party_index, expected_index)
-            self.assertIs(mock.phase, BattleMockPhase.COMMAND)
-            self.assertEqual(
-                [texts[0].color for texts in mock.party_status_texts],
-                [
-                    5 if index == expected_index else 4
-                    for index in range(len(members))
-                ],
-            )
+        for _frame in range(TIMELINE_ANIMATION_FRAME_COUNT + 1):
+            mock._update_timeline_animation()
+        self.assertIs(mock.timeline_animation_phase, TimelineAnimationPhase.SLIDE)
 
-        mock._advance_timeline()
-
-        self.assertIs(mock.timeline[0], monsters[0])
-        self.assertIs(mock.timeline[-1], mock.party_visuals[-1])
-        self.assertEqual(mock.command_window.open.call_count, len(members) - 1)
-        self.assertIsNone(mock.active_party_index)
-        self.assertIs(mock.phase, BattleMockPhase.MONSTER_ACTION)
-        self.assertEqual(mock.blinking_monster_index, 0)
-        self.assertEqual(
-            mock.monster_blink_frames_remaining,
-            MONSTER_BLINK_FRAME_COUNT,
-        )
-        self.assertEqual(
-            [texts[0].color for texts in mock.party_status_texts],
-            [4, 4, 4],
-        )
-        mock.command_window.close_immediately.assert_called_once_with()
-
-        for _ in range(MONSTER_BLINK_FRAME_COUNT - 1):
-            mock._update_monster_action()
-        self.assertIs(mock.phase, BattleMockPhase.MONSTER_ACTION)
-        self.assertEqual(mock.monster_blink_frames_remaining, 1)
-
-        mock._update_monster_action()
-
-        self.assertIs(mock.phase, BattleMockPhase.TIMELINE)
+        for _frame in range(TIMELINE_ANIMATION_FRAME_COUNT + 1):
+            mock._update_timeline_animation()
         self.assertIs(
             mock.timeline_animation_phase,
-            TimelineAnimationPhase.DROP,
+            TimelineAnimationPhase.INTERRUPT,
         )
-        for _ in range(2 * (TIMELINE_ANIMATION_FRAME_COUNT + 1)):
+
+        interrupt_frames = mock._timeline_interrupt_frame_count()
+        for _frame in range(interrupt_frames + 1):
             mock._update_timeline_animation()
 
-        self.assertIs(mock.timeline[0], monsters[1])
-        self.assertIs(mock.timeline[-1], monsters[0])
-        self.assertEqual(mock.blinking_monster_index, 1)
-
-        for expected_monster_index in range(2, len(monsters)):
-            completed_actor = mock.timeline[0]
-            mock._advance_timeline()
-            self.assertIs(mock.timeline[0], monsters[expected_monster_index])
-            self.assertIs(mock.timeline[-1], completed_actor)
-            self.assertEqual(
-                mock.blinking_monster_index,
-                expected_monster_index,
-            )
-
-        completed_actor = mock.timeline[0]
-        mock._advance_timeline()
-
-        self.assertIs(mock.timeline[0], mock.party_visuals[0])
-        self.assertIs(mock.timeline[-1], completed_actor)
-        self.assertEqual(mock.timeline, initial_timeline)
-        self.assertEqual(mock.active_party_index, 0)
-        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
-        self.assertEqual(mock.command_window.open.call_count, len(members))
-        self.assertEqual(
-            mock.command_window.close_immediately.call_count,
-            len(monsters) + 1,
-        )
-        self.assertIsNone(mock.blinking_monster_index)
-        self.assertEqual(
-            [texts[0].color for texts in mock.party_status_texts],
-            [5, 4, 4],
-        )
+        self.assertIsNone(mock.timeline_animation_phase)
+        self.assertEqual(mock.timeline, (actors[1], actors[2], actors[0], *actors[3:]))
+        self.assertEqual(mock._timeline_order.entries[0].gauge, 64.0)
+        mock._activate_timeline_head.assert_called_once_with()
 
     def test_active_member_draws_with_the_whiteward_pulse_palette(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -1633,6 +1596,17 @@ class BattleScreenMockTest(unittest.TestCase):
             SimpleNamespace(icon_x=index * 16, icon_y=0)
             for index in range(8)
         )
+        order = TimelineOrder(
+            tuple(
+                TimelineEntry(entry, 10, 64.0 - index * 4)
+                for index, entry in enumerate(mock.timeline)
+            )
+        )
+        mock.timeline_advance = complete_timeline_action(
+            order,
+            current_agility=10,
+            visible_count=TIMELINE_VISIBLE_ENTRY_COUNT,
+        )
         mock.timeline_animation_phase = TimelineAnimationPhase.DROP
         mock.timeline_animation_frame = TIMELINE_ANIMATION_FRAME_COUNT // 2
 
@@ -1668,6 +1642,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(blt.call_args_list[-1].args[3], 96)
 
         mock.timeline_animation_phase = None
+        mock.timeline = mock.timeline_advance.after.actors
         with (
             patch("tools.screen_mocks.battle.pyxel.blt") as blt,
             patch("tools.screen_mocks.battle.pyxel.rect"),
@@ -1679,6 +1654,78 @@ class BattleScreenMockTest(unittest.TestCase):
             [(70 + index * 20, 220) for index in range(6)],
         )
         self.assertEqual(len(blt.call_args_list), TIMELINE_VISIBLE_ENTRY_COUNT + 1)
+
+    def test_timeline_interrupt_cascades_by_collision_and_drops_overflow(self) -> None:
+        actors = tuple(
+            SimpleNamespace(icon_x=index * 16, icon_y=0)
+            for index in range(7)
+        )
+        order = TimelineOrder(
+            tuple(
+                TimelineEntry(actor, 50, gauge)
+                for actor, gauge in zip(actors, (64, 58, 52, 44, 38, 32, 26))
+            )
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.timeline_advance = complete_timeline_action(
+            order,
+            current_agility=50,
+            visible_count=TIMELINE_VISIBLE_ENTRY_COUNT,
+        )
+        mock.phase = BattleMockPhase.TIMELINE
+        mock.timeline_animation_phase = TimelineAnimationPhase.INTERRUPT
+
+        first_collision_frame = mock._timeline_interrupt_collision_frame(2)
+        self.assertEqual(first_collision_frame, 1)
+        mock.timeline_animation_frame = first_collision_frame + 1
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.rect"),
+        ):
+            mock._draw_timeline()
+
+        # The first displaced icon has moved far enough for its 16x16 rectangle
+        # to overlap the next icon; that neighbor begins moving on the next frame.
+        self.assertEqual(blt.call_args_list[2].args[:2], (115, 220))
+        self.assertEqual(blt.call_args_list[3].args[:2], (130, 220))
+
+        mock.timeline_animation_frame = mock._timeline_interrupt_frame_count()
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.rect"),
+        ):
+            mock._draw_timeline()
+
+        self.assertEqual(
+            [draw_call.args[:2] for draw_call in blt.call_args_list],
+            [
+                (70, 220),
+                (90, 220),
+                (130, 220),
+                (150, 220),
+                (170, 220),
+                (SCREEN_WIDTH + 16, SCREEN_HEIGHT + 16),
+                (110, 220),
+            ],
+        )
+        self.assertEqual(
+            mock._timeline_interrupt_frame_count(),
+            first_collision_frame
+            + 3
+            + TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT,
+        )
+        self.assertEqual(TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT, 4)
+        self.assertEqual(TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT, 4)
+
+    def test_timeline_collision_uses_overlapping_sixteen_pixel_rectangles(
+        self,
+    ) -> None:
+        collision = BattleScreenMock._timeline_icons_collide
+
+        self.assertFalse(collision(70, 220, 86, 220))
+        self.assertTrue(collision(70, 220, 85, 220))
+        self.assertFalse(collision(70, 220, 70, 236))
+        self.assertTrue(collision(70, 220, 70, 235))
 
     def test_timeline_enters_from_right_with_two_frame_stagger(self) -> None:
         self.assertEqual(TIMELINE_ENTRANCE_FRAME_COUNT, 10)
@@ -2263,6 +2310,80 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._select_initial_member_command()
 
         mock.command_cursor.select_key.assert_called_once_with(BattleCommand.DEFEND)
+
+    def test_member_command_memory_is_restored_and_formation_clears_it(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (object(), object())
+        mock.active_party_index = 1
+        mock.command_cursor = Mock()
+        mock.last_command_by_party_index = {1: BattleCommand.SPELL}
+        mock._active_member_command_options = Mock(
+            return_value=(
+                BattleCommandOption(BattleCommand.ATTACK),
+                BattleCommandOption(BattleCommand.SPELL),
+                BattleCommandOption(BattleCommand.DEFEND),
+            )
+        )
+
+        mock._select_initial_member_command()
+
+        mock.command_cursor.select_key.assert_called_once_with(BattleCommand.SPELL)
+
+        mock.command_cursor.select_key.reset_mock()
+        mock._remember_active_command(BattleCommand.FORMATION)
+        mock._select_initial_member_command()
+
+        self.assertEqual(mock.last_command_by_party_index, {})
+        mock.command_cursor.select_key.assert_not_called()
+
+    def test_item_selection_restores_the_active_members_last_item(self) -> None:
+        items = load_mock_items()
+        candidates = tuple(
+            BattleItemCandidate(items[key])
+            for key in ("POTION", "REMEDY", "MANA DROP", "PANACEA")
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 1
+        mock.last_item_selection_by_party_index = {1: ("PANACEA", None)}
+        mock._active_member_item_candidates = Mock(return_value=candidates)
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.item_window = Mock()
+        mock._hide_command_guide = Mock()
+        mock._refresh_item_options = Mock()
+
+        self.assertTrue(mock._begin_item_selection())
+
+        self.assertEqual(mock.selected_item_index, 3)
+        self.assertEqual(mock.item_scroll_offset, 1)
+
+    def test_spell_selection_restores_the_active_members_last_spell(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        remembered_spell = load_mock_spells()["HEALING1"]
+        mock.last_spell_key_by_party_index = {0: remembered_spell.key}
+        mock._active_member_spell_candidates = Mock(
+            return_value=(load_mock_spells()["FIRE1"], remembered_spell)
+        )
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.spell_window = Mock()
+        mock._hide_command_guide = Mock()
+        mock._refresh_spell_options = Mock()
+
+        self.assertTrue(mock._begin_spell_selection())
+
+        self.assertIs(mock.spell_type, remembered_spell.type)
+        mock._refresh_spell_options.assert_called_once_with(
+            preferred_key=remembered_spell.key
+        )
 
     def test_escape_confirmation_closes_command_and_defaults_to_yes(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

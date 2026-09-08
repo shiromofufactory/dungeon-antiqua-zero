@@ -34,6 +34,14 @@ from battle_commands import (
     resolve_battle_commands,
     selectable_attack_target_indexes,
 )
+from battle_timeline import (
+    TimelineAdvance,
+    TimelineOrder,
+    complete_timeline_action,
+    initialize_timeline_order,
+    ready_timeline_head,
+    remove_timeline_actor,
+)
 from item import Item, ItemEquipType
 from localization import Localizer, ascii_to_fullwidth
 from member import (
@@ -106,13 +114,19 @@ ACTIVE_PARTY_PULSE_MIN_BASE_RATE = 0.5
 ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT = 90
 ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT // 2
 MONSTER_POSITIONS = ((4, 56), (4, 120), (68, 24), (68, 88), (68, 152))
-TIMELINE_BASE_X = 70
+TIMELINE_BASE_X = 68
 TIMELINE_BASE_Y = 220
 TIMELINE_SLOT_SPACING = 20
+TIMELINE_ICON_SIZE = 16
 TIMELINE_VISIBLE_ENTRY_COUNT = 6
 TIMELINE_ANIMATION_FRAME_COUNT = 8
 TIMELINE_DROP_DISTANCE = SCREEN_HEIGHT - TIMELINE_BASE_Y
 TIMELINE_INCOMING_START_X = SCREEN_WIDTH
+TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT = 4
+TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT = 4
+TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT = 10
+TIMELINE_INTERRUPT_OVERFLOW_JUMP_HEIGHT = 18
+TIMELINE_INTERRUPT_OVERFLOW_DESTINATION_X = SCREEN_WIDTH + 16
 ESCAPE_MESSAGE_WINDOW_GRID = (0, 0, 64, 7)
 ESCAPE_MESSAGE_TEXT_POSITION = (2, 2)
 ESCAPE_CHOICE_WINDOW_GRID = (52, 0, 12, 10)
@@ -194,7 +208,7 @@ FORMATION_MOVE_FRAME_COUNT = 8
 FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 COMMAND_GUIDE_DELAY_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
-DEFEND_SPRITE_SOURCE_X = 16 * 7
+DEFEND_SPRITE_SOURCE_X = 16 * 6
 COMMAND_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.command.attack",
     BattleCommand.SPELL: "battle.command.spell",
@@ -297,10 +311,11 @@ class BattleGlobalCommand(StrEnum):
 
 
 class TimelineAnimationPhase(StrEnum):
-    """Two-stage movement between battle turns."""
+    """Movement stages between battle turns."""
 
     DROP = "drop"
     SLIDE = "slide"
+    INTERRUPT = "interrupt"
 
 
 def _required_text(record: Mapping[str, object], field: str, label: str) -> str:
@@ -362,6 +377,12 @@ class BattleMockCharacter:
     def display_name(self, localizer: Localizer) -> str:
         return self.member.definition.localized_name(localizer)
 
+    @property
+    def agility(self) -> int:
+        """Return the member's current equipment-adjusted agility."""
+
+        return self.member.adjusted_abilities.agility
+
 
 @dataclass
 class BattleMockMonster:
@@ -376,6 +397,7 @@ class BattleMockMonster:
     icon_y: int
     is_front_row: bool
     state: MonsterBattleState
+    agility: int
     initial_is_front_row: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -409,6 +431,7 @@ class BattleMockMonster:
             icon_y=_required_nonnegative_integer(record, "icon_y", key),
             is_front_row=is_front_row,
             state=MonsterBattleState.from_record(record),
+            agility=_required_nonnegative_integer(record, "agi", key),
         )
 
     @property
@@ -541,10 +564,10 @@ class BattleScreenMock:
             monster.key: resources.image(monster.image_resource_id)
             for monster in self.monsters
         }
-        # The mock starts with its three party members, followed by all five monsters.
-        # Rotating this tuple makes the first entry the single source of truth
-        # for the current actor and the leftmost timeline icon.
-        self.timeline = self.party_visuals + self.monsters
+        self._timeline_order: TimelineOrder[BattleMockCharacter | BattleMockMonster] = (
+            TimelineOrder(())
+        )
+        self.timeline: tuple[BattleMockCharacter | BattleMockMonster, ...] = ()
         fonts = FontResources()
         windows = WindowFactory(fonts.font_for(settings.language))
         font_6x8 = fonts.font_for(Language.ENGLISH)
@@ -685,6 +708,9 @@ class BattleScreenMock:
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
         self.timeline_animation_frame = 0
+        self.timeline_advance: (
+            TimelineAdvance[BattleMockCharacter | BattleMockMonster] | None
+        ) = None
         self.formation_animation_frame = 0
         self.formation_actor_index: int | None = None
         self.formation_start_x = 0
@@ -720,6 +746,11 @@ class BattleScreenMock:
         self.spell_scroll_offset = 0
         self.spell_type = SpellType.MYSTIC
         self.spell_cursor: WindowCursor | None = None
+        self.last_command_by_party_index: dict[int, BattleCommand] = {}
+        self.last_spell_key_by_party_index: dict[int, str] = {}
+        self.last_item_selection_by_party_index: dict[
+            int, tuple[str, EquipmentSlot | None]
+        ] = {}
         self.defending_party_indexes: set[int] = set()
         self.escaping_party_indexes: set[int] = set()
         self.windows = [
@@ -838,6 +869,8 @@ class BattleScreenMock:
                 self.command_window.open()
             elif self.command_window.is_open:
                 command = self.command_cursor.selected_key
+                if isinstance(command, BattleCommand):
+                    self._remember_active_command(command)
                 if command == BattleCommand.ATTACK:
                     self._begin_attack_target_selection()
                 elif command == BattleCommand.SPELL:
@@ -888,15 +921,22 @@ class BattleScreenMock:
             member.fully_recover()
         for monster in self.monsters:
             monster.restore()
-        self.timeline = self.party_visuals + self.monsters
+        self._timeline_order = initialize_timeline_order(
+            tuple(
+                (entry, entry.agility)
+                for entry in (*self.party_visuals, *self.monsters)
+            )
+        )
+        self.timeline = self._timeline_order.actors
         self.phase = BattleMockPhase.ENTRANCE
-        self.active_party_index = 0
+        self.active_party_index = None
         self.active_party_pulse_frame = 0
         self._sync_active_party_pulse_palette()
         self.blinking_monster_index = None
         self.monster_blink_frames_remaining = 0
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
+        self.timeline_advance = None
         self.formation_animation_frame = 0
         self.formation_actor_index = None
         self.formation_start_x = 0
@@ -921,6 +961,9 @@ class BattleScreenMock:
         self.spell_scroll_offset = 0
         self.spell_type = SpellType.MYSTIC
         self.spell_cursor = None
+        self.last_command_by_party_index.clear()
+        self.last_spell_key_by_party_index.clear()
+        self.last_item_selection_by_party_index.clear()
         self.selectable_party_target_indexes = ()
         self.selected_party_target_index = None
         self.action_targets_enemy = False
@@ -978,11 +1021,7 @@ class BattleScreenMock:
         self.entrance_animation_frame += 1
         if self.entrance_animation_frame >= BATTLE_ENTRANCE_FRAME_COUNT:
             self.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT
-            self.phase = BattleMockPhase.COMMAND
-            self.command_cursor.active = True
-            self._select_initial_member_command()
-            self.command_window.open()
-            self._refresh_input_guide()
+            self._activate_timeline_head()
 
     def _open_global_command_menu(self) -> None:
         """Replace the active member's command list with party-wide commands."""
@@ -1301,6 +1340,42 @@ class BattleScreenMock:
             return None
         return self.item_candidates[self.selected_item_index]
 
+    def _remember_active_item(self, candidate: BattleItemCandidate) -> None:
+        """Keep one member's last confirmed item by stable item and slot keys."""
+
+        if self.active_party_index is None:
+            return
+        selections = getattr(self, "last_item_selection_by_party_index", None)
+        if selections is None:
+            selections = {}
+            self.last_item_selection_by_party_index = selections
+        selections[self.active_party_index] = (
+            candidate.item.key,
+            candidate.equipment_slot,
+        )
+
+    def _remembered_item_index(
+        self,
+        candidates: tuple[BattleItemCandidate, ...],
+    ) -> int | None:
+        """Find the active member's last item when it remains usable."""
+
+        if self.active_party_index is None:
+            return None
+        selection = getattr(self, "last_item_selection_by_party_index", {}).get(
+            self.active_party_index
+        )
+        if selection is None:
+            return None
+        return next(
+            (
+                index
+                for index, candidate in enumerate(candidates)
+                if (candidate.item.key, candidate.equipment_slot) == selection
+            ),
+            None,
+        )
+
     def _begin_item_selection(self) -> bool:
         """Replace the command contents with the current actor's item list."""
 
@@ -1310,8 +1385,12 @@ class BattleScreenMock:
         self.phase = BattleMockPhase.ITEM
         self.selected_command = BattleCommand.ITEM
         self.item_candidates = candidates
-        self.selected_item_index = 0
-        self.item_scroll_offset = 0
+        remembered_index = self._remembered_item_index(candidates)
+        self.selected_item_index = 0 if remembered_index is None else remembered_index
+        self.item_scroll_offset = min(
+            self.selected_item_index,
+            max(0, len(candidates) - ITEM_VISIBLE_COUNT),
+        )
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.item_window.open_immediately()
@@ -1449,10 +1528,13 @@ class BattleScreenMock:
         spell = self.spells.get(item.use_spell_key)
         if spell is None:
             return False
-        return self._begin_action_target_selection(
+        started = self._begin_action_target_selection(
             spell,
             item_candidate=candidate,
         )
+        if started:
+            self._remember_active_item(candidate)
+        return started
 
     def _active_member_spell_candidates(self) -> tuple[Spell, ...]:
         """Return the active member's learned spells that work in battle."""
@@ -1497,30 +1579,43 @@ class BattleScreenMock:
         self.spell_candidates = candidates
         self.spell_scroll_offset = 0
         member = self.party[self.active_party_index]
-        self.spell_type = next(
-            spell_type
-            for spell_type in SPELL_TYPE_ORDER
-            if any(
-                spell.mp <= member.mp
-                for spell in self._spell_candidates_for_type(spell_type)
-            )
-            or self._spell_candidates_for_type(spell_type)
+        remembered_key = getattr(self, "last_spell_key_by_party_index", {}).get(
+            self.active_party_index
         )
+        remembered_spell = next(
+            (spell for spell in candidates if spell.key == remembered_key),
+            None,
+        )
+        if remembered_spell is not None and member.mp >= remembered_spell.mp:
+            self.spell_type = remembered_spell.type
+            self._ensure_selected_spell_is_visible(remembered_spell)
+        else:
+            remembered_key = None
+            self.spell_type = next(
+                spell_type
+                for spell_type in SPELL_TYPE_ORDER
+                if any(
+                    spell.mp <= member.mp
+                    for spell in self._spell_candidates_for_type(spell_type)
+                )
+                or self._spell_candidates_for_type(spell_type)
+            )
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.spell_window.open_immediately()
         self._hide_command_guide()
-        self._refresh_spell_options()
+        self._refresh_spell_options(preferred_key=remembered_key)
         return True
 
-    def _refresh_spell_options(self) -> None:
+    def _refresh_spell_options(self, *, preferred_key: str | None = None) -> None:
         """Populate the active school in the four-row battle spell list."""
 
-        if self.active_party_index is None:
+        active_index = getattr(self, "active_party_index", None)
+        if active_index is None:
             return
         member = self.party[self.active_party_index]
         cursor = getattr(self, "spell_cursor", None)
-        selected_key = (
+        selected_key = preferred_key or (
             cursor.selected_key
             if cursor is not None and isinstance(cursor.selected_key, str)
             else None
@@ -1732,7 +1827,14 @@ class BattleScreenMock:
         member = self.party[self.active_party_index]
         if spell is None or member.mp < spell.mp:
             return False
-        return self._begin_action_target_selection(spell)
+        started = self._begin_action_target_selection(spell)
+        if started:
+            selections = getattr(self, "last_spell_key_by_party_index", None)
+            if selections is None:
+                selections = {}
+                self.last_spell_key_by_party_index = selections
+            selections[self.active_party_index] = spell.key
+        return started
 
     def _begin_action_target_selection(
         self,
@@ -2011,7 +2113,8 @@ class BattleScreenMock:
         if dying_index is None:
             raise RuntimeError("monster death phase requires a target")
         defeated = self.monsters[dying_index]
-        self.timeline = tuple(entry for entry in self.timeline if entry is not defeated)
+        self._timeline_order = remove_timeline_actor(self._timeline_order, defeated)
+        self.timeline = self._timeline_order.actors
         self.monster_death_animation = None
         self.dying_monster_index = None
         self._complete_current_turn()
@@ -2078,6 +2181,12 @@ class BattleScreenMock:
         self._start_timeline_animation()
 
     def _start_timeline_animation(self) -> None:
+        actor = self._timeline_order.entries[0].actor
+        self.timeline_advance = complete_timeline_action(
+            self._timeline_order,
+            current_agility=actor.agility,
+            visible_count=TIMELINE_VISIBLE_ENTRY_COUNT,
+        )
         self.phase = BattleMockPhase.TIMELINE
         self.active_party_index = None
         if hasattr(self, "active_party_pulse_frame"):
@@ -2132,20 +2241,126 @@ class BattleScreenMock:
 
     def _update_timeline_animation(self) -> None:
         self.command_window.update(None)
-        if self.timeline_animation_frame < TIMELINE_ANIMATION_FRAME_COUNT:
+        phase_frame_count = (
+            self._timeline_interrupt_frame_count()
+            if self.timeline_animation_phase is TimelineAnimationPhase.INTERRUPT
+            else TIMELINE_ANIMATION_FRAME_COUNT
+        )
+        if self.timeline_animation_frame < phase_frame_count:
             self.timeline_animation_frame += 1
             return
         if self.timeline_animation_phase is TimelineAnimationPhase.DROP:
             self.timeline_animation_phase = TimelineAnimationPhase.SLIDE
             self.timeline_animation_frame = 0
             return
+        if self.timeline_animation_phase is TimelineAnimationPhase.SLIDE:
+            advance = self.timeline_advance
+            if advance is None:
+                raise RuntimeError("timeline animation requires a pending advance")
+            if advance.interrupt_index is not None:
+                self.timeline_animation_phase = TimelineAnimationPhase.INTERRUPT
+                self.timeline_animation_frame = 0
+                return
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
         self._advance_timeline()
 
     def _advance_timeline(self) -> None:
-        self.timeline = self.timeline[1:] + self.timeline[:1]
+        advance = self.timeline_advance
+        if advance is None:
+            raise RuntimeError("timeline advance is not prepared")
+        self._timeline_order = ready_timeline_head(advance.after)
+        self.timeline = self._timeline_order.actors
+        self.timeline_advance = None
         self._activate_timeline_head()
+
+    def _timeline_interrupt_frame_count(self) -> int:
+        advance = self.timeline_advance
+        if advance is None or advance.interrupt_index is None:
+            return 0
+        interrupt_index = advance.interrupt_index
+        visible_remaining_count = min(
+            len(advance.remaining.entries),
+            TIMELINE_VISIBLE_ENTRY_COUNT,
+        )
+        last_visible_index = max(interrupt_index, visible_remaining_count - 1)
+        last_collision_frame = self._timeline_interrupt_collision_frame(
+            last_visible_index
+        )
+        slide_completion = last_collision_frame + TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT
+        if advance.overflow_actor is None:
+            return max(TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT, slide_completion)
+        overflow_completion = (
+            self._timeline_interrupt_collision_frame(TIMELINE_VISIBLE_ENTRY_COUNT - 1)
+            + TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT
+        )
+        return max(TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT, overflow_completion)
+
+    def _timeline_interrupt_collision_frame(self, index: int) -> int:
+        """Return the frame when 16x16 icon rectangles first overlap."""
+
+        advance = self.timeline_advance
+        if advance is None or advance.interrupt_index is None:
+            raise RuntimeError("timeline collision requires a pending interrupt")
+        interrupt_index = advance.interrupt_index
+        if not interrupt_index <= index < TIMELINE_VISIBLE_ENTRY_COUNT:
+            raise ValueError("timeline collision index is outside the pushed range")
+
+        destination_x = TIMELINE_BASE_X + interrupt_index * TIMELINE_SLOT_SPACING
+        collision_frame: int | None = None
+        for frame in range(TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT + 1):
+            actor_y = SCREEN_HEIGHT - (
+                (SCREEN_HEIGHT - TIMELINE_BASE_Y)
+                * frame
+                // TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT
+            )
+            if self._timeline_icons_collide(
+                destination_x,
+                actor_y,
+                destination_x,
+                TIMELINE_BASE_Y,
+            ):
+                collision_frame = frame
+                break
+        if collision_frame is None:
+            raise RuntimeError("interrupting icon never reaches the timeline")
+
+        for pushed_index in range(interrupt_index, index):
+            pushed_x = TIMELINE_BASE_X + pushed_index * TIMELINE_SLOT_SPACING
+            neighbor_x = pushed_x + TIMELINE_SLOT_SPACING
+            for elapsed in range(1, TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT + 1):
+                moving_x = pushed_x + (
+                    TIMELINE_SLOT_SPACING
+                    * elapsed
+                    // TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT
+                )
+                if self._timeline_icons_collide(
+                    moving_x,
+                    TIMELINE_BASE_Y,
+                    neighbor_x,
+                    TIMELINE_BASE_Y,
+                ):
+                    collision_frame += elapsed
+                    break
+            else:
+                raise RuntimeError("pushed timeline icons never collide")
+        return collision_frame
+
+    @staticmethod
+    def _timeline_icons_collide(
+        first_x: int,
+        first_y: int,
+        second_x: int,
+        second_y: int,
+    ) -> bool:
+        """Return whether two 16x16 timeline icon rectangles overlap."""
+
+        return (
+            first_x < second_x + TIMELINE_ICON_SIZE
+            and first_x + TIMELINE_ICON_SIZE > second_x
+            and first_y < second_y + TIMELINE_ICON_SIZE
+            and first_y + TIMELINE_ICON_SIZE > second_y
+        )
 
     def _activate_timeline_head(self) -> None:
         actor = self.timeline[0]
@@ -2265,10 +2480,23 @@ class BattleScreenMock:
         return options
 
     def _select_initial_member_command(self) -> None:
-        """Start unreachable attackers on the always-available defend command."""
+        """Restore one member's last command, or use the normal initial choice."""
 
         if not hasattr(self, "party"):
             return
+        active_index = getattr(self, "active_party_index", None)
+        remembered_command = getattr(self, "last_command_by_party_index", {}).get(
+            active_index
+        )
+        if remembered_command is not None:
+            try:
+                self.command_cursor.select_key(remembered_command)
+            except ValueError:
+                # A remembered command can become unavailable after an item is
+                # consumed or a temporary battle condition changes.
+                pass
+            else:
+                return
         options = self._active_member_command_options()
         attack = next(
             (option for option in options if option.command is BattleCommand.ATTACK),
@@ -2276,6 +2504,23 @@ class BattleScreenMock:
         )
         if attack is not None and not attack.enabled:
             self.command_cursor.select_key(BattleCommand.DEFEND)
+
+    def _remember_active_command(self, command: BattleCommand) -> None:
+        """Keep a confirmed command for its member, except formation movement."""
+
+        active_index = getattr(self, "active_party_index", None)
+        if active_index is None:
+            return
+        commands = getattr(self, "last_command_by_party_index", None)
+        if commands is None:
+            commands = {}
+            self.last_command_by_party_index = commands
+        if command is BattleCommand.FORMATION:
+            # Retreat and advance must open at the normal initial position on
+            # the member's next turn, rather than restoring an older command.
+            commands.pop(active_index, None)
+            return
+        commands[active_index] = command
 
     def _command_label(self, command: BattleCommand) -> str:
         """Resolve one command's localized display label from the text catalog."""
@@ -2655,13 +2900,18 @@ class BattleScreenMock:
                 self._draw_timeline_entry(entry, x, TIMELINE_BASE_Y)
             return
         if self.timeline_animation_phase is TimelineAnimationPhase.DROP:
+            advance = self.timeline_advance
+            if advance is None:
+                raise RuntimeError("timeline drop requires a pending advance")
             drop = (
                 TIMELINE_DROP_DISTANCE
                 * self.timeline_animation_frame
                 * self.timeline_animation_frame
                 // (TIMELINE_ANIMATION_FRAME_COUNT**2)
             )
-            for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
+            for index, entry in enumerate(
+                advance.before.actors[:TIMELINE_VISIBLE_ENTRY_COUNT]
+            ):
                 y = TIMELINE_BASE_Y + (drop if index == 0 else 0)
                 self._draw_timeline_entry(
                     entry,
@@ -2670,42 +2920,44 @@ class BattleScreenMock:
                 )
             return
         if self.timeline_animation_phase is TimelineAnimationPhase.SLIDE:
+            advance = self.timeline_advance
+            if advance is None:
+                raise RuntimeError("timeline slide requires a pending advance")
             shift = (
                 TIMELINE_SLOT_SPACING
                 * self.timeline_animation_frame
                 // TIMELINE_ANIMATION_FRAME_COUNT
             )
-            for index, entry in enumerate(
-                self.timeline[1:TIMELINE_VISIBLE_ENTRY_COUNT],
-                start=1,
-            ):
+            remaining = advance.remaining.actors
+            sliding_entries = remaining[: TIMELINE_VISIBLE_ENTRY_COUNT - 1]
+            for index, entry in enumerate(sliding_entries):
                 self._draw_timeline_entry(
                     entry,
-                    TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING - shift,
+                    TIMELINE_BASE_X + (index + 1) * TIMELINE_SLOT_SPACING - shift,
                     TIMELINE_BASE_Y,
                 )
-            visible_entry_count = min(
-                len(self.timeline),
-                TIMELINE_VISIBLE_ENTRY_COUNT,
-            )
-            destination_x = (
-                TIMELINE_BASE_X + (visible_entry_count - 1) * TIMELINE_SLOT_SPACING
-            )
-            incoming_x = TIMELINE_INCOMING_START_X - (
-                (TIMELINE_INCOMING_START_X - destination_x)
-                * self.timeline_animation_frame
-                // TIMELINE_ANIMATION_FRAME_COUNT
-            )
-            incoming_index = (
-                TIMELINE_VISIBLE_ENTRY_COUNT
-                if len(self.timeline) > TIMELINE_VISIBLE_ENTRY_COUNT
-                else 0
-            )
-            self._draw_timeline_entry(
-                self.timeline[incoming_index],
-                incoming_x,
-                TIMELINE_BASE_Y,
-            )
+            incoming: BattleMockCharacter | BattleMockMonster | None = None
+            if len(remaining) >= TIMELINE_VISIBLE_ENTRY_COUNT:
+                incoming = remaining[TIMELINE_VISIBLE_ENTRY_COUNT - 1]
+                incoming_index = TIMELINE_VISIBLE_ENTRY_COUNT - 1
+            elif advance.interrupt_index is None:
+                incoming = advance.completed_actor
+                incoming_index = len(remaining)
+            if incoming is not None:
+                destination_x = TIMELINE_BASE_X + incoming_index * TIMELINE_SLOT_SPACING
+                incoming_x = TIMELINE_INCOMING_START_X - (
+                    (TIMELINE_INCOMING_START_X - destination_x)
+                    * self.timeline_animation_frame
+                    // TIMELINE_ANIMATION_FRAME_COUNT
+                )
+                self._draw_timeline_entry(
+                    incoming,
+                    incoming_x,
+                    TIMELINE_BASE_Y,
+                )
+            return
+        if self.timeline_animation_phase is TimelineAnimationPhase.INTERRUPT:
+            self._draw_timeline_interrupt()
             return
 
         for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
@@ -2723,6 +2975,75 @@ class BattleScreenMock:
             8,
             8,
             TRANSPARENT_INDEX,
+        )
+
+    def _draw_timeline_interrupt(self) -> None:
+        """Draw the completed actor rising into the order and pushing neighbors."""
+
+        advance = self.timeline_advance
+        if advance is None or advance.interrupt_index is None:
+            raise RuntimeError("timeline interrupt requires a pending interrupt")
+        frame = self.timeline_animation_frame
+        interrupt_index = advance.interrupt_index
+        remaining = advance.remaining.actors[:TIMELINE_VISIBLE_ENTRY_COUNT]
+        for index, entry in enumerate(remaining):
+            x = TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING
+            y = TIMELINE_BASE_Y
+            if index >= interrupt_index:
+                collision_delay = self._timeline_interrupt_collision_frame(index)
+                if entry is advance.overflow_actor:
+                    elapsed = max(
+                        0,
+                        min(
+                            frame - collision_delay,
+                            TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT,
+                        ),
+                    )
+                    duration = TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT
+                    x += (
+                        (TIMELINE_INTERRUPT_OVERFLOW_DESTINATION_X - x)
+                        * elapsed
+                        // duration
+                    )
+                    jump = (
+                        4
+                        * TIMELINE_INTERRUPT_OVERFLOW_JUMP_HEIGHT
+                        * elapsed
+                        * (duration - elapsed)
+                        // (duration**2)
+                    )
+                    fall = (
+                        (SCREEN_HEIGHT + 16 - TIMELINE_BASE_Y)
+                        * elapsed
+                        * elapsed
+                        // (duration**2)
+                    )
+                    y += fall - jump
+                else:
+                    slide_elapsed = max(
+                        0,
+                        min(
+                            frame - collision_delay,
+                            TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT,
+                        ),
+                    )
+                    x += (
+                        TIMELINE_SLOT_SPACING
+                        * slide_elapsed
+                        // TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT
+                    )
+            self._draw_timeline_entry(entry, x, y)
+
+        entry_elapsed = min(frame, TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT)
+        actor_y = SCREEN_HEIGHT - (
+            (SCREEN_HEIGHT - TIMELINE_BASE_Y)
+            * entry_elapsed
+            // TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT
+        )
+        self._draw_timeline_entry(
+            advance.completed_actor,
+            TIMELINE_BASE_X + interrupt_index * TIMELINE_SLOT_SPACING,
+            actor_y,
         )
 
     def _timeline_entrance_x(self, index: int) -> int | None:
