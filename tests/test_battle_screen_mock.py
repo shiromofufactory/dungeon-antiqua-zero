@@ -727,7 +727,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
 
         with (
-            patch("tools.screen_mocks.battle.play_se") as play_se,
+            patch("scenes.battle.play_se") as play_se,
             patch("tools.screen_mocks.battle.pyxel.blt") as blt,
         ):
             mock._update_attack_presentation()
@@ -959,8 +959,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._refresh_monster_name_colors = Mock()
 
         with (
-            patch("tools.screen_mocks.battle.member_can_attack", return_value=True),
-            patch("tools.screen_mocks.battle.member_attack_reach", return_value=1),
+            patch("scenes.battle.member_can_attack", return_value=True),
+            patch("scenes.battle.member_attack_reach", return_value=1),
         ):
             self.assertTrue(mock._begin_attack_target_selection())
 
@@ -992,8 +992,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.selected_target_index = None
 
         with (
-            patch("tools.screen_mocks.battle.member_can_attack", return_value=True),
-            patch("tools.screen_mocks.battle.member_attack_reach", return_value=1),
+            patch("scenes.battle.member_can_attack", return_value=True),
+            patch("scenes.battle.member_attack_reach", return_value=1),
         ):
             self.assertFalse(mock._begin_attack_target_selection())
 
@@ -1151,7 +1151,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         with (
             patch("tools.screen_mocks.battle.random.randint", return_value=8),
-            patch("tools.screen_mocks.battle.play_se") as play_se,
+            patch("scenes.battle.play_se") as play_se,
         ):
             mock._update_target_selection(
                 InputState(confirm=InputButton(triggered=True, held=True))
@@ -1214,7 +1214,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.palette_shifter = Mock()
         mock._complete_current_turn = Mock()
 
-        with patch("tools.screen_mocks.battle.play_se") as play_se:
+        with patch("scenes.battle.play_se") as play_se:
             for _frame in range(
                 ATTACK_HIT_START_FRAME
                 + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
@@ -1339,7 +1339,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = Mock()
         mock.palette_shifter = Mock()
 
-        with patch("tools.screen_mocks.battle.play_se") as play_se:
+        with patch("scenes.battle.play_se") as play_se:
             self.assertTrue(mock._begin_monster_death())
 
         self.assertFalse(front_monster.is_alive)
@@ -1791,7 +1791,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._complete_current_turn = Mock()
         before_mp = mock.party[0].mp
 
-        with patch("tools.screen_mocks.battle.play_se") as play_se:
+        with patch("scenes.battle.play_se") as play_se:
             self.assertTrue(mock._confirm_action_target_selection())
 
         self.assertEqual(mock.party[0].mp, before_mp - spell.mp)
@@ -1936,7 +1936,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.all_target_cursors = (Mock(), Mock())
         mock._refresh_monster_name_colors = Mock()
 
-        with patch("tools.screen_mocks.battle.play_se") as play_se:
+        with patch("scenes.battle.play_se") as play_se:
             self.assertTrue(mock._begin_action_presentation(spell))
 
         assert mock.action_presentation is not None
@@ -2570,7 +2570,7 @@ class BattleScreenMockTest(unittest.TestCase):
         with (
             patch("tools.screen_mocks.battle.random.choice", return_value=2) as choice,
             patch("tools.screen_mocks.battle.random.randint", return_value=15) as randint,
-            patch("tools.screen_mocks.battle.play_se") as play_se,
+            patch("scenes.battle.play_se") as play_se,
         ):
             mock._update_monster_action()
 
@@ -2587,7 +2587,7 @@ class BattleScreenMockTest(unittest.TestCase):
         with (
             patch("tools.screen_mocks.battle.random.choice", return_value=2),
             patch("tools.screen_mocks.battle.random.randint", return_value=99),
-            patch("tools.screen_mocks.battle.play_se") as play_se,
+            patch("scenes.battle.play_se") as play_se,
         ):
             mock._update_monster_action()
 
@@ -2657,7 +2657,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._refresh_party_hp_text = Mock()
         mock._start_timeline_animation = Mock()
 
-        with patch("tools.screen_mocks.battle.play_se") as play_se:
+        with patch("scenes.battle.play_se") as play_se:
             mock._update_monster_action()
 
         self.assertEqual(member.hp, 20)

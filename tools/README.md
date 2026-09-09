@@ -176,14 +176,17 @@ SE、宣言済みグローバルフラグは一覧から選択できる。JSON�
 
 ## Screen Mocks
 
-画面モックの起動処理と疑似状態は `tools/screen_mocks/` に置く。仕様が確定して本編でも使う画面は `app/ui/` のOverlay／表示部品とし、モックから同じ実装へ疑似状態を渡す。
+画面モックの起動処理と疑似状態は `tools/screen_mocks/` に置く。仕様が確定して本編でも使う画面は
+`app/scenes/` のSceneまたは `app/ui/` のOverlay／表示部品とし、モックから同じ実装へ疑似状態を渡す。
+戦闘の状態・更新・描画は `app/scenes/battle.py` が所有し、下記の `battle.py` は本番Sceneへ
+テスト用パーティ、敵編成、全アイテム1個ずつの所持状態を渡して単独実行するだけの入口である。
 
 ```text
 tools/screen_mocks/
 ├── _runtime.py             # 共通初期化、資産、入力設定
 ├── _runner.py              # 例外表示と終了コード
 ├── _fixtures.py            # 疑似パーティなどの共有fixture
-├── battle.py               # 戦闘画面モック
+├── battle.py               # 本番BattleSceneをfixtureで単独起動
 ├── status.py               # 本番Overlayへ疑似状態を渡す互換アダプター
 ├── spell.py                # 本番Overlayへ疑似状態を渡す互換アダプター
 ├── item.py                 # 本番Overlayへ疑似状態を渡す互換アダプター

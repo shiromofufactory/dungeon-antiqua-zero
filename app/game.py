@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pyxel
 
+from attack_pose import AttackPoseDataError
 from game_data import (
     GameDataError,
     create_party,
@@ -56,6 +57,7 @@ from member import (
     Member,
     MemberDataError,
 )
+from monster import MonsterDataError
 from resources import (
     TRANSPARENT_INDEX,
     AudioResourceError,
@@ -93,9 +95,11 @@ from rendering import (
     FieldRenderer,
     PaletteShifter,
 )
+from scenes import BattleDataError, BattleEncounter, BattleScene
 from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
+from spell_effect import SpellEffectDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings
 from systems import (
     ChangeBgmEffect,
@@ -507,6 +511,8 @@ class Game:
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
+        # Encounter selection and return transitions will assign/clear this later.
+        self.battle_scene: BattleScene | None = None
         self.pending_shop = None
         self.shop_return_to_debug = False
         self.debug_screen: DebugMenuOverlay | None = None
@@ -555,6 +561,24 @@ class Game:
             return repository.load()
         except SettingsSystemError:
             return Settings()
+
+    def _build_battle_scene(self, encounter: BattleEncounter) -> BattleScene:
+        """Create a battle from current session state without choosing when it starts."""
+
+        return BattleScene.create(
+            settings=self.settings,
+            palette_shifter=self.palette_shifter,
+            bgm=self.bgm,
+            resources=self.images,
+            fonts=self.fonts,
+            texts=self.texts,
+            item_catalog=self.items,
+            spells=self.spells,
+            inventory_system=self.inventory_system,
+            character_records=self.character_records,
+            party=self.party[:BATTLE_PARTY_MEMBER_COUNT],
+            encounter=encounter,
+        )
 
     @staticmethod
     def _select_cursor_key(cursor: WindowCursor, key: object) -> None:
@@ -2376,6 +2400,10 @@ class Game:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        battle_scene = getattr(self, "battle_scene", None)
+        if battle_scene is not None:
+            battle_scene.update(input_state)
+            return
         if getattr(self, "_returning_to_start", False):
             self._update_return_to_start(input_state)
             return
@@ -2533,6 +2561,10 @@ class Game:
         pyxel.cls(0)
         pyxel.camera(self.alert.camera_x, 0)
         try:
+            battle_scene = getattr(self, "battle_scene", None)
+            if battle_scene is not None:
+                battle_scene.draw()
+                return
             start_screen = getattr(self, "start_screen", None)
             if start_screen is not None:
                 start_screen.draw()
@@ -2671,7 +2703,9 @@ class Game:
 
 
 GAME_ERRORS = (
+    AttackPoseDataError,
     AudioResourceError,
+    BattleDataError,
     DataResourceError,
     DebugPartyError,
     EventMessageResourceError,
@@ -2682,11 +2716,13 @@ GAME_ERRORS = (
     ItemDataError,
     ItemMenuDataError,
     MemberDataError,
+    MonsterDataError,
     GameDataError,
     SkillDataError,
     SaveMenuDataError,
     StartMenuDataError,
     SpellDataError,
+    SpellEffectDataError,
     SpellMenuDataError,
     ShopUiDataError,
     ShopDataError,

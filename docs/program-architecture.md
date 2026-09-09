@@ -55,6 +55,8 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 app/
 ├── main.py                   # Pyxel初期化、共通資産読込、Game生成、pyxel.run
 ├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
+├── scenes/
+│   └── battle.py             # 本編と単独テストで共有する戦闘Scene
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
 ├── battle_physical.py        # DA2準拠の通常攻撃力、命中、物理ダメージ計算
@@ -148,7 +150,7 @@ tools/
     ├── _runtime.py         # Pyxel初期化、共通資産、モック入力
     ├── _runner.py          # 例外表示とCLI終了コード
     ├── _fixtures.py        # 疑似パーティなどモック専用状態
-    ├── battle.py           # 本番用部品を使う戦闘画面モック
+    ├── battle.py           # BattleSceneへfixtureを注入する単独起動口
     ├── status.py           # 本番Overlayへ疑似状態を渡す互換アダプター
     ├── spell.py            # 本番Overlayへ疑似状態を渡す互換アダプター
     ├── item.py             # 本番Overlayへ疑似状態を渡す互換アダプター
@@ -431,7 +433,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-戦闘など未確定画面を試作する起点は `tools/screen_mocks/` に画面単位で置く。一方、仕様が確定して本編でも使う入力、状態、描画は `app/` のField、Renderer、Overlayまたは表示部品へ置き、`tools/` から本番部品へリソースと疑似状態を注入して確認する。確定済みのフィールド、メインメニュー、ステータス、呪文、アイテム、装備、ショップは `app/game.py` から接続し、ゲーム本体から `tools/` を参照しない。
+戦闘など未確定画面を試作する起点は `tools/screen_mocks/` に画面単位で置く。一方、仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、`tools/` から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。エンカウント選択と `BattleResult` を受けた復帰遷移は、接続仕様を確定する段階で追加する。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。
