@@ -25,6 +25,7 @@ from tools.screen_mocks.battle import (
     BATTLE_MONSTER_DEATH_SE_ID,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+    BATTLE_TEST_PARTY,
     ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT,
     ACTIVE_PARTY_PULSE_MIN_BASE_RATE,
     ACTIVE_PARTY_PULSE_PALETTE,
@@ -41,6 +42,8 @@ from tools.screen_mocks.battle import (
     DAMAGE_NUMBER_SPRITE_Y,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
+    DEAD_SPRITE_SOURCE_X,
+    DEAD_SPRITE_WIDTH,
     DEFEND_SPRITE_SOURCE_X,
     ESCAPE_RUN_DESTINATION_X,
     ESCAPE_RUN_PATTERN_FRAME_COUNT,
@@ -57,6 +60,7 @@ from tools.screen_mocks.battle import (
     MONSTER_ENTRANCE_FRAME_COUNTS,
     MONSTER_MISS_FRAME_COUNT,
     MONSTER_POSITIONS,
+    NEAR_DEATH_SPRITE_SOURCE_X,
     MISS_SPRITE_SOURCE_X,
     MISS_SPRITE_WIDTH,
     PARTY_ENTRANCE_COMPLETE_FRAME,
@@ -75,6 +79,8 @@ from tools.screen_mocks.battle import (
     BattleItemCandidate,
     BattleMockMonster,
     BattleMockPhase,
+    BattleResult,
+    BattleScene,
     BattleScreenMock,
     BattleTargetSpellEffect,
     BattleTimedPopup,
@@ -114,6 +120,7 @@ from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
+    load_mock_character_records,
     load_mock_items,
     load_mock_party,
     load_mock_skills,
@@ -213,10 +220,10 @@ class BattleScreenMockTest(unittest.TestCase):
             SCREEN_HEIGHT,
         )
 
-    def test_battle_fixture_uses_requested_three_members_at_level_ninety_nine(self) -> None:
+    def test_battle_fixture_uses_configured_members_at_level_ninety_nine(self) -> None:
         self.assertEqual(
             BATTLE_MOCK_PARTY_CHARACTER_KEYS,
-            ("Fiora", "Cerion", "Alvan"),
+            tuple(state.character_key for state in BATTLE_TEST_PARTY),
         )
         party = load_mock_party(
             load_mock_items(),
@@ -229,7 +236,7 @@ class BattleScreenMockTest(unittest.TestCase):
             tuple(member.definition.key for member in party),
             BATTLE_MOCK_PARTY_CHARACTER_KEYS,
         )
-        self.assertEqual(len(party), 3)
+        self.assertEqual(len(party), len(BATTLE_TEST_PARTY))
         self.assertTrue(
             all(member.internal_level == MAX_INTERNAL_LEVEL for member in party)
         )
@@ -246,7 +253,10 @@ class BattleScreenMockTest(unittest.TestCase):
             patch("tools.screen_mocks.battle.WindowFactory") as windows,
             patch(
                 "battle_timeline.random.uniform",
-                side_effect=(2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+                side_effect=(
+                    *(2.0 for _state in BATTLE_TEST_PARTY),
+                    *(1.0 for _monster_key in BATTLE_MOCK_MONSTER_KEYS),
+                ),
             ),
             patch("tools.screen_mocks.battle.pyxel.run"),
         ):
@@ -317,16 +327,25 @@ class BattleScreenMockTest(unittest.TestCase):
                 for member in mock.party
             )
         )
+        character_records = {
+            record["name_en"]: record
+            for record in load_mock_character_records()
+        }
+        expected_party_records = tuple(
+            character_records[key]
+            for key in BATTLE_MOCK_PARTY_CHARACTER_KEYS
+        )
         self.assertEqual(
             [visual.battle_sprite for visual in mock.party_visuals],
-            [0, 1, 2],
+            [record["battle_sprite"] for record in expected_party_records],
         )
         self.assertEqual(
             [(entry.icon_x, entry.icon_y) for entry in mock.timeline],
             [
-                (0, 0),
-                (16, 0),
-                (32, 0),
+                (record["icon_x"], record["icon_y"])
+                for record in expected_party_records
+            ]
+            + [
                 (128, 16),
                 (128, 16),
                 (128, 16),
@@ -355,9 +374,17 @@ class BattleScreenMockTest(unittest.TestCase):
             MonsterCombatStats(attack=15, hit=85, defense=0, evasion=0),
         )
         self.assertEqual(mock.timeline, mock.party_visuals + mock.monsters)
+        initial_gauges = sorted(
+            (
+                *(visual.agility * 2.0 for visual in mock.party_visuals),
+                *(monster.agility * 1.0 for monster in mock.monsters),
+            ),
+            reverse=True,
+        )
+        gauge_offset = 64.0 - initial_gauges[0]
         self.assertEqual(
             tuple(entry.gauge for entry in mock._timeline_order.entries),
-            (64.0, 58.0, 56.0, 29.0, 29.0, 29.0, 26.0, 26.0),
+            tuple(gauge + gauge_offset for gauge in initial_gauges),
         )
         self.assertEqual(
             mock.inventory_system.catalog_count,
@@ -519,6 +546,63 @@ class BattleScreenMockTest(unittest.TestCase):
                     DEFEND_SPRITE_SOURCE_X,
                     128,
                     16,
+                    32,
+                    1,
+                ),
+            ],
+        )
+
+    def test_party_uses_near_death_and_wide_dead_poses(self) -> None:
+        self.assertEqual(NEAR_DEATH_SPRITE_SOURCE_X, 16 * 5)
+        self.assertEqual(DEAD_SPRITE_SOURCE_X, 16 * 8)
+        self.assertEqual(DEAD_SPRITE_WIDTH, 24)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.character_sprites = object()
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                    is_dying=True,
+                ),
+                battle_sprite=2,
+            ),
+            SimpleNamespace(
+                member=SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=True,
+                    is_dying=True,
+                ),
+                battle_sprite=4,
+            ),
+        )
+        mock.phase = BattleMockPhase.COMMAND
+        mock.active_party_index = None
+        mock.defending_party_indexes = {1}
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    156,
+                    64,
+                    mock.character_sprites,
+                    NEAR_DEATH_SPRITE_SOURCE_X,
+                    64,
+                    16,
+                    32,
+                    1,
+                ),
+                call(
+                    160,
+                    92,
+                    mock.character_sprites,
+                    DEAD_SPRITE_SOURCE_X,
+                    128,
+                    DEAD_SPRITE_WIDTH,
                     32,
                     1,
                 ),
@@ -2090,11 +2174,12 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_allied_all_target_creates_one_cursor_for_each_living_member(self) -> None:
         spell = load_mock_spells()["TELEPORT"]
         items = load_mock_items()
+        party_keys = ("Fiora", "Cerion", "Alvan")
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
             items,
             load_mock_skills(),
-            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            character_keys=party_keys,
             internal_level=MAX_INTERNAL_LEVEL,
         )
         mock.target_cursor = Mock(active=False)
@@ -2315,6 +2400,7 @@ class BattleScreenMockTest(unittest.TestCase):
             BattleMockPhase.ENTRANCE,
             BattleMockPhase.FORMATION,
             BattleMockPhase.MONSTER_DEATH,
+            BattleMockPhase.DEFEAT_MESSAGE,
             BattleMockPhase.TIMELINE,
             BattleMockPhase.MONSTER_ACTION,
             BattleMockPhase.ESCAPE_MESSAGE,
@@ -2645,6 +2731,186 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.monster_attack_target_index)
         self.assertIsNone(mock.monster_attack_damage)
         mock._start_timeline_animation.assert_called_once_with()
+
+    def test_dead_party_member_is_removed_before_their_timeline_turn(self) -> None:
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion"),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        party[0].hp = 0
+        visuals = tuple(
+            BattleMockCharacter(member, index * 16, 0, index)
+            for index, member in enumerate(party)
+        )
+        monster = BattleMockMonster(
+            key="monster",
+            names={},
+            image_id="0",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=16,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=10),
+            agility=12,
+        )
+        order = TimelineOrder(
+            (
+                TimelineEntry(visuals[0], visuals[0].agility, 64.0),
+                TimelineEntry(visuals[1], visuals[1].agility, 50.0),
+                TimelineEntry(monster, monster.agility, 40.0),
+            )
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = visuals
+        mock._timeline_order = order
+        mock.timeline = order.actors
+        mock.active_party_index = None
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock.escaping_party_indexes = set()
+        mock.defending_party_indexes = set()
+        mock.auto_battle_active = False
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock._hide_command_guide = Mock()
+        mock._refresh_command_options = Mock()
+        mock._select_initial_member_command = Mock()
+        mock._refresh_input_guide = Mock()
+        mock._refresh_party_text_colors = Mock()
+        mock._begin_defeat_message = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertNotIn(visuals[0], mock.timeline)
+        self.assertIs(mock.timeline[0], visuals[1])
+        self.assertEqual(mock.active_party_index, 1)
+        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
+        mock._begin_defeat_message.assert_not_called()
+
+    def test_lethal_monster_attack_removes_last_member_and_begins_defeat(
+        self,
+    ) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=("Fiora",),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )[0]
+        member.hp = 1
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        monster = BattleMockMonster(
+            key="monster",
+            names={},
+            image_id="0",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=16,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=10),
+            agility=12,
+        )
+        order = TimelineOrder(
+            (
+                TimelineEntry(monster, monster.agility, 64.0),
+                TimelineEntry(visual, visual.agility, 50.0),
+            )
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock._timeline_order = order
+        mock.timeline = order.actors
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_damage = 1
+        mock.monster_attack_animation_frame = MONSTER_DAMAGE_FRAME_COUNT
+        mock.defending_party_indexes = {0}
+        mock._refresh_party_hp_text = Mock()
+        mock._begin_defeat_message = Mock()
+        mock._start_timeline_animation = Mock()
+
+        mock._finish_monster_attack()
+
+        self.assertTrue(member.is_dead)
+        self.assertNotIn(visual, mock.timeline)
+        self.assertEqual(mock.defending_party_indexes, set())
+        mock._begin_defeat_message.assert_called_once_with()
+        mock._start_timeline_animation.assert_not_called()
+
+    def test_defeat_message_uses_da2_text_then_reports_production_result(
+        self,
+    ) -> None:
+        mock = BattleScene.__new__(BattleScene)
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+        mock.result = None
+        mock.active_party_index = 0
+        mock.blinking_monster_index = 0
+        mock.monster_blink_frames_remaining = 1
+        mock.timeline_animation_phase = TimelineAnimationPhase.DROP
+        mock.timeline_animation_frame = 2
+        mock.timeline_advance = object()
+        mock.auto_battle_active = True
+        mock.command_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock.global_command_window = Mock()
+        mock.target_cursor = Mock(active=True)
+        mock.escape_cursor = Mock(active=True)
+        mock.item_window = Mock()
+        mock._close_spell_windows = Mock()
+        mock._hide_command_guide = Mock()
+        mock.battle_popup = BattleTimedPopup(frames_remaining=20)
+        mock.battle_popup_window = Mock()
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock._refresh_party_text_colors = Mock()
+
+        mock._begin_defeat_message()
+
+        self.assertIs(mock.phase, BattleMockPhase.DEFEAT_MESSAGE)
+        self.assertFalse(mock.battle_popup.visible)
+        mock.battle_popup_window.add_text.assert_called_once_with(
+            "ぜんめつした．．．",
+            2,
+            2,
+        )
+        mock._update_defeat_message(InputState())
+        self.assertIsNone(mock.result)
+
+        mock._update_defeat_message(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        self.assertIs(mock.result, BattleResult.DEFEAT)
+
+    def test_standalone_defeat_acknowledgement_restarts_fixture(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock._restart_battle_mock = Mock()
+
+        mock._complete_defeat()
+
+        mock._restart_battle_mock.assert_called_once_with()
+
+    def test_defeat_message_window_stays_visible_while_waiting(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.DEFEAT_MESSAGE
+        mock.windows = []
+        mock.party_status_windows = []
+        mock.monsters = ()
+        mock.monster_name_windows = []
+        mock.command_window = Mock(is_closed=True)
+        mock.global_command_window = Mock(is_open=False, is_closed=True)
+        mock.escape_message_window = Mock()
+        mock.escape_started_message_window = Mock()
+        mock.escape_choice_window = Mock()
+        mock.battle_popup = BattleTimedPopup()
+        mock.battle_popup_window = Mock()
+
+        mock._draw_windows()
+
+        mock.battle_popup_window.draw.assert_called_once_with()
 
     def test_monster_miss_uses_da2_length_without_reducing_hp(self) -> None:
         member = SimpleNamespace(hp=20, max_hp=30)
@@ -3012,11 +3278,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window.close_immediately.assert_called_once_with()
 
     def test_disabled_formation_does_not_start_animation(self) -> None:
+        party_keys = ("Fiora", "Cerion", "Alvan")
         party = list(
             load_mock_party(
                 load_mock_items(),
                 load_mock_skills(),
-                character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+                character_keys=party_keys,
                 internal_level=MAX_INTERNAL_LEVEL,
             )
         )
@@ -3453,6 +3720,22 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._begin_escape_animation.assert_called_once_with()
         mock._start_timeline_animation.assert_not_called()
         mock.command_window.open.assert_not_called()
+
+    def test_dead_party_member_does_not_block_escape_readiness(self) -> None:
+        members = (
+            SimpleNamespace(formation_row=FormationRow.FRONT, hp=20),
+            SimpleNamespace(formation_row=FormationRow.FRONT, hp=0),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member)
+            for member in members
+        )
+        mock.escaping_party_indexes = set()
+        mock.defending_party_indexes = set()
+
+        self.assertTrue(mock._mark_party_member_escaping(0))
+        self.assertEqual(mock.escaping_party_indexes, {0})
 
     def test_escape_animation_hides_selection_and_stops_bgm(self) -> None:
         members = (

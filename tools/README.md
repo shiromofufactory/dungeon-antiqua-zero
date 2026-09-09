@@ -204,13 +204,21 @@ Pyxel、共通アセット、パレット、Q終了入力は `_runtime.py`、想
 確定済みのフィールド、メインメニュー、接続済み子画面はゲーム本体へ移行した。
 起動方法と仕様は [`docs/features/field.md`](../docs/features/field.md) を参照する。
 
-### Battle Screen Mock
+### Battle Test
 
-`background/bg_nector`、キャラクター、モンスター、ウィンドウなどの本番用リソースを使って戦闘画面の仮レイアウトを表示する。
+`background/bg_nector`、キャラクター、モンスター、ウィンドウなどの本番用リソースと
+本編の `BattleScene` を使い、指定したパーティ状態と敵編成で戦闘を単独実行する。
 
 ```sh
-npm run mock-battle
+npm run test-battle
 ```
+
+パーティ構成、内部レベル、前後列、開始HP・MPは
+`tools/screen_mocks/battle.py` の `BATTLE_TEST_PARTY` で指定する。開始HP・MPを `None` にすると
+最大値で開始する。敵の種類と前衛位置は `BATTLE_TEST_MONSTER_KEYS` と
+`BATTLE_TEST_FRONT_MONSTER_INDEXES` で指定する。Sキーによる再開始でも同じ指定状態へ戻る。
+全員が死亡すると「ぜんめつした...」を表示し、決定またはキャンセル入力後に同じ指定状態から
+戦闘を再開始する。
 
 起動直後はコマンドウィンドウが閉じている。`Z`または`Enter`を押すと中央から開き、開き切った後は矢印キーでコマンドカーソルを移動できる。もう一度`Z`または`Enter`を押すと現在位置のコマンドキーを取得してウィンドウを閉じる。`Q`または`Esc`で終了する。
 起動前に呪文エフェクトのゲーム用データを再生成する。登録済み呪文または使用効果アイテムの

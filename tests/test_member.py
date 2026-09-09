@@ -188,6 +188,31 @@ class MemberTest(unittest.TestCase):
 
         self.assertFalse(self.member.is_front_row)
 
+    def test_alive_dead_and_dying_conditions_match_da2(self) -> None:
+        self.assertTrue(self.member.is_alive)
+        self.assertFalse(self.member.is_dead)
+
+        self.member.hp = self.member.max_hp // 4 + 1
+        self.assertFalse(self.member.is_dying)
+
+        self.member.hp = self.member.max_hp // 4
+        self.assertTrue(self.member.is_dying)
+
+        self.member.hp = self.member.max_hp
+        self.member.poisoned = True
+        self.assertTrue(self.member.is_dying)
+
+        self.member.poisoned = False
+        self.member.hp = 0
+        self.assertFalse(self.member.is_alive)
+        self.assertTrue(self.member.is_dead)
+        self.assertFalse(self.member.is_dying)
+
+        # DA2's status predicate still reports poison at zero HP. Rendering
+        # resolves the overlap by giving the death pose priority.
+        self.member.poisoned = True
+        self.assertTrue(self.member.is_dying)
+
     def test_equipment_eligibility_uses_aptitude_and_armor_class(self) -> None:
         fighter = self.build_member("Fighter", eq_sword=2, eq_shield=1)
         mage = self.build_member("Mage", gender="FEMALE", sp_mystic=1)

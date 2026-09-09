@@ -240,7 +240,11 @@ FORMATION_MOVE_FRAME_COUNT = 8
 FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 COMMAND_GUIDE_DELAY_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
+PARTY_SPRITE_WIDTH = 16
+NEAR_DEATH_SPRITE_SOURCE_X = 16 * 5
 DEFEND_SPRITE_SOURCE_X = 16 * 6
+DEAD_SPRITE_SOURCE_X = 16 * 8
+DEAD_SPRITE_WIDTH = 24
 ACTION_MOVE_DISTANCE = 16
 DA2_ACTION_MOVE_SPEED = 4
 ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
@@ -375,6 +379,7 @@ class BattlePhase(StrEnum):
     ESCAPE = "escape"
     FORMATION = "formation"
     MONSTER_DEATH = "monster_death"
+    DEFEAT_MESSAGE = "defeat_message"
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
 
@@ -1137,6 +1142,9 @@ class BattleScene:
         if self.phase is BattlePhase.ENTRANCE:
             self._update_entrance_animation()
             return
+        if self.phase is BattlePhase.DEFEAT_MESSAGE:
+            self._update_defeat_message(input_state)
+            return
         if getattr(self, "auto_battle_active", False) and input_state.cancel.triggered:
             self._cancel_auto_battle()
             return
@@ -1247,12 +1255,18 @@ class BattleScene:
         if self.reset_party_on_restart:
             for member in self.party:
                 member.fully_recover()
+        self._prepare_party_for_restart()
         for monster in self.monsters:
             monster.restore()
+        living_party = tuple(
+            visual
+            for visual in self.party_visuals
+            if visual.member.is_alive
+        )
         self._timeline_order = initialize_timeline_order(
             tuple(
                 (entry, entry.agility)
-                for entry in (*self.party_visuals, *self.monsters)
+                for entry in (*living_party, *self.monsters)
             )
         )
         self.timeline = self._timeline_order.actors
@@ -1334,6 +1348,9 @@ class BattleScene:
             base_rate=0.0,
             target_color=self.palette_shifter.base_colors[0],
         )
+
+    def _prepare_party_for_restart(self) -> None:
+        """Allow a composition root to apply fixture state before gauge rolls."""
 
     def _restart_battle_bgm(self) -> None:
         """Restart the battle track from its beginning for this scene."""
@@ -1522,7 +1539,11 @@ class BattleScene:
 
         self.escaping_party_indexes.add(index)
         self.defending_party_indexes.discard(index)
-        return len(self.escaping_party_indexes) == len(self.party_visuals)
+        return all(
+            party_index in self.escaping_party_indexes
+            or self._party_member_is_dead(party_index)
+            for party_index in range(len(self.party_visuals))
+        )
 
     def _begin_escape_animation(self) -> None:
         """Show the success message and start the DA2-style party run."""
@@ -1554,7 +1575,8 @@ class BattleScene:
         self._update_escape_fade()
         self._advance_escape_run()
         if self.escape_fade_covered and all(
-            self._escape_party_x(index) >= ESCAPE_RUN_DESTINATION_X
+            self._party_member_is_dead(index)
+            or self._escape_party_x(index) >= ESCAPE_RUN_DESTINATION_X
             for index in range(len(self.party_visuals))
         ):
             self.result = BattleResult.ESCAPED
@@ -1576,6 +1598,46 @@ class BattleScene:
         )
         if event is FadeEvent.COVERED:
             self.escape_fade_covered = True
+
+    def _begin_defeat_message(self) -> None:
+        """Stop battle input and show DA2's persistent party-defeat message."""
+
+        self.phase = BattlePhase.DEFEAT_MESSAGE
+        self.active_party_index = None
+        self.blinking_monster_index = None
+        self.monster_blink_frames_remaining = 0
+        self.timeline_animation_phase = None
+        self.timeline_animation_frame = 0
+        self.timeline_advance = None
+        self.auto_battle_active = False
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        global_command_window = getattr(self, "global_command_window", None)
+        if global_command_window is not None:
+            global_command_window.close_immediately()
+        self.target_cursor.active = False
+        self.escape_cursor.active = False
+        self.item_window.close_immediately()
+        self._close_spell_windows()
+        self._hide_command_guide()
+        self.battle_popup.clear()
+        self.battle_popup_window.clear_texts()
+        self.battle_popup_window.add_text(
+            self.texts.text("battle.defeat", self.localizer),
+            *ESCAPE_MESSAGE_TEXT_POSITION,
+        )
+        self._refresh_party_text_colors()
+
+    def _update_defeat_message(self, input_state: InputState) -> None:
+        """Wait for DA2-style acknowledgement before reporting defeat."""
+
+        if input_state.confirm.triggered or input_state.cancel.triggered:
+            self._complete_defeat()
+
+    def _complete_defeat(self) -> None:
+        """Report defeat to the future battle-transition owner."""
+
+        self.result = BattleResult.DEFEAT
 
     def _cancel_escape_confirmation(self) -> None:
         self.selected_command = None
@@ -3076,6 +3138,10 @@ class BattleScene:
         )
 
     def _activate_timeline_head(self) -> None:
+        self._remove_defeated_party_from_timeline()
+        if self._party_is_defeated():
+            self._begin_defeat_message()
+            return
         actor = self.timeline[0]
         if isinstance(actor, BattleCharacter):
             self.active_party_index = next(
@@ -3396,7 +3462,46 @@ class BattleScene:
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
         self.monster_attack_animation_frame = 0
+        if damage > 0 and self._member_is_dead(self.party[target_index]):
+            self.defending_party_indexes.discard(target_index)
+            self._remove_defeated_party_from_timeline()
+            if self._party_is_defeated():
+                self._begin_defeat_message()
+                return
         self._start_timeline_animation()
+
+    def _party_is_defeated(self) -> bool:
+        """Return whether every battle participant has died."""
+
+        return bool(self.party_visuals) and all(
+            self._party_member_is_dead(index)
+            for index in range(len(self.party_visuals))
+        )
+
+    def _remove_defeated_party_from_timeline(self) -> None:
+        """Remove dead party actors by identity while preserving gauge order."""
+
+        defeated = tuple(
+            visual
+            for index, visual in enumerate(self.party_visuals)
+            if self._party_member_is_dead(index)
+        )
+        if not defeated:
+            return
+        order = getattr(self, "_timeline_order", None)
+        if order is None:
+            self.timeline = tuple(
+                actor
+                for actor in self.timeline
+                if all(actor is not visual for visual in defeated)
+            )
+            return
+        for visual in defeated:
+            self._timeline_order = remove_timeline_actor(
+                self._timeline_order,
+                visual,
+            )
+        self.timeline = self._timeline_order.actors
 
     def _refresh_all_party_hp_texts(self) -> None:
         if not hasattr(self, "party_status_texts"):
@@ -3513,12 +3618,13 @@ class BattleScene:
                 BattlePhase.ESCAPE_MESSAGE,
                 BattlePhase.ESCAPE,
             ) or index in getattr(self, "escaping_party_indexes", ())
-            width = -16 if is_escaping else 16
+            width = self._party_sprite_width(index, is_escaping=is_escaping)
             attack_presentation = getattr(self, "attack_presentation", None)
             attack_pose = (
                 attack_presentation.pose
                 if (
-                    self.phase is BattlePhase.ATTACK_PRESENTATION
+                    not self._party_member_is_dead(index)
+                    and self.phase is BattlePhase.ATTACK_PRESENTATION
                     and index == getattr(self, "action_party_index", None)
                     and attack_presentation is not None
                 )
@@ -3621,7 +3727,10 @@ class BattleScene:
     def _party_draw_position(self, index: int) -> tuple[int, int] | None:
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
-        if self.phase in (BattlePhase.ESCAPE_MESSAGE, BattlePhase.ESCAPE):
+        if self.phase in (
+            BattlePhase.ESCAPE_MESSAGE,
+            BattlePhase.ESCAPE,
+        ) and not self._party_member_is_dead(index):
             return self._escape_party_x(index), target_y
         if (
             self.phase is BattlePhase.FORMATION
@@ -3692,7 +3801,35 @@ class BattleScene:
             x += 16
         return x
 
+    def _party_member_is_dead(self, index: int) -> bool:
+        member = getattr(self.party_visuals[index], "member", None)
+        if member is None:
+            return False
+        return self._member_is_dead(member)
+
+    @staticmethod
+    def _member_is_dead(member: object) -> bool:
+        if isinstance(member, Member):
+            return member.is_dead
+        is_dead = getattr(member, "is_dead", None)
+        if is_dead is not None:
+            return bool(is_dead)
+        return getattr(member, "hp", 1) <= 0
+
+    def _party_member_is_dying(self, index: int) -> bool:
+        member = self.party_visuals[index].member
+        if isinstance(member, Member):
+            return member.is_dying
+        return bool(getattr(member, "is_dying", False))
+
+    def _party_sprite_width(self, index: int, *, is_escaping: bool) -> int:
+        if self._party_member_is_dead(index):
+            return DEAD_SPRITE_WIDTH
+        return -PARTY_SPRITE_WIDTH if is_escaping else PARTY_SPRITE_WIDTH
+
     def _party_sprite_source_x(self, index: int) -> int:
+        if self._party_member_is_dead(index):
+            return DEAD_SPRITE_SOURCE_X
         if self.phase in (BattlePhase.ESCAPE_MESSAGE, BattlePhase.ESCAPE):
             pattern = (
                 self.escape_animation_frame // ESCAPE_RUN_PATTERN_FRAME_COUNT
@@ -3731,6 +3868,8 @@ class BattleScene:
             return SPELL_CAST_SPRITE_SOURCE_X if self.action_uses_cast_pose else 0
         if index in getattr(self, "defending_party_indexes", ()):
             return DEFEND_SPRITE_SOURCE_X
+        if self._party_member_is_dying(index):
+            return NEAR_DEATH_SPRITE_SOURCE_X
         return 0
 
     def _draw_monster_attack_result(self) -> None:
@@ -4251,7 +4390,9 @@ class BattleScene:
         if self.phase is BattlePhase.ESCAPE_MESSAGE:
             self.escape_started_message_window.draw()
         battle_popup = getattr(self, "battle_popup", None)
-        if battle_popup is not None and battle_popup.visible:
+        if self.phase is BattlePhase.DEFEAT_MESSAGE:
+            self.battle_popup_window.draw()
+        elif battle_popup is not None and battle_popup.visible:
             self.battle_popup_window.draw()
         if (
             getattr(self, "auto_battle_active", False)

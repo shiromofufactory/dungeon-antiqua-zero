@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pyxel
 
 from tools._bootstrap import APP_ROOT
@@ -50,31 +52,57 @@ from systems import InventorySystem
 from text_catalog import TextCatalog, TextCatalogError
 from ui import WindowFactory
 
-BATTLE_MOCK_PARTY_CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
-BATTLE_MOCK_MONSTER_KEYS = (
+
+@dataclass(frozen=True)
+class BattleTestMember:
+    """Editable initial state for one member in the standalone battle test."""
+
+    character_key: str
+    internal_level: int | None = None
+    formation_row: FormationRow = FormationRow.FRONT
+    hp: int | None = None
+    mp: int | None = None
+
+
+# Edit these fixtures to choose the standalone battle's initial state.
+BATTLE_TEST_PARTY = (
+    BattleTestMember("Fiora"),
+    BattleTestMember("Cerion"),
+    # BattleTestMember("Alvan"),
+)
+BATTLE_TEST_MONSTER_KEYS = (
     "Giant Spider",
     "Giant Spider",
     "Giant Spider",
     "Coyote",
     "Coyote",
 )
-BATTLE_MOCK_FRONT_MONSTER_INDEXES = frozenset((2, 3, 4))
-BATTLE_MOCK_FRONT_CHARACTER_KEYS = frozenset(("Cerion",))
+BATTLE_TEST_FRONT_MONSTER_INDEXES = frozenset((2, 3, 4))
 
-# Compatibility names used by existing focused tests and external mock callers.
+# Compatibility names retained for the existing focused regression tests.
+BATTLE_MOCK_PARTY_CHARACTER_KEYS = tuple(
+    member.character_key for member in BATTLE_TEST_PARTY
+)
+BATTLE_MOCK_MONSTER_KEYS = BATTLE_TEST_MONSTER_KEYS
+BATTLE_MOCK_FRONT_MONSTER_INDEXES = BATTLE_TEST_FRONT_MONSTER_INDEXES
+BATTLE_MOCK_FRONT_CHARACTER_KEYS = frozenset(
+    member.character_key
+    for member in BATTLE_TEST_PARTY
+    if member.formation_row is FormationRow.FRONT
+)
+
+# Compatibility type names used by the existing focused regression tests.
 BattleMockDataError = BattleDataError
 BattleMockPhase = BattlePhase
 BattleMockCharacter = BattleCharacter
 BattleMockMonster = BattleMonster
 
 
-class BattleScreenMock(BattleScene):
+class BattleTestApp(BattleScene):
     """Small composition root for exercising a configured battle in isolation."""
 
     def __init__(self) -> None:
-        palette_shifter = initialize_screen_mock(
-            "Dungeon Antiqua ZERO Battle Screen Mock"
-        )
+        palette_shifter = initialize_screen_mock("Dungeon Antiqua ZERO Battle Test")
         self.input_reader = create_mock_input_reader()
         bgm = BgmPlayer()
         resources = ImageResources()
@@ -82,14 +110,16 @@ class BattleScreenMock(BattleScene):
         fonts = FontResources()
         windows = WindowFactory(fonts.font_for(settings.language))
         items = load_mock_items()
-        party = load_mock_party(
-            items,
-            load_mock_skills(),
-            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        skills = load_mock_skills()
+        party = tuple(
+            load_mock_party(
+                items,
+                skills,
+                character_keys=(state.character_key,),
+                internal_level=state.internal_level,
+            )[0]
+            for state in BATTLE_TEST_PARTY
         )
-        for member in party:
-            if member.definition.key in BATTLE_MOCK_FRONT_CHARACTER_KEYS:
-                member.formation_row = FormationRow.FRONT
 
         super().__init__(
             settings=settings,
@@ -108,19 +138,15 @@ class BattleScreenMock(BattleScene):
                 load_record_array("monsters.json", APP_ROOT / "data")
             ),
             encounter=BattleEncounter(
-                BATTLE_MOCK_MONSTER_KEYS,
-                BATTLE_MOCK_FRONT_MONSTER_INDEXES,
+                BATTLE_TEST_MONSTER_KEYS,
+                BATTLE_TEST_FRONT_MONSTER_INDEXES,
             ),
-            attack_poses=load_attack_poses(
-                APP_ROOT / "effects" / "attack_poses.json"
-            ),
+            attack_poses=load_attack_poses(APP_ROOT / "effects" / "attack_poses.json"),
             spell_effect_renderer=SpellEffectRenderer(
                 resources,
                 palette_shifter,
             ),
-            spell_effects=load_spell_effects(
-                APP_ROOT / "effects" / "spells.json"
-            ),
+            spell_effects=load_spell_effects(APP_ROOT / "effects" / "spells.json"),
             restart_enabled=True,
             reset_party_on_restart=True,
             reset_inventory_on_restart=True,
@@ -138,6 +164,37 @@ class BattleScreenMock(BattleScene):
     def _restart_battle_mock(self) -> None:
         super()._restart_battle()
 
+    def _prepare_party_for_restart(self) -> None:
+        """Apply the configured state before the production timeline is built."""
+
+        self._apply_test_party_state(self.party)
+
+    def _complete_defeat(self) -> None:
+        """Restart the standalone fixture after acknowledging a wipeout."""
+
+        self._restart_battle_mock()
+
+    @staticmethod
+    def _apply_test_party_state(party) -> None:
+        states = {state.character_key: state for state in BATTLE_TEST_PARTY}
+        for member in party:
+            state = states[member.definition.key]
+            member.formation_row = state.formation_row
+            hp = member.max_hp if state.hp is None else state.hp
+            mp = member.max_mp if state.mp is None else state.mp
+            if not 0 <= hp <= member.max_hp:
+                raise ValueError(
+                    f"battle test HP must be from 0 to {member.max_hp}: "
+                    f"{member.definition.key}"
+                )
+            if not 0 <= mp <= member.max_mp:
+                raise ValueError(
+                    f"battle test MP must be from 0 to {member.max_mp}: "
+                    f"{member.definition.key}"
+                )
+            member.hp = hp
+            member.mp = mp
+
     def _update_escape_animation(self) -> None:
         super()._update_escape_animation()
         if getattr(self, "result", None) is BattleResult.ESCAPED:
@@ -146,7 +203,7 @@ class BattleScreenMock(BattleScene):
 
 def main() -> int:
     return run_screen_mock(
-        BattleScreenMock,
+        BattleTestApp,
         expected_errors=(
             AudioResourceError,
             BattleDataError,
@@ -157,6 +214,9 @@ def main() -> int:
             TextCatalogError,
         ),
     )
+
+
+BattleScreenMock = BattleTestApp
 
 
 if __name__ == "__main__":

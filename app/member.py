@@ -897,6 +897,26 @@ class Member:
         return self.formation_row is FormationRow.FRONT
 
     @property
+    def is_alive(self) -> bool:
+        """Return whether the member has at least one HP."""
+
+        return self.hp > 0
+
+    @property
+    def is_dead(self) -> bool:
+        """Return whether the member has no HP remaining."""
+
+        return not self.is_alive
+
+    @property
+    def is_dying(self) -> bool:
+        """Return DA2's near-death state, including poison at any HP."""
+
+        return self.poisoned or (
+            self.is_alive and self.hp <= self.max_hp // 4
+        )
+
+    @property
     def is_npc(self) -> bool:
         """Return whether this member uses the NPC equipment rules."""
 
