@@ -138,9 +138,17 @@ button { color: inherit; }
 
 .preset-heading { display: flex; justify-content: space-between; align-items: end; }
 .preset-heading h2 { margin-top: 3px; }
+.preset-hint { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
 .preset-list { display: grid; gap: 7px; margin-top: 13px; max-height: 310px; overflow-y: auto; padding-right: 3px; }
-.preset-item { width: 100%; min-height: 54px; text-align: left; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 3px; background: var(--panel-2); cursor: pointer; }
+.preset-item { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; width: 100%; min-height: 54px; text-align: left; padding: 8px 10px 8px 6px; border: 1px solid var(--line-soft); border-radius: 3px; background: var(--panel-2); cursor: pointer; }
 .preset-item.active { border-color: var(--gold); background: #211d15; }
+.preset-item.dragging { opacity: .42; }
+.preset-item.drop-before::before, .preset-item.drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--gold); box-shadow: 0 0 8px #e1b85b99; }
+.preset-item.drop-before::before { top: -5px; }
+.preset-item.drop-after::after { bottom: -5px; }
+.drag-handle { color: var(--muted); font: 700 13px/1 ui-monospace, monospace; cursor: grab; user-select: none; }
+.drag-handle:active { cursor: grabbing; }
+.preset-copy { min-width: 0; }
 .preset-item strong { display: block; overflow: hidden; text-overflow: ellipsis; font: 700 10px ui-monospace, monospace; }
 .preset-item small { display: block; margin-top: 6px; color: var(--muted); font: 9px ui-monospace, monospace; }
 .preset-editor { display: grid; gap: 7px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }

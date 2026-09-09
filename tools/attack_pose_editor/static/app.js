@@ -17,6 +17,8 @@ const state = {
   viewOrigin: [...DEFAULT_VIEW_ORIGIN],
   dirty: false,
   dragging: null,
+  draggedPoseIndex: null,
+  suppressPresetClick: false,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -252,22 +254,87 @@ function renderPresetList() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `preset-item${index === state.selectedPose ? " active" : ""}`;
+    button.dataset.poseIndex = String(index);
+    const handle = document.createElement("span");
+    handle.className = "drag-handle";
+    handle.textContent = "⠿";
+    handle.title = "ドラッグして並び替え";
+    handle.setAttribute("aria-hidden", "true");
+    handle.draggable = true;
+    const copy = document.createElement("span");
+    copy.className = "preset-copy";
     const id = document.createElement("strong");
     id.textContent = pose.id;
     const summary = document.createElement("small");
     const weapons = pose.weapons.map((weapon) => `W${String(weapon.image).padStart(2, "0")}`).join(" + ");
     summary.textContent = `P${pose.character_pose} / ${weapons}`;
-    button.append(id, summary);
+    copy.append(id, summary);
+    button.append(handle, copy);
     button.addEventListener("click", () => {
+      if (state.suppressPresetClick) return;
       state.selectedPose = index;
       if (state.selectedWeapon >= currentPose().weapons.length) state.selectedWeapon = 0;
       if (state.moveTarget === "weapon_1" && currentPose().weapons.length < 2) state.moveTarget = "weapon_0";
       renderAll();
     });
+    handle.addEventListener("dragstart", (event) => {
+      state.draggedPoseIndex = index;
+      state.suppressPresetClick = true;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+      requestAnimationFrame(() => button.classList.add("dragging"));
+    });
+    button.addEventListener("dragover", (event) => {
+      if (state.draggedPoseIndex === null || state.draggedPoseIndex === index) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      clearPresetDropIndicators();
+      const bounds = button.getBoundingClientRect();
+      button.classList.add(event.clientY < bounds.top + bounds.height / 2 ? "drop-before" : "drop-after");
+    });
+    button.addEventListener("dragleave", (event) => {
+      if (!button.contains(event.relatedTarget)) button.classList.remove("drop-before", "drop-after");
+    });
+    button.addEventListener("drop", (event) => {
+      if (state.draggedPoseIndex === null) return;
+      event.preventDefault();
+      const bounds = button.getBoundingClientRect();
+      reorderPose(state.draggedPoseIndex, index, event.clientY >= bounds.top + bounds.height / 2);
+    });
+    handle.addEventListener("dragend", () => {
+      state.draggedPoseIndex = null;
+      button.classList.remove("dragging");
+      clearPresetDropIndicators();
+      setTimeout(() => { state.suppressPresetClick = false; }, 0);
+    });
     container.append(button);
   });
   byId("pose-id").value = currentPose().id;
   byId("delete-pose").disabled = state.data.poses.length <= 1;
+}
+
+function clearPresetDropIndicators() {
+  document.querySelectorAll(".preset-item").forEach((item) => {
+    item.classList.remove("drop-before", "drop-after");
+  });
+}
+
+function reorderPose(fromIndex, targetIndex, placeAfter) {
+  const poses = state.data.poses;
+  const selected = currentPose();
+  let insertionIndex = targetIndex + (placeAfter ? 1 : 0);
+  if (fromIndex < insertionIndex) insertionIndex -= 1;
+  if (insertionIndex === fromIndex) {
+    clearPresetDropIndicators();
+    return;
+  }
+  const [moving] = poses.splice(fromIndex, 1);
+  poses.splice(insertionIndex, 0, moving);
+  state.selectedPose = poses.indexOf(selected);
+  state.draggedPoseIndex = null;
+  setDirty();
+  renderAll();
+  setTimeout(() => { state.suppressPresetClick = false; }, 0);
 }
 
 function renderAll() {

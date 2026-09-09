@@ -123,6 +123,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertTrue(result["saved"])
         saved = json.loads(self.application.source_path.read_text(encoding="utf-8"))
         self.assertEqual(len(saved["poses"]), 2)
+        self.assertEqual([pose["id"] for pose in saved["poses"]], ["attack_pose_01", "slash_finish"])
         self.assertNotIn("character_position", saved["poses"][1])
         self.assertEqual(len(saved["poses"][1]["weapons"]), 2)
         self.assertEqual(saved["poses"][1]["weapons"][0]["position"], [-10, 9])
@@ -166,6 +167,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertIn('id="origin-x" type="number"', page)
         self.assertIn('data-target="weapon_1"', page)
         self.assertIn('id="toggle-second-weapon"', page)
+        self.assertIn("ハンドルをドラッグして並び替え", page)
         self.assertIn('data-layer="front"', page)
         self.assertIn('data-flip="flip_x"', page)
         self.assertIn('data-flip="flip_y"', page)
@@ -173,6 +175,8 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertIn('for (let index = 0; index < 8; index += 1)', script)
         self.assertIn('for (let index = 0; index < 16; index += 1)', script)
         self.assertIn('context.scale(weapon.flip_x ? -1 : 1, weapon.flip_y ? -1 : 1)', script)
+        self.assertIn("function reorderPose(fromIndex, targetIndex, placeAfter)", script)
+        self.assertIn('handle.addEventListener("dragstart"', script)
         self.assertNotIn("character_position", script)
 
 
