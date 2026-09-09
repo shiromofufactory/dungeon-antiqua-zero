@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+DEFENDING_HIT_VALUE_THRESHOLD = 25
+
+
 @dataclass(frozen=True)
 class PhysicalAttackResult:
     """One DA2-compatible basic physical-attack result."""
@@ -51,8 +54,9 @@ def resolve_physical_attack(
     target_defense: int,
     target_evasion: int,
     hit_roll: int,
+    target_defending: bool = False,
 ) -> PhysicalAttackResult:
-    """Resolve an unmodified physical attack using DA2's base calculation."""
+    """Resolve a physical attack, including DA2's defend-command effect."""
 
     attack = _nonnegative_integer(attack, "attack")
     hit = _nonnegative_integer(hit, "hit")
@@ -62,6 +66,8 @@ def resolve_physical_attack(
     hit_roll = _nonnegative_integer(hit_roll, "hit_roll")
     if hit_roll > 99:
         raise ValueError("hit_roll must be from 0 to 99")
+    if not isinstance(target_defending, bool):
+        raise TypeError("target_defending must be a boolean")
 
     adjusted_hit = float(hit)
     if agility > 20:
@@ -70,7 +76,8 @@ def resolve_physical_attack(
         adjusted_hit *= 1 + (agility - 10) / 20
 
     hit_value = adjusted_hit * (100 - target_evasion) / 100 - hit_roll
-    if hit_value < 0:
+    hit_threshold = DEFENDING_HIT_VALUE_THRESHOLD if target_defending else 0
+    if hit_value < hit_threshold:
         return PhysicalAttackResult(
             hit=False,
             damage=0,
@@ -84,8 +91,10 @@ def resolve_physical_attack(
     damage = int(
         reduced_attack * damage_factor * (1 - defense_cut_rate) + 0.99
     )
+    if target_defending:
+        damage //= 2
     return PhysicalAttackResult(
-        hit=True,
+        hit=not target_defending or damage > 0,
         damage=damage,
         adjusted_hit=adjusted_hit,
         hit_value=hit_value,
@@ -93,6 +102,7 @@ def resolve_physical_attack(
 
 
 __all__ = [
+    "DEFENDING_HIT_VALUE_THRESHOLD",
     "PhysicalAttackResult",
     "member_physical_attack",
     "resolve_physical_attack",

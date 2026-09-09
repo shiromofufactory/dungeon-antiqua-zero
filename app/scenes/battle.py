@@ -3667,6 +3667,10 @@ class BattleScene:
             target_defense=target_stats.defense,
             target_evasion=target_stats.evasion,
             hit_roll=random.randint(0, 99),
+            target_defending=(
+                self.monster_attack_target_index
+                in self.defending_party_indexes
+            ),
         )
         self.monster_attack_damage = result.damage
         self.monster_attack_animation_frame = 0

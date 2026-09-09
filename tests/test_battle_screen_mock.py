@@ -2702,6 +2702,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.monster_attack_target_index = None
         mock.monster_attack_damage = None
         mock.monster_attack_animation_frame = 0
+        mock.defending_party_indexes = set()
         mock._start_timeline_animation = Mock()
 
         with (
@@ -2730,6 +2731,54 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(mock.monster_attack_damage, 0)
         play_se.assert_not_called()
+
+    def test_defending_member_gets_da2_guard_effect_against_monster_attack(
+        self,
+    ) -> None:
+        actor = BattleMockMonster(
+            key="Giant Spider",
+            names={"name_en": "Giant Spider"},
+            image_id="1",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=2),
+            agility=20,
+            combat_stats=MonsterCombatStats(
+                attack=100,
+                hit=100,
+                defense=0,
+                evasion=0,
+            ),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.command_window = Mock()
+        mock.timeline = (actor,)
+        mock.party = (
+            SimpleNamespace(
+                hp=30,
+                formation_row=FormationRow.FRONT,
+                battle_stats=SimpleNamespace(defense=0, evasion=0),
+            ),
+        )
+        mock.monster_blink_frames_remaining = 1
+        mock.monster_attack_target_index = None
+        mock.monster_attack_damage = None
+        mock.monster_attack_animation_frame = 0
+        mock.defending_party_indexes = {0}
+        mock._start_timeline_animation = Mock()
+
+        with (
+            patch("tools.screen_mocks.battle.random.choice", return_value=0),
+            patch("tools.screen_mocks.battle.random.randint", return_value=75),
+            patch("scenes.battle.play_se") as play_se,
+        ):
+            mock._update_monster_action()
+
+        self.assertEqual(mock.monster_attack_damage, 45)
+        play_se.assert_called_once_with(BATTLE_HIT_SE_ID)
 
     def test_rear_monster_finishes_without_attacking(self) -> None:
         actor = BattleMockMonster(
