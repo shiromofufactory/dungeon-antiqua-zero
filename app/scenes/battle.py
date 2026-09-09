@@ -26,6 +26,11 @@ from battle_commands import (
     resolve_battle_commands,
     selectable_attack_target_indexes,
 )
+from battle_magic import (
+    DA2_DEFAULT_ITEM_SPELL_ABILITY,
+    member_spell_ability,
+    resolve_healing,
+)
 from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import (
     TimelineAdvance,
@@ -70,7 +75,7 @@ from resources import (
     play_se,
 )
 from state import Language, Settings
-from spell import Spell, SpellType
+from spell import Spell, SpellAction, SpellType
 from spell_effect import (
     SpellEffectPlayer,
     load_spell_effects,
@@ -242,6 +247,7 @@ MONSTER_DAMAGE_SHAKE_X = (8, 9)
 DAMAGE_NUMBER_SPRITE_X = 128
 DAMAGE_NUMBER_SPRITE_Y = 0
 DAMAGE_NUMBER_SPRITE_SIZE = 8
+HEALING_NUMBER_SPRITE_Y = DAMAGE_NUMBER_SPRITE_Y + DAMAGE_NUMBER_SPRITE_SIZE
 MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
@@ -260,6 +266,7 @@ DA2_ACTION_MOVE_SPEED = 4
 ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
 BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
+SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
 ATTACK_POSE_SWING_FRAME_COUNT = 8
 ATTACK_MOTION_FRAME_COUNT = (
@@ -437,6 +444,34 @@ class BattleTargetSpellEffect:
     player: SpellEffectPlayer
 
 
+@dataclass(frozen=True)
+class BattleHealingResult:
+    """A resolved HEAL value waiting for its DA2-timed application."""
+
+    target_index: int
+    amount: int
+    cures_ailments: bool
+    popup_x: int
+    popup_y: int
+
+
+@dataclass
+class BattleHealingPopup:
+    """One non-blocking recovery number animated with DA2's offsets."""
+
+    x: int
+    y: int
+    amount: int
+    elapsed_frame: int = 0
+
+    @property
+    def completed(self) -> bool:
+        return self.elapsed_frame >= DAMAGE_POPUP_FRAME_COUNT
+
+    def update(self) -> None:
+        self.elapsed_frame += 1
+
+
 @dataclass
 class BattleActionPresentation:
     """Own the visual layers that must finish before a turn advances.
@@ -446,6 +481,9 @@ class BattleActionPresentation:
     """
 
     spell_effects: tuple[BattleTargetSpellEffect, ...]
+    healing_results: tuple[BattleHealingResult, ...] = ()
+    result_start_frame: int = 0
+    results_applied: bool = False
     elapsed_frame: int = 0
 
     @property
@@ -1065,6 +1103,7 @@ class BattleScene:
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
+        self.healing_popups: list[BattleHealingPopup] = []
         self.attack_presentation: BattleAttackPresentation | None = None
         self.battle_popup = BattleTimedPopup()
         self.action_party_index: int | None = None
@@ -1161,6 +1200,7 @@ class BattleScene:
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.update()
+        self._update_healing_popups()
         if hasattr(self, "active_party_pulse_frame"):
             self._update_active_party_pulse()
         self._update_action_motion()
@@ -1385,6 +1425,7 @@ class BattleScene:
         self.pending_item_candidate = None
         self.pending_spell = None
         self.action_presentation = None
+        self.healing_popups.clear()
         self.attack_presentation = None
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
@@ -2638,7 +2679,20 @@ class BattleScene:
                         ),
                     )
                 )
-        self.action_presentation = BattleActionPresentation(tuple(effects))
+        healing_results = self._resolve_healing_results(spell, indexes)
+        effect_frame_count = max(
+            (effect.player.definition.total_frames for effect in effects),
+            default=0,
+        )
+        result_start_frame = max(
+            effect_frame_count - SPELL_RESULT_OVERLAP_FRAME_COUNT,
+            0,
+        )
+        self.action_presentation = BattleActionPresentation(
+            tuple(effects),
+            healing_results=healing_results,
+            result_start_frame=result_start_frame,
+        )
         self.phase = BattlePhase.ACTION_PRESENTATION
         self.target_cursor.active = False
         if self.party_target_cursor is not None:
@@ -2655,6 +2709,80 @@ class BattleScene:
                 play_se(se_id)
             self.spell_effect_renderer.prepare(first_player)
         return True
+
+    def _resolve_healing_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleHealingResult, ...]:
+        """Resolve each HEAL target without mutating party state yet."""
+
+        if spell.action is not SpellAction.HEAL:
+            return ()
+        if spell.to_enemy:
+            raise BattleDataError("HEAL spells must target allies")
+        if self.active_party_index is None:
+            raise RuntimeError("HEAL requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        ability = (
+            DA2_DEFAULT_ITEM_SPELL_ABILITY
+            if spell.type is SpellType.ITEM
+            else member_spell_ability(
+                magic=actor.adjusted_abilities.magic,
+                internal_level=actor.internal_level,
+            )
+        )
+        results: list[BattleHealingResult] = []
+        for index in indexes:
+            target = self.party[index]
+            resolution = resolve_healing(
+                intensity=spell.intensity,
+                ability=ability,
+                current_hp=target.hp,
+                max_hp=target.max_hp,
+                random_factor=random.random(),
+            )
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
+            results.append(
+                BattleHealingResult(
+                    target_index=index,
+                    amount=resolution.amount,
+                    cures_ailments=resolution.cures_ailments,
+                    popup_x=x + 6,
+                    popup_y=y + 16,
+                )
+            )
+        return tuple(results)
+
+    def _apply_action_results(self, presentation: BattleActionPresentation) -> None:
+        """Apply resolved state changes and start independent result popups."""
+
+        if presentation.results_applied:
+            return
+        presentation.results_applied = True
+        popups = getattr(self, "healing_popups", None)
+        if popups is None:
+            popups = []
+            self.healing_popups = popups
+        for result in presentation.healing_results:
+            member = self.party[result.target_index]
+            member.apply_healing(
+                result.amount,
+                cure_ailments=result.cures_ailments,
+            )
+            self._refresh_party_hp_text(result.target_index)
+            if result.amount > 0:
+                popups.append(
+                    BattleHealingPopup(
+                        result.popup_x,
+                        result.popup_y,
+                        result.amount,
+                    )
+                )
 
     def _show_item_use_message(self, item: Item) -> None:
         """Show DA2's timed item-use announcement in the common popup."""
@@ -2715,7 +2843,11 @@ class BattleScene:
         """Return the center of the target's actual battle sprite rectangle."""
 
         if target_side == "ally":
-            return self._party_sprite_x(index) + 8, PARTY_SPRITE_Y[index] + 16
+            position = self._party_draw_position(index)
+            if position is None:
+                raise ValueError("spell effect target must be visible")
+            x, y = position
+            return x + 8, y + 16
         if target_side == "enemy":
             monster = self.monsters[index]
             _target_x, target_y = MONSTER_POSITIONS[index]
@@ -2733,7 +2865,13 @@ class BattleScene:
             self._complete_current_turn()
             return
         presentation.update()
+        if (
+            not presentation.results_applied
+            and presentation.elapsed_frame >= presentation.result_start_frame
+        ):
+            self._apply_action_results(presentation)
         if presentation.is_complete:
+            self._apply_action_results(presentation)
             self.action_presentation = None
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
             if getattr(self, "action_party_index", None) is not None:
@@ -2745,6 +2883,16 @@ class BattleScene:
             self.spell_effect_renderer.prepare(
                 presentation.spell_effects[0].player
             )
+
+    def _update_healing_popups(self) -> None:
+        """Advance recovery numbers independently from the battle phase."""
+
+        popups = getattr(self, "healing_popups", None)
+        if not popups:
+            return
+        for popup in popups:
+            popup.update()
+        self.healing_popups = [popup for popup in popups if not popup.completed]
 
     def _begin_action_motion(self, *, use_cast_pose: bool) -> None:
         """Move the active party actor toward the enemies as in DA2."""
@@ -3821,6 +3969,7 @@ class BattleScene:
         self._draw_monsters()
         self._draw_party_attack_effect()
         self._draw_spell_effects()
+        self._draw_healing_popups()
         self._draw_party_attack_damage()
         self._draw_monster_attack_result()
         self._draw_timeline()
@@ -4357,6 +4506,32 @@ class BattleScene:
             return
         for effect in presentation.spell_effects:
             self.spell_effect_renderer.draw_effect(effect.player)
+
+    def _draw_healing_popups(self) -> None:
+        """Draw HEAL numbers from the sprite row below damage digits."""
+
+        for popup in getattr(self, "healing_popups", ()):
+            reference_frame = min(
+                popup.elapsed_frame * DA2_REFERENCE_FPS // FPS,
+                len(DA2_DAMAGE_VERTICAL_OFFSETS) - 1,
+            )
+            vertical_offset = DA2_DAMAGE_VERTICAL_OFFSETS[reference_frame]
+            digits = str(popup.amount)
+            x = popup.x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
+            y = popup.y - vertical_offset
+            for digit in digits:
+                pyxel.blt(
+                    x,
+                    y,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X
+                    + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                    HEALING_NUMBER_SPRITE_Y,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+                x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_monster_image(
         self,

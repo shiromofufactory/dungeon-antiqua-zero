@@ -1,4 +1,4 @@
-"""Spell master data and learning rules independent of UI and Pyxel."""
+"""Spell master data, effect identity, and learning rules independent of UI."""
 
 from __future__ import annotations
 
@@ -39,6 +39,36 @@ class SpellType(StrEnum):
     ITEM = "item"
 
 
+class SpellAction(StrEnum):
+    """Stable effect kinds stored by the spell master."""
+
+    AGILITY_UP = "AGI_UP"
+    BLOOD_SUCK = "BLOOD_SUCK"
+    BREAK = "BREAK"
+    CONFUSE = "CONFUSE"
+    CURE = "CURE"
+    CURSE = "CURSE"
+    DAMAGE = "DAMAGE"
+    FADE = "FADE"
+    HASTE = "HASTE"
+    HEAL = "HEAL"
+    HEAVENGATE = "HEAVENGATE"
+    MAGIC_SHIELD = "MAGIC_SHIELD"
+    MAGIC_UP = "MAG_UP"
+    MANA = "MANA"
+    MAX_HP_UP = "MHP_UP"
+    MAX_MP_UP = "MMP_UP"
+    NONE = "NONE"
+    PROTECTION = "PROTECTION"
+    PURGE = "PURGE"
+    REVIVE = "REVIVE"
+    SILENCE = "SILENCE"
+    SLEEP = "SLEEP"
+    SLOW = "SLOW"
+    STRENGTH_UP = "STR_UP"
+    TELEPORT = "TELEPORT"
+
+
 SPELL_PROFICIENCY_BY_TYPE = MappingProxyType(
     {
         SpellType.MYSTIC: ProficiencyKind.MYSTIC,
@@ -73,7 +103,7 @@ def _flag(record: Mapping[str, object], field: str) -> bool:
 
 @dataclass(frozen=True)
 class Spell:
-    """Immutable spell identity, display data, and acquisition requirements."""
+    """Immutable spell identity, effect metadata, and acquisition requirements."""
 
     key: str
     names: Mapping[str, str]
@@ -84,6 +114,7 @@ class Spell:
     on_battle: bool
     to_enemy: bool
     to_all: bool
+    action: SpellAction
     intensity: int
     descriptions: Mapping[str, tuple[str, ...]]
 
@@ -124,6 +155,16 @@ class Spell:
         except ValueError as error:
             raise SpellDataError(f"unsupported spell.type: {type_value}") from error
 
+        action_value = record.get("action")
+        if not isinstance(action_value, str):
+            raise SpellDataError("spell.action must be a string")
+        try:
+            action = SpellAction(action_value)
+        except ValueError as error:
+            raise SpellDataError(
+                f"unsupported spell.action: {action_value}"
+            ) from error
+
         level = _integer(record, "lv", 0)
         if level > 9:
             raise SpellDataError("spell.lv must be from 0 to 9")
@@ -138,6 +179,7 @@ class Spell:
             on_battle=_flag(record, "on_battle"),
             to_enemy=_flag(record, "to_enemy"),
             to_all=_flag(record, "to_all"),
+            action=action,
             intensity=_integer(record, "intensity", 0),
             descriptions=MappingProxyType(descriptions),
         )
@@ -218,6 +260,7 @@ __all__ = [
     "SPELL_PROFICIENCY_BY_TYPE",
     "SPELL_TYPE_ICON_TAGS",
     "Spell",
+    "SpellAction",
     "SpellDataError",
     "SpellType",
 ]

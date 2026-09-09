@@ -960,6 +960,24 @@ class Member:
         )
         return self.hp - old_hp
 
+    def apply_healing(self, amount: int, *, cure_ailments: bool = False) -> int:
+        """Apply a non-negative recovery and optionally clear all ailments."""
+
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise TypeError("amount must be an integer")
+        if amount < 0:
+            raise ValueError("amount must not be negative")
+        if not isinstance(cure_ailments, bool):
+            raise TypeError("cure_ailments must be a boolean")
+        old_hp = self.hp
+        self.hp = min(self.max_hp, self.hp + amount)
+        if cure_ailments:
+            self.poisoned = False
+            self.paralyzed = False
+            self.sleeping = 0
+            self.confused = 0
+        return self.hp - old_hp
+
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""
 

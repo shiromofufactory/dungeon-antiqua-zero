@@ -42,6 +42,7 @@ from tools.screen_mocks.battle import (
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
     DAMAGE_NUMBER_SPRITE_X,
     DAMAGE_NUMBER_SPRITE_Y,
+    HEALING_NUMBER_SPRITE_Y,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
     DEAD_SPRITE_SOURCE_X,
@@ -74,8 +75,10 @@ from tools.screen_mocks.battle import (
     ACTION_MOVE_DISTANCE,
     ACTION_MOVE_SPEED,
     SPELL_CAST_SPRITE_SOURCE_X,
+    SPELL_RESULT_OVERLAP_FRAME_COUNT,
     BattleActionPresentation,
     BattleAttackPresentation,
+    BattleHealingPopup,
     BattleMockCharacter,
     BattleGlobalCommand,
     BattleItemCandidate,
@@ -117,6 +120,7 @@ from battle_timeline import (
 )
 from localization import Localizer
 from member import EquipmentSlot, MAX_INTERNAL_LEVEL, MIN_INTERNAL_LEVEL
+from battle_magic import member_spell_ability
 from state import Language
 from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
@@ -1944,6 +1948,204 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._complete_current_turn.assert_called_once_with()
         mock.palette_shifter.remove_variant.assert_called_once_with(
             SPELL_EFFECT_FLASH_PALETTE
+        )
+
+    def test_heal_applies_at_da2_overlap_and_popup_does_not_delay_return(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["HEALING1"]
+        definition = SpellEffectDefinition.from_record(
+            spell.key,
+            {
+                "kind": "target_sprite",
+                "image_id": "effects/spells32",
+                "row": 0,
+                "frame_count": 5,
+                "frames_per_pattern": 4,
+                "offset": {"ally": [0, -4], "enemy": [0, -4]},
+                "flash_color": 5,
+                "se_id": "spell_healing1",
+            },
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in mock.party
+        )
+        mock.party[0].hp = 1
+        mock.active_party_index = 1
+        mock.action_party_index = 1
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_returning = False
+        mock.action_return_jump = False
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = False
+        mock.action_targets_all = False
+        mock.selectable_party_target_indexes = (0, 1)
+        mock.selected_party_target_index = 0
+        mock.spell_effects = {spell.key: definition}
+        mock.spell_effect_renderer = Mock()
+        mock.palette_shifter = Mock()
+        mock.target_cursor = SimpleNamespace(active=False)
+        mock.party_target_cursor = SimpleNamespace(active=True)
+        mock.all_target_cursors = ()
+        mock.healing_popups = []
+        mock._refresh_monster_name_colors = Mock()
+        mock._refresh_party_hp_text = Mock()
+        mock._begin_action_return = Mock()
+
+        with (
+            patch("scenes.battle.random.random", return_value=0.5),
+            patch("scenes.battle.play_se"),
+        ):
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        expected_ability = member_spell_ability(
+            magic=mock.party[1].adjusted_abilities.magic,
+            internal_level=mock.party[1].internal_level,
+        )
+        expected_amount = int(spell.intensity * expected_ability / 10 + 1)
+        result_frame = definition.total_frames - SPELL_RESULT_OVERLAP_FRAME_COUNT
+        for _frame in range(result_frame - 1):
+            mock._update_action_presentation()
+        self.assertEqual(mock.party[0].hp, 1)
+
+        mock._update_action_presentation()
+
+        self.assertEqual(
+            mock.party[0].hp,
+            min(mock.party[0].max_hp, 1 + expected_amount),
+        )
+        self.assertEqual(mock.healing_popups[0].amount, expected_amount)
+        mock._refresh_party_hp_text.assert_called_once_with(0)
+
+        for _frame in range(SPELL_RESULT_OVERLAP_FRAME_COUNT):
+            mock._update_action_presentation()
+
+        mock._begin_action_return.assert_called_once_with(complete_turn=True)
+        self.assertEqual(len(mock.healing_popups), 1)
+
+    def test_item_heal_uses_da2_fixed_ability_of_twenty(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["POTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in mock.party
+        )
+        mock.party[0].hp = 1
+        mock.active_party_index = 1
+        mock.action_party_index = 1
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_returning = False
+        mock.action_return_jump = False
+        mock.phase = BattleMockPhase.ACTION_TARGET
+
+        with patch("scenes.battle.random.random", return_value=0.5):
+            result = mock._resolve_healing_results(spell, (0,))[0]
+
+        self.assertEqual(result.amount, 61)
+
+    def test_unregistered_heal_effect_still_recovers_then_returns(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["HEALING2"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in mock.party
+        )
+        target = mock.party[0]
+        target.hp = 1
+        mock.active_party_index = 1
+        mock.action_party_index = 1
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_returning = False
+        mock.action_return_jump = False
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = False
+        mock.action_targets_all = False
+        mock.selectable_party_target_indexes = (0, 1)
+        mock.selected_party_target_index = 0
+        mock.spell_effects = {}
+        mock.target_cursor = SimpleNamespace(active=False)
+        mock.party_target_cursor = SimpleNamespace(active=True)
+        mock.all_target_cursors = ()
+        mock.healing_popups = []
+        mock._refresh_monster_name_colors = Mock()
+        mock._refresh_party_hp_text = Mock()
+        mock._begin_action_return = Mock()
+
+        with patch("scenes.battle.random.random", return_value=0.5):
+            self.assertTrue(mock._begin_action_presentation(spell))
+        mock._update_action_presentation()
+
+        self.assertGreater(target.hp, 1)
+        mock._begin_action_return.assert_called_once_with(complete_turn=True)
+        self.assertEqual(len(mock.healing_popups), 1)
+
+    def test_zero_intensity_heal_restores_hp_and_cures_all_ailments(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["PANACEA"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        target = mock.party[0]
+        target.hp = 1
+        target.poisoned = True
+        target.paralyzed = True
+        target.sleeping = 2
+        target.confused = 2
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in mock.party
+        )
+        mock.active_party_index = 1
+        mock.action_party_index = 1
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
+        mock.action_returning = False
+        mock.action_return_jump = False
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.healing_popups = []
+        mock._refresh_party_hp_text = Mock()
+
+        result = mock._resolve_healing_results(spell, (0,))
+        presentation = BattleActionPresentation((), healing_results=result)
+        mock._apply_action_results(presentation)
+
+        self.assertEqual(target.hp, target.max_hp)
+        self.assertFalse(target.poisoned)
+        self.assertFalse(target.paralyzed)
+        self.assertEqual(target.sleeping, 0)
+        self.assertEqual(target.confused, 0)
+
+    def test_heal_popup_uses_sprite_row_eight_pixels_below_damage(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.healing_popups = [BattleHealingPopup(100, 80, 12)]
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_healing_popups()
+
+        self.assertEqual(HEALING_NUMBER_SPRITE_Y, DAMAGE_NUMBER_SPRITE_Y + 8)
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(92, 78, 0, DAMAGE_NUMBER_SPRITE_X + 8, 8, 8, 8, 1),
+                call(100, 78, 0, DAMAGE_NUMBER_SPRITE_X + 16, 8, 8, 8, 1),
+            ],
         )
 
     def test_spell_cast_message_uses_da2_text_and_escape_window_position(self) -> None:

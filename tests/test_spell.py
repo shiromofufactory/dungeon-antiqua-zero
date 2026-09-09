@@ -10,7 +10,7 @@ from tools.screen_mocks._fixtures import (
 )
 from localization import Localizer
 from resources import load_record_array
-from spell import Spell, SpellDataError, SpellType
+from spell import Spell, SpellAction, SpellDataError, SpellType
 from state import Language
 
 
@@ -28,6 +28,7 @@ class SpellTest(unittest.TestCase):
         self.assertFalse(spell.on_camp)
         self.assertTrue(spell.to_enemy)
         self.assertFalse(spell.to_all)
+        self.assertIs(spell.action, SpellAction.DAMAGE)
         self.assertEqual(
             spell.localized_name(Localizer(Language.JAPANESE)),
             "ファイア１",
@@ -68,6 +69,16 @@ class SpellTest(unittest.TestCase):
                 Localizer(Language.JAPANESE)
             ),
             "－",
+        )
+
+    def test_loads_every_current_heal_effect_by_its_stable_action(self) -> None:
+        self.assertEqual(
+            {
+                spell.key
+                for spell in self.spells.values()
+                if spell.action is SpellAction.HEAL
+            },
+            {"HEALING1", "HEALING2", "POTION", "PANACEA"},
         )
 
     def test_standard_display_name_uses_each_spell_school_icon(self) -> None:

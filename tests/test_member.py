@@ -331,6 +331,22 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.hp, 0)
         self.assertEqual(self.member.heal_and_poison_amount, 0)
 
+    def test_battle_healing_caps_hp_and_can_clear_all_ailments(self) -> None:
+        self.member.hp = 1
+        self.member.poisoned = True
+        self.member.paralyzed = True
+        self.member.sleeping = 2
+        self.member.confused = 3
+
+        recovered = self.member.apply_healing(999, cure_ailments=True)
+
+        self.assertEqual(recovered, self.member.max_hp - 1)
+        self.assertEqual(self.member.hp, self.member.max_hp)
+        self.assertFalse(self.member.poisoned)
+        self.assertFalse(self.member.paralyzed)
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 0)
+
     def test_negative_equipment_healing_reduces_hp(self) -> None:
         cursed_ring = self.item("CURSED RING", "ARM", healing=-2)
         self.member.equipment = EquipmentSet(
