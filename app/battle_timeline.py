@@ -54,6 +54,7 @@ class TimelineAdvance(Generic[Actor]):
     reinsertion_index: int
     interrupt_index: int | None
     overflow_actor: Actor | None
+    reinsert_completed_actor: bool = True
 
 
 def initialize_timeline_order(
@@ -154,6 +155,27 @@ def complete_timeline_action(
     )
 
 
+def remove_timeline_head(
+    order: TimelineOrder[Actor],
+) -> TimelineAdvance[Actor]:
+    """Remove the current actor without reinserting it after the slide."""
+
+    if not order.entries:
+        raise ValueError("cannot remove an actor from an empty timeline")
+    completed = order.entries[0]
+    remaining = TimelineOrder(order.entries[1:])
+    return TimelineAdvance(
+        before=order,
+        remaining=remaining,
+        after=remaining,
+        completed_actor=completed.actor,
+        reinsertion_index=len(remaining.entries),
+        interrupt_index=None,
+        overflow_actor=None,
+        reinsert_completed_actor=False,
+    )
+
+
 def remove_timeline_actor(
     order: TimelineOrder[Actor],
     actor: Actor,
@@ -176,4 +198,5 @@ __all__ = [
     "initialize_timeline_order",
     "ready_timeline_head",
     "remove_timeline_actor",
+    "remove_timeline_head",
 ]

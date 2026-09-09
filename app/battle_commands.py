@@ -163,6 +163,7 @@ def resolve_battle_commands(
     monsters: Sequence[BattleTarget],
     *,
     context: BattleCommandContext | None = None,
+    party_front_rows: Sequence[bool] | None = None,
 ) -> tuple[BattleCommandOption, ...]:
     """Resolve visible commands and their selectable state for one member."""
 
@@ -170,13 +171,25 @@ def resolve_battle_commands(
         raise ValueError("party must not be empty")
     if not any(candidate is member for candidate in party):
         raise ValueError("member must belong to party")
+    if party_front_rows is None:
+        front_rows = tuple(candidate.is_front_row for candidate in party)
+    else:
+        front_rows = tuple(party_front_rows)
+        if len(front_rows) != len(party) or not all(
+            isinstance(is_front, bool) for is_front in front_rows
+        ):
+            raise ValueError("party_front_rows must contain one boolean per member")
+    member_index = next(
+        index for index, candidate in enumerate(party) if candidate is member
+    )
+    member_is_front_row = front_rows[member_index]
     current = BattleCommandContext() if context is None else context
     if not isinstance(current, BattleCommandContext):
         raise TypeError("context must be a BattleCommandContext")
     left_commands: list[BattleCommandOption] = []
     attack_targets = (
         selectable_attack_target_indexes(
-            attacker_is_front_row=member.is_front_row,
+            attacker_is_front_row=member_is_front_row,
             weapon_reach=member_attack_reach(member),
             monsters=monsters,
         )
@@ -213,7 +226,7 @@ def resolve_battle_commands(
         right_commands.append(
             BattleCommandOption(
                 BattleCommand.FORMATION,
-                enabled=formation_change_enabled(member, party),
+                enabled=not member_is_front_row or sum(front_rows) >= 2,
             )
         )
     return tuple((*left_commands, *right_commands))

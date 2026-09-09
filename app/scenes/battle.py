@@ -21,7 +21,6 @@ from battle_commands import (
     BattleCommand,
     BattleCommandContext,
     BattleCommandOption,
-    formation_change_enabled,
     member_can_attack,
     member_attack_reach,
     resolve_battle_commands,
@@ -35,6 +34,7 @@ from battle_timeline import (
     initialize_timeline_order,
     ready_timeline_head,
     remove_timeline_actor,
+    remove_timeline_head,
 )
 from item import Item, ItemEquipType
 from localization import Localizer, ascii_to_fullwidth
@@ -100,6 +100,7 @@ CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
 BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
+BATTLE_ESCAPE_SE_ID = "battle_escape"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
@@ -375,6 +376,7 @@ class BattlePhase(StrEnum):
     ACTION_PRESENTATION = "action_presentation"
     ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
+    ESCAPE_MEMBER = "escape_member"
     ESCAPE_MESSAGE = "escape_message"
     ESCAPE = "escape"
     FORMATION = "formation"
@@ -406,6 +408,15 @@ class TimelineAnimationPhase(StrEnum):
     DROP = "drop"
     SLIDE = "slide"
     INTERRUPT = "interrupt"
+
+
+class FormationAnimationCompletion(StrEnum):
+    """Continuation to run after manual or automatic row movement."""
+
+    COMPLETE_CURRENT_TURN = "complete_current_turn"
+    START_TIMELINE = "start_timeline"
+    START_TIMELINE_REMOVAL = "start_timeline_removal"
+    ACTIVATE_TIMELINE_HEAD = "activate_timeline_head"
 
 
 @dataclass(frozen=True)
@@ -1013,10 +1024,18 @@ class BattleScene:
         ) = None
         self.formation_animation_frame = 0
         self.formation_actor_index: int | None = None
+        self.formation_actor_indexes: tuple[int, ...] = ()
         self.formation_start_x = 0
         self.formation_destination_x = 0
+        self.formation_start_x_by_index: dict[int, int] = {}
+        self.formation_destination_x_by_index: dict[int, int] = {}
+        self.formation_animation_completion = (
+            FormationAnimationCompletion.COMPLETE_CURRENT_TURN
+        )
         self.escape_animation_frame = 0
         self.escape_start_x: tuple[int, ...] = ()
+        self.escape_requested = False
+        self.escape_actor_index: int | None = None
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.monster_death_animation: MonsterDeathAnimation | None = None
@@ -1064,7 +1083,8 @@ class BattleScene:
             int, tuple[str, EquipmentSlot | None]
         ] = {}
         self.defending_party_indexes: set[int] = set()
-        self.escaping_party_indexes: set[int] = set()
+        self.escaped_party_indexes: set[int] = set()
+        self.temporary_front_party_indexes: set[int] = set()
         self.windows = [
             command_guide_window,
             command_window,
@@ -1153,6 +1173,9 @@ class BattleScene:
             return
         if self.phase is BattlePhase.ESCAPE_CONFIRMATION:
             self._update_escape_confirmation(input_state)
+            return
+        if self.phase is BattlePhase.ESCAPE_MEMBER:
+            self._update_party_member_escape()
             return
         if self.phase is BattlePhase.ESCAPE_MESSAGE:
             self._update_escape_message(input_state)
@@ -1285,10 +1308,18 @@ class BattleScene:
         self.timeline_advance = None
         self.formation_animation_frame = 0
         self.formation_actor_index = None
+        self.formation_actor_indexes = ()
         self.formation_start_x = 0
         self.formation_destination_x = 0
+        self.formation_start_x_by_index = {}
+        self.formation_destination_x_by_index = {}
+        self.formation_animation_completion = (
+            FormationAnimationCompletion.COMPLETE_CURRENT_TURN
+        )
         self.escape_animation_frame = 0
         self.escape_start_x = ()
+        self.escape_requested = False
+        self.escape_actor_index = None
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.monster_death_animation = None
@@ -1329,7 +1360,8 @@ class BattleScene:
         self.item_guide_window.clear_texts()
         self._close_spell_windows()
         self.defending_party_indexes.clear()
-        self.escaping_party_indexes.clear()
+        self.escaped_party_indexes.clear()
+        self.temporary_front_party_indexes.clear()
         self.target_cursor.active = False
         self.escape_cursor.active = False
         self.command_window.close_immediately()
@@ -1523,49 +1555,78 @@ class BattleScene:
         self.escape_cursor.update(input_state.navigation)
 
     def _accept_escape_confirmation(self) -> None:
-        """Put the current member into escape state and complete their turn."""
+        """Start the current member's escape and commit the party to follow."""
 
         if self.active_party_index is None:
             raise RuntimeError("escape confirmation requires an active member")
         self.escape_cursor.active = False
-        all_members_ready = self._mark_party_member_escaping(self.active_party_index)
-        if all_members_ready:
-            self._begin_escape_animation()
-            return
-        self._complete_current_turn()
+        self.escape_requested = True
+        self._begin_party_member_escape(self.active_party_index)
 
-    def _mark_party_member_escaping(self, index: int) -> bool:
-        """Reverse one member and report whether the whole party is ready."""
+    def _begin_party_member_escape(self, index: int) -> None:
+        """Run one member off the battlefield on that member's turn."""
 
-        self.escaping_party_indexes.add(index)
-        self.defending_party_indexes.discard(index)
-        return all(
-            party_index in self.escaping_party_indexes
-            or self._party_member_is_dead(party_index)
-            for party_index in range(len(self.party_visuals))
-        )
-
-    def _begin_escape_animation(self) -> None:
-        """Show the success message and start the DA2-style party run."""
-
-        self.phase = BattlePhase.ESCAPE_MESSAGE
+        escaped = getattr(self, "escaped_party_indexes", None)
+        if escaped is None:
+            escaped = set()
+            self.escaped_party_indexes = escaped
+        if index in escaped or self._party_member_is_dead(index):
+            raise ValueError("only an active living member can escape")
+        play_se(BATTLE_ESCAPE_SE_ID)
+        self.phase = BattlePhase.ESCAPE_MEMBER
+        self.escape_actor_index = index
         self.escape_animation_frame = 0
         self.escape_start_x = tuple(
-            self._party_sprite_x(index) for index in range(len(self.party_visuals))
+            self._party_sprite_x(party_index)
+            for party_index in range(len(self.party_visuals))
         )
+        getattr(self, "defending_party_indexes", set()).discard(index)
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self._refresh_party_text_colors()
+
+    def _update_party_member_escape(self) -> None:
+        """Advance one member's run and remove them after reaching screen right."""
+
+        index = self.escape_actor_index
+        if index is None:
+            raise RuntimeError("member escape phase requires an actor")
+        self.escape_animation_frame += 1
+        if self._escape_party_x(index) < ESCAPE_RUN_DESTINATION_X:
+            return
+        self.escaped_party_indexes.add(index)
+        self.escape_actor_index = None
+        self.active_party_index = None
+        if not self._active_party_indexes():
+            self._timeline_order = remove_timeline_actor(
+                self._timeline_order,
+                self.party_visuals[index],
+            )
+            self.timeline = self._timeline_order.actors
+            self._begin_escape_animation()
+            return
+        if self._begin_front_promotion_if_needed(
+            FormationAnimationCompletion.START_TIMELINE_REMOVAL
+        ):
+            return
+        self._start_timeline_removal_animation()
+
+    def _begin_escape_animation(self) -> None:
+        """Show escape success after the final active member has left."""
+
+        self.phase = BattlePhase.ESCAPE_MESSAGE
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.active_party_index = None
         self.command_cursor.active = False
         self.escape_cursor.active = False
         self._refresh_party_text_colors()
-        self.bgm.stop()
 
     def _update_escape_message(self, input_state: InputState) -> None:
-        """Keep running while the success message waits for acknowledgement."""
+        """Wait for acknowledgement after every active member has escaped."""
 
-        self._advance_escape_run()
         if input_state.confirm.triggered or input_state.cancel.triggered:
+            self.bgm.stop()
             self.phase = BattlePhase.ESCAPE
             self.escape_fade.start()
 
@@ -1573,18 +1634,8 @@ class BattleScene:
         """Fade out after acknowledgement and finish once fully covered."""
 
         self._update_escape_fade()
-        self._advance_escape_run()
-        if self.escape_fade_covered and all(
-            self._party_member_is_dead(index)
-            or self._escape_party_x(index) >= ESCAPE_RUN_DESTINATION_X
-            for index in range(len(self.party_visuals))
-        ):
+        if self.escape_fade_covered:
             self.result = BattleResult.ESCAPED
-
-    def _advance_escape_run(self) -> None:
-        """Advance the shared party run by one frame."""
-
-        self.escape_animation_frame += 1
 
     def _update_escape_fade(self) -> None:
         """Fade to black once and hold the covered frame for the scene owner."""
@@ -1657,24 +1708,105 @@ class BattleScene:
             return False
         index = self.active_party_index
         member = self.party[index]
-        if len(self.party) <= 1 or not formation_change_enabled(
-            member,
-            self.party,
+        active_indexes = self._active_party_indexes()
+        is_front = self._party_member_is_front_row(index)
+        if len(active_indexes) <= 1 or (
+            is_front
+            and sum(
+                self._party_member_is_front_row(party_index)
+                for party_index in active_indexes
+            )
+            < 2
         ):
             return False
         self.formation_actor_index = index
         self.formation_start_x = self._party_sprite_x(index)
-        member.formation_row = (
-            FormationRow.BACK
-            if member.formation_row is FormationRow.FRONT
-            else FormationRow.FRONT
-        )
+        self.formation_actor_indexes = (index,)
+        self.formation_start_x_by_index = {index: self.formation_start_x}
+        if is_front:
+            temporary_front = getattr(
+                self,
+                "temporary_front_party_indexes",
+                set(),
+            )
+            if index in temporary_front:
+                temporary_front.discard(index)
+            else:
+                member.formation_row = FormationRow.BACK
+        else:
+            member.formation_row = FormationRow.FRONT
+            getattr(self, "temporary_front_party_indexes", set()).discard(index)
         self.formation_destination_x = self._party_sprite_x(index)
+        self.formation_destination_x_by_index = {
+            index: self.formation_destination_x
+        }
         self.formation_animation_frame = 0
+        self.formation_animation_completion = (
+            FormationAnimationCompletion.COMPLETE_CURRENT_TURN
+        )
         self.phase = BattlePhase.FORMATION
         self.selected_command = BattleCommand.FORMATION
         self.command_cursor.active = False
         self.command_window.close_immediately()
+        return True
+
+    def _active_party_indexes(self) -> tuple[int, ...]:
+        """Return living members that have not left this battle."""
+
+        escaped = getattr(self, "escaped_party_indexes", set())
+        party_count = len(
+            getattr(self, "party_visuals", getattr(self, "party", ()))
+        )
+        return tuple(
+            index
+            for index in range(party_count)
+            if index not in escaped and not self._party_member_is_dead(index)
+        )
+
+    def _party_member_is_front_row(self, index: int) -> bool:
+        """Return a member's effective row, including battle-only promotion."""
+
+        if index in getattr(self, "temporary_front_party_indexes", set()):
+            return True
+        visuals = getattr(self, "party_visuals", ())
+        member = visuals[index].member if visuals else self.party[index]
+        formation_row = getattr(member, "formation_row", None)
+        if formation_row is not None:
+            return formation_row is FormationRow.FRONT
+        return bool(getattr(member, "is_front_row", True))
+
+    def _begin_front_promotion_if_needed(
+        self,
+        completion: FormationAnimationCompletion,
+    ) -> bool:
+        """Animate battle-only promotion when no active front member remains."""
+
+        active_indexes = self._active_party_indexes()
+        if not active_indexes or any(
+            self._party_member_is_front_row(index) for index in active_indexes
+        ):
+            return False
+        start_x_by_index = {
+            index: self._party_sprite_x(index) for index in active_indexes
+        }
+        temporary_front = getattr(self, "temporary_front_party_indexes", None)
+        if temporary_front is None:
+            temporary_front = set()
+            self.temporary_front_party_indexes = temporary_front
+        temporary_front.update(active_indexes)
+        self.formation_actor_index = None
+        self.formation_actor_indexes = active_indexes
+        self.formation_start_x_by_index = start_x_by_index
+        self.formation_destination_x_by_index = {
+            index: self._party_sprite_x(index) for index in active_indexes
+        }
+        self.formation_animation_frame = 0
+        self.formation_animation_completion = completion
+        self.phase = BattlePhase.FORMATION
+        self.active_party_index = None
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self._refresh_party_text_colors()
         return True
 
     def _begin_defense(self) -> bool:
@@ -1688,14 +1820,30 @@ class BattleScene:
         return True
 
     def _update_formation_animation(self) -> None:
-        """Advance one formation walk and then complete the actor's turn."""
+        """Advance manual or automatic formation walking, then continue."""
 
         self.formation_animation_frame += 1
         if self.formation_animation_frame < FORMATION_MOVE_FRAME_COUNT:
             return
         self.formation_animation_frame = FORMATION_MOVE_FRAME_COUNT
         self.formation_actor_index = None
-        self._complete_current_turn()
+        self.formation_actor_indexes = ()
+        self.formation_start_x_by_index = {}
+        self.formation_destination_x_by_index = {}
+        completion = self.formation_animation_completion
+        self.formation_animation_completion = (
+            FormationAnimationCompletion.COMPLETE_CURRENT_TURN
+        )
+        if completion is FormationAnimationCompletion.COMPLETE_CURRENT_TURN:
+            self._complete_current_turn()
+        elif completion is FormationAnimationCompletion.START_TIMELINE:
+            self._start_timeline_animation()
+        elif completion is FormationAnimationCompletion.START_TIMELINE_REMOVAL:
+            self._start_timeline_removal_animation()
+        elif completion is FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD:
+            self._activate_timeline_head()
+        else:
+            raise RuntimeError("unknown formation animation completion")
 
     def _active_member_item_candidates(self) -> tuple[BattleItemCandidate, ...]:
         """Return DA2-style equipment followed by owned usable consumables.
@@ -2128,7 +2276,7 @@ class BattleScene:
             )
         mp_label = self.texts.text("menu.member.mp", self.localizer)
         mp_window.add_text(
-            ascii_to_fullwidth(f"{mp_label} {member.mp:03d}"),
+            ascii_to_fullwidth(f"{mp_label} {member.mp:3d}"),
             COMMAND_GUIDE_TEXT_X,
             COMMAND_GUIDE_FIRST_Y,
         )
@@ -2274,9 +2422,7 @@ class BattleScene:
                 target_positions,
             )
         else:
-            selectable = tuple(
-                index for index, member in enumerate(self.party) if member.hp > 0
-            )
+            selectable = self._active_party_indexes()
             if not selectable:
                 return False
             party_targets = tuple(
@@ -2983,6 +3129,21 @@ class BattleScene:
         self.timeline_animation_frame = 0
         self._refresh_party_text_colors()
 
+    def _start_timeline_removal_animation(self) -> None:
+        """Slide the timeline after an escaping actor leaves permanently."""
+
+        self.timeline_advance = remove_timeline_head(self._timeline_order)
+        self.phase = BattlePhase.TIMELINE
+        self.active_party_index = None
+        if hasattr(self, "active_party_pulse_frame"):
+            self.active_party_pulse_frame = 0
+            self._sync_active_party_pulse_palette()
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self.timeline_animation_phase = TimelineAnimationPhase.DROP
+        self.timeline_animation_frame = 0
+        self._refresh_party_text_colors()
+
     def _active_party_pulse_is_visible(self) -> bool:
         """Return whether the current actor's palette pulse should be drawn."""
 
@@ -3149,8 +3310,15 @@ class BattleScene:
 
     def _activate_timeline_head(self) -> None:
         self._remove_defeated_party_from_timeline()
-        if self._party_is_defeated():
-            self._begin_defeat_message()
+        if not self._active_party_indexes():
+            if getattr(self, "escape_requested", False):
+                self._begin_escape_animation()
+            else:
+                self._begin_defeat_message()
+            return
+        if self._begin_front_promotion_if_needed(
+            FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD
+        ):
             return
         actor = self.timeline[0]
         if isinstance(actor, BattleCharacter):
@@ -3161,14 +3329,8 @@ class BattleScene:
             )
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
-            if getattr(self, "escaping_party_indexes", ()):
-                all_members_ready = self._mark_party_member_escaping(
-                    self.active_party_index
-                )
-                if all_members_ready:
-                    self._begin_escape_animation()
-                else:
-                    self._start_timeline_animation()
+            if getattr(self, "escape_requested", False):
+                self._begin_party_member_escape(self.active_party_index)
                 return
             self.defending_party_indexes.discard(self.active_party_index)
             if getattr(self, "auto_battle_active", False):
@@ -3209,8 +3371,8 @@ class BattleScene:
             return ()
         return tuple(
             index
-            for index, member in enumerate(self.party)
-            if member.hp > 0 and member.formation_row is FormationRow.FRONT
+            for index in self._active_party_indexes()
+            if self._party_member_is_front_row(index)
         )
 
     def _active_member_attack_targets(self) -> tuple[int, ...]:
@@ -3220,7 +3382,9 @@ class BattleScene:
         if not member_can_attack(actor):
             return ()
         return selectable_attack_target_indexes(
-            attacker_is_front_row=actor.is_front_row,
+            attacker_is_front_row=self._party_member_is_front_row(
+                self.active_party_index
+            ),
             weapon_reach=member_attack_reach(actor),
             monsters=self.monsters,
         )
@@ -3230,12 +3394,18 @@ class BattleScene:
 
         if self.active_party_index is None:
             return ()
+        active_indexes = self._active_party_indexes()
+        active_party = tuple(self.party[index] for index in active_indexes)
         return resolve_battle_commands(
             self.party[self.active_party_index],
-            self.party,
+            active_party,
             self.monsters,
             context=BattleCommandContext(
                 item_available=bool(self._active_member_item_candidates()),
+            ),
+            party_front_rows=tuple(
+                self._party_member_is_front_row(index)
+                for index in active_indexes
             ),
         )
 
@@ -3343,7 +3513,7 @@ class BattleScene:
 
         if command is BattleCommand.FORMATION and self.active_party_index is not None:
             return FORMATION_COMMAND_TEXT_KEYS[
-                self.party[self.active_party_index].is_front_row
+                self._party_member_is_front_row(self.active_party_index)
             ]
         return COMMAND_TEXT_KEYS[command]
 
@@ -3488,8 +3658,15 @@ class BattleScene:
         if damage > 0 and self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
             self._remove_defeated_party_from_timeline()
-            if self._party_is_defeated():
-                self._begin_defeat_message()
+            if not self._active_party_indexes():
+                if getattr(self, "escape_requested", False):
+                    self._begin_escape_animation()
+                else:
+                    self._begin_defeat_message()
+                return
+            if self._begin_front_promotion_if_needed(
+                FormationAnimationCompletion.START_TIMELINE
+            ):
                 return
         self._start_timeline_animation()
 
@@ -3622,6 +3799,8 @@ class BattleScene:
 
     def _draw_party(self) -> None:
         for index, visual in enumerate(self.party_visuals):
+            if index in getattr(self, "escaped_party_indexes", ()):
+                continue
             position = self._party_draw_position(index)
             if position is None:
                 continue
@@ -3637,10 +3816,10 @@ class BattleScene:
                     // FPS
                 ) % len(MONSTER_DAMAGE_SHAKE_X)
                 x += MONSTER_DAMAGE_SHAKE_X[shake_index]
-            is_escaping = self.phase in (
-                BattlePhase.ESCAPE_MESSAGE,
-                BattlePhase.ESCAPE,
-            ) or index in getattr(self, "escaping_party_indexes", ())
+            is_escaping = (
+                self.phase is BattlePhase.ESCAPE_MEMBER
+                and index == getattr(self, "escape_actor_index", None)
+            )
             width = self._party_sprite_width(index, is_escaping=is_escaping)
             attack_presentation = getattr(self, "attack_presentation", None)
             attack_pose = (
@@ -3748,19 +3927,23 @@ class BattleScene:
                 draw_weapon(weapon)
 
     def _party_draw_position(self, index: int) -> tuple[int, int] | None:
+        if index in getattr(self, "escaped_party_indexes", ()):
+            return None
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
-        if self.phase in (
-            BattlePhase.ESCAPE_MESSAGE,
-            BattlePhase.ESCAPE,
-        ) and not self._party_member_is_dead(index):
+        if (
+            self.phase is BattlePhase.ESCAPE_MEMBER
+            and index == getattr(self, "escape_actor_index", None)
+        ):
             return self._escape_party_x(index), target_y
         if (
             self.phase is BattlePhase.FORMATION
-            and index == self.formation_actor_index
+            and index in getattr(self, "formation_actor_indexes", ())
         ):
-            x = self.formation_start_x + (
-                (self.formation_destination_x - self.formation_start_x)
+            start_x = self.formation_start_x_by_index[index]
+            destination_x = self.formation_destination_x_by_index[index]
+            x = start_x + (
+                (destination_x - start_x)
                 * self.formation_animation_frame
                 // FORMATION_MOVE_FRAME_COUNT
             )
@@ -3820,12 +4003,16 @@ class BattleScene:
 
     def _party_sprite_x(self, index: int) -> int:
         x = 156 + index * 4
-        if self.party_visuals[index].member.formation_row is FormationRow.BACK:
+        if not self._party_member_is_front_row(index):
             x += 16
         return x
 
     def _party_member_is_dead(self, index: int) -> bool:
-        member = getattr(self.party_visuals[index], "member", None)
+        visuals = getattr(self, "party_visuals", ())
+        member = getattr(visuals[index], "member", None) if visuals else None
+        if member is None:
+            party = getattr(self, "party", ())
+            member = party[index] if index < len(party) else None
         if member is None:
             return False
         return self._member_is_dead(member)
@@ -3853,16 +4040,17 @@ class BattleScene:
     def _party_sprite_source_x(self, index: int) -> int:
         if self._party_member_is_dead(index):
             return DEAD_SPRITE_SOURCE_X
-        if self.phase in (BattlePhase.ESCAPE_MESSAGE, BattlePhase.ESCAPE):
+        if (
+            self.phase is BattlePhase.ESCAPE_MEMBER
+            and index == getattr(self, "escape_actor_index", None)
+        ):
             pattern = (
                 self.escape_animation_frame // ESCAPE_RUN_PATTERN_FRAME_COUNT
             ) % 2
             return pattern * FORMATION_SPRITE_STEP_X
-        if index in getattr(self, "escaping_party_indexes", ()):
-            return 0
         if (
             self.phase is BattlePhase.FORMATION
-            and index == self.formation_actor_index
+            and index in getattr(self, "formation_actor_indexes", ())
         ):
             pattern = (
                 self.formation_animation_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
@@ -4223,7 +4411,10 @@ class BattleScene:
             if len(remaining) >= TIMELINE_VISIBLE_ENTRY_COUNT:
                 incoming = remaining[TIMELINE_VISIBLE_ENTRY_COUNT - 1]
                 incoming_index = TIMELINE_VISIBLE_ENTRY_COUNT - 1
-            elif advance.interrupt_index is None:
+            elif (
+                advance.interrupt_index is None
+                and advance.reinsert_completed_actor
+            ):
                 incoming = advance.completed_actor
                 incoming_index = len(remaining)
             if incoming is not None:
@@ -4376,9 +4567,21 @@ class BattleScene:
                 PARTY_ENTRANCE_COMPLETE_FRAME,
             )
         )
+        hidden_party_status_indexes = set(
+            getattr(self, "escaped_party_indexes", set())
+        )
+        if self.phase is BattlePhase.ESCAPE_MEMBER:
+            escape_actor_index = getattr(self, "escape_actor_index", None)
+            if escape_actor_index is not None:
+                hidden_party_status_indexes.add(escape_actor_index)
         for window in self.windows:
             if hide_party_status and any(
                 window is status_window for status_window in self.party_status_windows
+            ):
+                continue
+            if any(
+                index in hidden_party_status_indexes and window is status_window
+                for index, status_window in enumerate(self.party_status_windows)
             ):
                 continue
             window.draw()

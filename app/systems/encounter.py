@@ -17,7 +17,7 @@ else:
 
 ENCOUNTER_STEP_MIN = 1
 ENCOUNTER_STEP_MAX = 4
-ENCOUNTER_THRESHOLD = 160
+ENCOUNTER_THRESHOLD = 120
 
 
 @dataclass(frozen=True)
@@ -74,9 +74,7 @@ class EncounterSystem:
             if site.destination.map_id != map_data.map_id
             for cell in site.entrance_cells
         }
-        candidates: list[
-            tuple[int, int, str, int, int, int, DungeonExitReturn]
-        ] = []
+        candidates: list[tuple[int, int, str, int, int, int, DungeonExitReturn]] = []
         for site in map_data.sites:
             if site.destination.map_id == map_data.map_id:
                 continue
@@ -89,9 +87,8 @@ class EncounterSystem:
                         exit_cell.x - direction.dx,
                         exit_cell.y - direction.dy,
                     )
-                    if (
-                        (landing.x, landing.y) in exit_cells
-                        or map_data.is_blocked(landing.x, landing.y)
+                    if (landing.x, landing.y) in exit_cells or map_data.is_blocked(
+                        landing.x, landing.y
                     ):
                         continue
                     landing_distance = abs(landing.x - origin.x) + abs(

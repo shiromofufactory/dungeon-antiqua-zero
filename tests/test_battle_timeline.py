@@ -10,6 +10,7 @@ from battle_timeline import (
     initialize_timeline_order,
     ready_timeline_head,
     remove_timeline_actor,
+    remove_timeline_head,
 )
 
 
@@ -113,6 +114,22 @@ class BattleTimelineTest(unittest.TestCase):
         remaining = remove_timeline_actor(order, first)
 
         self.assertEqual(remaining.actors, (second,))
+
+    def test_timeline_head_can_leave_without_being_reinserted(self) -> None:
+        order = TimelineOrder(
+            (
+                TimelineEntry("escaping", 20, 64.0),
+                TimelineEntry("remaining", 10, 40.0),
+            )
+        )
+
+        advance = remove_timeline_head(order)
+
+        self.assertEqual(advance.before.actors, ("escaping", "remaining"))
+        self.assertEqual(advance.remaining.actors, ("remaining",))
+        self.assertEqual(advance.after.actors, ("remaining",))
+        self.assertEqual(advance.completed_actor, "escaping")
+        self.assertFalse(advance.reinsert_completed_actor)
 
 
 if __name__ == "__main__":

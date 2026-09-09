@@ -21,6 +21,7 @@ from tools.screen_mocks.battle import (
     ATTACK_SLASH_SE_ID,
     BATTLE_ENTRANCE_FRAME_COUNT,
     BATTLE_BGM_ID,
+    BATTLE_ESCAPE_SE_ID,
     BATTLE_HIT_SE_ID,
     BATTLE_MONSTER_DEATH_SE_ID,
     BATTLE_MOCK_MONSTER_KEYS,
@@ -443,7 +444,10 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.escape_cursor.active)
         self.assertEqual(mock.escape_animation_frame, 0)
         self.assertEqual(mock.escape_start_x, ())
-        self.assertEqual(mock.escaping_party_indexes, set())
+        self.assertFalse(mock.escape_requested)
+        self.assertIsNone(mock.escape_actor_index)
+        self.assertEqual(mock.escaped_party_indexes, set())
+        self.assertEqual(mock.temporary_front_party_indexes, set())
         first_member = mock.party[0]
         self.assertIn(
             ascii_to_fullwidth(
@@ -1760,7 +1764,32 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_guide_window.add_text.call_args_list[2].args[2], 11)
         self.assertEqual(
             mock.spell_mp_window.add_text.call_args.args[0],
-            ascii_to_fullwidth(f"ＭＰ {mock.party[0].mp:03d}"),
+            ascii_to_fullwidth(f"ＭＰ {mock.party[0].mp:3d}"),
+        )
+
+    def test_spell_mp_window_uses_spaces_instead_of_leading_zeroes(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.party[0].mp = 12
+        mock.active_party_index = 0
+        mock.spell_candidates = (load_mock_spells()["FIRE1"],)
+        mock.spell_cursor = Mock(selected_key="FIRE1")
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.spell_guide_window = Mock()
+        mock.spell_mp_window = Mock()
+
+        mock._refresh_spell_guide()
+
+        self.assertEqual(
+            mock.spell_mp_window.add_text.call_args.args[0],
+            "ＭＰ　　１２",
         )
 
     def test_using_a_spell_starts_target_selection_without_spending_mp(self) -> None:
@@ -2405,6 +2434,7 @@ class BattleScreenMockTest(unittest.TestCase):
             BattleMockPhase.DEFEAT_MESSAGE,
             BattleMockPhase.TIMELINE,
             BattleMockPhase.MONSTER_ACTION,
+            BattleMockPhase.ESCAPE_MEMBER,
             BattleMockPhase.ESCAPE_MESSAGE,
             BattleMockPhase.ESCAPE,
         ):
@@ -2714,7 +2744,9 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.monster_blink_frames_remaining, 0)
         mock._start_timeline_animation.assert_called_once_with()
 
-    def test_front_monster_skips_blink_when_no_attack_target_exists(self) -> None:
+    def test_last_living_rear_member_is_temporarily_promoted_for_enemy_attack(
+        self,
+    ) -> None:
         actor = BattleMockMonster(
             key="Giant Spider",
             names={"name_en": "Giant Spider"},
@@ -2743,9 +2775,15 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._activate_timeline_head()
 
-        self.assertIsNone(mock.blinking_monster_index)
-        self.assertEqual(mock.monster_blink_frames_remaining, 0)
-        mock._start_timeline_animation.assert_called_once_with()
+        self.assertEqual(mock.temporary_front_party_indexes, {0})
+        self.assertIs(mock.party[0].formation_row, FormationRow.BACK)
+        self.assertIs(mock.phase, BattleMockPhase.FORMATION)
+        self.assertEqual(mock._party_draw_position(0), (172, 64))
+        for _frame in range(FORMATION_MOVE_FRAME_COUNT):
+            mock._update_formation_animation()
+        self.assertEqual(mock.blinking_monster_index, 0)
+        self.assertEqual(mock.monster_blink_frames_remaining, MONSTER_BLINK_FRAME_COUNT)
+        mock._start_timeline_animation.assert_not_called()
 
     def test_monster_damage_is_applied_after_da2_length_animation(self) -> None:
         member = SimpleNamespace(hp=20, max_hp=30)
@@ -2804,7 +2842,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.active_party_index = None
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
-        mock.escaping_party_indexes = set()
+        mock.escape_requested = False
+        mock.escaped_party_indexes = set()
         mock.defending_party_indexes = set()
         mock.auto_battle_active = False
         mock.command_cursor = Mock()
@@ -2820,6 +2859,9 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertNotIn(visuals[0], mock.timeline)
         self.assertIs(mock.timeline[0], visuals[1])
+        self.assertIs(mock.phase, BattleMockPhase.FORMATION)
+        for _frame in range(FORMATION_MOVE_FRAME_COUNT):
+            mock._update_formation_animation()
         self.assertEqual(mock.active_party_index, 1)
         self.assertIs(mock.phase, BattleMockPhase.COMMAND)
         mock._begin_defeat_message.assert_not_called()
@@ -2873,6 +2915,73 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.defending_party_indexes, set())
         mock._begin_defeat_message.assert_called_once_with()
         mock._start_timeline_animation.assert_not_called()
+
+    def test_lethal_attack_on_last_front_promotes_living_rear_members(self) -> None:
+        party = list(
+            load_mock_party(
+                load_mock_items(),
+                load_mock_skills(),
+                character_keys=("Fiora", "Cerion"),
+                internal_level=MAX_INTERNAL_LEVEL,
+            )
+        )
+        party[0].formation_row = FormationRow.FRONT
+        party[1].formation_row = FormationRow.BACK
+        party[0].hp = 1
+        visuals = tuple(
+            BattleMockCharacter(member, 0, 0, index)
+            for index, member in enumerate(party)
+        )
+        monster = BattleMockMonster(
+            key="monster",
+            names={},
+            image_id="0",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=16,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=10),
+            agility=12,
+        )
+        order = TimelineOrder(
+            (
+                TimelineEntry(monster, monster.agility, 64.0),
+                TimelineEntry(visuals[0], visuals[0].agility, 50.0),
+                TimelineEntry(visuals[1], visuals[1].agility, 40.0),
+            )
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = tuple(party)
+        mock.party_visuals = visuals
+        mock._timeline_order = order
+        mock.timeline = order.actors
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_damage = 1
+        mock.monster_attack_animation_frame = MONSTER_DAMAGE_FRAME_COUNT
+        mock.defending_party_indexes = set()
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock._refresh_party_text_colors = Mock()
+        mock._refresh_party_hp_text = Mock()
+        mock._start_timeline_animation = Mock()
+
+        mock._finish_monster_attack()
+
+        self.assertTrue(party[0].is_dead)
+        self.assertEqual(mock.temporary_front_party_indexes, {1})
+        self.assertTrue(mock._party_member_is_front_row(1))
+        self.assertIs(party[1].formation_row, FormationRow.BACK)
+        self.assertIs(mock.phase, BattleMockPhase.FORMATION)
+        self.assertEqual(mock._party_draw_position(1), (176, 92))
+        mock.formation_animation_frame = FORMATION_MOVE_FRAME_COUNT // 2
+        self.assertEqual(mock._party_draw_position(1), (168, 92))
+        mock.formation_animation_frame = 0
+        for _frame in range(FORMATION_MOVE_FRAME_COUNT):
+            mock._update_formation_animation()
+        mock._start_timeline_animation.assert_called_once_with()
 
     def test_defeat_message_uses_da2_text_then_reports_production_result(
         self,
@@ -3676,86 +3785,134 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._accept_escape_confirmation.assert_called_once_with()
         quit_game.assert_not_called()
 
-    def test_first_escape_member_reverses_and_completes_their_turn(self) -> None:
+    def test_first_escape_member_starts_running_immediately(self) -> None:
+        members = tuple(
+            SimpleNamespace(formation_row=FormationRow.FRONT, hp=20)
+            for _index in range(3)
+        )
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.party_visuals = (object(), object(), object())
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in members
+        )
         mock.active_party_index = 0
-        mock.escaping_party_indexes = set()
+        mock.escaped_party_indexes = set()
         mock.defending_party_indexes = {0}
         mock.escape_cursor = Mock(active=True)
-        mock._complete_current_turn = Mock()
-        mock._begin_escape_animation = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock._refresh_party_text_colors = Mock()
 
-        mock._accept_escape_confirmation()
+        with patch("scenes.battle.play_se") as play_se:
+            mock._accept_escape_confirmation()
 
-        self.assertEqual(mock.escaping_party_indexes, {0})
+        self.assertTrue(mock.escape_requested)
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MEMBER)
+        self.assertEqual(mock.escape_actor_index, 0)
+        self.assertEqual(mock.escape_start_x, (156, 160, 164))
+        self.assertEqual(mock.escaped_party_indexes, set())
         self.assertEqual(mock.defending_party_indexes, set())
         self.assertFalse(mock.escape_cursor.active)
-        mock._complete_current_turn.assert_called_once_with()
-        mock._begin_escape_animation.assert_not_called()
+        play_se.assert_called_once_with(BATTLE_ESCAPE_SE_ID)
 
-    def test_later_party_turns_automatically_join_escape_state(self) -> None:
-        visuals = tuple(
-            BattleMockCharacter(
-                SimpleNamespace(definition=SimpleNamespace(key=str(index))),
-                0,
-                0,
-                index,
+    def test_later_party_turn_starts_that_members_escape_without_a_command(self) -> None:
+        members = tuple(
+            SimpleNamespace(
+                definition=SimpleNamespace(key=str(index)),
+                formation_row=FormationRow.FRONT,
+                hp=20,
             )
             for index in range(3)
+        )
+        visuals = tuple(
+            BattleMockCharacter(member, 0, 0, index)
+            for index, member in enumerate(members)
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.timeline = (visuals[1],)
         mock.party_visuals = visuals
-        mock.escaping_party_indexes = {0}
+        mock.escape_requested = True
+        mock.escaped_party_indexes = {0}
         mock.defending_party_indexes = {1}
         mock.command_cursor = Mock(active=False)
         mock.command_window = Mock()
         mock.blinking_monster_index = 0
         mock.monster_blink_frames_remaining = 1
-        mock._start_timeline_animation = Mock()
-        mock._begin_escape_animation = Mock()
+        mock._remove_defeated_party_from_timeline = Mock()
+        mock._begin_party_member_escape = Mock()
+        mock._refresh_party_text_colors = Mock()
 
         mock._activate_timeline_head()
 
-        self.assertEqual(mock.escaping_party_indexes, {0, 1})
-        self.assertEqual(mock.defending_party_indexes, set())
         self.assertEqual(mock.active_party_index, 1)
         self.assertIsNone(mock.blinking_monster_index)
-        mock._start_timeline_animation.assert_called_once_with()
-        mock._begin_escape_animation.assert_not_called()
+        mock._begin_party_member_escape.assert_called_once_with(1)
         mock.command_window.open.assert_not_called()
 
-    def test_last_party_member_starts_run_when_everyone_is_ready(self) -> None:
-        visuals = tuple(
-            BattleMockCharacter(
-                SimpleNamespace(definition=SimpleNamespace(key=str(index))),
-                0,
-                0,
-                index,
-            )
-            for index in range(3)
+    def test_later_party_member_escape_plays_escape_sound_again(self) -> None:
+        members = tuple(
+            SimpleNamespace(formation_row=FormationRow.FRONT, hp=20)
+            for _index in range(2)
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.timeline = (visuals[2],)
-        mock.party_visuals = visuals
-        mock.escaping_party_indexes = {0, 1}
-        mock.defending_party_indexes = set()
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in members
+        )
+        mock.escaped_party_indexes = {0}
+        mock.defending_party_indexes = {1}
         mock.command_cursor = Mock(active=False)
         mock.command_window = Mock()
-        mock.blinking_monster_index = None
-        mock.monster_blink_frames_remaining = 0
-        mock._start_timeline_animation = Mock()
-        mock._begin_escape_animation = Mock()
+        mock._refresh_party_text_colors = Mock()
 
-        mock._activate_timeline_head()
+        with patch("scenes.battle.play_se") as play_se:
+            mock._begin_party_member_escape(1)
 
-        self.assertEqual(mock.escaping_party_indexes, {0, 1, 2})
-        mock._begin_escape_animation.assert_called_once_with()
-        mock._start_timeline_animation.assert_not_called()
-        mock.command_window.open.assert_not_called()
+        play_se.assert_called_once_with(BATTLE_ESCAPE_SE_ID)
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MEMBER)
+        self.assertEqual(mock.escape_actor_index, 1)
 
-    def test_dead_party_member_does_not_block_escape_readiness(self) -> None:
+    def test_escaped_member_leaves_timeline_and_cannot_be_attacked(self) -> None:
+        members = (
+            SimpleNamespace(formation_row=FormationRow.FRONT, hp=20),
+            SimpleNamespace(formation_row=FormationRow.BACK, hp=20),
+        )
+        visuals = tuple(
+            BattleMockCharacter(member, 0, 0, index)
+            for index, member in enumerate(members)
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = members
+        mock.party_visuals = visuals
+        mock._timeline_order = TimelineOrder(
+            (
+                TimelineEntry(visuals[0], 20, 64.0),
+                TimelineEntry(visuals[1], 10, 40.0),
+            )
+        )
+        mock.timeline = mock._timeline_order.actors
+        mock.escape_actor_index = 0
+        mock.escape_start_x = (ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED, 176)
+        mock.escape_animation_frame = 0
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock._refresh_party_text_colors = Mock()
+
+        mock._update_party_member_escape()
+
+        self.assertEqual(mock.escaped_party_indexes, {0})
+        self.assertEqual(mock.temporary_front_party_indexes, {1})
+        self.assertIs(members[1].formation_row, FormationRow.BACK)
+        self.assertIs(mock.phase, BattleMockPhase.FORMATION)
+        self.assertEqual(mock._party_draw_position(1), (176, 92))
+        for _frame in range(FORMATION_MOVE_FRAME_COUNT):
+            mock._update_formation_animation()
+        self.assertIs(mock.phase, BattleMockPhase.TIMELINE)
+        self.assertEqual(mock.timeline_advance.after.actors, (visuals[1],))
+        enemy = SimpleNamespace(is_front_row=True)
+        self.assertEqual(mock._monster_attack_target_indexes(enemy), (1,))
+
+    def test_final_living_member_departure_starts_escape_message(self) -> None:
         members = (
             SimpleNamespace(formation_row=FormationRow.FRONT, hp=20),
             SimpleNamespace(formation_row=FormationRow.FRONT, hp=0),
@@ -3765,13 +3922,29 @@ class BattleScreenMockTest(unittest.TestCase):
             SimpleNamespace(member=member)
             for member in members
         )
-        mock.escaping_party_indexes = set()
-        mock.defending_party_indexes = set()
+        mock.party = members
+        mock._timeline_order = TimelineOrder(
+            (TimelineEntry(mock.party_visuals[0], 20, 64.0),)
+        )
+        mock.escape_actor_index = 0
+        mock.escape_start_x = (ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED, 160)
+        mock.escape_animation_frame = 0
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.escape_cursor = Mock(active=False)
+        mock._refresh_party_text_colors = Mock()
+        mock.bgm = Mock()
 
-        self.assertTrue(mock._mark_party_member_escaping(0))
-        self.assertEqual(mock.escaping_party_indexes, {0})
+        mock._update_party_member_escape()
 
-    def test_escape_animation_hides_selection_and_stops_bgm(self) -> None:
+        self.assertEqual(mock.escaped_party_indexes, {0})
+        self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MESSAGE)
+        self.assertEqual(mock.timeline, ())
+        mock.bgm.stop.assert_not_called()
+
+    def test_escape_message_hides_selection_without_stopping_bgm(self) -> None:
         members = (
             SimpleNamespace(formation_row=FormationRow.FRONT),
             SimpleNamespace(formation_row=FormationRow.BACK),
@@ -3791,8 +3964,6 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._begin_escape_animation()
 
         self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MESSAGE)
-        self.assertEqual(mock.escape_animation_frame, 0)
-        self.assertEqual(mock.escape_start_x, (156, 176))
         self.assertFalse(mock.escape_fade.is_active)
         self.assertEqual(mock.escape_fade.visible_rate, 1.0)
         self.assertFalse(mock.escape_fade_covered)
@@ -3800,33 +3971,37 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.command_cursor.active)
         self.assertFalse(mock.escape_cursor.active)
         mock._refresh_party_text_colors.assert_called_once_with()
-        mock.bgm.stop.assert_called_once_with()
+        mock.bgm.stop.assert_not_called()
 
     def test_escape_message_keeps_running_until_a_button_is_pressed(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.ESCAPE_MESSAGE
         mock.escape_animation_frame = 0
         mock.escape_fade = Mock()
+        mock.bgm = Mock()
 
         mock._update_escape_message(InputState())
 
         self.assertIs(mock.phase, BattleMockPhase.ESCAPE_MESSAGE)
-        self.assertEqual(mock.escape_animation_frame, 1)
+        self.assertEqual(mock.escape_animation_frame, 0)
         mock.escape_fade.start.assert_not_called()
+        mock.bgm.stop.assert_not_called()
 
         mock._update_escape_message(
             InputState(confirm=InputButton(triggered=True, held=True))
         )
 
         self.assertIs(mock.phase, BattleMockPhase.ESCAPE)
-        self.assertEqual(mock.escape_animation_frame, 2)
+        self.assertEqual(mock.escape_animation_frame, 0)
         mock.escape_fade.start.assert_called_once_with()
+        mock.bgm.stop.assert_called_once_with()
 
     def test_escape_message_accepts_cancel_button_for_acknowledgement(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.ESCAPE_MESSAGE
         mock.escape_animation_frame = 0
         mock.escape_fade = Mock()
+        mock.bgm = Mock()
 
         mock._update_escape_message(
             InputState(cancel=InputButton(triggered=True, held=True))
@@ -3834,29 +4009,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertIs(mock.phase, BattleMockPhase.ESCAPE)
         mock.escape_fade.start.assert_called_once_with()
-
-    def test_member_waiting_to_escape_faces_right_without_walking(self) -> None:
-        member = SimpleNamespace(formation_row=FormationRow.FRONT)
-        visual = SimpleNamespace(member=member, battle_sprite=2)
-        mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.party_visuals = (visual,)
-        mock.character_sprites = object()
-        mock.phase = BattleMockPhase.TIMELINE
-        mock.escaping_party_indexes = {0}
-
-        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
-            mock._draw_party()
-
-        blt.assert_called_once_with(
-            156,
-            64,
-            mock.character_sprites,
-            0,
-            64,
-            -16,
-            32,
-            1,
-        )
+        mock.bgm.stop.assert_called_once_with()
 
     def test_escape_run_uses_da2_speed_walk_pattern_and_right_facing_sprite(
         self,
@@ -3866,7 +4019,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party_visuals = (visual,)
         mock.character_sprites = object()
-        mock.phase = BattleMockPhase.ESCAPE
+        mock.phase = BattleMockPhase.ESCAPE_MEMBER
+        mock.escape_actor_index = 0
+        mock.escaped_party_indexes = set()
         mock.escape_start_x = (156,)
         mock.escape_animation_frame = ESCAPE_RUN_PATTERN_FRAME_COUNT
 
@@ -3894,26 +4049,15 @@ class BattleScreenMockTest(unittest.TestCase):
             1,
         )
 
-    def test_escape_run_quits_after_every_member_reaches_da2_destination(
-        self,
-    ) -> None:
+    def test_escape_finishes_when_fade_reaches_black(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.party_visuals = (object(), object())
-        mock.escape_start_x = (
-            ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED,
-            ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED * 2,
-        )
-        mock.escape_animation_frame = 0
         mock.escape_fade_covered = True
         mock._update_escape_fade = Mock()
 
         with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
             mock._update_escape_animation()
-            quit_game.assert_not_called()
-            mock._update_escape_animation()
 
-        self.assertEqual(mock.escape_animation_frame, 2)
-        self.assertEqual(mock._update_escape_fade.call_count, 2)
+        mock._update_escape_fade.assert_called_once_with()
         quit_game.assert_called_once_with()
 
     def test_escape_fade_reaches_black_and_does_not_fade_back_in(self) -> None:
@@ -4110,6 +4254,26 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_windows()
         for status_window in party_status_windows:
             status_window.draw.assert_not_called()
+
+    def test_escaping_member_status_is_hidden_when_running_starts(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        command_window = Mock()
+        party_status_windows = [Mock(), Mock(), Mock()]
+        mock.windows = [command_window, *party_status_windows]
+        mock.party_status_windows = party_status_windows
+        mock.monsters = ()
+        mock.monster_name_windows = []
+        mock.command_window = command_window
+        mock.phase = BattleMockPhase.ESCAPE_MEMBER
+        mock.escape_actor_index = 1
+        mock.escaped_party_indexes = {0}
+
+        mock._draw_windows()
+
+        command_window.draw.assert_called_once_with()
+        party_status_windows[0].draw.assert_not_called()
+        party_status_windows[1].draw.assert_not_called()
+        party_status_windows[2].draw.assert_called_once_with()
 
     def test_cancel_input_opens_the_global_command_menu(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

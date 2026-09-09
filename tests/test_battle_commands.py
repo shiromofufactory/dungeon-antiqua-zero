@@ -112,6 +112,29 @@ class BattleCommandRulesTest(unittest.TestCase):
 
         self.assertTrue(formation_change_enabled(self.party[0], self.party))
 
+    def test_resolver_accepts_battle_only_front_rows(self) -> None:
+        self.party[0].formation_row = FormationRow.BACK
+        self.party[1].formation_row = FormationRow.BACK
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party[:2],
+            self.monsters,
+            party_front_rows=(True, True),
+        )
+
+        attack = next(
+            option for option in commands if option.command is BattleCommand.ATTACK
+        )
+        formation = next(
+            option
+            for option in commands
+            if option.command is BattleCommand.FORMATION
+        )
+        self.assertTrue(attack.enabled)
+        self.assertTrue(formation.enabled)
+        self.assertIs(self.party[0].formation_row, FormationRow.BACK)
+
     def test_single_member_party_does_not_show_formation(self) -> None:
         commands = resolve_battle_commands(
             self.party[0],
