@@ -3174,17 +3174,34 @@ class BattleScene:
             self._refresh_input_guide()
         else:
             self.active_party_index = None
-            self.phase = BattlePhase.MONSTER_ACTION
             self.command_cursor.active = False
             self.command_window.close_immediately()
+            self.monster_attack_target_index = None
+            self.monster_attack_damage = None
+            self.monster_attack_animation_frame = 0
+            if not self._monster_attack_target_indexes(actor):
+                self.blinking_monster_index = None
+                self.monster_blink_frames_remaining = 0
+                self._start_timeline_animation()
+                return
+            self.phase = BattlePhase.MONSTER_ACTION
             self.blinking_monster_index = next(
                 index for index, monster in enumerate(self.monsters) if monster is actor
             )
             self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
-            self.monster_attack_target_index = None
-            self.monster_attack_damage = None
-            self.monster_attack_animation_frame = 0
         self._refresh_party_text_colors()
+
+    def _monster_attack_target_indexes(
+        self,
+        actor: BattleMonster,
+    ) -> tuple[int, ...]:
+        if not actor.is_front_row:
+            return ()
+        return tuple(
+            index
+            for index, member in enumerate(self.party)
+            if member.hp > 0 and member.formation_row is FormationRow.FRONT
+        )
 
     def _active_member_attack_targets(self) -> tuple[int, ...]:
         if self.active_party_index is None:
@@ -3416,14 +3433,10 @@ class BattleScene:
         if self.monster_blink_frames_remaining > 0:
             return
         actor = self.timeline[0]
-        if not isinstance(actor, BattleMonster) or not actor.is_front_row:
+        if not isinstance(actor, BattleMonster):
             self._start_timeline_animation()
             return
-        target_indexes = tuple(
-            index
-            for index, member in enumerate(self.party)
-            if member.hp > 0 and member.formation_row is FormationRow.FRONT
-        )
+        target_indexes = self._monster_attack_target_indexes(actor)
         if not target_indexes:
             self._start_timeline_animation()
             return

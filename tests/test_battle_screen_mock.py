@@ -2694,23 +2694,55 @@ class BattleScreenMockTest(unittest.TestCase):
             agility=12,
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor,)
         mock.command_window = Mock()
         mock.timeline = (actor,)
         mock.party = (
             SimpleNamespace(hp=30, formation_row=FormationRow.FRONT),
         )
-        mock.monster_blink_frames_remaining = 1
-        mock.monster_attack_target_index = None
+        mock.command_cursor = Mock()
+        mock._remove_defeated_party_from_timeline = Mock()
+        mock._party_is_defeated = Mock(return_value=False)
+        mock._refresh_party_text_colors = Mock()
         mock._start_timeline_animation = Mock()
 
-        with (
-            patch("tools.screen_mocks.battle.random.choice") as choice,
-            patch("tools.screen_mocks.battle.random.randint") as randint,
-        ):
-            mock._update_monster_action()
+        mock._activate_timeline_head()
 
-        choice.assert_not_called()
-        randint.assert_not_called()
+        self.assertIsNone(mock.blinking_monster_index)
+        self.assertEqual(mock.monster_blink_frames_remaining, 0)
+        mock._start_timeline_animation.assert_called_once_with()
+
+    def test_front_monster_skips_blink_when_no_attack_target_exists(self) -> None:
+        actor = BattleMockMonster(
+            key="Giant Spider",
+            names={"name_en": "Giant Spider"},
+            image_id="1",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=2),
+            agility=12,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor,)
+        mock.command_window = Mock()
+        mock.command_cursor = Mock()
+        mock.timeline = (actor,)
+        mock.party = (
+            SimpleNamespace(hp=30, formation_row=FormationRow.BACK),
+            SimpleNamespace(hp=0, formation_row=FormationRow.FRONT),
+        )
+        mock._remove_defeated_party_from_timeline = Mock()
+        mock._party_is_defeated = Mock(return_value=False)
+        mock._refresh_party_text_colors = Mock()
+        mock._start_timeline_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertIsNone(mock.blinking_monster_index)
+        self.assertEqual(mock.monster_blink_frames_remaining, 0)
         mock._start_timeline_animation.assert_called_once_with()
 
     def test_monster_damage_is_applied_after_da2_length_animation(self) -> None:
