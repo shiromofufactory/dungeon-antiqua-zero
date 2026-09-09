@@ -57,8 +57,9 @@ app/
 ├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
+├── battle_physical.py        # DA2準拠の通常攻撃力、命中、物理ダメージ計算
 ├── attack_pose.py             # 通常攻撃コンポジット定義の検証と武器別ポーズ解決
-├── monster.py                # モンスター種族、戦闘ごとのHP、敵隊列ルール
+├── monster.py                # モンスター種族、基本戦闘能力、戦闘ごとのHP、敵隊列ルール
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
 ├── world_sites.py            # ワールド拠点のセル検索と訪問済み候補の抽出
@@ -217,8 +218,9 @@ app/
 ├── audio/                   # 22.05kHz・モノラルの実行時OGG
 ├── images/                  # content/imagesから生成するmanifestと画像バイナリ
 ├── fonts/                   # フォント資産
+├── battle_physical.py       # DA2準拠の通常攻撃力、命中、物理ダメージ計算
 ├── member.py
-├── monster.py               # モンスター種族、戦闘ごとのHP、敵隊列ルール
+├── monster.py               # モンスター種族、基本戦闘能力、戦闘ごとのHP、敵隊列ルール
 ├── item.py
 ├── skill.py
 └── spell.py
@@ -950,6 +952,16 @@ fixtureではセリオンとエリカを後列にする。この隊列は初期�
 `monsters.json` の `image_id`、`width`、`height` から解決する。BattleSceneまたはその専用の
 Rendererがこれらの描画用値を読む責務を持ち、名前・モンスター種別・固定座標で分岐しない。
 `Member` や戦闘ルールは画像リソースを保持しない。
+
+モンスターの不変な物理戦闘能力は、`monsters.json` の `attack`、`hit`、`defense`、
+`evasion` から `MonsterCombatStats` へ読み込む。戦闘ルールはこの値を命中・ダメージ計算の
+入力とし、回避率を `agi` から再計算しない。現在HPや一時的な能力変化は戦闘ごとの可変状態が
+所有し、マスターデータと `MonsterCombatStats` は変更しない。
+
+通常攻撃の総合攻撃力、命中判定、物理ダメージは、PyxelやSceneに依存しない
+`battle_physical.py` が計算する。BattleSceneと戦闘モックは、`Member` の装備・能力・熟練度、
+または `MonsterCombatStats` から入力値を組み立て、0～99の命中乱数を明示的に渡す。
+演出側は計算結果の命中可否とダメージだけを受け取り、同じ式を重複実装しない。
 
 ステータスメニューOverlayは左右方向または前後ページ入力で表示中のMemberを切り替え、
 両端では循環する。切り替え時は名前だけでなく、顔、装備、能力値、熟練度を含むWindow全体を

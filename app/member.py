@@ -957,6 +957,15 @@ class Member:
             raise TypeError("kind must be a ProficiencyKind")
         return self.proficiencies[kind]
 
+    def weapon_level(self, weapon: Item) -> int:
+        """Return the current proficiency level for one weapon."""
+
+        if not isinstance(weapon, Item):
+            raise TypeError("weapon must be an Item")
+        if not weapon.is_weapon:
+            raise ValueError("weapon must be a weapon item")
+        return self.proficiency(self._weapon_proficiency_kind(weapon)).level
+
     @property
     def resistances(self) -> frozenset[ResistanceType]:
         """Return the union of resistances on all currently equipped items."""
@@ -1095,8 +1104,7 @@ class Member:
         return bonus
 
     def _hand_hit(self, weapon: Item, cross_weapon_bonus: int) -> HandHit:
-        kind = self._weapon_proficiency_kind(weapon)
-        level = self.proficiency(kind).level
+        level = self.weapon_level(weapon)
         weapon_level_bonus = (level - 1) * 2
         return HandHit(
             total=weapon.hit + weapon_level_bonus + cross_weapon_bonus,

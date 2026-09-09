@@ -5,9 +5,37 @@ from types import SimpleNamespace
 
 from app.monster import (
     MonsterBattleState,
+    MonsterCombatStats,
     MonsterDataError,
     promote_rear_monsters_if_front_empty,
 )
+
+
+class MonsterCombatStatsTest(unittest.TestCase):
+    def test_required_values_are_loaded_without_deriving_evasion(self) -> None:
+        stats = MonsterCombatStats.from_record(
+            {
+                "attack": 18,
+                "hit": 95,
+                "defense": 7,
+                "evasion": 12,
+                "agi": 99,
+            }
+        )
+
+        self.assertEqual(stats.attack, 18)
+        self.assertEqual(stats.hit, 95)
+        self.assertEqual(stats.defense, 7)
+        self.assertEqual(stats.evasion, 12)
+
+    def test_values_must_be_non_negative_integers(self) -> None:
+        valid = {"attack": 1, "hit": 100, "defense": 0, "evasion": 0}
+        for field_name in valid:
+            for value in (None, True, -1, 1.5, "1"):
+                with self.subTest(field=field_name, value=value):
+                    record = {**valid, field_name: value}
+                    with self.assertRaises(MonsterDataError):
+                        MonsterCombatStats.from_record(record)
 
 
 class MonsterBattleStateTest(unittest.TestCase):

@@ -35,6 +35,32 @@ class MonsterTribe(StrEnum):
     DEMON = "DEMON"
 
 
+@dataclass(frozen=True)
+class MonsterCombatStats:
+    """Immutable physical-combat values read from monster master data."""
+
+    attack: int
+    hit: int
+    defense: int
+    evasion: int
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, object]) -> MonsterCombatStats:
+        """Read the four required non-negative combat values from one record."""
+
+        if not isinstance(record, Mapping):
+            raise MonsterDataError("monster must be an object")
+        values: dict[str, int] = {}
+        for field_name in ("attack", "hit", "defense", "evasion"):
+            value = record.get(field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise MonsterDataError(
+                    f"monster.{field_name} must be a non-negative integer"
+                )
+            values[field_name] = value
+        return cls(**values)
+
+
 @dataclass
 class MonsterBattleState:
     """Per-battle HP copied from one monster's immutable master data."""
@@ -110,6 +136,7 @@ def promote_rear_monsters_if_front_empty(
 
 __all__ = [
     "MonsterBattleState",
+    "MonsterCombatStats",
     "MonsterDataError",
     "MonsterFormationTarget",
     "MonsterTribe",

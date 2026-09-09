@@ -42,6 +42,7 @@ from battle_commands import (
     resolve_battle_commands,
     selectable_attack_target_indexes,
 )
+from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import (
     TimelineAdvance,
     TimelineOrder,
@@ -60,6 +61,7 @@ from member import (
 )
 from monster import (
     MonsterBattleState,
+    MonsterCombatStats,
     MonsterDataError,
     promote_rear_monsters_if_front_empty,
 )
@@ -241,11 +243,13 @@ DA2_DAMAGE_VERTICAL_OFFSETS = (
     0,
 )
 DA2_MISS_VERTICAL_OFFSETS = (-1, 0, 5, 9, 12, 14, 12, 9, 5, 0, 0, 0, 0)
+ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT = 10
 DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT = 3
-MONSTER_DAMAGE_FRAME_COUNT = (
+DAMAGE_POPUP_FRAME_COUNT = (
     len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
     + DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT
 )
+MONSTER_DAMAGE_FRAME_COUNT = DAMAGE_POPUP_FRAME_COUNT
 MONSTER_MISS_FRAME_COUNT = (
     len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
 )
@@ -276,7 +280,7 @@ ATTACK_HIT_PATTERN_COUNT = 3
 ATTACK_HIT_PATTERN_FRAME_COUNT = 5
 ATTACK_HIT_FRAME_COUNT = ATTACK_HIT_PATTERN_COUNT * ATTACK_HIT_PATTERN_FRAME_COUNT
 ATTACK_HIT_START_FRAME = ATTACK_POSE_RAISE_FRAME_COUNT
-ATTACK_DAMAGE_FRAME_COUNT = MONSTER_DAMAGE_FRAME_COUNT
+ATTACK_DAMAGE_FRAME_COUNT = DAMAGE_POPUP_FRAME_COUNT
 ATTACK_RETURN_JUMP_FRAME_COUNT = 8
 ATTACK_RETURN_JUMP_HEIGHT = 8
 ATTACK_LANDING_GUARD_FRAME_COUNT = 6
@@ -454,6 +458,7 @@ class BattleAttackPresentation:
     damage: int
     poses: tuple[AttackPoseDefinition, ...]
     effect_row: int | None
+    is_hit: bool = True
     sound_effect_id: str = ATTACK_SLASH_SE_ID
     elapsed_frame: int = 0
     damage_applied: bool = False
@@ -472,8 +477,16 @@ class BattleAttackPresentation:
         return self.elapsed_frame - ATTACK_HIT_START_FRAME
 
     @property
+    def damage_popup_elapsed_frame(self) -> int:
+        delay = ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT if self.is_hit else 0
+        return self.hit_elapsed_frame - delay
+
+    @property
     def result_complete(self) -> bool:
-        return self.hit_elapsed_frame >= ATTACK_DAMAGE_FRAME_COUNT
+        frame_count = (
+            ATTACK_DAMAGE_FRAME_COUNT if self.is_hit else MONSTER_MISS_FRAME_COUNT
+        )
+        return self.damage_popup_elapsed_frame >= frame_count
 
 
 @dataclass
@@ -580,6 +593,9 @@ class BattleMockMonster:
     is_front_row: bool
     state: MonsterBattleState
     agility: int
+    combat_stats: MonsterCombatStats = field(
+        default_factory=lambda: MonsterCombatStats(0, 0, 0, 0)
+    )
     initial_is_front_row: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -613,6 +629,7 @@ class BattleMockMonster:
             icon_y=_required_nonnegative_integer(record, "icon_y", key),
             is_front_row=is_front_row,
             state=MonsterBattleState.from_record(record),
+            combat_stats=MonsterCombatStats.from_record(record),
             agility=_required_nonnegative_integer(record, "agi", key),
         )
 
@@ -2607,11 +2624,28 @@ class BattleScreenMock:
             weapon_img,
         )
         effect_row = ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype)
+        member_stats = member.battle_stats
+        monster_stats = monster.combat_stats
+        attack = member_physical_attack(
+            weapon_attack=member_stats.attack_right,
+            strength=member.adjusted_abilities.strength,
+            weapon_level=member.weapon_level(weapon),
+            internal_level=member.internal_level,
+        )
+        result = resolve_physical_attack(
+            attack=attack,
+            hit=member_stats.hit_right.total,
+            agility=member.adjusted_abilities.agility,
+            target_defense=monster_stats.defense,
+            target_evasion=monster_stats.evasion,
+            hit_roll=random.randint(0, 99),
+        )
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
-            damage=random.randint(8, 15),
+            damage=result.damage,
             poses=poses,
             effect_row=effect_row,
+            is_hit=result.hit,
             sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
                 weapon.subtype,
                 ATTACK_SLASH_SE_ID,
@@ -2635,11 +2669,12 @@ class BattleScreenMock:
             not presentation.damage_applied
             and presentation.hit_elapsed_frame >= 0
         ):
-            monster = self.monsters[presentation.target_index]
-            monster.state.take_damage(presentation.damage)
+            if presentation.is_hit:
+                monster = self.monsters[presentation.target_index]
+                monster.state.take_damage(presentation.damage)
+                promote_rear_monsters_if_front_empty(self.monsters)
+                play_se(presentation.sound_effect_id)
             presentation.damage_applied = True
-            promote_rear_monsters_if_front_empty(self.monsters)
-            play_se(presentation.sound_effect_id)
         if (
             not presentation.return_started
             and presentation.elapsed_frame >= ATTACK_MOTION_FRAME_COUNT
@@ -3242,9 +3277,19 @@ class BattleScreenMock:
             self._start_timeline_animation()
             return
         self.monster_attack_target_index = random.choice(target_indexes)
-        self.monster_attack_damage = random.randint(0, 15)
+        target = self.party[self.monster_attack_target_index]
+        target_stats = target.battle_stats
+        result = resolve_physical_attack(
+            attack=actor.combat_stats.attack,
+            hit=actor.combat_stats.hit,
+            agility=actor.agility,
+            target_defense=target_stats.defense,
+            target_evasion=target_stats.evasion,
+            hit_roll=random.randint(0, 99),
+        )
+        self.monster_attack_damage = result.damage
         self.monster_attack_animation_frame = 0
-        if self.monster_attack_damage > 0:
+        if result.hit:
             play_se(BATTLE_HIT_SE_ID)
 
     def _monster_attack_animation_frame_count(self) -> int:
@@ -3617,8 +3662,9 @@ class BattleScreenMock:
             if damage == 0
             else DA2_DAMAGE_VERTICAL_OFFSETS
         )
+        popup_elapsed_frame = self.monster_attack_animation_frame
         reference_frame = min(
-            self.monster_attack_animation_frame * DA2_REFERENCE_FPS // FPS,
+            popup_elapsed_frame * DA2_REFERENCE_FPS // FPS,
             len(offsets) - 1,
         )
         vertical_offset = offsets[reference_frame]
@@ -3662,6 +3708,7 @@ class BattleScreenMock:
         if (
             getattr(self, "phase", None) is not BattleMockPhase.ATTACK_PRESENTATION
             or presentation is None
+            or not presentation.is_hit
             or presentation.effect_row is None
             or not 0 <= presentation.hit_elapsed_frame < ATTACK_HIT_FRAME_COUNT
         ):
@@ -3685,25 +3732,51 @@ class BattleScreenMock:
         )
 
     def _draw_party_attack_damage(self) -> None:
-        """Draw the temporary 8–15 damage result over the struck monster."""
+        """Draw a resolved damage or miss result over the target monster."""
 
         presentation = getattr(self, "attack_presentation", None)
         if (
             getattr(self, "phase", None) is not BattleMockPhase.ATTACK_PRESENTATION
             or presentation is None
             or not presentation.damage_applied
-            or not 0 <= presentation.hit_elapsed_frame < ATTACK_DAMAGE_FRAME_COUNT
         ):
             return
-        reference_frame = min(
-            presentation.hit_elapsed_frame * DA2_REFERENCE_FPS // FPS,
-            len(DA2_DAMAGE_VERTICAL_OFFSETS) - 1,
+        offsets = (
+            DA2_DAMAGE_VERTICAL_OFFSETS
+            if presentation.is_hit
+            else DA2_MISS_VERTICAL_OFFSETS
         )
-        vertical_offset = DA2_DAMAGE_VERTICAL_OFFSETS[reference_frame]
+        frame_count = (
+            ATTACK_DAMAGE_FRAME_COUNT
+            if presentation.is_hit
+            else MONSTER_MISS_FRAME_COUNT
+        )
+        popup_elapsed_frame = presentation.damage_popup_elapsed_frame
+        if not 0 <= popup_elapsed_frame < frame_count:
+            return
+        reference_frame = min(
+            popup_elapsed_frame * DA2_REFERENCE_FPS // FPS,
+            len(offsets) - 1,
+        )
+        vertical_offset = offsets[reference_frame]
+        if vertical_offset < 0:
+            return
         monster = self.monsters[presentation.target_index]
         _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
         anchor_x = self._monster_draw_x(presentation.target_index) + monster.width // 2
         y = target_y + monster.height - 8 - vertical_offset
+        if not presentation.is_hit:
+            pyxel.blt(
+                anchor_x - MISS_SPRITE_WIDTH // 2,
+                y,
+                0,
+                MISS_SPRITE_SOURCE_X,
+                DAMAGE_NUMBER_SPRITE_Y,
+                MISS_SPRITE_WIDTH,
+                DAMAGE_NUMBER_SPRITE_SIZE,
+                TRANSPARENT_INDEX,
+            )
+            return
         digits = str(presentation.damage)
         x = anchor_x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
         for digit in digits:
