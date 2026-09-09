@@ -9,6 +9,14 @@
       "channel": 0,
       "sound": 12
     },
+    "battle_weapon_slash": {
+      "channel": 0,
+      "sound": 11
+    },
+    "battle_weapon_blunt": {
+      "channel": 0,
+      "sound": 29
+    },
     "confirm": {
       "channel": 1,
       "sound": 9

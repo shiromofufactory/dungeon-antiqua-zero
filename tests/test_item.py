@@ -27,6 +27,7 @@ class ItemTest(unittest.TestCase):
                 "requirements": "LV9",
                 "price": 60000,
                 "use": "FIRE2",
+                "weapon_img": "WAND-1",
                 "break": 0,
                 "source": "ようせいのさと",
                 "atk": 40,
@@ -58,6 +59,7 @@ class ItemTest(unittest.TestCase):
         self.assertEqual(self.item.requirement, "LV9")
         self.assertEqual(self.item.price, 60000)
         self.assertEqual(self.item.use_spell_key, "FIRE2")
+        self.assertEqual(self.item.weapon_img, "WAND-1")
         self.assertFalse(self.item.breaks_on_use)
         self.assertEqual(self.item.source, "ようせいのさと")
         self.assertEqual(self.item.attack, 40)
@@ -97,6 +99,7 @@ class ItemTest(unittest.TestCase):
         self.assertEqual(item.requirement, "")
         self.assertEqual(item.price, 0)
         self.assertEqual(item.use_spell_key, "")
+        self.assertEqual(item.weapon_img, "")
         self.assertFalse(item.breaks_on_use)
         self.assertEqual(item.source, "")
         self.assertEqual(item.reach, 0)

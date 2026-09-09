@@ -207,6 +207,7 @@ class Item:
     effective_tribe: MonsterTribe | None
     price: int
     use_spell_key: str
+    weapon_img: str
     breaks_on_use: bool
     source: str
     attack: int
@@ -279,6 +280,7 @@ class Item:
             effective_tribe=_optional_monster_tribe(record),
             price=_optional_non_negative_stat(record, "price"),
             use_spell_key=_optional_string(record, "use"),
+            weapon_img=_optional_string(record, "weapon_img"),
             breaks_on_use=_optional_flag(record, "break"),
             source=_optional_string(record, "source"),
             attack=_non_negative_stat(record, "atk"),

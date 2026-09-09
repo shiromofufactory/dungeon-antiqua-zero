@@ -92,10 +92,20 @@ class BgmPlayerTest(unittest.TestCase):
 
         pyxel.play.assert_called_once_with(1, 9)
         self.assertTrue(
-            {"alert", "battle_hit", "confirm", "teleport", "treasure_open"}
+            {
+                "alert",
+                "battle_hit",
+                "battle_weapon_blunt",
+                "battle_weapon_slash",
+                "confirm",
+                "teleport",
+                "treasure_open",
+            }
             <= set(list_se_ids())
         )
         self.assertEqual(se_channel_and_sound("confirm"), (1, 9))
+        self.assertEqual(se_channel_and_sound("battle_weapon_slash"), (0, 11))
+        self.assertEqual(se_channel_and_sound("battle_weapon_blunt"), (0, 29))
         with self.assertRaises(AudioResourceError):
             play_se("missing", pyxel_api=pyxel)
         with self.assertRaises(AudioResourceError):

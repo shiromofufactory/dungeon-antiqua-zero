@@ -89,8 +89,15 @@ def member_attack_reach(member: Member) -> int:
         for slot in (EquipmentSlot.RIGHT, EquipmentSlot.LEFT)
         if (weapon := member.equipment.weapon_at(slot)) is not None
     )
-    # An unarmed attack follows the same range rule as a reach-1 weapon.
-    return min((weapon.reach for weapon in weapons), default=1)
+    if not weapons:
+        raise ValueError("member must have an equipped weapon to attack")
+    return min(weapon.reach for weapon in weapons)
+
+
+def member_can_attack(member: Member) -> bool:
+    """Return whether the member has a main-hand weapon for a normal attack."""
+
+    return member.equipment.weapon_at(EquipmentSlot.RIGHT) is not None
 
 
 def selectable_attack_target_indexes(
@@ -167,14 +174,18 @@ def resolve_battle_commands(
     if not isinstance(current, BattleCommandContext):
         raise TypeError("context must be a BattleCommandContext")
     left_commands: list[BattleCommandOption] = []
-    attack_targets = selectable_attack_target_indexes(
-        attacker_is_front_row=member.is_front_row,
-        weapon_reach=member_attack_reach(member),
-        monsters=monsters,
+    attack_targets = (
+        selectable_attack_target_indexes(
+            attacker_is_front_row=member.is_front_row,
+            weapon_reach=member_attack_reach(member),
+            monsters=monsters,
+        )
+        if member_can_attack(member)
+        else ()
     )
     # Keep normal attack visible even when it cannot currently reach a target.
-    # In particular, a back-row member with a short-range weapon cannot attack
-    # until their formation changes, so the option is disabled.
+    # A member without a main-hand weapon and a back-row member with a
+    # short-range weapon cannot attack, so the option is disabled.
     left_commands.append(
         BattleCommandOption(BattleCommand.ATTACK, enabled=bool(attack_targets))
     )
@@ -214,6 +225,7 @@ __all__ = [
     "BattleCommandOption",
     "BattleTarget",
     "formation_change_enabled",
+    "member_can_attack",
     "member_attack_reach",
     "member_has_spell_aptitude",
     "resolve_battle_commands",

@@ -26,11 +26,18 @@ from tools.screen_mocks._runtime import (
     create_mock_input_reader,
     initialize_screen_mock,
 )
+from attack_pose import (
+    AttackPoseDefinition,
+    AttackWeaponSprite,
+    attack_sequence,
+    load_attack_poses,
+)
 from battle_commands import (
     BattleCommand,
     BattleCommandContext,
     BattleCommandOption,
     formation_change_enabled,
+    member_can_attack,
     member_attack_reach,
     resolve_battle_commands,
     selectable_attack_target_indexes,
@@ -105,6 +112,8 @@ BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
 BATTLE_HIT_SE_ID = "battle_hit"
+ATTACK_SLASH_SE_ID = "battle_weapon_slash"
+ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 BATTLE_MOCK_PARTY_CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
 BATTLE_MOCK_MONSTER_KEYS = (
     "Giant Spider",
@@ -231,8 +240,10 @@ DA2_DAMAGE_VERTICAL_OFFSETS = (
     0,
 )
 DA2_MISS_VERTICAL_OFFSETS = (-1, 0, 5, 9, 12, 14, 12, 9, 5, 0, 0, 0, 0)
+DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT = 3
 MONSTER_DAMAGE_FRAME_COUNT = (
     len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+    + DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT
 )
 MONSTER_MISS_FRAME_COUNT = (
     len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
@@ -255,6 +266,43 @@ DA2_ACTION_MOVE_SPEED = 4
 ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
 BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
+ATTACK_POSE_RAISE_FRAME_COUNT = 3
+ATTACK_POSE_SWING_FRAME_COUNT = 8
+ATTACK_MOTION_FRAME_COUNT = (
+    ATTACK_POSE_RAISE_FRAME_COUNT + ATTACK_POSE_SWING_FRAME_COUNT
+)
+ATTACK_HIT_PATTERN_COUNT = 3
+ATTACK_HIT_PATTERN_FRAME_COUNT = 5
+ATTACK_HIT_FRAME_COUNT = ATTACK_HIT_PATTERN_COUNT * ATTACK_HIT_PATTERN_FRAME_COUNT
+ATTACK_HIT_START_FRAME = ATTACK_POSE_RAISE_FRAME_COUNT
+ATTACK_DAMAGE_FRAME_COUNT = MONSTER_DAMAGE_FRAME_COUNT
+ATTACK_RETURN_JUMP_FRAME_COUNT = 8
+ATTACK_RETURN_JUMP_HEIGHT = 8
+ATTACK_LANDING_GUARD_FRAME_COUNT = 6
+ATTACK_WEAPON_SPRITE_Y = 32
+ATTACK_WEAPON_SPRITE_SIZE = 16
+ATTACK_EFFECT_CELL_SIZE = 64
+ATTACK_EFFECT_IMAGE_ID = "effects/weapons"
+ATTACK_EFFECT_ROW_BY_SUBTYPE = {
+    "AXE": 0,
+    "SWORD": 1,
+    "KATANA": 1,
+    "KNIFE": 2,
+    "HAMMER": 3,
+    "WAND": 3,
+    "ROD": 3,
+    "SPEAR": 4,
+}
+ATTACK_SE_ID_BY_SUBTYPE = {
+    "AXE": ATTACK_SLASH_SE_ID,
+    "SWORD": ATTACK_SLASH_SE_ID,
+    "KATANA": ATTACK_SLASH_SE_ID,
+    "KNIFE": ATTACK_SLASH_SE_ID,
+    "HAMMER": ATTACK_BLUNT_SE_ID,
+    "WAND": ATTACK_BLUNT_SE_ID,
+    "ROD": ATTACK_BLUNT_SE_ID,
+    "SPEAR": ATTACK_SLASH_SE_ID,
+}
 COMMAND_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.command.attack",
     BattleCommand.SPELL: "battle.command.spell",
@@ -339,6 +387,7 @@ class BattleMockPhase(StrEnum):
     SPELL = "spell"
     TARGET = "target"
     ACTION_TARGET = "action_target"
+    ATTACK_PRESENTATION = "attack_presentation"
     ACTION_PRESENTATION = "action_presentation"
     ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
@@ -394,6 +443,36 @@ class BattleActionPresentation:
         self.elapsed_frame += 1
         for effect in self.spell_effects:
             effect.player.update()
+
+
+@dataclass
+class BattleAttackPresentation:
+    """Own one party member's DA2-timed weapon attack result."""
+
+    target_index: int
+    damage: int
+    poses: tuple[AttackPoseDefinition, ...]
+    effect_row: int | None
+    sound_effect_id: str = ATTACK_SLASH_SE_ID
+    elapsed_frame: int = 0
+    damage_applied: bool = False
+    return_started: bool = False
+
+    @property
+    def pose(self) -> AttackPoseDefinition | None:
+        if not self.poses or self.elapsed_frame >= ATTACK_MOTION_FRAME_COUNT:
+            return None
+        if len(self.poses) == 1 or self.elapsed_frame < ATTACK_POSE_RAISE_FRAME_COUNT:
+            return self.poses[0]
+        return self.poses[1]
+
+    @property
+    def hit_elapsed_frame(self) -> int:
+        return self.elapsed_frame - ATTACK_HIT_START_FRAME
+
+    @property
+    def result_complete(self) -> bool:
+        return self.hit_elapsed_frame >= ATTACK_DAMAGE_FRAME_COUNT
 
 
 @dataclass
@@ -618,6 +697,10 @@ class BattleScreenMock:
             )
         self.background = resources.image(BACKGROUND_IMAGE_ID)
         self.character_sprites = resources.image(CH_BATTLE_IMAGE_ID)
+        self.attack_effect_image = resources.image(ATTACK_EFFECT_IMAGE_ID)
+        self.attack_poses = load_attack_poses(
+            APP_ROOT / "effects" / "attack_poses.json"
+        )
         self.spell_effect_renderer = SpellEffectRenderer(
             resources,
             self.palette_shifter,
@@ -852,12 +935,17 @@ class BattleScreenMock:
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
+        self.attack_presentation: BattleAttackPresentation | None = None
         self.battle_popup = BattleTimedPopup()
         self.action_party_index: int | None = None
         self.action_offset_x = 0
         self.action_motion_frame = 0
         self.action_returning = False
         self.action_uses_cast_pose = False
+        self.action_return_jump = False
+        self.action_return_frame = 0
+        self.action_return_start_offset = 0
+        self.action_landing_guard_frames_remaining = 0
         self.command_guide_command: BattleCommand | None = None
         self.command_guide_timer = 0
         self.command_guide_visible = False
@@ -981,6 +1069,9 @@ class BattleScreenMock:
             return
         if self.phase is BattleMockPhase.ACTION_PRESENTATION:
             self._update_action_presentation()
+            return
+        if self.phase is BattleMockPhase.ATTACK_PRESENTATION:
+            self._update_attack_presentation()
             return
         if self.phase is BattleMockPhase.ITEM:
             self._update_item_selection(input_state)
@@ -1109,6 +1200,7 @@ class BattleScreenMock:
         self.pending_item_candidate = None
         self.pending_spell = None
         self.action_presentation = None
+        self.attack_presentation = None
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.clear()
@@ -1274,6 +1366,7 @@ class BattleScreenMock:
             self.selectable_target_indexes = ()
             self.selected_target_index = None
             self.target_cursor.active = False
+            self._begin_action_return()
             self._open_member_command_menu()
         self._refresh_input_guide()
 
@@ -2306,22 +2399,37 @@ class BattleScreenMock:
             )
 
     def _begin_action_motion(self, *, use_cast_pose: bool) -> None:
-        """Move the active item user or caster toward the enemies as in DA2."""
+        """Move the active party actor toward the enemies as in DA2."""
 
         if self.active_party_index is None:
             return
         self.action_party_index = self.active_party_index
         self.action_returning = False
         self.action_uses_cast_pose = use_cast_pose
+        self.action_return_jump = False
+        self.action_return_frame = 0
+        self.action_return_start_offset = 0
+        self.action_landing_guard_frames_remaining = 0
 
-    def _begin_action_return(self, *, complete_turn: bool = False) -> None:
-        """Send the item user or caster back before optionally advancing."""
+    def _begin_action_return(
+        self,
+        *,
+        complete_turn: bool = False,
+        jump: bool = False,
+    ) -> None:
+        """Send the party actor back before optionally advancing."""
 
         if getattr(self, "action_party_index", None) is None:
             if complete_turn:
                 self.phase = BattleMockPhase.ACTION_RETURN
             return
         self.action_returning = True
+        self.action_return_jump = jump
+        self.action_return_frame = 0
+        self.action_return_start_offset = self.action_offset_x
+        self.action_landing_guard_frames_remaining = 0
+        if jump:
+            self._advance_action_return_jump()
         if complete_turn:
             self.phase = BattleMockPhase.ACTION_RETURN
 
@@ -2329,6 +2437,19 @@ class BattleScreenMock:
         """Advance one DA2-speed forward or backward action movement."""
 
         if getattr(self, "action_party_index", None) is None:
+            return
+        landing_frames = getattr(
+            self,
+            "action_landing_guard_frames_remaining",
+            0,
+        )
+        if landing_frames:
+            self.action_landing_guard_frames_remaining = landing_frames - 1
+            if self.action_landing_guard_frames_remaining == 0:
+                self._clear_action_motion_state()
+            return
+        if self.action_returning and getattr(self, "action_return_jump", False):
+            self._advance_action_return_jump()
             return
         destination = 0 if self.action_returning else ACTION_MOVE_DISTANCE
         distance = destination - self.action_offset_x
@@ -2339,12 +2460,36 @@ class BattleScreenMock:
         if self.action_returning and self.action_offset_x == 0:
             self._clear_action_motion_state()
 
+    def _advance_action_return_jump(self) -> None:
+        """Advance the jump immediately so it has no stationary first frame."""
+
+        self.action_return_frame += 1
+        remaining = max(
+            0,
+            ATTACK_RETURN_JUMP_FRAME_COUNT - self.action_return_frame,
+        )
+        self.action_offset_x = (
+            self.action_return_start_offset
+            * remaining
+            // ATTACK_RETURN_JUMP_FRAME_COUNT
+        )
+        self.action_motion_frame += 1
+        if self.action_return_frame >= ATTACK_RETURN_JUMP_FRAME_COUNT:
+            self.action_return_jump = False
+            self.action_landing_guard_frames_remaining = (
+                ATTACK_LANDING_GUARD_FRAME_COUNT
+            )
+
     def _clear_action_motion_state(self) -> None:
         self.action_party_index = None
         self.action_offset_x = 0
         self.action_motion_frame = 0
         self.action_returning = False
         self.action_uses_cast_pose = False
+        self.action_return_jump = False
+        self.action_return_frame = 0
+        self.action_return_start_offset = 0
+        self.action_landing_guard_frames_remaining = 0
 
     def _commit_item_use(self, candidate: BattleItemCandidate) -> bool:
         """Remove an item or equipped gear only when its use was confirmed."""
@@ -2408,6 +2553,7 @@ class BattleScreenMock:
         # DA2 starts enemy selection at the last selectable monster.
         self.selected_target_index = selectable[-1]
         self.phase = BattleMockPhase.TARGET
+        self._begin_action_motion(use_cast_pose=False)
         self.command_cursor.active = False
         self.target_cursor.active = True
         self.target_cursor.select_key(self.selected_target_index)
@@ -2416,19 +2562,20 @@ class BattleScreenMock:
 
     def _update_target_selection(self, input_state: InputState) -> None:
         if getattr(self, "auto_battle_active", False):
-            self._begin_monster_death()
+            self._begin_attack_presentation()
             return
         if input_state.cancel.triggered:
             self.selected_command = None
             self.selectable_target_indexes = ()
             self.selected_target_index = None
             self.phase = BattleMockPhase.COMMAND
+            self._begin_action_return()
             self.command_cursor.active = True
             self.target_cursor.active = False
             return
 
         if input_state.confirm.triggered:
-            self._begin_monster_death()
+            self._begin_attack_presentation()
             return
 
         navigation = input_state.navigation
@@ -2436,17 +2583,88 @@ class BattleScreenMock:
             self._move_target(navigation)
         self.target_cursor.update()
 
-    def _begin_monster_death(self) -> bool:
-        """Set the selected target's HP to zero and start its defeat effect."""
+    def _begin_attack_presentation(self) -> bool:
+        """Start the selected right-hand weapon's authored attack sequence."""
 
         index = self.selected_target_index
-        if index is None or index not in self.selectable_target_indexes:
+        if (
+            self.active_party_index is None
+            or index is None
+            or index not in self.selectable_target_indexes
+        ):
             return False
         monster = self.monsters[index]
         if not monster.is_alive:
             return False
+        member = self.party[self.active_party_index]
+        weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+        if weapon is None:
+            return False
+        weapon_img = weapon.weapon_img
+        poses = attack_sequence(
+            getattr(self, "attack_poses", {}),
+            weapon_img,
+        )
+        effect_row = ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype)
+        self.attack_presentation = BattleAttackPresentation(
+            target_index=index,
+            damage=random.randint(8, 15),
+            poses=poses,
+            effect_row=effect_row,
+            sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
+                weapon.subtype,
+                ATTACK_SLASH_SE_ID,
+            ),
+        )
+        self.phase = BattleMockPhase.ATTACK_PRESENTATION
+        self.target_cursor.active = False
+        self.command_window.close_immediately()
+        self._refresh_monster_name_colors()
+        return True
 
-        monster.state.defeat()
+    def _update_attack_presentation(self) -> None:
+        """Apply the hit, show its result, and start the jumping return."""
+
+        presentation = getattr(self, "attack_presentation", None)
+        if presentation is None:
+            self._complete_current_turn()
+            return
+        presentation.elapsed_frame += 1
+        if (
+            not presentation.damage_applied
+            and presentation.hit_elapsed_frame >= 0
+        ):
+            monster = self.monsters[presentation.target_index]
+            monster.state.take_damage(presentation.damage)
+            presentation.damage_applied = True
+            promote_rear_monsters_if_front_empty(self.monsters)
+            play_se(presentation.sound_effect_id)
+        if (
+            not presentation.return_started
+            and presentation.elapsed_frame >= ATTACK_MOTION_FRAME_COUNT
+        ):
+            presentation.return_started = True
+            self._begin_action_return(jump=True)
+        if not presentation.result_complete:
+            return
+        target_index = presentation.target_index
+        target_is_alive = self.monsters[target_index].is_alive
+        self.attack_presentation = None
+        if not target_is_alive:
+            self._begin_monster_death(target_index)
+            return
+        self._complete_current_turn()
+
+    def _begin_monster_death(self, index: int | None = None) -> bool:
+        """Start the defeat effect for a target whose HP reached zero."""
+
+        if index is None:
+            index = self.selected_target_index
+        if index is None:
+            return False
+        monster = self.monsters[index]
+        if monster.is_alive:
+            monster.state.defeat()
         promote_rear_monsters_if_front_empty(self.monsters)
         self.phase = BattleMockPhase.MONSTER_DEATH
         self.dying_monster_index = index
@@ -2526,6 +2744,7 @@ class BattleScreenMock:
         self.pending_item_candidate = None
         self.pending_spell = None
         self.action_presentation = None
+        self.attack_presentation = None
         self._clear_action_motion_state()
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
@@ -2783,6 +3002,8 @@ class BattleScreenMock:
         if self.active_party_index is None:
             return ()
         actor = self.party[self.active_party_index]
+        if not member_can_attack(actor):
+            return ()
         return selectable_attack_target_indexes(
             attacker_is_front_row=actor.is_front_row,
             weapon_reach=member_attack_reach(actor),
@@ -3120,7 +3341,9 @@ class BattleScreenMock:
         self._draw_background()
         self._draw_party()
         self._draw_monsters()
+        self._draw_party_attack_effect()
         self._draw_spell_effects()
+        self._draw_party_attack_damage()
         self._draw_monster_attack_result()
         self._draw_timeline()
         self._draw_windows()
@@ -3159,6 +3382,19 @@ class BattleScreenMock:
                 BattleMockPhase.ESCAPE,
             ) or index in getattr(self, "escaping_party_indexes", ())
             width = -16 if is_escaping else 16
+            attack_presentation = getattr(self, "attack_presentation", None)
+            attack_pose = (
+                attack_presentation.pose
+                if (
+                    self.phase is BattleMockPhase.ATTACK_PRESENTATION
+                    and index == getattr(self, "action_party_index", None)
+                    and attack_presentation is not None
+                )
+                else None
+            )
+            if attack_pose is not None:
+                self._draw_attack_composite(index, x, y, attack_pose)
+                continue
             if self.phase is BattleMockPhase.ACTION_PRESENTATION:
                 self._draw_spell_effect_target(
                     "ally",
@@ -3202,6 +3438,54 @@ class BattleScreenMock:
                 TRANSPARENT_INDEX,
             )
 
+    def _draw_attack_composite(
+        self,
+        index: int,
+        x: int,
+        y: int,
+        pose: AttackPoseDefinition,
+    ) -> None:
+        """Draw authored back weapons, character pose, then front weapons."""
+
+        def draw_weapon(weapon: AttackWeaponSprite) -> None:
+            width = (
+                -ATTACK_WEAPON_SPRITE_SIZE
+                if weapon.flip_x
+                else ATTACK_WEAPON_SPRITE_SIZE
+            )
+            height = (
+                -ATTACK_WEAPON_SPRITE_SIZE
+                if weapon.flip_y
+                else ATTACK_WEAPON_SPRITE_SIZE
+            )
+            pyxel.blt(
+                x + weapon.position_x,
+                y + weapon.position_y,
+                0,
+                weapon.image * ATTACK_WEAPON_SPRITE_SIZE,
+                ATTACK_WEAPON_SPRITE_Y,
+                width,
+                height,
+                TRANSPARENT_INDEX,
+            )
+
+        for weapon in pose.weapons:
+            if weapon.layer == "back":
+                draw_weapon(weapon)
+        pyxel.blt(
+            x,
+            y,
+            self.character_sprites,
+            pose.character_pose * 16,
+            self.party_visuals[index].battle_sprite * 32,
+            16,
+            32,
+            TRANSPARENT_INDEX,
+        )
+        for weapon in pose.weapons:
+            if weapon.layer == "front":
+                draw_weapon(weapon)
+
     def _party_draw_position(self, index: int) -> tuple[int, int] | None:
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
@@ -3220,6 +3504,23 @@ class BattleScreenMock:
         if self.phase is not BattleMockPhase.ENTRANCE:
             if index == getattr(self, "action_party_index", None):
                 target_x -= self.action_offset_x
+                if (
+                    self.action_returning
+                    and getattr(self, "action_return_jump", False)
+                ):
+                    elapsed = min(
+                        self.action_return_frame,
+                        ATTACK_RETURN_JUMP_FRAME_COUNT,
+                    )
+                    remaining = ATTACK_RETURN_JUMP_FRAME_COUNT - elapsed
+                    jump = (
+                        4
+                        * ATTACK_RETURN_JUMP_HEIGHT
+                        * elapsed
+                        * remaining
+                        // (ATTACK_RETURN_JUMP_FRAME_COUNT**2)
+                    )
+                    target_y -= jump
             return target_x, target_y
 
         delay = index * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
@@ -3282,6 +3583,10 @@ class BattleScreenMock:
         ):
             return MONSTER_DAMAGE_SPRITE_SOURCE_X
         if index == getattr(self, "action_party_index", None):
+            if getattr(self, "action_landing_guard_frames_remaining", 0):
+                return DEFEND_SPRITE_SOURCE_X
+            if self.action_returning and getattr(self, "action_return_jump", False):
+                return 0
             if (
                 self.action_offset_x != ACTION_MOVE_DISTANCE
                 or self.action_returning
@@ -3348,6 +3653,70 @@ class BattleScreenMock:
             )
             x += DAMAGE_NUMBER_SPRITE_SIZE
 
+    def _draw_party_attack_effect(self) -> None:
+        """Draw one of the five three-pattern weapon impact rows."""
+
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            getattr(self, "phase", None) is not BattleMockPhase.ATTACK_PRESENTATION
+            or presentation is None
+            or presentation.effect_row is None
+            or not 0 <= presentation.hit_elapsed_frame < ATTACK_HIT_FRAME_COUNT
+        ):
+            return
+        pattern = (
+            presentation.hit_elapsed_frame // ATTACK_HIT_PATTERN_FRAME_COUNT
+        )
+        anchor_x, anchor_y = self._spell_effect_anchor(
+            "enemy",
+            presentation.target_index,
+        )
+        pyxel.blt(
+            anchor_x - ATTACK_EFFECT_CELL_SIZE // 2,
+            anchor_y - ATTACK_EFFECT_CELL_SIZE // 2 + 8,
+            self.attack_effect_image,
+            pattern * ATTACK_EFFECT_CELL_SIZE,
+            presentation.effect_row * ATTACK_EFFECT_CELL_SIZE,
+            ATTACK_EFFECT_CELL_SIZE,
+            ATTACK_EFFECT_CELL_SIZE,
+            TRANSPARENT_INDEX,
+        )
+
+    def _draw_party_attack_damage(self) -> None:
+        """Draw the temporary 8–15 damage result over the struck monster."""
+
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            getattr(self, "phase", None) is not BattleMockPhase.ATTACK_PRESENTATION
+            or presentation is None
+            or not presentation.damage_applied
+            or not 0 <= presentation.hit_elapsed_frame < ATTACK_DAMAGE_FRAME_COUNT
+        ):
+            return
+        reference_frame = min(
+            presentation.hit_elapsed_frame * DA2_REFERENCE_FPS // FPS,
+            len(DA2_DAMAGE_VERTICAL_OFFSETS) - 1,
+        )
+        vertical_offset = DA2_DAMAGE_VERTICAL_OFFSETS[reference_frame]
+        monster = self.monsters[presentation.target_index]
+        _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
+        anchor_x = self._monster_draw_x(presentation.target_index) + monster.width // 2
+        y = target_y + monster.height - 8 - vertical_offset
+        digits = str(presentation.damage)
+        x = anchor_x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
+        for digit in digits:
+            pyxel.blt(
+                x,
+                y,
+                0,
+                int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_Y,
+                DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_SIZE,
+                TRANSPARENT_INDEX,
+            )
+            x += DAMAGE_NUMBER_SPRITE_SIZE
+
     def _draw_monsters(self) -> None:
         for index, (monster, (_, y)) in enumerate(
             zip(self.monsters, MONSTER_POSITIONS)
@@ -3356,7 +3725,13 @@ class BattleScreenMock:
                 self.phase is BattleMockPhase.MONSTER_DEATH
                 and index == self.dying_monster_index
             )
-            if not monster.is_alive and not is_dying:
+            attack_presentation = getattr(self, "attack_presentation", None)
+            is_attack_target = (
+                self.phase is BattleMockPhase.ATTACK_PRESENTATION
+                and attack_presentation is not None
+                and index == attack_presentation.target_index
+            )
+            if not monster.is_alive and not is_dying and not is_attack_target:
                 continue
             if (
                 index == self.blinking_monster_index

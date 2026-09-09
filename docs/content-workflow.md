@@ -61,6 +61,9 @@ Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象J
 ```text
 共有リポジトリ effects/spells.json
         └──→ spell effect compiler ──→ app/effects/spells.json ──→ Pyxelゲーム
+
+共有リポジトリ battle/attack_poses.json
+        └──→ attack pose compiler ──→ app/effects/attack_poses.json ──→ Pyxelゲーム
 ```
 
 マップの空間データはGoogle Sheetsと同期せず、次の経路で利用する。
@@ -154,6 +157,11 @@ Google Sheetsとの同期対象にしない。呪文の表示名、効果、対�
 呪文エフェクト設定ツールで未登録Soundへ安定IDを付けた場合は、ゲーム本体が直接読む
 `app/audio/catalog.json`へ追加する。Sound本体は`assets.pyxres`で管理し、ツールはnotes、tones、
 volumes、speedを変更しない。
+
+攻撃ポーズは `content/battle/attack_poses.json` を正本とし、`npm run attack-poses:build` で
+`app/effects/attack_poses.json` を生成する。アイテムの `weapon_img` と枝番1・2を通常攻撃の
+振り上げ・振り下ろしへ対応させる。ゲームと戦闘モックは生成済みデータだけを読み、制作JSONを
+直接参照しない。
 
 ## マップ制作データとゲーム用データ生成
 

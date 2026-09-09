@@ -57,6 +57,7 @@ app/
 ├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
+├── attack_pose.py             # 通常攻撃コンポジット定義の検証と武器別ポーズ解決
 ├── monster.py                # モンスター種族、戦闘ごとのHP、敵隊列ルール
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
@@ -442,6 +443,10 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 `SpellEffectPlayer`は対象が味方か敵かを明示的に受け取り、定義に保存された対象側のOFFSETを選ぶ。
 画面構成、保存形式、通常エフェクトと特殊エフェクトの境界は
 [`features/spell-effect-editor.md`](./features/spell-effect-editor.md)を参照する。
+
+通常攻撃コンポジットも同様に、制作設定の正本を `content/battle/attack_poses.json`、ゲーム用
+生成物を `app/effects/attack_poses.json` とする。形式検証と `weapon_img` ごとの枝番解決は
+`app/attack_pose.py` に置き、戦闘モックは生成済みデータとアイテムモデルだけを参照する。
 
 呪文マスターの文字列enum、習得レベル、表示名・説明の解釈は `app/spell.py` が所有する。
 レベル1から9の呪文はMemberの対応する元素・神聖・暗黒熟練度以下を習得済みとし、

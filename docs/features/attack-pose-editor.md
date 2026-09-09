@@ -40,6 +40,8 @@
 
 正本は `content/battle/attack_poses.json` とする。初回保存時に作成し、複数のポーズを1ファイルで
 管理する。IDはアイテム側の `weapon_img` と制作者が指定する枝番から生成した安定キーとする。
+ゲーム用生成物は `npm run attack-poses:build` で `app/effects/attack_poses.json` へ出力し、
+戦闘モック起動時にも自動生成する。ゲーム側は正本を直接読まない。
 
 ```json
 {

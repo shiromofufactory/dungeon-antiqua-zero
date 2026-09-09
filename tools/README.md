@@ -42,6 +42,18 @@ npm run spell-effects:validate
 npm run spell-effects:build
 ```
 
+## Attack Pose Editor
+
+戦闘用キャラクターの静止ポーズと武器画像を重ね、通常攻撃の振り上げ・振り下ろしを調整する
+ローカルWebツールである。詳細仕様は
+[`docs/features/attack-pose-editor.md`](../docs/features/attack-pose-editor.md)を参照する。
+
+```sh
+npm run attack-pose-editor
+npm run attack-poses:validate
+npm run attack-poses:build
+```
+
 ## Image Viewer
 
 生成済み画像を本番パレットで表示する。

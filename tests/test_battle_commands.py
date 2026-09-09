@@ -12,7 +12,7 @@ from battle_commands import (
     resolve_battle_commands,
     selectable_attack_target_indexes,
 )
-from member import FormationRow, MAX_INTERNAL_LEVEL
+from member import EquipmentSlot, FormationRow, MAX_INTERNAL_LEVEL
 from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
@@ -72,6 +72,23 @@ class BattleCommandRulesTest(unittest.TestCase):
             ),
             (1,),
         )
+
+    def test_unarmed_member_cannot_select_attack(self) -> None:
+        self.party[0].equipment = self.party[0].equipment.replaced(
+            {EquipmentSlot.RIGHT: None}
+        )
+
+        attack = next(
+            option
+            for option in resolve_battle_commands(
+                self.party[0],
+                self.party,
+                self.monsters,
+            )
+            if option.command is BattleCommand.ATTACK
+        )
+
+        self.assertFalse(attack.enabled)
 
     def test_formation_is_disabled_for_the_only_front_member(self) -> None:
         self.party[0].formation_row = FormationRow.BACK
