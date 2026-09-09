@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -162,6 +162,14 @@ SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
 SPELL_VISIBLE_COUNT = 4
 DA2_REFERENCE_FPS = 30
+DA2_CONFIRM_REPEAT_DELAY_FRAME_COUNT = 10
+DA2_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT = 2
+BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT = (
+    DA2_CONFIRM_REPEAT_DELAY_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
+)
+BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT = (
+    DA2_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
+)
 DA2_ESCAPE_RUN_SPEED = 12
 ESCAPE_RUN_SPEED = DA2_ESCAPE_RUN_SPEED * DA2_REFERENCE_FPS // FPS
 ESCAPE_RUN_DESTINATION_X = SCREEN_WIDTH + 4
@@ -231,9 +239,10 @@ MONSTER_MISS_FRAME_COUNT = (
 )
 MONSTER_DAMAGE_SPRITE_SOURCE_X = 16 * 4
 MONSTER_DAMAGE_SHAKE_X = (8, 9)
-DAMAGE_NUMBER_SPRITE_Y = 48
+DAMAGE_NUMBER_SPRITE_X = 128
+DAMAGE_NUMBER_SPRITE_Y = 0
 DAMAGE_NUMBER_SPRITE_SIZE = 8
-MISS_SPRITE_SOURCE_X = 80
+MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
 UNSELECTABLE_TARGET_PALETTE_BASE_RATE = 0.5
@@ -1046,6 +1055,7 @@ class BattleScene:
         self.escape_return_phase = BattlePhase.COMMAND
         self.auto_battle_active = False
         self.input_device = InputDevice.KEYBOARD
+        self.confirm_hold_frame_count = 0
         self.selectable_target_indexes: tuple[int, ...] = ()
         self.selected_target_index: int | None = None
         self.selectable_party_target_indexes: tuple[int, ...] = ()
@@ -1140,6 +1150,7 @@ class BattleScene:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        input_state = self._apply_confirm_repeat(input_state)
         self.input_device = input_state.device
         self._refresh_input_guide()
         if getattr(self, "result", None) is not None:
@@ -1247,6 +1258,31 @@ class BattleScene:
         self.command_window.update(navigation)
         self._update_command_guide()
 
+    def _apply_confirm_repeat(self, input_state: InputState) -> InputState:
+        """Repeat held battle confirmations at DA2-equivalent timing."""
+
+        confirm = input_state.confirm
+        if confirm.triggered:
+            self.confirm_hold_frame_count = 0
+            return input_state
+        if not confirm.held:
+            self.confirm_hold_frame_count = 0
+            return input_state
+
+        held_frames = getattr(self, "confirm_hold_frame_count", 0) + 1
+        self.confirm_hold_frame_count = held_frames
+        should_repeat = (
+            held_frames >= BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT
+            and (
+                held_frames - BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT
+            )
+            % BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT
+            == 0
+        )
+        if not should_repeat:
+            return input_state
+        return replace(input_state, confirm=replace(confirm, triggered=True))
+
     def _update_global_command_selection(self, input_state: InputState) -> None:
         """Choose a party-wide action or return to the current member's menu."""
 
@@ -1328,6 +1364,7 @@ class BattleScene:
         self.selected_command = None
         self.escape_return_phase = BattlePhase.COMMAND
         self.auto_battle_active = False
+        self.confirm_hold_frame_count = 0
         self.selectable_target_indexes = ()
         self.selected_target_index = None
         self.item_candidates = ()
@@ -4128,7 +4165,8 @@ class BattleScene:
                 x,
                 y,
                 0,
-                int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_X
+                + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_Y,
                 DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_SIZE,
@@ -4219,7 +4257,8 @@ class BattleScene:
                 x,
                 y,
                 0,
-                int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_X
+                + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_Y,
                 DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_SIZE,

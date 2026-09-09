@@ -40,6 +40,7 @@ from tools.screen_mocks.battle import (
     COMMAND_TEXT_KEYS,
     ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT,
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
+    DAMAGE_NUMBER_SPRITE_X,
     DAMAGE_NUMBER_SPRITE_Y,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
@@ -783,8 +784,26 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
-                call(28, 110, 0, 8, DAMAGE_NUMBER_SPRITE_Y, 8, 8, 1),
-                call(36, 110, 0, 16, DAMAGE_NUMBER_SPRITE_Y, 8, 8, 1),
+                call(
+                    28,
+                    110,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X + 8,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    8,
+                    8,
+                    1,
+                ),
+                call(
+                    36,
+                    110,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X + 16,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    8,
+                    8,
+                    1,
+                ),
             ],
         )
 
@@ -3106,6 +3125,10 @@ class BattleScreenMockTest(unittest.TestCase):
         )
 
     def test_monster_damage_draws_bank_zero_digit_sprites(self) -> None:
+        self.assertEqual(
+            (DAMAGE_NUMBER_SPRITE_X, DAMAGE_NUMBER_SPRITE_Y),
+            (128, 0),
+        )
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.MONSTER_ACTION
         mock.party_visuals = (
@@ -3121,12 +3144,31 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
-                call(162, 78, 0, 8, DAMAGE_NUMBER_SPRITE_Y, 8, 8, 1),
-                call(170, 78, 0, 40, DAMAGE_NUMBER_SPRITE_Y, 8, 8, 1),
+                call(
+                    162,
+                    78,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X + 8,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    8,
+                    8,
+                    1,
+                ),
+                call(
+                    170,
+                    78,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X + 40,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    8,
+                    8,
+                    1,
+                ),
             ],
         )
 
     def test_monster_miss_draws_the_supplied_bank_zero_sprite(self) -> None:
+        self.assertEqual(MISS_SPRITE_SOURCE_X, 208)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.MONSTER_ACTION
         mock.party_visuals = (

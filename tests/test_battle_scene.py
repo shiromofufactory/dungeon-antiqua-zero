@@ -12,13 +12,18 @@ from game import (
     RANDOM_BATTLE_ENCOUNTER,
     Game,
 )
-from input import Direction, InputState
+from input import Direction, InputButton, InputState
 from rendering import (
     ENCOUNTER_TRANSITION_FRAME_COUNT,
     EncounterTransition,
     FadePhase,
 )
 from scenes import BattleEncounter, BattleResult, BattleScene
+from scenes.battle import (
+    BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
+    BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
+    BattlePhase,
+)
 from state import SaveData
 from systems import DungeonExitReturn, EncounterAdvance
 
@@ -39,6 +44,67 @@ class BattleEncounterTest(unittest.TestCase):
 
 
 class BattleSceneIntegrationTest(unittest.TestCase):
+    def test_held_confirm_repeats_at_da2_equivalent_timing(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        pressed = InputState(confirm=InputButton(triggered=True, held=True))
+        held = InputState(confirm=InputButton(held=True))
+
+        self.assertEqual(BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT, 20)
+        self.assertEqual(BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT, 4)
+        self.assertTrue(scene._apply_confirm_repeat(pressed).confirm.triggered)
+        before_repeat = tuple(
+            scene._apply_confirm_repeat(held).confirm.triggered
+            for _frame in range(BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT - 1)
+        )
+        first_repeat = scene._apply_confirm_repeat(held)
+        before_next_repeat = tuple(
+            scene._apply_confirm_repeat(held).confirm.triggered
+            for _frame in range(BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT - 1)
+        )
+        next_repeat = scene._apply_confirm_repeat(held)
+
+        self.assertFalse(any(before_repeat))
+        self.assertTrue(first_repeat.confirm.triggered)
+        self.assertFalse(any(before_next_repeat))
+        self.assertTrue(next_repeat.confirm.triggered)
+
+    def test_releasing_confirm_resets_the_battle_repeat_delay(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        held = InputState(confirm=InputButton(held=True))
+        released = InputState()
+
+        for _frame in range(BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT - 1):
+            scene._apply_confirm_repeat(held)
+        scene._apply_confirm_repeat(released)
+        after_release = tuple(
+            scene._apply_confirm_repeat(held).confirm.triggered
+            for _frame in range(BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT - 1)
+        )
+
+        self.assertFalse(any(after_release))
+
+    def test_battle_update_passes_repeated_confirm_to_the_active_phase(
+        self,
+    ) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.result = None
+        scene.restart_enabled = False
+        scene.confirm_hold_frame_count = (
+            BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT - 1
+        )
+        scene.phase = BattlePhase.ITEM
+        scene._refresh_input_guide = Mock()
+        scene._update_action_motion = Mock()
+        scene._update_item_selection = Mock()
+        held = InputState(confirm=InputButton(held=True))
+
+        scene.update(held)
+
+        repeated = scene._update_item_selection.call_args.args[0]
+        self.assertFalse(held.confirm.triggered)
+        self.assertTrue(repeated.confirm.triggered)
+        self.assertTrue(repeated.confirm.held)
+
     def test_scene_consumes_input_supplied_by_its_owner(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         scene.result = BattleResult.ESCAPED
