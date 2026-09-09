@@ -112,6 +112,7 @@ BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
 BATTLE_HIT_SE_ID = "battle_hit"
+BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 BATTLE_MOCK_PARTY_CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
@@ -2672,6 +2673,7 @@ class BattleScreenMock:
         self.target_cursor.active = False
         self.command_window.close_immediately()
         self._sync_monster_death_palette()
+        play_se(BATTLE_MONSTER_DEATH_SE_ID)
         return True
 
     def _update_monster_death_animation(self) -> None:

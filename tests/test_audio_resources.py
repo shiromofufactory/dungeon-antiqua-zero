@@ -95,6 +95,7 @@ class BgmPlayerTest(unittest.TestCase):
             {
                 "alert",
                 "battle_hit",
+                "battle_monster_death",
                 "battle_weapon_blunt",
                 "battle_weapon_slash",
                 "confirm",
@@ -104,6 +105,7 @@ class BgmPlayerTest(unittest.TestCase):
             <= set(list_se_ids())
         )
         self.assertEqual(se_channel_and_sound("confirm"), (1, 9))
+        self.assertEqual(se_channel_and_sound("battle_monster_death"), (0, 10))
         self.assertEqual(se_channel_and_sound("battle_weapon_slash"), (0, 11))
         self.assertEqual(se_channel_and_sound("battle_weapon_blunt"), (0, 29))
         with self.assertRaises(AudioResourceError):

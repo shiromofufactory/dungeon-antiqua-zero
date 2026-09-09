@@ -9,6 +9,10 @@
       "channel": 0,
       "sound": 12
     },
+    "battle_monster_death": {
+      "channel": 0,
+      "sound": 10
+    },
     "battle_weapon_slash": {
       "channel": 0,
       "sound": 11

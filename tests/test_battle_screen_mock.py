@@ -22,6 +22,7 @@ from tools.screen_mocks.battle import (
     BATTLE_ENTRANCE_FRAME_COUNT,
     BATTLE_BGM_ID,
     BATTLE_HIT_SE_ID,
+    BATTLE_MONSTER_DEATH_SE_ID,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
     ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT,
@@ -1126,13 +1127,20 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.palette_shifter = Mock()
         mock._complete_current_turn = Mock()
 
-        with patch("tools.screen_mocks.battle.play_se"):
+        with patch("tools.screen_mocks.battle.play_se") as play_se:
             for _frame in range(
                 ATTACK_HIT_START_FRAME + ATTACK_DAMAGE_FRAME_COUNT
             ):
                 mock._update_attack_presentation()
 
         self.assertEqual(monster.state.hp, 0)
+        self.assertEqual(
+            play_se.call_args_list,
+            [
+                call(ATTACK_SLASH_SE_ID),
+                call(BATTLE_MONSTER_DEATH_SE_ID),
+            ],
+        )
         self.assertIs(mock.phase, BattleMockPhase.MONSTER_DEATH)
         self.assertEqual(mock.dying_monster_index, 0)
         self.assertIsInstance(mock.monster_death_animation, MonsterDeathAnimation)
@@ -1242,10 +1250,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = Mock()
         mock.palette_shifter = Mock()
 
-        self.assertTrue(mock._begin_monster_death())
+        with patch("tools.screen_mocks.battle.play_se") as play_se:
+            self.assertTrue(mock._begin_monster_death())
 
         self.assertFalse(front_monster.is_alive)
         self.assertTrue(rear_monster.is_front_row)
+        play_se.assert_called_once_with(BATTLE_MONSTER_DEATH_SE_ID)
 
         rear_monster.restore()
         self.assertTrue(rear_monster.is_alive)
