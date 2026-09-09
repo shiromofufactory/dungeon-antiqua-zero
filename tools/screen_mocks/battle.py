@@ -55,7 +55,6 @@ from item import Item, ItemEquipType
 from localization import Localizer, ascii_to_fullwidth
 from member import (
     EquipmentSlot,
-    MAX_INTERNAL_LEVEL,
     FormationRow,
     Member,
 )
@@ -743,7 +742,6 @@ class BattleScreenMock:
             items,
             load_mock_skills(),
             character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
-            internal_level=MAX_INTERNAL_LEVEL,
         )
         for member in self.party:
             if member.definition.key in BATTLE_MOCK_FRONT_CHARACTER_KEYS:
@@ -1009,7 +1007,7 @@ class BattleScreenMock:
                 color=c,
             )
             hp_text = window.add_text(
-                ascii_to_fullwidth(f"{member.hp:03d}/{member.max_hp:03d}"),
+                ascii_to_fullwidth(f"{member.hp:3d}/{member.max_hp:3d}"),
                 0,
                 4,
                 font=font_6x8,
@@ -3325,7 +3323,7 @@ class BattleScreenMock:
         member = self.party[index]
         window.remove_text(hp_text)
         hp_text = window.add_text(
-            ascii_to_fullwidth(f"{member.hp:03d}/{member.max_hp:03d}"),
+            ascii_to_fullwidth(f"{member.hp:3d}/{member.max_hp:3d}"),
             hp_text.x,
             hp_text.y,
             color=hp_text.color,

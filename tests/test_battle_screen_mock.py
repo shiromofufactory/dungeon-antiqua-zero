@@ -79,7 +79,6 @@ from tools.screen_mocks.battle import (
     BattleTargetSpellEffect,
     BattleTimedPopup,
     FormationRow,
-    MAX_INTERNAL_LEVEL,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
     SPELL_GUIDE_WINDOW_GRID,
@@ -109,7 +108,7 @@ from battle_timeline import (
     complete_timeline_action,
 )
 from localization import Localizer
-from member import EquipmentSlot
+from member import EquipmentSlot, MAX_INTERNAL_LEVEL, MIN_INTERNAL_LEVEL
 from state import Language
 from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
@@ -312,7 +311,11 @@ class BattleScreenMockTest(unittest.TestCase):
             BATTLE_MOCK_PARTY_CHARACTER_KEYS,
         )
         self.assertTrue(
-            all(member.internal_level == MAX_INTERNAL_LEVEL for member in mock.party)
+            all(
+                member.internal_level
+                == member.definition.joining_internal_level(MIN_INTERNAL_LEVEL)
+                for member in mock.party
+            )
         )
         self.assertEqual(
             [visual.battle_sprite for visual in mock.party_visuals],
@@ -417,7 +420,7 @@ class BattleScreenMockTest(unittest.TestCase):
         first_member = mock.party[0]
         self.assertIn(
             ascii_to_fullwidth(
-                f"{first_member.hp:03d}/{first_member.max_hp:03d}"
+                f"{first_member.hp:3d}/{first_member.max_hp:3d}"
             ),
             [
                 call.args[0]
