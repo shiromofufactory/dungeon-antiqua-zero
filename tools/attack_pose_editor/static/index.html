@@ -107,8 +107,11 @@
         </div>
         <div id="preset-list" class="preset-list"></div>
         <div class="preset-editor">
-          <label for="pose-id">ポーズID</label>
-          <input id="pose-id" type="text" pattern="[a-z][a-z0-9_]*" spellcheck="false">
+          <div class="preset-fields">
+            <label class="preset-field" for="pose-weapon-img"><span>weapon_img</span><select id="pose-weapon-img"></select></label>
+            <label class="preset-field" for="pose-branch"><span>枝番</span><span class="branch-field"><span>_</span><input id="pose-branch" type="text" pattern="[A-Za-z0-9][A-Za-z0-9_-]*" spellcheck="false"></span></label>
+          </div>
+          <div class="pose-id-preview"><span>ポーズID</span><code id="pose-id-readout">—</code></div>
           <div class="preset-actions">
             <button id="duplicate-pose" class="button quiet" type="button">複製</button>
             <button id="delete-pose" class="button danger" type="button">削除</button>

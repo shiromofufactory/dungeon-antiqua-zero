@@ -8,6 +8,7 @@ const state = {
   token: new URLSearchParams(location.search).get("token") || "",
   data: null,
   characters: [],
+  weaponImgOptions: [],
   characterImage: null,
   weaponImage: null,
   selectedCharacter: 0,
@@ -30,8 +31,12 @@ function newWeapon() {
   return { image: 0, position: [0, 0], layer: "front", flip_x: false, flip_y: false };
 }
 
-function newPose(id) {
-  return { id, character_pose: 0, weapons: [newWeapon()] };
+function composePoseId(weaponImg, branch) {
+  return `${weaponImg}_${branch}`;
+}
+
+function newPose(branch, weaponImg = "SWORD-1") {
+  return { id: composePoseId(weaponImg, branch), weapon_img: weaponImg, branch, character_pose: 0, weapons: [newWeapon()] };
 }
 
 function showToast(message) {
@@ -48,11 +53,17 @@ function setDirty(value = true) {
   byId("save-state").textContent = value ? "未保存の変更" : "保存済み";
 }
 
-function uniquePoseId(base = "attack_pose") {
+function uniqueBranch(weaponImg, base = null) {
   const ids = new Set(state.data.poses.map((pose) => pose.id));
+  if (base) {
+    if (!ids.has(composePoseId(weaponImg, base))) return base;
+    let copyIndex = 2;
+    while (ids.has(composePoseId(weaponImg, `${base}_${copyIndex}`))) copyIndex += 1;
+    return `${base}_${copyIndex}`;
+  }
   let index = 1;
-  while (ids.has(`${base}_${String(index).padStart(2, "0")}`)) index += 1;
-  return `${base}_${String(index).padStart(2, "0")}`;
+  while (ids.has(composePoseId(weaponImg, String(index)))) index += 1;
+  return String(index);
 }
 
 function loadImage(url) {
@@ -309,8 +320,30 @@ function renderPresetList() {
     });
     container.append(button);
   });
-  byId("pose-id").value = currentPose().id;
+  renderPoseIdentity();
   byId("delete-pose").disabled = state.data.poses.length <= 1;
+}
+
+function renderPoseIdentity() {
+  const pose = currentPose();
+  const select = byId("pose-weapon-img");
+  select.replaceChildren();
+  state.weaponImgOptions.forEach((weaponImg) => {
+    const option = document.createElement("option");
+    option.value = weaponImg;
+    option.textContent = weaponImg;
+    select.append(option);
+  });
+  select.value = pose.weapon_img;
+  byId("pose-branch").value = pose.branch;
+  byId("pose-id-readout").textContent = pose.id;
+}
+
+function updateSelectedPresetIdentity() {
+  const pose = currentPose();
+  byId("pose-id-readout").textContent = pose.id;
+  const selectedCard = document.querySelector(`.preset-item[data-pose-index="${state.selectedPose}"] strong`);
+  if (selectedCard) selectedCard.textContent = pose.id;
 }
 
 function clearPresetDropIndicators() {
@@ -431,13 +464,21 @@ function bindControls() {
     setDirty();
     renderAll();
   }));
-  byId("pose-id").addEventListener("input", (event) => {
-    currentPose().id = event.target.value;
+  byId("pose-weapon-img").addEventListener("change", (event) => {
+    currentPose().weapon_img = event.target.value;
+    currentPose().id = composePoseId(currentPose().weapon_img, currentPose().branch);
     setDirty();
-    renderPresetList();
+    updateSelectedPresetIdentity();
+  });
+  byId("pose-branch").addEventListener("input", (event) => {
+    currentPose().branch = event.target.value;
+    currentPose().id = composePoseId(currentPose().weapon_img, currentPose().branch);
+    setDirty();
+    updateSelectedPresetIdentity();
   });
   byId("add-pose").addEventListener("click", () => {
-    state.data.poses.push(newPose(uniquePoseId()));
+    const weaponImg = "SWORD-1";
+    state.data.poses.push(newPose(uniqueBranch(weaponImg), weaponImg));
     state.selectedPose = state.data.poses.length - 1;
     state.selectedWeapon = 0;
     state.moveTarget = "weapon_0";
@@ -446,7 +487,8 @@ function bindControls() {
   });
   byId("duplicate-pose").addEventListener("click", () => {
     const copy = deepCopy(currentPose());
-    copy.id = uniquePoseId(currentPose().id.replace(/_\d+$/, "") || "attack_pose");
+    copy.branch = uniqueBranch(copy.weapon_img, copy.branch);
+    copy.id = composePoseId(copy.weapon_img, copy.branch);
     state.data.poses.splice(state.selectedPose + 1, 0, copy);
     state.selectedPose += 1;
     setDirty();
@@ -539,6 +581,7 @@ async function initialize() {
     if (!response.ok) throw new Error(payload.error || "データを読み込めませんでした。");
     state.data = payload.data;
     state.characters = payload.characters;
+    state.weaponImgOptions = payload.weapon_img_options;
     [state.characterImage, state.weaponImage] = await Promise.all([
       loadImage(payload.character_image_url), loadImage(payload.weapon_image_url),
     ]);

@@ -18,7 +18,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 1180px; min-height: 100vh; background: var(--page); }
+body { margin: 0; min-width: 1256px; min-height: 100vh; background: var(--page); }
 button, input { font: inherit; }
 button { color: inherit; }
 
@@ -39,15 +39,16 @@ button { color: inherit; }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(220px, 250px) minmax(600px, 1fr) minmax(300px, 330px);
+  grid-template-columns: minmax(200px, 220px) minmax(556px, 580px) minmax(500px, 1fr);
   min-height: calc(100vh - 78px);
 }
 .panel { min-width: 0; padding: 20px; background: var(--panel); }
 .character-panel { border-right: 1px solid var(--line); }
 .main-panel { background: var(--page); }
-.right-rail { display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--line); background: var(--panel); }
-.weapon-panel { border-bottom: 1px solid var(--line); }
-.preset-panel { flex: 1; }
+.right-rail { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); min-width: 0; border-left: 1px solid var(--line); background: var(--panel); }
+.right-rail .panel { padding-inline: 16px; }
+.weapon-panel { border-right: 1px solid var(--line); }
+.preset-panel { min-width: 0; }
 .panel-heading { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px; }
 .panel-heading h2, .preset-heading h2 { margin: 0 0 3px; font: 600 17px/1.2 Georgia, serif; }
 .panel-heading p { margin: 0; color: var(--muted); font-size: 11px; }
@@ -115,7 +116,7 @@ button { color: inherit; }
 .coordinate-grid fieldset { display: flex; gap: 10px; align-items: center; margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); }
 .coordinate-grid legend { padding: 0 5px; color: var(--muted); font: 700 9px ui-monospace, monospace; letter-spacing: .12em; }
 .coordinate-grid label { flex: 1; display: flex; align-items: center; gap: 7px; color: var(--muted); font: 10px ui-monospace, monospace; }
-.coordinate-grid input, .preset-editor input { min-width: 0; width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); background: var(--panel-2); padding: 0 8px; font-family: ui-monospace, monospace; }
+.coordinate-grid input, .preset-editor input, .preset-editor select { min-width: 0; width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); background: var(--panel-2); padding: 0 8px; font-family: ui-monospace, monospace; }
 .layer-control { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 0; font-size: 12px; }
 
 .weapon-slot-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
@@ -139,7 +140,7 @@ button { color: inherit; }
 .preset-heading { display: flex; justify-content: space-between; align-items: end; }
 .preset-heading h2 { margin-top: 3px; }
 .preset-hint { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
-.preset-list { display: grid; gap: 7px; margin-top: 13px; max-height: 310px; overflow-y: auto; padding-right: 3px; }
+.preset-list { display: grid; gap: 7px; margin-top: 13px; padding-right: 3px; }
 .preset-item { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; width: 100%; min-height: 54px; text-align: left; padding: 8px 10px 8px 6px; border: 1px solid var(--line-soft); border-radius: 3px; background: var(--panel-2); cursor: pointer; }
 .preset-item.active { border-color: var(--gold); background: #211d15; }
 .preset-item.dragging { opacity: .42; }
@@ -153,6 +154,13 @@ button { color: inherit; }
 .preset-item small { display: block; margin-top: 6px; color: var(--muted); font: 9px ui-monospace, monospace; }
 .preset-editor { display: grid; gap: 7px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }
 .preset-editor label { color: var(--muted); font-size: 11px; }
+.preset-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.preset-field { display: grid; gap: 5px; min-width: 0; }
+.branch-field { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; }
+.branch-field > span { color: var(--gold); font: 700 14px ui-monospace, monospace; text-align: center; }
+.pose-id-preview { display: grid; gap: 4px; padding: 8px 9px; border: 1px solid var(--line-soft); background: #0e1014; }
+.pose-id-preview span { color: var(--muted); font-size: 9px; }
+.pose-id-preview code { overflow-wrap: anywhere; color: var(--blue); font-size: 10px; }
 .preset-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 
 .toast { position: fixed; right: 20px; bottom: 18px; transform: translateY(20px); opacity: 0; pointer-events: none; padding: 10px 14px; border: 1px solid var(--line); background: #1d2027; border-radius: 3px; font-size: 12px; transition: .18s ease; }

@@ -28,7 +28,8 @@ DEFAULT_PORT = 8769
 MAX_REQUEST_BYTES = 1024 * 1024
 TRANSPARENT_INDEX = 1
 CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
-ID_PATTERN = re.compile(r"[a-z][a-z0-9_]*\Z")
+WEAPON_IMG_PATTERN = re.compile(r"[A-Z0-9]+(?:-[A-Z0-9]+)*\Z")
+BRANCH_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8",
@@ -55,7 +56,9 @@ def initial_document() -> dict[str, object]:
         "format_version": 1,
         "poses": [
             {
-                "id": "attack_pose_01",
+                "id": "SWORD-1_1",
+                "weapon_img": "SWORD-1",
+                "branch": "1",
                 "character_pose": 0,
                 "weapons": [
                     {
@@ -75,7 +78,14 @@ def _integer(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def validate_document(data: object) -> list[dict[str, str]]:
+def pose_id(weapon_img: str, branch: str) -> str:
+    return f"{weapon_img}_{branch}"
+
+
+def validate_document(
+    data: object,
+    weapon_img_options: set[str] | None = None,
+) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
 
     def error(code: str, path: str, message: str) -> None:
@@ -100,13 +110,26 @@ def validate_document(data: object) -> list[dict[str, str]]:
         if not isinstance(pose, dict):
             error("invalid_pose", path, "ポーズはobjectである必要があります。")
             continue
-        pose_id = pose.get("id")
-        if not isinstance(pose_id, str) or ID_PATTERN.fullmatch(pose_id) is None:
-            error("invalid_id", f"{path}.id", "IDはlower_snake_caseで指定してください。")
-        elif pose_id in seen_ids:
-            error("duplicate_id", f"{path}.id", f"IDが重複しています: {pose_id}")
+        saved_pose_id = pose.get("id")
+        weapon_img = pose.get("weapon_img")
+        branch = pose.get("branch")
+        if not isinstance(weapon_img, str) or WEAPON_IMG_PATTERN.fullmatch(weapon_img) is None:
+            error("invalid_weapon_img", f"{path}.weapon_img", "weapon_imgが不正です。")
+        elif weapon_img_options is not None and weapon_img not in weapon_img_options:
+            error("unknown_weapon_img", f"{path}.weapon_img", f"items.jsonにないweapon_imgです: {weapon_img}")
+        if not isinstance(branch, str) or BRANCH_PATTERN.fullmatch(branch) is None:
+            error("invalid_branch", f"{path}.branch", "枝番は英数字、ハイフン、アンダースコアで指定してください。")
+        expected_id = (
+            pose_id(weapon_img, branch)
+            if isinstance(weapon_img, str) and isinstance(branch, str)
+            else None
+        )
+        if not isinstance(saved_pose_id, str) or saved_pose_id != expected_id:
+            error("invalid_id", f"{path}.id", "IDはweapon_imgと枝番から生成した値にしてください。")
+        elif saved_pose_id in seen_ids:
+            error("duplicate_id", f"{path}.id", f"IDが重複しています: {saved_pose_id}")
         else:
-            seen_ids.add(pose_id)
+            seen_ids.add(saved_pose_id)
         character_pose = pose.get("character_pose")
         if not _integer(character_pose) or not 0 <= character_pose <= 7:
             error("invalid_character_pose", f"{path}.character_pose", "キャラポーズは0〜7で指定してください。")
@@ -205,6 +228,7 @@ class AttackPoseApplication:
             raise ValueError("保存先がcontent/battle外です。")
         self.character_path = self.content_root / "images" / "characters" / "ch_battle.gif"
         self.character_data_path = self.content_root / "data" / "characters.json"
+        self.item_data_path = self.content_root / "data" / "items.json"
         self.resource_path = self.app_root / "assets.pyxres"
         self.palette_path = self.app_root / "assets.pyxpal"
         self.token = token or secrets.token_urlsafe(24)
@@ -233,11 +257,34 @@ class AttackPoseApplication:
             })
         return catalog
 
+    def weapon_img_catalog(self) -> list[str]:
+        records = json.loads(self.item_data_path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            raise ValueError("items.jsonのルートが配列ではありません。")
+        values: list[str] = []
+        seen: set[str] = set()
+        for record in records:
+            value = record.get("weapon_img") if isinstance(record, dict) else None
+            if not isinstance(value, str):
+                raise ValueError("items.jsonのweapon_imgは文字列である必要があります。")
+            if not value or value in seen:
+                continue
+            if WEAPON_IMG_PATTERN.fullmatch(value) is None:
+                raise ValueError(f"items.jsonのweapon_imgが不正です: {value}")
+            seen.add(value)
+            values.append(value)
+        if "SWORD-1" not in seen:
+            raise ValueError("items.jsonに初期weapon_imgのSWORD-1がありません。")
+        return values
+
+    def validate(self, data: object) -> list[dict[str, str]]:
+        return validate_document(data, set(self.weapon_img_catalog()))
+
     def load(self) -> tuple[dict[str, object], bool]:
         if not self.source_path.is_file():
             return initial_document(), True
         data = json.loads(self.source_path.read_text(encoding="utf-8"))
-        issues = validate_document(data)
+        issues = self.validate(data)
         if issues:
             raise ValueError(issues[0]["message"])
         return data, False
@@ -247,17 +294,18 @@ class AttackPoseApplication:
         return {
             "data": data,
             "characters": self.character_catalog(),
+            "weapon_img_options": self.weapon_img_catalog(),
             "character_image_url": f"/api/characters.png?token={self.token}",
             "weapon_image_url": f"/api/weapons.png?token={self.token}",
             "source_path": self.source_path.relative_to(PROJECT_ROOT).as_posix()
             if self.source_path.is_relative_to(PROJECT_ROOT)
             else str(self.source_path),
             "is_new": is_new,
-            "diagnostics": validate_document(data),
+            "diagnostics": self.validate(data),
         }
 
     def save(self, data: object) -> dict[str, object]:
-        issues = validate_document(data)
+        issues = self.validate(data)
         if issues or not isinstance(data, dict):
             return {"saved": False, "diagnostics": issues}
         self.source_path.parent.mkdir(parents=True, exist_ok=True)

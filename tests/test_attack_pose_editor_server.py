@@ -40,6 +40,12 @@ class AttackPoseEditorServerTest(unittest.TestCase):
             {"name_en": "Cerion", "name_ja": "セリオン", "battle_sprite": 1},
             {"name_en": "Alvan", "name_ja": "アルヴァン", "battle_sprite": 2},
         ]), encoding="utf-8")
+        (data_root / "items.json").write_text(json.dumps([
+            {"name_en": "BRONZE SWORD", "weapon_img": "SWORD-1"},
+            {"name_en": "IRON SWORD", "weapon_img": "SWORD-1"},
+            {"name_en": "BRONZE SPEAR", "weapon_img": "SPEAR-1"},
+            {"name_en": "POTION", "weapon_img": ""},
+        ]), encoding="utf-8")
 
         self.app_root.mkdir()
         (self.app_root / "assets.pyxpal").write_text("000000\nFF0080\nFFFFFF\n", encoding="utf-8")
@@ -82,7 +88,10 @@ class AttackPoseEditorServerTest(unittest.TestCase):
     def test_loads_initial_document_and_three_character_catalog(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
-        self.assertEqual(payload["data"]["poses"][0]["id"], "attack_pose_01")
+        self.assertEqual(payload["data"]["poses"][0]["id"], "SWORD-1_1")
+        self.assertEqual(payload["data"]["poses"][0]["weapon_img"], "SWORD-1")
+        self.assertEqual(payload["data"]["poses"][0]["branch"], "1")
+        self.assertEqual(payload["weapon_img_options"], ["SWORD-1", "SPEAR-1"])
         self.assertEqual([item["key"] for item in payload["characters"]], ["Fiora", "Cerion", "Alvan"])
 
         with self.assertRaises(HTTPError) as context:
@@ -103,7 +112,8 @@ class AttackPoseEditorServerTest(unittest.TestCase):
     def test_saves_multiple_valid_poses(self) -> None:
         data = initial_document()
         second = json.loads(json.dumps(data["poses"][0]))
-        second["id"] = "slash_finish"
+        second["id"] = "SWORD-1_slash_finish"
+        second["branch"] = "slash_finish"
         second["character_pose"] = 2
         second["weapons"][0].update({
             "position": [-10, 9],
@@ -123,7 +133,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertTrue(result["saved"])
         saved = json.loads(self.application.source_path.read_text(encoding="utf-8"))
         self.assertEqual(len(saved["poses"]), 2)
-        self.assertEqual([pose["id"] for pose in saved["poses"]], ["attack_pose_01", "slash_finish"])
+        self.assertEqual([pose["id"] for pose in saved["poses"]], ["SWORD-1_1", "SWORD-1_slash_finish"])
         self.assertNotIn("character_position", saved["poses"][1])
         self.assertEqual(len(saved["poses"][1]["weapons"]), 2)
         self.assertEqual(saved["poses"][1]["weapons"][0]["position"], [-10, 9])
@@ -148,6 +158,18 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         empty = {"format_version": 1, "poses": []}
         self.assertEqual(validate_document(empty)[0]["code"], "empty_poses")
 
+    def test_rejects_unknown_weapon_img_and_mismatched_generated_id(self) -> None:
+        data = initial_document()
+        data["poses"][0]["weapon_img"] = "UNKNOWN-1"
+        data["poses"][0]["id"] = "UNKNOWN-1_1"
+        result = self.post_json(data)
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["diagnostics"][0]["code"], "unknown_weapon_img")
+
+        data = initial_document()
+        data["poses"][0]["id"] = "SWORD-1_wrong"
+        self.assertEqual(validate_document(data)[0]["code"], "invalid_id")
+
     def test_rejects_more_than_two_weapons(self) -> None:
         data = initial_document()
         weapon = json.loads(json.dumps(data["poses"][0]["weapons"][0]))
@@ -159,6 +181,8 @@ class AttackPoseEditorServerTest(unittest.TestCase):
             page = response.read().decode("utf-8")
         with urlopen(f"{self.base_url}/app.js", timeout=2) as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{self.base_url}/styles.css", timeout=2) as response:
+            styles = response.read().decode("utf-8")
         self.assertIn('class="panel character-panel"', page)
         self.assertIn('class="panel main-panel"', page)
         self.assertIn('class="panel weapon-panel"', page)
@@ -167,6 +191,10 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertIn('id="origin-x" type="number"', page)
         self.assertIn('data-target="weapon_1"', page)
         self.assertIn('id="toggle-second-weapon"', page)
+        self.assertIn('id="pose-weapon-img"', page)
+        self.assertIn('id="pose-branch"', page)
+        self.assertIn('id="pose-id-readout"', page)
+        self.assertIn('class="preset-fields"', page)
         self.assertIn("ハンドルをドラッグして並び替え", page)
         self.assertIn('data-layer="front"', page)
         self.assertIn('data-flip="flip_x"', page)
@@ -176,8 +204,12 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertIn('for (let index = 0; index < 16; index += 1)', script)
         self.assertIn('context.scale(weapon.flip_x ? -1 : 1, weapon.flip_y ? -1 : 1)', script)
         self.assertIn("function reorderPose(fromIndex, targetIndex, placeAfter)", script)
+        self.assertIn("function composePoseId(weaponImg, branch)", script)
         self.assertIn('handle.addEventListener("dragstart"', script)
         self.assertNotIn("character_position", script)
+        self.assertIn("minmax(556px, 580px) minmax(500px, 1fr)", styles)
+        self.assertIn("grid-template-columns: repeat(2, minmax(240px, 1fr))", styles)
+        self.assertNotIn("max-height: 310px", styles)
 
 
 if __name__ == "__main__":
