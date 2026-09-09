@@ -85,6 +85,9 @@ class BgmPlayerTest(unittest.TestCase):
     def test_runtime_battle_bgm_is_available(self) -> None:
         self.assertIn("da3-battle1", list_bgm_ids())
 
+    def test_runtime_encounter_jingle_is_available(self) -> None:
+        self.assertIn("da3-encount", list_bgm_ids())
+
     def test_plays_stable_se_id_from_shared_catalog(self) -> None:
         pyxel = Mock()
 

@@ -1297,6 +1297,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = Mock()
         mock.palette_shifter = Mock()
         mock._complete_current_turn = Mock()
+        mock.result = None
 
         with patch("scenes.battle.play_se") as play_se:
             for _frame in range(
@@ -1333,7 +1334,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.palette_shifter.remove_variant.assert_called_once_with(
             MONSTER_DEATH_PALETTE
         )
-        mock._complete_current_turn.assert_called_once_with()
+        self.assertIs(mock.result, BattleResult.VICTORY)
+        mock._complete_current_turn.assert_not_called()
 
     def test_monster_death_draw_uses_shifted_palette_and_dither(self) -> None:
         monster = BattleMockMonster(

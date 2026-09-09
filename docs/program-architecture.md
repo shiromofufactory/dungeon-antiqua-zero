@@ -70,6 +70,7 @@ app/
 ├── item_detail.py            # メニュー・店・戦闘で共有するアイテム詳細表現
 ├── systems/
 │   ├── debug.py              # デバッグ時だけ使うパーティ状態の再生成
+│   ├── encounter.py          # 歩行加算、発生判定、全滅時の最寄り出口解決
 │   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
 │   ├── save.py               # セーブv1の変換、検証、スロット永続化
 │   ├── settings.py           # 端末設定の読込と原子的な永続化
@@ -212,6 +213,7 @@ app/
 │   ├── event_messages.py    # 生成済みイベントメッセージの読込
 │   └── images.py            # manifestと画像bundleの読込・検証
 ├── rendering/
+│   ├── encounter.py         # PC中心の回転・拡大と暗転タイミング
 │   ├── palette.py           # 一時パレットシフトと色変換
 │   └── monster_death.py     # モンスター撃破演出の段階・描画パラメータ
 │
@@ -1292,6 +1294,8 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 |---|---|
 | フィールドで入力を受けた結果 | `FieldScene` |
 | フィールドや迷宮の移動ルール | `Field` または探索用System |
+| エンカウント加算、発生判定、全滅時の出口解決 | `EncounterSystem` |
+| エンカウント画面の回転・拡大パラメータ | `rendering/encounter.py` |
 | フィールドの描画 | `FieldScene` またはField専用Renderer |
 | 拠点のセル検索、近隣名表示候補 | `WorldSiteCatalog` |
 | 拠点入場、テレポート到着先参照 | `TravelSystem` |
@@ -1312,6 +1316,11 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | 起動時のスロット選択と削除確認 | `ui/start_menu.py` |
 | ロードJSONからの状態再構築と検証 | `systems/save.py` |
 | Scene切り替え、フェード、BGM調停 | `SceneManager` |
+
+現在のComposition Rootでは `Game` が `EncounterSystem` の結果を受け、フィールド画面の保存、
+`BattleScene` の生成、`BattleResult` に応じたフィールド復帰を調停する。エンカウント変数は
+`SaveData`、戦闘内の一時状態は `BattleScene`、回転・拡大のフレーム状態は
+`EncounterTransition` がそれぞれ所有する。
 
 配置に迷った場合は「どの状態を変更するか」「その状態の所有者は誰か」を先に決める。複数箇所から呼ばれるという理由だけで `util.py` へ移動しない。
 

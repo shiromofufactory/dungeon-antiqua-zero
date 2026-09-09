@@ -6,6 +6,14 @@ from .fade import (
     FadePhase,
     FadeThroughBlack,
 )
+from .encounter import (
+    ENCOUNTER_FADE_START_FRAME,
+    ENCOUNTER_FINAL_SCALE,
+    ENCOUNTER_ROTATION_DEGREES,
+    ENCOUNTER_TRANSITION_FRAME_COUNT,
+    EncounterTransform,
+    EncounterTransition,
+)
 from .field import (
     FIELD_CHARACTER_ANIMATION_INTERVAL,
     FIELD_CHARACTER_ASSET_ID,
@@ -55,6 +63,12 @@ __all__ = [
     "FadeEvent",
     "FadePhase",
     "FadeThroughBlack",
+    "ENCOUNTER_FADE_START_FRAME",
+    "ENCOUNTER_FINAL_SCALE",
+    "ENCOUNTER_ROTATION_DEGREES",
+    "ENCOUNTER_TRANSITION_FRAME_COUNT",
+    "EncounterTransform",
+    "EncounterTransition",
     "FIELD_CHARACTER_ANIMATION_INTERVAL",
     "FIELD_CHARACTER_ASSET_ID",
     "FIELD_CHARACTER_BANK",

@@ -135,6 +135,12 @@ def restore_save_document(
         gold=_non_negative_int(progress, "gold", "progress"),
         experience=_non_negative_int(progress, "experience", "progress"),
         battle_count=_non_negative_int(progress, "battle_count", "progress"),
+        encounter_count=_optional_non_negative_int(
+            progress,
+            "encounter_count",
+            "progress",
+            default=0,
+        ),
         difficulty=difficulty,
         play_time_frames=_non_negative_int(
             progress,
@@ -391,6 +397,20 @@ def _non_negative_int(value: Mapping[str, object], key: str, label: str) -> int:
     return current
 
 
+def _optional_non_negative_int(
+    value: Mapping[str, object],
+    key: str,
+    label: str,
+    *,
+    default: int,
+) -> int:
+    """Restore an additive v1 field while accepting saves written earlier."""
+
+    if key not in value:
+        return default
+    return _non_negative_int(value, key, label)
+
+
 def _string_list(value: object, label: str) -> list[str]:
     if not isinstance(value, list) or not all(
         isinstance(key, str) and key for key in value
@@ -561,6 +581,7 @@ def create_save_document(
             "gold": save_data.gold,
             "experience": save_data.experience,
             "battle_count": save_data.battle_count,
+            "encounter_count": save_data.encounter_count,
             "difficulty": save_data.difficulty.value,
             "play_time_frames": save_data.play_time_frames,
         },

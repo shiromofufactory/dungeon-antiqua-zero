@@ -45,6 +45,7 @@ class SaveSystemTest(unittest.TestCase):
                 gold=123,
                 experience=456,
                 battle_count=7,
+                encounter_count=83,
                 difficulty=Difficulty.HARD,
                 play_time_frames=890,
                 event_flags={"prologue_complete", "fairy_saved"},
@@ -94,6 +95,7 @@ class SaveSystemTest(unittest.TestCase):
                 "gold": 123,
                 "experience": 456,
                 "battle_count": 7,
+                "encounter_count": 83,
                 "difficulty": "hard",
                 "play_time_frames": 890,
             },
@@ -197,6 +199,7 @@ class SaveSystemTest(unittest.TestCase):
         )
 
         self.assertEqual(restored.save_data.gold, 123)
+        self.assertEqual(restored.save_data.encounter_count, 83)
         self.assertEqual(restored.save_data.difficulty, Difficulty.HARD)
         self.assertEqual(
             [member.definition.key for member in restored.active_party],
@@ -217,6 +220,19 @@ class SaveSystemTest(unittest.TestCase):
             saved_at=datetime.fromisoformat(document["saved_at"]),
         )
         self.assertEqual(round_tripped, document)
+
+    def test_legacy_version_one_save_defaults_missing_encounter_count(self) -> None:
+        document = self.save_document()
+        del document["progress"]["encounter_count"]
+
+        restored = restore_save_document(
+            document,
+            character_records=load_mock_character_records(),
+            items=self.items,
+            skills=self.skills,
+        )
+
+        self.assertEqual(restored.save_data.encounter_count, 0)
 
     def test_repository_loads_and_deletes_slot_document(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

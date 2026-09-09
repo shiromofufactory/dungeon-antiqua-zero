@@ -85,6 +85,7 @@ class SaveDataTest(unittest.TestCase):
         self.assertEqual(save_data.gold, 0)
         self.assertEqual(save_data.experience, 0)
         self.assertEqual(save_data.battle_count, 0)
+        self.assertEqual(save_data.encounter_count, 0)
         self.assertEqual(save_data.difficulty, Difficulty.NORMAL)
         self.assertEqual(save_data.play_time_frames, 0)
         self.assertEqual(save_data.event_flags, set())
@@ -114,6 +115,7 @@ class SaveDataTest(unittest.TestCase):
             {"gold": -1},
             {"experience": True},
             {"battle_count": -1},
+            {"encounter_count": -1},
             {"play_time_frames": "0"},
             {"difficulty": "normal"},
             {"event_flags": ["prologue_complete"]},

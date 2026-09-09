@@ -6,9 +6,21 @@ from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
 
-from game import Game
-from input import InputState
+from field import FieldPosition
+from game import (
+    ENCOUNTER_JINGLE_ID,
+    RANDOM_BATTLE_ENCOUNTER,
+    Game,
+)
+from input import Direction, InputState
+from rendering import (
+    ENCOUNTER_TRANSITION_FRAME_COUNT,
+    EncounterTransition,
+    FadePhase,
+)
 from scenes import BattleEncounter, BattleResult, BattleScene
+from state import SaveData
+from systems import DungeonExitReturn, EncounterAdvance
 
 
 class BattleEncounterTest(unittest.TestCase):
@@ -88,6 +100,146 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertIs(scene, create.return_value)
         self.assertEqual(len(create.call_args.kwargs["party"]), 5)
         self.assertIs(create.call_args.kwargs["encounter"], encounter)
+
+    def test_game_advances_encounters_only_on_dungeon_steps(self) -> None:
+        game = Game.__new__(Game)
+        game.current_map = Mock(profile="dungeon")
+        game.save_data = SaveData(encounter_count=158)
+        game.encounter_system = Mock()
+        game.encounter_system.advance.return_value = EncounterAdvance(0, True)
+        game._begin_random_encounter = Mock()
+
+        self.assertTrue(game._advance_random_encounter())
+
+        game.encounter_system.advance.assert_called_once_with(158)
+        self.assertEqual(game.save_data.encounter_count, 0)
+        game._begin_random_encounter.assert_called_once_with()
+
+        game.current_map.profile = "town"
+        game.encounter_system.reset_mock()
+        self.assertFalse(game._advance_random_encounter())
+        game.encounter_system.advance.assert_not_called()
+
+    def test_completed_ordinary_field_step_checks_for_an_encounter(self) -> None:
+        game = Game.__new__(Game)
+        arrived = FieldPosition(3, 4)
+        game.field = Mock(is_moving=False, arrived_position=arrived)
+        game.field_actors = None
+        game.pending_screen_change = None
+        game._release_latch_blocks_field = Mock(return_value=False)
+        game._try_open_treasure = Mock(return_value=False)
+        game._try_field_trigger = Mock(return_value=False)
+        game._handle_arrived_site = Mock()
+        game._advance_random_encounter = Mock(return_value=True)
+        game._refresh_site_name_label = Mock()
+
+        game._update_field(InputState())
+
+        game._try_field_trigger.assert_called_once_with(
+            "step",
+            3,
+            4,
+            release_direction=None,
+        )
+        game._advance_random_encounter.assert_called_once_with()
+        game._refresh_site_name_label.assert_not_called()
+
+    def test_game_begins_pc_centered_transition_with_encounter_jingle(self) -> None:
+        game = Game.__new__(Game)
+        game.current_map = Mock(tile_size=16)
+        game.field = Mock(world_x=160, world_y=96)
+        game.field_renderer = Mock()
+        game.field_renderer.camera_position.return_value = (40, 20)
+        game.bgm = Mock()
+
+        game._begin_random_encounter()
+
+        self.assertEqual(game.encounter_transition.pivot_x, 128)
+        self.assertEqual(game.encounter_transition.pivot_y, 76)
+        self.assertIsNone(game.encounter_snapshot)
+        game.field.stop.assert_called_once_with()
+        game.bgm.play.assert_called_once_with(ENCOUNTER_JINGLE_ID, loop=False)
+
+    def test_encounter_transition_builds_the_fixed_test_lineup_at_black(
+        self,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.encounter_transition = EncounterTransition(128, 120)
+        game.encounter_snapshot = object()
+        game.palette_shifter = Mock(base_colors=(0,))
+        battle = Mock()
+        game._build_battle_scene = Mock(return_value=battle)
+
+        for _frame in range(ENCOUNTER_TRANSITION_FRAME_COUNT):
+            game._update_encounter_transition()
+
+        self.assertIsNone(game.encounter_transition)
+        self.assertIsNone(game.encounter_snapshot)
+        self.assertIs(game.battle_scene, battle)
+        game._build_battle_scene.assert_called_once_with(RANDOM_BATTLE_ENCOUNTER)
+        self.assertEqual(
+            RANDOM_BATTLE_ENCOUNTER.monster_keys,
+            (
+                "Giant Spider",
+                "Giant Spider",
+                "Giant Spider",
+                "Coyote",
+                "Coyote",
+            ),
+        )
+
+    def test_defeat_return_moves_to_the_cell_before_nearest_dungeon_exit(
+        self,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.battle_return_result = BattleResult.DEFEAT
+        game.battle_scene = Mock()
+        game.current_map = Mock(bgm_id="da3-forest")
+        game.field = Mock(position=FieldPosition(20, 20))
+        game.encounter_system = Mock()
+        game.encounter_system.defeat_return.return_value = DungeonExitReturn(
+            FieldPosition(16, 38),
+            Direction.DOWN,
+        )
+        game._reset_field_actors = Mock()
+        game.bgm = Mock()
+
+        with patch("game.FieldMovement", return_value=Mock()) as movement:
+            game._apply_battle_return()
+
+        movement.assert_called_once_with(
+            game.current_map,
+            start=FieldPosition(16, 38),
+            facing=Direction.DOWN,
+        )
+        self.assertIsNone(game.battle_scene)
+        game._reset_field_actors.assert_called_once_with()
+        game.bgm.play.assert_called_once_with("da3-forest")
+
+    def test_victory_return_counts_the_completed_battle(self) -> None:
+        game = Game.__new__(Game)
+        game.battle_return_result = BattleResult.VICTORY
+        game.battle_scene = Mock()
+        game.save_data = SaveData(battle_count=4)
+        game.current_map = Mock(bgm_id="da3-forest")
+        game.bgm = Mock()
+
+        game._apply_battle_return()
+
+        self.assertEqual(game.save_data.battle_count, 5)
+
+    def test_escape_reuses_battle_blackout_and_starts_with_field_fade_in(
+        self,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.palette_shifter = Mock(base_colors=(0,))
+        game._apply_battle_return = Mock()
+
+        game._begin_battle_return(BattleResult.ESCAPED)
+
+        game._apply_battle_return.assert_called_once_with()
+        self.assertIs(game.battle_return_result, BattleResult.ESCAPED)
+        self.assertIs(game.battle_return_fade.phase, FadePhase.FADING_IN)
 
 
 if __name__ == "__main__":

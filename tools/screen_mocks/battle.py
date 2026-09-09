@@ -157,6 +157,8 @@ class BattleTestApp(BattleScene):
         """Poll standalone input and delegate one frame to the production scene."""
 
         super().update(self.input_reader.poll())
+        if getattr(self, "result", None) is BattleResult.VICTORY:
+            pyxel.quit()
 
     def _restart_battle(self) -> None:
         self._restart_battle_mock()

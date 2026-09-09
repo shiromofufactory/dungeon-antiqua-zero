@@ -2878,7 +2878,17 @@ class BattleScene:
         self.monster_death_animation = None
         self.dying_monster_index = None
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
+        if self._monsters_are_defeated():
+            self.result = BattleResult.VICTORY
+            return
         self._complete_current_turn()
+
+    def _monsters_are_defeated(self) -> bool:
+        """Return whether every monster in this encounter has died."""
+
+        return bool(self.monsters) and all(
+            not monster.is_alive for monster in self.monsters
+        )
 
     def _release_transient_action_palettes(self) -> None:
         """Release mutually exclusive effect blocks before restarting the scene."""

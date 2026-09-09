@@ -162,6 +162,7 @@ class SaveData:
     gold: int = 0
     experience: int = 0
     battle_count: int = 0
+    encounter_count: int = 0
     difficulty: Difficulty = Difficulty.NORMAL
     play_time_frames: int = 0
     event_flags: set[str] = field(default_factory=set)
@@ -171,7 +172,13 @@ class SaveData:
     logs: list[dict[str, object]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        for name in ("gold", "experience", "battle_count", "play_time_frames"):
+        for name in (
+            "gold",
+            "experience",
+            "battle_count",
+            "encounter_count",
+            "play_time_frames",
+        ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")

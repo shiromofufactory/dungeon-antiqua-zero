@@ -85,6 +85,7 @@ from rendering import (
     FadeEvent,
     FadePhase,
     FadeThroughBlack,
+    EncounterTransition,
     FIELD_CHARACTER_ASSET_ID,
     FIELD_PLAYER_CHARACTER_ASSET_ID,
     FIELD_PLAYER_CHARACTER_SET_HEIGHT,
@@ -95,7 +96,7 @@ from rendering import (
     FieldRenderer,
     PaletteShifter,
 )
-from scenes import BattleDataError, BattleEncounter, BattleScene
+from scenes import BattleDataError, BattleEncounter, BattleResult, BattleScene
 from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
@@ -108,6 +109,7 @@ from systems import (
     EventContext,
     EventRunner,
     EventRuntimeError,
+    EncounterSystem,
     InventorySystem,
     LoadedGameState,
     MessageEffect,
@@ -312,6 +314,17 @@ SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
 SE_PREVIEW_SOUND_ID = 9
 GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
 WELCOME_BGM_ID = "da3-welcome"
+ENCOUNTER_JINGLE_ID = "da3-encount"
+RANDOM_BATTLE_ENCOUNTER = BattleEncounter(
+    (
+        "Giant Spider",
+        "Giant Spider",
+        "Giant Spider",
+        "Coyote",
+        "Coyote",
+    ),
+    frozenset((2, 3, 4)),
+)
 INITIAL_GOLD = 100
 INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
 
@@ -505,13 +518,17 @@ class Game:
         self.fade_bgm = False
         self.animate_main_windows_with_fade = False
         self.showing_field = False
+        self.encounter_system = EncounterSystem()
+        self.encounter_transition: EncounterTransition | None = None
+        self.encounter_snapshot = None
+        self.battle_return_fade: FadeThroughBlack | None = None
+        self.battle_return_result: BattleResult | None = None
         self.item_screen: ItemMenuOverlay | None = None
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
-        # Encounter selection and return transitions will assign/clear this later.
         self.battle_scene: BattleScene | None = None
         self.pending_shop = None
         self.shop_return_to_debug = False
@@ -579,6 +596,109 @@ class Game:
             party=self.party[:BATTLE_PARTY_MEMBER_COUNT],
             encounter=encounter,
         )
+
+    def _advance_random_encounter(self) -> bool:
+        """Advance one completed dungeon step and begin battle when due."""
+
+        current_map = getattr(self, "current_map", None)
+        if getattr(current_map, "profile", None) != "dungeon":
+            return False
+        advanced = self.encounter_system.advance(
+            self.save_data.encounter_count
+        )
+        self.save_data.encounter_count = advanced.count
+        if not advanced.triggered:
+            return False
+        self._begin_random_encounter()
+        return True
+
+    def _begin_random_encounter(self) -> None:
+        """Freeze the field and begin the PC-centered encounter transition."""
+
+        camera_x, camera_y = self.field_renderer.camera_position(self.field)
+        pivot_x = self.field.world_x - camera_x + self.current_map.tile_size / 2
+        pivot_y = self.field.world_y - camera_y
+        self.field.stop()
+        self.encounter_transition = EncounterTransition(pivot_x, pivot_y)
+        self.encounter_snapshot = None
+        self.bgm.play(ENCOUNTER_JINGLE_ID, loop=False)
+
+    def _update_encounter_transition(self) -> None:
+        """Fade the transformed field to black, then create the battle scene."""
+
+        transition = self.encounter_transition
+        if transition is None:
+            return
+        transition.update()
+        self.palette_shifter.set_global_mix(
+            base_rate=transition.visible_rate,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+        if not transition.is_finished:
+            return
+        self.encounter_transition = None
+        self.encounter_snapshot = None
+        self.battle_scene = self._build_battle_scene(RANDOM_BATTLE_ENCOUNTER)
+
+    def _begin_battle_return(self, result: BattleResult) -> None:
+        """Begin the field return, reusing escape's already-covered screen."""
+
+        if not isinstance(result, BattleResult):
+            raise TypeError("battle return result must be a BattleResult")
+        self.battle_return_result = result
+        self.battle_return_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        if result is BattleResult.ESCAPED:
+            self._apply_battle_return()
+            self.battle_return_fade.start_fade_in()
+            self.palette_shifter.set_global_mix(
+                base_rate=0.0,
+                target_color=self.palette_shifter.base_colors[0],
+            )
+            return
+        self.battle_return_fade.start()
+
+    def _update_battle_return(self) -> None:
+        """Apply the battle-to-field replacement at the fade midpoint."""
+
+        fade = self.battle_return_fade
+        if fade is None:
+            return
+        event = fade.update()
+        self.palette_shifter.set_global_mix(
+            base_rate=fade.visible_rate,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+        self.bgm.set_fade_rate(fade.visible_rate)
+        if event is FadeEvent.COVERED:
+            self._apply_battle_return()
+        if event is FadeEvent.FINISHED:
+            self.bgm.set_fade_rate(1.0)
+            self.battle_return_fade = None
+            self.battle_return_result = None
+
+    def _apply_battle_return(self) -> None:
+        """Commit battle result changes while the screen is fully black."""
+
+        result = self.battle_return_result
+        if result is None:
+            raise RuntimeError("battle return has no result")
+        if result is BattleResult.VICTORY:
+            self.save_data.battle_count += 1
+        elif result is BattleResult.DEFEAT:
+            destination = self.encounter_system.defeat_return(
+                self.current_map,
+                self.field.position,
+            )
+            if destination is not None:
+                self.field = FieldMovement(
+                    self.current_map,
+                    start=destination.position,
+                    facing=destination.facing,
+                )
+                self._reset_field_actors()
+        self.battle_scene = None
+        self.bgm.set_fade_rate(0.0)
+        self.bgm.play(self.current_map.bgm_id)
 
     @staticmethod
     def _select_cursor_key(cursor: WindowCursor, key: object) -> None:
@@ -2392,6 +2512,12 @@ class Game:
         ):
             return
         self._handle_arrived_site()
+        if (
+            arrived is not None
+            and getattr(self, "pending_screen_change", None) is None
+            and self._advance_random_encounter()
+        ):
+            return
         self._refresh_site_name_label()
         field_actors = getattr(self, "field_actors", None)
         if field_actors is not None:
@@ -2400,9 +2526,18 @@ class Game:
     def update(self) -> None:
         self.alert.update()
         input_state = self.input_reader.poll()
+        if getattr(self, "encounter_transition", None) is not None:
+            self._update_encounter_transition()
+            return
+        if getattr(self, "battle_return_fade", None) is not None:
+            self._update_battle_return()
+            return
         battle_scene = getattr(self, "battle_scene", None)
         if battle_scene is not None:
             battle_scene.update(input_state)
+            result = getattr(battle_scene, "result", None)
+            if isinstance(result, BattleResult):
+                self._begin_battle_return(result)
             return
         if getattr(self, "_returning_to_start", False):
             self._update_return_to_start(input_state)
@@ -2561,6 +2696,9 @@ class Game:
         pyxel.cls(0)
         pyxel.camera(self.alert.camera_x, 0)
         try:
+            if getattr(self, "encounter_transition", None) is not None:
+                self._draw_encounter_transition()
+                return
             battle_scene = getattr(self, "battle_scene", None)
             if battle_scene is not None:
                 battle_scene.draw()
@@ -2574,25 +2712,7 @@ class Game:
                 shop_screen.draw()
                 return
             if getattr(self, "showing_field", False):
-                if isinstance(getattr(self, "field_actors", None), FieldActors):
-                    self.field_renderer.draw(
-                        self.field,
-                        actors=self.field_actors,
-                        prop_image=self.field_prop_image,
-                        actor_character_image=self.field_actor_character_image,
-                        player_character_image=self.field_player_character_image,
-                        player_sprite_index=self.party[0].definition.battle_sprite,
-                        treasure_image=self.field_treasure_image,
-                    )
-                else:
-                    self.field_renderer.draw(self.field)
-                self._draw_site_name()
-                event_message = getattr(self, "event_message", None)
-                if event_message is not None:
-                    event_message.draw()
-                treasure_message = getattr(self, "treasure_message", None)
-                if treasure_message is not None:
-                    treasure_message.draw()
+                self._draw_field_screen()
                 return
             item_screen = getattr(self, "item_screen", None)
             if item_screen is not None:
@@ -2644,6 +2764,64 @@ class Game:
                 self.confirmation_window.draw()
         finally:
             pyxel.camera()
+
+    def _draw_field_screen(self) -> None:
+        """Draw the current field and any field-owned overlays."""
+
+        if isinstance(getattr(self, "field_actors", None), FieldActors):
+            self.field_renderer.draw(
+                self.field,
+                actors=self.field_actors,
+                prop_image=self.field_prop_image,
+                actor_character_image=self.field_actor_character_image,
+                player_character_image=self.field_player_character_image,
+                player_sprite_index=self.party[0].definition.battle_sprite,
+                treasure_image=self.field_treasure_image,
+            )
+        else:
+            self.field_renderer.draw(self.field)
+        self._draw_site_name()
+        event_message = getattr(self, "event_message", None)
+        if event_message is not None:
+            event_message.draw()
+        treasure_message = getattr(self, "treasure_message", None)
+        if treasure_message is not None:
+            treasure_message.draw()
+
+    def _draw_encounter_transition(self) -> None:
+        """Capture the field once, then transform that immutable framebuffer."""
+
+        transition = self.encounter_transition
+        if transition is None:
+            return
+        snapshot = self.encounter_snapshot
+        if snapshot is None:
+            self._draw_field_screen()
+            snapshot = pyxel.Image(SCREEN_WIDTH, SCREEN_HEIGHT)
+            snapshot.blt(
+                0,
+                0,
+                pyxel.screen,
+                0,
+                0,
+                SCREEN_WIDTH,
+                SCREEN_HEIGHT,
+            )
+            self.encounter_snapshot = snapshot
+            return
+        transform = transition.transform(SCREEN_WIDTH, SCREEN_HEIGHT)
+        pyxel.camera()
+        pyxel.blt(
+            transform.x,
+            transform.y,
+            snapshot,
+            0,
+            0,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+            rotate=transform.rotate,
+            scale=transform.scale,
+        )
 
     def _draw_party_face(
         self,
@@ -2738,10 +2916,12 @@ def create_game_input_reader() -> PyxelInputReader:
 
 
 __all__ = [
+    "ENCOUNTER_JINGLE_ID",
     "FPS",
     "GAME_ERRORS",
     "GAME_SETTINGS_ENV",
     "Game",
+    "RANDOM_BATTLE_ENCOUNTER",
     "SCREEN_HEIGHT",
     "SCREEN_WIDTH",
     "create_game_input_reader",
