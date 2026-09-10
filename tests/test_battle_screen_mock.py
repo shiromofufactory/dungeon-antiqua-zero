@@ -48,6 +48,7 @@ from tools.screen_mocks.battle import (
     COMMAND_GUIDE_TEXT_X,
     COMMAND_GUIDE_WINDOW_GRID,
     COMMAND_TEXT_KEYS,
+    FORMATION_COMMAND_GUIDE_TEXT_KEYS,
     ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT,
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
     DAMAGE_NUMBER_SPRITE_X,
@@ -167,6 +168,7 @@ from rendering import (
     FadeThroughBlack,
     MonsterDeathAnimation,
 )
+from resources import load_record_array
 from ui import CursorTarget, Window, WindowCursor
 
 
@@ -1529,7 +1531,10 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._start_timeline_animation()
 
         self.assertEqual(mock.timeline_advance.after.actors, (other, actor))
-        self.assertEqual(mock.timeline_advance.after.entries[1].gauge, 18.0)
+        self.assertEqual(
+            mock.timeline_advance.after.entries[1].gauge,
+            50 + AIM_GAUGE_ADJUSTMENT,
+        )
         self.assertEqual(mock.action_gauge_adjustment, 0.0)
 
     def test_lethal_attack_starts_death_then_removes_enemy(self) -> None:
@@ -3991,31 +3996,48 @@ class BattleScreenMockTest(unittest.TestCase):
             )
         )
 
+    def test_each_command_guide_uses_a_registered_battle_text_key(self) -> None:
+        self.assertEqual(
+            set(COMMAND_GUIDE_TEXT_KEYS),
+            set(BattleCommand) - {BattleCommand.FORMATION, BattleCommand.ESCAPE},
+        )
+        guide_keys = {
+            *COMMAND_GUIDE_TEXT_KEYS.values(),
+            *FORMATION_COMMAND_GUIDE_TEXT_KEYS.values(),
+        }
+        records = load_record_array("texts.json", APP_ROOT / "data")
+        registered_keys = {record["text_key"] for record in records}
+
+        self.assertTrue(all(key.startswith("battle.guide.") for key in guide_keys))
+        self.assertLessEqual(guide_keys, registered_keys)
+
     def test_formation_label_and_guide_reflect_the_active_member_row(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.texts = Mock()
+        mock.texts.text.side_effect = lambda key, _localizer: key
+        mock.texts.lines.side_effect = lambda key, _localizer: (key,)
         mock.localizer = Localizer(Language.JAPANESE)
         mock.party = (SimpleNamespace(is_front_row=True),)
         mock.active_party_index = 0
 
         self.assertEqual(
             mock._command_label(BattleCommand.FORMATION),
-            "こうたい",
+            "battle.command.retreat",
         )
         self.assertEqual(
             mock._command_guide_lines(BattleCommand.FORMATION),
-            ("こうたい",),
+            ("battle.guide.retreat",),
         )
 
         mock.party[0].is_front_row = False
 
         self.assertEqual(
             mock._command_label(BattleCommand.FORMATION),
-            "ぜんしん",
+            "battle.command.advance",
         )
         self.assertEqual(
             mock._command_guide_lines(BattleCommand.FORMATION),
-            ("ぜんしん",),
+            ("battle.guide.advance",),
         )
 
     def test_command_guide_waits_at_the_same_command_then_shows_three_lines(self) -> None:
@@ -4070,12 +4092,15 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.command_guide_timer, 1)
         self.assertFalse(mock.command_guide_visible)
 
-    def test_guide_reuses_da2_text_and_falls_back_to_new_command_name(self) -> None:
+    def test_command_guide_uses_its_registered_guide_key(self) -> None:
         self.assertEqual(
             COMMAND_GUIDE_TEXT_KEYS[BattleCommand.DEFEND],
             "battle.guide.defend",
         )
-        self.assertNotIn(BattleCommand.FOCUS, COMMAND_GUIDE_TEXT_KEYS)
+        self.assertEqual(
+            COMMAND_GUIDE_TEXT_KEYS[BattleCommand.FOCUS],
+            "battle.guide.focus",
+        )
         texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         localizer = Localizer(Language.JAPANESE)
         self.assertEqual(
@@ -4084,10 +4109,6 @@ class BattleScreenMockTest(unittest.TestCase):
                 ascii_to_fullwidth("もっている ぶきで"),
                 ascii_to_fullwidth("てきを こうげきする"),
             ),
-        )
-        self.assertEqual(
-            texts.lines(COMMAND_TEXT_KEYS[BattleCommand.FOCUS], localizer),
-            ("ためる",),
         )
 
     def test_formation_walk_swaps_row_and_uses_alternate_sprite(self) -> None:

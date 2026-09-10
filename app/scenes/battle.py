@@ -363,12 +363,21 @@ FORMATION_COMMAND_TEXT_KEYS = {
 COMMAND_GUIDE_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.guide.attack",
     BattleCommand.SPELL: "battle.guide.spell",
+    BattleCommand.AIM: "battle.guide.aim",
     BattleCommand.HIDE: "battle.guide.hide",
     BattleCommand.IDENTIFY: "battle.guide.identify",
     BattleCommand.PRAY: "battle.guide.pray",
     BattleCommand.COVER: "battle.guide.cover",
+    BattleCommand.IAI: "battle.guide.iai",
+    BattleCommand.FOCUS: "battle.guide.focus",
+    BattleCommand.BREATH: "battle.guide.breath",
+    BattleCommand.MP_SHARE: "battle.guide.mp_share",
     BattleCommand.DEFEND: "battle.guide.defend",
     BattleCommand.ITEM: "battle.guide.item",
+}
+FORMATION_COMMAND_GUIDE_TEXT_KEYS = {
+    True: "battle.guide.retreat",
+    False: "battle.guide.advance",
 }
 COMMAND_TEXT_X = (4, 18)
 COMMAND_CURSOR_X = (2, 16)
@@ -3990,9 +3999,14 @@ class BattleScene:
         return COMMAND_TEXT_KEYS[command]
 
     def _command_guide_lines(self, command: BattleCommand) -> tuple[str, ...]:
-        """Return DA2-derived guide text or the command name as a placeholder."""
+        """Return the command's authored guide text."""
 
-        key = COMMAND_GUIDE_TEXT_KEYS.get(command, self._command_text_key(command))
+        if command is BattleCommand.FORMATION and self.active_party_index is not None:
+            key = FORMATION_COMMAND_GUIDE_TEXT_KEYS[
+                self._party_member_is_front_row(self.active_party_index)
+            ]
+        else:
+            key = COMMAND_GUIDE_TEXT_KEYS[command]
         return self.texts.lines(key, self.localizer)
 
     def _update_command_guide(self) -> None:
