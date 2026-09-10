@@ -186,7 +186,8 @@ tools/screen_mocks/
 ├── _runtime.py             # 共通初期化、資産、入力設定
 ├── _runner.py              # 例外表示と終了コード
 ├── _fixtures.py            # 疑似パーティなどの戦闘fixture
-└── battle.py               # 本番BattleSceneをfixtureで単独起動
+├── battle.py               # 本番BattleSceneをfixtureで単独起動
+└── battle_result.py        # 戦闘勝利リザルトの静的モック
 ```
 
 Pyxel、共通アセット、パレット、Q終了入力は `_runtime.py`、想定内エラーの表示と
@@ -215,3 +216,13 @@ npm run test-battle
 起動前に呪文エフェクトのゲーム用データを再生成する。登録済み呪文または使用効果アイテムの
 ターゲットを決定すると、対象側のOFFSET、フラッシュ、SEを使ってエフェクトを再生し、完了後に
 次の手番へ進む。
+
+## Battle Result Mock
+
+戦闘勝利後のリザルト画面を、フィオラの内部レベル50を基準にした6人パーティで静的表示する。
+レイアウトと表示内容の詳細は
+[`docs/features/battle.md`](../docs/features/battle.md)を参照する。`Q`または`Esc`で終了する。
+
+```sh
+npm run mock-battle-result
+```

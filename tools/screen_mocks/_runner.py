@@ -1,4 +1,4 @@
-"""Normalize expected failures and exit codes for the battle-test entry point."""
+"""Normalize expected failures and exit codes for screen-mock entry points."""
 
 from __future__ import annotations
 

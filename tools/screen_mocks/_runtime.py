@@ -1,4 +1,4 @@
-"""Platform helpers for the standalone battle test."""
+"""Platform helpers for standalone screen mocks."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def initialize_screen_mock(
 
 
 def create_mock_input_reader() -> PyxelInputReader:
-    """Create standalone battle-test bindings, including Q as an exit key."""
+    """Create standalone screen-mock bindings, including Q as cancel."""
 
     return PyxelInputReader(
         InputBindings.default().with_cancel(pyxel.KEY_Q)

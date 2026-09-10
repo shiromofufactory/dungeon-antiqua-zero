@@ -151,7 +151,8 @@ tools/
     ├── _runtime.py         # Pyxel初期化、共通資産、戦闘テスト入力
     ├── _runner.py          # 例外表示とCLI終了コード
     ├── _fixtures.py        # 疑似パーティなど戦闘テスト専用状態
-    └── battle.py           # BattleSceneへfixtureを注入する単独起動口
+    ├── battle.py           # BattleSceneへfixtureを注入する単独起動口
+    └── battle_result.py    # 戦闘勝利リザルトの静的モック
 ```
 
 `content/data` は共有JSONの正本である。`app/data` は `npm run content:sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
@@ -430,7 +431,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。エンカウント選択と `BattleResult` を受けた復帰遷移は、接続仕様を確定する段階で追加する。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
+戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。エンカウント選択と `BattleResult` を受けた復帰遷移は、接続仕様を確定する段階で追加する。勝利リザルトはレイアウト検討中のため `tools/screen_mocks/battle_result.py` に静的モックを置き、本編へ接続する段階で表示部品またはOverlayへ移す。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。
