@@ -214,7 +214,12 @@ def resolve_battle_commands(
             break
         if not member.has_skill(skill_key):
             continue
-        left_commands.append(BattleCommandOption(command))
+        left_commands.append(
+            BattleCommandOption(
+                command,
+                enabled=command is not BattleCommand.AIM or bool(attack_targets),
+            )
+        )
     right_commands = [
         BattleCommandOption(BattleCommand.DEFEND),
         BattleCommandOption(

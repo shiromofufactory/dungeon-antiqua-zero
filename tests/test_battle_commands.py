@@ -187,6 +187,10 @@ class BattleCommandRulesTest(unittest.TestCase):
             (BattleCommand.ATTACK, BattleCommand.SPELL, BattleCommand.AIM),
         )
         self.assertFalse(commands[0].enabled)
+        aim = next(
+            option for option in commands if option.command is BattleCommand.AIM
+        )
+        self.assertFalse(aim.enabled)
 
     def test_silence_disables_visible_spell_without_hiding_it(self) -> None:
         commands = resolve_battle_commands(

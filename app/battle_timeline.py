@@ -111,6 +111,7 @@ def complete_timeline_action(
     *,
     current_agility: int,
     visible_count: int,
+    gauge_adjustment: Real = 0,
 ) -> TimelineAdvance[Actor]:
     """Reset the current actor's gauge and stably reinsert it by gauge."""
 
@@ -123,7 +124,13 @@ def complete_timeline_action(
 
     completed = order.entries[0]
     remaining = TimelineOrder(order.entries[1:])
-    reset = TimelineEntry(completed.actor, current_agility, float(current_agility))
+    if isinstance(gauge_adjustment, bool) or not isinstance(
+        gauge_adjustment,
+        Real,
+    ):
+        raise TypeError("gauge_adjustment must be numeric")
+    gauge = current_agility + gauge_adjustment
+    reset = TimelineEntry(completed.actor, current_agility, float(gauge))
     entries = list(remaining.entries)
     reinsertion_index = len(entries)
     for index, entry in enumerate(entries):

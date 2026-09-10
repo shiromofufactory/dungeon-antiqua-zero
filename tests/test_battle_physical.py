@@ -74,6 +74,21 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertEqual(result.hit_value, 0.0)
         self.assertEqual(result.damage, 16)
 
+    def test_hit_value_bonus_is_added_after_evasion_and_random_roll(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=0,
+            agility=20,
+            target_defense=0,
+            target_evasion=100,
+            hit_roll=99,
+            hit_value_bonus=100,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertEqual(result.hit_value, 1.0)
+        self.assertEqual(result.damage, 81)
+
     def test_defending_avoids_an_attack_below_da2_guard_threshold(self) -> None:
         result = resolve_physical_attack(
             attack=100,

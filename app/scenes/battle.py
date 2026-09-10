@@ -293,6 +293,28 @@ ATTACK_DAMAGE_FRAME_COUNT = DAMAGE_POPUP_FRAME_COUNT
 ATTACK_RETURN_JUMP_FRAME_COUNT = 8
 ATTACK_RETURN_JUMP_HEIGHT = 8
 ATTACK_LANDING_GUARD_FRAME_COUNT = 6
+AIM_HIT_VALUE_BONUS = 100
+AIM_GAUGE_ADJUSTMENT = -16.0
+AIM_GUARD_WAIT_FRAME_COUNT = 12
+AIM_RETICLE_START_DISTANCE = 32
+AIM_RETICLE_END_DISTANCE = 8
+AIM_RETICLE_MOVE_SPEED = 6
+AIM_RETICLE_MOVE_FRAME_COUNT = (
+    AIM_RETICLE_START_DISTANCE - AIM_RETICLE_END_DISTANCE
+) // AIM_RETICLE_MOVE_SPEED
+AIM_RETICLE_START_FRAME = AIM_GUARD_WAIT_FRAME_COUNT
+AIM_RETICLE_END_FRAME = AIM_RETICLE_START_FRAME + AIM_RETICLE_MOVE_FRAME_COUNT
+AIM_RETICLE_HOLD_FRAME_COUNT = 6
+AIM_ATTACK_HIT_START_FRAME = AIM_RETICLE_END_FRAME + AIM_RETICLE_HOLD_FRAME_COUNT
+AIM_RETICLE_CORNER_SIZE = 8
+AIM_RETICLE_CORNER_SOURCES = (
+    (0, 128, -1, -1),
+    (8, 128, 1, -1),
+    (0, 136, -1, 1),
+    (8, 136, 1, 1),
+)
+AIM_RETICLE_CENTER_SOURCE = (16, 128)
+AIM_RETICLE_CENTER_SIZE = 16
 ATTACK_WEAPON_SPRITE_Y = 32
 ATTACK_WEAPON_SPRITE_SIZE = 16
 ATTACK_EFFECT_CELL_SIZE = 64
@@ -577,6 +599,7 @@ class BattleAttackPresentation:
     poses: tuple[AttackPoseDefinition, ...]
     effect_row: int | None
     is_hit: bool = True
+    is_aimed: bool = False
     sound_effect_id: str = ATTACK_SLASH_SE_ID
     elapsed_frame: int = 0
     damage_applied: bool = False
@@ -584,15 +607,57 @@ class BattleAttackPresentation:
 
     @property
     def pose(self) -> AttackPoseDefinition | None:
-        if not self.poses or self.elapsed_frame >= ATTACK_MOTION_FRAME_COUNT:
+        if not self.poses or self.elapsed_frame >= self.motion_frame_count:
             return None
-        if len(self.poses) == 1 or self.elapsed_frame < ATTACK_POSE_RAISE_FRAME_COUNT:
+        if self.aim_guard_pose_visible:
+            return None
+        if len(self.poses) == 1 or self.elapsed_frame < self.hit_start_frame:
             return self.poses[0]
         return self.poses[1]
 
     @property
+    def hit_start_frame(self) -> int:
+        return AIM_ATTACK_HIT_START_FRAME if self.is_aimed else ATTACK_HIT_START_FRAME
+
+    @property
+    def motion_frame_count(self) -> int:
+        return self.hit_start_frame + ATTACK_POSE_SWING_FRAME_COUNT
+
+    @property
     def hit_elapsed_frame(self) -> int:
-        return self.elapsed_frame - ATTACK_HIT_START_FRAME
+        return self.elapsed_frame - self.hit_start_frame
+
+    @property
+    def aim_reticle_distance(self) -> int | None:
+        if (
+            not self.is_aimed
+            or self.elapsed_frame < AIM_RETICLE_START_FRAME
+            or self.elapsed_frame >= self.hit_start_frame
+        ):
+            return None
+        moved = min(
+            (self.elapsed_frame - AIM_RETICLE_START_FRAME) * AIM_RETICLE_MOVE_SPEED,
+            AIM_RETICLE_START_DISTANCE - AIM_RETICLE_END_DISTANCE,
+        )
+        return AIM_RETICLE_START_DISTANCE - moved
+
+    @property
+    def aim_reticle_moving(self) -> bool:
+        return (
+            self.is_aimed
+            and AIM_RETICLE_START_FRAME <= self.elapsed_frame < AIM_RETICLE_END_FRAME
+        )
+
+    @property
+    def aim_guard_pose_visible(self) -> bool:
+        return self.is_aimed and self.elapsed_frame < AIM_RETICLE_END_FRAME
+
+    @property
+    def aim_reticle_center_visible(self) -> bool:
+        return (
+            self.is_aimed
+            and AIM_RETICLE_END_FRAME <= self.elapsed_frame < self.hit_start_frame
+        )
 
     @property
     def damage_popup_elapsed_frame(self) -> int:
@@ -1128,8 +1193,7 @@ class BattleScene:
             ),
         )
         self.action_popup_window = windows.create(
-            SCREEN_WIDTH // TEXT_GRID_X
-            - BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID,
+            SCREEN_WIDTH // TEXT_GRID_X - BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID,
             0,
             BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID,
             BATTLE_ACTION_POPUP_HEIGHT,
@@ -1204,6 +1268,7 @@ class BattleScene:
         self.affinity_popups: list[BattleAffinityPopup] = []
         self.pending_monster_death_indexes: list[int] = []
         self.attack_presentation: BattleAttackPresentation | None = None
+        self.action_gauge_adjustment = 0.0
         self.battle_popup = BattleTimedPopup()
         self.action_party_index: int | None = None
         self.action_offset_x = 0
@@ -1381,6 +1446,8 @@ class BattleScene:
                     self._remember_active_command(command)
                 if command == BattleCommand.ATTACK:
                     self._begin_attack_target_selection()
+                elif command == BattleCommand.AIM:
+                    self._begin_attack_target_selection(command=BattleCommand.AIM)
                 elif command == BattleCommand.SPELL:
                     self._begin_spell_selection()
                 elif command == BattleCommand.FORMATION:
@@ -1526,6 +1593,7 @@ class BattleScene:
         if pending_deaths is not None:
             pending_deaths.clear()
         self.attack_presentation = None
+        self.action_gauge_adjustment = 0.0
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.clear()
@@ -3234,12 +3302,18 @@ class BattleScene:
         self.all_target_cursors = ()
         self._refresh_monster_name_colors()
 
-    def _begin_attack_target_selection(self) -> bool:
+    def _begin_attack_target_selection(
+        self,
+        *,
+        command: BattleCommand = BattleCommand.ATTACK,
+    ) -> bool:
+        if command not in (BattleCommand.ATTACK, BattleCommand.AIM):
+            raise ValueError("attack target selection requires attack or aim")
         selectable = self._active_member_attack_targets()
         if not selectable:
             return False
 
-        self.selected_command = "attack"
+        self.selected_command = command
         self.selectable_target_indexes = selectable
         # DA2 starts enemy selection at the last selectable monster.
         self.selected_target_index = selectable[-1]
@@ -3297,6 +3371,7 @@ class BattleScene:
             weapon_img,
         )
         effect_row = ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype)
+        is_aimed = self.selected_command == BattleCommand.AIM
         member_stats = member.battle_stats
         monster_stats = monster.combat_stats
         attack = member_physical_attack(
@@ -3312,6 +3387,7 @@ class BattleScene:
             target_defense=monster_stats.defense,
             target_evasion=monster_stats.evasion,
             hit_roll=random.randint(0, 99),
+            hit_value_bonus=AIM_HIT_VALUE_BONUS if is_aimed else 0,
         )
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
@@ -3319,12 +3395,19 @@ class BattleScene:
             poses=poses,
             effect_row=effect_row,
             is_hit=result.hit,
+            is_aimed=is_aimed,
             sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
                 weapon.subtype,
                 ATTACK_SLASH_SE_ID,
             ),
         )
         self.phase = BattlePhase.ATTACK_PRESENTATION
+        self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT if is_aimed else 0.0
+        if is_aimed:
+            self._show_battle_popup(
+                self._command_label(BattleCommand.AIM),
+                BATTLE_POPUP_FRAME_COUNT,
+            )
         self.target_cursor.active = False
         self.command_window.close_immediately()
         self._refresh_monster_name_colors()
@@ -3347,7 +3430,7 @@ class BattleScene:
             presentation.damage_applied = True
         if (
             not presentation.return_started
-            and presentation.elapsed_frame >= ATTACK_MOTION_FRAME_COUNT
+            and presentation.elapsed_frame >= presentation.motion_frame_count
         ):
             presentation.return_started = True
             self._begin_action_return(jump=True)
@@ -3505,7 +3588,9 @@ class BattleScene:
             self._timeline_order,
             current_agility=actor.agility,
             visible_count=TIMELINE_VISIBLE_ENTRY_COUNT,
+            gauge_adjustment=getattr(self, "action_gauge_adjustment", 0.0),
         )
+        self.action_gauge_adjustment = 0.0
         self.phase = BattlePhase.TIMELINE
         self.active_party_index = None
         if hasattr(self, "active_party_pulse_frame"):
@@ -4168,6 +4253,7 @@ class BattleScene:
         self._draw_background()
         self._draw_party()
         self._draw_monsters()
+        self._draw_aim_reticle()
         self._draw_party_attack_effect()
         self._draw_spell_effects()
         self._draw_affinity_popups()
@@ -4446,6 +4532,13 @@ class BattleScene:
         ):
             return MONSTER_DAMAGE_SPRITE_SOURCE_X
         if index == getattr(self, "action_party_index", None):
+            attack_presentation = getattr(self, "attack_presentation", None)
+            if (
+                self.phase is BattlePhase.ATTACK_PRESENTATION
+                and attack_presentation is not None
+                and attack_presentation.aim_guard_pose_visible
+            ):
+                return DEFEND_SPRITE_SOURCE_X
             if getattr(self, "action_landing_guard_frames_remaining", 0):
                 return DEFEND_SPRITE_SOURCE_X
             if self.action_returning and getattr(self, "action_return_jump", False):
@@ -4538,6 +4631,46 @@ class BattleScene:
             presentation.effect_row * ATTACK_EFFECT_CELL_SIZE,
             ATTACK_EFFECT_CELL_SIZE,
             ATTACK_EFFECT_CELL_SIZE,
+            TRANSPARENT_INDEX,
+        )
+
+    def _draw_aim_reticle(self) -> None:
+        """Draw the four converging corners and timed center marker for Aim."""
+
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            getattr(self, "phase", None) is not BattlePhase.ATTACK_PRESENTATION
+            or presentation is None
+            or presentation.aim_reticle_distance is None
+        ):
+            return
+        center_x, center_y = self._spell_effect_anchor(
+            "enemy",
+            presentation.target_index,
+        )
+        distance = presentation.aim_reticle_distance
+        for source_x, source_y, direction_x, direction_y in AIM_RETICLE_CORNER_SOURCES:
+            pyxel.blt(
+                center_x + direction_x * distance - AIM_RETICLE_CORNER_SIZE // 2,
+                center_y + direction_y * distance - AIM_RETICLE_CORNER_SIZE // 2,
+                0,
+                source_x,
+                source_y,
+                AIM_RETICLE_CORNER_SIZE,
+                AIM_RETICLE_CORNER_SIZE,
+                TRANSPARENT_INDEX,
+            )
+        if not presentation.aim_reticle_center_visible:
+            return
+        source_x, source_y = AIM_RETICLE_CENTER_SOURCE
+        pyxel.blt(
+            center_x - AIM_RETICLE_CENTER_SIZE // 2,
+            center_y - AIM_RETICLE_CENTER_SIZE // 2,
+            0,
+            source_x,
+            source_y,
+            AIM_RETICLE_CENTER_SIZE,
+            AIM_RETICLE_CENTER_SIZE,
             TRANSPARENT_INDEX,
         )
 

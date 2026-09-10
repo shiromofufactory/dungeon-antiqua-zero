@@ -101,6 +101,25 @@ class BattleTimelineTest(unittest.TestCase):
 
         self.assertEqual(advance.after.actors, ("existing", "actor", "lower"))
 
+    def test_action_can_adjust_its_reset_gauge_without_changing_agility(self) -> None:
+        order = TimelineOrder(
+            (
+                TimelineEntry("actor", 50, 64.0),
+                TimelineEntry("other", 10, 40.0),
+            )
+        )
+
+        advance = complete_timeline_action(
+            order,
+            current_agility=50,
+            visible_count=6,
+            gauge_adjustment=-32,
+        )
+
+        self.assertEqual(advance.after.actors, ("other", "actor"))
+        self.assertEqual(advance.after.entries[1].agility, 50)
+        self.assertEqual(advance.after.entries[1].gauge, 18.0)
+
     def test_actor_can_be_removed_by_identity(self) -> None:
         first = object()
         second = object()
