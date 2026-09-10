@@ -8,6 +8,8 @@ from app.field import FieldPosition
 from app.input import Direction
 from app.rendering import (
     ENCOUNTER_FADE_START_FRAME,
+    ENCOUNTER_ROTATION_DEGREES,
+    ENCOUNTER_ROTATION_START_FRAME,
     ENCOUNTER_TRANSITION_FRAME_COUNT,
     EncounterTransition,
 )
@@ -126,6 +128,54 @@ class EncounterTransitionTest(unittest.TestCase):
 
         self.assertTrue(transition.is_finished)
         self.assertEqual(transition.visible_rate, 0.0)
+
+    def test_zooms_before_starting_one_clockwise_rotation(self) -> None:
+        transition = EncounterTransition(128, 120)
+
+        for _frame in range(ENCOUNTER_ROTATION_START_FRAME):
+            transition.update()
+        zoom_only = transition.transform(256, 240)
+
+        self.assertEqual(zoom_only.rotate, 0.0)
+        self.assertGreater(zoom_only.scale, 1.0)
+
+        transition.update()
+        self.assertGreater(transition.transform(256, 240).rotate, 0.0)
+
+        while transition.elapsed_frames < ENCOUNTER_TRANSITION_FRAME_COUNT - 1:
+            transition.update()
+        self.assertAlmostEqual(
+            transition.transform(256, 240).rotate,
+            ENCOUNTER_ROTATION_DEGREES,
+        )
+
+    def test_rotated_snapshot_covers_screen_corners_away_from_center(self) -> None:
+        transition = EncounterTransition(48, 72)
+
+        for _frame in range(ENCOUNTER_TRANSITION_FRAME_COUNT - 1):
+            transition.update()
+            transform = transition.transform(256, 240)
+            radians = math.radians(transform.rotate)
+            cosine = math.cos(radians)
+            sine = math.sin(radians)
+            for corner_x, corner_y in (
+                (0, 0),
+                (256, 0),
+                (0, 240),
+                (256, 240),
+            ):
+                relative_x = corner_x - 48
+                relative_y = corner_y - 72
+                source_x = 48 + (
+                    cosine * relative_x + sine * relative_y
+                ) / transform.scale
+                source_y = 72 + (
+                    -sine * relative_x + cosine * relative_y
+                ) / transform.scale
+                self.assertGreaterEqual(source_x, 0)
+                self.assertLessEqual(source_x, 256)
+                self.assertGreaterEqual(source_y, 0)
+                self.assertLessEqual(source_y, 240)
 
     def test_transform_keeps_the_player_pivot_fixed(self) -> None:
         transition = EncounterTransition(48, 72)
