@@ -2823,6 +2823,7 @@ class Game:
             0,
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
+            rotate=transform.rotate,
             scale=transform.scale,
         )
 

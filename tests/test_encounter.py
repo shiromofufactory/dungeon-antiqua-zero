@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from types import MappingProxyType
 import unittest
 
@@ -9,6 +10,7 @@ from app.rendering import (
     ENCOUNTER_BLACK_COLOR,
     ENCOUNTER_FADE_FRAME_COUNT,
     ENCOUNTER_FINAL_SCALE,
+    ENCOUNTER_ROTATION_DEGREES,
     ENCOUNTER_TRANSITION_FRAME_COUNT,
     ENCOUNTER_WHITE_COLOR,
     ENCOUNTER_WHITEOUT_FRAME_COUNT,
@@ -163,20 +165,45 @@ class EncounterTransitionTest(unittest.TestCase):
             ENCOUNTER_FINAL_SCALE,
         )
 
+    def test_rotation_starts_immediately_and_accelerates_to_two_turns(self) -> None:
+        transition = EncounterTransition(128, 112)
+        angles = [transition.transform(256, 240).rotate]
+
+        for _frame in range(ENCOUNTER_TRANSITION_FRAME_COUNT - 1):
+            transition.update()
+            angles.append(transition.transform(256, 240).rotate)
+
+        frame_rotations = [
+            after - before for before, after in zip(angles, angles[1:])
+        ]
+        self.assertGreater(angles[1], 0.0)
+        self.assertAlmostEqual(angles[-1], ENCOUNTER_ROTATION_DEGREES)
+        self.assertEqual(frame_rotations, sorted(frame_rotations))
+
     def test_transform_keeps_the_player_pivot_fixed(self) -> None:
         transition = EncounterTransition(48, 72)
         for _frame in range(13):
             transition.update()
 
         transform = transition.transform(256, 240)
+        radians = math.radians(transform.rotate)
         source_x = 48 - 128
         source_y = 72 - 120
-        destination_x = transform.x + 128 + transform.scale * source_x
-        destination_y = transform.y + 120 + transform.scale * source_y
+        destination_x = (
+            transform.x
+            + 128
+            + transform.scale
+            * (source_x * math.cos(radians) - source_y * math.sin(radians))
+        )
+        destination_y = (
+            transform.y
+            + 120
+            + transform.scale
+            * (source_x * math.sin(radians) + source_y * math.cos(radians))
+        )
 
         self.assertAlmostEqual(destination_x, 48)
         self.assertAlmostEqual(destination_y, 72)
-
 
 if __name__ == "__main__":
     unittest.main()
