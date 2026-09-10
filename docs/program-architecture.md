@@ -148,15 +148,10 @@ tools/
 ├── audio_wav/              # 現段階のBGM変換元WAV
 ├── image_viewer.py         # 本番用画像をPyxelで確認するviewer
 └── screen_mocks/
-    ├── _runtime.py         # Pyxel初期化、共通資産、モック入力
+    ├── _runtime.py         # Pyxel初期化、共通資産、戦闘テスト入力
     ├── _runner.py          # 例外表示とCLI終了コード
-    ├── _fixtures.py        # 疑似パーティなどモック専用状態
-    ├── battle.py           # BattleSceneへfixtureを注入する単独起動口
-    ├── status.py           # 本番Overlayへ疑似状態を渡す互換アダプター
-    ├── spell.py            # 本番Overlayへ疑似状態を渡す互換アダプター
-    ├── item.py             # 本番Overlayへ疑似状態を渡す互換アダプター
-    ├── equipment.py        # 本番Overlayへ疑似状態を渡す互換アダプター
-    └── shop.py             # 本番ショップOverlayの互換アダプター
+    ├── _fixtures.py        # 疑似パーティなど戦闘テスト専用状態
+    └── battle.py           # BattleSceneへfixtureを注入する単独起動口
 ```
 
 `content/data` は共有JSONの正本である。`app/data` は `npm run content:sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
@@ -257,9 +252,9 @@ Pyxelの物理入力
 操作案内ではSceneやOverlayが論理操作の `InputAction` と
 `InputState.device` を `ui.input_icons.input_icon_tag()` へ渡し、対応するテキスト内アイコン
 タグを得る。これにより、画面ごとにキーボード／ゲームパッドの座標対応を持たない。
-開発用モックで入力種別を固定する場合も `InputDevice` を明示して同じ変換を使う。
+戦闘テストで入力種別を固定する場合も `InputDevice` を明示して同じ変換を使う。
 
-本番では `Game.update()` がフレームごとに一度だけ `poll()` し、SceneManagerを通して最上位Overlayまたは現在のSceneへ渡す。開発用モックは独立したComposition RootとしてReaderを1つ生成し、同じ `InputState` とWindow部品を直接利用する。モック固有のQ終了などは、Qをキャンセルへ追加したBindingsをReaderへ渡して表現する。
+本番では `Game.update()` がフレームごとに一度だけ `poll()` し、SceneManagerを通して最上位Overlayまたは現在のSceneへ渡す。戦闘テストは独立したComposition RootとしてReaderを1つ生成し、同じ `InputState` とWindow部品を直接利用する。テスト固有のQ終了は、Qをキャンセルへ追加したBindingsをReaderへ渡して表現する。
 
 ```python
 input_state = input_reader.poll()
@@ -272,15 +267,15 @@ if input_state.confirm.triggered and command_window.is_open:
 ## ゲームデータリソースの責務
 
 `app/resources/data.py` の `load_record_array()` は、`app/data` の生成済みJSONを
-UTF-8で読み込み、ルートがオブジェクト配列であることまでを検証する。本編と開発用
-モックは同じ入口を使い、画面ごとにファイル不在、JSON構文、ルート構造の処理を
+UTF-8で読み込み、ルートがオブジェクト配列であることまでを検証する。本編と戦闘テストは
+同じ入口を使い、ファイル不在、JSON構文、ルート構造の処理を
 複製しない。ファイル名は `app/data` 直下の名前だけを受け付け、任意のパス探索には
 使用しない。
 
 各レコードの意味的な検証は `Item.from_record()`、
 `CharacterDefinition.from_record()` などのDomain Modelが担当する。安定キーによる索引、
 重複判定、レコード間参照の解決は、必要なマスターデータ単位のloaderまたは
-Composition Rootで行う。モック用の加入済みパーティは本編のマスターデータではないため、
+Composition Rootで行う。戦闘テスト用の加入済みパーティは本編のマスターデータではないため、
 `tools/screen_mocks/_fixtures.py` が生成し、`app/resources` へ置かない。
 
 ## 画像リソースの責務
@@ -424,7 +419,7 @@ manifestや保存形式など、本番と共有すべき解釈処理は `app/res
 `tools/` は画面、入力、選択中の対象といったツール固有状態だけを所有する。これによりviewerだけが
 成功し、ゲーム本体では読めないという形式差異を防ぐ。
 
-ツール同士を巨大な共通Appへ統合しない。単独で確認するツールは `python3 -m tools.<module>` で独立起動できる小さなComposition Rootとし、画面遷移を確認する場合は起点となるモックだけをComposition Rootにする。複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。画面モックでは、Pyxelと共通資産の初期化を `_runtime.py`、想定内例外と終了コードの変換を `_runner.py`、疑似パーティを `_fixtures.py` が担当する。Settings、SaveData、画面固有画像は起点が生成し、子画面へ必要な依存だけを明示的に渡す。すべてを格納する汎用Contextは作らない。`tools/` は `pyxel package app ...` の配布対象に含めない。
+ツール同士を巨大な共通Appへ統合しない。単独で確認するツールは `python3 -m tools.<module>` で独立起動できる小さなComposition Rootとする。複数ツールで本当に同じ起動処理が生じた場合だけ `tools/` 内の小さな共通モジュールへ抽出する。戦闘テストでは、Pyxelと共通資産の初期化を `_runtime.py`、想定内例外と終了コードの変換を `_runner.py`、疑似パーティを `_fixtures.py` が担当する。Settingsと画像は起点が生成し、BattleSceneへ必要な依存だけを明示的に渡す。`tools/` は `pyxel package app ...` の配布対象に含めない。
 
 マップチップメタデータ設定ツール、マップエディタ、イベントエディタは `tools/editor` を共通の
 Composition Rootとし、単一のローカルHTTPサーバーと認証セッションから `/tileset/`、`/map/`、
@@ -435,7 +430,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-戦闘など未確定画面を試作する起点は `tools/screen_mocks/` に画面単位で置く。一方、仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、`tools/` から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。エンカウント選択と `BattleResult` を受けた復帰遷移は、接続仕様を確定する段階で追加する。
+戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。エンカウント選択と `BattleResult` を受けた復帰遷移は、接続仕様を確定する段階で追加する。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。
@@ -464,7 +459,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 状態異常呪文で共有する。
 
 アイテムメニューOverlayはDA2準拠の「つかう／すてる／いちらん／だいじなもの」の
-4カテゴリ、左の一覧、右の情報欄を持つ。単体アイテムモックの疑似所持品は
+4カテゴリ、左の一覧、右の情報欄を持つ。メニュー回帰テストの疑似所持品は
 `items.json` の全レコードを1個ずつとし、現在のゲームの初期所持品は空とする。
 だいじなものは未定義のため空とする。情報欄は選択中の名前、種別、装備条件、
 0以外の攻撃・命中・防御・回避・術防御、能力補正、フィールド回復、射程を表示する。
@@ -478,7 +473,7 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 所持数を1減らす。破棄確認中も、直前の商品位置へ非アクティブカーソルを残す。
 `price=0` は破棄不可を表し、確認画面を開かずDA2と同じエラー演出を
 返す。下部の顔とHP表示は呪文画面と
-`_party_status.py` の同じ部品を使う。一覧は選択行が上下端を越えると表示開始位置を1件ずつ
+`app/ui/party_status.py` の同じ部品を使う。一覧は選択行が上下端を越えると表示開始位置を1件ずつ
 追従させ、左右および前後ページ入力では表示行数ぶん移動する。一覧Windowは従来より
 8px右へ広げ、情報欄のテキストは追加インデントを置かず枠内側から開始することで、
 情報欄テキストの画面上の絶対位置は維持する。一覧が表示行数を超える場合は、右枠の
@@ -688,7 +683,7 @@ Sceneへ置かないものは次のとおり。
 追加しない。
 画面やOverlayの差し替えは `COVERED` を受け取ったSceneManagerが1回だけ適用し、
 フェード自身へコールバックや遷移先を保持させない。フェード中は通常入力をSceneやOverlayへ
-渡さない。開発用画面モックでは、そのComposition RootがSceneManagerと同じ調停を担当する。
+渡さない。単独戦闘テストでは、そのComposition RootがSceneManagerと同じ調停を担当する。
 イベント演出など標準よりゆっくり暗転させる場合は、生成時の `frame_count` に6より大きい
 正の整数を渡す。時間を指定しないメニューや通常のScene遷移は6フレームを既定値として使い、
 SceneやOverlayごとに独自のフェード速度計算を持たせない。
@@ -935,7 +930,7 @@ DA2準拠の画面語彙を追加するときは、英語・簡体字中国語�
 現在HP／最大HP、現在MP／最大MPだけで構成する。現在のゲームの初期パーティは
 フィオラ、セリオンの2名とする。
 HP・MPラベルも `menu.member.*` の安定キーを使う。顔は32×32pxで、前列をx=20px、
-後列をx=32pxへ配置して隊列を表す。現在のゲームではセリオンを、単体画面モック用の
+後列をx=32pxへ配置して隊列を表す。現在のゲームではセリオンを、メニュー回帰テスト用の
 fixtureではセリオンとエリカを後列にする。この隊列は初期状態であり、
 キャラクターの不変なマスターデータには含めない。
 メインコマンドには独立した「スキル」を置かず、スキルの確認はステータス画面から行う。
@@ -967,14 +962,14 @@ Rendererがこれらの描画用値を読む責務を持ち、名前・モンス
 所有し、マスターデータと `MonsterCombatStats` は変更しない。
 
 通常攻撃の総合攻撃力、命中判定、物理ダメージは、PyxelやSceneに依存しない
-`battle_physical.py` が計算する。BattleSceneと戦闘モックは、`Member` の装備・能力・熟練度、
+`battle_physical.py` が計算する。BattleSceneと単独戦闘テストは、`Member` の装備・能力・熟練度、
 または `MonsterCombatStats` から入力値を組み立て、0～99の命中乱数を明示的に渡す。
 演出側は計算結果の命中可否とダメージだけを受け取り、同じ式を重複実装しない。
 
 ステータスメニューOverlayは左右方向または前後ページ入力で表示中のMemberを切り替え、
 両端では循環する。切り替え時は名前だけでなく、顔、装備、能力値、熟練度を含むWindow全体を
-現在のMemberから再構築する。単体ステータスモックでは従来の疑似パーティを構築し、
-現在のゲームでは現在のパーティを、メニューの「ステータス」決定時に同じSettings、
+現在のMemberから再構築する。メニュー回帰テストでは疑似パーティを構築し、実行時には
+現在のパーティを、メニューの「ステータス」決定時に同じSettings、
 TextCatalog、フォント、顔画像とともに渡す。
 ステータスWindowはアニメーションなしで即時表示する。
 メニュー側は最後に表示したメンバー位置を保持し、次回のステータス表示を同じ位置から始める。

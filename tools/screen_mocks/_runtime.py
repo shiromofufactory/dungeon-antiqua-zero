@@ -1,4 +1,4 @@
-"""Small platform helpers shared by independently runnable screen mocks."""
+"""Platform helpers for the standalone battle test."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def initialize_screen_mock(
         or display_scale <= 0
     ):
         raise ValueError("display_scale must be a positive integer or None")
-    # Esc is a logical cancel input in the screen mocks.  Let each mock decide
+    # Esc is a logical cancel input in the battle test. Let the scene decide
     # whether cancel closes an overlay or exits instead of Pyxel terminating the
     # process before the update callback can handle it.
     init_options = {"title": title, "fps": FPS, "quit_key": pyxel.KEY_NONE}
@@ -41,7 +41,7 @@ def initialize_screen_mock(
 
 
 def create_mock_input_reader() -> PyxelInputReader:
-    """Create the common mock bindings, including Q as an exit key."""
+    """Create standalone battle-test bindings, including Q as an exit key."""
 
     return PyxelInputReader(
         InputBindings.default().with_cancel(pyxel.KEY_Q)

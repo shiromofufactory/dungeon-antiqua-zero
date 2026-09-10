@@ -1,4 +1,4 @@
-"""Reusable game-state fixtures for standalone screen mocks."""
+"""Reusable game-state fixtures for the standalone battle test."""
 
 from __future__ import annotations
 
@@ -6,13 +6,11 @@ from game_data import (
     create_party,
     load_character_records,
     load_items,
-    load_shops,
     load_skills,
     load_spells,
 )
 from item import Item
 from member import Member
-from shop import Shop
 from skill import Skill
 from spell import Spell
 
@@ -51,12 +49,6 @@ def load_mock_spells() -> dict[str, Spell]:
     return load_spells()
 
 
-def load_mock_shops(items: dict[str, Item]) -> tuple[Shop, ...]:
-    """Load shops in shared-data order and resolve their fixed products."""
-
-    return load_shops(items)
-
-
 def load_mock_party(
     items: dict[str, Item],
     skills: dict[str, Skill],
@@ -82,6 +74,5 @@ __all__ = [
     "load_mock_items",
     "load_mock_party",
     "load_mock_skills",
-    "load_mock_shops",
     "load_mock_spells",
 ]

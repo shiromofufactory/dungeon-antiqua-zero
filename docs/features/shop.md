@@ -183,8 +183,7 @@
 - ショップOverlay: `app/ui/shop.py`
 - 購入時メンバー表示: `app/ui/shop_party.py`
 - 現在の接続元・デバッグメニュー: `app/ui/debug_menu.py`、`app/game.py`
-- モック互換アダプター: `tools/screen_mocks/shop.py`
-- 回帰テスト: `tests/test_shop_screen_mock.py`、`tests/test_shop_system.py`、`tests/test_shop.py`
+- 回帰テスト: `tests/test_shop_menu.py`、`tests/test_shop_system.py`、`tests/test_shop.py`
 
 変更時は購入と売却を別々に確認し、少なくとも次を検証する。
 

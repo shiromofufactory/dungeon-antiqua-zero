@@ -72,7 +72,7 @@ class InventorySystem:
 
     @classmethod
     def with_one_each(cls, items: Mapping[str, Item]) -> InventorySystem:
-        """Build the current screen-mock inventory with one of every item."""
+        """Build a development-test inventory with one of every item."""
 
         return cls(items, {key: 1 for key in items})
 

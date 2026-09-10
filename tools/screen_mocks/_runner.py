@@ -1,4 +1,4 @@
-"""Normalize expected failures and exit codes for screen mock entry points."""
+"""Normalize expected failures and exit codes for the battle-test entry point."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ def run_screen_mock(
     *,
     expected_errors: tuple[type[Exception], ...],
 ) -> int:
-    """Run one mock factory and convert expected failures to CLI exit codes."""
+    """Run the test factory and convert expected failures to CLI exit codes."""
 
     if not callable(factory):
         raise TypeError("factory must be callable")

@@ -4,19 +4,19 @@ import unittest
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
-from tools.screen_mocks._fixtures import (
-    load_mock_items,
-    load_mock_party,
-    load_mock_shops,
-    load_mock_skills,
-    load_mock_spells,
+from tests.ui_test_support import (
+    load_test_items,
+    load_test_party,
+    load_test_shops,
+    load_test_skills,
+    load_test_spells,
 )
-from tools.screen_mocks._shop_party import (
+from ui.shop_party import (
     SHOP_PARTY_WINDOW_GRID,
     ShopEquipmentMarker,
     ShopPartyPanel,
 )
-from tools.screen_mocks.shop import (
+from ui.shop import (
     QUANTITY_ARROW_HEIGHT,
     QUANTITY_ARROW_LEFT_X,
     QUANTITY_ARROW_LEFT_SOURCE,
@@ -56,8 +56,8 @@ from tools.screen_mocks.shop import (
     SHOP_SELL_PRICE_WINDOW_GRID,
     ShopCommand,
     ShopMode,
+    ShopOverlay,
     ShopPhase,
-    ShopScreenMock,
 )
 from input import Direction, InputButton, InputState
 from resources import FontResources
@@ -66,11 +66,11 @@ from systems import MAX_GOLD, InventorySystem, ShopSystem
 from text_catalog import TextCatalog
 
 
-class ShopScreenMockTest(unittest.TestCase):
+class ShopMenuTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.items = load_mock_items()
-        self.party = load_mock_party(self.items, load_mock_skills())
-        self.shops = load_mock_shops(self.items)
+        self.items = load_test_items()
+        self.party = load_test_party(self.items, load_test_skills())
+        self.shops = load_test_shops(self.items)
         self.inventory = InventorySystem.with_one_each(self.items)
         self.save_data = SaveData(gold=MAX_GOLD)
         self.system = ShopSystem(
@@ -80,13 +80,13 @@ class ShopScreenMockTest(unittest.TestCase):
             save_data=self.save_data,
         )
         self.invalid_action = Mock()
-        self.screen = ShopScreenMock(
+        self.screen = ShopOverlay(
             shop=self.shops[0],
             shop_system=self.system,
             party=self.party,
             inventory_system=self.inventory,
             save_data=self.save_data,
-            spells=load_mock_spells(),
+            spells=load_test_spells(),
             settings=Settings(),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
             fonts=FontResources(),
@@ -239,7 +239,7 @@ class ShopScreenMockTest(unittest.TestCase):
         self.assertIs(self.screen.phase, ShopPhase.QUANTITY)
         self.assertIsNone(self.screen.completion_message_window)
 
-    @patch("tools.screen_mocks.shop.Window.draw")
+    @patch("ui.shop.Window.draw")
     def test_selected_command_keeps_an_inactive_cursor(
         self,
         _draw_window: Mock,
@@ -268,7 +268,7 @@ class ShopScreenMockTest(unittest.TestCase):
             self.screen.update(InputState(cancel=InputButton(triggered=True)))
             self.assertIs(self.screen.phase, ShopPhase.ITEM)
 
-    @patch("tools.screen_mocks.shop.Window.draw")
+    @patch("ui.shop.Window.draw")
     def test_quantity_selection_keeps_inactive_item_cursor(
         self,
         _draw_window: Mock,
@@ -289,7 +289,7 @@ class ShopScreenMockTest(unittest.TestCase):
 
         self.screen.item_cursor.draw.assert_called_once_with()
 
-    @patch("tools.screen_mocks.shop.pyxel.blt")
+    @patch("ui.shop.pyxel.blt")
     def test_quantity_window_shows_current_total_guide_and_inline_arrows(
         self,
         blt: Mock,
@@ -476,7 +476,7 @@ class ShopScreenMockTest(unittest.TestCase):
         self.screen.party_panel.draw = Mock()
         self.screen.command_cursor.draw = Mock()
         self.screen.item_cursor.draw = Mock()
-        with patch("tools.screen_mocks.shop.Window.draw"):
+        with patch("ui.shop.Window.draw"):
             self.screen.draw()
 
         self.screen.party_panel.draw.assert_called_once_with(
@@ -485,8 +485,8 @@ class ShopScreenMockTest(unittest.TestCase):
 
     def test_equipped_marker_uses_fullwidth_japanese_glyph(self) -> None:
         with (
-            patch("tools.screen_mocks._shop_party.pyxel.blt"),
-            patch("tools.screen_mocks._shop_party.pyxel.text") as draw_text,
+            patch("ui.shop_party.pyxel.blt"),
+            patch("ui.shop_party.pyxel.text") as draw_text,
         ):
             self.screen.party_panel.draw(self.items["DAGGER"])
 
@@ -614,7 +614,7 @@ class ShopScreenMockTest(unittest.TestCase):
         self.screen.item_cursor.draw = Mock()
         self.screen.command_cursor.draw = Mock()
         self.screen.rare_cursor.draw = Mock()
-        with patch("tools.screen_mocks.shop.Window.draw"):
+        with patch("ui.shop.Window.draw"):
             self.screen.draw()
         self.screen.item_cursor.draw.assert_called_once_with()
         self.screen.update(InputState(confirm=InputButton(triggered=True)))

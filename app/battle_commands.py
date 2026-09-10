@@ -1,4 +1,4 @@
-"""Battle command availability rules independent of Pyxel and screen mocks."""
+"""Battle command availability rules independent of Pyxel and presentation."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ class BattleCommandContext:
     The member supplies equipment, base spell aptitude, and skill state.
     Battle state supplies temporary restrictions and the availability of
     escape and items. This boundary can incorporate new rules without
-    coupling them to Pyxel or a screen mock.
+    coupling them to Pyxel or a standalone test entry point.
     """
 
     silenced: bool = False

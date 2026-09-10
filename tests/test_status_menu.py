@@ -4,15 +4,18 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from tools._bootstrap import APP_ROOT as _APP_ROOT
+
 from app.member import BattleStats, HandHit
 from app.resistance import ResistanceType
 from app.resources import load_record_array
-from app.ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
-from tools.screen_mocks._fixtures import (
-    MOCK_PARTY_CHARACTER_KEYS,
-    load_mock_items,
+from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
+from tests.ui_test_support import (
+    TEST_PARTY_CHARACTER_KEYS,
+    StatusMenuHarness,
+    load_test_items,
 )
-from tools.screen_mocks.status import (
+from ui.status_menu import (
     ATTACK_VALUE_X,
     DUAL_ATTACK_VALUE_X,
     LOCALIZED_POSITIONS,
@@ -26,7 +29,6 @@ from tools.screen_mocks.status import (
     TRANSPARENT_INDEX,
     Settings,
     StatusSelectionPhase,
-    StatusScreenMock,
     attack_display,
     hit_display,
     pad,
@@ -51,7 +53,7 @@ def input_state(
     )
 
 
-class StatusScreenMockTest(unittest.TestCase):
+class StatusMenuTest(unittest.TestCase):
     def test_character_face_coordinates_match_faces_pc_sheet(self) -> None:
         expected = {
             "フィオラ": (0, 0),
@@ -84,19 +86,19 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_first_three_lines_use_localized_member_identity(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
-            patch("tools.screen_mocks.status.WindowFactory") as factory,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
+            patch("tests.ui_test_support.WindowFactory") as factory,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
 
-            mock = StatusScreenMock()
+            mock = StatusMenuHarness()
 
         self.assertEqual(
             tuple(member.definition.names["name_en"] for member in mock.party),
-            MOCK_PARTY_CHARACTER_KEYS,
+            TEST_PARTY_CHARACTER_KEYS,
         )
         self.assertEqual(
             [
@@ -207,15 +209,15 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_displays_abilities_increased_by_equipment(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock()
+            mock = StatusMenuHarness()
 
-        flower_crown = load_mock_items()["FLOWER CROWN"]
+        flower_crown = load_test_items()["FLOWER CROWN"]
         mock.member.equipment = mock.member.equipment.replaced(
             {EquipmentSlot.HEAD: flower_crown}
         )
@@ -228,16 +230,16 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_starts_from_supplied_member_without_opening_animation(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
-            patch("tools.screen_mocks.status.WindowFactory") as factory,
-            patch("tools.screen_mocks.status.WindowCursor"),
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
+            patch("tests.ui_test_support.WindowFactory") as factory,
+            patch("tests.ui_test_support.WindowCursor"),
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
 
-            mock = StatusScreenMock(member_index=2)
+            mock = StatusMenuHarness(member_index=2)
 
         self.assertEqual(mock.member_index, 2)
         self.assertEqual(mock.member.definition.key, "Alvan")
@@ -246,13 +248,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_member_without_mp_uses_shared_disabled_color(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock()
+            mock = StatusMenuHarness()
 
         mock.member_index = 4
         window = mock._build_window()
@@ -266,13 +268,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_favored_marker_is_eight_pixels_left_of_icon(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock()
+            mock = StatusMenuHarness()
 
         mock.member_index = 1
         mock._rebuild_window()
@@ -324,14 +326,14 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_dual_wield_attack_is_eight_pixels_left_of_single_attack(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            single = StatusScreenMock(member_index=0)
-            dual = StatusScreenMock(member_index=3)
+            single = StatusMenuHarness(member_index=0)
+            dual = StatusMenuHarness(member_index=3)
 
         self.assertIsNone(single.member.battle_stats.attack_left)
         self.assertIsNotNone(dual.member.battle_stats.attack_left)
@@ -369,13 +371,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_member_with_skills_has_confirm_guide_and_skill_targets(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock(member_index=4)
+            mock = StatusMenuHarness(member_index=4)
 
         self.assertEqual(
             (
@@ -399,13 +401,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_confirm_selects_skills_and_updates_bottom_description(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock(member_index=4)
+            mock = StatusMenuHarness(member_index=4)
 
         self.assertFalse(mock.update(input_state(confirm=True)))
 
@@ -444,13 +446,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_cancel_leaves_skill_selection_before_returning_to_menu(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock(member_index=1)
+            mock = StatusMenuHarness(member_index=1)
 
         mock.update(input_state(confirm=True))
         self.assertFalse(mock.update(input_state(cancel=True)))
@@ -463,13 +465,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_fiora_cannot_enter_skill_selection(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock(member_index=0)
+            mock = StatusMenuHarness(member_index=0)
 
         self.assertFalse(mock.update(input_state(confirm=True)))
         self.assertIs(mock.phase, StatusSelectionPhase.STATUS)
@@ -477,8 +479,8 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.skill_description_window)
 
     def test_right_navigation_wraps_from_dain_to_fiora(self) -> None:
-        mock = StatusScreenMock.__new__(StatusScreenMock)
-        mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
+        mock = StatusMenuHarness.__new__(StatusMenuHarness)
+        mock.party = tuple(Mock() for _ in TEST_PARTY_CHARACTER_KEYS)
         mock.member_index = 5
         mock.settings = Settings()
         mock.phase = StatusSelectionPhase.STATUS
@@ -496,8 +498,8 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertFalse(returned)
 
     def test_left_navigation_wraps_from_fiora_to_dain(self) -> None:
-        mock = StatusScreenMock.__new__(StatusScreenMock)
-        mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
+        mock = StatusMenuHarness.__new__(StatusMenuHarness)
+        mock.party = tuple(Mock() for _ in TEST_PARTY_CHARACTER_KEYS)
         mock.member_index = 0
         mock.settings = Settings()
         mock.phase = StatusSelectionPhase.STATUS
@@ -520,8 +522,8 @@ class StatusScreenMockTest(unittest.TestCase):
         )
         for button_name, start, expected in cases:
             with self.subTest(button_name=button_name):
-                mock = StatusScreenMock.__new__(StatusScreenMock)
-                mock.party = tuple(Mock() for _ in MOCK_PARTY_CHARACTER_KEYS)
+                mock = StatusMenuHarness.__new__(StatusMenuHarness)
+                mock.party = tuple(Mock() for _ in TEST_PARTY_CHARACTER_KEYS)
                 mock.member_index = start
                 mock.settings = Settings()
                 mock.phase = StatusSelectionPhase.STATUS
@@ -541,8 +543,8 @@ class StatusScreenMockTest(unittest.TestCase):
         japanese_font = object()
         english_font = object()
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.side_effect = (
@@ -555,7 +557,7 @@ class StatusScreenMockTest(unittest.TestCase):
                 if language is Language.ENGLISH
                 else 0
             )
-            mock = StatusScreenMock()
+            mock = StatusMenuHarness()
 
         mock.settings = mock.settings.with_language(Language.ENGLISH)
         mock._rebuild_window()
@@ -616,13 +618,13 @@ class StatusScreenMockTest(unittest.TestCase):
 
     def test_chinese_fixed_labels_are_rebuilt_from_text_catalog(self) -> None:
         with (
-            patch("tools.screen_mocks.status.ImageResources") as images,
-            patch("tools.screen_mocks.status.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = object()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusScreenMock()
+            mock = StatusMenuHarness()
 
         mock.settings = mock.settings.with_language(
             Language.SIMPLIFIED_CHINESE
@@ -662,7 +664,7 @@ class StatusScreenMockTest(unittest.TestCase):
         self.assertEqual(texts[(30, 41)], "耐性")
 
     def test_cancel_returns_to_menu_without_changing_language(self) -> None:
-        mock = StatusScreenMock.__new__(StatusScreenMock)
+        mock = StatusMenuHarness.__new__(StatusMenuHarness)
         mock.settings = Settings()
         mock.phase = StatusSelectionPhase.STATUS
         mock.input_reader = Mock()
@@ -676,7 +678,7 @@ class StatusScreenMockTest(unittest.TestCase):
         mock._rebuild_window.assert_not_called()
 
     def test_draws_all_windows_before_face(self) -> None:
-        mock = StatusScreenMock.__new__(StatusScreenMock)
+        mock = StatusMenuHarness.__new__(StatusMenuHarness)
         mock.faces = object()
         mock.party = (Mock(face_position=Mock(x=64, y=96)),)
         mock.member_index = 0
@@ -690,7 +692,7 @@ class StatusScreenMockTest(unittest.TestCase):
         second_window.draw.side_effect = lambda: draw_order.append("second_window")
 
         with patch(
-            "tools.screen_mocks.status.pyxel.blt",
+            "ui.status_menu.pyxel.blt",
             side_effect=lambda *args: draw_order.append("face"),
         ) as blt:
             mock.draw()

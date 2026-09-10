@@ -174,37 +174,28 @@ npm run tools:event-editor
 SE、宣言済みグローバルフラグは一覧から選択できる。JSONを手編集する場合も
 `npm run events:validate` と `npm run events:build` が同じ検証処理を使用する。
 
-## Screen Mocks
+## Battle Test
 
-画面モックの起動処理と疑似状態は `tools/screen_mocks/` に置く。仕様が確定して本編でも使う画面は
-`app/scenes/` のSceneまたは `app/ui/` のOverlay／表示部品とし、モックから同じ実装へ疑似状態を渡す。
-戦闘の状態・更新・描画は `app/scenes/battle.py` が所有し、下記の `battle.py` は本番Sceneへ
-テスト用パーティ、敵編成、全アイテム1個ずつの所持状態を渡して単独実行するだけの入口である。
+戦闘の状態・更新・描画は `app/scenes/battle.py` が所有する。`tools/screen_mocks/battle.py` は
+本番Sceneへテスト用パーティ、敵編成、全アイテム1個ずつの所持状態を渡して単独実行する入口である。
+本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内の動線と `app/ui/` を直接対象にした
+回帰テストで確認する。
 
 ```text
 tools/screen_mocks/
 ├── _runtime.py             # 共通初期化、資産、入力設定
 ├── _runner.py              # 例外表示と終了コード
-├── _fixtures.py            # 疑似パーティなどの共有fixture
-├── battle.py               # 本番BattleSceneをfixtureで単独起動
-├── status.py               # 本番Overlayへ疑似状態を渡す互換アダプター
-├── spell.py                # 本番Overlayへ疑似状態を渡す互換アダプター
-├── item.py                 # 本番Overlayへ疑似状態を渡す互換アダプター
-├── equipment.py            # 本番Overlayへ疑似状態を渡す互換アダプター
-└── shop.py                 # 本番ショップOverlayの互換アダプター
+├── _fixtures.py            # 疑似パーティなどの戦闘fixture
+└── battle.py               # 本番BattleSceneをfixtureで単独起動
 ```
 
 Pyxel、共通アセット、パレット、Q終了入力は `_runtime.py`、想定内エラーの表示と
 終了コードは `_runner.py` へ集約する。ゲームデータJSON自体は本編と同じ
-`app.resources.load_record_array()` で読み、モック固有の疑似パーティ構築だけを
-`_fixtures.py` に置く。Settings、SaveData、画面固有画像は起点となるComposition Rootが所有し、
-`app/ui/item_menu.py`、`equipment_menu.py`、`status_menu.py`、`spell_menu.py`、`shop.py` へ
-必要なものだけを明示的に渡す。すべてのモックを管理する巨大な共通Appは作らない。
+`app.resources.load_record_array()` で読み、戦闘テスト固有の疑似パーティ構築だけを
+`_fixtures.py` に置く。
 
 確定済みのフィールド、メインメニュー、接続済み子画面はゲーム本体へ移行した。
 起動方法と仕様は [`docs/features/field.md`](../docs/features/field.md) を参照する。
-
-### Battle Test
 
 `background/bg_nector`、キャラクター、モンスター、ウィンドウなどの本番用リソースと
 本編の `BattleScene` を使い、指定したパーティ状態と敵編成で戦闘を単独実行する。

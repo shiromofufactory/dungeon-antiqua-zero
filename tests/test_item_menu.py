@@ -4,10 +4,12 @@ from contextlib import nullcontext
 import unittest
 from unittest.mock import Mock, call, patch
 
+from tools._bootstrap import APP_ROOT as _APP_ROOT
+
 from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
 from app.rendering import DIMMED_PALETTE
-from tools.screen_mocks._party_status import (
+from ui.party_status import (
     PARTY_COLUMN_WIDTH,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
@@ -17,7 +19,7 @@ from tools.screen_mocks._party_status import (
     PARTY_TEXT_X,
     PARTY_WINDOW_GRID,
 )
-from tools.screen_mocks.item import (
+from ui.item_menu import (
     CATEGORY_CURSOR_X,
     CATEGORY_TEXT_X,
     CATEGORY_TEXT_Y,
@@ -43,16 +45,16 @@ from tools.screen_mocks.item import (
     ITEM_TEXT_X,
     ITEM_VISIBLE_COUNT,
     ItemCategory,
-    ItemScreenMock,
     ItemSelectionPhase,
 )
+from tests.ui_test_support import ItemMenuHarness
 from state import Language, Settings
 from systems import InventorySystem
 
 
-class ItemScreenMockTest(unittest.TestCase):
+class ItemMenuTest(unittest.TestCase):
     def test_builds_da2_layout_with_every_defined_item_owned_once(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.assertEqual(
             tuple(
@@ -146,10 +148,10 @@ class ItemScreenMockTest(unittest.TestCase):
     def test_item_counts_are_right_aligned_without_moving_one_digit_count(
         self,
     ) -> None:
-        items = ItemScreenMock().items
+        items = ItemMenuHarness().items
         first_key = next(iter(items))
         inventory = InventorySystem(items, {first_key: 10})
-        mock = ItemScreenMock(items=items, inventory_system=inventory)
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
 
         count_text = mock.item_list_window.texts[1]
         one_digit_width = count_text.font.text_width("１")
@@ -161,7 +163,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     @staticmethod
-    def select_item(mock: ItemScreenMock, key: str) -> None:
+    def select_item(mock: ItemMenuHarness, key: str) -> None:
         mock.phase = ItemSelectionPhase.ITEM
         mock.category_cursor.active = False
         mock.selected_item_index = next(
@@ -171,7 +173,7 @@ class ItemScreenMockTest(unittest.TestCase):
         mock._build_item_windows()
 
     def test_displays_type_requirement_stats_and_ability_modifiers(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "ELIKA")
 
@@ -224,7 +226,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_preserves_authored_spell_description_lines_without_wrapping(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "BOOK of FIRE")
         lines = [text.text for text in mock.item_info_window.texts]
@@ -262,7 +264,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertNotIn("%NETHER%コンフュージョン", discord_lines)
 
     def test_omits_zero_stats_and_keeps_negative_sign(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "IRON ARMOR")
 
@@ -277,7 +279,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_displays_two_handed_type_and_each_reach_wording(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "FIRE SPEAR")
         fire_spear_lines = [text.text for text in mock.item_info_window.texts]
@@ -309,7 +311,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_displays_equipment_slot_icons_before_each_armor_type(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         expected = {
             "IRON SHIELD": "%SHIELD%たて",
@@ -323,7 +325,7 @@ class ItemScreenMockTest(unittest.TestCase):
                 self.assertEqual(mock.item_info_window.texts[1].text, type_line)
 
     def test_displays_only_requirements_as_dedicated_equipment(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         expected = {
             "DRAGON HOOD": "ドラゴニュート　せんよう",
@@ -342,7 +344,7 @@ class ItemScreenMockTest(unittest.TestCase):
                 )
 
     def test_displays_dark_attribute_and_drain_effect_separately(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "CHIZAKURA!")
         lines = [text.text for text in mock.item_info_window.texts]
@@ -361,7 +363,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_displays_defense_down_and_every_monster_tribe(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "LABRYS")
         self.assertIn(
@@ -389,7 +391,7 @@ class ItemScreenMockTest(unittest.TestCase):
                 )
 
     def test_displays_each_resistance_on_its_own_line(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "EAN SI MANTLE")
         resistance_lines = [
@@ -414,7 +416,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_uses_da2_field_healing_wording_for_either_sign(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         self.select_item(mock, "DAYBRINGER")
         self.assertIn(
@@ -429,7 +431,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_reuses_spell_party_panel_layout_and_faces(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         placements = {(text.x, text.y): text.text for text in mock.party_window.texts}
 
         self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
@@ -439,7 +441,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
         mock.windows = tuple(Mock() for _ in mock.windows)
         mock.category_cursor = Mock()
-        with patch("tools.screen_mocks._party_status.pyxel.blt") as blt:
+        with patch("ui.party_status.pyxel.blt") as blt:
             mock.draw()
 
         self.assertEqual(
@@ -462,13 +464,13 @@ class ItemScreenMockTest(unittest.TestCase):
     def test_dims_only_members_who_cannot_equip_selected_equipment(self) -> None:
         palette_shifter = Mock()
         palette_shifter.shifted.side_effect = lambda _name: nullcontext()
-        mock = ItemScreenMock(palette_shifter=palette_shifter)
+        mock = ItemMenuHarness(palette_shifter=palette_shifter)
 
         self.assertEqual(mock.dimmed_member_indexes, frozenset())
         self.select_item(mock, "ELIKA")
         self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 1, 2, 3)))
 
-        with patch("tools.screen_mocks._party_status.pyxel.blt") as blt:
+        with patch("ui.party_status.pyxel.blt") as blt:
             mock.party_panel.draw_faces(mock.dimmed_member_indexes)
 
         self.assertEqual(blt.call_count, len(mock.party_panel.party))
@@ -481,8 +483,8 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.dimmed_member_indexes, frozenset())
 
     def test_category_spacing_fits_japanese_and_english_inside_the_frame(self) -> None:
-        japanese = ItemScreenMock()
-        english = ItemScreenMock(
+        japanese = ItemMenuHarness()
+        english = ItemMenuHarness(
             settings=Settings(language=Language.ENGLISH),
         )
 
@@ -517,7 +519,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertLessEqual(important_end, right_frame_start)
 
     def test_item_selection_scrolls_one_row_at_the_bottom_edge(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
@@ -557,7 +559,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_item_scroll_indicators_reflect_vertical_input(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         mock.update(InputState(confirm=InputButton(True, True)))
 
         mock.update(InputState(navigation=Direction.DOWN))
@@ -570,7 +572,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.item_list_window.vertical_navigation_pressed, -1)
 
     def test_page_input_moves_the_scrolling_viewport_by_ten_rows(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(navigation=Direction.DOWN))
 
@@ -582,7 +584,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertGreaterEqual(len(mock.item_info_window.texts), 2)
 
     def test_japanese_item_name_is_fully_displayed_in_the_list(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         mock.phase = ItemSelectionPhase.ITEM
         mock.category_cursor.active = False
         mock.selected_item_index = next(
@@ -601,7 +603,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(name.text, "こおりのくさりかたびら")
 
     def test_english_item_name_is_fully_displayed_in_the_list(self) -> None:
-        mock = ItemScreenMock(settings=Settings(language=Language.ENGLISH))
+        mock = ItemMenuHarness(settings=Settings(language=Language.ENGLISH))
         mock.phase = ItemSelectionPhase.ITEM
         mock.category_cursor.active = False
         mock.selected_item_index = next(
@@ -623,7 +625,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_important_items_stay_empty_and_cannot_enter_item_selection(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         for _ in range(3):
             mock.update(InputState(navigation=Direction.RIGHT))
 
@@ -639,7 +641,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.category_cursor.active)
 
     def test_drop_confirmation_uses_da2_text_and_discards_one_item(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         discarded = mock.inventory[0]
 
         mock.update(InputState(navigation=Direction.RIGHT))
@@ -703,7 +705,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertIn(discarded, mock.category_items)
 
     def test_category_summary_updates_owned_count_but_keeps_recorded_count(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -722,10 +724,10 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_recorded_total_stays_unknown_until_every_item_is_recorded(self) -> None:
-        items = ItemScreenMock().items
+        items = ItemMenuHarness().items
         first_key = next(iter(items))
         inventory = InventorySystem(items, {first_key: 1})
-        mock = ItemScreenMock(items=items, inventory_system=inventory)
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
 
         self.assertEqual(
             [text.text for text in mock.item_info_window.texts],
@@ -738,7 +740,7 @@ class ItemScreenMockTest(unittest.TestCase):
         )
 
     def test_drop_confirmation_no_and_cancel_keep_the_item(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
         item = mock.inventory[0]
         mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -758,7 +760,7 @@ class ItemScreenMockTest(unittest.TestCase):
 
     def test_price_zero_item_triggers_invalid_action_without_confirmation(self) -> None:
         invalid_action = Mock()
-        mock = ItemScreenMock(on_invalid_action=invalid_action)
+        mock = ItemMenuHarness(on_invalid_action=invalid_action)
         mock.update(InputState(navigation=Direction.RIGHT))
         self.select_item(mock, "ELIKA")
         protected = mock.selected_item
@@ -772,10 +774,10 @@ class ItemScreenMockTest(unittest.TestCase):
         invalid_action.assert_called_once_with()
 
     def test_drop_decrements_quantity_before_removing_item_type(self) -> None:
-        items = ItemScreenMock().items
+        items = ItemMenuHarness().items
         first_key = next(iter(items))
         inventory = InventorySystem(items, {first_key: 2})
-        mock = ItemScreenMock(items=items, inventory_system=inventory)
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
         mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -786,7 +788,7 @@ class ItemScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.item_counts[first_key], 1)
 
     def test_cancel_returns_to_category_then_to_main_menu(self) -> None:
-        mock = ItemScreenMock()
+        mock = ItemMenuHarness()
 
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertFalse(mock.update(InputState(cancel=InputButton(True, True))))

@@ -160,7 +160,7 @@ volumes、speedを変更しない。
 
 攻撃ポーズは `content/battle/attack_poses.json` を正本とし、`npm run attack-poses:build` で
 `app/effects/attack_poses.json` を生成する。アイテムの `weapon_img` と枝番1・2を通常攻撃の
-振り上げ・振り下ろしへ対応させる。ゲームと戦闘モックは生成済みデータだけを読み、制作JSONを
+振り上げ・振り下ろしへ対応させる。ゲームと単独戦闘テストは生成済みデータだけを読み、制作JSONを
 直接参照しない。
 
 ## マップ制作データとゲーム用データ生成

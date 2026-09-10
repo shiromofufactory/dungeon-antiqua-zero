@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, call, patch
 
-from tools.screen_mocks.equipment import (
+from tools._bootstrap import APP_ROOT as _APP_ROOT
+
+from ui.equipment_menu import (
     AUTO_KEY,
     EQUIPPABLE_ICON_ORDER,
     FACE_SIZE,
@@ -34,9 +36,9 @@ from tools.screen_mocks.equipment import (
     TOLERANCE_ICON_Y,
     TOLERANCE_LABEL_Y,
     TOLERANCE_PREVIEW_Y,
-    EquipmentScreenMock,
     EquipmentSelectionPhase,
 )
+from tests.ui_test_support import EquipmentMenuHarness
 from input import Direction, InputButton, InputState
 from item import ItemEquipType
 from member import BattleStats, EquipmentSlot, HandHit, ProficiencyKind
@@ -44,22 +46,22 @@ from state import Language, Settings
 from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 
 
-class EquipmentScreenMockTest(unittest.TestCase):
+class EquipmentMenuTest(unittest.TestCase):
     def build_mock(
         self,
         *,
         member_index: int = 0,
         on_invalid_action=None,
-    ) -> EquipmentScreenMock:
+    ) -> EquipmentMenuHarness:
         font = object()
         with (
-            patch("tools.screen_mocks.equipment.ImageResources") as images,
-            patch("tools.screen_mocks.equipment.FontResources") as fonts,
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = font
             fonts.return_value.baseline_offset_for.return_value = 0
-            return EquipmentScreenMock(
+            return EquipmentMenuHarness(
                 member_index=member_index,
                 on_invalid_action=on_invalid_action,
             )
@@ -130,7 +132,7 @@ class EquipmentScreenMockTest(unittest.TestCase):
             3,
         )
 
-    @patch("tools.screen_mocks.equipment.pyxel.blt")
+    @patch("ui.equipment_menu.pyxel.blt")
     def test_equipment_icons_use_two_pixel_gaps(self, blt: Mock) -> None:
         mock = self.build_mock(member_index=4)
         kinds = mock._equippable_proficiency_kinds()
@@ -163,7 +165,7 @@ class EquipmentScreenMockTest(unittest.TestCase):
             )
         )
 
-    @patch("tools.screen_mocks.equipment.pyxel.text")
+    @patch("ui.equipment_menu.pyxel.text")
     def test_weapon_levels_use_right_aligned_pyxel_text_below_icons(
         self,
         text: Mock,
@@ -218,7 +220,7 @@ class EquipmentScreenMockTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            EquipmentScreenMock._stat_displays(
+            EquipmentMenuHarness._stat_displays(
                 stats,
                 include_hit_bonus=False,
             ),
@@ -679,8 +681,8 @@ class EquipmentScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.main_window.active)
         self.assertTrue(mock.item_list_window.active)
 
-    @patch("tools.screen_mocks.equipment.pyxel.text")
-    @patch("tools.screen_mocks.equipment.pyxel.blt")
+    @patch("ui.equipment_menu.pyxel.text")
+    @patch("ui.equipment_menu.pyxel.blt")
     def test_draws_current_member_face(self, blt, _text) -> None:
         mock = self.build_mock(member_index=1)
         for window in mock.windows:
@@ -704,8 +706,8 @@ class EquipmentScreenMockTest(unittest.TestCase):
             blt.call_args_list,
         )
 
-    @patch("tools.screen_mocks.equipment.pyxel.text")
-    @patch("tools.screen_mocks.equipment.pyxel.blt")
+    @patch("ui.equipment_menu.pyxel.text")
+    @patch("ui.equipment_menu.pyxel.blt")
     def test_item_selection_draws_inactive_source_and_active_item_cursors(
         self,
         _blt,

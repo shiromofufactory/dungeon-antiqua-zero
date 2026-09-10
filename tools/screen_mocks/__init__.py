@@ -1,1 +1,1 @@
-"""Standalone screen-layout mocks for development."""
+"""Standalone production BattleScene test entry point."""

@@ -4,10 +4,12 @@ from dataclasses import replace
 import unittest
 from unittest.mock import Mock, call, patch
 
+from tools._bootstrap import APP_ROOT as _APP_ROOT
+
 from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
 from app.spell import SpellType
-from tools.screen_mocks.spell import (
+from ui.spell_menu import (
     FACE_SIZE,
     GUIDE_WINDOW_GRID,
     MEMBER_CURSOR_X,
@@ -32,15 +34,15 @@ from tools.screen_mocks.spell import (
     SPELL_TEXT_X,
     SPELL_TYPE_ORDER,
     SPELL_WINDOW_GRID,
-    SpellMockDataError,
+    SpellMenuDataError,
     SpellSelectionPhase,
-    SpellScreenMock,
 )
+from tests.ui_test_support import SpellMenuHarness
 
 
-class SpellScreenMockTest(unittest.TestCase):
+class SpellMenuTest(unittest.TestCase):
     def test_builds_da2_layout_with_three_spell_types_per_level_row(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
 
         self.assertEqual(
             tuple(
@@ -94,7 +96,7 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.guide_window.texts, ())
 
     def test_bottom_party_uses_five_faces_and_three_digit_hp_fields(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
         placements = {(text.x, text.y): text.text for text in mock.party_window.texts}
 
         self.assertEqual(len(mock.party), 6)
@@ -114,7 +116,7 @@ class SpellScreenMockTest(unittest.TestCase):
         mock.caster_cursor = Mock()
         mock.spell_cursor = Mock()
         mock.member_cursor = Mock()
-        with patch("tools.screen_mocks.spell.pyxel.blt") as blt:
+        with patch("ui.spell_menu.pyxel.blt") as blt:
             mock.draw()
 
         expected_faces = [
@@ -148,7 +150,7 @@ class SpellScreenMockTest(unittest.TestCase):
         mock.member_cursor.draw.assert_not_called()
 
     def test_selects_caster_before_moving_between_spells(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
 
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(navigation=Direction.RIGHT))
@@ -168,7 +170,7 @@ class SpellScreenMockTest(unittest.TestCase):
         )
 
     def test_left_and_right_select_caster_before_spell_confirmation(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
 
         mock.update(InputState(navigation=Direction.RIGHT))
 
@@ -181,7 +183,7 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_spell.key, "FIRE1")
 
     def test_cancel_returns_from_spell_to_caster_then_to_menu(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
 
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertFalse(mock.update(InputState(cancel=InputButton(True, True))))
@@ -193,7 +195,7 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))
 
     def test_page_buttons_switch_member_and_cancel_returns_to_menu(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
 
         self.assertFalse(
             mock.update(InputState(previous_page=InputButton(True, True)))
@@ -215,7 +217,7 @@ class SpellScreenMockTest(unittest.TestCase):
         )
 
     def test_confirm_does_not_use_selected_spell(self) -> None:
-        mock = SpellScreenMock(member_index=1)
+        mock = SpellMenuHarness(member_index=1)
 
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(navigation=Direction.RIGHT))
@@ -226,7 +228,7 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.member.mp, mock.member.max_mp)
 
     def test_target_cursor_appears_only_after_usable_spell_is_selected(self) -> None:
-        mock = SpellScreenMock(member_index=1)
+        mock = SpellMenuHarness(member_index=1)
         self.assertFalse(mock.member_cursor.active)
 
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -253,34 +255,34 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.member_cursor.active)
 
     def test_spell_cursor_draws_only_after_caster_confirmation(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
         mock.windows = tuple(Mock() for _ in mock.windows)
         mock.caster_cursor = Mock(active=True)
         mock.spell_cursor = Mock(selected_key="FIRE1", active=False)
         mock.member_cursor = Mock(active=False)
 
-        with patch("tools.screen_mocks.spell.pyxel.blt"):
+        with patch("ui.spell_menu.pyxel.blt"):
             mock.draw()
         mock.caster_cursor.draw.assert_called_once_with()
         mock.spell_cursor.draw.assert_not_called()
 
         mock.phase = SpellSelectionPhase.SPELL
-        with patch("tools.screen_mocks.spell.pyxel.blt"):
+        with patch("ui.spell_menu.pyxel.blt"):
             mock.draw()
         self.assertEqual(mock.caster_cursor.draw.call_count, 2)
         mock.spell_cursor.draw.assert_called_once_with()
         mock.member_cursor.draw.assert_not_called()
 
         mock.phase = SpellSelectionPhase.TARGET
-        with patch("tools.screen_mocks.spell.pyxel.blt"):
+        with patch("ui.spell_menu.pyxel.blt"):
             mock.draw()
         self.assertEqual(mock.caster_cursor.draw.call_count, 3)
         self.assertEqual(mock.spell_cursor.draw.call_count, 2)
         mock.member_cursor.draw.assert_called_once_with()
 
     def test_level_zero_spell_appears_only_when_event_key_is_supplied(self) -> None:
-        without_event = SpellScreenMock()
-        with_event = SpellScreenMock(event_spell_keys={"TELEPORT"})
+        without_event = SpellMenuHarness()
+        with_event = SpellMenuHarness(event_spell_keys={"TELEPORT"})
         level_zero_y = SPELL_FIRST_Y + 9 * SPELL_ROW_HEIGHT
 
         self.assertNotIn(
@@ -295,7 +297,7 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertEqual((teleport.x, teleport.y), (SPELL_CURSOR_X[0], level_zero_y))
 
     def test_member_without_spell_aptitude_has_no_cursor_selection(self) -> None:
-        mock = SpellScreenMock(member_index=4)
+        mock = SpellMenuHarness(member_index=4)
 
         self.assertEqual(mock.member.definition.key, "Ragna")
         self.assertEqual(mock.spell_window.texts, ())
@@ -306,13 +308,13 @@ class SpellScreenMockTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.CASTER)
 
     def test_duplicate_type_and_level_is_rejected(self) -> None:
-        mock = SpellScreenMock()
+        mock = SpellMenuHarness()
         fire = mock.spells["FIRE1"]
         spells = dict(mock.spells)
         spells["DUPLICATE"] = replace(fire, key="DUPLICATE")
 
-        with self.assertRaisesRegex(SpellMockDataError, "重複"):
-            SpellScreenMock(spells=spells)
+        with self.assertRaisesRegex(SpellMenuDataError, "重複"):
+            SpellMenuHarness(spells=spells)
 
 
 if __name__ == "__main__":
