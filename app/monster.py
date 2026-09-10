@@ -37,27 +37,38 @@ class MonsterTribe(StrEnum):
 
 @dataclass(frozen=True)
 class MonsterCombatStats:
-    """Immutable physical-combat values read from monster master data."""
+    """Immutable physical and spell-defense values from monster master data."""
 
     attack: int
     hit: int
     defense: int
     evasion: int
+    spell_resistance: int = 0
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MonsterCombatStats:
-        """Read the four required non-negative combat values from one record."""
+        """Read the required non-negative combat values from one record."""
 
         if not isinstance(record, Mapping):
             raise MonsterDataError("monster must be an object")
         values: dict[str, int] = {}
-        for field_name in ("attack", "hit", "defense", "evasion"):
+        for field_name in (
+            "attack",
+            "hit",
+            "defense",
+            "evasion",
+            "resistance",
+        ):
             value = record.get(field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise MonsterDataError(
                     f"monster.{field_name} must be a non-negative integer"
                 )
-            values[field_name] = value
+            values[
+                "spell_resistance" if field_name == "resistance" else field_name
+            ] = value
+        if values["spell_resistance"] > 100:
+            raise MonsterDataError("monster.resistance must not exceed 100")
         return cls(**values)
 
 

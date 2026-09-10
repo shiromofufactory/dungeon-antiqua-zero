@@ -42,6 +42,9 @@ from tools.screen_mocks.battle import (
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
     DAMAGE_NUMBER_SPRITE_X,
     DAMAGE_NUMBER_SPRITE_Y,
+    AFFINITY_ICON_SOURCE_X,
+    WEAK_ICON_SOURCE_Y,
+    RESIST_ICON_SOURCE_Y,
     HEALING_NUMBER_SPRITE_Y,
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
@@ -79,6 +82,8 @@ from tools.screen_mocks.battle import (
     BattleActionPresentation,
     BattleAttackPresentation,
     BattleHealingPopup,
+    BattleAffinityPopup,
+    BattleSpellDamagePopup,
     BattleMockCharacter,
     BattleGlobalCommand,
     BattleItemCandidate,
@@ -119,8 +124,14 @@ from battle_timeline import (
     complete_timeline_action,
 )
 from localization import Localizer
-from member import EquipmentSlot, MAX_INTERNAL_LEVEL, MIN_INTERNAL_LEVEL
-from battle_magic import member_spell_ability
+from member import (
+    EquipmentSlot,
+    MAX_INTERNAL_LEVEL,
+    MIN_INTERNAL_LEVEL,
+    ProficiencyKind,
+)
+from battle_magic import SpellAffinity, member_spell_ability, member_spell_modifier
+from resistance import ResistanceType
 from state import Language
 from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
@@ -157,6 +168,31 @@ _JAPANESE_COMMAND_LABELS = {
     BattleCommand.ITEM: "アイテム",
     BattleCommand.FORMATION: "こうたい",
 }
+
+
+def _damage_test_monster(
+    index: int = 0,
+    *,
+    hp: int = 10_000,
+    spell_resistance: int = 0,
+    weaknesses: frozenset[ResistanceType] = frozenset(),
+    resistances: frozenset[ResistanceType] = frozenset(),
+) -> BattleMockMonster:
+    return BattleMockMonster(
+        key=f"damage-monster-{index}",
+        names={},
+        image_id=str(index),
+        width=64,
+        height=64,
+        icon_x=0,
+        icon_y=0,
+        is_front_row=True,
+        state=MonsterBattleState(max_hp=hp),
+        agility=1,
+        combat_stats=MonsterCombatStats(0, 0, 0, 0, spell_resistance),
+        weaknesses=weaknesses,
+        resistances=resistances,
+    )
 
 
 class BattleScreenMockTest(unittest.TestCase):
@@ -1364,6 +1400,54 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIs(mock.result, BattleResult.VICTORY)
         mock._complete_current_turn.assert_not_called()
 
+    def test_simultaneous_spell_defeats_play_each_monster_death_in_order(self) -> None:
+        monsters = (_damage_test_monster(0, hp=1), _damage_test_monster(1, hp=1))
+        for monster in monsters:
+            monster.state.defeat()
+        actor = object()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = monsters
+        mock._timeline_order = TimelineOrder(
+            (
+                TimelineEntry(actor, 10, 64.0),
+                TimelineEntry(monsters[0], 10, 50.0),
+                TimelineEntry(monsters[1], 10, 40.0),
+            )
+        )
+        mock.timeline = mock._timeline_order.actors
+        mock.phase = BattleMockPhase.MONSTER_DEATH
+        mock.dying_monster_index = 0
+        mock.monster_death_animation = MonsterDeathAnimation()
+        mock.pending_monster_death_indexes = [1]
+        mock.action_party_index = None
+        mock.target_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.palette_shifter = Mock()
+        mock._complete_current_turn = Mock()
+        mock.result = None
+        frame_count = (
+            MONSTER_DEATH_TINT_FRAME_COUNT
+            + MONSTER_DEATH_BRIGHTEN_FRAME_COUNT
+            + MONSTER_DEATH_DISSOLVE_FRAME_COUNT
+        )
+
+        with patch("scenes.battle.play_se") as play_se:
+            for _frame in range(frame_count):
+                mock._update_monster_death_animation()
+
+            self.assertEqual(mock.dying_monster_index, 1)
+            self.assertNotIn(monsters[0], mock.timeline)
+            self.assertIn(monsters[1], mock.timeline)
+            self.assertEqual(mock.pending_monster_death_indexes, [])
+
+            for _frame in range(frame_count):
+                mock._update_monster_death_animation()
+
+        play_se.assert_called_once_with(BATTLE_MONSTER_DEATH_SE_ID)
+        self.assertNotIn(monsters[1], mock.timeline)
+        self.assertIs(mock.result, BattleResult.VICTORY)
+        mock._complete_current_turn.assert_not_called()
+
     def test_monster_death_draw_uses_shifted_palette_and_dither(self) -> None:
         monster = BattleMockMonster(
             key="Coyote",
@@ -1921,12 +2005,14 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.selected_target_index = 0
         mock.selectable_party_target_indexes = ()
         mock.selected_party_target_index = None
-        mock.monsters = (SimpleNamespace(width=64, height=64),)
+        mock.monsters = (_damage_test_monster(),)
         mock.target_cursor = SimpleNamespace(active=True)
         mock.party_target_cursor = None
         mock.all_target_cursors = ()
         mock._refresh_monster_name_colors = Mock()
         mock._complete_current_turn = Mock()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
         before_mp = mock.party[0].mp
 
         with patch("scenes.battle.play_se") as play_se:
@@ -2148,6 +2234,121 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
+    def test_fire_damage_uses_member_modifier_and_da2_weakness(self) -> None:
+        spell = load_mock_spells()["FIRE1"]
+        definition = SpellEffectDefinition.from_record(
+            spell.key,
+            {
+                "kind": "target_sprite",
+                "image_id": "effects/spells32",
+                "row": 0,
+                "frame_count": 2,
+                "frames_per_pattern": 2,
+                "offset": {"ally": [0, 0], "enemy": [0, 0]},
+                "flash_color": None,
+                "se_id": None,
+            },
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.action_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.monsters = (
+            _damage_test_monster(
+                weaknesses=frozenset((ResistanceType.FIRE,)),
+            ),
+        )
+        mock.spell_effects = {spell.key: definition}
+        mock.spell_effect_renderer = Mock()
+        mock.palette_shifter = Mock()
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+        mock._begin_action_return = Mock()
+
+        with patch("scenes.battle.random.random", return_value=0.0):
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        actor = mock.party[0]
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=actor.proficiency(ProficiencyKind.MYSTIC).level,
+            internal_level=actor.internal_level,
+        )
+        expected_damage = int(spell.intensity * modifier * 0.20 * 4)
+        result_frame = definition.total_frames - SPELL_RESULT_OVERLAP_FRAME_COUNT
+        updates_until_result = max(1, result_frame)
+        for _frame in range(updates_until_result):
+            mock._update_action_presentation()
+
+        self.assertEqual(mock.monsters[0].state.hp, 10_000 - expected_damage)
+        self.assertEqual(mock.spell_damage_popups[0].damage, expected_damage)
+        self.assertEqual(
+            (mock.spell_damage_popups[0].x, mock.spell_damage_popups[0].y),
+            (36, 112),
+        )
+        self.assertEqual(
+            (
+                mock.affinity_popups[0].affinity,
+                mock.affinity_popups[0].x,
+                mock.affinity_popups[0].y,
+            ),
+            (SpellAffinity.WEAK, 24, 76),
+        )
+
+        for _frame in range(definition.total_frames - updates_until_result):
+            mock._update_action_presentation()
+
+        mock._begin_action_return.assert_called_once_with(complete_turn=True)
+        self.assertEqual(len(mock.spell_damage_popups), 1)
+        self.assertEqual(len(mock.affinity_popups), 1)
+
+    def test_spell_damage_popup_uses_standard_damage_sprite_row(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.spell_damage_popups = [BattleSpellDamagePopup(100, 80, 12)]
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_spell_damage_popups()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(92, 78, 0, DAMAGE_NUMBER_SPRITE_X + 8, 0, 8, 8, 1),
+                call(100, 78, 0, DAMAGE_NUMBER_SPRITE_X + 16, 0, 8, 8, 1),
+            ],
+        )
+
+    def test_weak_and_resist_popups_use_the_registered_bank_zero_sprites(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.affinity_popups = [
+            BattleAffinityPopup(10, 20, SpellAffinity.WEAK),
+            BattleAffinityPopup(30, 40, SpellAffinity.RESIST),
+        ]
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_affinity_popups()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(10, 20, 0, AFFINITY_ICON_SOURCE_X, WEAK_ICON_SOURCE_Y, 24, 8, 1),
+                call(30, 40, 0, AFFINITY_ICON_SOURCE_X, RESIST_ICON_SOURCE_Y, 24, 8, 1),
+            ],
+        )
+
     def test_spell_cast_message_uses_da2_text_and_escape_window_position(self) -> None:
         spell = load_mock_spells()["FIRE1"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -2256,6 +2457,13 @@ class BattleScreenMockTest(unittest.TestCase):
             },
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
         mock.spell_effects = {spell.key: definition}
         mock.spell_effect_renderer = Mock()
         mock.phase = BattleMockPhase.ACTION_TARGET
@@ -2263,13 +2471,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.action_targets_all = True
         mock.selectable_target_indexes = (0, 1)
         mock.selected_target_index = None
-        mock.monsters = (
-            SimpleNamespace(width=64, height=64),
-            SimpleNamespace(width=64, height=64),
-        )
+        mock.monsters = (_damage_test_monster(0), _damage_test_monster(1))
         mock.target_cursor = SimpleNamespace(active=False)
         mock.party_target_cursor = None
         mock.all_target_cursors = (Mock(), Mock())
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
         mock._refresh_monster_name_colors = Mock()
 
         with patch("scenes.battle.play_se") as play_se:

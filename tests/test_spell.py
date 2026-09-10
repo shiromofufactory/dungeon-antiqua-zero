@@ -10,6 +10,7 @@ from tools.screen_mocks._fixtures import (
 )
 from localization import Localizer
 from resources import load_record_array
+from resistance import ResistanceType
 from spell import Spell, SpellAction, SpellDataError, SpellType
 from state import Language
 
@@ -29,6 +30,7 @@ class SpellTest(unittest.TestCase):
         self.assertTrue(spell.to_enemy)
         self.assertFalse(spell.to_all)
         self.assertIs(spell.action, SpellAction.DAMAGE)
+        self.assertIs(spell.attribute, ResistanceType.FIRE)
         self.assertEqual(
             spell.localized_name(Localizer(Language.JAPANESE)),
             "ファイア１",
@@ -101,6 +103,16 @@ class SpellTest(unittest.TestCase):
         record["type"] = 1
 
         with self.assertRaisesRegex(SpellDataError, "type must be a string"):
+            Spell.from_record(record)
+
+    def test_empty_attribute_is_normalized_to_none(self) -> None:
+        self.assertIsNone(self.spells["SPARK"].attribute)
+
+    def test_rejects_unknown_attribute_code(self) -> None:
+        record = dict(load_record_array("spells.json")[0])
+        record["attr"] = "雷"
+
+        with self.assertRaisesRegex(SpellDataError, "unsupported spell.attr"):
             Spell.from_record(record)
 
 

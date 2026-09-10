@@ -16,6 +16,7 @@ if __package__ == "":
         format_text_template,
     )
     from member import Member, ProficiencyKind
+    from resistance import ResistanceType, TOLERANCE_CHARACTER_MAP
 else:
     from .localization import (
         LocalizedText,
@@ -24,6 +25,7 @@ else:
         format_text_template,
     )
     from .member import Member, ProficiencyKind
+    from .resistance import ResistanceType, TOLERANCE_CHARACTER_MAP
 
 
 class SpellDataError(ValueError):
@@ -115,6 +117,7 @@ class Spell:
     to_enemy: bool
     to_all: bool
     action: SpellAction
+    attribute: ResistanceType | None
     intensity: int
     descriptions: Mapping[str, tuple[str, ...]]
 
@@ -169,6 +172,19 @@ class Spell:
         if level > 9:
             raise SpellDataError("spell.lv must be from 0 to 9")
 
+        attribute_value = record.get("attr")
+        if not isinstance(attribute_value, str):
+            raise SpellDataError("spell.attr must be a string")
+        attribute = None
+        if attribute_value:
+            if len(attribute_value) != 1:
+                raise SpellDataError("spell.attr must be empty or one attribute code")
+            attribute = TOLERANCE_CHARACTER_MAP.get(attribute_value)
+            if attribute is None:
+                raise SpellDataError(
+                    f"unsupported spell.attr: {attribute_value}"
+                )
+
         return cls(
             key=key,
             names=MappingProxyType(names),
@@ -180,6 +196,7 @@ class Spell:
             to_enemy=_flag(record, "to_enemy"),
             to_all=_flag(record, "to_all"),
             action=action,
+            attribute=attribute,
             intensity=_integer(record, "intensity", 0),
             descriptions=MappingProxyType(descriptions),
         )

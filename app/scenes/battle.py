@@ -28,8 +28,11 @@ from battle_commands import (
 )
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
+    SpellAffinity,
     member_spell_ability,
+    member_spell_modifier,
     resolve_healing,
+    resolve_spell_damage,
 )
 from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import (
@@ -53,6 +56,7 @@ from monster import (
     MonsterCombatStats,
     promote_rear_monsters_if_front_empty,
 )
+from resistance import ResistanceType, resistances_from_tolerance
 from input import Direction, InputAction, InputDevice, InputState
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
@@ -75,7 +79,7 @@ from resources import (
     play_se,
 )
 from state import Language, Settings
-from spell import Spell, SpellAction, SpellType
+from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 from spell_effect import (
     SpellEffectPlayer,
     load_spell_effects,
@@ -248,6 +252,14 @@ DAMAGE_NUMBER_SPRITE_X = 128
 DAMAGE_NUMBER_SPRITE_Y = 0
 DAMAGE_NUMBER_SPRITE_SIZE = 8
 HEALING_NUMBER_SPRITE_Y = DAMAGE_NUMBER_SPRITE_Y + DAMAGE_NUMBER_SPRITE_SIZE
+AFFINITY_ICON_SOURCE_X = 232
+WEAK_ICON_SOURCE_Y = 16
+RESIST_ICON_SOURCE_Y = 24
+AFFINITY_ICON_WIDTH = 24
+AFFINITY_ICON_HEIGHT = 8
+AFFINITY_POPUP_FRAME_COUNT = (
+    len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+)
 MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
@@ -472,6 +484,53 @@ class BattleHealingPopup:
         self.elapsed_frame += 1
 
 
+@dataclass(frozen=True)
+class BattleSpellDamageResult:
+    """Resolved DAMAGE magic waiting for its timed application."""
+
+    target_index: int
+    damage: int
+    affinity: SpellAffinity
+    popup_x: int
+    popup_y: int
+    affinity_x: int
+    affinity_y: int
+
+
+@dataclass
+class BattleSpellDamagePopup:
+    """One non-blocking spell-damage number animated with DA2's offsets."""
+
+    x: int
+    y: int
+    damage: int
+    elapsed_frame: int = 0
+
+    @property
+    def completed(self) -> bool:
+        return self.elapsed_frame >= DAMAGE_POPUP_FRAME_COUNT
+
+    def update(self) -> None:
+        self.elapsed_frame += 1
+
+
+@dataclass
+class BattleAffinityPopup:
+    """A non-blocking DA2-style WEAK or RESIST marker."""
+
+    x: int
+    y: int
+    affinity: SpellAffinity
+    elapsed_frame: int = 0
+
+    @property
+    def completed(self) -> bool:
+        return self.elapsed_frame >= AFFINITY_POPUP_FRAME_COUNT
+
+    def update(self) -> None:
+        self.elapsed_frame += 1
+
+
 @dataclass
 class BattleActionPresentation:
     """Own the visual layers that must finish before a turn advances.
@@ -482,6 +541,7 @@ class BattleActionPresentation:
 
     spell_effects: tuple[BattleTargetSpellEffect, ...]
     healing_results: tuple[BattleHealingResult, ...] = ()
+    damage_results: tuple[BattleSpellDamageResult, ...] = ()
     result_start_frame: int = 0
     results_applied: bool = False
     elapsed_frame: int = 0
@@ -642,6 +702,9 @@ class BattleMonster:
     combat_stats: MonsterCombatStats = field(
         default_factory=lambda: MonsterCombatStats(0, 0, 0, 0)
     )
+    weaknesses: frozenset[ResistanceType] = field(default_factory=frozenset)
+    resistances: frozenset[ResistanceType] = field(default_factory=frozenset)
+    is_shadow: bool = False
     initial_is_front_row: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -665,6 +728,19 @@ class BattleMonster:
         image_id_text = str(image_id)
         if not image_id_text:
             raise BattleDataError(f"{key}.image_id must not be empty")
+        weakness = record.get("weakness")
+        if not isinstance(weakness, str):
+            raise BattleDataError(f"{key}.weakness must be a string")
+        tolerance = record.get("tolerance")
+        if not isinstance(tolerance, str):
+            raise BattleDataError(f"{key}.tolerance must be a string")
+        shadow = record.get("shadow")
+        if (
+            isinstance(shadow, bool)
+            or not isinstance(shadow, int)
+            or shadow not in (0, 1)
+        ):
+            raise BattleDataError(f"{key}.shadow must be 0 or 1")
         return cls(
             key=key,
             names=record,
@@ -677,6 +753,9 @@ class BattleMonster:
             state=MonsterBattleState.from_record(record),
             combat_stats=MonsterCombatStats.from_record(record),
             agility=_required_nonnegative_integer(record, "agi", key),
+            weaknesses=resistances_from_tolerance(weakness),
+            resistances=resistances_from_tolerance(tolerance),
+            is_shadow=bool(shadow),
         )
 
     @property
@@ -1104,6 +1183,9 @@ class BattleScene:
         self.pending_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
         self.healing_popups: list[BattleHealingPopup] = []
+        self.spell_damage_popups: list[BattleSpellDamagePopup] = []
+        self.affinity_popups: list[BattleAffinityPopup] = []
+        self.pending_monster_death_indexes: list[int] = []
         self.attack_presentation: BattleAttackPresentation | None = None
         self.battle_popup = BattleTimedPopup()
         self.action_party_index: int | None = None
@@ -1201,6 +1283,8 @@ class BattleScene:
         if battle_popup is not None:
             battle_popup.update()
         self._update_healing_popups()
+        self._update_spell_damage_popups()
+        self._update_affinity_popups()
         if hasattr(self, "active_party_pulse_frame"):
             self._update_active_party_pulse()
         self._update_action_motion()
@@ -1426,6 +1510,11 @@ class BattleScene:
         self.pending_spell = None
         self.action_presentation = None
         self.healing_popups.clear()
+        self.spell_damage_popups.clear()
+        self.affinity_popups.clear()
+        pending_deaths = getattr(self, "pending_monster_death_indexes", None)
+        if pending_deaths is not None:
+            pending_deaths.clear()
         self.attack_presentation = None
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
@@ -2680,6 +2769,7 @@ class BattleScene:
                     )
                 )
         healing_results = self._resolve_healing_results(spell, indexes)
+        damage_results = self._resolve_spell_damage_results(spell, indexes)
         effect_frame_count = max(
             (effect.player.definition.total_frames for effect in effects),
             default=0,
@@ -2691,7 +2781,21 @@ class BattleScene:
         self.action_presentation = BattleActionPresentation(
             tuple(effects),
             healing_results=healing_results,
+            damage_results=damage_results,
             result_start_frame=result_start_frame,
+        )
+        affinity_popups = getattr(self, "affinity_popups", None)
+        if affinity_popups is None:
+            affinity_popups = []
+            self.affinity_popups = affinity_popups
+        affinity_popups.extend(
+            BattleAffinityPopup(
+                result.affinity_x,
+                result.affinity_y,
+                result.affinity,
+            )
+            for result in damage_results
+            if result.affinity is not SpellAffinity.NORMAL
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
         self.target_cursor.active = False
@@ -2758,6 +2862,59 @@ class BattleScene:
             )
         return tuple(results)
 
+    def _resolve_spell_damage_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleSpellDamageResult, ...]:
+        """Resolve each DAMAGE target without mutating monster state yet."""
+
+        if spell.action is not SpellAction.DAMAGE:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("DAMAGE spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("DAMAGE requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattleSpellDamageResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            resolution = resolve_spell_damage(
+                intensity=spell.intensity,
+                spell_modifier=modifier,
+                target_spell_defense=monster.combat_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
+                target_is_shadow=monster.is_shadow,
+                random_factor=random.random(),
+            )
+            _base_x, base_y = MONSTER_POSITIONS[index]
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            results.append(
+                BattleSpellDamageResult(
+                    target_index=index,
+                    damage=resolution.damage,
+                    affinity=resolution.affinity,
+                    popup_x=center_x,
+                    popup_y=base_y + monster.height - 8,
+                    affinity_x=center_x - AFFINITY_ICON_WIDTH // 2,
+                    affinity_y=base_y + 20,
+                )
+            )
+        return tuple(results)
+
     def _apply_action_results(self, presentation: BattleActionPresentation) -> None:
         """Apply resolved state changes and start independent result popups."""
 
@@ -2783,6 +2940,20 @@ class BattleScene:
                         result.amount,
                     )
                 )
+        damage_popups = getattr(self, "spell_damage_popups", None)
+        if damage_popups is None:
+            damage_popups = []
+            self.spell_damage_popups = damage_popups
+        for result in presentation.damage_results:
+            monster = self.monsters[result.target_index]
+            monster.state.take_damage(result.damage)
+            damage_popups.append(
+                BattleSpellDamagePopup(
+                    result.popup_x,
+                    result.popup_y,
+                    result.damage,
+                )
+            )
 
     def _show_item_use_message(self, item: Item) -> None:
         """Show DA2's timed item-use announcement in the common popup."""
@@ -2872,12 +3043,23 @@ class BattleScene:
             self._apply_action_results(presentation)
         if presentation.is_complete:
             self._apply_action_results(presentation)
+            defeated_indexes = [
+                result.target_index
+                for result in presentation.damage_results
+                if not self.monsters[result.target_index].is_alive
+            ]
             self.action_presentation = None
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
+            if defeated_indexes:
+                if getattr(self, "action_party_index", None) is not None:
+                    self._begin_action_return()
+                self.pending_monster_death_indexes = defeated_indexes[1:]
+                self._begin_monster_death(defeated_indexes[0])
+                return
             if getattr(self, "action_party_index", None) is not None:
                 self._begin_action_return(complete_turn=True)
-            else:
-                self._complete_current_turn()
+                return
+            self._complete_current_turn()
             return
         if presentation.spell_effects:
             self.spell_effect_renderer.prepare(
@@ -2893,6 +3075,28 @@ class BattleScene:
         for popup in popups:
             popup.update()
         self.healing_popups = [popup for popup in popups if not popup.completed]
+
+    def _update_spell_damage_popups(self) -> None:
+        """Advance spell-damage numbers independently from the battle phase."""
+
+        popups = getattr(self, "spell_damage_popups", None)
+        if not popups:
+            return
+        for popup in popups:
+            popup.update()
+        self.spell_damage_popups = [
+            popup for popup in popups if not popup.completed
+        ]
+
+    def _update_affinity_popups(self) -> None:
+        """Advance WEAK/RESIST markers independently from the battle phase."""
+
+        popups = getattr(self, "affinity_popups", None)
+        if not popups:
+            return
+        for popup in popups:
+            popup.update()
+        self.affinity_popups = [popup for popup in popups if not popup.completed]
 
     def _begin_action_motion(self, *, use_cast_pose: bool) -> None:
         """Move the active party actor toward the enemies as in DA2."""
@@ -3209,8 +3413,16 @@ class BattleScene:
         self.monster_death_animation = None
         self.dying_monster_index = None
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
+        pending_indexes = getattr(self, "pending_monster_death_indexes", [])
+        if pending_indexes:
+            next_index = pending_indexes.pop(0)
+            self._begin_monster_death(next_index)
+            return
         if self._monsters_are_defeated():
             self.result = BattleResult.VICTORY
+            return
+        if getattr(self, "action_party_index", None) is not None:
+            self.phase = BattlePhase.ACTION_RETURN
             return
         self._complete_current_turn()
 
@@ -3270,6 +3482,9 @@ class BattleScene:
         self.pending_spell = None
         self.action_presentation = None
         self.attack_presentation = None
+        pending_deaths = getattr(self, "pending_monster_death_indexes", None)
+        if pending_deaths is not None:
+            pending_deaths.clear()
         self._clear_action_motion_state()
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
@@ -3969,6 +4184,8 @@ class BattleScene:
         self._draw_monsters()
         self._draw_party_attack_effect()
         self._draw_spell_effects()
+        self._draw_affinity_popups()
+        self._draw_spell_damage_popups()
         self._draw_healing_popups()
         self._draw_party_attack_damage()
         self._draw_monster_attack_result()
@@ -4433,7 +4650,27 @@ class BattleScene:
                 and attack_presentation is not None
                 and index == attack_presentation.target_index
             )
-            if not monster.is_alive and not is_dying and not is_attack_target:
+            action_presentation = getattr(self, "action_presentation", None)
+            is_spell_damage_target = (
+                self.phase is BattlePhase.ACTION_PRESENTATION
+                and action_presentation is not None
+                and any(
+                    result.target_index == index
+                    for result in action_presentation.damage_results
+                )
+            )
+            is_pending_death = index in getattr(
+                self,
+                "pending_monster_death_indexes",
+                (),
+            )
+            if (
+                not monster.is_alive
+                and not is_dying
+                and not is_attack_target
+                and not is_spell_damage_target
+                and not is_pending_death
+            ):
                 continue
             if (
                 index == self.blinking_monster_index
@@ -4532,6 +4769,52 @@ class BattleScene:
                     TRANSPARENT_INDEX,
                 )
                 x += DAMAGE_NUMBER_SPRITE_SIZE
+
+    def _draw_spell_damage_popups(self) -> None:
+        """Draw spell damage using the standard damage-number sprite row."""
+
+        for popup in getattr(self, "spell_damage_popups", ()):
+            reference_frame = min(
+                popup.elapsed_frame * DA2_REFERENCE_FPS // FPS,
+                len(DA2_DAMAGE_VERTICAL_OFFSETS) - 1,
+            )
+            vertical_offset = DA2_DAMAGE_VERTICAL_OFFSETS[reference_frame]
+            digits = str(popup.damage)
+            x = popup.x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
+            y = popup.y - vertical_offset
+            for digit in digits:
+                pyxel.blt(
+                    x,
+                    y,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X
+                    + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+                x += DAMAGE_NUMBER_SPRITE_SIZE
+
+    def _draw_affinity_popups(self) -> None:
+        """Draw static DA2-style WEAK/RESIST markers from image bank zero."""
+
+        for popup in getattr(self, "affinity_popups", ()):
+            source_y = (
+                WEAK_ICON_SOURCE_Y
+                if popup.affinity is SpellAffinity.WEAK
+                else RESIST_ICON_SOURCE_Y
+            )
+            pyxel.blt(
+                popup.x,
+                popup.y,
+                0,
+                AFFINITY_ICON_SOURCE_X,
+                source_y,
+                AFFINITY_ICON_WIDTH,
+                AFFINITY_ICON_HEIGHT,
+                TRANSPARENT_INDEX,
+            )
 
     def _draw_monster_image(
         self,

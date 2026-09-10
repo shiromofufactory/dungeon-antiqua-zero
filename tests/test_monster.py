@@ -19,6 +19,7 @@ class MonsterCombatStatsTest(unittest.TestCase):
                 "hit": 95,
                 "defense": 7,
                 "evasion": 12,
+                "resistance": 23,
                 "agi": 99,
             }
         )
@@ -27,9 +28,16 @@ class MonsterCombatStatsTest(unittest.TestCase):
         self.assertEqual(stats.hit, 95)
         self.assertEqual(stats.defense, 7)
         self.assertEqual(stats.evasion, 12)
+        self.assertEqual(stats.spell_resistance, 23)
 
     def test_values_must_be_non_negative_integers(self) -> None:
-        valid = {"attack": 1, "hit": 100, "defense": 0, "evasion": 0}
+        valid = {
+            "attack": 1,
+            "hit": 100,
+            "defense": 0,
+            "evasion": 0,
+            "resistance": 0,
+        }
         for field_name in valid:
             for value in (None, True, -1, 1.5, "1"):
                 with self.subTest(field=field_name, value=value):
