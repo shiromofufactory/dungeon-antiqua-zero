@@ -211,6 +211,44 @@ def draw_tagged_text(
                 cursor_x += _text_width(run, run_font)
 
 
+def tagged_text_width(
+    text: str,
+    font: Any | None = None,
+    *,
+    font_spans: tuple[TextFontSpan, ...] = (),
+) -> int:
+    """Return the rendered pixel width of text, icons, and font spans."""
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if not isinstance(font_spans, tuple) or not all(
+        isinstance(span, TextFontSpan) for span in font_spans
+    ):
+        raise TypeError("font_spans must contain TextFontSpan values")
+    if any(span.end > len(text) for span in font_spans):
+        raise ValueError("font span must fit inside text")
+
+    width = 0
+    for part, start, end in _split_tagged_text_with_offsets(text):
+        if isinstance(part, TextIcon):
+            width += ICON_SIZE
+            continue
+        if isinstance(part, TextColor):
+            continue
+        width += sum(
+            _text_width(run, run_font)
+            for run, run_font, _run_y_offset in _styled_text_runs(
+                text,
+                start,
+                end,
+                font,
+                0,
+                font_spans,
+            )
+        )
+    return width
+
+
 def _styled_text_runs(
     text: str,
     start: int,

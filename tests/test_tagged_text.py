@@ -15,6 +15,7 @@ from app.ui.tagged_text import (
     TextIcon,
     draw_tagged_text,
     split_tagged_text,
+    tagged_text_width,
 )
 
 
@@ -153,6 +154,15 @@ class TaggedTextTest(unittest.TestCase):
                 ICON_SIZE,
                 ICON_COLKEY,
             ),
+        )
+
+    def test_tagged_text_width_counts_icons_and_ignores_color_tags(self) -> None:
+        self.assertEqual(
+            tagged_text_width(
+                "A%FIRE%%COL_BLUE%BC%COL_END%",
+                StubFont(),
+            ),
+            6 + ICON_SIZE + 12,
         )
 
     def test_consecutive_icons_do_not_require_text_between_them(self) -> None:

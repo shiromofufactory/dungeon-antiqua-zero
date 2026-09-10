@@ -358,6 +358,8 @@ class BattleScreenMockTest(unittest.TestCase):
             windows.return_value.create.call_args_list[7].args[:4],
             SPELL_MP_WINDOW_GRID,
         )
+        action_popup_window_call = windows.return_value.create.call_args_list[15]
+        self.assertTrue(action_popup_window_call.kwargs["thin_frame"])
 
         self.assertEqual(
             tuple(member.definition.key for member in mock.party),
@@ -2366,50 +2368,45 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_spell_cast_message_uses_da2_text_and_escape_window_position(self) -> None:
+    def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:
         spell = load_mock_spells()["FIRE1"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.active_party_index = 0
-        mock.party_visuals = (
-            SimpleNamespace(display_name=Mock(return_value="フィオラ")),
-        )
         mock.localizer = Localizer(Language.JAPANESE)
-        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        mock.battle_popup_window = Mock()
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
         mock.battle_popup = BattleTimedPopup()
 
         mock._show_spell_cast_message(spell)
 
-        mock.battle_popup_window.clear_texts.assert_called_once_with()
-        mock.battle_popup_window.add_text.assert_called_once_with(
-            "フィオラは　ファイア１をとなえた",
-            2,
-            2,
+        self.assertEqual(
+            mock.action_popup_window.texts,
+            (WindowText("%MYSTIC%ファイア１", 2, 2),),
         )
+        self.assertEqual(mock.action_popup_window.width, 16)
+        self.assertEqual(mock.action_popup_window.x, 48)
         self.assertEqual(
             mock.battle_popup.frames_remaining,
             BATTLE_POPUP_FRAME_COUNT,
         )
 
-    def test_item_use_message_uses_da2_text_in_the_common_popup(self) -> None:
+    def test_item_use_popup_shows_only_name_at_minimum_top_right_width(self) -> None:
         item = load_mock_items()["POTION"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.active_party_index = 0
-        mock.party_visuals = (
-            SimpleNamespace(display_name=Mock(return_value="フィオラ")),
-        )
         mock.localizer = Localizer(Language.JAPANESE)
-        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        mock.battle_popup_window = Mock()
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
         mock.battle_popup = BattleTimedPopup()
 
         mock._show_item_use_message(item)
 
-        mock.battle_popup_window.add_text.assert_called_once_with(
-            "フィオラは　きずぐすりをつかった",
-            2,
-            2,
+        self.assertEqual(
+            mock.action_popup_window.texts,
+            (WindowText("きずぐすり", 2, 2),),
         )
+        self.assertEqual(mock.action_popup_window.width, 14)
+        self.assertEqual(mock.action_popup_window.x, 50)
         self.assertEqual(
             mock.battle_popup.frames_remaining,
             BATTLE_POPUP_FRAME_COUNT,
@@ -2569,12 +2566,10 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock.inventory_system = InventorySystem.with_one_each(items)
         mock.active_party_index = 0
-        mock.party_visuals = (
-            SimpleNamespace(display_name=Mock(return_value="フィオラ")),
-        )
         mock.localizer = Localizer(Language.JAPANESE)
-        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        mock.battle_popup_window = Mock()
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
         mock.battle_popup = BattleTimedPopup()
         mock.pending_item_candidate = BattleItemCandidate(potion)
         mock.pending_spell = None
@@ -2587,10 +2582,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._begin_action_presentation.assert_called_once_with(
             mock.spells[potion.use_spell_key]
         )
-        mock.battle_popup_window.add_text.assert_called_once_with(
-            "フィオラは　きずぐすりをつかった",
-            2,
-            2,
+        self.assertEqual(
+            mock.action_popup_window.texts,
+            (WindowText("きずぐすり", 2, 2),),
         )
         self.assertEqual(
             mock.battle_popup.frames_remaining,
@@ -3548,6 +3542,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escape_choice_window = Mock()
         mock.battle_popup = BattleTimedPopup()
         mock.battle_popup_window = Mock()
+        mock.action_popup_window = Mock()
 
         mock._draw_windows()
 
@@ -4651,6 +4646,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escape_message_window = Mock()
         mock.escape_started_message_window = Mock()
         mock.battle_popup_window = Mock()
+        mock.action_popup_window = Mock()
         mock.battle_popup = BattleTimedPopup()
         mock.escape_choice_window = Mock()
         mock.command_window = Mock(is_closed=False)
@@ -4701,7 +4697,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.action_presentation = BattleActionPresentation(())
         mock.battle_popup.show(1)
         mock._draw_windows()
-        mock.battle_popup_window.draw.assert_called_once_with()
+        mock.action_popup_window.draw.assert_called_once_with()
 
     def test_monster_name_colors_follow_target_availability_and_button_wait(
         self,

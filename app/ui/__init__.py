@@ -17,6 +17,7 @@ from .tagged_text import (
     TextIcon,
     draw_tagged_text,
     split_tagged_text,
+    tagged_text_width,
 )
 from .text_format import format_play_time, pad, spacing
 from .window import (
@@ -96,4 +97,5 @@ __all__ = [
     "pad",
     "spacing",
     "split_tagged_text",
+    "tagged_text_width",
 ]

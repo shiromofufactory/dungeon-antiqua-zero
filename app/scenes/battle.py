@@ -90,12 +90,14 @@ from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
     RESERVE_MEMBER_TEXT_COLOR,
+    TEXT_GRID_X,
     CursorTarget,
     Window,
     WindowCursor,
     WindowFactory,
     WindowText,
     input_icon_tag,
+    tagged_text_width,
 )
 from item_detail import ItemDetailContext, item_detail_lines
 
@@ -136,6 +138,9 @@ TIMELINE_INTERRUPT_OVERFLOW_JUMP_HEIGHT = 18
 TIMELINE_INTERRUPT_OVERFLOW_DESTINATION_X = SCREEN_WIDTH + 16
 ESCAPE_MESSAGE_WINDOW_GRID = (0, 0, 64, 7)
 ESCAPE_MESSAGE_TEXT_POSITION = (2, 2)
+BATTLE_ACTION_POPUP_HEIGHT = 7
+BATTLE_ACTION_POPUP_TEXT_POSITION = (2, 2)
+BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID = 4
 ESCAPE_CHOICE_WINDOW_GRID = (52, 0, 12, 10)
 ESCAPE_CHOICE_TEXT_X = 4
 ESCAPE_CHOICE_CURSOR_X = 2
@@ -1121,6 +1126,15 @@ class BattleScene:
                     ESCAPE_NO_Y,
                 ),
             ),
+        )
+        self.action_popup_window = windows.create(
+            SCREEN_WIDTH // TEXT_GRID_X
+            - BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID,
+            0,
+            BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID,
+            BATTLE_ACTION_POPUP_HEIGHT,
+            (),
+            thin_frame=True,
         )
         self.escape_cursor = self.escape_choice_window.set_cursor(
             (
@@ -2948,58 +2962,47 @@ class BattleScene:
             )
 
     def _show_item_use_message(self, item: Item) -> None:
-        """Show DA2's timed item-use announcement in the common popup."""
+        """Show only the used item's name in the timed action popup."""
 
         if (
-            self.active_party_index is None
-            or getattr(self, "battle_popup_window", None) is None
+            getattr(self, "action_popup_window", None) is None
             or getattr(self, "battle_popup", None) is None
         ):
             return
-        actor_name = self.party_visuals[self.active_party_index].display_name(
-            self.localizer
+        self._show_battle_popup(
+            item.localized_name(self.localizer),
+            BATTLE_POPUP_FRAME_COUNT,
         )
-        message = self.texts.formatted_text(
-            "battle.item.used",
-            self.localizer,
-            {
-                "ACTOR": actor_name,
-                "ITEM": item.localized_name(self.localizer),
-            },
-        )
-        self._show_battle_popup(message, BATTLE_POPUP_FRAME_COUNT)
 
     def _show_spell_cast_message(self, spell: Spell) -> None:
-        """Show DA2's timed spell announcement in the top message window."""
+        """Show the spell-school icon and name in the timed action popup."""
 
         if (
-            self.active_party_index is None
-            or getattr(self, "battle_popup_window", None) is None
+            getattr(self, "action_popup_window", None) is None
             or getattr(self, "battle_popup", None) is None
         ):
             return
-        actor_name = self.party_visuals[self.active_party_index].display_name(
-            self.localizer
+        self._show_battle_popup(
+            spell.localized_display_name(self.localizer),
+            BATTLE_POPUP_FRAME_COUNT,
         )
-        message = self.texts.formatted_text(
-            "battle.spell.cast",
-            self.localizer,
-            {
-                "ACTOR": actor_name,
-                "SPELL": spell.localized_name(self.localizer),
-            },
-        )
-        self._show_battle_popup(message, BATTLE_POPUP_FRAME_COUNT)
 
     def _show_battle_popup(self, message: str, frame_count: int) -> None:
-        """Replace the common non-blocking battle popup and restart its timer."""
+        """Right-align a content-sized action popup and restart its timer."""
 
-        window = getattr(self, "battle_popup_window", None)
+        window = getattr(self, "action_popup_window", None)
         battle_popup = getattr(self, "battle_popup", None)
         if window is None or battle_popup is None:
             return
+        text_width = tagged_text_width(message, window.font)
+        window.width = min(
+            SCREEN_WIDTH // TEXT_GRID_X,
+            BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID
+            + (text_width + TEXT_GRID_X - 1) // TEXT_GRID_X,
+        )
+        window.x = SCREEN_WIDTH // TEXT_GRID_X - window.width
         window.clear_texts()
-        window.add_text(message, *ESCAPE_MESSAGE_TEXT_POSITION)
+        window.add_text(message, *BATTLE_ACTION_POPUP_TEXT_POSITION)
         battle_popup.show(frame_count)
 
     def _spell_effect_anchor(self, target_side: str, index: int) -> tuple[int, int]:
@@ -5073,7 +5076,7 @@ class BattleScene:
         if self.phase is BattlePhase.DEFEAT_MESSAGE:
             self.battle_popup_window.draw()
         elif battle_popup is not None and battle_popup.visible:
-            self.battle_popup_window.draw()
+            self.action_popup_window.draw()
         if (
             getattr(self, "auto_battle_active", False)
             or self.phase is BattlePhase.COMMAND
