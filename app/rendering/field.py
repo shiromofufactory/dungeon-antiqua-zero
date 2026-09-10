@@ -85,6 +85,7 @@ class FieldRenderer:
         player_sprite_index: int = 0,
         treasure_image: Any | None = None,
         frame_count: int | None = None,
+        draw_player: bool = True,
     ) -> None:
         if not isinstance(field, FieldMovement):
             raise TypeError("field renderer requires a FieldMovement")
@@ -94,6 +95,8 @@ class FieldRenderer:
             frame_count = self._pyxel.frame_count
         if isinstance(frame_count, bool) or not isinstance(frame_count, int):
             raise TypeError("field renderer frame count must be an integer")
+        if not isinstance(draw_player, bool):
+            raise TypeError("field renderer draw_player must be a boolean")
 
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
@@ -103,15 +106,17 @@ class FieldRenderer:
             frame_count,
             draw_groups=("object", "object_overlay"),
         )
-        characters: list[tuple[int, FieldMovement, str, int, Any | None]] = [
-            (
-                field.world_y,
-                field,
-                "player",
-                player_sprite_index,
-                player_character_image,
+        characters: list[tuple[int, FieldMovement, str, int, Any | None]] = []
+        if draw_player:
+            characters.append(
+                (
+                    field.world_y,
+                    field,
+                    "player",
+                    player_sprite_index,
+                    player_character_image,
+                )
             )
-        ]
         if actors is not None:
             if actors.map_data is not self.map_data:
                 raise ValueError("field renderer and actors must use the same map data")

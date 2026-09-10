@@ -624,15 +624,15 @@ class Game:
         self.bgm.play(ENCOUNTER_JINGLE_ID, loop=False)
 
     def _update_encounter_transition(self) -> None:
-        """Fade the transformed field to black, then create the battle scene."""
+        """White out the enlarged field, fade it, then create the battle scene."""
 
         transition = self.encounter_transition
         if transition is None:
             return
         transition.update()
         self.palette_shifter.set_global_mix(
-            base_rate=transition.visible_rate,
-            target_color=self.palette_shifter.base_colors[0],
+            base_rate=transition.palette_base_rate,
+            target_color=transition.palette_target_color,
         )
         if not transition.is_finished:
             return
@@ -2765,21 +2765,25 @@ class Game:
         finally:
             pyxel.camera()
 
-    def _draw_field_screen(self) -> None:
+    def _draw_field_screen(self, *, draw_player: bool = True) -> None:
         """Draw the current field and any field-owned overlays."""
 
         if isinstance(getattr(self, "field_actors", None), FieldActors):
-            self.field_renderer.draw(
-                self.field,
-                actors=self.field_actors,
-                prop_image=self.field_prop_image,
-                actor_character_image=self.field_actor_character_image,
-                player_character_image=self.field_player_character_image,
-                player_sprite_index=self.party[0].definition.battle_sprite,
-                treasure_image=self.field_treasure_image,
-            )
-        else:
+            draw_options = {
+                "actors": self.field_actors,
+                "prop_image": self.field_prop_image,
+                "actor_character_image": self.field_actor_character_image,
+                "player_character_image": self.field_player_character_image,
+                "player_sprite_index": self.party[0].definition.battle_sprite,
+                "treasure_image": self.field_treasure_image,
+            }
+            if not draw_player:
+                draw_options["draw_player"] = False
+            self.field_renderer.draw(self.field, **draw_options)
+        elif draw_player:
             self.field_renderer.draw(self.field)
+        else:
+            self.field_renderer.draw(self.field, draw_player=False)
         self._draw_site_name()
         event_message = getattr(self, "event_message", None)
         if event_message is not None:
@@ -2796,7 +2800,7 @@ class Game:
             return
         snapshot = self.encounter_snapshot
         if snapshot is None:
-            self._draw_field_screen()
+            self._draw_field_screen(draw_player=False)
             snapshot = pyxel.Image(SCREEN_WIDTH, SCREEN_HEIGHT)
             snapshot.blt(
                 0,
@@ -2819,7 +2823,6 @@ class Game:
             0,
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
-            rotate=transform.rotate,
             scale=transform.scale,
         )
 

@@ -288,6 +288,25 @@ class FieldMovementTest(unittest.TestCase):
 
 
 class FieldRendererTest(unittest.TestCase):
+    def test_can_draw_field_layers_without_the_player(self) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="dungeon")
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=Mock(frame_count=0),
+        )
+        renderer._draw_ground = Mock()  # type: ignore[method-assign]
+        renderer._draw_objects = Mock()  # type: ignore[method-assign]
+        renderer._draw_player_character = Mock()  # type: ignore[method-assign]
+
+        renderer.draw(field, draw_player=False)
+
+        renderer._draw_ground.assert_called_once()
+        self.assertEqual(renderer._draw_objects.call_count, 2)
+        renderer._draw_player_character.assert_not_called()
+
     def test_draws_ground_objects_then_the_requested_character_frame(self) -> None:
         object_tile = MapObjectTile(
             instance_id="tree_1",

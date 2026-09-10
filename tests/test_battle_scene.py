@@ -254,6 +254,18 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             ),
         )
 
+    @patch("game.pyxel.Image")
+    def test_encounter_snapshot_hides_the_player(self, image_type: Mock) -> None:
+        game = Game.__new__(Game)
+        game.encounter_transition = EncounterTransition(128, 120)
+        game.encounter_snapshot = None
+        game._draw_field_screen = Mock()
+
+        game._draw_encounter_transition()
+
+        game._draw_field_screen.assert_called_once_with(draw_player=False)
+        self.assertIs(game.encounter_snapshot, image_type.return_value)
+
     def test_defeat_return_moves_to_the_cell_before_nearest_dungeon_exit(
         self,
     ) -> None:

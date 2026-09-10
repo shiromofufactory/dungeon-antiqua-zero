@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import math
 from types import MappingProxyType
 import unittest
 
 from app.field import FieldPosition
 from app.input import Direction
 from app.rendering import (
-    ENCOUNTER_FADE_START_FRAME,
-    ENCOUNTER_ROTATION_DEGREES,
-    ENCOUNTER_ROTATION_START_FRAME,
+    ENCOUNTER_BLACK_COLOR,
+    ENCOUNTER_FADE_FRAME_COUNT,
+    ENCOUNTER_FINAL_SCALE,
     ENCOUNTER_TRANSITION_FRAME_COUNT,
+    ENCOUNTER_WHITE_COLOR,
+    ENCOUNTER_WHITEOUT_FRAME_COUNT,
     EncounterTransition,
 )
 from app.resources.maps import CompiledMap, MapCell, MapDestination, WorldSite
@@ -115,67 +116,52 @@ class EncounterSystemTest(unittest.TestCase):
 
 
 class EncounterTransitionTest(unittest.TestCase):
-    def test_fades_only_during_second_half_and_finishes_with_jingle_timing(self) -> None:
+    def test_whites_out_for_32_frames_then_fades_to_black(self) -> None:
         transition = EncounterTransition(128, 120)
 
-        for _frame in range(ENCOUNTER_FADE_START_FRAME):
+        for _frame in range(ENCOUNTER_WHITEOUT_FRAME_COUNT // 2):
             transition.update()
-        self.assertEqual(transition.visible_rate, 1.0)
-        for _frame in range(
-            ENCOUNTER_TRANSITION_FRAME_COUNT - ENCOUNTER_FADE_START_FRAME
-        ):
+        self.assertEqual(transition.palette_base_rate, 0.5)
+        self.assertEqual(transition.palette_target_color, ENCOUNTER_WHITE_COLOR)
+
+        for _frame in range(ENCOUNTER_WHITEOUT_FRAME_COUNT // 2):
+            transition.update()
+        self.assertEqual(transition.palette_base_rate, 0.0)
+        self.assertEqual(transition.palette_target_color, ENCOUNTER_WHITE_COLOR)
+
+        for _frame in range(ENCOUNTER_FADE_FRAME_COUNT // 2):
+            transition.update()
+        self.assertEqual(transition.palette_base_rate, 0.0)
+        self.assertEqual(transition.palette_target_color, 0x808080)
+
+        for _frame in range(ENCOUNTER_FADE_FRAME_COUNT // 2):
             transition.update()
 
         self.assertTrue(transition.is_finished)
-        self.assertEqual(transition.visible_rate, 0.0)
+        self.assertEqual(transition.palette_target_color, ENCOUNTER_BLACK_COLOR)
 
-    def test_zooms_before_starting_one_clockwise_rotation(self) -> None:
+    def test_zoom_accelerates_to_the_final_scale(self) -> None:
         transition = EncounterTransition(128, 120)
+        scales = [transition.transform(256, 240).scale]
 
-        for _frame in range(ENCOUNTER_ROTATION_START_FRAME):
+        for _segment in range(4):
+            for _frame in range(ENCOUNTER_WHITEOUT_FRAME_COUNT // 4):
+                transition.update()
+            scales.append(transition.transform(256, 240).scale)
+
+        increases = [
+            after - before for before, after in zip(scales, scales[1:])
+        ]
+        self.assertEqual(scales[0], 1.0)
+        self.assertEqual(scales[-1], ENCOUNTER_FINAL_SCALE)
+        self.assertEqual(increases, sorted(increases))
+
+        for _frame in range(ENCOUNTER_FADE_FRAME_COUNT):
             transition.update()
-        zoom_only = transition.transform(256, 240)
-
-        self.assertEqual(zoom_only.rotate, 0.0)
-        self.assertGreater(zoom_only.scale, 1.0)
-
-        transition.update()
-        self.assertGreater(transition.transform(256, 240).rotate, 0.0)
-
-        while transition.elapsed_frames < ENCOUNTER_TRANSITION_FRAME_COUNT - 1:
-            transition.update()
-        self.assertAlmostEqual(
-            transition.transform(256, 240).rotate,
-            ENCOUNTER_ROTATION_DEGREES,
+        self.assertEqual(
+            transition.transform(256, 240).scale,
+            ENCOUNTER_FINAL_SCALE,
         )
-
-    def test_rotated_snapshot_covers_screen_corners_away_from_center(self) -> None:
-        transition = EncounterTransition(48, 72)
-
-        for _frame in range(ENCOUNTER_TRANSITION_FRAME_COUNT - 1):
-            transition.update()
-            transform = transition.transform(256, 240)
-            radians = math.radians(transform.rotate)
-            cosine = math.cos(radians)
-            sine = math.sin(radians)
-            for corner_x, corner_y in (
-                (0, 0),
-                (256, 0),
-                (0, 240),
-                (256, 240),
-            ):
-                relative_x = corner_x - 48
-                relative_y = corner_y - 72
-                source_x = 48 + (
-                    cosine * relative_x + sine * relative_y
-                ) / transform.scale
-                source_y = 72 + (
-                    -sine * relative_x + cosine * relative_y
-                ) / transform.scale
-                self.assertGreaterEqual(source_x, 0)
-                self.assertLessEqual(source_x, 256)
-                self.assertGreaterEqual(source_y, 0)
-                self.assertLessEqual(source_y, 240)
 
     def test_transform_keeps_the_player_pivot_fixed(self) -> None:
         transition = EncounterTransition(48, 72)
@@ -183,21 +169,10 @@ class EncounterTransitionTest(unittest.TestCase):
             transition.update()
 
         transform = transition.transform(256, 240)
-        radians = math.radians(transform.rotate)
         source_x = 48 - 128
         source_y = 72 - 120
-        destination_x = (
-            transform.x
-            + 128
-            + transform.scale
-            * (source_x * math.cos(radians) - source_y * math.sin(radians))
-        )
-        destination_y = (
-            transform.y
-            + 120
-            + transform.scale
-            * (source_x * math.sin(radians) + source_y * math.cos(radians))
-        )
+        destination_x = transform.x + 128 + transform.scale * source_x
+        destination_y = transform.y + 120 + transform.scale * source_y
 
         self.assertAlmostEqual(destination_x, 48)
         self.assertAlmostEqual(destination_y, 72)
