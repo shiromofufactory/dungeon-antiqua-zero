@@ -195,8 +195,7 @@ PARTY_ENTRANCE_START_X = SCREEN_WIDTH
 PARTY_ENTRANCE_OFFSET_Y = -24
 PARTY_ENTRANCE_JUMP_HEIGHT = 24
 PARTY_ENTRANCE_COMPLETE_FRAME = (
-    PARTY_ENTRANCE_FRAME_COUNT
-    + 2 * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
+    PARTY_ENTRANCE_FRAME_COUNT + 2 * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
 )
 TIMELINE_ENTRANCE_FRAME_COUNT = 10
 TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT = 2
@@ -243,9 +242,7 @@ DAMAGE_POPUP_FRAME_COUNT = (
     + DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT
 )
 MONSTER_DAMAGE_FRAME_COUNT = DAMAGE_POPUP_FRAME_COUNT
-MONSTER_MISS_FRAME_COUNT = (
-    len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
-)
+MONSTER_MISS_FRAME_COUNT = len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
 MONSTER_DAMAGE_SPRITE_SOURCE_X = 16 * 4
 MONSTER_DAMAGE_SHAKE_X = (8, 9)
 DAMAGE_NUMBER_SPRITE_X = 128
@@ -257,9 +254,7 @@ WEAK_ICON_SOURCE_Y = 16
 RESIST_ICON_SOURCE_Y = 24
 AFFINITY_ICON_WIDTH = 24
 AFFINITY_ICON_HEIGHT = 8
-AFFINITY_POPUP_FRAME_COUNT = (
-    len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
-)
+AFFINITY_POPUP_FRAME_COUNT = len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
 MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
@@ -279,6 +274,7 @@ ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
 BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
 SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
+SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
 ATTACK_POSE_SWING_FRAME_COUNT = 8
 ATTACK_MOTION_FRAME_COUNT = (
@@ -545,15 +541,26 @@ class BattleActionPresentation:
     result_start_frame: int = 0
     results_applied: bool = False
     elapsed_frame: int = 0
+    post_effect_elapsed_frame: int = 0
+
+    @property
+    def effects_complete(self) -> bool:
+        return all(effect.player.completed for effect in self.spell_effects)
 
     @property
     def is_complete(self) -> bool:
-        return all(effect.player.completed for effect in self.spell_effects)
+        return (
+            self.effects_complete
+            and self.post_effect_elapsed_frame >= SPELL_POST_EFFECT_WAIT_FRAME_COUNT
+        )
 
     def update(self) -> None:
+        effects_were_complete = self.effects_complete
         self.elapsed_frame += 1
         for effect in self.spell_effects:
             effect.player.update()
+        if effects_were_complete:
+            self.post_effect_elapsed_frame += 1
 
 
 @dataclass
@@ -875,16 +882,12 @@ class BattleScene:
             party=party,
             monster_records=tuple(load_record_array("monsters.json")),
             encounter=encounter,
-            attack_poses=load_attack_poses(
-                APP_ROOT / "effects" / "attack_poses.json"
-            ),
+            attack_poses=load_attack_poses(APP_ROOT / "effects" / "attack_poses.json"),
             spell_effect_renderer=SpellEffectRenderer(
                 resources,
                 palette_shifter,
             ),
-            spell_effects=load_spell_effects(
-                APP_ROOT / "effects" / "spells.json"
-            ),
+            spell_effects=load_spell_effects(APP_ROOT / "effects" / "spells.json"),
         )
 
     def __init__(
@@ -1397,9 +1400,7 @@ class BattleScene:
         self.confirm_hold_frame_count = held_frames
         should_repeat = (
             held_frames >= BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT
-            and (
-                held_frames - BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT
-            )
+            and (held_frames - BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT)
             % BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT
             == 0
         )
@@ -1442,15 +1443,10 @@ class BattleScene:
         for monster in self.monsters:
             monster.restore()
         living_party = tuple(
-            visual
-            for visual in self.party_visuals
-            if visual.member.is_alive
+            visual for visual in self.party_visuals if visual.member.is_alive
         )
         self._timeline_order = initialize_timeline_order(
-            tuple(
-                (entry, entry.agility)
-                for entry in (*living_party, *self.monsters)
-            )
+            tuple((entry, entry.agility) for entry in (*living_party, *self.monsters))
         )
         self.timeline = self._timeline_order.actors
         self.phase = BattlePhase.ENTRANCE
@@ -1904,9 +1900,7 @@ class BattleScene:
             member.formation_row = FormationRow.FRONT
             getattr(self, "temporary_front_party_indexes", set()).discard(index)
         self.formation_destination_x = self._party_sprite_x(index)
-        self.formation_destination_x_by_index = {
-            index: self.formation_destination_x
-        }
+        self.formation_destination_x_by_index = {index: self.formation_destination_x}
         self.formation_animation_frame = 0
         self.formation_animation_completion = (
             FormationAnimationCompletion.COMPLETE_CURRENT_TURN
@@ -1921,9 +1915,7 @@ class BattleScene:
         """Return living members that have not left this battle."""
 
         escaped = getattr(self, "escaped_party_indexes", set())
-        party_count = len(
-            getattr(self, "party_visuals", getattr(self, "party", ()))
-        )
+        party_count = len(getattr(self, "party_visuals", getattr(self, "party", ())))
         return tuple(
             index
             for index in range(party_count)
@@ -3062,9 +3054,7 @@ class BattleScene:
             self._complete_current_turn()
             return
         if presentation.spell_effects:
-            self.spell_effect_renderer.prepare(
-                presentation.spell_effects[0].player
-            )
+            self.spell_effect_renderer.prepare(presentation.spell_effects[0].player)
 
     def _update_healing_popups(self) -> None:
         """Advance recovery numbers independently from the battle phase."""
@@ -3084,9 +3074,7 @@ class BattleScene:
             return
         for popup in popups:
             popup.update()
-        self.spell_damage_popups = [
-            popup for popup in popups if not popup.completed
-        ]
+        self.spell_damage_popups = [popup for popup in popups if not popup.completed]
 
     def _update_affinity_popups(self) -> None:
         """Advance WEAK/RESIST markers independently from the battle phase."""
@@ -3347,10 +3335,7 @@ class BattleScene:
             self._complete_current_turn()
             return
         presentation.elapsed_frame += 1
-        if (
-            not presentation.damage_applied
-            and presentation.hit_elapsed_frame >= 0
-        ):
+        if not presentation.damage_applied and presentation.hit_elapsed_frame >= 0:
             if presentation.is_hit:
                 monster = self.monsters[presentation.target_index]
                 monster.state.take_damage(presentation.damage)
@@ -3804,8 +3789,7 @@ class BattleScene:
                 item_available=bool(self._active_member_item_candidates()),
             ),
             party_front_rows=tuple(
-                self._party_member_is_front_row(index)
-                for index in active_indexes
+                self._party_member_is_front_row(index) for index in active_indexes
             ),
         )
 
@@ -4031,8 +4015,7 @@ class BattleScene:
             target_evasion=target_stats.evasion,
             hit_roll=random.randint(0, 99),
             target_defending=(
-                self.monster_attack_target_index
-                in self.defending_party_indexes
+                self.monster_attack_target_index in self.defending_party_indexes
             ),
         )
         self.monster_attack_damage = result.damage
@@ -4218,14 +4201,11 @@ class BattleScene:
                 and getattr(self, "monster_attack_damage", None)
             ):
                 shake_index = (
-                    self.monster_attack_animation_frame
-                    * DA2_REFERENCE_FPS
-                    // FPS
+                    self.monster_attack_animation_frame * DA2_REFERENCE_FPS // FPS
                 ) % len(MONSTER_DAMAGE_SHAKE_X)
                 x += MONSTER_DAMAGE_SHAKE_X[shake_index]
-            is_escaping = (
-                self.phase is BattlePhase.ESCAPE_MEMBER
-                and index == getattr(self, "escape_actor_index", None)
+            is_escaping = self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
+                self, "escape_actor_index", None
             )
             width = self._party_sprite_width(index, is_escaping=is_escaping)
             attack_presentation = getattr(self, "attack_presentation", None)
@@ -4338,14 +4318,12 @@ class BattleScene:
             return None
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
-        if (
-            self.phase is BattlePhase.ESCAPE_MEMBER
-            and index == getattr(self, "escape_actor_index", None)
+        if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
+            self, "escape_actor_index", None
         ):
             return self._escape_party_x(index), target_y
-        if (
-            self.phase is BattlePhase.FORMATION
-            and index in getattr(self, "formation_actor_indexes", ())
+        if self.phase is BattlePhase.FORMATION and index in getattr(
+            self, "formation_actor_indexes", ()
         ):
             start_x = self.formation_start_x_by_index[index]
             destination_x = self.formation_destination_x_by_index[index]
@@ -4358,10 +4336,7 @@ class BattleScene:
         if self.phase is not BattlePhase.ENTRANCE:
             if index == getattr(self, "action_party_index", None):
                 target_x -= self.action_offset_x
-                if (
-                    self.action_returning
-                    and getattr(self, "action_return_jump", False)
-                ):
+                if self.action_returning and getattr(self, "action_return_jump", False):
                     elapsed = min(
                         self.action_return_frame,
                         ATTACK_RETURN_JUMP_FRAME_COUNT,
@@ -4447,17 +4422,15 @@ class BattleScene:
     def _party_sprite_source_x(self, index: int) -> int:
         if self._party_member_is_dead(index):
             return DEAD_SPRITE_SOURCE_X
-        if (
-            self.phase is BattlePhase.ESCAPE_MEMBER
-            and index == getattr(self, "escape_actor_index", None)
+        if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
+            self, "escape_actor_index", None
         ):
             pattern = (
                 self.escape_animation_frame // ESCAPE_RUN_PATTERN_FRAME_COUNT
             ) % 2
             return pattern * FORMATION_SPRITE_STEP_X
-        if (
-            self.phase is BattlePhase.FORMATION
-            and index in getattr(self, "formation_actor_indexes", ())
+        if self.phase is BattlePhase.FORMATION and index in getattr(
+            self, "formation_actor_indexes", ()
         ):
             pattern = (
                 self.formation_animation_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
@@ -4474,13 +4447,9 @@ class BattleScene:
                 return DEFEND_SPRITE_SOURCE_X
             if self.action_returning and getattr(self, "action_return_jump", False):
                 return 0
-            if (
-                self.action_offset_x != ACTION_MOVE_DISTANCE
-                or self.action_returning
-            ):
+            if self.action_offset_x != ACTION_MOVE_DISTANCE or self.action_returning:
                 pattern = (
-                    self.action_motion_frame
-                    // FORMATION_WALK_PATTERN_FRAME_COUNT
+                    self.action_motion_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
                 ) % 2
                 return pattern * FORMATION_SPRITE_STEP_X
             return SPELL_CAST_SPRITE_SOURCE_X if self.action_uses_cast_pose else 0
@@ -4500,9 +4469,7 @@ class BattleScene:
         ):
             return
         offsets = (
-            DA2_MISS_VERTICAL_OFFSETS
-            if damage == 0
-            else DA2_DAMAGE_VERTICAL_OFFSETS
+            DA2_MISS_VERTICAL_OFFSETS if damage == 0 else DA2_DAMAGE_VERTICAL_OFFSETS
         )
         popup_elapsed_frame = self.monster_attack_animation_frame
         reference_frame = min(
@@ -4535,8 +4502,7 @@ class BattleScene:
                 x,
                 y,
                 0,
-                DAMAGE_NUMBER_SPRITE_X
-                + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_X + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_Y,
                 DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_SIZE,
@@ -4556,9 +4522,7 @@ class BattleScene:
             or not 0 <= presentation.hit_elapsed_frame < ATTACK_HIT_FRAME_COUNT
         ):
             return
-        pattern = (
-            presentation.hit_elapsed_frame // ATTACK_HIT_PATTERN_FRAME_COUNT
-        )
+        pattern = presentation.hit_elapsed_frame // ATTACK_HIT_PATTERN_FRAME_COUNT
         anchor_x, anchor_y = self._spell_effect_anchor(
             "enemy",
             presentation.target_index,
@@ -4627,8 +4591,7 @@ class BattleScene:
                 x,
                 y,
                 0,
-                DAMAGE_NUMBER_SPRITE_X
-                + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                DAMAGE_NUMBER_SPRITE_X + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_Y,
                 DAMAGE_NUMBER_SPRITE_SIZE,
                 DAMAGE_NUMBER_SPRITE_SIZE,
@@ -4761,8 +4724,7 @@ class BattleScene:
                     x,
                     y,
                     0,
-                    DAMAGE_NUMBER_SPRITE_X
-                    + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_X + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
                     HEALING_NUMBER_SPRITE_Y,
                     DAMAGE_NUMBER_SPRITE_SIZE,
                     DAMAGE_NUMBER_SPRITE_SIZE,
@@ -4787,8 +4749,7 @@ class BattleScene:
                     x,
                     y,
                     0,
-                    DAMAGE_NUMBER_SPRITE_X
-                    + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_X + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
                     DAMAGE_NUMBER_SPRITE_Y,
                     DAMAGE_NUMBER_SPRITE_SIZE,
                     DAMAGE_NUMBER_SPRITE_SIZE,
@@ -4912,10 +4873,7 @@ class BattleScene:
             if len(remaining) >= TIMELINE_VISIBLE_ENTRY_COUNT:
                 incoming = remaining[TIMELINE_VISIBLE_ENTRY_COUNT - 1]
                 incoming_index = TIMELINE_VISIBLE_ENTRY_COUNT - 1
-            elif (
-                advance.interrupt_index is None
-                and advance.reinsert_completed_actor
-            ):
+            elif advance.interrupt_index is None and advance.reinsert_completed_actor:
                 incoming = advance.completed_actor
                 incoming_index = len(remaining)
             if incoming is not None:
@@ -5068,9 +5026,7 @@ class BattleScene:
                 PARTY_ENTRANCE_COMPLETE_FRAME,
             )
         )
-        hidden_party_status_indexes = set(
-            getattr(self, "escaped_party_indexes", set())
-        )
+        hidden_party_status_indexes = set(getattr(self, "escaped_party_indexes", set()))
         if self.phase is BattlePhase.ESCAPE_MEMBER:
             escape_actor_index = getattr(self, "escape_actor_index", None)
             if escape_actor_index is not None:
@@ -5089,10 +5045,7 @@ class BattleScene:
         global_command_window = getattr(self, "global_command_window", None)
         show_monster_names = (
             self.phase is BattlePhase.TARGET
-            or (
-                self.phase is BattlePhase.ACTION_TARGET
-                and self.action_targets_enemy
-            )
+            or (self.phase is BattlePhase.ACTION_TARGET and self.action_targets_enemy)
             or (self.phase is BattlePhase.INITIAL and self.command_window.is_closed)
             or (
                 self.phase is BattlePhase.GLOBAL_COMMAND

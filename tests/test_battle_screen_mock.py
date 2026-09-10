@@ -78,6 +78,7 @@ from tools.screen_mocks.battle import (
     ACTION_MOVE_DISTANCE,
     ACTION_MOVE_SPEED,
     SPELL_CAST_SPRITE_SOURCE_X,
+    SPELL_POST_EFFECT_WAIT_FRAME_COUNT,
     SPELL_RESULT_OVERLAP_FRAME_COUNT,
     BattleActionPresentation,
     BattleAttackPresentation,
@@ -2031,6 +2032,11 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._update_action_presentation()
         mock._complete_current_turn.assert_not_called()
         mock._update_action_presentation()
+        mock._complete_current_turn.assert_not_called()
+        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT - 1):
+            mock._update_action_presentation()
+            mock._complete_current_turn.assert_not_called()
+        mock._update_action_presentation()
         mock._complete_current_turn.assert_called_once_with()
         mock.palette_shifter.remove_variant.assert_called_once_with(
             SPELL_EFFECT_FLASH_PALETTE
@@ -2112,6 +2118,10 @@ class BattleScreenMockTest(unittest.TestCase):
         for _frame in range(SPELL_RESULT_OVERLAP_FRAME_COUNT):
             mock._update_action_presentation()
 
+        mock._begin_action_return.assert_not_called()
+        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT):
+            mock._update_action_presentation()
+
         mock._begin_action_return.assert_called_once_with(complete_turn=True)
         self.assertEqual(len(mock.healing_popups), 1)
 
@@ -2178,6 +2188,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._update_action_presentation()
 
         self.assertGreater(target.hp, 1)
+        mock._begin_action_return.assert_not_called()
+        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT - 1):
+            mock._update_action_presentation()
         mock._begin_action_return.assert_called_once_with(complete_turn=True)
         self.assertEqual(len(mock.healing_popups), 1)
 
@@ -2312,6 +2325,10 @@ class BattleScreenMockTest(unittest.TestCase):
         for _frame in range(definition.total_frames - updates_until_result):
             mock._update_action_presentation()
 
+        mock._begin_action_return.assert_not_called()
+        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT):
+            mock._update_action_presentation()
+
         mock._begin_action_return.assert_called_once_with(complete_turn=True)
         self.assertEqual(len(mock.spell_damage_popups), 1)
         self.assertEqual(len(mock.affinity_popups), 1)
@@ -2423,6 +2440,10 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.palette_shifter = Mock()
         mock._complete_current_turn = Mock()
 
+        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT - 1):
+            mock._update_action_presentation()
+            self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+            mock._complete_current_turn.assert_not_called()
         mock._update_action_presentation()
 
         self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
