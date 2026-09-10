@@ -192,6 +192,22 @@ class BattleCommandRulesTest(unittest.TestCase):
         )
         self.assertFalse(aim.enabled)
 
+    def test_focus_is_disabled_when_normal_attack_cannot_reach(self) -> None:
+        skills = load_mock_skills()
+        self.party[0].formation_row = FormationRow.BACK
+        self.party[0].skills.append(skills["Focus"])
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party,
+            self.monsters,
+        )
+
+        focus = next(
+            option for option in commands if option.command is BattleCommand.FOCUS
+        )
+        self.assertFalse(focus.enabled)
+
     def test_silence_disables_visible_spell_without_hiding_it(self) -> None:
         commands = resolve_battle_commands(
             self.party[0],

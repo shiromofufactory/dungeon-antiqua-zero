@@ -89,6 +89,22 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertEqual(result.hit_value, 1.0)
         self.assertEqual(result.damage, 81)
 
+    def test_unable_to_evade_matches_da2_split_vulnerability(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=0,
+            agility=20,
+            target_defense=0,
+            target_evasion=100,
+            hit_roll=99,
+            target_unable_to_evade=True,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertEqual(result.adjusted_hit, 0.0)
+        self.assertEqual(result.hit_value, 1.0)
+        self.assertEqual(result.damage, 81)
+
     def test_defending_avoids_an_attack_below_da2_guard_threshold(self) -> None:
         result = resolve_physical_attack(
             attack=100,

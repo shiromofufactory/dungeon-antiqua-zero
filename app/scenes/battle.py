@@ -112,6 +112,7 @@ BATTLE_BGM_ID = "da3-battle1"
 BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
+BATTLE_FOCUS_SE_ID = "battle_focus"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
@@ -277,6 +278,8 @@ ACTION_MOVE_DISTANCE = 16
 DA2_ACTION_MOVE_SPEED = 4
 ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
 BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
+FOCUS_PRESENTATION_FRAME_COUNT = 36
+FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
 SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
 SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
@@ -433,6 +436,7 @@ class BattlePhase(StrEnum):
     TARGET = "target"
     ACTION_TARGET = "action_target"
     ATTACK_PRESENTATION = "attack_presentation"
+    FOCUS_PRESENTATION = "focus_presentation"
     ACTION_PRESENTATION = "action_presentation"
     ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
@@ -609,6 +613,7 @@ class BattleAttackPresentation:
     effect_row: int | None
     is_hit: bool = True
     is_aimed: bool = False
+    is_focused: bool = False
     sound_effect_id: str = ATTACK_SLASH_SE_ID
     elapsed_frame: int = 0
     damage_applied: bool = False
@@ -1279,6 +1284,8 @@ class BattleScene:
         self.attack_presentation: BattleAttackPresentation | None = None
         self.action_gauge_adjustment = 0.0
         self.battle_popup = BattleTimedPopup()
+        self.focused_target_by_party_index: dict[int, int] = {}
+        self.focus_presentation_elapsed_frame = 0
         self.action_party_index: int | None = None
         self.action_offset_x = 0
         self.action_motion_frame = 0
@@ -1373,6 +1380,7 @@ class BattleScene:
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.update()
+        self._clear_interrupted_focus_states()
         self._update_healing_popups()
         self._update_spell_damage_popups()
         self._update_affinity_popups()
@@ -1430,6 +1438,9 @@ class BattleScene:
         if self.phase is BattlePhase.ATTACK_PRESENTATION:
             self._update_attack_presentation()
             return
+        if self.phase is BattlePhase.FOCUS_PRESENTATION:
+            self._update_focus_presentation()
+            return
         if self.phase is BattlePhase.ITEM:
             self._update_item_selection(input_state)
             return
@@ -1457,6 +1468,8 @@ class BattleScene:
                     self._begin_attack_target_selection()
                 elif command == BattleCommand.AIM:
                     self._begin_attack_target_selection(command=BattleCommand.AIM)
+                elif command == BattleCommand.FOCUS:
+                    self._begin_attack_target_selection(command=BattleCommand.FOCUS)
                 elif command == BattleCommand.SPELL:
                     self._begin_spell_selection()
                 elif command == BattleCommand.FORMATION:
@@ -1603,6 +1616,8 @@ class BattleScene:
             pending_deaths.clear()
         self.attack_presentation = None
         self.action_gauge_adjustment = 0.0
+        self.focused_target_by_party_index.clear()
+        self.focus_presentation_elapsed_frame = 0
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.clear()
@@ -2068,6 +2083,91 @@ class BattleScene:
         self.selected_command = BattleCommand.DEFEND
         self._complete_current_turn()
         return True
+
+    def _begin_focus_presentation(self) -> bool:
+        """Store a charged attack and hold the guard pose for 36 frames."""
+
+        party_index = self.active_party_index
+        target_index = self.selected_target_index
+        if (
+            party_index is None
+            or target_index is None
+            or target_index not in self.selectable_target_indexes
+            or not self.monsters[target_index].is_alive
+        ):
+            return False
+        focused_targets = getattr(self, "focused_target_by_party_index", None)
+        if focused_targets is None:
+            focused_targets = {}
+            self.focused_target_by_party_index = focused_targets
+        focused_targets[party_index] = target_index
+        self.focus_presentation_elapsed_frame = 0
+        self.phase = BattlePhase.FOCUS_PRESENTATION
+        self.command_cursor.active = False
+        self.target_cursor.active = False
+        self.command_window.close_immediately()
+        self._show_battle_popup(
+            self._command_label(BattleCommand.FOCUS),
+            FOCUS_PRESENTATION_FRAME_COUNT,
+        )
+        play_se(BATTLE_FOCUS_SE_ID)
+        self._refresh_monster_name_colors()
+        return True
+
+    def _update_focus_presentation(self) -> None:
+        """Finish the no-op charging turn after its authored hold."""
+
+        self.focus_presentation_elapsed_frame += 1
+        if self.focus_presentation_elapsed_frame < FOCUS_PRESENTATION_FRAME_COUNT:
+            return
+        self.focus_presentation_elapsed_frame = FOCUS_PRESENTATION_FRAME_COUNT
+        self._complete_current_turn()
+
+    @staticmethod
+    def _member_focus_is_interrupted(member: object) -> bool:
+        """Return whether death or an incapacitating ailment cancels focus."""
+
+        return (
+            BattleScene._member_is_dead(member)
+            or bool(getattr(member, "paralyzed", False))
+            or bool(getattr(member, "sleeping", 0))
+            or bool(getattr(member, "confused", 0))
+            or bool(getattr(member, "stunned", False))
+        )
+
+    def _clear_interrupted_focus_states(self) -> None:
+        """Drop charged attacks whose owner can no longer maintain them."""
+
+        focused_targets = getattr(self, "focused_target_by_party_index", None)
+        if not focused_targets:
+            return
+        for index in tuple(focused_targets):
+            if index >= len(self.party) or self._member_focus_is_interrupted(
+                self.party[index]
+            ):
+                focused_targets.pop(index, None)
+
+    def _begin_focused_attack(self) -> bool:
+        """Consume the active member's focus and begin its automatic attack."""
+
+        party_index = self.active_party_index
+        focused_targets = getattr(self, "focused_target_by_party_index", {})
+        if party_index is None or party_index not in focused_targets:
+            return False
+        if self._member_focus_is_interrupted(self.party[party_index]):
+            focused_targets.pop(party_index, None)
+            return False
+        selectable = self._active_member_attack_targets()
+        if not selectable:
+            focused_targets.pop(party_index, None)
+            return False
+        stored_target = focused_targets.pop(party_index)
+        target_index = stored_target if stored_target in selectable else selectable[0]
+        self.selected_command = BattleCommand.FOCUS
+        self.selectable_target_indexes = selectable
+        self.selected_target_index = target_index
+        self._begin_action_motion(use_cast_pose=False)
+        return self._begin_attack_presentation()
 
     def _update_formation_animation(self) -> None:
         """Advance manual or automatic formation walking, then continue."""
@@ -3316,8 +3416,12 @@ class BattleScene:
         *,
         command: BattleCommand = BattleCommand.ATTACK,
     ) -> bool:
-        if command not in (BattleCommand.ATTACK, BattleCommand.AIM):
-            raise ValueError("attack target selection requires attack or aim")
+        if command not in (
+            BattleCommand.ATTACK,
+            BattleCommand.AIM,
+            BattleCommand.FOCUS,
+        ):
+            raise ValueError("attack target selection requires attack, aim, or focus")
         selectable = self._active_member_attack_targets()
         if not selectable:
             return False
@@ -3327,7 +3431,8 @@ class BattleScene:
         # DA2 starts enemy selection at the last selectable monster.
         self.selected_target_index = selectable[-1]
         self.phase = BattlePhase.TARGET
-        self._begin_action_motion(use_cast_pose=False)
+        if command is not BattleCommand.FOCUS:
+            self._begin_action_motion(use_cast_pose=False)
         self.command_cursor.active = False
         self.target_cursor.active = True
         self.target_cursor.select_key(self.selected_target_index)
@@ -3349,7 +3454,10 @@ class BattleScene:
             return
 
         if input_state.confirm.triggered:
-            self._begin_attack_presentation()
+            if self.selected_command is BattleCommand.FOCUS:
+                self._begin_focus_presentation()
+            else:
+                self._begin_attack_presentation()
             return
 
         navigation = input_state.navigation
@@ -3381,6 +3489,7 @@ class BattleScene:
         )
         effect_row = ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype)
         is_aimed = self.selected_command == BattleCommand.AIM
+        is_focused = self.selected_command == BattleCommand.FOCUS
         member_stats = member.battle_stats
         monster_stats = monster.combat_stats
         attack = member_physical_attack(
@@ -3389,6 +3498,8 @@ class BattleScene:
             weapon_level=member.weapon_level(weapon),
             internal_level=member.internal_level,
         )
+        if is_focused:
+            attack *= FOCUS_ATTACK_MULTIPLIER
         result = resolve_physical_attack(
             attack=attack,
             hit=member_stats.hit_right.total,
@@ -3405,6 +3516,7 @@ class BattleScene:
             effect_row=effect_row,
             is_hit=result.hit,
             is_aimed=is_aimed,
+            is_focused=is_focused,
             sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
                 weapon.subtype,
                 ATTACK_SLASH_SE_ID,
@@ -3562,6 +3674,7 @@ class BattleScene:
         self.pending_spell = None
         self.action_presentation = None
         self.attack_presentation = None
+        self.focus_presentation_elapsed_frame = 0
         pending_deaths = getattr(self, "pending_monster_death_indexes", None)
         if pending_deaths is not None:
             pending_deaths.clear()
@@ -3815,6 +3928,9 @@ class BattleScene:
                 self._begin_party_member_escape(self.active_party_index)
                 return
             self.defending_party_indexes.discard(self.active_party_index)
+            if self._begin_focused_attack():
+                self._refresh_party_text_colors()
+                return
             if getattr(self, "auto_battle_active", False):
                 self._begin_auto_action()
                 self._refresh_party_text_colors()
@@ -4119,6 +4235,10 @@ class BattleScene:
             target_defending=(
                 self.monster_attack_target_index in self.defending_party_indexes
             ),
+            target_unable_to_evade=(
+                self.monster_attack_target_index
+                in getattr(self, "focused_target_by_party_index", {})
+            ),
         )
         self.monster_attack_damage = result.damage
         self.monster_attack_animation_frame = 0
@@ -4141,6 +4261,11 @@ class BattleScene:
             member = self.party[target_index]
             member.hp = max(0, member.hp - damage)
             self._refresh_party_hp_text(target_index)
+            if self._member_focus_is_interrupted(member):
+                getattr(self, "focused_target_by_party_index", {}).pop(
+                    target_index,
+                    None,
+                )
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
         self.monster_attack_animation_frame = 0
@@ -4539,6 +4664,11 @@ class BattleScene:
                 self.formation_animation_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
             ) % 2
             return pattern * FORMATION_SPRITE_STEP_X
+        if (
+            self.phase is BattlePhase.FOCUS_PRESENTATION
+            and index == getattr(self, "active_party_index", None)
+        ):
+            return DEFEND_SPRITE_SOURCE_X
         if (
             self.phase is BattlePhase.MONSTER_ACTION
             and index == getattr(self, "monster_attack_target_index", None)

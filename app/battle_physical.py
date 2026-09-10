@@ -55,6 +55,7 @@ def resolve_physical_attack(
     target_evasion: int,
     hit_roll: int,
     target_defending: bool = False,
+    target_unable_to_evade: bool = False,
     hit_value_bonus: int = 0,
 ) -> PhysicalAttackResult:
     """Resolve a physical attack, including DA2's defend-command effect."""
@@ -70,6 +71,8 @@ def resolve_physical_attack(
         raise ValueError("hit_roll must be from 0 to 99")
     if not isinstance(target_defending, bool):
         raise TypeError("target_defending must be a boolean")
+    if not isinstance(target_unable_to_evade, bool):
+        raise TypeError("target_unable_to_evade must be a boolean")
 
     adjusted_hit = float(hit)
     if agility > 20:
@@ -77,11 +80,16 @@ def resolve_physical_attack(
     elif agility < 10:
         adjusted_hit *= 1 + (agility - 10) / 20
 
-    hit_value = (
-        adjusted_hit * (100 - target_evasion) / 100
-        - hit_roll
-        + hit_value_bonus
-    )
+    if target_unable_to_evade:
+        # DA2's 「まっぷたつ」 vulnerability ignores evasion and guarantees
+        # at least one point of hit value after the 0-99 roll.
+        hit_value = max(adjusted_hit, 100) - hit_roll + hit_value_bonus
+    else:
+        hit_value = (
+            adjusted_hit * (100 - target_evasion) / 100
+            - hit_roll
+            + hit_value_bonus
+        )
     hit_threshold = DEFENDING_HIT_VALUE_THRESHOLD if target_defending else 0
     if hit_value < hit_threshold:
         return PhysicalAttackResult(

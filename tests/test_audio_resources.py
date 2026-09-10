@@ -98,6 +98,7 @@ class BgmPlayerTest(unittest.TestCase):
             {
                 "alert",
                 "battle_escape",
+                "battle_focus",
                 "battle_hit",
                 "battle_monster_death",
                 "battle_weapon_blunt",
@@ -110,6 +111,7 @@ class BgmPlayerTest(unittest.TestCase):
         )
         self.assertEqual(se_channel_and_sound("confirm"), (1, 9))
         self.assertEqual(se_channel_and_sound("battle_escape"), (0, 26))
+        self.assertEqual(se_channel_and_sound("battle_focus"), (0, 37))
         self.assertEqual(se_channel_and_sound("battle_monster_death"), (0, 10))
         self.assertEqual(se_channel_and_sound("battle_weapon_slash"), (0, 11))
         self.assertEqual(se_channel_and_sound("battle_weapon_blunt"), (0, 29))

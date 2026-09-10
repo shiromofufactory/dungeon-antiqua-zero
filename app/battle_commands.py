@@ -217,7 +217,10 @@ def resolve_battle_commands(
         left_commands.append(
             BattleCommandOption(
                 command,
-                enabled=command is not BattleCommand.AIM or bool(attack_targets),
+                enabled=(
+                    command not in (BattleCommand.AIM, BattleCommand.FOCUS)
+                    or bool(attack_targets)
+                ),
             )
         )
     right_commands = [

@@ -17,6 +17,10 @@
       "channel": 0,
       "sound": 26
     },
+    "battle_focus": {
+      "channel": 0,
+      "sound": 37
+    },
     "battle_weapon_slash": {
       "channel": 0,
       "sound": 11
