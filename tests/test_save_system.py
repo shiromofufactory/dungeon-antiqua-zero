@@ -10,6 +10,7 @@ from tools._bootstrap import APP_ROOT
 from field import FieldPosition
 from input import Direction
 from state import Difficulty, SaveData
+from member import internal_level_for_experience, required_experience_for_level
 from systems import (
     SAVE_FORMAT_VERSION,
     SAVE_SLOT_COUNT,
@@ -84,7 +85,7 @@ class SaveSystemTest(unittest.TestCase):
             ),
         )
 
-    def test_creates_complete_version_one_document(self) -> None:
+    def test_creates_complete_current_version_document(self) -> None:
         document = self.save_document()
 
         self.assertEqual(document["format_version"], SAVE_FORMAT_VERSION)
@@ -179,7 +180,7 @@ class SaveSystemTest(unittest.TestCase):
             self.assertIsNone(summary.saved_at)
             self.assertEqual(summary.party_character_keys, ())
 
-    def test_repository_rejects_non_v1_document(self) -> None:
+    def test_repository_rejects_non_current_write_document(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = SaveRepository(Path(directory))
             with self.assertRaises(SaveSystemError):
@@ -188,7 +189,7 @@ class SaveSystemTest(unittest.TestCase):
                 repository.save(1, {"format_version": 1})
             self.assertFalse(repository.slot_path(1).exists())
 
-    def test_restores_complete_state_and_round_trips_version_one(self) -> None:
+    def test_restores_complete_state_and_rederives_internal_levels(self) -> None:
         document = self.save_document()
 
         restored = restore_save_document(
@@ -219,7 +220,38 @@ class SaveSystemTest(unittest.TestCase):
             facing=restored.facing,
             saved_at=datetime.fromisoformat(document["saved_at"]),
         )
-        self.assertEqual(round_tripped, document)
+        for state in round_tripped["party"]["character_states"].values():
+            self.assertEqual(
+                state["internal_level"],
+                internal_level_for_experience(
+                    document["progress"]["experience"]
+                    + state["experience_offset"]
+                ),
+            )
+
+    def test_migrates_version_one_member_level_to_an_experience_offset(self) -> None:
+        document = self.save_document()
+        document["format_version"] = 1
+        for state in document["party"]["character_states"].values():
+            del state["experience_offset"]
+
+        restored = restore_save_document(
+            document,
+            character_records=load_mock_character_records(),
+            items=self.items,
+            skills=self.skills,
+        )
+
+        for member in restored.character_states.values():
+            saved_level = document["party"]["character_states"][
+                member.definition.key
+            ]["internal_level"]
+            self.assertEqual(member.internal_level, saved_level)
+            self.assertEqual(
+                member.experience_offset,
+                required_experience_for_level(saved_level)
+                - document["progress"]["experience"],
+            )
 
     def test_legacy_version_one_save_defaults_missing_encounter_count(self) -> None:
         document = self.save_document()

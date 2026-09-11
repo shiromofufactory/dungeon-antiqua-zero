@@ -78,16 +78,22 @@ from resources import (
     load_record_array,
     play_se,
 )
-from state import Language, Settings
+from state import Language, SaveData, Settings
 from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 from spell_effect import (
     SpellEffectPlayer,
     load_spell_effects,
 )
-from systems import InventorySystem
+from systems import (
+    BattleProgression,
+    EnemyProgressionData,
+    InventorySystem,
+)
 from text_catalog import TextCatalog
 from ui import (
     DEFAULT_TEXT_COLOR,
+    BattleResultOverlay,
+    LocalizedWindowTextFactory,
     DISABLED_COLOR,
     RESERVE_MEMBER_TEXT_COLOR,
     TEXT_GRID_X,
@@ -109,6 +115,8 @@ SCREEN_HEIGHT = 240
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
+BATTLE_WIN_BGM_ID = "da3-win"
+BATTLE_LEVEL_UP_BGM_ID = "da3-lvup"
 BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
@@ -281,6 +289,10 @@ BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
 FOCUS_PRESENTATION_FRAME_COUNT = 36
 FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
+VICTORY_SPRITE_SOURCE_X = 16 * 7
+VICTORY_MOTION_LIMIT = 70
+VICTORY_MOTION_PERIOD = 40
+VICTORY_MOTION_VISIBLE_FRAMES = 20
 SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
 SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
@@ -448,6 +460,8 @@ class BattlePhase(StrEnum):
     DEFEAT_MESSAGE = "defeat_message"
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
+    VICTORY_SUMMARY = "victory_summary"
+    RESULT = "result"
 
 
 class BattleResult(StrEnum):
@@ -790,6 +804,10 @@ class BattleMonster:
     is_front_row: bool
     state: MonsterBattleState
     agility: int
+    level: int = 1
+    early_appear: int = 0
+    max_occurrence: int = 1
+    gold: int = 0
     combat_stats: MonsterCombatStats = field(
         default_factory=lambda: MonsterCombatStats(0, 0, 0, 0)
     )
@@ -844,6 +862,12 @@ class BattleMonster:
             state=MonsterBattleState.from_record(record),
             combat_stats=MonsterCombatStats.from_record(record),
             agility=_required_nonnegative_integer(record, "agi", key),
+            level=_required_nonnegative_integer(record, "lv", key),
+            early_appear=_required_nonnegative_integer(
+                record, "early_appear", key
+            ),
+            max_occurrence=_required_positive_integer(record, "max_occ", key),
+            gold=_required_nonnegative_integer(record, "gold", key),
             weaknesses=resistances_from_tolerance(weakness),
             resistances=resistances_from_tolerance(tolerance),
             is_shadow=bool(shadow),
@@ -947,6 +971,8 @@ class BattleScene:
         character_records: tuple[dict[str, object], ...],
         party: tuple[Member, ...],
         encounter: BattleEncounter,
+        save_data: SaveData,
+        result_party: tuple[Member, ...],
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -966,6 +992,9 @@ class BattleScene:
             party=party,
             monster_records=tuple(load_record_array("monsters.json")),
             encounter=encounter,
+            save_data=save_data,
+            result_party=result_party,
+            fonts=fonts,
             attack_poses=load_attack_poses(APP_ROOT / "effects" / "attack_poses.json"),
             spell_effect_renderer=SpellEffectRenderer(
                 resources,
@@ -997,6 +1026,9 @@ class BattleScene:
         restart_enabled: bool = False,
         reset_party_on_restart: bool = False,
         reset_inventory_on_restart: bool = False,
+        save_data: SaveData | None = None,
+        result_party: tuple[Member, ...] | None = None,
+        fonts: FontResources | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
@@ -1019,6 +1051,8 @@ class BattleScene:
         self.reset_party_on_restart = reset_party_on_restart
         self.reset_inventory_on_restart = reset_inventory_on_restart
         self.settings = settings
+        self.fonts = FontResources() if fonts is None else fonts
+        self.save_data = SaveData() if save_data is None else save_data
         self.palette_shifter = palette_shifter
         self.palette_shifter.define_mix(
             UNSELECTABLE_TARGET_PALETTE,
@@ -1053,6 +1087,15 @@ class BattleScene:
             label="character",
         )
         self.party = party
+        self.result_party = party if result_party is None else result_party
+        if (
+            not self.result_party
+            or len(self.result_party) > 6
+            or not all(isinstance(member, Member) for member in self.result_party)
+        ):
+            raise ValueError("result_party must contain from 1 to 6 members")
+        if tuple(self.result_party[: len(party)]) != party:
+            raise ValueError("battle party must be the leading result party members")
         self.party_entrance_complete_frame = (
             PARTY_ENTRANCE_FRAME_COUNT
             + (len(party) - 1) * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
@@ -1078,6 +1121,17 @@ class BattleScene:
                 is_front_row=index in encounter.front_monster_indexes,
             )
             for index, key in enumerate(encounter.monster_keys)
+        )
+        self.progression = BattleProgression(
+            tuple(
+                EnemyProgressionData(
+                    monster.level,
+                    monster.early_appear,
+                    monster.max_occurrence,
+                    monster.gold,
+                )
+                for monster in self.monsters
+            )
         )
         self.monster_images = {
             monster.key: resources.image(monster.image_resource_id)
@@ -1314,6 +1368,12 @@ class BattleScene:
         self.defending_party_indexes: set[int] = set()
         self.escaped_party_indexes: set[int] = set()
         self.temporary_front_party_indexes: set[int] = set()
+        self.victory_motion_frame = 0
+        self.victory_summary_window: Window | None = None
+        self.result_overlay: BattleResultOverlay | None = None
+        self.growth_jingle_played = False
+        self.action_progression_weapon: Item | None = None
+        self.action_progression_enemy_levels: tuple[int, ...] = ()
         self.windows = [
             command_guide_window,
             command_window,
@@ -1369,6 +1429,14 @@ class BattleScene:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        if getattr(self, "phase", None) is BattlePhase.VICTORY_SUMMARY:
+            self.input_device = input_state.device
+            self._update_victory_summary(input_state)
+            return
+        if getattr(self, "phase", None) is BattlePhase.RESULT:
+            self.input_device = input_state.device
+            self._update_result(input_state)
+            return
         input_state = self._apply_confirm_repeat(input_state)
         self.input_device = input_state.device
         self._refresh_input_guide()
@@ -1545,6 +1613,17 @@ class BattleScene:
         self._prepare_party_for_restart()
         for monster in self.monsters:
             monster.restore()
+        self.progression = BattleProgression(
+            tuple(
+                EnemyProgressionData(
+                    monster.level,
+                    monster.early_appear,
+                    monster.max_occurrence,
+                    monster.gold,
+                )
+                for monster in self.monsters
+            )
+        )
         living_party = tuple(
             visual for visual in self.party_visuals if visual.member.is_alive
         )
@@ -1631,6 +1710,12 @@ class BattleScene:
         self.defending_party_indexes.clear()
         self.escaped_party_indexes.clear()
         self.temporary_front_party_indexes.clear()
+        self.victory_motion_frame = 0
+        self.victory_summary_window = None
+        self.result_overlay = None
+        self.growth_jingle_played = False
+        self.action_progression_weapon = None
+        self.action_progression_enemy_levels = ()
         self.target_cursor.active = False
         self.escape_cursor.active = False
         self.command_window.close_immediately()
@@ -2101,6 +2186,10 @@ class BattleScene:
             focused_targets = {}
             self.focused_target_by_party_index = focused_targets
         focused_targets[party_index] = target_index
+        self._record_equipped_weapon_action(
+            party_index,
+            (getattr(self.monsters[target_index], "level", 1),),
+        )
         self.focus_presentation_elapsed_frame = 0
         self.phase = BattlePhase.FOCUS_PRESENTATION
         self.command_cursor.active = False
@@ -2886,6 +2975,19 @@ class BattleScene:
                 if use_spell_key
                 else None
             )
+            if (
+                item_candidate.item.is_weapon
+                and self.active_party_index is not None
+                and hasattr(self, "progression")
+            ):
+                levels = self._current_action_enemy_levels()
+                self.progression.record_weapon_action(
+                    self.party[self.active_party_index],
+                    (item_candidate.item,),
+                    levels,
+                )
+                self.action_progression_weapon = item_candidate.item
+                self.action_progression_enemy_levels = levels
         elif spell is not None:
             if self.active_party_index is None:
                 return False
@@ -2894,6 +2996,13 @@ class BattleScene:
                 return False
             member.mp -= spell.mp
             self._show_spell_cast_message(spell)
+            if spell.type is not SpellType.ITEM and hasattr(self, "progression"):
+                self.progression.record_spell_use(
+                    member,
+                    SPELL_PROFICIENCY_BY_TYPE[spell.type],
+                    self._current_action_enemy_levels(),
+                    mp_spent=spell.mp,
+                )
         else:
             return False
         if effect_spell is not None and self._begin_action_presentation(effect_spell):
@@ -2903,6 +3012,54 @@ class BattleScene:
             return True
         self._complete_current_turn()
         return True
+
+    def _current_action_enemy_levels(self) -> tuple[int, ...]:
+        """Resolve enemy levels for the currently confirmed spell/item action."""
+
+        if self.action_targets_enemy:
+            indexes = (
+                self.selectable_target_indexes
+                if self.action_targets_all
+                else (
+                    ()
+                    if self.selected_target_index is None
+                    else (self.selected_target_index,)
+                )
+            )
+            return tuple(getattr(self.monsters[index], "level", 1) for index in indexes)
+        living = tuple(
+            getattr(monster, "level", 1)
+            for monster in self.monsters
+            if monster.is_alive
+        )
+        return (() if not living else (max(living),))
+
+    def _record_equipped_weapon_action(
+        self,
+        party_index: int,
+        enemy_levels: tuple[int, ...],
+        *,
+        defeated_enemy: bool = False,
+    ) -> None:
+        """Record both equipped hands for one physical command action."""
+
+        if not hasattr(self, "progression") or not hasattr(self, "party"):
+            return
+        member = self.party[party_index]
+        if not hasattr(member, "equipment"):
+            return
+        weapons = tuple(
+            weapon
+            for slot in (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
+            if (weapon := member.equipment.weapon_at(slot)) is not None
+        )
+        if weapons:
+            self.progression.record_weapon_action(
+                member,
+                weapons,
+                enemy_levels,
+                defeated_enemy=defeated_enemy,
+            )
 
     def _begin_action_presentation(
         self,
@@ -3221,6 +3378,18 @@ class BattleScene:
                 if not self.monsters[result.target_index].is_alive
             ]
             self.action_presentation = None
+            progression_weapon = getattr(self, "action_progression_weapon", None)
+            if defeated_indexes and progression_weapon is not None:
+                party_index = getattr(self, "action_party_index", None)
+                if party_index is not None:
+                    self.progression.record_weapon_action(
+                        self.party[party_index],
+                        (progression_weapon,),
+                        getattr(self, "action_progression_enemy_levels", ()),
+                        defeated_enemy=True,
+                    )
+            self.action_progression_weapon = None
+            self.action_progression_enemy_levels = ()
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
             if defeated_indexes:
                 if getattr(self, "action_party_index", None) is not None:
@@ -3559,6 +3728,14 @@ class BattleScene:
             return
         target_index = presentation.target_index
         target_is_alive = self.monsters[target_index].is_alive
+        party_index = getattr(self, "action_party_index", None)
+        if party_index is not None:
+            self._record_equipped_weapon_action(
+                party_index,
+                (getattr(self.monsters[target_index], "level", 1),),
+                defeated_enemy=not target_is_alive,
+                # TODO: 会心実装時はcritical=Trueを加えて撃破との同時成立を+2にする。
+            )
         self.attack_presentation = None
         if not target_is_alive:
             self._begin_monster_death(target_index)
@@ -3611,7 +3788,7 @@ class BattleScene:
             self._begin_monster_death(next_index)
             return
         if self._monsters_are_defeated():
-            self.result = BattleResult.VICTORY
+            self._begin_victory_summary()
             return
         if getattr(self, "action_party_index", None) is not None:
             self.phase = BattlePhase.ACTION_RETURN
@@ -3624,6 +3801,83 @@ class BattleScene:
         return bool(self.monsters) and all(
             not monster.is_alive for monster in self.monsters
         )
+
+    def _begin_victory_summary(self) -> None:
+        """Settle rewards and show DA1's victory message over the battlefield."""
+
+        if not all(
+            hasattr(self, name)
+            for name in ("party", "result_party", "progression", "save_data")
+        ):
+            self.result = BattleResult.VICTORY
+            return
+        ineligible = {
+            member.definition.key
+            for index, member in enumerate(self.party)
+            if index in self.escaped_party_indexes or member.is_dead
+        }
+        growth = self.progression.settle(
+            self.save_data,
+            self.result_party,
+            ineligible_member_keys=ineligible,
+        )
+        self.growth_result = growth
+        message = self.texts.formatted_text(
+            "battle.victory.reward",
+            self.localizer,
+            {
+                "EXP": str(growth.experience_gained),
+                "GOLD": str(growth.gold_gained),
+            },
+        )
+        localized_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts,
+            self.settings.language,
+        )
+        placement = localized_texts.create(message, 2, 2)
+        self.victory_summary_window = WindowFactory(
+            self.fonts.font_for(Language.JAPANESE)
+        ).create(0, 0, 64, 7, (placement,))
+        self.victory_motion_frame = 0
+        self.phase = BattlePhase.VICTORY_SUMMARY
+        self.active_party_index = None
+        self.timeline = ()
+        self.bgm.play(BATTLE_WIN_BGM_ID, loop=False)
+
+    def _update_victory_summary(self, input_state: InputState) -> None:
+        self.victory_motion_frame = min(
+            self.victory_motion_frame + 1,
+            VICTORY_MOTION_LIMIT,
+        )
+        if not input_state.confirm.triggered:
+            return
+        growth = getattr(self, "growth_result", None)
+        if growth is None:
+            raise RuntimeError("victory result requires settled growth")
+        self.result_overlay = BattleResultOverlay(
+            party=self.result_party,
+            growth=growth,
+            settings=self.settings,
+            fonts=self.fonts,
+            character_sprites=self.character_sprites,
+        )
+        self.phase = BattlePhase.RESULT
+
+    def _update_result(self, input_state: InputState) -> None:
+        overlay = self.result_overlay
+        if overlay is None:
+            raise RuntimeError("result phase requires a result overlay")
+        was_complete = overlay.animation_complete
+        completed = overlay.update(input_state)
+        if (
+            not was_complete
+            and overlay.animation_complete
+            and self.growth_result.has_visible_growth
+        ):
+            self.bgm.play(BATTLE_LEVEL_UP_BGM_ID, loop=False)
+            self.growth_jingle_played = True
+        if completed:
+            self.result = BattleResult.VICTORY
 
     def _release_transient_action_palettes(self) -> None:
         """Release mutually exclusive effect blocks before restarting the scene."""
@@ -3672,6 +3926,8 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        self.action_progression_weapon = None
+        self.action_progression_enemy_levels = ()
         self.action_presentation = None
         self.attack_presentation = None
         self.focus_presentation_elapsed_frame = 0
@@ -4222,6 +4478,8 @@ class BattleScene:
         if not target_indexes:
             self._start_timeline_animation()
             return
+        if hasattr(self, "progression"):
+            self.progression.record_enemy_action(self.monsters.index(actor))
         self.monster_attack_target_index = random.choice(target_indexes)
         target = self.party[self.monster_attack_target_index]
         target_stats = target.battle_stats
@@ -4389,6 +4647,11 @@ class BattleScene:
     def draw(self) -> None:
         """Draw the battle screen in explicit back-to-front order."""
 
+        if getattr(self, "phase", None) is BattlePhase.RESULT:
+            if self.result_overlay is None:
+                raise RuntimeError("result phase requires a result overlay")
+            self.result_overlay.draw()
+            return
         self._draw_background()
         self._draw_party()
         self._draw_monsters()
@@ -4650,6 +4913,11 @@ class BattleScene:
     def _party_sprite_source_x(self, index: int) -> int:
         if self._party_member_is_dead(index):
             return DEAD_SPRITE_SOURCE_X
+        if self.phase is BattlePhase.VICTORY_SUMMARY:
+            motion_visible = (
+                self.victory_motion_frame + VICTORY_MOTION_VISIBLE_FRAMES + 10
+            ) % VICTORY_MOTION_PERIOD < VICTORY_MOTION_VISIBLE_FRAMES
+            return VICTORY_SPRITE_SOURCE_X if motion_visible else 0
         if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
             self, "escape_actor_index", None
         ):
@@ -5105,6 +5373,8 @@ class BattleScene:
             self.party_target_cursor.draw()
 
     def _draw_timeline(self) -> None:
+        if self.phase is BattlePhase.VICTORY_SUMMARY:
+            return
         if self.phase is BattlePhase.ENTRANCE:
             for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
                 x = self._timeline_entrance_x(index)
@@ -5294,6 +5564,10 @@ class BattleScene:
         pyxel.rect(x, y + 18, 16, 1, color - 1)
 
     def _draw_windows(self) -> None:
+        if self.phase is BattlePhase.VICTORY_SUMMARY:
+            if self.victory_summary_window is not None:
+                self.victory_summary_window.draw()
+            return
         hide_party_status = self.phase in (
             BattlePhase.ESCAPE_MESSAGE,
             BattlePhase.ESCAPE,

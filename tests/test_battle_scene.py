@@ -158,6 +158,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.inventory_system = object()
         game.character_records = object()
         game.party = tuple(object() for _index in range(6))
+        game.save_data = SaveData()
         encounter = BattleEncounter(("Coyote",))
 
         with patch("game.BattleScene.create", return_value=Mock()) as create:
@@ -165,6 +166,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertIs(scene, create.return_value)
         self.assertEqual(len(create.call_args.kwargs["party"]), 5)
+        self.assertEqual(len(create.call_args.kwargs["result_party"]), 6)
+        self.assertIs(create.call_args.kwargs["save_data"], game.save_data)
         self.assertIs(create.call_args.kwargs["encounter"], encounter)
 
     def test_game_advances_encounters_only_on_dungeon_steps(self) -> None:

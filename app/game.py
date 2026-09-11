@@ -594,6 +594,8 @@ class Game:
             inventory_system=self.inventory_system,
             character_records=self.character_records,
             party=self.party[:BATTLE_PARTY_MEMBER_COUNT],
+            result_party=self.party,
+            save_data=self.save_data,
             encounter=encounter,
         )
 

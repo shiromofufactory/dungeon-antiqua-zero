@@ -4,7 +4,12 @@ import unittest
 
 from app.input import Direction
 from app.item import Item
-from app.member import EquipmentSlot, Member, ProficiencyKind
+from app.member import (
+    EquipmentSlot,
+    Member,
+    ProficiencyKind,
+    required_experience_for_level,
+)
 from app.resources.events import EventCatalog, EventResourceError
 from app.state import SaveData
 from app.systems import (
@@ -190,6 +195,22 @@ class EventRunnerTest(unittest.TestCase):
 
         self.assertIs(self.party.active_party[-1], alvan)
         self.assertEqual(self.party.active_party[-1].hp, 1)
+
+    def test_join_event_anchors_level_difference_to_shared_experience(self) -> None:
+        self.records[1]["lv_diff"] = 17
+        self.save_data.experience = 10
+        runner = self.runner(
+            [{"command": "join_party", "character_key": "Alvan"}]
+        )
+
+        self.assertIsNone(runner.advance())
+
+        alvan = self.party.active_party[-1]
+        self.assertEqual(alvan.internal_level, 18)
+        self.assertEqual(
+            alvan.experience_offset,
+            required_experience_for_level(18) - 10,
+        )
 
     def test_recover_party_restores_hp_mp_and_all_conditions(self) -> None:
         self.party.join("Alvan")

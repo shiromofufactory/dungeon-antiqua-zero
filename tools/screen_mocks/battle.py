@@ -47,7 +47,7 @@ from spell_effect import (
     SpellEffectDataError,
     load_spell_effects,
 )
-from state import Language, Settings
+from state import Language, SaveData, Settings
 from systems import InventorySystem
 from text_catalog import TextCatalog, TextCatalogError
 from ui import WindowFactory
@@ -150,6 +150,9 @@ class BattleTestApp(BattleScene):
             restart_enabled=True,
             reset_party_on_restart=True,
             reset_inventory_on_restart=True,
+            save_data=SaveData(),
+            result_party=party,
+            fonts=fonts,
         )
         pyxel.run(self.update, self.draw)
 

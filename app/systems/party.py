@@ -72,7 +72,13 @@ class PartySystem:
         self._active_party = party
         self._character_states = states
 
-    def join(self, character_key: str) -> bool:
+    def join(self, character_key: str, *, shared_experience: int = 0) -> bool:
+        if isinstance(shared_experience, bool) or not isinstance(
+            shared_experience, int
+        ):
+            raise TypeError("shared_experience must be an integer")
+        if shared_experience < 0:
+            raise ValueError("shared_experience must not be negative")
         self._require_character(character_key)
         if self.contains(character_key):
             return False
@@ -91,7 +97,10 @@ class PartySystem:
                 skills=self._skills,
                 fiora_internal_level=fiora.internal_level,
             )
+            member.set_joining_experience_offset(shared_experience)
             self._character_states[character_key] = member
+        else:
+            member.refresh_internal_level(shared_experience)
         self._active_party = (*self._active_party, member)
         return True
 

@@ -38,6 +38,24 @@ from resources import (
 from skill import Skill, SkillDataError
 from state import Language
 from ui import Window, WindowFactory, WindowText, pad
+from ui.battle_result import (
+    MISSING_RESULT_SPRITE_CHARACTER_KEYS,
+    RESULT_CHARACTER_GRID_X,
+    RESULT_CHARACTER_GRID_Y,
+    RESULT_CHARACTER_SPRITE_HEIGHT,
+    RESULT_CHARACTER_SPRITE_WIDTH,
+    RESULT_HP_GRID_Y,
+    RESULT_MP_GRID_Y,
+    RESULT_NAME_GRID_Y,
+    RESULT_SPELL_GRID_Y,
+    RESULT_TEXT_GRID_X,
+    RESULT_WEAPON_GRID_Y,
+    RESULT_WINDOW_COLUMNS,
+    RESULT_WINDOW_GRID_HEIGHT,
+    RESULT_WINDOW_GRID_WIDTH,
+    member_battle_sprite_region,
+    result_window_grid,
+)
 
 CHARACTER_SPRITES_IMAGE_ID = "characters/ch_battle"
 RESULT_PARTY_CHARACTER_KEYS = (
@@ -49,22 +67,6 @@ RESULT_PARTY_CHARACTER_KEYS = (
     "Dain",
 )
 FIORA_INTERNAL_LEVEL = 50
-MISSING_RESULT_SPRITE_CHARACTER_KEYS = frozenset(("Dain",))
-
-RESULT_WINDOW_COLUMNS = 2
-RESULT_WINDOW_GRID_WIDTH = 32
-RESULT_WINDOW_GRID_HEIGHT = 20
-RESULT_CHARACTER_GRID_X = 2
-RESULT_CHARACTER_GRID_Y = 2
-RESULT_CHARACTER_SPRITE_WIDTH = 16
-RESULT_CHARACTER_SPRITE_HEIGHT = 32
-RESULT_TEXT_GRID_X = 8
-RESULT_NAME_GRID_Y = 2
-RESULT_HP_GRID_Y = 5
-RESULT_MP_GRID_Y = 8
-RESULT_WEAPON_GRID_Y = 13
-RESULT_SPELL_GRID_Y = 16
-
 WEAPON_HAND_ORDER = (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
 SPELL_PROFICIENCY_ORDER = (
     ProficiencyKind.MYSTIC,
@@ -75,25 +77,6 @@ SPELL_PROFICIENCY_ORDER = (
 
 class BattleResultMockDataError(RuntimeError):
     """Raised when the result mock cannot resolve its configured party."""
-
-
-def result_window_grid(member_index: int) -> tuple[int, int, int, int]:
-    """Return one member window in row-major order on the 64x60 grid."""
-
-    if (
-        isinstance(member_index, bool)
-        or not isinstance(member_index, int)
-        or not 0 <= member_index < len(RESULT_PARTY_CHARACTER_KEYS)
-    ):
-        raise ValueError("member_index must identify a result member")
-    column = member_index % RESULT_WINDOW_COLUMNS
-    row = member_index // RESULT_WINDOW_COLUMNS
-    return (
-        column * RESULT_WINDOW_GRID_WIDTH,
-        row * RESULT_WINDOW_GRID_HEIGHT,
-        RESULT_WINDOW_GRID_WIDTH,
-        RESULT_WINDOW_GRID_HEIGHT,
-    )
 
 
 def proficiency_display(member: Member, kind: ProficiencyKind) -> str:
@@ -137,19 +120,6 @@ def spell_proficiency_display(member: Member) -> str | None:
         if member.proficiency(kind).max_level > 0
     )
     return "　".join(displays) or None
-
-
-def member_battle_sprite_region(member: Member) -> tuple[int, int, int, int] | None:
-    """Resolve the first battle pose, except for known missing artwork."""
-
-    if member.definition.key in MISSING_RESULT_SPRITE_CHARACTER_KEYS:
-        return None
-    return (
-        0,
-        member.definition.battle_sprite * RESULT_CHARACTER_SPRITE_HEIGHT,
-        RESULT_CHARACTER_SPRITE_WIDTH,
-        RESULT_CHARACTER_SPRITE_HEIGHT,
-    )
 
 
 def member_result_texts(member: Member) -> tuple[WindowText, ...]:

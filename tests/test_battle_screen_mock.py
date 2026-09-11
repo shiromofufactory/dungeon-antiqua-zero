@@ -419,7 +419,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(
             [monster.state.hp for monster in mock.monsters],
-            [12, 12, 12, 15, 15],
+            [25, 25, 25, 20, 20],
         )
         self.assertEqual(
             [monster.agility for monster in mock.monsters],
@@ -427,7 +427,13 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(
             mock.monsters[0].combat_stats,
-            MonsterCombatStats(attack=8, hit=90, defense=0, evasion=0),
+            MonsterCombatStats(
+                attack=8,
+                hit=95,
+                defense=0,
+                evasion=0,
+                spell_resistance=5,
+            ),
         )
         self.assertEqual(
             mock.monsters[-1].combat_stats,

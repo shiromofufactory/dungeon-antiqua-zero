@@ -72,10 +72,12 @@ app/
 │   ├── debug.py              # デバッグ時だけ使うパーティ状態の再生成
 │   ├── encounter.py          # 歩行加算、発生判定、全滅時の最寄り出口解決
 │   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
-│   ├── save.py               # セーブv1の変換、検証、スロット永続化
+│   ├── battle_progression.py # 戦闘実績、報酬、熟練度、HP・MP成長の確定
+│   ├── save.py               # セーブv2とv1移行の変換、検証、スロット永続化
 │   ├── settings.py           # 端末設定の読込と原子的な永続化
 │   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
 ├── ui/
+│   ├── battle_result.py      # 6人リザルトと30フレーム数値補間
 │   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
 │   ├── start_menu.py         # 起動直後のロード・削除Overlay
 │   ├── save_menu.py          # プレイ中の手動セーブOverlay
@@ -431,7 +433,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。エンカウント選択と `BattleResult` を受けた復帰遷移は、接続仕様を確定する段階で追加する。勝利リザルトはレイアウト検討中のため `tools/screen_mocks/battle_result.py` に静的モックを置き、本編へ接続する段階で表示部品またはOverlayへ移す。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
+戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの確定はPyxel非依存の `systems/battle_progression.py` が所有する。`BattleScene` はその記録契機と勝利演出を調停し、6人リザルトのWindow、色、30フレーム補間は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。
@@ -1075,6 +1077,11 @@ NPCの空き枠へ追加した装備は固定せず、取り外しや
 ステータスメニューOverlayでは適性0（使用不可）の武器・呪文のレベルと熟練度を `DISABLED_COLOR` で表示する。
 ステータスメニューOverlayでは適性2（得意）の武器・呪文に限り、種別アイコンの開始位置から8px左の同じ高さへ
 得意マーカー（共通画像バンクの `(152, 24)` から8×8px）を表示する。
+
+共有経験値は `SaveData.experience` が1つだけ所有し、各 `Member.experience_offset` を加えた値から
+DA2の累計必要経験値式で内部LVを導出する。`Member.internal_level` は現在値のキャッシュであり、
+戦闘報酬確定、加入・再加入、ロード時に再計算する。セーブv2は補正値を保存し、v1からは
+保存済み内部LVの必要経験値と共有経験値の差を補正値として移行する。
 
 キャラクター正本の `base_str`、`base_agi`、`base_mag` は、変更されない
 `CharacterDefinition.base_abilities` として保持する。画面やゲームルールは基礎値を

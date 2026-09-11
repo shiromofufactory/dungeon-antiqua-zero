@@ -169,7 +169,10 @@ class EventRunner:
                 return None
             if command_type == "join_party":
                 self._require_field(command_type)
-                self.party.join(str(command["character_key"]))
+                self.party.join(
+                    str(command["character_key"]),
+                    shared_experience=self.save_data.experience,
+                )
                 return None
             if command_type == "leave_party":
                 self._require_field(command_type)

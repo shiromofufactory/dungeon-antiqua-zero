@@ -45,6 +45,13 @@ from .settings import (
     SettingsSystemError,
 )
 from .shop import MAX_GOLD, ShopSystem
+from .battle_progression import (
+    BattleGrowthResult,
+    BattleProgression,
+    EnemyProgressionData,
+    MemberGrowthSnapshot,
+    ProficiencySnapshot,
+)
 from .travel import TravelSystem
 from .treasure import TreasureOpenStatus, TreasureSystem
 
@@ -75,6 +82,11 @@ __all__ = [
     "SAVE_FORMAT_VERSION",
     "SAVE_SLOT_COUNT",
     "MAX_GOLD",
+    "BattleGrowthResult",
+    "BattleProgression",
+    "EnemyProgressionData",
+    "MemberGrowthSnapshot",
+    "ProficiencySnapshot",
     "MAX_OTHER_MEMBER_COUNT",
     "MIN_OTHER_MEMBER_COUNT",
     "SaveRepository",

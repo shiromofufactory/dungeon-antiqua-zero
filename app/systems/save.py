@@ -21,6 +21,7 @@ if __package__ == "systems":
         Member,
         Proficiency,
         ProficiencyKind,
+        required_experience_for_level,
     )
     from state import Difficulty, SaveData
     from systems.inventory import InventorySystem
@@ -37,12 +38,14 @@ else:
         Member,
         Proficiency,
         ProficiencyKind,
+        required_experience_for_level,
     )
     from ..state import Difficulty, SaveData
     from .inventory import InventorySystem
 
 
-SAVE_FORMAT_VERSION = 1
+SAVE_FORMAT_VERSION = 2
+SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, SAVE_FORMAT_VERSION))
 SAVE_SLOT_COUNT = 8
 SAVE_DIRECTORY = Path.home() / ".config" / ".pyxel" / "dungeon-antiqua-zero"
 MAX_SAVE_GOLD = 999_999
@@ -105,11 +108,12 @@ def restore_save_document(
     items: Mapping[str, object],
     skills: Mapping[str, object],
 ) -> LoadedGameState:
-    """Validate and reconstruct version-1 state without mutating the game."""
+    """Validate and reconstruct a supported save version without mutation."""
 
     if not isinstance(document, Mapping):
         raise TypeError("save document must be a mapping")
-    if document.get("format_version") != SAVE_FORMAT_VERSION:
+    format_version = document.get("format_version")
+    if format_version not in SUPPORTED_SAVE_FORMAT_VERSIONS:
         raise SaveSystemError("save document has an unsupported format version")
     if isinstance(character_records, (str, bytes)) or not isinstance(
         character_records, Sequence
@@ -197,6 +201,8 @@ def restore_save_document(
             state_document,
             items=items,
             skills=skills,
+            shared_experience=save_data.experience,
+            format_version=format_version,
         )
     try:
         active_party = tuple(character_states[key] for key in active_keys)
@@ -273,6 +279,8 @@ def _restore_member(
     *,
     items: Mapping[str, object],
     skills: Mapping[str, object],
+    shared_experience: int,
+    format_version: int,
 ) -> Member:
     state = _mapping(value, f"party.character_states.{key}")
     internal_level = _non_negative_int(state, "internal_level", f"member {key}")
@@ -346,9 +354,15 @@ def _restore_member(
         formation_row = FormationRow(formation_value)
     except ValueError as error:
         raise SaveSystemError(f"member {key} formation row is unsupported") from error
-    return Member(
+    member = Member(
         initial.definition,
         internal_level=internal_level,
+        experience_offset=(
+            _integer(state, "experience_offset", f"member {key}")
+            if format_version >= 2
+            else required_experience_for_level(internal_level)
+            - shared_experience
+        ),
         hp=_non_negative_int(state, "hp", f"member {key}"),
         max_hp=_non_negative_int(state, "max_hp", f"member {key}"),
         mp=_non_negative_int(state, "mp", f"member {key}"),
@@ -360,6 +374,8 @@ def _restore_member(
         equipment=equipment,
         proficiencies=proficiencies,
     )
+    member.refresh_internal_level(shared_experience)
+    return member
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
@@ -394,6 +410,13 @@ def _non_negative_int(value: Mapping[str, object], key: str, label: str) -> int:
     current = value.get(key)
     if isinstance(current, bool) or not isinstance(current, int) or current < 0:
         raise SaveSystemError(f"{label}.{key} must be a non-negative integer")
+    return current
+
+
+def _integer(value: Mapping[str, object], key: str, label: str) -> int:
+    current = value.get(key)
+    if isinstance(current, bool) or not isinstance(current, int):
+        raise SaveSystemError(f"{label}.{key} must be an integer")
     return current
 
 
@@ -498,7 +521,7 @@ def create_save_document(
     facing: Direction,
     saved_at: datetime | None = None,
 ) -> dict[str, object]:
-    """Create one complete version-1 save document from explicit state owners."""
+    """Create one complete current-version save document from explicit owners."""
 
     if not isinstance(save_data, SaveData):
         raise TypeError("save_data must be SaveData")
@@ -620,6 +643,7 @@ def _serialize_member(member: Member) -> dict[str, object]:
         equipment[slot.value] = None if item is None else item.key
     return {
         "internal_level": member.internal_level,
+        "experience_offset": member.experience_offset,
         "hp": member.hp,
         "max_hp": member.max_hp,
         "mp": member.mp,
@@ -788,7 +812,7 @@ class SaveRepository:
             raise SaveSystemError(f"failed to read save slot {slot}") from error
         if not isinstance(document, dict):
             raise SaveSystemError(f"save slot {slot} does not contain an object")
-        if document.get("format_version") != SAVE_FORMAT_VERSION:
+        if document.get("format_version") not in SUPPORTED_SAVE_FORMAT_VERSIONS:
             raise SaveSystemError("save document has an unsupported format version")
         return document
 
@@ -808,7 +832,7 @@ class SaveRepository:
     ) -> SaveSlotSummary:
         if (
             not isinstance(document, Mapping)
-            or document.get("format_version") != SAVE_FORMAT_VERSION
+            or document.get("format_version") not in SUPPORTED_SAVE_FORMAT_VERSIONS
         ):
             raise ValueError("unsupported save preview")
         saved_at = document.get("saved_at")

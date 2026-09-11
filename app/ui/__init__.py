@@ -42,10 +42,12 @@ from .start_menu import StartMenuDataError, StartMenuOverlay
 from .spell_menu import SpellMenuDataError, SpellMenuOverlay
 from .status_menu import StatusMenuDataError, StatusMenuOverlay
 from .event_message import EventMessageDataError, EventMessageOverlay, MessageOverlay
+from .battle_result import BattleResultOverlay
 
 
 __all__ = [
     "BLUE_TEXT_COLOR",
+    "BattleResultOverlay",
     "CursorTarget",
     "DEFAULT_TEXT_COLOR",
     "DISABLED_COLOR",

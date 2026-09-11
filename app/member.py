@@ -175,6 +175,40 @@ _TWO_HANDED_SKILL_KINDS = frozenset(
 )
 
 
+def required_experience_for_level(level: int) -> int:
+    """Return DA2's cumulative experience threshold for one internal level."""
+
+    if isinstance(level, bool) or not isinstance(level, int):
+        raise TypeError("level must be an integer")
+    if not MIN_INTERNAL_LEVEL <= level <= MAX_INTERNAL_LEVEL:
+        raise ValueError(
+            f"level must be from {MIN_INTERNAL_LEVEL} to {MAX_INTERNAL_LEVEL}"
+        )
+    total = 0
+    increment = 0
+    for previous_level in range(level - 1):
+        if previous_level == 0:
+            increment = 11
+        else:
+            factor = max(1.0, 1.4 - (previous_level - 1) / 100)
+            increment = int(increment * factor)
+        total += increment
+    return total
+
+
+def internal_level_for_experience(experience: int) -> int:
+    """Resolve the highest internal level whose DA2 threshold is reached."""
+
+    if isinstance(experience, bool) or not isinstance(experience, int):
+        raise TypeError("experience must be an integer")
+    if experience < 0:
+        return MIN_INTERNAL_LEVEL
+    for level in range(MAX_INTERNAL_LEVEL, MIN_INTERNAL_LEVEL, -1):
+        if experience >= required_experience_for_level(level):
+            return level
+    return MIN_INTERNAL_LEVEL
+
+
 def _validate_ability_value(name: str, value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise MemberDataError(f"character.{name} must be an integer")
@@ -669,6 +703,7 @@ class Member:
 
     definition: CharacterDefinition
     internal_level: int = MIN_INTERNAL_LEVEL
+    experience_offset: int = 0
     hp: int | None = None
     max_hp: int | None = None
     mp: int | None = None
@@ -697,6 +732,10 @@ class Member:
                 f"internal_level must be from {MIN_INTERNAL_LEVEL} "
                 f"to {MAX_INTERNAL_LEVEL}"
             )
+        if isinstance(self.experience_offset, bool) or not isinstance(
+            self.experience_offset, int
+        ):
+            raise TypeError("experience_offset must be an integer")
         if not isinstance(self.proficiencies, dict):
             raise TypeError("proficiencies must be a dictionary")
         if not self.proficiencies:
@@ -807,6 +846,9 @@ class Member:
             internal_level=definition.joining_internal_level(
                 fiora_internal_level
             ),
+            experience_offset=required_experience_for_level(
+                definition.joining_internal_level(fiora_internal_level)
+            ),
             skills=current_skills,
             equipment=equipment,
         )
@@ -855,9 +897,59 @@ class Member:
         return cls(
             member.definition,
             internal_level=internal_level,
+            experience_offset=required_experience_for_level(internal_level),
             skills=member.skills,
             equipment=member.equipment,
             proficiencies=proficiencies,
+        )
+
+    def set_joining_experience_offset(self, shared_experience: int) -> None:
+        """Anchor this member's joining level against current shared experience."""
+
+        if isinstance(shared_experience, bool) or not isinstance(
+            shared_experience, int
+        ):
+            raise TypeError("shared_experience must be an integer")
+        if shared_experience < 0:
+            raise ValueError("shared_experience must not be negative")
+        self.experience_offset = (
+            required_experience_for_level(self.internal_level) - shared_experience
+        )
+
+    def refresh_internal_level(self, shared_experience: int) -> int:
+        """Recalculate and store internal level from shared experience plus offset."""
+
+        if isinstance(shared_experience, bool) or not isinstance(
+            shared_experience, int
+        ):
+            raise TypeError("shared_experience must be an integer")
+        if shared_experience < 0:
+            raise ValueError("shared_experience must not be negative")
+        self.internal_level = internal_level_for_experience(
+            shared_experience + self.experience_offset
+        )
+        return self.internal_level
+
+    def calculated_max_hp(self) -> int:
+        """Return the current internal-level HP ceiling without mutating state."""
+
+        return min(
+            self.definition.base_hp * (4 + self.internal_level) // 5,
+            MAX_HP,
+        )
+
+    def calculated_max_mp(self) -> int:
+        """Return the current level/proficiency MP ceiling without mutating state."""
+
+        maximum_spell_level = max(
+            self.proficiency(kind).level for kind in SPELL_PROFICIENCY_KINDS
+        )
+        return min(
+            self.definition.base_mp
+            * (11 + self.internal_level)
+            * (7 + maximum_spell_level)
+            // 200,
+            MAX_MP,
         )
 
     @property
