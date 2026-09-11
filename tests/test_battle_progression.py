@@ -106,6 +106,25 @@ class BattleProgressionTest(unittest.TestCase):
         proficiency = member.proficiency(ProficiencyKind.MYSTIC)
         self.assertEqual((proficiency.level, proficiency.progress), (2, 2))
 
+    def test_result_growth_distinguishes_progress_from_level_up(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        progression = BattleProgression((EnemyProgressionData(1, 1, 1, 0),))
+        progression.record_weapon_action(member, (self.sword,), (1,))
+
+        growth = progression.settle(SaveData(), (member,))
+
+        self.assertTrue(growth.has_result_growth)
+        self.assertFalse(growth.has_level_up_growth)
+
+    def test_no_growth_can_skip_the_result_screen(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        progression = BattleProgression((EnemyProgressionData(1, 1, 1, 0),))
+
+        growth = progression.settle(SaveData(), (member,))
+
+        self.assertFalse(growth.has_result_growth)
+        self.assertFalse(growth.has_level_up_growth)
+
     def test_hp_recipient_alone_is_excluded_from_mp_growth(self) -> None:
         first = Member.from_record(member_record("First"))
         second = Member.from_record(member_record("Second"))

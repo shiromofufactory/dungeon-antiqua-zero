@@ -39,6 +39,7 @@ class FakePyxel:
         self.created_sounds: list[FakeSound] = []
         self.play_calls: list[tuple[object, ...]] = []
         self.stop_calls: list[int] = []
+        self.play_position: tuple[int, int] | None = None
 
     def Sound(self) -> FakeSound:
         sound = FakeSound(error=self.sound_error)
@@ -54,9 +55,14 @@ class FakePyxel:
         loop: bool,
     ) -> None:
         self.play_calls.append((channel, sound, sec, loop))
+        self.play_position = (0, 0)
 
     def stop(self, channel: int) -> None:
         self.stop_calls.append(channel)
+        self.play_position = None
+
+    def play_pos(self, channel: int) -> tuple[int, int] | None:
+        return self.play_position
 
 
 class BgmPlayerTest(unittest.TestCase):
@@ -186,6 +192,18 @@ class BgmPlayerTest(unittest.TestCase):
         self.assertIsNone(player.current_id)
         self.assertEqual(self.pyxel.stop_calls, [2, 2, 2])
         self.assertEqual(self.pyxel.play_calls[-1][2:], (1.25, False))
+
+    def test_starts_queued_field_bgm_when_one_shot_finishes(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+
+        player.play_once_then("da3-welcome", "da3-field")
+
+        self.assertEqual(player.current_id, "da3-welcome")
+        self.assertFalse(player.update())
+        self.pyxel.play_position = None
+        self.assertTrue(player.update())
+        self.assertEqual(player.current_id, "da3-field")
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (0.0, True))
 
     def test_missing_or_unsafe_ids_are_rejected(self) -> None:
         player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)

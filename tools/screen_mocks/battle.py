@@ -152,6 +152,7 @@ class BattleTestApp(BattleScene):
             reset_inventory_on_restart=True,
             save_data=SaveData(),
             result_party=party,
+            return_bgm_id="da3-field",
             fonts=fonts,
         )
         pyxel.run(self.update, self.draw)
@@ -159,6 +160,9 @@ class BattleTestApp(BattleScene):
     def update(self) -> None:
         """Poll standalone input and delegate one frame to the production scene."""
 
+        bgm = getattr(self, "bgm", None)
+        if bgm is not None:
+            bgm.update()
         super().update(self.input_reader.poll())
         if getattr(self, "result", None) is BattleResult.VICTORY:
             pyxel.quit()

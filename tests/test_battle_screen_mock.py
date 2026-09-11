@@ -1042,6 +1042,90 @@ class BattleScreenMockTest(unittest.TestCase):
             1,
         )
 
+    def test_attack_records_weapon_before_return_clears_the_actor(self) -> None:
+        monster = BattleMockMonster(
+            key="monster",
+            names={},
+            image_id="0",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=10),
+            agility=12,
+            level=1,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock.action_party_index = 0
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            elapsed_frame=ATTACK_HIT_START_FRAME - 1,
+        )
+        mock._record_equipped_weapon_action = Mock()
+
+        with patch("scenes.battle.play_se"):
+            mock._update_attack_presentation()
+
+        mock._record_equipped_weapon_action.assert_called_once_with(
+            0,
+            (1,),
+            defeated_enemy=True,
+        )
+
+        # The actor is cleared well before the damage popup finishes. The
+        # proficiency fact must already be retained and must not be recorded twice.
+        mock.action_party_index = None
+        mock.attack_presentation.elapsed_frame = (
+            ATTACK_HIT_START_FRAME
+            + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+            + ATTACK_DAMAGE_FRAME_COUNT
+            - 1
+        )
+        mock._begin_monster_death = Mock()
+        mock._update_attack_presentation()
+
+        mock._record_equipped_weapon_action.assert_called_once()
+
+    def test_missed_attack_still_records_weapon_proficiency(self) -> None:
+        monster = BattleMockMonster(
+            key="monster",
+            names={},
+            image_id="0",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=10),
+            agility=12,
+            level=1,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock.action_party_index = 0
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=0,
+            poses=(),
+            effect_row=2,
+            is_hit=False,
+            elapsed_frame=ATTACK_HIT_START_FRAME - 1,
+        )
+        mock._record_equipped_weapon_action = Mock()
+
+        mock._update_attack_presentation()
+
+        mock._record_equipped_weapon_action.assert_called_once_with(
+            0,
+            (1,),
+            defeated_enemy=False,
+        )
+
     def test_cancelled_spell_caster_walks_back_to_the_original_position(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.active_party_index = 0

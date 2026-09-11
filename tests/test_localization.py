@@ -117,7 +117,7 @@ class LocalizationTest(unittest.TestCase):
         )
         self.assertEqual(
             localizer.text(record, "text").narrow_spans,
-            ((0, 8), (9, 13)),
+            (),
         )
 
     def test_authored_fullwidth_english_text_keeps_wide_font_intent(self) -> None:

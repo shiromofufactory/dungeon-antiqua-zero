@@ -45,7 +45,7 @@ from battle_timeline import (
     remove_timeline_head,
 )
 from item import Item, ItemEquipType
-from localization import Localizer, ascii_to_fullwidth
+from localization import Localizer, ascii_to_fullwidth, format_number
 from member import (
     EquipmentSlot,
     FormationRow,
@@ -973,6 +973,7 @@ class BattleScene:
         encounter: BattleEncounter,
         save_data: SaveData,
         result_party: tuple[Member, ...],
+        return_bgm_id: str,
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -994,6 +995,7 @@ class BattleScene:
             encounter=encounter,
             save_data=save_data,
             result_party=result_party,
+            return_bgm_id=return_bgm_id,
             fonts=fonts,
             attack_poses=load_attack_poses(APP_ROOT / "effects" / "attack_poses.json"),
             spell_effect_renderer=SpellEffectRenderer(
@@ -1028,6 +1030,7 @@ class BattleScene:
         reset_inventory_on_restart: bool = False,
         save_data: SaveData | None = None,
         result_party: tuple[Member, ...] | None = None,
+        return_bgm_id: str | None = None,
         fonts: FontResources | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
@@ -1053,6 +1056,11 @@ class BattleScene:
         self.settings = settings
         self.fonts = FontResources() if fonts is None else fonts
         self.save_data = SaveData() if save_data is None else save_data
+        if return_bgm_id is not None and (
+            not isinstance(return_bgm_id, str) or not return_bgm_id
+        ):
+            raise ValueError("return_bgm_id must be a non-empty string or None")
+        self.return_bgm_id = return_bgm_id
         self.palette_shifter = palette_shifter
         self.palette_shifter.define_mix(
             UNSELECTABLE_TARGET_PALETTE,
@@ -3712,11 +3720,19 @@ class BattleScene:
             return
         presentation.elapsed_frame += 1
         if not presentation.damage_applied and presentation.hit_elapsed_frame >= 0:
+            monster = self.monsters[presentation.target_index]
             if presentation.is_hit:
-                monster = self.monsters[presentation.target_index]
                 monster.state.take_damage(presentation.damage)
                 promote_rear_monsters_if_front_empty(self.monsters)
                 play_se(presentation.sound_effect_id)
+            party_index = getattr(self, "action_party_index", None)
+            if party_index is not None:
+                self._record_equipped_weapon_action(
+                    party_index,
+                    (getattr(monster, "level", 1),),
+                    defeated_enemy=not monster.is_alive,
+                    # TODO: 会心実装時はcritical=Trueを加えて撃破との同時成立を+2にする。
+                )
             presentation.damage_applied = True
         if (
             not presentation.return_started
@@ -3728,14 +3744,6 @@ class BattleScene:
             return
         target_index = presentation.target_index
         target_is_alive = self.monsters[target_index].is_alive
-        party_index = getattr(self, "action_party_index", None)
-        if party_index is not None:
-            self._record_equipped_weapon_action(
-                party_index,
-                (getattr(self.monsters[target_index], "level", 1),),
-                defeated_enemy=not target_is_alive,
-                # TODO: 会心実装時はcritical=Trueを加えて撃破との同時成立を+2にする。
-            )
         self.attack_presentation = None
         if not target_is_alive:
             self._begin_monster_death(target_index)
@@ -3826,8 +3834,8 @@ class BattleScene:
             "battle.victory.reward",
             self.localizer,
             {
-                "EXP": str(growth.experience_gained),
-                "GOLD": str(growth.gold_gained),
+                "EXP": self._victory_number(growth.experience_gained),
+                "GOLD": self._victory_number(growth.gold_gained),
             },
         )
         localized_texts = LocalizedWindowTextFactory.from_language(
@@ -3842,7 +3850,18 @@ class BattleScene:
         self.phase = BattlePhase.VICTORY_SUMMARY
         self.active_party_index = None
         self.timeline = ()
-        self.bgm.play(BATTLE_WIN_BGM_ID, loop=False)
+        self._play_victory_jingle(BATTLE_WIN_BGM_ID)
+
+    def _victory_number(self, value: int) -> str:
+        if self.settings.language is Language.JAPANESE:
+            return format_number(value)
+        return str(value)
+
+    def _play_victory_jingle(self, bgm_id: str) -> None:
+        if self.return_bgm_id is None:
+            self.bgm.play(bgm_id, loop=False)
+            return
+        self.bgm.play_once_then(bgm_id, self.return_bgm_id)
 
     def _update_victory_summary(self, input_state: InputState) -> None:
         self.victory_motion_frame = min(
@@ -3854,6 +3873,9 @@ class BattleScene:
         growth = getattr(self, "growth_result", None)
         if growth is None:
             raise RuntimeError("victory result requires settled growth")
+        if not growth.has_result_growth:
+            self.result = BattleResult.VICTORY
+            return
         self.result_overlay = BattleResultOverlay(
             party=self.result_party,
             growth=growth,
@@ -3872,9 +3894,9 @@ class BattleScene:
         if (
             not was_complete
             and overlay.animation_complete
-            and self.growth_result.has_visible_growth
+            and self.growth_result.has_level_up_growth
         ):
-            self.bgm.play(BATTLE_LEVEL_UP_BGM_ID, loop=False)
+            self._play_victory_jingle(BATTLE_LEVEL_UP_BGM_ID)
             self.growth_jingle_played = True
         if completed:
             self.result = BattleResult.VICTORY

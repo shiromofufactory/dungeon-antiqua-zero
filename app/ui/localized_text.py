@@ -83,8 +83,6 @@ class LocalizedWindowTextFactory:
                 font,
                 baseline_offset,
                 normalize_ascii=True,
-                narrow_font=font_for(Language.ENGLISH),
-                narrow_baseline_offset=baseline_offset_for(Language.ENGLISH),
             )
         if language is not Language.ENGLISH:
             return cls(font, baseline_offset)

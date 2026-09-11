@@ -86,7 +86,24 @@ class BattleGrowthResult:
     after: tuple[MemberGrowthSnapshot, ...]
 
     @property
-    def has_visible_growth(self) -> bool:
+    def has_result_growth(self) -> bool:
+        """Return whether the animated result has any value to increase."""
+
+        return any(
+            old.max_hp != new.max_hp
+            or old.max_mp != new.max_mp
+            or any(
+                old.proficiencies[kind].total
+                != new.proficiencies[kind].total
+                for kind in ProficiencyKind
+            )
+            for old, new in zip(self.before, self.after)
+        )
+
+    @property
+    def has_level_up_growth(self) -> bool:
+        """Return whether growth should trigger the level-up jingle and color."""
+
         return any(
             old.max_hp != new.max_hp
             or old.max_mp != new.max_mp

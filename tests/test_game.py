@@ -176,9 +176,7 @@ class GameTest(unittest.TestCase):
             fonts.font_for.call_args_list,
             [
                 call(Language.JAPANESE),
-                call(Language.ENGLISH),
                 call(Language.JAPANESE),
-                call(Language.ENGLISH),
                 call(Language.JAPANESE),
             ],
         )
@@ -368,7 +366,7 @@ class GameTest(unittest.TestCase):
         self.assertEqual(japanese["settings.se.label"], "ＳＥおんりょう")
         self.assertEqual(
             japanese["settings.guide.language.1"].narrow_spans,
-            ((0, 33),),
+            (),
         )
         self.assertEqual(english["settings.display.smooth"], "Ｓｍｏｏｔｈｅｄ")
         self.assertEqual(chinese["settings.return_title"], "返回标题界面")

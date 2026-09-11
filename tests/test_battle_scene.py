@@ -24,7 +24,7 @@ from scenes.battle import (
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
     BattlePhase,
 )
-from state import SaveData
+from state import Language, SaveData, Settings
 from systems import DungeonExitReturn, EncounterAdvance
 
 
@@ -44,6 +44,37 @@ class BattleEncounterTest(unittest.TestCase):
 
 
 class BattleSceneIntegrationTest(unittest.TestCase):
+    def test_skips_result_when_no_growth_was_recorded(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.phase = BattlePhase.VICTORY_SUMMARY
+        scene.result = None
+        scene.victory_motion_frame = 0
+        scene.growth_result = Mock(has_result_growth=False)
+
+        scene._update_victory_summary(
+            InputState(confirm=InputButton(triggered=True))
+        )
+
+        self.assertIs(scene.result, BattleResult.VICTORY)
+
+    def test_japanese_victory_numbers_use_fullwidth_glyphs(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.settings = Settings(language=Language.JAPANESE)
+
+        self.assertEqual(scene._victory_number(1234), "１２３４")
+
+    def test_victory_jingle_queues_the_field_bgm(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.bgm = Mock()
+        scene.return_bgm_id = "da3-field"
+
+        scene._play_victory_jingle("da3-win")
+
+        scene.bgm.play_once_then.assert_called_once_with(
+            "da3-win",
+            "da3-field",
+        )
+
     def test_held_confirm_repeats_at_da2_equivalent_timing(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         pressed = InputState(confirm=InputButton(triggered=True, held=True))
@@ -159,6 +190,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.character_records = object()
         game.party = tuple(object() for _index in range(6))
         game.save_data = SaveData()
+        game.current_map = Mock(bgm_id="da3-field")
         encounter = BattleEncounter(("Coyote",))
 
         with patch("game.BattleScene.create", return_value=Mock()) as create:
@@ -168,6 +200,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertEqual(len(create.call_args.kwargs["party"]), 5)
         self.assertEqual(len(create.call_args.kwargs["result_party"]), 6)
         self.assertIs(create.call_args.kwargs["save_data"], game.save_data)
+        self.assertEqual(create.call_args.kwargs["return_bgm_id"], "da3-field")
         self.assertIs(create.call_args.kwargs["encounter"], encounter)
 
     def test_game_advances_encounters_only_on_dungeon_steps(self) -> None:

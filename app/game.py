@@ -596,6 +596,7 @@ class Game:
             party=self.party[:BATTLE_PARTY_MEMBER_COUNT],
             result_party=self.party,
             save_data=self.save_data,
+            return_bgm_id=self.current_map.bgm_id,
             encounter=encounter,
         )
 
@@ -2526,6 +2527,9 @@ class Game:
             field_actors.update_roaming(party_position=self.field.position)
 
     def update(self) -> None:
+        bgm = getattr(self, "bgm", None)
+        if bgm is not None:
+            bgm.update()
         self.alert.update()
         input_state = self.input_reader.poll()
         if getattr(self, "encounter_transition", None) is not None:
