@@ -28,7 +28,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.app_root = root / "app"
         character_root = self.content_root / "images" / "characters"
         character_root.mkdir(parents=True)
-        sheet = Image.new("P", (144, 96), 1)
+        sheet = Image.new("P", (160, 96), 1)
         sheet.putpalette([0, 0, 0, 255, 0, 128] + [0, 0, 0] * 254)
         sheet.info["transparency"] = 1
         sheet.save(character_root / "ch_battle.gif", transparency=1)
@@ -99,7 +99,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertEqual(context.exception.code, 403)
 
     def test_serves_transparent_sprite_sheets(self) -> None:
-        for endpoint, expected_size in (("characters.png", (144, 96)), ("weapons.png", (256, 16))):
+        for endpoint, expected_size in (("characters.png", (160, 96)), ("weapons.png", (256, 16))):
             with urlopen(f"{self.base_url}/api/{endpoint}?token=test-token", timeout=2) as response:
                 image = Image.open(io.BytesIO(response.read()))
                 self.assertEqual(image.size, expected_size)
@@ -142,7 +142,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
 
     def test_rejects_invalid_pose_data(self) -> None:
         data = initial_document()
-        data["poses"][0]["character_pose"] = 8
+        data["poses"][0]["character_pose"] = 9
         result = self.post_json(data)
         self.assertFalse(result["saved"])
         self.assertEqual(result["diagnostics"][0]["code"], "invalid_character_pose")
@@ -200,7 +200,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertIn('data-flip="flip_x"', page)
         self.assertIn('data-flip="flip_y"', page)
         self.assertIn('<span>8× zoom</span>', page)
-        self.assertIn('for (let index = 0; index < 8; index += 1)', script)
+        self.assertIn('for (let index = 0; index < 9; index += 1)', script)
         self.assertIn('for (let index = 0; index < 16; index += 1)', script)
         self.assertIn('context.scale(weapon.flip_x ? -1 : 1, weapon.flip_y ? -1 : 1)', script)
         self.assertIn("function reorderPose(fromIndex, targetIndex, placeAfter)", script)

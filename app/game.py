@@ -776,41 +776,7 @@ class Game:
             27,
             16,
             27,
-            (
-                localized_texts.create(localized["menu.info.gold"], 2, 2),
-                WindowText(pad(self.save_data.gold, 6), 2, 5),
-                localized_texts.create(
-                    localized["menu.info.experience"],
-                    2,
-                    8,
-                ),
-                WindowText(pad(self.save_data.experience, 6), 2, 11),
-                localized_texts.create(
-                    localized["menu.info.difficulty"],
-                    2,
-                    14,
-                ),
-                localized_texts.create(
-                    localized[DIFFICULTY_TEXT_KEYS[self.save_data.difficulty]],
-                    4,
-                    17,
-                ),
-                localized_texts.create(
-                    localized["menu.info.play_time"],
-                    2,
-                    20,
-                ),
-                WindowText(
-                    "　"
-                    + format_play_time(
-                        self.save_data.play_time_frames,
-                        fps=FPS,
-                        include_seconds=False,
-                    ),
-                    2,
-                    23,
-                ),
-            ),
+            self._main_info_window_texts(),
             opened=not animate,
         )
         self.close_guide_window = windows.create(
@@ -1325,6 +1291,61 @@ class Game:
                 font_spans=placement.font_spans,
             )
 
+    def _main_info_window_texts(self) -> tuple[WindowText, ...]:
+        """Build menu information from the current shared save state."""
+
+        return (
+            self.localized_texts.create(self.localized["menu.info.gold"], 2, 2),
+            WindowText(pad(self.save_data.gold, 6), 2, 5),
+            self.localized_texts.create(
+                self.localized["menu.info.experience"],
+                2,
+                8,
+            ),
+            WindowText(pad(self.save_data.experience, 6), 2, 11),
+            self.localized_texts.create(
+                self.localized["menu.info.difficulty"],
+                2,
+                14,
+            ),
+            self.localized_texts.create(
+                self.localized[DIFFICULTY_TEXT_KEYS[self.save_data.difficulty]],
+                4,
+                17,
+            ),
+            self.localized_texts.create(
+                self.localized["menu.info.play_time"],
+                2,
+                20,
+            ),
+            WindowText(
+                "　"
+                + format_play_time(
+                    self.save_data.play_time_frames,
+                    fps=FPS,
+                    include_seconds=False,
+                ),
+                2,
+                23,
+            ),
+        )
+
+    def _refresh_info_window_texts(self) -> None:
+        """Refresh values that can change while the field is being shown."""
+
+        self.info_window.clear_texts()
+        for placement in self._main_info_window_texts():
+            self.info_window.add_text(
+                placement.text,
+                placement.x,
+                placement.y,
+                color=placement.color,
+                font=placement.font,
+                shadow_color=placement.shadow_color,
+                baseline_offset=placement.baseline_offset,
+                font_spans=placement.font_spans,
+            )
+
     def _settings_value(self, key: str) -> str:
         if key == "language":
             return self.localized[f"settings.language.{self.settings.language.value}"]
@@ -1682,6 +1703,7 @@ class Game:
         elif change is GameScreenChange.SHOW_MENU:
             self.showing_field = False
             self._refresh_party_window_texts()
+            self._refresh_info_window_texts()
             self.command_cursor.active = True
             self._restart_main_windows_for_fade_in()
         elif change is GameScreenChange.OPEN_ITEM:

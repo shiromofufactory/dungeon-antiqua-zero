@@ -585,7 +585,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._activate_timeline_head.assert_called_once_with()
 
     def test_party_sprites_use_formation_and_defense_source_images(self) -> None:
-        self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 6)
+        self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 7)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (
@@ -622,8 +622,8 @@ class BattleScreenMockTest(unittest.TestCase):
         )
 
     def test_party_uses_near_death_and_wide_dead_poses(self) -> None:
-        self.assertEqual(NEAR_DEATH_SPRITE_SOURCE_X, 16 * 5)
-        self.assertEqual(DEAD_SPRITE_SOURCE_X, 16 * 8)
+        self.assertEqual(NEAR_DEATH_SPRITE_SOURCE_X, 16 * 6)
+        self.assertEqual(DEAD_SPRITE_SOURCE_X, 16 * 9)
         self.assertEqual(DEAD_SPRITE_WIDTH, 24)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
@@ -865,7 +865,7 @@ class BattleScreenMockTest(unittest.TestCase):
             "SPEAR-1_2",
             "SPEAR-1",
             "2",
-            1,
+            2,
             (
                 AttackWeaponSprite(10, -12, 7, "back", False, False),
                 AttackWeaponSprite(11, -11, 6, "front", True, True),
@@ -882,7 +882,7 @@ class BattleScreenMockTest(unittest.TestCase):
             blt.call_args_list,
             [
                 call(128, 71, 0, 160, 32, 16, 16, 1),
-                call(140, 64, mock.character_sprites, 16, 32, 16, 32, 1),
+                call(140, 64, mock.character_sprites, 32, 32, 16, 32, 1),
                 call(129, 70, 0, 176, 32, -16, -16, 1),
             ],
         )
@@ -4084,7 +4084,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._refresh_party_hp_text.assert_not_called()
         mock._start_timeline_animation.assert_called_once_with()
 
-    def test_monster_damage_uses_fifth_party_pattern_and_da2_shake(self) -> None:
+    def test_monster_damage_uses_sixth_party_pattern_and_da2_shake(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (
@@ -4103,7 +4103,7 @@ class BattleScreenMockTest(unittest.TestCase):
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock._draw_party()
 
-        self.assertEqual(MONSTER_DAMAGE_SPRITE_SOURCE_X, 16 * 4)
+        self.assertEqual(MONSTER_DAMAGE_SPRITE_SOURCE_X, 16 * 5)
         blt.assert_called_once_with(
             164,
             64,

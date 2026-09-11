@@ -131,8 +131,8 @@ def validate_document(
         else:
             seen_ids.add(saved_pose_id)
         character_pose = pose.get("character_pose")
-        if not _integer(character_pose) or not 0 <= character_pose <= 7:
-            error("invalid_character_pose", f"{path}.character_pose", "キャラポーズは0〜7で指定してください。")
+        if not _integer(character_pose) or not 0 <= character_pose <= 8:
+            error("invalid_character_pose", f"{path}.character_pose", "キャラポーズは0〜8で指定してください。")
         weapons = pose.get("weapons")
         if not isinstance(weapons, list) or not 1 <= len(weapons) <= 2:
             error("invalid_weapons", f"{path}.weapons", "武器は1〜2件の配列で指定してください。")
@@ -204,8 +204,8 @@ def weapon_strip_png(resource_path: Path, palette_path: Path) -> bytes:
 
 def character_sheet_png(path: Path) -> bytes:
     with Image.open(path) as source:
-        if source.width < 144 or source.height < 96:
-            raise ValueError("ch_battle.gifに3人分の9ポーズがありません。")
+        if source.width < 160 or source.height < 96:
+            raise ValueError("ch_battle.gifに3人分の10ポーズがありません。")
         image = source.convert("RGBA")
     output = io.BytesIO()
     image.save(output, format="PNG")

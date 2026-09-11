@@ -282,24 +282,27 @@ class BattleProgression:
             enumerate(party),
             key=lambda entry: (entry[1].internal_level, entry[0]),
         )
-        hp_growth_key: str | None = None
-        for _index, member in ordered:
-            key = member.definition.key
-            if key in eligible and member.calculated_max_hp() > member.max_hp:
-                member.max_hp = member.calculated_max_hp()
-                hp_growth_key = key
-                break
-
         spell_users = set(self._spell_uses)
+        mp_growth_key: str | None = None
         for _index, member in ordered:
             key = member.definition.key
             if (
                 key in eligible
-                and key != hp_growth_key
                 and key in spell_users
                 and member.calculated_max_mp() > member.max_mp
             ):
                 member.max_mp = member.calculated_max_mp()
+                mp_growth_key = key
+                break
+
+        for _index, member in ordered:
+            key = member.definition.key
+            if (
+                key in eligible
+                and key != mp_growth_key
+                and member.calculated_max_hp() > member.max_hp
+            ):
+                member.max_hp = member.calculated_max_hp()
                 break
 
         self._settled = True

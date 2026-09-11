@@ -119,7 +119,7 @@ function renderPoses() {
   container.replaceChildren();
   const pose = currentPose();
   const character = state.characters[state.selectedCharacter];
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 9; index += 1) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `pose-button${index === pose.character_pose ? " active" : ""}`;
@@ -138,7 +138,7 @@ function renderPoses() {
     });
     container.append(button);
   }
-  byId("pose-readout").textContent = `${pose.character_pose} / 7`;
+  byId("pose-readout").textContent = `${pose.character_pose} / 8`;
 }
 
 function renderWeaponSlots() {

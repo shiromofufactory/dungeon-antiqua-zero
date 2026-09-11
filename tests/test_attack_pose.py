@@ -21,7 +21,7 @@ def document() -> dict[str, object]:
                 "id": "SPEAR-1_2",
                 "weapon_img": "SPEAR-1",
                 "branch": "2",
-                "character_pose": 1,
+                "character_pose": 2,
                 "weapons": [
                     {
                         "image": 10,
@@ -63,7 +63,7 @@ class AttackPoseTest(unittest.TestCase):
         poses = parse_attack_poses(document())
 
         spear = poses["SPEAR-1_2"]
-        self.assertEqual(spear.character_pose, 1)
+        self.assertEqual(spear.character_pose, 2)
         self.assertEqual(len(spear.weapons), 2)
         self.assertEqual(spear.weapons[0].position_x, -27)
         self.assertTrue(spear.weapons[1].flip_x)

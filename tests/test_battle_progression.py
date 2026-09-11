@@ -71,6 +71,19 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertEqual(enemy.experience(0), 36)
         self.assertEqual(progression.rewards(), (43, 25))
 
+    def test_repeated_battles_accumulate_experience_in_the_live_save(self) -> None:
+        save_data = SaveData(experience=30)
+        member = Member.from_record(member_record("Fighter"))
+
+        for _battle in range(3):
+            progression = BattleProgression(
+                (EnemyProgressionData(5, 4, 4, 0),)
+            )
+            growth = progression.settle(save_data, (member,))
+            self.assertEqual(growth.experience_gained, 15)
+
+        self.assertEqual(save_data.experience, 75)
+
     def test_weapon_uses_maximum_action_award_and_stacks_bonuses(self) -> None:
         member = Member.from_record(member_record("Fighter"))
         member.proficiency(ProficiencyKind.SWORD).progress = 95
@@ -125,7 +138,7 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertFalse(growth.has_result_growth)
         self.assertFalse(growth.has_level_up_growth)
 
-    def test_hp_recipient_alone_is_excluded_from_mp_growth(self) -> None:
+    def test_mp_recipient_alone_is_excluded_from_hp_growth(self) -> None:
         first = Member.from_record(member_record("First"))
         second = Member.from_record(member_record("Second"))
         first.max_hp = second.max_hp = 1
@@ -142,10 +155,10 @@ class BattleProgressionTest(unittest.TestCase):
 
         progression.settle(SaveData(), (first, second))
 
-        self.assertGreater(first.max_hp, 1)
-        self.assertEqual(second.max_hp, 1)
-        self.assertEqual(first.max_mp, 0)
-        self.assertGreater(second.max_mp, 0)
+        self.assertEqual(first.max_hp, 1)
+        self.assertGreater(second.max_hp, 1)
+        self.assertGreater(first.max_mp, 0)
+        self.assertEqual(second.max_mp, 0)
 
     def test_dead_member_gets_shared_internal_level_but_no_visible_growth(self) -> None:
         member = Member.from_record(member_record("Dead"))

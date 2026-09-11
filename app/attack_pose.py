@@ -113,9 +113,9 @@ class AttackPoseDefinition:
                 f"attack pose.id must equal weapon_img + branch: {pose_id}"
             )
         character_pose = record.get("character_pose")
-        if not _integer(character_pose) or not 0 <= character_pose <= 7:
+        if not _integer(character_pose) or not 0 <= character_pose <= 8:
             raise AttackPoseDataError(
-                f"attack pose.character_pose must be from 0 to 7: {pose_id}"
+                f"attack pose.character_pose must be from 0 to 8: {pose_id}"
             )
         weapon_records = record.get("weapons")
         if not isinstance(weapon_records, list) or not 1 <= len(weapon_records) <= 2:

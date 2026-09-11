@@ -624,6 +624,7 @@ class GameTest(unittest.TestCase):
         window = Mock(is_animating=True)
         mock.windows = (window,)
         mock._refresh_party_window_texts = Mock()
+        mock._refresh_info_window_texts = Mock()
 
         mock.update()
 
@@ -639,6 +640,7 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertIsNone(mock.pending_screen_change)
         mock._refresh_party_window_texts.assert_called_once_with()
+        mock._refresh_info_window_texts.assert_called_once_with()
         window.restart_opening.assert_called_once_with()
         self.assertEqual(window.update.call_count, 2)
         self.assertTrue(mock.animate_main_windows_with_fade)
@@ -648,6 +650,28 @@ class GameTest(unittest.TestCase):
 
         self.assertEqual(window.update.call_count, 8)
         self.assertFalse(mock.animate_main_windows_with_fade)
+
+    def test_menu_info_refresh_uses_current_shared_experience(self) -> None:
+        game = Game.__new__(Game)
+        game.save_data = SaveData(gold=45, experience=75)
+        game.localized = {
+            "menu.info.gold": "Gold",
+            "menu.info.experience": "EXP",
+            "menu.info.difficulty": "Difficulty",
+            "menu.difficulty.normal": "Normal",
+            "menu.info.play_time": "Time",
+        }
+        game.localized_texts = Mock()
+        game.localized_texts.create.side_effect = (
+            lambda text, x, y: WindowText(text, x, y)
+        )
+        game.info_window = Mock()
+
+        game._refresh_info_window_texts()
+
+        game.info_window.clear_texts.assert_called_once_with()
+        experience_text = game.info_window.add_text.call_args_list[3].args[0]
+        self.assertTrue(experience_text.endswith("７５"))
 
     def test_menu_screen_change_restores_standard_fade_speed(self) -> None:
         mock = Game.__new__(Game)
