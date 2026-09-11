@@ -435,7 +435,6 @@ class Game:
             self.items,
             self.skills,
             character_keys=INITIAL_PARTY_KEYS,
-            back_row_character_keys=("Cerion",),
         )
         self.shops = load_shops(self.items)
         self.shop_system = ShopSystem(
@@ -1682,6 +1681,7 @@ class Game:
             self.showing_field = True
         elif change is GameScreenChange.SHOW_MENU:
             self.showing_field = False
+            self._refresh_party_window_texts()
             self.command_cursor.active = True
             self._restart_main_windows_for_fade_in()
         elif change is GameScreenChange.OPEN_ITEM:
@@ -1799,6 +1799,7 @@ class Game:
             fonts=self.fonts,
             faces=self.faces,
             member_index=self.selected_member_index,
+            on_invalid_action=self.alert.start,
         )
 
     def _start_save(self) -> None:
@@ -1943,6 +1944,7 @@ class Game:
             return
         self.selected_member_index = self.spell_screen.member_index
         self.spell_screen = None
+        self._refresh_party_window_texts()
         self.command_cursor.active = True
 
     def _start_shop(self) -> None:

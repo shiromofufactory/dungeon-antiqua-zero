@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+import random
+from collections.abc import Callable, Collection, Mapping
 from enum import Enum
 
 import pyxel
 
+from battle_magic import member_spell_ability, resolve_healing
 from ui.party_status import (
     PARTY_COLUMN_WIDTH,
     PARTY_CURSOR_Y,
@@ -21,8 +23,8 @@ from ui.party_status import (
 from input import InputState
 from localization import Localizer
 from member import Member
-from resources import TRANSPARENT_INDEX, FontResources
-from spell import Spell, SpellType
+from resources import TRANSPARENT_INDEX, FontResources, play_se
+from spell import Spell, SpellAction, SpellType
 from state import Language, Settings
 from text_catalog import TextCatalog
 from ui import (
@@ -59,6 +61,7 @@ SPELL_TEXT_X = (4, 24, 44)
 SPELL_CURSOR_X = (2, 22, 42)
 SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
+HEALING_SE_ID = "spell_healing1"
 
 class SpellSelectionPhase(Enum):
     """Selection stage used by the DA2-style spell menu."""
@@ -84,6 +87,7 @@ class SpellMenuOverlay:
         faces: object,
         member_index: int = 0,
         event_spell_keys: Collection[str] = (),
+        on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         """Build a DA2-style spell view from menu-owned state."""
 
@@ -105,6 +109,8 @@ class SpellMenuOverlay:
             isinstance(key, str) for key in event_spell_keys
         ):
             raise TypeError("event_spell_keys must contain strings")
+        if on_invalid_action is not None and not callable(on_invalid_action):
+            raise TypeError("on_invalid_action must be callable")
 
         self.party = party
         self.spells = dict(spell_catalog)
@@ -114,6 +120,7 @@ class SpellMenuOverlay:
         self.faces = faces
         self.member_index = member_index
         self.event_spell_keys = frozenset(event_spell_keys)
+        self.on_invalid_action = on_invalid_action
         self.phase = SpellSelectionPhase.CASTER
         self._spells_by_position = self._index_spells()
         self._build_windows()
@@ -258,7 +265,8 @@ class SpellMenuOverlay:
                     continue
                 color = (
                     DEFAULT_TEXT_COLOR
-                    if spell.on_camp and self.member.mp >= spell.mp
+                    if self._is_supported_menu_spell(spell)
+                    and self.member.mp >= spell.mp
                     else DISABLED_COLOR
                 )
                 texts.append(
@@ -279,7 +287,7 @@ class SpellMenuOverlay:
         return tuple(texts), tuple(targets)
 
     def _guide_texts(self) -> tuple[WindowText, ...]:
-        if self.phase is not SpellSelectionPhase.SPELL:
+        if self.phase is SpellSelectionPhase.CASTER:
             return ()
         spell = self.selected_spell
         if spell is None:
@@ -336,16 +344,149 @@ class SpellMenuOverlay:
 
     def _enter_target_selection(self) -> None:
         spell = self.selected_spell
-        if spell is None or not spell.on_camp or self.member.mp < spell.mp:
+        if (
+            spell is None
+            or not self._is_supported_menu_spell(spell)
+            or self.member.mp < spell.mp
+        ):
+            self._notify_invalid_action()
+            return
+        target_indexes = self._usable_target_indexes(spell)
+        if not target_indexes:
+            self._notify_invalid_action()
             return
         self.phase = SpellSelectionPhase.TARGET
         self.spell_cursor.active = False
         self.member_cursor.active = True
+        self.member_cursor.select_key(target_indexes[0])
 
     def _return_to_spell_selection(self) -> None:
         self.phase = SpellSelectionPhase.SPELL
         self.spell_cursor.active = True
         self.member_cursor.active = False
+
+    @staticmethod
+    def _is_supported_menu_spell(spell: Spell) -> bool:
+        """Return whether the currently implemented camp effect can use it."""
+
+        return (
+            spell.on_camp
+            and not spell.to_enemy
+            and spell.action is SpellAction.HEAL
+        )
+
+    @staticmethod
+    def _has_curable_ailment(member: Member) -> bool:
+        return bool(
+            member.poisoned
+            or member.paralyzed
+            or member.sleeping
+            or member.confused
+        )
+
+    def _can_heal_target(self, spell: Spell, target: Member) -> bool:
+        if target.hp <= 0:
+            return False
+        if target.hp < target.max_hp:
+            return True
+        return spell.intensity == 0 and self._has_curable_ailment(target)
+
+    def _usable_target_indexes(self, spell: Spell) -> tuple[int, ...]:
+        if (
+            not self._is_supported_menu_spell(spell)
+            or self.member.mp < spell.mp
+        ):
+            return ()
+        return tuple(
+            index
+            for index, target in enumerate(self.party_panel.party)
+            if self._can_heal_target(spell, target)
+        )
+
+    def _notify_invalid_action(self) -> None:
+        if self.on_invalid_action is not None:
+            self.on_invalid_action()
+
+    def _next_target_index(
+        self,
+        spell: Spell,
+        preferred_index: int,
+    ) -> int | None:
+        usable = frozenset(self._usable_target_indexes(spell))
+        if not usable:
+            return None
+        member_count = len(self.party_panel.party)
+        return next(
+            (
+                (preferred_index + distance) % member_count
+                for distance in range(member_count)
+                if (preferred_index + distance) % member_count in usable
+            ),
+            None,
+        )
+
+    def _refresh_after_healing(
+        self,
+        spell: Spell,
+        preferred_target_index: int,
+    ) -> None:
+        next_target = self._next_target_index(spell, preferred_target_index)
+        self.phase = (
+            SpellSelectionPhase.TARGET
+            if next_target is not None and len(self.party_panel.party) > 1
+            else SpellSelectionPhase.SPELL
+        )
+        self._build_windows()
+        self.spell_cursor.select_key(spell.key)
+        self._refresh_guide()
+        if self.phase is SpellSelectionPhase.TARGET and next_target is not None:
+            self.member_cursor.select_key(next_target)
+
+    def _use_selected_healing_spell(self) -> bool:
+        spell = self.selected_spell
+        selected_target = self.member_cursor.selected_key
+        if (
+            spell is None
+            or not isinstance(selected_target, int)
+            or not self._is_supported_menu_spell(spell)
+            or self.member.mp < spell.mp
+        ):
+            self._notify_invalid_action()
+            return False
+
+        target_indexes = (
+            self._usable_target_indexes(spell)
+            if spell.to_all
+            else (selected_target,)
+        )
+        if not target_indexes or any(
+            index not in self._usable_target_indexes(spell)
+            for index in target_indexes
+        ):
+            self._notify_invalid_action()
+            return False
+
+        ability = member_spell_ability(
+            magic=self.member.adjusted_abilities.magic,
+            internal_level=self.member.internal_level,
+        )
+        for index in target_indexes:
+            target = self.party_panel.party[index]
+            result = resolve_healing(
+                intensity=spell.intensity,
+                ability=ability,
+                current_hp=target.hp,
+                max_hp=target.max_hp,
+                random_factor=random.random(),
+            )
+            target.apply_healing(
+                result.amount,
+                cure_ailments=result.cures_ailments,
+            )
+        self.member.mp -= spell.mp
+        play_se(HEALING_SE_ID)
+        self._refresh_after_healing(spell, selected_target)
+        return True
 
     def update(self, input_state: InputState) -> bool:
         """Update selection and report whether the menu should be restored."""
@@ -385,7 +526,8 @@ class SpellMenuOverlay:
             self._return_to_spell_selection()
             return False
         self.member_cursor.update(input_state.navigation)
-        # Confirm intentionally does nothing until spell effects are implemented.
+        if input_state.confirm.triggered:
+            self._use_selected_healing_spell()
         return False
 
     def draw(self) -> None:
@@ -418,4 +560,5 @@ __all__ = [
     "SpellMenuDataError",
     "SpellMenuOverlay",
     "SpellSelectionPhase",
+    "HEALING_SE_ID",
 ]

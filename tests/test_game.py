@@ -196,7 +196,7 @@ class GameTest(unittest.TestCase):
             [member.formation_row for member in mock.party],
             [
                 FormationRow.FRONT,
-                FormationRow.BACK,
+                FormationRow.FRONT,
             ],
         )
         self.assertEqual(mock.save_data.gold, INITIAL_GOLD)
@@ -623,6 +623,7 @@ class GameTest(unittest.TestCase):
         mock.alert = Mock()
         window = Mock(is_animating=True)
         mock.windows = (window,)
+        mock._refresh_party_window_texts = Mock()
 
         mock.update()
 
@@ -637,6 +638,7 @@ class GameTest(unittest.TestCase):
         self.assertFalse(mock.showing_field)
         self.assertTrue(mock.command_cursor.active)
         self.assertIsNone(mock.pending_screen_change)
+        mock._refresh_party_window_texts.assert_called_once_with()
         window.restart_opening.assert_called_once_with()
         self.assertEqual(window.update.call_count, 2)
         self.assertTrue(mock.animate_main_windows_with_fade)
@@ -1970,6 +1972,7 @@ class GameTest(unittest.TestCase):
             fonts=mock.fonts,
             faces=mock.faces,
             member_index=2,
+            on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)
         self.assertIsNone(mock.pending_screen_change)
@@ -1988,6 +1991,7 @@ class GameTest(unittest.TestCase):
         mock.selected_member_index = 0
         mock.spell_screen = Mock(member_index=2)
         mock.spell_screen.update.return_value = True
+        mock._refresh_party_window_texts = Mock()
 
         spell_screen = mock.spell_screen
         mock.update()
@@ -2004,6 +2008,7 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.spell_screen)
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 2)
+        mock._refresh_party_window_texts.assert_called_once_with()
 
     @patch("game.pyxel.camera")
     @patch("game.pyxel.cls")

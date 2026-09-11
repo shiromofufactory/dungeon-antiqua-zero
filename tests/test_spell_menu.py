@@ -216,19 +216,41 @@ class SpellMenuTest(unittest.TestCase):
             mock.update(InputState(cancel=InputButton(True, True)))
         )
 
-    def test_confirm_does_not_use_selected_spell(self) -> None:
+    @patch("ui.spell_menu.play_se")
+    @patch("ui.spell_menu.random.random", return_value=0.5)
+    def test_healing_spell_recovers_hp_spends_mp_and_refreshes_values(
+        self,
+        random_value: Mock,
+        play_se: Mock,
+    ) -> None:
         mock = SpellMenuHarness(member_index=1)
+        target = mock.party[0]
+        target.hp = 1
+        initial_mp = mock.member.mp
 
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(navigation=Direction.RIGHT))
-        selected = mock.selected_spell
         self.assertFalse(mock.update(InputState(confirm=InputButton(True, True))))
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
-        self.assertIs(mock.selected_spell, selected)
-        self.assertEqual(mock.member.mp, mock.member.max_mp)
+        self.assertFalse(mock.update(InputState(confirm=InputButton(True, True))))
+
+        self.assertEqual(target.hp, target.max_hp)
+        self.assertEqual(mock.member.mp, initial_mp - mock.spells["HEALING1"].mp)
+        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertEqual(mock.selected_spell.key, "HEALING1")
+        member_texts = {(text.x, text.y): text.text for text in mock.member_window.texts}
+        self.assertEqual(
+            member_texts[(MEMBER_TEXT_X, MEMBER_MP_VALUE_Y)],
+            "　１３／　１６",
+        )
+        party_texts = {(text.x, text.y): text.text for text in mock.party_window.texts}
+        self.assertEqual(party_texts[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
+        random_value.assert_called_once_with()
+        play_se.assert_called_once_with("spell_healing1")
 
     def test_target_cursor_appears_only_after_usable_spell_is_selected(self) -> None:
         mock = SpellMenuHarness(member_index=1)
+        mock.party[0].hp -= 1
         self.assertFalse(mock.member_cursor.active)
 
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -253,6 +275,39 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
         self.assertTrue(mock.spell_cursor.active)
         self.assertFalse(mock.member_cursor.active)
+
+    def test_healing_with_no_valid_target_reports_an_error(self) -> None:
+        invalid_action = Mock()
+        mock = SpellMenuHarness(member_index=1)
+        mock.on_invalid_action = invalid_action
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertEqual(mock.member.mp, mock.member.max_mp)
+        invalid_action.assert_called_once_with()
+
+    @patch("ui.spell_menu.play_se")
+    @patch("ui.spell_menu.random.random", return_value=0.5)
+    def test_healing_keeps_target_selection_on_next_injured_member(
+        self,
+        _random_value: Mock,
+        _play_se: Mock,
+    ) -> None:
+        mock = SpellMenuHarness(member_index=1)
+        mock.party[0].hp = 1
+        mock.party[1].hp = 1
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.selected_spell.key, "HEALING1")
+        self.assertEqual(mock.member_cursor.selected_key, 1)
 
     def test_spell_cursor_draws_only_after_caster_confirmation(self) -> None:
         mock = SpellMenuHarness()
