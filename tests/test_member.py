@@ -363,6 +363,7 @@ class MemberTest(unittest.TestCase):
     def test_temporary_sleep_and_confusion_are_cleared_after_battle(self) -> None:
         self.member.sleeping = 2
         self.member.confused = 3
+        self.member.protection_level = 2
         self.member.poisoned = True
         self.member.paralyzed = True
 
@@ -370,8 +371,28 @@ class MemberTest(unittest.TestCase):
 
         self.assertEqual(self.member.sleeping, 0)
         self.assertEqual(self.member.confused, 0)
+        self.assertEqual(self.member.protection_level, 0)
         self.assertTrue(self.member.poisoned)
         self.assertTrue(self.member.paralyzed)
+
+    def test_protection_raises_defense_twice_using_da2_formula(self) -> None:
+        armor = self.item("ARMOR", "BODY", defense=10)
+        self.member.equipment = EquipmentSet({EquipmentSlot.BODY: armor})
+
+        self.assertEqual(self.member.battle_stats.defense, 10)
+        self.assertTrue(self.member.apply_protection())
+        self.assertEqual(self.member.battle_stats.defense, 18)
+        self.assertTrue(self.member.apply_protection())
+        self.assertEqual(self.member.battle_stats.defense, 30)
+        self.assertFalse(self.member.apply_protection())
+        self.assertEqual(self.member.protection_level, 2)
+
+    def test_death_clears_protection(self) -> None:
+        self.member.protection_level = 2
+
+        self.member.take_damage(self.member.hp)
+
+        self.assertEqual(self.member.protection_level, 0)
 
     def test_negative_equipment_healing_reduces_hp(self) -> None:
         cursed_ring = self.item("CURSED RING", "ARM", healing=-2)
@@ -967,6 +988,10 @@ class MemberTest(unittest.TestCase):
             Member(self.member.definition, sleeping=True)
         with self.assertRaisesRegex(ValueError, "confused"):
             Member(self.member.definition, confused=-1)
+        with self.assertRaisesRegex(TypeError, "protection_level"):
+            Member(self.member.definition, protection_level=True)
+        with self.assertRaisesRegex(ValueError, "protection_level"):
+            Member(self.member.definition, protection_level=3)
 
     def test_rejects_missing_base_ability(self) -> None:
         with self.assertRaisesRegex(MemberDataError, "base_mag"):

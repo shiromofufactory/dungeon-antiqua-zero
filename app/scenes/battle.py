@@ -50,6 +50,7 @@ from localization import Localizer, ascii_to_fullwidth, format_number
 from member import (
     EquipmentSlot,
     FormationRow,
+    MAX_PROTECTION_LEVEL,
     Member,
 )
 from monster import (
@@ -284,6 +285,15 @@ SLEEP_ICON_PATTERN_COUNT = 4
 SLEEP_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 SLEEP_MIN_TURNS = 2
 SLEEP_MAX_TURNS = 3
+PROTECTION_ICON_SOURCE_X = 64
+PROTECTION_ICON_SOURCE_Y = 128
+PROTECTION_ICON_SIZE = 8
+PROTECTION_ICON_PATTERN_COUNT = 3
+PROTECTION_ICON_PATTERN_FRAME_COUNTS = (
+    6 * FPS // DA2_REFERENCE_FPS,
+    3 * FPS // DA2_REFERENCE_FPS,
+)
+PROTECTION_ICON_NAME_OFFSET_X = -PROTECTION_ICON_SIZE
 MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
@@ -577,6 +587,13 @@ class BattleSleepResult:
     affinity_y: int
 
 
+@dataclass(frozen=True)
+class BattleProtectionResult:
+    """One guaranteed PROTECTION stage waiting for its timed application."""
+
+    target_index: int
+
+
 @dataclass
 class BattleSpellDamagePopup:
     """One non-blocking spell-damage number animated with DA2's offsets."""
@@ -627,6 +644,7 @@ class BattleActionPresentation:
     healing_results: tuple[BattleHealingResult, ...] = ()
     damage_results: tuple[BattleSpellDamageResult, ...] = ()
     sleep_results: tuple[BattleSleepResult, ...] = ()
+    protection_results: tuple[BattleProtectionResult, ...] = ()
     result_start_frame: int = 0
     results_applied: bool = False
     elapsed_frame: int = 0
@@ -2915,7 +2933,7 @@ class BattleScene:
                 target_positions,
             )
         else:
-            selectable = self._active_party_indexes()
+            selectable = self._selectable_party_indexes_for_spell(spell)
             if not selectable:
                 return False
             party_targets = tuple(
@@ -2956,6 +2974,18 @@ class BattleScene:
         self._close_spell_windows()
         self._refresh_monster_name_colors()
         return True
+
+    def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
+        """Return living ally targets that can still receive the spell."""
+
+        indexes = self._active_party_indexes()
+        if spell.action is not SpellAction.PROTECTION:
+            return indexes
+        return tuple(
+            index
+            for index in indexes
+            if self.party[index].protection_level < MAX_PROTECTION_LEVEL
+        )
 
     @staticmethod
     def _make_all_target_cursors(
@@ -3151,6 +3181,7 @@ class BattleScene:
         healing_results = self._resolve_healing_results(spell, indexes)
         damage_results = self._resolve_spell_damage_results(spell, indexes)
         sleep_results = self._resolve_sleep_results(spell, indexes)
+        protection_results = self._resolve_protection_results(spell, indexes)
         effect_indexes = (
             tuple(
                 result.target_index
@@ -3189,6 +3220,7 @@ class BattleScene:
             healing_results=healing_results,
             damage_results=damage_results,
             sleep_results=sleep_results,
+            protection_results=protection_results,
             result_start_frame=result_start_frame,
         )
         affinity_popups = getattr(self, "affinity_popups", None)
@@ -3277,6 +3309,19 @@ class BattleScene:
                 )
             )
         return tuple(results)
+
+    def _resolve_protection_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleProtectionResult, ...]:
+        """Resolve DA2's guaranteed one-stage defense increase."""
+
+        if spell.action is not SpellAction.PROTECTION:
+            return ()
+        if spell.to_enemy:
+            raise BattleDataError("PROTECTION spells must target allies")
+        return tuple(BattleProtectionResult(index) for index in indexes)
 
     def _resolve_spell_damage_results(
         self,
@@ -3445,6 +3490,8 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+        for result in presentation.protection_results:
+            self.party[result.target_index].apply_protection()
 
     def _show_item_use_message(self, item: Item) -> None:
         """Show only the used item's name in the timed action popup."""
@@ -4913,6 +4960,7 @@ class BattleScene:
         self._draw_critical_markers()
         self._draw_timeline()
         self._draw_windows()
+        self._draw_protection_icons()
         self._draw_target_cursor()
 
     def _draw_background(self) -> None:
@@ -5622,6 +5670,58 @@ class BattleScene:
                 SLEEP_ICON_SOURCE_Y,
                 SLEEP_ICON_SIZE,
                 SLEEP_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
+
+    def _draw_protection_icons(self) -> None:
+        """Animate each defense stage immediately left of its party name."""
+
+        phase = getattr(self, "phase", None)
+        if phase in (
+            BattlePhase.VICTORY_SUMMARY,
+            BattlePhase.RESULT_TRANSITION,
+            BattlePhase.ESCAPE_MESSAGE,
+            BattlePhase.ESCAPE,
+        ):
+            return
+        if (
+            phase is BattlePhase.ENTRANCE
+            and getattr(self, "entrance_animation_frame", 0)
+            < getattr(
+                self,
+                "party_entrance_complete_frame",
+                PARTY_ENTRANCE_COMPLETE_FRAME,
+            )
+        ):
+            return
+
+        hidden_indexes = set(getattr(self, "escaped_party_indexes", set()))
+        if phase is BattlePhase.ESCAPE_MEMBER:
+            escape_actor_index = getattr(self, "escape_actor_index", None)
+            if escape_actor_index is not None:
+                hidden_indexes.add(escape_actor_index)
+
+        for index, (member, window) in enumerate(
+            zip(
+                getattr(self, "party", ()),
+                getattr(self, "party_status_windows", ()),
+            )
+        ):
+            level = member.protection_level
+            if index in hidden_indexes or level <= 0:
+                continue
+            interval = PROTECTION_ICON_PATTERN_FRAME_COUNTS[level - 1]
+            pattern = (
+                pyxel.frame_count // interval
+            ) % PROTECTION_ICON_PATTERN_COUNT
+            pyxel.blt(
+                window.pixel_x + PROTECTION_ICON_NAME_OFFSET_X,
+                window.pixel_y,
+                0,
+                PROTECTION_ICON_SOURCE_X + pattern * PROTECTION_ICON_SIZE,
+                PROTECTION_ICON_SOURCE_Y,
+                PROTECTION_ICON_SIZE,
+                PROTECTION_ICON_SIZE,
                 TRANSPARENT_INDEX,
             )
 

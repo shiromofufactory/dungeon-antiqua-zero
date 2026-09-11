@@ -113,6 +113,7 @@ MAX_INTERNAL_LEVEL = 99
 MAX_HP = 999
 MAX_MP = 255
 MAX_ABILITY = 32
+MAX_PROTECTION_LEVEL = 2
 EQUIPMENT_RECORD_FIELDS = MappingProxyType(
     {
         EquipmentSlot.RIGHT: "equip_right",
@@ -713,6 +714,7 @@ class Member:
     paralyzed: bool = False
     sleeping: int = 0
     confused: int = 0
+    protection_level: int = 0
     skills: list[Skill] = field(default_factory=list)
     equipment: EquipmentSet = field(default_factory=EquipmentSet)
     proficiencies: dict[ProficiencyKind, Proficiency] = field(
@@ -805,6 +807,15 @@ class Member:
                 raise TypeError(f"{name} must be an integer")
             if value < 0:
                 raise ValueError(f"{name} must not be negative")
+        if (
+            isinstance(self.protection_level, bool)
+            or not isinstance(self.protection_level, int)
+        ):
+            raise TypeError("protection_level must be an integer")
+        if not 0 <= self.protection_level <= MAX_PROTECTION_LEVEL:
+            raise ValueError(
+                f"protection_level must be from 0 to {MAX_PROTECTION_LEVEL}"
+            )
         if not isinstance(self.skills, list):
             raise TypeError("skills must be a list")
         if not all(isinstance(skill, Skill) for skill in self.skills):
@@ -1082,6 +1093,8 @@ class Member:
         if damage > 0:
             self.sleeping = 0
             self.confused = 0
+        if self.hp <= 0:
+            self.protection_level = 0
         return old_hp - self.hp
 
     def apply_sleep(self, turns: int) -> None:
@@ -1102,11 +1115,20 @@ class Member:
         self.sleeping -= 1
         return True
 
+    def apply_protection(self) -> bool:
+        """Raise DA2's defense buff by one stage, up to its second stage."""
+
+        if self.protection_level >= MAX_PROTECTION_LEVEL:
+            return False
+        self.protection_level += 1
+        return True
+
     def clear_temporary_battle_conditions(self) -> None:
         """Discard ailments that DA2 keeps only for the current battle."""
 
         self.sleeping = 0
         self.confused = 0
+        self.protection_level = 0
 
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""
@@ -1117,6 +1139,7 @@ class Member:
         self.paralyzed = False
         self.sleeping = 0
         self.confused = 0
+        self.protection_level = 0
 
     def proficiency(self, kind: ProficiencyKind) -> Proficiency:
         """Return the current proficiency for one stable kind."""
@@ -1328,7 +1351,15 @@ class Member:
         )
 
         armor = self.equipment.armor_items()
-        defense = sum(item.defense for item in armor)
+        base_defense = sum(item.defense for item in armor)
+        defense = (
+            base_defense
+            if self.protection_level == 0
+            else int(
+                (base_defense + self.protection_level * 5)
+                * (1.0 + self.protection_level / 4)
+            )
+        )
         abilities = self.adjusted_abilities
         agility_bonus = max(0, (abilities.agility - 20) * 2)
         evasion = max(

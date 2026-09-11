@@ -106,6 +106,11 @@ from tools.screen_mocks.battle import (
     SLEEP_ICON_SOURCE_Y,
     SLEEP_MAX_TURNS,
     SLEEP_MIN_TURNS,
+    PROTECTION_ICON_NAME_OFFSET_X,
+    PROTECTION_ICON_PATTERN_FRAME_COUNTS,
+    PROTECTION_ICON_SIZE,
+    PROTECTION_ICON_SOURCE_X,
+    PROTECTION_ICON_SOURCE_Y,
     SPELL_POST_EFFECT_WAIT_FRAME_COUNT,
     SPELL_RESULT_OVERLAP_FRAME_COUNT,
     BattleActionPresentation,
@@ -244,6 +249,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_target_cursor = Mock()
         mock._draw_timeline = Mock()
         mock._draw_windows = Mock()
+        mock._draw_protection_icons = Mock()
 
         manager = Mock()
         manager.attach_mock(mock._draw_background, "background")
@@ -256,6 +262,7 @@ class BattleScreenMockTest(unittest.TestCase):
         manager.attach_mock(mock._draw_target_cursor, "target")
         manager.attach_mock(mock._draw_timeline, "timeline")
         manager.attach_mock(mock._draw_windows, "windows")
+        manager.attach_mock(mock._draw_protection_icons, "protection_icons")
 
         mock.draw()
 
@@ -271,6 +278,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.monster_attack(),
                 call.timeline(),
                 call.windows(),
+                call.protection_icons(),
                 call.target(),
             ],
         )
@@ -3091,6 +3099,45 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         randint.assert_not_called()
 
+    def test_protection_applies_one_guaranteed_stage(self) -> None:
+        spell = load_mock_spells()["PROTECTION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        target = mock.party[1]
+        results = mock._resolve_protection_results(spell, (1,))
+        presentation = BattleActionPresentation((), protection_results=results)
+        mock.healing_popups = []
+        mock.spell_damage_popups = []
+
+        mock._apply_action_results(presentation)
+
+        self.assertEqual(target.protection_level, 1)
+        self.assertTrue(presentation.results_applied)
+
+    def test_protection_targeting_excludes_members_at_second_stage(self) -> None:
+        spell = load_mock_spells()["PROTECTION"]
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        party[0].protection_level = 2
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = party
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in party
+        )
+        mock.escaped_party_indexes = set()
+
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(spell),
+            (1,),
+        )
+
     def test_failed_sleep_popup_uses_da2_miss_sprite_and_timing(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         popup = BattleSpellDamagePopup(100, 80, 0, is_miss=True)
@@ -3196,6 +3243,35 @@ class BattleScreenMockTest(unittest.TestCase):
                     1,
                 ),
             ],
+        )
+
+    def test_protection_icon_animates_left_of_name_at_stage_speed(self) -> None:
+        member = SimpleNamespace(protection_level=2)
+        window = Window(52, 16, 7, 5, transparent=True)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.party = (member,)
+        mock.party_status_windows = (window,)
+        mock.escaped_party_indexes = set()
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                PROTECTION_ICON_PATTERN_FRAME_COUNTS[1],
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_protection_icons()
+
+        blt.assert_called_once_with(
+            window.pixel_x + PROTECTION_ICON_NAME_OFFSET_X,
+            window.pixel_y,
+            0,
+            PROTECTION_ICON_SOURCE_X + PROTECTION_ICON_SIZE,
+            PROTECTION_ICON_SOURCE_Y,
+            PROTECTION_ICON_SIZE,
+            PROTECTION_ICON_SIZE,
+            1,
         )
 
     def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:
