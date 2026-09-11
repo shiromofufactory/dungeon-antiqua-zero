@@ -347,6 +347,32 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.sleeping, 0)
         self.assertEqual(self.member.confused, 0)
 
+    def test_sleep_skips_actions_and_positive_damage_wakes_the_member(self) -> None:
+        self.member.confused = 3
+        self.member.apply_sleep(2)
+
+        self.assertEqual(self.member.sleeping, 2)
+        self.assertEqual(self.member.confused, 0)
+        self.assertTrue(self.member.elapse_sleep_turn())
+        self.assertEqual(self.member.sleeping, 1)
+        self.member.take_damage(1)
+
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertFalse(self.member.elapse_sleep_turn())
+
+    def test_temporary_sleep_and_confusion_are_cleared_after_battle(self) -> None:
+        self.member.sleeping = 2
+        self.member.confused = 3
+        self.member.poisoned = True
+        self.member.paralyzed = True
+
+        self.member.clear_temporary_battle_conditions()
+
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 0)
+        self.assertTrue(self.member.poisoned)
+        self.assertTrue(self.member.paralyzed)
+
     def test_negative_equipment_healing_reduces_hp(self) -> None:
         cursed_ring = self.item("CURSED RING", "ARM", healing=-2)
         self.member.equipment = EquipmentSet(
@@ -825,6 +851,7 @@ class MemberTest(unittest.TestCase):
         )
 
         self.assertEqual(member.battle_stats.attack_right, 61)
+        self.assertTrue(member.uses_two_handed_weapon(sword))
 
     def test_resistances_are_union_of_all_equipped_items(self) -> None:
         sword = self.item(

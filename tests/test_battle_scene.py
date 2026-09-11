@@ -360,7 +360,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
     def test_victory_return_counts_the_completed_battle(self) -> None:
         game = Game.__new__(Game)
         game.battle_return_result = BattleResult.VICTORY
-        game.battle_scene = Mock()
+        battle_scene = Mock()
+        game.battle_scene = battle_scene
         game.save_data = SaveData(battle_count=4)
         game.current_map = Mock(bgm_id="da3-forest")
         game.bgm = Mock()
@@ -368,6 +369,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game._apply_battle_return()
 
         self.assertEqual(game.save_data.battle_count, 5)
+        battle_scene.clear_temporary_member_conditions.assert_called_once_with()
 
     def test_escape_reuses_battle_blackout_and_starts_with_field_fade_in(
         self,

@@ -33,6 +33,7 @@ from battle_magic import (
     member_spell_modifier,
     resolve_healing,
     resolve_spell_damage,
+    resolve_status_spell,
 )
 from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import (
@@ -44,7 +45,7 @@ from battle_timeline import (
     remove_timeline_actor,
     remove_timeline_head,
 )
-from item import Item, ItemEquipType
+from item import Item, ItemEquipType, ItemSpecial
 from localization import Localizer, ascii_to_fullwidth, format_number
 from member import (
     EquipmentSlot,
@@ -269,6 +270,13 @@ RESIST_ICON_SOURCE_Y = 24
 AFFINITY_ICON_WIDTH = 24
 AFFINITY_ICON_HEIGHT = 8
 AFFINITY_POPUP_FRAME_COUNT = len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+SLEEP_ICON_SOURCE_X = 32
+SLEEP_ICON_SOURCE_Y = 136
+SLEEP_ICON_SIZE = 8
+SLEEP_ICON_PATTERN_COUNT = 4
+SLEEP_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
+SLEEP_MIN_TURNS = 2
+SLEEP_MAX_TURNS = 3
 MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
 UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
@@ -548,6 +556,20 @@ class BattleSpellDamageResult:
     affinity_y: int
 
 
+@dataclass(frozen=True)
+class BattleSleepResult:
+    """Resolved SLEEP magic waiting for its timed application."""
+
+    target_index: int
+    success: bool
+    turns: int
+    affinity: SpellAffinity
+    popup_x: int
+    popup_y: int
+    affinity_x: int
+    affinity_y: int
+
+
 @dataclass
 class BattleSpellDamagePopup:
     """One non-blocking spell-damage number animated with DA2's offsets."""
@@ -555,11 +577,15 @@ class BattleSpellDamagePopup:
     x: int
     y: int
     damage: int
+    is_miss: bool = False
     elapsed_frame: int = 0
 
     @property
     def completed(self) -> bool:
-        return self.elapsed_frame >= DAMAGE_POPUP_FRAME_COUNT
+        frame_count = (
+            MONSTER_MISS_FRAME_COUNT if self.is_miss else DAMAGE_POPUP_FRAME_COUNT
+        )
+        return self.elapsed_frame >= frame_count
 
     def update(self) -> None:
         self.elapsed_frame += 1
@@ -593,6 +619,7 @@ class BattleActionPresentation:
     spell_effects: tuple[BattleTargetSpellEffect, ...]
     healing_results: tuple[BattleHealingResult, ...] = ()
     damage_results: tuple[BattleSpellDamageResult, ...] = ()
+    sleep_results: tuple[BattleSleepResult, ...] = ()
     result_start_frame: int = 0
     results_applied: bool = False
     elapsed_frame: int = 0
@@ -627,6 +654,7 @@ class BattleAttackPresentation:
     poses: tuple[AttackPoseDefinition, ...]
     effect_row: int | None
     is_hit: bool = True
+    is_critical: bool = False
     is_aimed: bool = False
     is_focused: bool = False
     sound_effect_id: str = ATTACK_SLASH_SE_ID
@@ -1300,6 +1328,7 @@ class BattleScene:
         self.monster_blink_frames_remaining = 0
         self.monster_attack_target_index: int | None = None
         self.monster_attack_damage: int | None = None
+        self.monster_attack_critical = False
         self.monster_attack_animation_frame = 0
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
         self.timeline_animation_frame = 0
@@ -1655,6 +1684,7 @@ class BattleScene:
         self.monster_blink_frames_remaining = 0
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
+        self.monster_attack_critical = False
         self.monster_attack_animation_frame = 0
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
@@ -3057,6 +3087,7 @@ class BattleScene:
         enemy_levels: tuple[int, ...],
         *,
         defeated_enemy: bool = False,
+        critical: bool = False,
     ) -> None:
         """Record both equipped hands for one physical command action."""
 
@@ -3076,6 +3107,7 @@ class BattleScene:
                 weapons,
                 enemy_levels,
                 defeated_enemy=defeated_enemy,
+                critical=critical,
             )
 
     def _begin_action_presentation(
@@ -3109,9 +3141,21 @@ class BattleScene:
         if not indexes:
             return False
 
+        healing_results = self._resolve_healing_results(spell, indexes)
+        damage_results = self._resolve_spell_damage_results(spell, indexes)
+        sleep_results = self._resolve_sleep_results(spell, indexes)
+        effect_indexes = (
+            tuple(
+                result.target_index
+                for result in sleep_results
+                if result.success
+            )
+            if sleep_results
+            else indexes
+        )
         effects: list[BattleTargetSpellEffect] = []
         if definition is not None:
-            for index in indexes:
+            for index in effect_indexes:
                 anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
                 effects.append(
                     BattleTargetSpellEffect(
@@ -3125,8 +3169,6 @@ class BattleScene:
                         ),
                     )
                 )
-        healing_results = self._resolve_healing_results(spell, indexes)
-        damage_results = self._resolve_spell_damage_results(spell, indexes)
         effect_frame_count = max(
             (effect.player.definition.total_frames for effect in effects),
             default=0,
@@ -3139,6 +3181,7 @@ class BattleScene:
             tuple(effects),
             healing_results=healing_results,
             damage_results=damage_results,
+            sleep_results=sleep_results,
             result_start_frame=result_start_frame,
         )
         affinity_popups = getattr(self, "affinity_popups", None)
@@ -3152,6 +3195,15 @@ class BattleScene:
                 result.affinity,
             )
             for result in damage_results
+            if result.affinity is not SpellAffinity.NORMAL
+        )
+        affinity_popups.extend(
+            BattleAffinityPopup(
+                result.affinity_x,
+                result.affinity_y,
+                result.affinity,
+            )
+            for result in sleep_results
             if result.affinity is not SpellAffinity.NORMAL
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
@@ -3272,6 +3324,68 @@ class BattleScene:
             )
         return tuple(results)
 
+    def _resolve_sleep_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleSleepResult, ...]:
+        """Resolve SLEEP success and duration without mutating monsters yet."""
+
+        if spell.action is not SpellAction.SLEEP:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("SLEEP spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("SLEEP requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattleSleepResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            resolution = resolve_status_spell(
+                spell_modifier=modifier,
+                rate=spell.rate,
+                target_spell_defense=monster.combat_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
+                success_roll=(
+                    0
+                    if spell.attribute is not None
+                    and spell.attribute in monster.resistances
+                    else random.randint(0, 19)
+                ),
+            )
+            _base_x, base_y = MONSTER_POSITIONS[index]
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            results.append(
+                BattleSleepResult(
+                    target_index=index,
+                    success=resolution.success,
+                    turns=(
+                        random.randint(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS)
+                        if resolution.success
+                        else 0
+                    ),
+                    affinity=resolution.affinity,
+                    popup_x=center_x,
+                    popup_y=base_y + monster.height - 8,
+                    affinity_x=center_x - AFFINITY_ICON_WIDTH // 2,
+                    affinity_y=base_y + 20,
+                )
+            )
+        return tuple(results)
+
     def _apply_action_results(self, presentation: BattleActionPresentation) -> None:
         """Apply resolved state changes and start independent result popups."""
 
@@ -3311,6 +3425,19 @@ class BattleScene:
                     result.damage,
                 )
             )
+        for result in presentation.sleep_results:
+            monster = self.monsters[result.target_index]
+            if result.success:
+                monster.state.apply_sleep(result.turns)
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
 
     def _show_item_use_message(self, item: Item) -> None:
         """Show only the used item's name in the timed action popup."""
@@ -3686,6 +3813,9 @@ class BattleScene:
         )
         if is_focused:
             attack *= FOCUS_ATTACK_MULTIPLIER
+        target_incapacitated = monster.state.sleeping > 0
+        attacker_has_power_hit = member.has_skill("Power Hit")
+        weapon_has_power_hit = weapon.special is ItemSpecial.POWER_HIT
         result = resolve_physical_attack(
             attack=attack,
             hit=member_stats.hit_right.total,
@@ -3693,7 +3823,22 @@ class BattleScene:
             target_defense=monster_stats.defense,
             target_evasion=monster_stats.evasion,
             hit_roll=random.randint(0, 99),
+            target_incapacitated=target_incapacitated,
             hit_value_bonus=AIM_HIT_VALUE_BONUS if is_aimed else 0,
+            attacker_has_power_hit=attacker_has_power_hit,
+            weapon_has_power_hit=weapon_has_power_hit,
+            critical_rate_scale=(
+                1.5 if member.uses_two_handed_weapon(weapon) else 1.0
+            ),
+            critical_roll=(
+                random.randint(0, 99)
+                if (
+                    target_incapacitated
+                    or attacker_has_power_hit
+                    or weapon_has_power_hit
+                )
+                else None
+            ),
         )
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
@@ -3701,6 +3846,7 @@ class BattleScene:
             poses=poses,
             effect_row=effect_row,
             is_hit=result.hit,
+            is_critical=getattr(result, "critical", False),
             is_aimed=is_aimed,
             is_focused=is_focused,
             sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
@@ -3740,7 +3886,7 @@ class BattleScene:
                     party_index,
                     (getattr(monster, "level", 1),),
                     defeated_enemy=not monster.is_alive,
-                    # TODO: 会心実装時はcritical=Trueを加えて撃破との同時成立を+2にする。
+                    critical=presentation.is_critical,
                 )
             presentation.damage_applied = True
         if (
@@ -3929,6 +4075,12 @@ class BattleScene:
 
         self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
+
+    def clear_temporary_member_conditions(self) -> None:
+        """Clear DA2's battle-only member ailments before leaving the scene."""
+
+        for member in self.result_party:
+            member.clear_temporary_battle_conditions()
 
     def _release_palette_variant(self, name: str) -> None:
         palette_shifter = getattr(self, "palette_shifter", None)
@@ -4225,10 +4377,21 @@ class BattleScene:
             )
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
+            self.defending_party_indexes.discard(self.active_party_index)
+            if getattr(actor.member, "sleeping", 0):
+                if isinstance(actor.member, Member):
+                    actor.member.elapse_sleep_turn()
+                else:
+                    actor.member.sleeping -= 1
+                getattr(self, "focused_target_by_party_index", {}).pop(
+                    self.active_party_index,
+                    None,
+                )
+                self._start_timeline_animation()
+                return
             if getattr(self, "escape_requested", False):
                 self._begin_party_member_escape(self.active_party_index)
                 return
-            self.defending_party_indexes.discard(self.active_party_index)
             if self._begin_focused_attack():
                 self._refresh_party_text_colors()
                 return
@@ -4249,7 +4412,13 @@ class BattleScene:
             self.command_window.close_immediately()
             self.monster_attack_target_index = None
             self.monster_attack_damage = None
+            self.monster_attack_critical = False
             self.monster_attack_animation_frame = 0
+            if actor.state.elapse_sleep_turn():
+                self.blinking_monster_index = None
+                self.monster_blink_frames_remaining = 0
+                self._start_timeline_animation()
+                return
             if not self._monster_attack_target_indexes(actor):
                 self.blinking_monster_index = None
                 self.monster_blink_frames_remaining = 0
@@ -4528,6 +4697,7 @@ class BattleScene:
         self.monster_attack_target_index = random.choice(target_indexes)
         target = self.party[self.monster_attack_target_index]
         target_stats = target.battle_stats
+        target_incapacitated = bool(getattr(target, "sleeping", 0))
         result = resolve_physical_attack(
             attack=actor.combat_stats.attack,
             hit=actor.combat_stats.hit,
@@ -4542,8 +4712,13 @@ class BattleScene:
                 self.monster_attack_target_index
                 in getattr(self, "focused_target_by_party_index", {})
             ),
+            target_incapacitated=target_incapacitated,
+            critical_roll=(
+                random.randint(0, 99) if target_incapacitated else None
+            ),
         )
         self.monster_attack_damage = result.damage
+        self.monster_attack_critical = getattr(result, "critical", False)
         self.monster_attack_animation_frame = 0
         if result.hit:
             play_se(BATTLE_HIT_SE_ID)
@@ -4562,7 +4737,14 @@ class BattleScene:
             raise RuntimeError("monster attack requires a target and result")
         if damage > 0:
             member = self.party[target_index]
-            member.hp = max(0, member.hp - damage)
+            if isinstance(member, Member):
+                member.take_damage(damage)
+            else:
+                member.hp = max(0, member.hp - damage)
+                if hasattr(member, "sleeping"):
+                    member.sleeping = 0
+                if hasattr(member, "confused"):
+                    member.confused = 0
             self._refresh_party_hp_text(target_index)
             if self._member_focus_is_interrupted(member):
                 getattr(self, "focused_target_by_party_index", {}).pop(
@@ -4571,6 +4753,7 @@ class BattleScene:
                 )
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
+        self.monster_attack_critical = False
         self.monster_attack_animation_frame = 0
         if damage > 0 and self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
@@ -4711,6 +4894,7 @@ class BattleScene:
         self._draw_aim_reticle()
         self._draw_party_attack_effect()
         self._draw_spell_effects()
+        self._draw_sleeping_icons()
         self._draw_affinity_popups()
         self._draw_spell_damage_popups()
         self._draw_healing_popups()
@@ -5017,6 +5201,8 @@ class BattleScene:
                 ) % 2
                 return pattern * FORMATION_SPRITE_STEP_X
             return SPELL_CAST_SPRITE_SOURCE_X if self.action_uses_cast_pose else 0
+        if getattr(self.party_visuals[index].member, "sleeping", 0):
+            return NEAR_DEATH_SPRITE_SOURCE_X
         if index in getattr(self, "defending_party_indexes", ()):
             return DEFEND_SPRITE_SOURCE_X
         if self._party_member_is_dying(index):
@@ -5311,6 +5497,45 @@ class BattleScene:
         for effect in presentation.spell_effects:
             self.spell_effect_renderer.draw_effect(effect.player)
 
+    def _draw_sleeping_icons(self) -> None:
+        """Draw DA2's four-pattern sleep marker for every sleeping combatant."""
+
+        pattern = (
+            pyxel.frame_count // SLEEP_ICON_PATTERN_FRAME_COUNT
+        ) % SLEEP_ICON_PATTERN_COUNT
+        source_x = SLEEP_ICON_SOURCE_X + pattern * SLEEP_ICON_SIZE
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if not getattr(visual.member, "sleeping", 0):
+                continue
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
+            pyxel.blt(
+                x + 12,
+                y,
+                0,
+                source_x,
+                SLEEP_ICON_SOURCE_Y,
+                SLEEP_ICON_SIZE,
+                SLEEP_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            if not monster.is_alive or not monster.state.sleeping:
+                continue
+            _base_x, y = MONSTER_POSITIONS[index]
+            pyxel.blt(
+                self._monster_draw_x(index) + 48,
+                y,
+                0,
+                source_x,
+                SLEEP_ICON_SOURCE_Y,
+                SLEEP_ICON_SIZE,
+                SLEEP_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
+
     def _draw_healing_popups(self) -> None:
         """Draw HEAL numbers from the sprite row below damage digits."""
 
@@ -5337,17 +5562,36 @@ class BattleScene:
                 x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_spell_damage_popups(self) -> None:
-        """Draw spell damage using the standard damage-number sprite row."""
+        """Draw spell damage or a DA2-style miss marker."""
 
         for popup in getattr(self, "spell_damage_popups", ()):
+            offsets = (
+                DA2_MISS_VERTICAL_OFFSETS
+                if popup.is_miss
+                else DA2_DAMAGE_VERTICAL_OFFSETS
+            )
             reference_frame = min(
                 popup.elapsed_frame * DA2_REFERENCE_FPS // FPS,
-                len(DA2_DAMAGE_VERTICAL_OFFSETS) - 1,
+                len(offsets) - 1,
             )
-            vertical_offset = DA2_DAMAGE_VERTICAL_OFFSETS[reference_frame]
+            vertical_offset = offsets[reference_frame]
+            if vertical_offset < 0:
+                continue
+            y = popup.y - vertical_offset
+            if popup.is_miss:
+                pyxel.blt(
+                    popup.x - MISS_SPRITE_WIDTH // 2,
+                    y,
+                    0,
+                    MISS_SPRITE_SOURCE_X,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    MISS_SPRITE_WIDTH,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+                continue
             digits = str(popup.damage)
             x = popup.x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
-            y = popup.y - vertical_offset
             for digit in digits:
                 pyxel.blt(
                     x,

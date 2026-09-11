@@ -42,6 +42,15 @@ class SpellDamageResult:
     affinity: SpellAffinity = SpellAffinity.NORMAL
 
 
+@dataclass(frozen=True)
+class StatusSpellResult:
+    """One DA2-style status-spell success check and elemental relation."""
+
+    success: bool
+    success_rate: float
+    affinity: SpellAffinity = SpellAffinity.NORMAL
+
+
 def _nonnegative_integer(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer")
@@ -149,6 +158,63 @@ def resolve_spell_damage(
     return SpellDamageResult(damage, affinity)
 
 
+def resolve_status_spell(
+    *,
+    spell_modifier: float,
+    rate: int,
+    target_spell_defense: int,
+    attribute: ResistanceType | None,
+    target_weaknesses: frozenset[ResistanceType],
+    target_resistances: frozenset[ResistanceType],
+    success_roll: int,
+) -> StatusSpellResult:
+    """Resolve DA2's status success check using ZERO's spell modifier.
+
+    ``success_rate`` uses DA2's twenty-step scale: each point corresponds to
+    five percentage points while a value above twenty is an automatic success.
+    An explicit resistance still makes the effect fail before that roll.
+    """
+
+    if isinstance(spell_modifier, bool) or not isinstance(
+        spell_modifier,
+        (int, float),
+    ):
+        raise TypeError("spell_modifier must be a number")
+    if spell_modifier < 0:
+        raise ValueError("spell_modifier must not be negative")
+    rate = _nonnegative_integer(rate, "rate")
+    target_spell_defense = _nonnegative_integer(
+        target_spell_defense,
+        "target_spell_defense",
+    )
+    if attribute is not None and not isinstance(attribute, ResistanceType):
+        raise TypeError("attribute must be a ResistanceType or None")
+    if not isinstance(target_weaknesses, frozenset) or not all(
+        isinstance(value, ResistanceType) for value in target_weaknesses
+    ):
+        raise TypeError("target_weaknesses must be a ResistanceType frozenset")
+    if not isinstance(target_resistances, frozenset) or not all(
+        isinstance(value, ResistanceType) for value in target_resistances
+    ):
+        raise TypeError("target_resistances must be a ResistanceType frozenset")
+    success_roll = _nonnegative_integer(success_roll, "success_roll")
+    if success_roll > 19:
+        raise ValueError("success_roll must be from 0 to 19")
+
+    if attribute is not None and attribute in target_resistances:
+        return StatusSpellResult(False, 0.0, SpellAffinity.RESIST)
+
+    affinity = SpellAffinity.NORMAL
+    success_rate = max(
+        1.0,
+        (spell_modifier - target_spell_defense) / 2 + rate,
+    )
+    if attribute is not None and attribute in target_weaknesses:
+        affinity = SpellAffinity.WEAK
+        success_rate += 10
+    return StatusSpellResult(success_rate > success_roll, success_rate, affinity)
+
+
 def resolve_healing(
     *,
     intensity: int,
@@ -194,8 +260,10 @@ __all__ = [
     "SPELL_DAMAGE_RATE_RANGE",
     "SpellAffinity",
     "SpellDamageResult",
+    "StatusSpellResult",
     "member_spell_ability",
     "member_spell_modifier",
     "resolve_healing",
     "resolve_spell_damage",
+    "resolve_status_spell",
 ]

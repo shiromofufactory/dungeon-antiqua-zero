@@ -119,6 +119,7 @@ class Spell:
     action: SpellAction
     attribute: ResistanceType | None
     intensity: int
+    rate: int
     descriptions: Mapping[str, tuple[str, ...]]
 
     @classmethod
@@ -198,6 +199,7 @@ class Spell:
             action=action,
             attribute=attribute,
             intensity=_integer(record, "intensity", 0),
+            rate=_integer(record, "rate", 0),
             descriptions=MappingProxyType(descriptions),
         )
 

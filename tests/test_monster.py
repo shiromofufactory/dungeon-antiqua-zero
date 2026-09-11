@@ -63,6 +63,19 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.hp, 0)
         self.assertFalse(state.is_alive)
 
+    def test_sleep_does_not_shorten_and_positive_damage_wakes_the_monster(self) -> None:
+        state = MonsterBattleState(max_hp=10)
+
+        state.apply_sleep(3)
+        state.apply_sleep(2)
+        self.assertEqual(state.sleeping, 3)
+        self.assertTrue(state.elapse_sleep_turn())
+        self.assertEqual(state.sleeping, 2)
+        state.take_damage(1)
+
+        self.assertEqual(state.sleeping, 0)
+        self.assertFalse(state.elapse_sleep_turn())
+
     def test_defeat_and_restore_manage_mock_battle_lifecycle(self) -> None:
         state = MonsterBattleState.from_record({"mhp": 7})
 
@@ -70,6 +83,7 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.hp, 0)
         state.restore()
         self.assertEqual(state.hp, 7)
+        self.assertEqual(state.sleeping, 0)
 
     def test_mhp_must_be_a_positive_integer(self) -> None:
         for value in (None, True, 0, -1, 1.5, "2"):

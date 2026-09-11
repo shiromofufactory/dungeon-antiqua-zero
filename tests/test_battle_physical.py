@@ -105,6 +105,90 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertEqual(result.hit_value, 1.0)
         self.assertEqual(result.damage, 81)
 
+    def test_power_hit_uses_da2_rate_and_critical_damage(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=40,
+            target_evasion=0,
+            hit_roll=0,
+            attacker_has_power_hit=True,
+            critical_roll=9,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertTrue(result.critical)
+        self.assertEqual(result.critical_rate, 10.0)
+        # DA2 doubles attack and skips the flat defense subtraction, while
+        # retaining the final defense-rate cut.
+        self.assertEqual(result.damage, 144)
+
+    def test_da2_critical_boundary_is_strictly_greater_than_roll(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=40,
+            target_evasion=0,
+            hit_roll=0,
+            attacker_has_power_hit=True,
+            critical_roll=10,
+        )
+
+        self.assertFalse(result.critical)
+        self.assertEqual(result.critical_rate, 10.0)
+        self.assertEqual(result.damage, 44)
+
+    def test_incapacitated_target_adds_accuracy_and_enables_critical(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=0,
+            target_evasion=100,
+            hit_roll=99,
+            target_incapacitated=True,
+            critical_roll=19,
+        )
+
+        self.assertEqual(result.adjusted_hit, 200.0)
+        self.assertEqual(result.hit_value, 101.0)
+        self.assertEqual(result.critical_rate, 20.0)
+        self.assertTrue(result.critical)
+
+    def test_all_critical_sources_and_two_handed_rate_stack_like_da2(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=0,
+            target_evasion=0,
+            hit_roll=0,
+            target_incapacitated=True,
+            attacker_has_power_hit=True,
+            weapon_has_power_hit=True,
+            critical_rate_scale=1.5,
+            critical_roll=89,
+        )
+
+        self.assertAlmostEqual(result.critical_rate, 90.0)
+        self.assertTrue(result.critical)
+
+    def test_attack_without_critical_condition_cannot_critical(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=0,
+            target_evasion=0,
+            hit_roll=0,
+            critical_roll=0,
+        )
+
+        self.assertEqual(result.critical_rate, 0.0)
+        self.assertFalse(result.critical)
+
     def test_defending_avoids_an_attack_below_da2_guard_threshold(self) -> None:
         result = resolve_physical_attack(
             attack=100,

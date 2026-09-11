@@ -684,6 +684,9 @@ class Game:
         result = self.battle_return_result
         if result is None:
             raise RuntimeError("battle return has no result")
+        battle_scene = getattr(self, "battle_scene", None)
+        if battle_scene is not None:
+            battle_scene.clear_temporary_member_conditions()
         if result is BattleResult.VICTORY:
             self.save_data.battle_count += 1
         elif result is BattleResult.DEFEAT:

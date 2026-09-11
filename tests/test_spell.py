@@ -31,6 +31,7 @@ class SpellTest(unittest.TestCase):
         self.assertFalse(spell.to_all)
         self.assertIs(spell.action, SpellAction.DAMAGE)
         self.assertIs(spell.attribute, ResistanceType.FIRE)
+        self.assertEqual(spell.rate, 0)
         self.assertEqual(
             spell.localized_name(Localizer(Language.JAPANESE)),
             "ファイア１",
@@ -98,6 +99,9 @@ class SpellTest(unittest.TestCase):
                     display_name,
                 )
 
+    def test_sleep_loads_its_authored_success_rate(self) -> None:
+        self.assertEqual(self.spells["SLEEP"].rate, 6)
+
     def test_rejects_legacy_numeric_spell_type(self) -> None:
         record = dict(load_record_array("spells.json")[0])
         record["type"] = 1
@@ -113,6 +117,13 @@ class SpellTest(unittest.TestCase):
         record["attr"] = "雷"
 
         with self.assertRaisesRegex(SpellDataError, "unsupported spell.attr"):
+            Spell.from_record(record)
+
+    def test_rejects_negative_status_rate(self) -> None:
+        record = dict(load_record_array("spells.json")[0])
+        record["rate"] = -1
+
+        with self.assertRaisesRegex(SpellDataError, "rate must be at least 0"):
             Spell.from_record(record)
 
 

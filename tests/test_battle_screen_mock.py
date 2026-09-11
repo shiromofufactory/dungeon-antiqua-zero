@@ -54,6 +54,7 @@ from tools.screen_mocks.battle import (
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
     DAMAGE_NUMBER_SPRITE_X,
     DAMAGE_NUMBER_SPRITE_Y,
+    DAMAGE_NUMBER_SPRITE_SIZE,
     AFFINITY_ICON_SOURCE_X,
     WEAK_ICON_SOURCE_Y,
     RESIST_ICON_SOURCE_Y,
@@ -92,6 +93,12 @@ from tools.screen_mocks.battle import (
     ACTION_MOVE_DISTANCE,
     ACTION_MOVE_SPEED,
     SPELL_CAST_SPRITE_SOURCE_X,
+    SLEEP_ICON_PATTERN_FRAME_COUNT,
+    SLEEP_ICON_SIZE,
+    SLEEP_ICON_SOURCE_X,
+    SLEEP_ICON_SOURCE_Y,
+    SLEEP_MAX_TURNS,
+    SLEEP_MIN_TURNS,
     SPELL_POST_EFFECT_WAIT_FRAME_COUNT,
     SPELL_RESULT_OVERLAP_FRAME_COUNT,
     BattleActionPresentation,
@@ -1075,6 +1082,7 @@ class BattleScreenMockTest(unittest.TestCase):
             0,
             (1,),
             defeated_enemy=True,
+            critical=False,
         )
 
         # The actor is cleared well before the damage popup finishes. The
@@ -1090,6 +1098,31 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._update_attack_presentation()
 
         mock._record_equipped_weapon_action.assert_called_once()
+
+    def test_critical_attack_records_weapon_progression_bonus(self) -> None:
+        monster = _damage_test_monster(hp=10)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock.action_party_index = 0
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            elapsed_frame=ATTACK_HIT_START_FRAME - 1,
+        )
+        mock._record_equipped_weapon_action = Mock()
+
+        with patch("scenes.battle.play_se"):
+            mock._update_attack_presentation()
+
+        mock._record_equipped_weapon_action.assert_called_once_with(
+            0,
+            (1,),
+            defeated_enemy=True,
+            critical=True,
+        )
 
     def test_missed_attack_still_records_weapon_proficiency(self) -> None:
         monster = BattleMockMonster(
@@ -1124,6 +1157,7 @@ class BattleScreenMockTest(unittest.TestCase):
             0,
             (1,),
             defeated_enemy=False,
+            critical=False,
         )
 
     def test_cancelled_spell_caster_walks_back_to_the_original_position(self) -> None:
@@ -1606,6 +1640,50 @@ class BattleScreenMockTest(unittest.TestCase):
             BATTLE_POPUP_FRAME_COUNT,
         )
 
+    def test_power_hit_and_sleep_are_passed_to_critical_resolution(self) -> None:
+        items = load_mock_items()
+        skills = load_mock_skills()
+        member = load_mock_party(
+            items,
+            skills,
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )[0]
+        member.skills.append(skills["Power Hit"])
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.RIGHT: items["HANZO KUNAI"]}
+        )
+        monster = _damage_test_monster()
+        monster.state.apply_sleep(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.monsters = (monster,)
+        mock.attack_poses = {}
+        mock.selected_command = BattleCommand.ATTACK
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.target_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        result = SimpleNamespace(hit=True, damage=20, critical=True)
+
+        with (
+            patch("scenes.battle.random.randint", side_effect=(40, 9)) as randint,
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                return_value=result,
+            ) as resolve,
+        ):
+            self.assertTrue(mock._begin_attack_presentation())
+
+        self.assertTrue(resolve.call_args.kwargs["target_incapacitated"])
+        self.assertTrue(resolve.call_args.kwargs["attacker_has_power_hit"])
+        self.assertTrue(resolve.call_args.kwargs["weapon_has_power_hit"])
+        self.assertEqual(resolve.call_args.kwargs["critical_roll"], 9)
+        self.assertTrue(mock.attack_presentation.is_critical)
+        self.assertEqual(randint.call_args_list, [call(0, 99), call(0, 99)])
+
     def test_aim_gauge_is_consumed_by_timeline_reinsertion(self) -> None:
         actor = SimpleNamespace(agility=50)
         other = SimpleNamespace(agility=10)
@@ -1789,6 +1867,37 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(mock.active_party_index, 0)
         mock._begin_focused_attack.assert_called_once_with()
+        mock.command_window.open.assert_not_called()
+
+    def test_sleeping_member_loses_one_turn_without_opening_commands(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        member.apply_sleep(2)
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.timeline = (visual,)
+        mock.escape_requested = False
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.defending_party_indexes = {0}
+        mock.focused_target_by_party_index = {0: 1}
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock._start_timeline_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(member.sleeping, 1)
+        self.assertEqual(mock.defending_party_indexes, set())
+        self.assertEqual(mock.focused_target_by_party_index, {})
+        mock._start_timeline_animation.assert_called_once_with()
         mock.command_window.open.assert_not_called()
 
     def test_lethal_attack_starts_death_then_removes_enemy(self) -> None:
@@ -2799,6 +2908,124 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(len(mock.spell_damage_popups), 1)
         self.assertEqual(len(mock.affinity_popups), 1)
 
+    def test_sleep_uses_authored_rate_and_applies_da2_duration(self) -> None:
+        spell = load_mock_spells()["SLEEP"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.monsters = (_damage_test_monster(),)
+        mock.spell_effects = {}
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+
+        with patch(
+            "scenes.battle.random.randint",
+            side_effect=(0, SLEEP_MAX_TURNS),
+        ) as randint:
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        result = mock.action_presentation.sleep_results[0]
+        self.assertTrue(result.success)
+        self.assertEqual(result.turns, SLEEP_MAX_TURNS)
+        self.assertEqual(spell.rate, 6)
+        self.assertEqual(
+            randint.call_args_list,
+            [call(0, 19), call(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS)],
+        )
+
+        mock._apply_action_results(mock.action_presentation)
+
+        self.assertEqual(mock.monsters[0].state.sleeping, SLEEP_MAX_TURNS)
+        self.assertEqual(mock.spell_damage_popups, [])
+
+    def test_sleep_resistance_fails_and_shows_miss_with_resist_marker(self) -> None:
+        spell = load_mock_spells()["SLEEP"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.monsters = (
+            _damage_test_monster(
+                resistances=frozenset((ResistanceType.SLEEP,)),
+            ),
+        )
+        mock.spell_effects = {}
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+
+        with patch("scenes.battle.random.randint", return_value=0) as randint:
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        mock._apply_action_results(mock.action_presentation)
+
+        self.assertEqual(mock.monsters[0].state.sleeping, 0)
+        self.assertEqual(
+            [popup.is_miss for popup in mock.spell_damage_popups],
+            [True],
+        )
+        self.assertEqual(
+            [popup.affinity for popup in mock.affinity_popups],
+            [SpellAffinity.RESIST],
+        )
+        randint.assert_not_called()
+
+    def test_failed_sleep_popup_uses_da2_miss_sprite_and_timing(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        popup = BattleSpellDamagePopup(100, 80, 0, is_miss=True)
+        mock.spell_damage_popups = [popup]
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_spell_damage_popups()
+        blt.assert_not_called()
+
+        popup.elapsed_frame = 2
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_spell_damage_popups()
+
+        blt.assert_called_once_with(
+            100 - MISS_SPRITE_WIDTH // 2,
+            80,
+            0,
+            MISS_SPRITE_SOURCE_X,
+            DAMAGE_NUMBER_SPRITE_Y,
+            MISS_SPRITE_WIDTH,
+            DAMAGE_NUMBER_SPRITE_SIZE,
+            1,
+        )
+        popup.elapsed_frame = MONSTER_MISS_FRAME_COUNT - 1
+        self.assertFalse(popup.completed)
+        popup.update()
+        self.assertTrue(popup.completed)
+
     def test_spell_damage_popup_uses_standard_damage_sprite_row(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.spell_damage_popups = [BattleSpellDamagePopup(100, 80, 12)]
@@ -2829,6 +3056,52 @@ class BattleScreenMockTest(unittest.TestCase):
             [
                 call(10, 20, 0, AFFINITY_ICON_SOURCE_X, WEAK_ICON_SOURCE_Y, 24, 8, 1),
                 call(30, 40, 0, AFFINITY_ICON_SOURCE_X, RESIST_ICON_SOURCE_Y, 24, 8, 1),
+            ],
+        )
+
+    def test_sleep_icons_use_da2_four_pattern_layout_from_bank_zero(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.apply_sleep(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (
+            SimpleNamespace(member=SimpleNamespace(sleeping=2)),
+        )
+        mock.monsters = (monster,)
+        mock._party_draw_position = Mock(return_value=(156, 64))
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                SLEEP_ICON_PATTERN_FRAME_COUNT,
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_sleeping_icons()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    168,
+                    64,
+                    0,
+                    SLEEP_ICON_SOURCE_X + SLEEP_ICON_SIZE,
+                    SLEEP_ICON_SOURCE_Y,
+                    SLEEP_ICON_SIZE,
+                    SLEEP_ICON_SIZE,
+                    1,
+                ),
+                call(
+                    52,
+                    56,
+                    0,
+                    SLEEP_ICON_SOURCE_X + SLEEP_ICON_SIZE,
+                    SLEEP_ICON_SOURCE_Y,
+                    SLEEP_ICON_SIZE,
+                    SLEEP_ICON_SIZE,
+                    1,
+                ),
             ],
         )
 
@@ -3719,6 +3992,60 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertTrue(resolve.call_args.kwargs["target_unable_to_evade"])
 
+    def test_monster_can_critical_a_sleeping_member(self) -> None:
+        actor = BattleMockMonster(
+            key="Giant Spider",
+            names={"name_en": "Giant Spider"},
+            image_id="1",
+            width=64,
+            height=64,
+            icon_x=0,
+            icon_y=0,
+            is_front_row=True,
+            state=MonsterBattleState(max_hp=2),
+            agility=20,
+            combat_stats=MonsterCombatStats(20, 100, 0, 0),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.command_window = Mock()
+        mock.timeline = (actor,)
+        mock.party = (
+            SimpleNamespace(
+                hp=30,
+                sleeping=2,
+                formation_row=FormationRow.FRONT,
+                battle_stats=SimpleNamespace(defense=0, evasion=100),
+            ),
+        )
+        mock.monster_blink_frames_remaining = 1
+        mock.monster_attack_target_index = None
+        mock.monster_attack_damage = None
+        mock.monster_attack_animation_frame = 0
+        mock.defending_party_indexes = set()
+        mock.focused_target_by_party_index = {}
+        mock._start_timeline_animation = Mock()
+        result = SimpleNamespace(hit=True, damage=40, critical=True)
+
+        with (
+            patch("tools.screen_mocks.battle.random.choice", return_value=0),
+            patch(
+                "tools.screen_mocks.battle.random.randint",
+                side_effect=(99, 19),
+            ) as randint,
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                return_value=result,
+            ) as resolve,
+            patch("scenes.battle.play_se"),
+        ):
+            mock._update_monster_action()
+
+        self.assertTrue(resolve.call_args.kwargs["target_incapacitated"])
+        self.assertFalse(resolve.call_args.kwargs["target_unable_to_evade"])
+        self.assertEqual(resolve.call_args.kwargs["critical_roll"], 19)
+        self.assertTrue(mock.monster_attack_critical)
+        self.assertEqual(randint.call_args_list, [call(0, 99), call(0, 99)])
+
     def test_rear_monster_finishes_without_attacking(self) -> None:
         actor = BattleMockMonster(
             key="Giant Spider",
@@ -3747,6 +4074,31 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._activate_timeline_head()
 
+        self.assertIsNone(mock.blinking_monster_index)
+        self.assertEqual(mock.monster_blink_frames_remaining, 0)
+        mock._start_timeline_animation.assert_called_once_with()
+
+    def test_sleeping_monster_loses_one_turn_without_attacking(self) -> None:
+        actor = _damage_test_monster()
+        actor.state.apply_sleep(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor,)
+        mock.timeline = (actor,)
+        mock.party = (
+            SimpleNamespace(hp=30, formation_row=FormationRow.FRONT),
+        )
+        mock.party_visuals = (
+            SimpleNamespace(member=mock.party[0]),
+        )
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock._start_timeline_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(actor.state.sleeping, 1)
         self.assertIsNone(mock.blinking_monster_index)
         self.assertEqual(mock.monster_blink_frames_remaining, 0)
         mock._start_timeline_animation.assert_called_once_with()

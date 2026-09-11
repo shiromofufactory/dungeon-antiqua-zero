@@ -9,6 +9,7 @@ from app.battle_magic import (
     member_spell_modifier,
     resolve_healing,
     resolve_spell_damage,
+    resolve_status_spell,
 )
 from app.resistance import ResistanceType
 
@@ -98,6 +99,55 @@ class ResolveSpellDamageTest(unittest.TestCase):
         )
 
         self.assertEqual((result.damage, result.affinity), (48, SpellAffinity.WEAK))
+
+
+class ResolveStatusSpellTest(unittest.TestCase):
+    def test_uses_da2_twenty_step_roll_with_the_zero_spell_modifier(self) -> None:
+        common = {
+            "spell_modifier": 20,
+            "rate": 6,
+            "target_spell_defense": 12,
+            "attribute": ResistanceType.SLEEP,
+            "target_weaknesses": frozenset(),
+            "target_resistances": frozenset(),
+        }
+
+        success = resolve_status_spell(**common, success_roll=9)
+        failure = resolve_status_spell(**common, success_roll=10)
+
+        self.assertEqual(success.success_rate, 10)
+        self.assertTrue(success.success)
+        self.assertFalse(failure.success)
+
+    def test_weakness_adds_ten_to_da2_success_rate(self) -> None:
+        result = resolve_status_spell(
+            spell_modifier=4,
+            rate=1,
+            target_spell_defense=20,
+            attribute=ResistanceType.SLEEP,
+            target_weaknesses=frozenset((ResistanceType.SLEEP,)),
+            target_resistances=frozenset(),
+            success_roll=10,
+        )
+
+        self.assertEqual(result.success_rate, 11)
+        self.assertTrue(result.success)
+        self.assertIs(result.affinity, SpellAffinity.WEAK)
+
+    def test_resistance_always_fails_and_takes_priority_over_weakness(self) -> None:
+        result = resolve_status_spell(
+            spell_modifier=100,
+            rate=100,
+            target_spell_defense=0,
+            attribute=ResistanceType.SLEEP,
+            target_weaknesses=frozenset((ResistanceType.SLEEP,)),
+            target_resistances=frozenset((ResistanceType.SLEEP,)),
+            success_roll=0,
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.success_rate, 0)
+        self.assertIs(result.affinity, SpellAffinity.RESIST)
 
 
 class ResolveHealingTest(unittest.TestCase):

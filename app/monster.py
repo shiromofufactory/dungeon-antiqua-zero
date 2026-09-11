@@ -78,6 +78,7 @@ class MonsterBattleState:
 
     max_hp: int
     hp: int | None = None
+    sleeping: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.max_hp, bool) or not isinstance(self.max_hp, int):
@@ -90,6 +91,10 @@ class MonsterBattleState:
             raise TypeError("hp must be an integer")
         if not 0 <= self.hp <= self.max_hp:
             raise ValueError("hp must be from 0 to max_hp")
+        if isinstance(self.sleeping, bool) or not isinstance(self.sleeping, int):
+            raise TypeError("sleeping must be an integer")
+        if self.sleeping < 0:
+            raise ValueError("sleeping must not be negative")
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MonsterBattleState:
@@ -119,7 +124,26 @@ class MonsterBattleState:
         previous = self.hp
         assert previous is not None
         self.hp = max(0, previous - damage)
+        if damage > 0:
+            self.sleeping = 0
         return previous - self.hp
+
+    def apply_sleep(self, turns: int) -> None:
+        """Apply DA2's non-shortening sleep duration."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
+        self.sleeping = max(self.sleeping, turns)
+
+    def elapse_sleep_turn(self) -> bool:
+        """Consume one sleeping action and report whether it was skipped."""
+
+        if self.sleeping <= 0:
+            return False
+        self.sleeping -= 1
+        return True
 
     def defeat(self) -> None:
         """Set HP to zero for a mock attack that always defeats its target."""
@@ -130,6 +154,7 @@ class MonsterBattleState:
         """Restore initial HP when restarting a battle fixture."""
 
         self.hp = self.max_hp
+        self.sleeping = 0
 
 
 def promote_rear_monsters_if_front_empty(

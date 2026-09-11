@@ -1070,6 +1070,44 @@ class Member:
             self.confused = 0
         return self.hp - old_hp
 
+    def take_damage(self, damage: int) -> int:
+        """Apply battle damage, waking from sleep or confusion like DA2."""
+
+        if isinstance(damage, bool) or not isinstance(damage, int):
+            raise TypeError("damage must be an integer")
+        if damage < 0:
+            raise ValueError("damage must not be negative")
+        old_hp = self.hp
+        self.hp = max(0, self.hp - damage)
+        if damage > 0:
+            self.sleeping = 0
+            self.confused = 0
+        return old_hp - self.hp
+
+    def apply_sleep(self, turns: int) -> None:
+        """Apply DA2's non-shortening sleep duration and clear confusion."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
+        self.sleeping = max(self.sleeping, turns)
+        self.confused = 0
+
+    def elapse_sleep_turn(self) -> bool:
+        """Consume one sleeping action and report whether it was skipped."""
+
+        if self.sleeping <= 0:
+            return False
+        self.sleeping -= 1
+        return True
+
+    def clear_temporary_battle_conditions(self) -> None:
+        """Discard ailments that DA2 keeps only for the current battle."""
+
+        self.sleeping = 0
+        self.confused = 0
+
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""
 
@@ -1219,6 +1257,13 @@ class Member:
             and self.equipment.item_at(EquipmentSlot.LEFT) is None
             and kind in _TWO_HANDED_SKILL_KINDS
         )
+
+    def uses_two_handed_weapon(self, weapon: Item) -> bool:
+        """Return whether one weapon receives the current two-hand bonus."""
+
+        if not isinstance(weapon, Item):
+            raise TypeError("weapon must be an Item")
+        return self._uses_two_handed_skill(weapon)
 
     def _cross_weapon_hit_bonus(
         self,
