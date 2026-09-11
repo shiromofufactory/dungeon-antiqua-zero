@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable, Mapping
 from enum import Enum, StrEnum
 
+from battle_magic import DA2_DEFAULT_ITEM_SPELL_ABILITY, resolve_healing
 from input import InputState
-from item import Item
+from item import Item, ItemEquipType
 from item_detail import item_detail_lines
 from localization import Localizer, format_number
 from member import Member
 from rendering import PaletteShifter
-from resources import FontResources
-from spell import Spell
+from resources import FontResources, play_se
+from spell import Spell, SpellAction
 from state import Language, Settings
 from systems import InventorySystem
 from text_catalog import TextCatalog
@@ -65,6 +67,8 @@ DROP_CONFIRM_CHOICE_TEXT_X = 4
 DROP_CONFIRM_CURSOR_X = 2
 DROP_CONFIRM_YES_Y = 2
 DROP_CONFIRM_NO_Y = 5
+HEALING_SE_ID = "spell_healing1"
+FIELD_HEALING_ITEM_KEYS = frozenset(("POTION",))
 
 
 def _validate_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
@@ -89,6 +93,7 @@ class ItemSelectionPhase(Enum):
 
     CATEGORY = "category"
     ITEM = "item"
+    TARGET = "target"
     CONFIRMATION = "confirmation"
 
 
@@ -241,18 +246,35 @@ class ItemMenuOverlay:
                 for index, category in enumerate(ItemCategory)
             ),
         )
+        self._window_factory = windows
+        self._build_party_panel()
+        self._build_item_windows()
+
+    def _build_party_panel(self, *, selected_target_index: int | None = None) -> None:
         self.party_panel = PartyStatusPanel(
             party=self.party,
             localizer=self.localizer,
             texts=self.texts,
             text_factory=self.localized_texts,
-            window_factory=windows,
+            window_factory=self._window_factory,
             faces=self.faces,
             palette_shifter=self.palette_shifter,
+            cursor_active=self.phase is ItemSelectionPhase.TARGET,
         )
         self.party_window = self.party_panel.window
-        self._window_factory = windows
-        self._build_item_windows()
+        self.member_cursor = self.party_panel.cursor
+        if selected_target_index is not None:
+            self.member_cursor.select_key(selected_target_index)
+        if hasattr(self, "item_info_window"):
+            self._refresh_windows()
+
+    def _refresh_windows(self) -> None:
+        self.windows = (
+            self.category_window,
+            self.item_info_window,
+            self.item_list_window,
+            self.party_window,
+        )
 
     def _build_item_windows(self) -> None:
         visible_items = self.category_items[
@@ -332,12 +354,7 @@ class ItemMenuOverlay:
             *ITEM_INFO_WINDOW_GRID,
             info_texts,
         )
-        self.windows = (
-            self.category_window,
-            self.item_info_window,
-            self.item_list_window,
-            self.party_window,
-        )
+        self._refresh_windows()
 
     def _item_summary_texts(self) -> tuple[WindowText, ...]:
         count_label = self.texts.text("item.inventory.count", self.localizer)
@@ -457,6 +474,152 @@ class ItemMenuOverlay:
         self.category_cursor.active = True
         self._build_item_windows()
 
+    def _field_healing_spell(self, item: Item | None) -> Spell | None:
+        """Resolve the currently supported camp-use item effect."""
+
+        if (
+            item is None
+            or item.key not in FIELD_HEALING_ITEM_KEYS
+            or item.equip_type is not ItemEquipType.ITEM
+            or not item.use_spell_key
+        ):
+            return None
+        spell = self.spells.get(item.use_spell_key)
+        if (
+            spell is None
+            or not spell.on_camp
+            or spell.to_enemy
+            or spell.action is not SpellAction.HEAL
+        ):
+            return None
+        return spell
+
+    @staticmethod
+    def _has_curable_ailment(member: Member) -> bool:
+        return bool(
+            member.poisoned
+            or member.paralyzed
+            or member.sleeping
+            or member.confused
+        )
+
+    def _can_heal_target(self, spell: Spell, target: Member) -> bool:
+        if target.hp <= 0:
+            return False
+        if target.hp < target.max_hp:
+            return True
+        return spell.intensity == 0 and self._has_curable_ailment(target)
+
+    def _usable_target_indexes(self, spell: Spell) -> tuple[int, ...]:
+        return tuple(
+            index
+            for index, target in enumerate(self.party_panel.party)
+            if self._can_heal_target(spell, target)
+        )
+
+    def _notify_invalid_action(self) -> None:
+        if self.on_invalid_action is not None:
+            self.on_invalid_action()
+
+    def _enter_target_selection(self) -> None:
+        spell = self._field_healing_spell(self.selected_item)
+        if spell is None:
+            self._notify_invalid_action()
+            return
+        target_indexes = self._usable_target_indexes(spell)
+        if not target_indexes:
+            self._notify_invalid_action()
+            return
+        self.phase = ItemSelectionPhase.TARGET
+        self.item_cursor.active = False
+        self.item_list_window.active = False
+        self.member_cursor.active = True
+        self.member_cursor.select_key(target_indexes[0])
+
+    def _return_to_item_selection(self) -> None:
+        self.phase = ItemSelectionPhase.ITEM
+        self.item_cursor.active = True
+        self.item_list_window.active = True
+        self.member_cursor.active = False
+
+    def _refresh_after_healing_item(
+        self,
+        item: Item,
+        spell: Spell,
+        preferred_target_index: int,
+    ) -> None:
+        items = self.category_items
+        if item in items:
+            self.selected_item_index = items.index(item)
+        elif items:
+            self.selected_item_index = min(self.selected_item_index, len(items) - 1)
+        else:
+            self.selected_item_index = 0
+        self.scroll_offset = min(
+            self.scroll_offset,
+            max(0, len(items) - ITEM_VISIBLE_COUNT),
+        )
+
+        can_reuse = item in items and bool(self._usable_target_indexes(spell))
+        self.phase = (
+            ItemSelectionPhase.TARGET
+            if can_reuse and len(self.party_panel.party) > 1
+            else ItemSelectionPhase.ITEM
+        )
+        self._build_item_windows()
+        next_target_index = None
+        if self.phase is ItemSelectionPhase.TARGET:
+            usable = frozenset(self._usable_target_indexes(spell))
+            member_count = len(self.party_panel.party)
+            next_target_index = next(
+                (
+                    (preferred_target_index + distance) % member_count
+                    for distance in range(member_count)
+                    if (preferred_target_index + distance) % member_count in usable
+                ),
+                None,
+            )
+        self._build_party_panel(selected_target_index=next_target_index)
+
+    def _use_selected_healing_item(self) -> bool:
+        item = self.selected_item
+        spell = self._field_healing_spell(item)
+        selected_target = self.member_cursor.selected_key
+        if (
+            item is None
+            or spell is None
+            or not isinstance(selected_target, int)
+            or self.inventory_system.quantity(item) <= 0
+        ):
+            self._notify_invalid_action()
+            return False
+
+        usable = self._usable_target_indexes(spell)
+        target_indexes = usable if spell.to_all else (selected_target,)
+        if not target_indexes or any(index not in usable for index in target_indexes):
+            self._notify_invalid_action()
+            return False
+
+        for index in target_indexes:
+            target = self.party_panel.party[index]
+            result = resolve_healing(
+                intensity=spell.intensity,
+                ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
+                current_hp=target.hp,
+                max_hp=target.max_hp,
+                random_factor=random.random(),
+            )
+            target.apply_healing(
+                result.amount,
+                cure_ailments=result.cures_ailments,
+            )
+        if item.breaks_on_use and not self.inventory_system.remove(item):
+            self._notify_invalid_action()
+            return False
+        play_se(HEALING_SE_ID)
+        self._refresh_after_healing_item(item, spell, selected_target)
+        return True
+
     def _start_drop_confirmation(self, item: Item) -> None:
         raw_name = self.localizer.value(item.names, "name")
         if not isinstance(raw_name, str) or not raw_name:
@@ -561,6 +724,15 @@ class ItemMenuOverlay:
             self._update_drop_confirmation(input_state)
             return False
 
+        if self.phase is ItemSelectionPhase.TARGET:
+            if input_state.cancel.triggered:
+                self._return_to_item_selection()
+                return False
+            self.member_cursor.update(input_state.navigation)
+            if input_state.confirm.triggered:
+                self._use_selected_healing_item()
+            return False
+
         if self.phase is ItemSelectionPhase.CATEGORY:
             self.category_cursor.update()
             if input_state.cancel.triggered:
@@ -602,15 +774,17 @@ class ItemMenuOverlay:
             elif navigation.dx > 0:
                 self._move_page(1)
             return False
-        if input_state.confirm.triggered and self.category is ItemCategory.DROP:
+        if input_state.confirm.triggered:
             item = self.selected_item
             if item is None:
                 return False
-            if not self.inventory_system.can_discard(item):
-                if self.on_invalid_action is not None:
-                    self.on_invalid_action()
-                return False
-            self._start_drop_confirmation(item)
+            if self.category is ItemCategory.USE:
+                self._enter_target_selection()
+            elif self.category is ItemCategory.DROP:
+                if not self.inventory_system.can_discard(item):
+                    self._notify_invalid_action()
+                    return False
+                self._start_drop_confirmation(item)
         return False
 
     def draw(self) -> None:
@@ -620,6 +794,8 @@ class ItemMenuOverlay:
         self.category_cursor.draw()
         if self.phase is not ItemSelectionPhase.CATEGORY:
             self.item_cursor.draw()
+        if self.phase is ItemSelectionPhase.TARGET:
+            self.member_cursor.draw()
         if self.drop_confirmation_window is not None:
             self.drop_confirmation_window.draw()
         if self.drop_confirmation_choice_window is not None:
@@ -629,6 +805,7 @@ class ItemMenuOverlay:
 
 
 __all__ = [
+    "HEALING_SE_ID",
     "ItemCategory",
     "ItemMenuDataError",
     "ItemMenuOverlay",

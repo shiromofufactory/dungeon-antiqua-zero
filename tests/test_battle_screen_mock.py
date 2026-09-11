@@ -3694,6 +3694,33 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(len(mock.all_target_cursors), 3)
         self.assertFalse(mock.party_target_cursor.active)
 
+    def test_allied_target_cursor_follows_the_advanced_actor(self) -> None:
+        spell = load_mock_spells()["POTION"]
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion"),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.action_party_index = 0
+        mock.target_cursor = Mock(active=False)
+        mock.party_target_window = Window(0, 0, 64, 60, transparent=True)
+        mock.item_window = Mock()
+        mock.item_guide_window = Mock()
+        mock._close_spell_windows = Mock()
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(mock._begin_action_target_selection(spell))
+
+        targets = {target.key: target for target in mock.party_target_cursor.targets}
+        self.assertEqual(
+            targets[0].x * 4,
+            mock._party_sprite_x(0) - ACTION_MOVE_DISTANCE - 8,
+        )
+        self.assertEqual(targets[1].x * 4, mock._party_sprite_x(1) - 8)
+
     def test_all_target_cursors_blink_on_alternating_frames(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.ACTION_TARGET

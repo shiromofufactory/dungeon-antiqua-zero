@@ -28,6 +28,7 @@ from ui.item_menu import (
     DROP_CONFIRM_NO_Y,
     DROP_CONFIRM_WINDOW_GRID,
     DROP_CONFIRM_YES_Y,
+    HEALING_SE_ID,
     ITEM_COUNT_X,
     ITEM_CURSOR_X,
     ITEM_FIRST_Y,
@@ -798,6 +799,74 @@ class ItemMenuTest(unittest.TestCase):
             "アイテムしょじすう：",
         )
         self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))
+
+    def test_uses_potion_on_an_injured_field_party_member(self) -> None:
+        items = ItemMenuHarness().items
+        potion = items["POTION"]
+        inventory = InventorySystem(items, {potion.key: 2})
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
+        target = mock.party_panel.party[1]
+        target.hp = 1
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 1)
+        self.assertEqual(inventory.quantity(potion), 2)
+
+        with (
+            patch("ui.item_menu.random.random", return_value=0.5),
+            patch("ui.item_menu.play_se") as play_se,
+        ):
+            mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(target.hp, 62)
+        self.assertEqual(inventory.quantity(potion), 1)
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 1)
+        self.assertEqual(
+            [text.text for text in mock.party_window.texts if text.y == PARTY_HP_Y][1],
+            "ＨＰ　６２",
+        )
+        play_se.assert_called_once_with(HEALING_SE_ID)
+
+    def test_canceling_potion_target_selection_does_not_consume_it(self) -> None:
+        mock = ItemMenuHarness()
+        potion = mock.items["POTION"]
+        mock.party_panel.party[0].hp -= 1
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(cancel=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertTrue(mock.item_cursor.active)
+        self.assertFalse(mock.member_cursor.active)
+        self.assertEqual(mock.inventory_system.quantity(potion), 1)
+
+    def test_potion_without_an_injured_target_reports_invalid_action(self) -> None:
+        invalid_action = Mock()
+        mock = ItemMenuHarness(on_invalid_action=invalid_action)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity("POTION"), 1)
+        invalid_action.assert_called_once_with()
+
+    def test_other_field_item_effects_remain_unsupported(self) -> None:
+        invalid_action = Mock()
+        mock = ItemMenuHarness(on_invalid_action=invalid_action)
+        mock.party_panel.party[0].hp -= 1
+        self.select_item(mock, "PANACEA")
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity("PANACEA"), 1)
+        invalid_action.assert_called_once_with()
 
 
 if __name__ == "__main__":

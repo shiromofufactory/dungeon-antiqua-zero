@@ -2963,7 +2963,7 @@ class BattleScene:
                 return False
             party_targets = tuple(
                 CursorTarget(
-                    (self._party_sprite_x(index) - 8) // 4,
+                    self._party_target_cursor_x(index) // 4,
                     (PARTY_SPRITE_Y[index] + 8) // 4,
                     key=index,
                 )
@@ -2999,6 +2999,14 @@ class BattleScene:
         self._close_spell_windows()
         self._refresh_monster_name_colors()
         return True
+
+    def _party_target_cursor_x(self, index: int) -> int:
+        """Place an ally cursor beside its action-position sprite."""
+
+        x = self._party_sprite_x(index)
+        if index == getattr(self, "action_party_index", None):
+            x -= ACTION_MOVE_DISTANCE
+        return x - 8
 
     def _selectable_enemy_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return living enemy targets that can still receive the spell."""
