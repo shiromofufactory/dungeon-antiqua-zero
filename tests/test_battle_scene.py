@@ -59,6 +59,28 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertIs(scene.result, BattleResult.VICTORY)
 
+    def test_waits_for_victory_jingle_before_leaving_results(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.phase = BattlePhase.VICTORY_SUMMARY
+        scene.result = None
+        scene.victory_motion_frame = 0
+        scene.victory_exit_pending = False
+        scene.growth_result = Mock(has_result_growth=False)
+        scene.bgm = Mock(current_id="da3-win")
+
+        scene._update_victory_summary(
+            InputState(confirm=InputButton(triggered=True))
+        )
+
+        self.assertIsNone(scene.result)
+        self.assertTrue(scene.victory_exit_pending)
+
+        scene.bgm.current_id = "da3-field"
+        scene._update_victory_summary(InputState())
+
+        self.assertIs(scene.result, BattleResult.VICTORY)
+        self.assertFalse(scene.victory_exit_pending)
+
     def test_result_transition_fades_out_and_in_before_result(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         scene.phase = BattlePhase.RESULT_TRANSITION
@@ -355,7 +377,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         )
         self.assertIsNone(game.battle_scene)
         game._reset_field_actors.assert_called_once_with()
-        game.bgm.play.assert_called_once_with("da3-forest")
+        game.bgm.transition_to.assert_called_once_with("da3-forest")
 
     def test_victory_return_counts_the_completed_battle(self) -> None:
         game = Game.__new__(Game)

@@ -207,6 +207,48 @@ class BgmPlayerTest(unittest.TestCase):
         self.assertEqual(player.current_id, "da3-field")
         self.assertEqual(self.pyxel.play_calls[-1][2:], (0.0, True))
 
+    def test_resumes_an_interrupted_loop_after_one_shot(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field")
+        self.pyxel.play_position = (0, 12.5)
+
+        player.play_once_then("da3-welcome", "da3-field")
+        self.pyxel.play_position = None
+        player.update()
+
+        self.assertEqual(player.current_id, "da3-field")
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (12.5, True))
+
+    def test_matching_scene_transition_does_not_interrupt_one_shot(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play_once_then("da3-welcome", "da3-field")
+
+        changed = player.transition_to("da3-field")
+
+        self.assertFalse(changed)
+        self.assertEqual(player.current_id, "da3-welcome")
+        self.assertEqual(len(self.pyxel.play_calls), 1)
+
+    def test_clears_an_unqueued_one_shot_after_it_finishes(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-welcome", loop=False)
+        self.pyxel.play_position = None
+
+        changed = player.update()
+
+        self.assertTrue(changed)
+        self.assertIsNone(player.current_id)
+        self.assertFalse(player.is_playing)
+
+    def test_new_one_shot_interrupts_the_current_one_shot(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play_once_then("da3-welcome", "da3-field")
+
+        player.play_once_then("dungeon/floor1", "da3-field")
+
+        self.assertEqual(player.current_id, "dungeon/floor1")
+        self.assertEqual(len(self.pyxel.play_calls), 2)
+
     def test_missing_or_unsafe_ids_are_rejected(self) -> None:
         player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
 

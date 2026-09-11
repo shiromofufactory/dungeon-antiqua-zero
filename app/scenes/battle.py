@@ -91,6 +91,7 @@ from systems import (
     BattleProgression,
     EnemyProgressionData,
     InventorySystem,
+    MonsterRecordSystem,
 )
 from text_catalog import TextCatalog
 from ui import (
@@ -272,6 +273,8 @@ RESIST_ICON_SOURCE_Y = 24
 AFFINITY_ICON_WIDTH = 24
 AFFINITY_ICON_HEIGHT = 8
 AFFINITY_POPUP_FRAME_COUNT = len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+TARGET_AFFINITY_BLINK_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
+TARGET_AFFINITY_VISIBLE_FRAME_COUNT = 12 * FPS // DA2_REFERENCE_FPS
 CRITICAL_FLASH_COLOR = 33
 CRITICAL_FLASH_FRAME_COUNT = 2
 CRITICAL_MARKER_SOURCE_X = 204
@@ -1134,6 +1137,7 @@ class BattleScene:
         self.settings = settings
         self.fonts = FontResources() if fonts is None else fonts
         self.save_data = SaveData() if save_data is None else save_data
+        self.monster_record_system = MonsterRecordSystem(self.save_data)
         if return_bgm_id is not None and (
             not isinstance(return_bgm_id, str) or not return_bgm_id
         ):
@@ -1207,6 +1211,9 @@ class BattleScene:
                 is_front_row=index in encounter.front_monster_indexes,
             )
             for index, key in enumerate(encounter.monster_keys)
+        )
+        self.monster_record_system.register_encounter(
+            monster.key for monster in self.monsters
         )
         self.progression = BattleProgression(
             tuple(
@@ -1461,6 +1468,7 @@ class BattleScene:
         self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.result_transition_covered = False
         self.growth_jingle_played = False
+        self.victory_exit_pending = False
         self.action_progression_weapon: Item | None = None
         self.action_progression_enemy_levels: tuple[int, ...] = ()
         self.windows = [
@@ -1813,6 +1821,7 @@ class BattleScene:
         self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.result_transition_covered = False
         self.growth_jingle_played = False
+        self.victory_exit_pending = False
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
         self.target_cursor.active = False
@@ -3138,6 +3147,8 @@ class BattleScene:
                 )
         else:
             return False
+        if effect_spell is not None:
+            self._record_action_target_information(effect_spell)
         if effect_spell is not None and self._begin_action_presentation(effect_spell):
             return True
         if getattr(self, "action_party_index", None) is not None:
@@ -3145,6 +3156,55 @@ class BattleScene:
             return True
         self._complete_current_turn()
         return True
+
+    def _record_action_target_information(self, spell: Spell) -> None:
+        """Reveal enemy profiles and tested attributes after confirmation."""
+
+        records = getattr(self, "monster_record_system", None)
+        if records is None or not self.action_targets_enemy:
+            return
+        indexes = (
+            self.selectable_target_indexes
+            if self.action_targets_all
+            else (
+                ()
+                if self.selected_target_index is None
+                else (self.selected_target_index,)
+            )
+        )
+        for index in indexes:
+            monster_key = self.monsters[index].key
+            records.reveal_profile(monster_key)
+            if spell.attribute is not None:
+                records.reveal_affinity(monster_key, spell.attribute)
+
+    def _target_affinity(self, index: int) -> SpellAffinity:
+        """Return a known affinity for one current enemy action target."""
+
+        if (
+            self.phase is not BattlePhase.ACTION_TARGET
+            or not self.action_targets_enemy
+            or index not in self.selectable_target_indexes
+        ):
+            return SpellAffinity.NORMAL
+        spell = self.pending_spell
+        if spell is None and self.pending_item_candidate is not None:
+            use_spell_key = self.pending_item_candidate.item.use_spell_key
+            spell = getattr(self, "spells", {}).get(use_spell_key)
+        if spell is None or spell.attribute is None:
+            return SpellAffinity.NORMAL
+        records = getattr(self, "monster_record_system", None)
+        monster = self.monsters[index]
+        if records is None or not records.affinity_is_revealed(
+            monster.key,
+            spell.attribute,
+        ):
+            return SpellAffinity.NORMAL
+        if spell.attribute in monster.resistances:
+            return SpellAffinity.RESIST
+        if spell.attribute in monster.weaknesses:
+            return SpellAffinity.WEAK
+        return SpellAffinity.NORMAL
 
     def _current_action_enemy_levels(self) -> tuple[int, ...]:
         """Resolve enemy levels for the currently confirmed spell/item action."""
@@ -4022,6 +4082,9 @@ class BattleScene:
                 ATTACK_SLASH_SE_ID,
             ),
         )
+        records = getattr(self, "monster_record_system", None)
+        if records is not None:
+            records.reveal_profile(monster.key)
         self.phase = BattlePhase.ATTACK_PRESENTATION
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT if is_aimed else 0.0
         if is_aimed:
@@ -4191,13 +4254,15 @@ class BattleScene:
             self.victory_motion_frame + 1,
             VICTORY_MOTION_LIMIT,
         )
+        if self._finish_pending_victory():
+            return
         if not input_state.confirm.triggered:
             return
         growth = getattr(self, "growth_result", None)
         if growth is None:
             raise RuntimeError("victory result requires settled growth")
         if not growth.has_result_growth:
-            self.result = BattleResult.VICTORY
+            self._request_victory_completion()
             return
         self.result_overlay = BattleResultOverlay(
             party=self.result_party,
@@ -4223,6 +4288,8 @@ class BattleScene:
             self.phase = BattlePhase.RESULT
 
     def _update_result(self, input_state: InputState) -> None:
+        if self._finish_pending_victory():
+            return
         overlay = self.result_overlay
         if overlay is None:
             raise RuntimeError("result phase requires a result overlay")
@@ -4236,7 +4303,30 @@ class BattleScene:
             self._play_victory_jingle(BATTLE_LEVEL_UP_BGM_ID)
             self.growth_jingle_played = True
         if completed:
-            self.result = BattleResult.VICTORY
+            self._request_victory_completion()
+
+    def _request_victory_completion(self) -> None:
+        """Leave results after the victory jingle, unless another track replaced it."""
+
+        if (
+            getattr(getattr(self, "bgm", None), "current_id", None)
+            == BATTLE_WIN_BGM_ID
+        ):
+            self.victory_exit_pending = True
+            return
+        self.result = BattleResult.VICTORY
+
+    def _finish_pending_victory(self) -> bool:
+        if not getattr(self, "victory_exit_pending", False):
+            return False
+        if (
+            getattr(getattr(self, "bgm", None), "current_id", None)
+            == BATTLE_WIN_BGM_ID
+        ):
+            return True
+        self.victory_exit_pending = False
+        self.result = BattleResult.VICTORY
+        return True
 
     def _release_transient_action_palettes(self) -> None:
         """Release mutually exclusive effect blocks before restarting the scene."""
@@ -5073,6 +5163,7 @@ class BattleScene:
         self._draw_spell_effects()
         self._draw_sleeping_icons()
         self._draw_speed_modifier_icons()
+        self._draw_target_affinity_indicators()
         self._draw_affinity_popups()
         self._draw_spell_damage_popups()
         self._draw_healing_popups()
@@ -5952,6 +6043,40 @@ class BattleScene:
             pyxel.blt(
                 popup.x,
                 popup.y,
+                0,
+                AFFINITY_ICON_SOURCE_X,
+                source_y,
+                AFFINITY_ICON_WIDTH,
+                AFFINITY_ICON_HEIGHT,
+                TRANSPARENT_INDEX,
+            )
+
+    def _draw_target_affinity_indicators(self) -> None:
+        """Blink learned WEAK/RESIST markers during enemy target selection."""
+
+        if (
+            getattr(self, "phase", None) is not BattlePhase.ACTION_TARGET
+            or not getattr(self, "action_targets_enemy", False)
+            or pyxel.frame_count % TARGET_AFFINITY_BLINK_FRAME_COUNT
+            >= TARGET_AFFINITY_VISIBLE_FRAME_COUNT
+        ):
+            return
+        for index in self.selectable_target_indexes:
+            affinity = self._target_affinity(index)
+            if affinity is SpellAffinity.NORMAL:
+                continue
+            monster = self.monsters[index]
+            _base_x, base_y = MONSTER_POSITIONS[index]
+            source_y = (
+                WEAK_ICON_SOURCE_Y
+                if affinity is SpellAffinity.WEAK
+                else RESIST_ICON_SOURCE_Y
+            )
+            pyxel.blt(
+                self._monster_draw_x(index)
+                + monster.width // 2
+                - AFFINITY_ICON_WIDTH // 2,
+                base_y + 20,
                 0,
                 AFFINITY_ICON_SOURCE_X,
                 source_y,

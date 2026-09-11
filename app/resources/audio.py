@@ -122,6 +122,7 @@ class BgmPlayer:
         self._current_id: str | None = None
         self._loop = True
         self._queued_id: str | None = None
+        self._queued_start_sec = 0.0
         self._volume = 0
         self._fade_rate = 1.0
         self.set_volume(volume)
@@ -192,6 +193,7 @@ class BgmPlayer:
             raise ValueError("start_sec must not be negative")
         if self._current_id == bgm_id and self._loop == loop and start_sec == 0:
             self._queued_id = None
+            self._queued_start_sec = 0.0
             return False
 
         path = self._path_for(bgm_id)
@@ -217,6 +219,7 @@ class BgmPlayer:
         self._current_id = bgm_id
         self._loop = loop
         self._queued_id = None
+        self._queued_start_sec = 0.0
         return True
 
     def play_once_then(self, bgm_id: str, next_bgm_id: str) -> bool:
@@ -225,27 +228,40 @@ class BgmPlayer:
         if not isinstance(next_bgm_id, str) or not next_bgm_id:
             raise ValueError("next_bgm_id must be a non-empty string")
         self._path_for(next_bgm_id)
+        resume_sec = 0.0
+        if self._current_id == next_bgm_id and self._loop:
+            resume_sec = self._playback_position_sec() or 0.0
         changed = self.play(bgm_id, loop=False)
         self._queued_id = next_bgm_id
+        self._queued_start_sec = resume_sec
         return changed
 
+    def transition_to(self, bgm_id: str) -> bool:
+        """Respect a matching queued transition, or play the requested BGM now."""
+
+        self._path_for(bgm_id)
+        if self._queued_id == bgm_id:
+            return False
+        return self.play(bgm_id)
+
     def update(self) -> bool:
-        """Start a queued BGM as soon as the current one-shot has finished."""
+        """Finish one-shot state and start its queued BGM when present."""
 
         if self._queued_id is None:
-            return False
-        try:
-            is_finished = self._pyxel.play_pos(self.channel) is None
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as error:
-            raise AudioResourceError(
-                f"BGMの再生位置を取得できません: {error}"
-            ) from error
-        if not is_finished:
+            if self._current_id is None or self._loop:
+                return False
+            if self._playback_position_sec() is not None:
+                return False
+            self._active_sound = None
+            self._current_id = None
+            return True
+        if self._playback_position_sec() is not None:
             return False
         next_bgm_id = self._queued_id
-        return self.play(next_bgm_id)
+        start_sec = self._queued_start_sec
+        self._queued_id = None
+        self._queued_start_sec = 0.0
+        return self.play(next_bgm_id, start_sec=start_sec)
 
     def stop(self) -> bool:
         was_playing = self.is_playing
@@ -253,7 +269,27 @@ class BgmPlayer:
         self._active_sound = None
         self._current_id = None
         self._queued_id = None
+        self._queued_start_sec = 0.0
         return was_playing
+
+    def _playback_position_sec(self) -> float | None:
+        try:
+            position = self._pyxel.play_pos(self.channel)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as error:
+            raise AudioResourceError(
+                f"BGMの再生位置を取得できません: {error}"
+            ) from error
+        if position is None:
+            return None
+        try:
+            seconds = float(position[1])
+        except (IndexError, TypeError, ValueError) as error:
+            raise AudioResourceError("BGMの再生位置が不正です。") from error
+        if seconds < 0:
+            raise AudioResourceError("BGMの再生位置が不正です。")
+        return seconds
 
     def _path_for(self, bgm_id: str) -> Path:
         if not isinstance(bgm_id, str) or not bgm_id:

@@ -713,7 +713,7 @@ class Game:
                 self._reset_field_actors()
         self.battle_scene = None
         self.bgm.set_fade_rate(0.0)
-        self.bgm.play(self.current_map.bgm_id)
+        self.bgm.transition_to(self.current_map.bgm_id)
 
     @staticmethod
     def _select_cursor_key(cursor: WindowCursor, key: object) -> None:

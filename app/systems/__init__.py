@@ -15,6 +15,12 @@ from .encounter import (
     EncounterSystem,
 )
 from .inventory import InventorySystem
+from .monster_records import (
+    MONSTER_COMBAT_FIELD_KEYS,
+    MONSTER_PROFILE_FIELD_KEY,
+    MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+    MonsterRecordSystem,
+)
 from .events import (
     ChangeBgmEffect,
     EventContext,
@@ -66,6 +72,10 @@ __all__ = [
     "EncounterAdvance",
     "EncounterSystem",
     "InventorySystem",
+    "MONSTER_COMBAT_FIELD_KEYS",
+    "MONSTER_PROFILE_FIELD_KEY",
+    "MONSTER_TREASURE_ACQUIRED_FIELD_KEY",
+    "MonsterRecordSystem",
     "ChangeBgmEffect",
     "EventContext",
     "EventRunner",

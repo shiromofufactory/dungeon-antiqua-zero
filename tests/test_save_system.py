@@ -55,7 +55,11 @@ class SaveSystemTest(unittest.TestCase):
                     ("nectar_forest", "entrance_potion"),
                 },
                 monster_records={
-                    "Giant Spider": {"FIRE", "profile"},
+                    "Giant Spider": {
+                        "FIRE",
+                        "profile",
+                        "treasure_acquired",
+                    },
                 },
                 logs=[
                     {
@@ -130,7 +134,15 @@ class SaveSystemTest(unittest.TestCase):
         )
         self.assertEqual(
             document["monster_records"],
-            {"Giant Spider": {"revealed_field_keys": ["FIRE", "profile"]}},
+            {
+                "Giant Spider": {
+                    "revealed_field_keys": [
+                        "FIRE",
+                        "profile",
+                        "treasure_acquired",
+                    ]
+                }
+            },
         )
         self.assertEqual(
             document["logs"],
@@ -202,6 +214,16 @@ class SaveSystemTest(unittest.TestCase):
         self.assertEqual(restored.save_data.gold, 123)
         self.assertEqual(restored.save_data.encounter_count, 83)
         self.assertEqual(restored.save_data.difficulty, Difficulty.HARD)
+        self.assertEqual(
+            restored.save_data.monster_records,
+            {
+                "Giant Spider": {
+                    "FIRE",
+                    "profile",
+                    "treasure_acquired",
+                }
+            },
+        )
         self.assertEqual(
             [member.definition.key for member in restored.active_party],
             ["Fiora", "Cerion"],
