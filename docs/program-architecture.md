@@ -968,6 +968,12 @@ Rendererがこれらの描画用値を読む責務を持ち、名前・モンス
 入力とし、回避率を `agi` から再計算しない。現在HPや一時的な能力変化は戦闘ごとの可変状態が
 所有し、マスターデータと `MonsterCombatStats` は変更しない。
 
+モンスターの行動定義は `monsters.json` の `mmp`、`int`、`special`、`extra`、`spells` から
+読込境界で構造化する。`special` は日本語1文字ごとの特殊行動キー列、`spells` は改行区切りの
+呪文安定キー列へ変換し、`extra` はアイテムと共通の追加効果型へ変換する。最大MP、知恵、
+行動候補は不変な定義として保持し、現在MPは戦闘ごとの可変状態が所有する。BattleSceneや
+Rendererは生の連結文字列・改行区切り文字列を再解釈せず、敵AIの行動選択結果を利用する。
+
 通常攻撃の総合攻撃力、命中判定、物理ダメージは、PyxelやSceneに依存しない
 `battle_physical.py` が計算する。BattleSceneと単独戦闘テストは、`Member` の装備・能力・熟練度、
 または `MonsterCombatStats` から入力値を組み立て、0～99の命中乱数を明示的に渡す。
