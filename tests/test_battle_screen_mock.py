@@ -106,6 +106,11 @@ from tools.screen_mocks.battle import (
     SLEEP_ICON_SOURCE_Y,
     SLEEP_MAX_TURNS,
     SLEEP_MIN_TURNS,
+    SLOW_ICON_PATTERN_FRAME_COUNT,
+    SPEED_ICON_NEGATIVE_SOURCE_Y,
+    SPEED_ICON_SIZE,
+    SPEED_ICON_SOURCE_X,
+    SPEED_ICON_TRANSPARENT_INDEX,
     PROTECTION_ICON_NAME_OFFSET_X,
     PROTECTION_ICON_PATTERN_FRAME_COUNTS,
     PROTECTION_ICON_SIZE,
@@ -244,6 +249,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_monsters = Mock()
         mock._draw_party_attack_effect = Mock()
         mock._draw_spell_effects = Mock()
+        mock._draw_speed_modifier_icons = Mock()
         mock._draw_party_attack_damage = Mock()
         mock._draw_monster_attack_result = Mock()
         mock._draw_target_cursor = Mock()
@@ -257,6 +263,7 @@ class BattleScreenMockTest(unittest.TestCase):
         manager.attach_mock(mock._draw_monsters, "monsters")
         manager.attach_mock(mock._draw_party_attack_effect, "party_attack_effect")
         manager.attach_mock(mock._draw_spell_effects, "spell_effects")
+        manager.attach_mock(mock._draw_speed_modifier_icons, "speed_modifier_icons")
         manager.attach_mock(mock._draw_party_attack_damage, "party_attack_damage")
         manager.attach_mock(mock._draw_monster_attack_result, "monster_attack")
         manager.attach_mock(mock._draw_target_cursor, "target")
@@ -274,6 +281,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.monsters(),
                 call.party_attack_effect(),
                 call.spell_effects(),
+                call.speed_modifier_icons(),
                 call.party_attack_damage(),
                 call.monster_attack(),
                 call.timeline(),
@@ -3054,6 +3062,84 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.monsters[0].state.sleeping, SLEEP_MAX_TURNS)
         self.assertEqual(mock.spell_damage_popups, [])
 
+    def test_slow_uses_authored_rate_and_applies_zero_speed_formula(self) -> None:
+        spell = load_mock_spells()["SLOW"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.monsters = (_damage_test_monster(),)
+        mock.monsters[0].agility = 20
+        mock.spell_effects = {}
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+
+        with patch("scenes.battle.random.randint", return_value=0) as randint:
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        result = mock.action_presentation.slow_results[0]
+        self.assertTrue(result.success)
+        self.assertEqual(spell.rate, 16)
+        mock._apply_action_results(mock.action_presentation)
+
+        self.assertEqual(mock.monsters[0].state.speed_modifier, -1)
+        self.assertEqual(mock.monsters[0].effective_agility, 15)
+        self.assertEqual(mock.spell_damage_popups, [])
+        randint.assert_called_once_with(0, 19)
+
+    def test_failed_slow_shows_miss_without_applying_the_modifier(self) -> None:
+        spell = load_mock_spells()["SLOW"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (_damage_test_monster(spell_resistance=100),)
+        mock.spell_damage_popups = []
+        results = ()
+        with patch("scenes.battle.random.randint", return_value=19):
+            results = mock._resolve_slow_results(spell, (0,))
+        presentation = BattleActionPresentation((), slow_results=results)
+        mock.healing_popups = []
+
+        mock._apply_action_results(presentation)
+
+        self.assertEqual(mock.monsters[0].state.speed_modifier, 0)
+        self.assertEqual(
+            [popup.is_miss for popup in mock.spell_damage_popups],
+            [True],
+        )
+
+    def test_slow_targeting_excludes_already_slowed_monsters(self) -> None:
+        spell = load_mock_spells()["SLOW"]
+        slowed = _damage_test_monster(0)
+        slowed.state.speed_modifier = -1
+        normal = _damage_test_monster(1)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (slowed, normal)
+
+        self.assertEqual(
+            mock._selectable_enemy_indexes_for_spell(spell),
+            (1,),
+        )
+
     def test_sleep_resistance_fails_and_shows_miss_with_resist_marker(self) -> None:
         spell = load_mock_spells()["SLEEP"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -3272,6 +3358,36 @@ class BattleScreenMockTest(unittest.TestCase):
             PROTECTION_ICON_SIZE,
             PROTECTION_ICON_SIZE,
             1,
+        )
+
+    def test_slow_icon_uses_da2_bank_zero_animation_below_monster(self) -> None:
+        self.assertEqual((SPEED_ICON_SOURCE_X, SPEED_ICON_NEGATIVE_SOURCE_Y), (96, 136))
+        self.assertEqual(SPEED_ICON_TRANSPARENT_INDEX, 1)
+
+        monster = _damage_test_monster()
+        monster.state.speed_modifier = -1
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                SLOW_ICON_PATTERN_FRAME_COUNT,
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_speed_modifier_icons()
+
+        blt.assert_called_once_with(
+            4 + monster.width - 24,
+            MONSTER_POSITIONS[0][1] + monster.height,
+            0,
+            SPEED_ICON_SOURCE_X + SPEED_ICON_SIZE,
+            SPEED_ICON_NEGATIVE_SOURCE_Y,
+            SPEED_ICON_SIZE,
+            SPEED_ICON_SIZE,
+            SPEED_ICON_TRANSPARENT_INDEX,
         )
 
     def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:

@@ -7,6 +7,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
+if __package__ == "":
+    from battle_speed import (
+        MAX_SPEED_MODIFIER,
+        MIN_SPEED_MODIFIER,
+    )
+else:
+    from .battle_speed import (
+        MAX_SPEED_MODIFIER,
+        MIN_SPEED_MODIFIER,
+    )
+
 
 class MonsterDataError(ValueError):
     """Raised when monster master data cannot initialize battle state."""
@@ -79,6 +90,7 @@ class MonsterBattleState:
     max_hp: int
     hp: int | None = None
     sleeping: int = 0
+    speed_modifier: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.max_hp, bool) or not isinstance(self.max_hp, int):
@@ -95,6 +107,16 @@ class MonsterBattleState:
             raise TypeError("sleeping must be an integer")
         if self.sleeping < 0:
             raise ValueError("sleeping must not be negative")
+        if (
+            isinstance(self.speed_modifier, bool)
+            or not isinstance(self.speed_modifier, int)
+        ):
+            raise TypeError("speed_modifier must be an integer")
+        if not MIN_SPEED_MODIFIER <= self.speed_modifier <= MAX_SPEED_MODIFIER:
+            raise ValueError(
+                f"speed_modifier must be from {MIN_SPEED_MODIFIER} "
+                f"to {MAX_SPEED_MODIFIER}"
+            )
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MonsterBattleState:
@@ -126,6 +148,8 @@ class MonsterBattleState:
         self.hp = max(0, previous - damage)
         if damage > 0:
             self.sleeping = 0
+        if self.hp <= 0:
+            self.speed_modifier = 0
         return previous - self.hp
 
     def apply_sleep(self, turns: int) -> None:
@@ -145,16 +169,26 @@ class MonsterBattleState:
         self.sleeping -= 1
         return True
 
+    def apply_slow(self) -> bool:
+        """Apply SLOW once, cancelling a positive speed modifier first."""
+
+        if self.speed_modifier <= MIN_SPEED_MODIFIER:
+            return False
+        self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
+        return True
+
     def defeat(self) -> None:
         """Set HP to zero for a mock attack that always defeats its target."""
 
         self.hp = 0
+        self.speed_modifier = 0
 
     def restore(self) -> None:
         """Restore initial HP when restarting a battle fixture."""
 
         self.hp = self.max_hp
         self.sleeping = 0
+        self.speed_modifier = 0
 
 
 def promote_rear_monsters_if_front_empty(

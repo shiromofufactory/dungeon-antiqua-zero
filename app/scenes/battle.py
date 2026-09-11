@@ -35,6 +35,7 @@ from battle_magic import (
     resolve_spell_damage,
     resolve_status_spell,
 )
+from battle_speed import MIN_SPEED_MODIFIER, modified_agility
 from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import (
     TimelineAdvance,
@@ -285,6 +286,12 @@ SLEEP_ICON_PATTERN_COUNT = 4
 SLEEP_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 SLEEP_MIN_TURNS = 2
 SLEEP_MAX_TURNS = 3
+SPEED_ICON_SOURCE_X = 96
+SPEED_ICON_NEGATIVE_SOURCE_Y = 136
+SPEED_ICON_SIZE = 8
+SPEED_ICON_PATTERN_COUNT = 4
+SLOW_ICON_PATTERN_FRAME_COUNT = 8 * FPS // DA2_REFERENCE_FPS
+SPEED_ICON_TRANSPARENT_INDEX = TRANSPARENT_INDEX
 PROTECTION_ICON_SOURCE_X = 64
 PROTECTION_ICON_SOURCE_Y = 128
 PROTECTION_ICON_SIZE = 8
@@ -588,6 +595,16 @@ class BattleSleepResult:
 
 
 @dataclass(frozen=True)
+class BattleSlowResult:
+    """Resolved SLOW magic waiting for its timed application."""
+
+    target_index: int
+    success: bool
+    popup_x: int
+    popup_y: int
+
+
+@dataclass(frozen=True)
 class BattleProtectionResult:
     """One guaranteed PROTECTION stage waiting for its timed application."""
 
@@ -644,6 +661,7 @@ class BattleActionPresentation:
     healing_results: tuple[BattleHealingResult, ...] = ()
     damage_results: tuple[BattleSpellDamageResult, ...] = ()
     sleep_results: tuple[BattleSleepResult, ...] = ()
+    slow_results: tuple[BattleSlowResult, ...] = ()
     protection_results: tuple[BattleProtectionResult, ...] = ()
     result_start_frame: int = 0
     results_applied: bool = False
@@ -839,9 +857,9 @@ class BattleCharacter:
 
     @property
     def agility(self) -> int:
-        """Return the member's current equipment-adjusted agility."""
+        """Return the member's battle-modified effective agility."""
 
-        return self.member.adjusted_abilities.agility
+        return self.member.effective_agility
 
 
 @dataclass
@@ -937,6 +955,12 @@ class BattleMonster:
     @property
     def is_alive(self) -> bool:
         return self.state.is_alive
+
+    @property
+    def effective_agility(self) -> int:
+        """Return master agility with ZERO's current battle modifier."""
+
+        return modified_agility(self.agility, self.state.speed_modifier)
 
     def restore(self) -> None:
         """Restore mutable battle values to this encounter's initial state."""
@@ -1697,7 +1721,10 @@ class BattleScene:
             visual for visual in self.party_visuals if visual.member.is_alive
         )
         self._timeline_order = initialize_timeline_order(
-            tuple((entry, entry.agility) for entry in (*living_party, *self.monsters))
+            tuple(
+                (entry, self._actor_agility(entry))
+                for entry in (*living_party, *self.monsters)
+            )
         )
         self.timeline = self._timeline_order.actors
         self.phase = BattlePhase.ENTRANCE
@@ -2910,9 +2937,7 @@ class BattleScene:
         """Select the targets specified by an item effect or a spell record."""
 
         if spell.to_enemy:
-            selectable = tuple(
-                index for index, monster in enumerate(self.monsters) if monster.is_alive
-            )
+            selectable = self._selectable_enemy_indexes_for_spell(spell)
             if not selectable:
                 return False
             self.selectable_target_indexes = selectable
@@ -2974,6 +2999,22 @@ class BattleScene:
         self._close_spell_windows()
         self._refresh_monster_name_colors()
         return True
+
+    def _selectable_enemy_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
+        """Return living enemy targets that can still receive the spell."""
+
+        indexes = tuple(
+            index
+            for index, monster in enumerate(self.monsters)
+            if monster.is_alive
+        )
+        if spell.action is not SpellAction.SLOW:
+            return indexes
+        return tuple(
+            index
+            for index in indexes
+            if self.monsters[index].state.speed_modifier > MIN_SPEED_MODIFIER
+        )
 
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return living ally targets that can still receive the spell."""
@@ -3181,14 +3222,16 @@ class BattleScene:
         healing_results = self._resolve_healing_results(spell, indexes)
         damage_results = self._resolve_spell_damage_results(spell, indexes)
         sleep_results = self._resolve_sleep_results(spell, indexes)
+        slow_results = self._resolve_slow_results(spell, indexes)
         protection_results = self._resolve_protection_results(spell, indexes)
+        status_results = sleep_results or slow_results
         effect_indexes = (
             tuple(
                 result.target_index
-                for result in sleep_results
+                for result in status_results
                 if result.success
             )
-            if sleep_results
+            if status_results
             else indexes
         )
         effects: list[BattleTargetSpellEffect] = []
@@ -3220,6 +3263,7 @@ class BattleScene:
             healing_results=healing_results,
             damage_results=damage_results,
             sleep_results=sleep_results,
+            slow_results=slow_results,
             protection_results=protection_results,
             result_start_frame=result_start_frame,
         )
@@ -3306,6 +3350,55 @@ class BattleScene:
                     cures_ailments=resolution.cures_ailments,
                     popup_x=x + 6,
                     popup_y=y + 16,
+                )
+            )
+        return tuple(results)
+
+    def _resolve_slow_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleSlowResult, ...]:
+        """Resolve SLOW with the shared DA2-style status success rule."""
+
+        if spell.action is not SpellAction.SLOW:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("SLOW spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("SLOW requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattleSlowResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            resolution = resolve_status_spell(
+                spell_modifier=modifier,
+                rate=spell.rate,
+                target_spell_defense=monster.combat_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
+                success_roll=random.randint(0, 19),
+            )
+            _base_x, base_y = MONSTER_POSITIONS[index]
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            results.append(
+                BattleSlowResult(
+                    target_index=index,
+                    success=resolution.success,
+                    popup_x=center_x,
+                    popup_y=base_y + monster.height - 8,
                 )
             )
         return tuple(results)
@@ -3481,6 +3574,19 @@ class BattleScene:
             monster = self.monsters[result.target_index]
             if result.success:
                 monster.state.apply_sleep(result.turns)
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
+        for result in presentation.slow_results:
+            monster = self.monsters[result.target_index]
+            if result.success:
+                monster.state.apply_slow()
             else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
@@ -3873,7 +3979,7 @@ class BattleScene:
         result = resolve_physical_attack(
             attack=attack,
             hit=member_stats.hit_right.total,
-            agility=member.adjusted_abilities.agility,
+            agility=member.effective_agility,
             target_defense=monster_stats.defense,
             target_evasion=monster_stats.evasion,
             hit_roll=random.randint(0, 99),
@@ -4215,7 +4321,7 @@ class BattleScene:
         actor = self._timeline_order.entries[0].actor
         self.timeline_advance = complete_timeline_action(
             self._timeline_order,
-            current_agility=actor.agility,
+            current_agility=self._actor_agility(actor),
             visible_count=TIMELINE_VISIBLE_ENTRY_COUNT,
             gauge_adjustment=getattr(self, "action_gauge_adjustment", 0.0),
         )
@@ -4230,6 +4336,12 @@ class BattleScene:
         self.timeline_animation_phase = TimelineAnimationPhase.DROP
         self.timeline_animation_frame = 0
         self._refresh_party_text_colors()
+
+    @staticmethod
+    def _actor_agility(actor: BattleCharacter | BattleMonster) -> int:
+        """Read effective agility while retaining lightweight test actors."""
+
+        return getattr(actor, "effective_agility", actor.agility)
 
     def _start_timeline_removal_animation(self) -> None:
         """Slide the timeline after an escaping actor leaves permanently."""
@@ -4755,7 +4867,7 @@ class BattleScene:
         result = resolve_physical_attack(
             attack=actor.combat_stats.attack,
             hit=actor.combat_stats.hit,
-            agility=actor.agility,
+            agility=actor.effective_agility,
             target_defense=target_stats.defense,
             target_evasion=target_stats.evasion,
             hit_roll=random.randint(0, 99),
@@ -4952,6 +5064,7 @@ class BattleScene:
         self._draw_party_attack_effect()
         self._draw_spell_effects()
         self._draw_sleeping_icons()
+        self._draw_speed_modifier_icons()
         self._draw_affinity_popups()
         self._draw_spell_damage_popups()
         self._draw_healing_popups()
@@ -5671,6 +5784,31 @@ class BattleScene:
                 SLEEP_ICON_SIZE,
                 SLEEP_ICON_SIZE,
                 TRANSPARENT_INDEX,
+            )
+
+    def _draw_speed_modifier_icons(self) -> None:
+        """Draw DA2's animated speed-down marker beside slowed monsters."""
+
+        pattern = (
+            pyxel.frame_count // SLOW_ICON_PATTERN_FRAME_COUNT
+        ) % SPEED_ICON_PATTERN_COUNT
+        source_x = SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            if (
+                not monster.is_alive
+                or monster.state.speed_modifier >= 0
+            ):
+                continue
+            _base_x, y = MONSTER_POSITIONS[index]
+            pyxel.blt(
+                self._monster_draw_x(index) + monster.width - 24,
+                y + monster.height,
+                0,
+                source_x,
+                SPEED_ICON_NEGATIVE_SOURCE_Y,
+                SPEED_ICON_SIZE,
+                SPEED_ICON_SIZE,
+                SPEED_ICON_TRANSPARENT_INDEX,
             )
 
     def _draw_protection_icons(self) -> None:

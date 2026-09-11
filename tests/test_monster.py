@@ -78,12 +78,23 @@ class MonsterBattleStateTest(unittest.TestCase):
 
     def test_defeat_and_restore_manage_mock_battle_lifecycle(self) -> None:
         state = MonsterBattleState.from_record({"mhp": 7})
+        state.speed_modifier = -1
 
         state.defeat()
         self.assertEqual(state.hp, 0)
         state.restore()
         self.assertEqual(state.hp, 7)
         self.assertEqual(state.sleeping, 0)
+        self.assertEqual(state.speed_modifier, 0)
+
+    def test_slow_cancels_haste_then_applies_once(self) -> None:
+        state = MonsterBattleState(max_hp=10, speed_modifier=2)
+
+        self.assertTrue(state.apply_slow())
+        self.assertEqual(state.speed_modifier, 0)
+        self.assertTrue(state.apply_slow())
+        self.assertEqual(state.speed_modifier, -1)
+        self.assertFalse(state.apply_slow())
 
     def test_mhp_must_be_a_positive_integer(self) -> None:
         for value in (None, True, 0, -1, 1.5, "2"):

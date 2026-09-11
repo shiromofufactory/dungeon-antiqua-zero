@@ -364,6 +364,7 @@ class MemberTest(unittest.TestCase):
         self.member.sleeping = 2
         self.member.confused = 3
         self.member.protection_level = 2
+        self.member.speed_modifier = -1
         self.member.poisoned = True
         self.member.paralyzed = True
 
@@ -372,6 +373,7 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.sleeping, 0)
         self.assertEqual(self.member.confused, 0)
         self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.speed_modifier, 0)
         self.assertTrue(self.member.poisoned)
         self.assertTrue(self.member.paralyzed)
 
@@ -387,12 +389,28 @@ class MemberTest(unittest.TestCase):
         self.assertFalse(self.member.apply_protection())
         self.assertEqual(self.member.protection_level, 2)
 
-    def test_death_clears_protection(self) -> None:
+    def test_death_clears_battle_modifiers(self) -> None:
         self.member.protection_level = 2
+        self.member.speed_modifier = -1
 
         self.member.take_damage(self.member.hp)
 
         self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.speed_modifier, 0)
+
+    def test_effective_agility_uses_speed_modifier_and_slow_cancels_haste(self) -> None:
+        self.assertEqual(self.member.adjusted_abilities.agility, 25)
+        self.assertEqual(self.member.effective_agility, 25)
+
+        self.member.speed_modifier = 2
+        self.assertEqual(self.member.effective_agility, 37)
+        self.assertTrue(self.member.apply_slow())
+        self.assertEqual(self.member.speed_modifier, 0)
+        self.assertTrue(self.member.apply_slow())
+        self.assertEqual(self.member.speed_modifier, -1)
+        self.assertEqual(self.member.effective_agility, 18)
+        self.assertEqual(self.member.battle_stats.evasion, 0)
+        self.assertFalse(self.member.apply_slow())
 
     def test_negative_equipment_healing_reduces_hp(self) -> None:
         cursed_ring = self.item("CURSED RING", "ARM", healing=-2)
@@ -992,6 +1010,10 @@ class MemberTest(unittest.TestCase):
             Member(self.member.definition, protection_level=True)
         with self.assertRaisesRegex(ValueError, "protection_level"):
             Member(self.member.definition, protection_level=3)
+        with self.assertRaisesRegex(TypeError, "speed_modifier"):
+            Member(self.member.definition, speed_modifier=True)
+        with self.assertRaisesRegex(ValueError, "speed_modifier"):
+            Member(self.member.definition, speed_modifier=-2)
 
     def test_rejects_missing_base_ability(self) -> None:
         with self.assertRaisesRegex(MemberDataError, "base_mag"):

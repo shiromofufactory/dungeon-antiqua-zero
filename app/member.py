@@ -8,12 +8,22 @@ from types import MappingProxyType
 from typing import Mapping, TypeVar
 
 if __package__ == "":
+    from battle_speed import (
+        MAX_SPEED_MODIFIER,
+        MIN_SPEED_MODIFIER,
+        modified_agility,
+    )
     from item import Item, ItemEquipType
     from localization import Localizer, format_number
     from resistance import ResistanceType
     from skill import Skill
     from text_catalog import TextCatalog
 else:
+    from .battle_speed import (
+        MAX_SPEED_MODIFIER,
+        MIN_SPEED_MODIFIER,
+        modified_agility,
+    )
     from .item import Item, ItemEquipType
     from .localization import Localizer, format_number
     from .resistance import ResistanceType
@@ -715,6 +725,7 @@ class Member:
     sleeping: int = 0
     confused: int = 0
     protection_level: int = 0
+    speed_modifier: int = 0
     skills: list[Skill] = field(default_factory=list)
     equipment: EquipmentSet = field(default_factory=EquipmentSet)
     proficiencies: dict[ProficiencyKind, Proficiency] = field(
@@ -815,6 +826,16 @@ class Member:
         if not 0 <= self.protection_level <= MAX_PROTECTION_LEVEL:
             raise ValueError(
                 f"protection_level must be from 0 to {MAX_PROTECTION_LEVEL}"
+            )
+        if (
+            isinstance(self.speed_modifier, bool)
+            or not isinstance(self.speed_modifier, int)
+        ):
+            raise TypeError("speed_modifier must be an integer")
+        if not MIN_SPEED_MODIFIER <= self.speed_modifier <= MAX_SPEED_MODIFIER:
+            raise ValueError(
+                f"speed_modifier must be from {MIN_SPEED_MODIFIER} "
+                f"to {MAX_SPEED_MODIFIER}"
             )
         if not isinstance(self.skills, list):
             raise TypeError("skills must be a list")
@@ -1095,6 +1116,7 @@ class Member:
             self.confused = 0
         if self.hp <= 0:
             self.protection_level = 0
+            self.speed_modifier = 0
         return old_hp - self.hp
 
     def apply_sleep(self, turns: int) -> None:
@@ -1123,12 +1145,30 @@ class Member:
         self.protection_level += 1
         return True
 
+    def apply_slow(self) -> bool:
+        """Apply DA2's SLOW state or cancel any positive HASTE state."""
+
+        if self.speed_modifier <= MIN_SPEED_MODIFIER:
+            return False
+        self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
+        return True
+
+    @property
+    def effective_agility(self) -> int:
+        """Return equipment-adjusted agility with the battle modifier."""
+
+        return modified_agility(
+            self.adjusted_abilities.agility,
+            self.speed_modifier,
+        )
+
     def clear_temporary_battle_conditions(self) -> None:
         """Discard ailments that DA2 keeps only for the current battle."""
 
         self.sleeping = 0
         self.confused = 0
         self.protection_level = 0
+        self.speed_modifier = 0
 
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""
@@ -1140,6 +1180,7 @@ class Member:
         self.sleeping = 0
         self.confused = 0
         self.protection_level = 0
+        self.speed_modifier = 0
 
     def proficiency(self, kind: ProficiencyKind) -> Proficiency:
         """Return the current proficiency for one stable kind."""
@@ -1361,7 +1402,7 @@ class Member:
             )
         )
         abilities = self.adjusted_abilities
-        agility_bonus = max(0, (abilities.agility - 20) * 2)
+        agility_bonus = max(0, (self.effective_agility - 20) * 2)
         evasion = max(
             0,
             sum(item.evasion for item in armor) + agility_bonus,
