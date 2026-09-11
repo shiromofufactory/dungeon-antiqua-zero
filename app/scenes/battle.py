@@ -270,6 +270,13 @@ RESIST_ICON_SOURCE_Y = 24
 AFFINITY_ICON_WIDTH = 24
 AFFINITY_ICON_HEIGHT = 8
 AFFINITY_POPUP_FRAME_COUNT = len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
+CRITICAL_FLASH_COLOR = 33
+CRITICAL_FLASH_FRAME_COUNT = 2
+CRITICAL_MARKER_SOURCE_X = 204
+CRITICAL_MARKER_SOURCE_Y = 24
+CRITICAL_MARKER_WIDTH = 28
+CRITICAL_MARKER_HEIGHT = 8
+CRITICAL_MARKER_FRAME_COUNT = MONSTER_MISS_FRAME_COUNT
 SLEEP_ICON_SOURCE_X = 32
 SLEEP_ICON_SOURCE_Y = 136
 SLEEP_ICON_SIZE = 8
@@ -4888,7 +4895,10 @@ class BattleScene:
                 raise RuntimeError("result phase requires a result overlay")
             self.result_overlay.draw()
             return
-        self._draw_background()
+        if self._critical_flash_visible():
+            pyxel.cls(CRITICAL_FLASH_COLOR)
+        else:
+            self._draw_background()
         self._draw_party()
         self._draw_monsters()
         self._draw_aim_reticle()
@@ -4900,6 +4910,7 @@ class BattleScene:
         self._draw_healing_popups()
         self._draw_party_attack_damage()
         self._draw_monster_attack_result()
+        self._draw_critical_markers()
         self._draw_timeline()
         self._draw_windows()
         self._draw_target_cursor()
@@ -4913,6 +4924,84 @@ class BattleScene:
             0,
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
+        )
+
+    def _critical_flash_visible(self) -> bool:
+        """Return whether this frame uses DA2's critical background flash."""
+
+        settings = getattr(self, "settings", None)
+        if settings is not None and not settings.screen_flash_enabled:
+            return False
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            getattr(self, "phase", None) is BattlePhase.ATTACK_PRESENTATION
+            and presentation is not None
+            and presentation.is_hit
+            and presentation.is_critical
+            and presentation.damage_applied
+            and 0
+            <= presentation.hit_elapsed_frame
+            < CRITICAL_FLASH_FRAME_COUNT
+        ):
+            return True
+        return (
+            getattr(self, "phase", None) is BattlePhase.MONSTER_ACTION
+            and getattr(self, "monster_attack_target_index", None) is not None
+            and bool(getattr(self, "monster_attack_critical", False))
+            and 0
+            <= getattr(self, "monster_attack_animation_frame", -1)
+            < CRITICAL_FLASH_FRAME_COUNT
+        )
+
+    def _draw_critical_markers(self) -> None:
+        """Draw DA2's SMASH marker when screen flashes are reduced."""
+
+        settings = getattr(self, "settings", None)
+        if settings is None or settings.screen_flash_enabled:
+            return
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            getattr(self, "phase", None) is BattlePhase.ATTACK_PRESENTATION
+            and presentation is not None
+            and presentation.is_hit
+            and presentation.is_critical
+            and presentation.damage_applied
+            and 0
+            <= presentation.damage_popup_elapsed_frame
+            < CRITICAL_MARKER_FRAME_COUNT
+        ):
+            monster = self.monsters[presentation.target_index]
+            _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
+            self._draw_critical_marker(
+                self._monster_draw_x(presentation.target_index)
+                + monster.width // 2
+                - CRITICAL_MARKER_WIDTH // 2,
+                target_y + 20,
+            )
+        target_index = getattr(self, "monster_attack_target_index", None)
+        animation_frame = getattr(self, "monster_attack_animation_frame", -1)
+        if (
+            getattr(self, "phase", None) is BattlePhase.MONSTER_ACTION
+            and target_index is not None
+            and bool(getattr(self, "monster_attack_critical", False))
+            and 0 <= animation_frame < CRITICAL_MARKER_FRAME_COUNT
+        ):
+            self._draw_critical_marker(
+                self._party_sprite_x(target_index),
+                PARTY_SPRITE_Y[target_index],
+            )
+
+    @staticmethod
+    def _draw_critical_marker(x: int, y: int) -> None:
+        pyxel.blt(
+            x,
+            y,
+            0,
+            CRITICAL_MARKER_SOURCE_X,
+            CRITICAL_MARKER_SOURCE_Y,
+            CRITICAL_MARKER_WIDTH,
+            CRITICAL_MARKER_HEIGHT,
+            TRANSPARENT_INDEX,
         )
 
     def _draw_party(self) -> None:

@@ -49,6 +49,7 @@ class Settings:
     se_volume: int = 3
     screen_scale: int = 3
     display_mode: DisplayMode = DisplayMode.PIXEL
+    screen_flash_enabled: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.language, Language):
@@ -76,6 +77,8 @@ class Settings:
             raise ValueError("screen_scale must be from 1 to 5")
         if not isinstance(self.display_mode, DisplayMode):
             raise TypeError("display_mode must be a DisplayMode")
+        if not isinstance(self.screen_flash_enabled, bool):
+            raise TypeError("screen_flash_enabled must be a boolean")
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON-compatible representation of these settings."""
@@ -86,6 +89,7 @@ class Settings:
             "se_volume": self.se_volume,
             "screen_scale": self.screen_scale,
             "display_mode": self.display_mode.value,
+            "screen_flash_enabled": self.screen_flash_enabled,
         }
 
     def with_language(self, language: Language) -> Settings:
@@ -116,6 +120,13 @@ class Settings:
         if not isinstance(mode, DisplayMode):
             raise TypeError("mode must be a DisplayMode")
         return replace(self, display_mode=mode)
+
+    def with_screen_flash_enabled(self, enabled: bool) -> Settings:
+        """Return updated settings for DA2-style screen flashes."""
+
+        if not isinstance(enabled, bool):
+            raise TypeError("enabled must be a boolean")
+        return replace(self, screen_flash_enabled=enabled)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Settings:
@@ -150,6 +161,7 @@ class Settings:
                 se_volume=data.get("se_volume", 3),
                 screen_scale=data.get("screen_scale", 3),
                 display_mode=display_mode,
+                screen_flash_enabled=data.get("screen_flash_enabled", True),
             )
         except (TypeError, ValueError) as error:
             raise SettingsDataError(str(error)) from error

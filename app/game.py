@@ -215,6 +215,9 @@ SETTINGS_TEXT_KEYS = (
     "settings.display.label",
     "settings.display.pixel",
     "settings.display.smooth",
+    "settings.screen_flash.label",
+    "settings.screen_flash.normal",
+    "settings.screen_flash.reduced",
     "settings.return_title",
     "settings.quit",
     "settings.guide.language.0",
@@ -227,6 +230,8 @@ SETTINGS_TEXT_KEYS = (
     "settings.guide.screen_size.1",
     "settings.guide.display.0",
     "settings.guide.display.1",
+    "settings.guide.screen_flash.0",
+    "settings.guide.screen_flash.1",
     "settings.confirm.return_title",
     "settings.confirm.quit",
     "settings.yes",
@@ -238,9 +243,10 @@ SETTINGS_ROWS = (
     ("se", 8),
     ("screen_size", 11),
     ("display", 14),
-    ("debug", 17),
-    ("return_title", 20),
-    ("quit", 23),
+    ("screen_flash", 17),
+    ("debug", 20),
+    ("return_title", 23),
+    ("quit", 26),
 )
 SETTINGS_GUIDE_KEYS = {
     "language": (
@@ -254,6 +260,10 @@ SETTINGS_GUIDE_KEYS = {
         "settings.guide.screen_size.1",
     ),
     "display": ("settings.guide.display.0", "settings.guide.display.1"),
+    "screen_flash": (
+        "settings.guide.screen_flash.0",
+        "settings.guide.screen_flash.1",
+    ),
 }
 LANGUAGE_SEQUENCE = (
     Language.JAPANESE,
@@ -299,12 +309,12 @@ ALERT_SOUND_ID = 7
 SE_CHANNELS = (TELEPORT_SOUND_CHANNEL, ALERT_CHANNEL)
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
-SETTINGS_WINDOW_GRID = (4, 12, 56, 36)
+SETTINGS_WINDOW_GRID = (4, 12, 56, 39)
 SETTINGS_LABEL_X = 4
 SETTINGS_VALUE_X = 30
 SETTINGS_CURSOR_X = 2
 SETTINGS_GUIDE_X = 4
-SETTINGS_GUIDE_Y = 29
+SETTINGS_GUIDE_Y = 32
 SETTINGS_GUIDE_ROW_HEIGHT = 3
 CONFIRMATION_WINDOW_GRID = (8, 22, 48, 16)
 CONFIRMATION_CURSOR_X = 4
@@ -1367,6 +1377,9 @@ class Game:
             return self.localized[
                 f"settings.display.{self.settings.display_mode.value}"
             ]
+        if key == "screen_flash":
+            value = "normal" if self.settings.screen_flash_enabled else "reduced"
+            return self.localized[f"settings.screen_flash.{value}"]
         raise ValueError(f"settings key has no value: {key}")
 
     def _settings_window_texts(
@@ -1380,6 +1393,7 @@ class Game:
             "se": "settings.se.label",
             "screen_size": "settings.screen_size.label",
             "display": "settings.display.label",
+            "screen_flash": "settings.screen_flash.label",
         }
         action_keys = {
             "return_title": "settings.return_title",
@@ -1425,8 +1439,16 @@ class Game:
         if selected_key == "language" and self.settings.language is Language.ENGLISH:
             guide_keys = guide_keys[:1]
         for index, text_key in enumerate(guide_keys):
+            text_factory = (
+                LocalizedWindowTextFactory.from_language(
+                    self.fonts,
+                    Language.ENGLISH,
+                )
+                if text_key == "settings.guide.language.1"
+                else self.localized_texts
+            )
             texts.append(
-                self.localized_texts.create(
+                text_factory.create(
                     self.localized[text_key],
                     SETTINGS_GUIDE_X,
                     SETTINGS_GUIDE_Y + index * SETTINGS_GUIDE_ROW_HEIGHT,
@@ -2028,6 +2050,10 @@ class Game:
             index = DISPLAY_SEQUENCE.index(self.settings.display_mode)
             mode = DISPLAY_SEQUENCE[(index + distance) % len(DISPLAY_SEQUENCE)]
             updated_settings = self.settings.with_display_mode(mode)
+        elif key == "screen_flash":
+            updated_settings = self.settings.with_screen_flash_enabled(
+                not self.settings.screen_flash_enabled
+            )
         else:
             return
 

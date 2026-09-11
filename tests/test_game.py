@@ -40,6 +40,7 @@ from game import (
     SITE_MAP_FADE_FRAME_COUNT,
     SITE_NAME_FONT_ROLE,
     SITE_NAME_LABEL_GAP,
+    SETTINGS_GUIDE_ROW_HEIGHT,
     SETTINGS_GUIDE_Y,
     SETTINGS_LABEL_X,
     SETTINGS_ROWS,
@@ -369,6 +370,8 @@ class GameTest(unittest.TestCase):
             (),
         )
         self.assertEqual(english["settings.display.smooth"], "Ｓｍｏｏｔｈｅｄ")
+        self.assertEqual(japanese["settings.screen_flash.normal"], "つうじょう")
+        self.assertEqual(chinese["settings.screen_flash.reduced"], "减轻")
         self.assertEqual(chinese["settings.return_title"], "返回标题界面")
         self.assertEqual(set(japanese), set(english))
         self.assertEqual(set(japanese), set(chinese))
@@ -411,7 +414,17 @@ class GameTest(unittest.TestCase):
             mock.texts,
             Language.JAPANESE,
         )
+        japanese_font = object()
+        english_font = object()
         mock.fonts = Mock()
+        mock.fonts.font_for.side_effect = {
+            Language.JAPANESE: japanese_font,
+            Language.ENGLISH: english_font,
+        }.__getitem__
+        mock.fonts.baseline_offset_for.side_effect = {
+            Language.JAPANESE: 0,
+            Language.ENGLISH: 3,
+        }.__getitem__
         mock.localized_texts = Mock()
         mock.localized_texts.create.side_effect = (
             lambda text, x, y, **_kwargs: Mock(text=text, x=x, y=y)
@@ -427,7 +440,8 @@ class GameTest(unittest.TestCase):
 
         mock._build_settings_window()
 
-        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 12, 56, 36))
+        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 12, 56, 39))
+        self.assertEqual(SETTINGS_GUIDE_Y, 32)
         self.assertEqual(factory.create.call_args.args[:4], SETTINGS_WINDOW_GRID)
         self.assertFalse(factory.create.call_args.kwargs["opened"])
         window.open.assert_called_once_with()
@@ -443,12 +457,14 @@ class GameTest(unittest.TestCase):
         self.assertEqual(placements[(SETTINGS_VALUE_X, 8)], "３")
         self.assertEqual(placements[(SETTINGS_VALUE_X, 11)], "７６８×７２０")
         self.assertEqual(placements[(SETTINGS_VALUE_X, 14)], "ピクセル")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 17)], "がめんフラッシュ")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 17)], "つうじょう")
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 20)],
+            placements[(SETTINGS_LABEL_X, 23)],
             "タイトルがめんへ　もどる",
         )
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 23)],
+            placements[(SETTINGS_LABEL_X, 26)],
             "ゲームを　しゅうりょうする",
         )
         debug_text_call = next(
@@ -461,6 +477,17 @@ class GameTest(unittest.TestCase):
             placements[(SETTINGS_LABEL_X, SETTINGS_GUIDE_Y)],
             "げんごを　きりかえられます",
         )
+        language_switching = next(
+            text
+            for text in factory.create.call_args.args[4]
+            if text.y == SETTINGS_GUIDE_Y + SETTINGS_GUIDE_ROW_HEIGHT
+        )
+        self.assertEqual(
+            language_switching.text,
+            "Ｌａｎｇｕａｇｅ　ｓｗｉｔｃｈｉｎｇ　（ＪＰ　／　ＥＮ　／　ＣＮ）",
+        )
+        self.assertIs(language_switching.font, english_font)
+        self.assertEqual(language_switching.baseline_offset, 3)
 
     @patch("game.WindowFactory")
     def test_english_return_confirmation_fits_widened_window_on_one_line(
@@ -2441,7 +2468,8 @@ class GameTest(unittest.TestCase):
         mock.command_window.update.assert_not_called()
 
     def test_debug_settings_row_is_available_in_current_game(self) -> None:
-        self.assertIn(("debug", 17), SETTINGS_ROWS)
+        self.assertIn(("screen_flash", 17), SETTINGS_ROWS)
+        self.assertIn(("debug", 20), SETTINGS_ROWS)
 
     def test_confirming_debug_setting_opens_debug_menu(self) -> None:
         mock = Game.__new__(Game)
@@ -2538,6 +2566,21 @@ class GameTest(unittest.TestCase):
 
         self.assertIs(mock.settings.display_mode, DisplayMode.SMOOTH)
         mock._apply_display_mode.assert_called_once_with()
+
+    def test_screen_flash_setting_toggles_and_is_persisted(self) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings(screen_flash_enabled=True)
+        mock.settings_repository = Mock()
+        mock.settings_cursor = Mock(selected_key="screen_flash")
+        mock._refresh_settings_window = Mock()
+
+        mock._change_setting(1)
+
+        self.assertFalse(mock.settings.screen_flash_enabled)
+        mock.settings_repository.save.assert_called_once_with(mock.settings)
+        mock._refresh_settings_window.assert_called_once_with(
+            selected_key="screen_flash"
+        )
 
     def test_setting_change_is_not_applied_when_persistence_fails(self) -> None:
         from systems import SettingsSystemError

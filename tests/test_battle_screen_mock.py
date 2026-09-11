@@ -49,6 +49,13 @@ from tools.screen_mocks.battle import (
     COMMAND_GUIDE_TEXT_X,
     COMMAND_GUIDE_WINDOW_GRID,
     COMMAND_TEXT_KEYS,
+    CRITICAL_FLASH_COLOR,
+    CRITICAL_FLASH_FRAME_COUNT,
+    CRITICAL_MARKER_FRAME_COUNT,
+    CRITICAL_MARKER_HEIGHT,
+    CRITICAL_MARKER_SOURCE_X,
+    CRITICAL_MARKER_SOURCE_Y,
+    CRITICAL_MARKER_WIDTH,
     FORMATION_COMMAND_GUIDE_TEXT_KEYS,
     ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT,
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
@@ -154,7 +161,7 @@ from member import (
 )
 from battle_magic import SpellAffinity, member_spell_ability, member_spell_modifier
 from resistance import ResistanceType
-from state import Language
+from state import Language, Settings
 from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
 from tools._bootstrap import APP_ROOT
@@ -284,6 +291,92 @@ class BattleScreenMockTest(unittest.TestCase):
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
         )
+
+    def test_critical_hit_flashes_the_background_for_two_impact_frames(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=True)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            elapsed_frame=ATTACK_HIT_START_FRAME,
+            damage_applied=True,
+        )
+
+        self.assertTrue(mock._critical_flash_visible())
+        mock.attack_presentation.elapsed_frame += 1
+        self.assertTrue(mock._critical_flash_visible())
+        mock.attack_presentation.elapsed_frame += 1
+        self.assertFalse(mock._critical_flash_visible())
+        self.assertEqual(CRITICAL_FLASH_FRAME_COUNT, 2)
+
+    def test_reduced_flashing_draws_da2_smash_marker_over_monster(self) -> None:
+        monster = _damage_test_monster()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=False)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.monsters = (monster,)
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            elapsed_frame=(
+                ATTACK_HIT_START_FRAME + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+            ),
+            damage_applied=True,
+        )
+        mock.monster_attack_target_index = None
+        mock.monster_attack_animation_frame = -1
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_critical_markers()
+
+        blt.assert_called_once_with(
+            22,
+            76,
+            0,
+            CRITICAL_MARKER_SOURCE_X,
+            CRITICAL_MARKER_SOURCE_Y,
+            CRITICAL_MARKER_WIDTH,
+            CRITICAL_MARKER_HEIGHT,
+            1,
+        )
+        self.assertEqual(CRITICAL_MARKER_WIDTH, 28)
+        self.assertEqual(CRITICAL_MARKER_FRAME_COUNT, MONSTER_MISS_FRAME_COUNT)
+
+    def test_reduced_flashing_draws_da2_smash_marker_over_party_target(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=False)
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+        mock.attack_presentation = None
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_critical = True
+        mock.monster_attack_animation_frame = 0
+        mock.party_visuals = (
+            SimpleNamespace(member=SimpleNamespace(formation_row=FormationRow.FRONT)),
+        )
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_critical_markers()
+
+        blt.assert_called_once_with(
+            156,
+            64,
+            0,
+            CRITICAL_MARKER_SOURCE_X,
+            CRITICAL_MARKER_SOURCE_Y,
+            CRITICAL_MARKER_WIDTH,
+            CRITICAL_MARKER_HEIGHT,
+            1,
+        )
+        self.assertFalse(mock._critical_flash_visible())
+        self.assertEqual(CRITICAL_FLASH_COLOR, 33)
 
     def test_battle_fixture_uses_configured_members_at_level_ninety_nine(self) -> None:
         self.assertEqual(

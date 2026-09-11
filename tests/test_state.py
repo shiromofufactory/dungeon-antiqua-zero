@@ -28,6 +28,7 @@ class SettingsTest(unittest.TestCase):
                 "se_volume": 3,
                 "screen_scale": 3,
                 "display_mode": "pixel",
+                "screen_flash_enabled": True,
             },
         )
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
@@ -54,6 +55,7 @@ class SettingsTest(unittest.TestCase):
             se_volume=4,
             screen_scale=5,
             display_mode=DisplayMode.SMOOTH,
+            screen_flash_enabled=False,
         )
 
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
@@ -64,6 +66,8 @@ class SettingsTest(unittest.TestCase):
             settings.with_display_mode(DisplayMode.PIXEL).display_mode,
             DisplayMode.PIXEL,
         )
+        self.assertTrue(settings.with_screen_flash_enabled(True).screen_flash_enabled)
+        self.assertTrue(Settings.from_dict({}).screen_flash_enabled)
 
     def test_invalid_da2_desktop_settings_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -74,6 +78,8 @@ class SettingsTest(unittest.TestCase):
             Settings(screen_scale=0)
         with self.assertRaises(TypeError):
             Settings(display_mode="pixel")  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            Settings(screen_flash_enabled=1)  # type: ignore[arg-type]
         with self.assertRaises(SettingsDataError):
             Settings.from_dict({"display_mode": "crt"})
 
