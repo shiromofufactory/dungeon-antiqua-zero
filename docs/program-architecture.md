@@ -77,7 +77,7 @@ app/
 │   ├── settings.py           # 端末設定の読込と原子的な永続化
 │   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
 ├── ui/
-│   ├── battle_result.py      # 6人リザルトと30フレーム数値補間
+│   ├── battle_result.py      # 6人リザルト、待機、数値補間、増加SE
 │   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
 │   ├── start_menu.py         # 起動直後のロード・削除Overlay
 │   ├── save_menu.py          # プレイ中の手動セーブOverlay
@@ -433,7 +433,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの確定はPyxel非依存の `systems/battle_progression.py` が所有する。`BattleScene` はその記録契機と勝利演出を調停し、6人リザルトのWindow、色、30フレーム補間は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
+戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの確定はPyxel非依存の `systems/battle_progression.py` が所有する。`BattleScene` はその記録契機、勝利演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。

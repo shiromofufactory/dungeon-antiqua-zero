@@ -461,6 +461,7 @@ class BattlePhase(StrEnum):
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
     VICTORY_SUMMARY = "victory_summary"
+    RESULT_TRANSITION = "result_transition"
     RESULT = "result"
 
 
@@ -1379,6 +1380,8 @@ class BattleScene:
         self.victory_motion_frame = 0
         self.victory_summary_window: Window | None = None
         self.result_overlay: BattleResultOverlay | None = None
+        self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.result_transition_covered = False
         self.growth_jingle_played = False
         self.action_progression_weapon: Item | None = None
         self.action_progression_enemy_levels: tuple[int, ...] = ()
@@ -1440,6 +1443,10 @@ class BattleScene:
         if getattr(self, "phase", None) is BattlePhase.VICTORY_SUMMARY:
             self.input_device = input_state.device
             self._update_victory_summary(input_state)
+            return
+        if getattr(self, "phase", None) is BattlePhase.RESULT_TRANSITION:
+            self.input_device = input_state.device
+            self._update_result_transition()
             return
         if getattr(self, "phase", None) is BattlePhase.RESULT:
             self.input_device = input_state.device
@@ -1721,6 +1728,8 @@ class BattleScene:
         self.victory_motion_frame = 0
         self.victory_summary_window = None
         self.result_overlay = None
+        self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.result_transition_covered = False
         self.growth_jingle_played = False
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
@@ -3883,7 +3892,21 @@ class BattleScene:
             fonts=self.fonts,
             character_sprites=self.character_sprites,
         )
-        self.phase = BattlePhase.RESULT
+        self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.result_transition_fade.start()
+        self.result_transition_covered = False
+        self.phase = BattlePhase.RESULT_TRANSITION
+
+    def _update_result_transition(self) -> None:
+        event = self.result_transition_fade.update()
+        self.palette_shifter.set_global_mix(
+            base_rate=self.result_transition_fade.visible_rate,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+        if event is FadeEvent.COVERED:
+            self.result_transition_covered = True
+        elif event is FadeEvent.FINISHED:
+            self.phase = BattlePhase.RESULT
 
     def _update_result(self, input_state: InputState) -> None:
         overlay = self.result_overlay
@@ -4669,6 +4692,14 @@ class BattleScene:
     def draw(self) -> None:
         """Draw the battle screen in explicit back-to-front order."""
 
+        if (
+            getattr(self, "phase", None) is BattlePhase.RESULT_TRANSITION
+            and self.result_transition_covered
+        ):
+            if self.result_overlay is None:
+                raise RuntimeError("result transition requires a result overlay")
+            self.result_overlay.draw()
+            return
         if getattr(self, "phase", None) is BattlePhase.RESULT:
             if self.result_overlay is None:
                 raise RuntimeError("result phase requires a result overlay")
@@ -4935,7 +4966,10 @@ class BattleScene:
     def _party_sprite_source_x(self, index: int) -> int:
         if self._party_member_is_dead(index):
             return DEAD_SPRITE_SOURCE_X
-        if self.phase is BattlePhase.VICTORY_SUMMARY:
+        if self.phase in (
+            BattlePhase.VICTORY_SUMMARY,
+            BattlePhase.RESULT_TRANSITION,
+        ):
             motion_visible = (
                 self.victory_motion_frame + VICTORY_MOTION_VISIBLE_FRAMES + 10
             ) % VICTORY_MOTION_PERIOD < VICTORY_MOTION_VISIBLE_FRAMES
@@ -5395,7 +5429,10 @@ class BattleScene:
             self.party_target_cursor.draw()
 
     def _draw_timeline(self) -> None:
-        if self.phase is BattlePhase.VICTORY_SUMMARY:
+        if self.phase in (
+            BattlePhase.VICTORY_SUMMARY,
+            BattlePhase.RESULT_TRANSITION,
+        ):
             return
         if self.phase is BattlePhase.ENTRANCE:
             for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
@@ -5586,7 +5623,10 @@ class BattleScene:
         pyxel.rect(x, y + 18, 16, 1, color - 1)
 
     def _draw_windows(self) -> None:
-        if self.phase is BattlePhase.VICTORY_SUMMARY:
+        if self.phase in (
+            BattlePhase.VICTORY_SUMMARY,
+            BattlePhase.RESULT_TRANSITION,
+        ):
             if self.victory_summary_window is not None:
                 self.victory_summary_window.draw()
             return

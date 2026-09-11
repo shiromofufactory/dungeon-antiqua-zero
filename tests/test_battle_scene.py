@@ -14,9 +14,11 @@ from game import (
 )
 from input import Direction, InputButton, InputState
 from rendering import (
+    DEFAULT_FADE_FRAME_COUNT,
     ENCOUNTER_TRANSITION_FRAME_COUNT,
     EncounterTransition,
     FadePhase,
+    FadeThroughBlack,
 )
 from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
@@ -56,6 +58,31 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         )
 
         self.assertIs(scene.result, BattleResult.VICTORY)
+
+    def test_result_transition_fades_out_and_in_before_result(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.phase = BattlePhase.RESULT_TRANSITION
+        scene.result_transition_fade = FadeThroughBlack(
+            DEFAULT_FADE_FRAME_COUNT
+        )
+        scene.result_transition_fade.start()
+        scene.result_transition_covered = False
+        scene.palette_shifter = Mock(base_colors=(0,))
+
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            scene._update_result_transition()
+
+        self.assertTrue(scene.result_transition_covered)
+        self.assertIs(scene.phase, BattlePhase.RESULT_TRANSITION)
+
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            scene._update_result_transition()
+
+        self.assertIs(scene.phase, BattlePhase.RESULT)
+        scene.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=1.0,
+            target_color=0,
+        )
 
     def test_japanese_victory_numbers_use_fullwidth_glyphs(self) -> None:
         scene = BattleScene.__new__(BattleScene)

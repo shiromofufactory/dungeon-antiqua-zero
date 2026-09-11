@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
+from unittest.mock import patch
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
@@ -15,11 +17,19 @@ from member import EquipmentSlot, ProficiencyKind
 from resources import FontResources
 from state import SaveData, Settings
 from systems import BattleProgression, EnemyProgressionData
-from ui.battle_result import BattleResultOverlay, RESULT_ANIMATION_FRAME_COUNT
+from ui.battle_result import (
+    RESULT_ANIMATION_FRAME_COUNT,
+    RESULT_INCREMENT_SE_ID,
+    RESULT_WAIT_FRAME_COUNT,
+    BattleResultOverlay,
+)
 
 
 class BattleResultOverlayTest(unittest.TestCase):
     def setUp(self) -> None:
+        play_se_patcher = patch("ui.battle_result.play_se")
+        self.play_se = play_se_patcher.start()
+        self.addCleanup(play_se_patcher.stop)
         self.party = build_result_party(
             load_mock_character_records(),
             load_mock_items(),
@@ -43,6 +53,10 @@ class BattleResultOverlayTest(unittest.TestCase):
         )
 
     def test_interpolates_for_exactly_thirty_frames(self) -> None:
+        for _frame in range(RESULT_WAIT_FRAME_COUNT):
+            self.assertFalse(self.overlay.update(InputState()))
+            self.assertEqual(self.overlay.frame, 0)
+
         for _frame in range(RESULT_ANIMATION_FRAME_COUNT - 1):
             self.assertFalse(self.overlay.update(InputState()))
             self.assertFalse(self.overlay.animation_complete)
@@ -53,7 +67,9 @@ class BattleResultOverlayTest(unittest.TestCase):
     def test_accepts_only_confirm_after_animation(self) -> None:
         early_confirm = InputState(confirm=InputButton(triggered=True))
         self.assertFalse(self.overlay.update(early_confirm))
-        for _frame in range(RESULT_ANIMATION_FRAME_COUNT - 1):
+        for _frame in range(RESULT_WAIT_FRAME_COUNT - 1):
+            self.overlay.update(InputState())
+        for _frame in range(RESULT_ANIMATION_FRAME_COUNT):
             self.overlay.update(InputState())
 
         self.assertFalse(self.overlay.update(InputState()))
@@ -62,14 +78,64 @@ class BattleResultOverlayTest(unittest.TestCase):
         )
 
     def test_marks_level_and_max_hp_growth_with_positive_color(self) -> None:
-        for _frame in range(RESULT_ANIMATION_FRAME_COUNT):
+        for _frame in range(
+            RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT
+        ):
             self.overlay.update(InputState())
 
         texts = [placement.text for placement in self.overlay.windows[0].texts]
-        self.assertTrue(any(text.startswith("%COL_POSITIVE%ＨＰ") for text in texts))
+        hp_text = next(text for text in texts if text.startswith("ＨＰ"))
+        self.assertNotIn("%COL_POSITIVE%ＨＰ", hp_text)
+        self.assertIn("／%COL_POSITIVE%", hp_text)
+        self.assertTrue(hp_text.endswith("%COL_END%"))
         self.assertTrue(
             any("%COL_POSITIVE%%KNIFE%" in text for text in texts)
         )
+
+    def test_plays_se_two_only_when_a_displayed_number_changes(self) -> None:
+        for _frame in range(RESULT_WAIT_FRAME_COUNT):
+            self.overlay.update(InputState())
+        self.play_se.assert_not_called()
+
+        previous = self.overlay._displayed_numbers(0)
+        changed_frame_count = 0
+        for _frame in range(RESULT_ANIMATION_FRAME_COUNT):
+            self.overlay.update(InputState())
+            current = self.overlay._displayed_numbers(0)
+            if current != previous:
+                changed_frame_count += 1
+            previous = current
+
+        self.assertGreater(changed_frame_count, 0)
+        self.assertEqual(self.play_se.call_count, changed_frame_count)
+        self.play_se.assert_called_with(RESULT_INCREMENT_SE_ID)
+
+    def test_marks_only_the_max_mp_number_with_positive_color(self) -> None:
+        before = self.overlay.growth.before[0]
+        growth = replace(
+            self.overlay.growth,
+            after=(replace(before, max_mp=before.max_mp + 1),),
+        )
+        overlay = BattleResultOverlay(
+            party=self.party,
+            growth=growth,
+            settings=Settings(),
+            fonts=FontResources(),
+            character_sprites=object(),
+        )
+        for _frame in range(
+            RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT
+        ):
+            overlay.update(InputState())
+
+        mp_text = next(
+            placement.text
+            for placement in overlay.windows[0].texts
+            if placement.text.startswith("ＭＰ")
+        )
+        self.assertNotIn("%COL_POSITIVE%ＭＰ", mp_text)
+        self.assertIn("／%COL_POSITIVE%", mp_text)
+        self.assertTrue(mp_text.endswith("%COL_END%"))
 
 
 if __name__ == "__main__":

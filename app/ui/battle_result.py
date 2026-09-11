@@ -9,7 +9,7 @@ import pyxel
 from input import InputState
 from localization import Localizer
 from member import EquipmentSlot, Member, ProficiencyKind
-from resources import FontResources, TRANSPARENT_INDEX
+from resources import FontResources, TRANSPARENT_INDEX, play_se
 from state import Language, Settings
 from systems.battle_progression import (
     BattleGrowthResult,
@@ -22,6 +22,8 @@ from .text_format import pad
 from .window import Window, WindowFactory, WindowText
 
 RESULT_ANIMATION_FRAME_COUNT = 30
+RESULT_WAIT_FRAME_COUNT = 12
+RESULT_INCREMENT_SE_ID = "result_increment"
 RESULT_WINDOW_COLUMNS = 2
 RESULT_WINDOW_GRID_WIDTH = 32
 RESULT_WINDOW_GRID_HEIGHT = 20
@@ -107,6 +109,7 @@ class BattleResultOverlay:
         self.growth = growth
         self.character_sprites = character_sprites
         self.frame = 0
+        self.wait_frame = 0
         self.localizer = Localizer(settings.language)
         self.localized_texts = LocalizedWindowTextFactory.from_language(
             fonts,
@@ -128,11 +131,45 @@ class BattleResultOverlay:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        if self.wait_frame < RESULT_WAIT_FRAME_COUNT:
+            self.wait_frame += 1
+            return False
         if not self.animation_complete:
+            before = tuple(
+                self._displayed_numbers(index) for index in range(len(self.party))
+            )
             self.frame += 1
             self._refresh()
+            after = tuple(
+                self._displayed_numbers(index) for index in range(len(self.party))
+            )
+            if after != before:
+                play_se(RESULT_INCREMENT_SE_ID)
             return False
         return input_state.confirm.triggered
+
+    def _displayed_numbers(self, index: int) -> tuple[int, ...]:
+        snapshot = self._snapshot(index)
+        member = self.party[index]
+        proficiency_kinds = (
+            *(
+                kind
+                for slot in WEAPON_HAND_ORDER
+                if (kind := _weapon_kind(member, slot)) is not None
+            ),
+            *(
+                kind
+                for kind in SPELL_PROFICIENCY_ORDER
+                if member.proficiency(kind).max_level > 0
+            ),
+        )
+        return (
+            snapshot.hp,
+            snapshot.max_hp,
+            snapshot.mp,
+            snapshot.max_mp,
+            *(snapshot.proficiencies[kind].total for kind in proficiency_kinds),
+        )
 
     def _snapshot(self, index: int) -> MemberGrowthSnapshot:
         before = self.growth.before[index]
@@ -176,15 +213,19 @@ class BattleResultOverlay:
                 baseline_offset=placement.baseline_offset,
                 font_spans=placement.font_spans,
             )
-            hp_color = "%COL_POSITIVE%" if after.max_hp > before.max_hp else ""
-            mp_color = "%COL_POSITIVE%" if after.max_mp > before.max_mp else ""
+            hp_max = pad(current.max_hp, 3)
+            if after.max_hp > before.max_hp:
+                hp_max = f"%COL_POSITIVE%{hp_max}%COL_END%"
+            mp_max = pad(current.max_mp, 3)
+            if after.max_mp > before.max_mp:
+                mp_max = f"%COL_POSITIVE%{mp_max}%COL_END%"
             window.add_text(
-                f"{hp_color}ＨＰ　{pad(current.hp, 3)}／{pad(current.max_hp, 3)}",
+                f"ＨＰ　{pad(current.hp, 3)}／{hp_max}",
                 RESULT_TEXT_GRID_X,
                 RESULT_HP_GRID_Y,
             )
             window.add_text(
-                f"{mp_color}ＭＰ　{pad(current.mp, 3)}／{pad(current.max_mp, 3)}",
+                f"ＭＰ　{pad(current.mp, 3)}／{mp_max}",
                 RESULT_TEXT_GRID_X,
                 RESULT_MP_GRID_Y,
             )
@@ -267,6 +308,7 @@ __all__ = [
     "BattleResultOverlay",
     "MISSING_RESULT_SPRITE_CHARACTER_KEYS",
     "RESULT_ANIMATION_FRAME_COUNT",
+    "RESULT_INCREMENT_SE_ID",
     "RESULT_CHARACTER_GRID_X",
     "RESULT_CHARACTER_GRID_Y",
     "RESULT_CHARACTER_SPRITE_HEIGHT",
@@ -277,6 +319,7 @@ __all__ = [
     "RESULT_SPELL_GRID_Y",
     "RESULT_TEXT_GRID_X",
     "RESULT_WEAPON_GRID_Y",
+    "RESULT_WAIT_FRAME_COUNT",
     "RESULT_WINDOW_COLUMNS",
     "RESULT_WINDOW_GRID_HEIGHT",
     "RESULT_WINDOW_GRID_WIDTH",

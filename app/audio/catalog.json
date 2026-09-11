@@ -33,6 +33,10 @@
       "channel": 1,
       "sound": 9
     },
+    "result_increment": {
+      "channel": 1,
+      "sound": 2
+    },
     "teleport": {
       "channel": 0,
       "sound": 8
