@@ -5,6 +5,7 @@ from math import ceil, hypot
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from tools._bootstrap import APP_ROOT  # noqa: F401 - add app to sys.path
 from tools.screen_mocks._fixtures import (
     load_mock_items,
     load_mock_party,
@@ -15,10 +16,13 @@ from tools.screen_mocks.battle import (
     BATTLE_POPUP_FRAME_COUNT,
     BATTLE_HIT_SE_ID,
     BATTLE_MONSTER_ESCAPE_SE_ID,
+    MONSTER_CHARGE_APPROACH_ACCELERATION,
+    MONSTER_CHARGE_APPROACH_ACCELERATION_INTERVAL,
+    MONSTER_CHARGE_APPROACH_INITIAL_SPEED,
     MONSTER_CHARGE_ATTACK_MULTIPLIER_DENOMINATOR,
     MONSTER_CHARGE_ATTACK_MULTIPLIER_NUMERATOR,
     MONSTER_CHARGE_MAX_JUMP_HEIGHT,
-    MONSTER_CHARGE_MOVE_SPEED,
+    MONSTER_CHARGE_RETURN_SPEED,
     MONSTER_ESCAPE_SPEED,
     MONSTER_ESCAPE_START_DELAY_FRAME_COUNT,
     MONSTER_POSITIONS,
@@ -26,6 +30,8 @@ from tools.screen_mocks.battle import (
     BattleMonsterChargePresentation,
     BattleScreenMock,
     BattleMockMonster,
+    monster_charge_approach_distance,
+    monster_charge_approach_frame_count,
 )
 from battle_physical import member_physical_attack
 from member import EquipmentSlot
@@ -51,6 +57,25 @@ def charge_monster(*, is_front_row: bool = True) -> BattleMockMonster:
 
 
 class MonsterChargePresentationTest(unittest.TestCase):
+    def test_approach_starts_at_eight_and_accelerates_every_two_frames(
+        self,
+    ) -> None:
+        distances = tuple(
+            monster_charge_approach_distance(frame)
+            for frame in range(6)
+        )
+        per_frame = tuple(
+            current - previous
+            for previous, current in zip(distances, distances[1:])
+        )
+
+        self.assertEqual(MONSTER_CHARGE_APPROACH_INITIAL_SPEED, 8)
+        self.assertEqual(MONSTER_CHARGE_APPROACH_ACCELERATION_INTERVAL, 2)
+        self.assertEqual(MONSTER_CHARGE_APPROACH_ACCELERATION, 1)
+        self.assertEqual(per_frame, (8, 8, 9, 9, 10))
+        self.assertEqual(monster_charge_approach_frame_count(34), 4)
+        self.assertEqual(monster_charge_approach_frame_count(35), 5)
+
     def test_escape_comparison_uses_total_attack_not_status_weapon_value(self) -> None:
         member = load_mock_party(load_mock_items(), load_mock_skills())[0]
         weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
@@ -82,14 +107,12 @@ class MonsterChargePresentationTest(unittest.TestCase):
 
         mock._begin_monster_charge(actor)
 
-        expected_target = (132, 160)
-        expected_frames = ceil(
-            hypot(
-                expected_target[0] - MONSTER_POSITIONS[0][0],
-                expected_target[1] - MONSTER_POSITIONS[0][1],
-            )
-            / MONSTER_CHARGE_MOVE_SPEED
+        expected_target = (136, 160)
+        expected_distance = hypot(
+            expected_target[0] - MONSTER_POSITIONS[0][0],
+            expected_target[1] - MONSTER_POSITIONS[0][1],
         )
+        expected_frames = monster_charge_approach_frame_count(expected_distance)
         self.assertEqual(
             mock._resolve_monster_attack.call_args.kwargs["attack"],
             10
@@ -103,6 +126,10 @@ class MonsterChargePresentationTest(unittest.TestCase):
             expected_target,
         )
         self.assertEqual(presentation.approach_frame_count, expected_frames)
+        self.assertEqual(
+            presentation.return_frame_count,
+            ceil(expected_distance / MONSTER_CHARGE_RETURN_SPEED),
+        )
         self.assertEqual(mock.action_gauge_adjustment, AIM_GAUGE_ADJUSTMENT)
         self.assertEqual(
             presentation.jump_height,
@@ -125,9 +152,11 @@ class MonsterChargePresentationTest(unittest.TestCase):
             is_critical=False,
             start_x=0,
             start_y=40,
-            target_x=80,
-            target_y=80,
+            target_x=16,
+            target_y=40,
+            travel_distance=16,
             approach_frame_count=2,
+            return_frame_count=2,
             jump_height=32,
         )
         mock.monster_attack_target_index = None
@@ -153,8 +182,8 @@ class MonsterChargePresentationTest(unittest.TestCase):
         assert presentation is not None
         presentation.elapsed_frame = 3
         x, y = presentation.position()
-        self.assertEqual(x, 40)
-        self.assertLess(y, 60)
+        self.assertEqual(x, 8)
+        self.assertLess(y, 40)
 
 
 class MonsterEscapePresentationTest(unittest.TestCase):

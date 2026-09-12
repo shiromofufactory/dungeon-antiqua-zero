@@ -244,15 +244,18 @@ DA2_BLINK_VISIBLE_FRAMES = 3
 MONSTER_BLINK_FRAME_COUNT = DA2_BLINK_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_PERIOD = DA2_BLINK_PERIOD * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_VISIBLE_FRAMES = DA2_BLINK_VISIBLE_FRAMES * FPS // DA2_REFERENCE_FPS
-# Monster special-action tuning values. Charge uses straight-line travel at
-# this speed in both directions. Its return arc scales from the actual travel
-# frame count so the longest layout-supported trip reaches approximately the
-# configured maximum height.
-MONSTER_CHARGE_MOVE_SPEED = 8
+# Monster special-action tuning values. Charge accelerates only on approach;
+# return movement remains constant-speed. Its return arc scales from the
+# actual approach frame count so the longest layout-supported trip reaches
+# approximately the configured maximum height.
+MONSTER_CHARGE_APPROACH_INITIAL_SPEED = 8
+MONSTER_CHARGE_APPROACH_ACCELERATION_INTERVAL = 2
+MONSTER_CHARGE_APPROACH_ACCELERATION = 1
+MONSTER_CHARGE_RETURN_SPEED = 8
 MONSTER_CHARGE_MAX_JUMP_HEIGHT = 64
 MONSTER_CHARGE_ATTACK_MULTIPLIER_NUMERATOR = 3
 MONSTER_CHARGE_ATTACK_MULTIPLIER_DENOMINATOR = 2
-MONSTER_CHARGE_TARGET_CENTER_OFFSET_X = 0
+MONSTER_CHARGE_TARGET_CENTER_OFFSET_X = 4
 DA2_MONSTER_ESCAPE_SPEED = 16
 MONSTER_ESCAPE_SPEED = DA2_MONSTER_ESCAPE_SPEED * DA2_REFERENCE_FPS // FPS
 DA2_MONSTER_ESCAPE_START_DELAY_FRAME_COUNT = 3
@@ -496,6 +499,34 @@ DA2_MONSTER_TARGET_ORDER = {
     ),
 }
 RecordValue = TypeVar("RecordValue")
+
+
+def monster_charge_approach_distance(frame_count: int) -> int:
+    """Return distance covered by ZERO's accelerating charge approach."""
+
+    if isinstance(frame_count, bool) or not isinstance(frame_count, int):
+        raise TypeError("charge frame_count must be an integer")
+    if frame_count < 0:
+        raise ValueError("charge frame_count must not be negative")
+    return sum(
+        MONSTER_CHARGE_APPROACH_INITIAL_SPEED
+        + frame // MONSTER_CHARGE_APPROACH_ACCELERATION_INTERVAL
+        * MONSTER_CHARGE_APPROACH_ACCELERATION
+        for frame in range(frame_count)
+    )
+
+
+def monster_charge_approach_frame_count(distance: float) -> int:
+    """Return frames needed for the accelerating approach to cover distance."""
+
+    if isinstance(distance, bool) or not isinstance(distance, (int, float)):
+        raise TypeError("charge distance must be numeric")
+    if distance < 0:
+        raise ValueError("charge distance must not be negative")
+    frame_count = 1
+    while monster_charge_approach_distance(frame_count) < distance:
+        frame_count += 1
+    return frame_count
 
 
 class BattleDataError(ValueError):
@@ -827,7 +858,9 @@ class BattleMonsterChargePresentation:
     start_y: int
     target_x: int
     target_y: int
+    travel_distance: float
     approach_frame_count: int
+    return_frame_count: int
     jump_height: int
     elapsed_frame: int = 0
     damage_applied: bool = False
@@ -835,6 +868,10 @@ class BattleMonsterChargePresentation:
     def __post_init__(self) -> None:
         if self.approach_frame_count <= 0:
             raise ValueError("charge approach_frame_count must be positive")
+        if self.return_frame_count <= 0:
+            raise ValueError("charge return_frame_count must be positive")
+        if self.travel_distance < 0:
+            raise ValueError("charge travel_distance must not be negative")
         if self.jump_height < 0:
             raise ValueError("charge jump_height must not be negative")
 
@@ -844,7 +881,9 @@ class BattleMonsterChargePresentation:
 
     @property
     def motion_complete(self) -> bool:
-        return self.elapsed_frame >= self.approach_frame_count * 2
+        return self.elapsed_frame >= (
+            self.approach_frame_count + self.return_frame_count
+        )
 
     @property
     def result_elapsed_frame(self) -> int:
@@ -864,18 +903,37 @@ class BattleMonsterChargePresentation:
     def position(self) -> tuple[int, int]:
         """Return the current straight approach or parabolic return position."""
 
-        duration = self.approach_frame_count
-        if self.elapsed_frame <= duration:
-            elapsed = min(self.elapsed_frame, duration)
-            x = self.start_x + (self.target_x - self.start_x) * elapsed // duration
-            y = self.start_y + (self.target_y - self.start_y) * elapsed // duration
+        approach_duration = self.approach_frame_count
+        if self.elapsed_frame <= approach_duration:
+            if self.elapsed_frame >= approach_duration or self.travel_distance == 0:
+                return self.target_x, self.target_y
+            traveled = min(
+                monster_charge_approach_distance(self.elapsed_frame),
+                self.travel_distance,
+            )
+            progress = traveled / self.travel_distance
+            x = round(self.start_x + (self.target_x - self.start_x) * progress)
+            y = round(self.start_y + (self.target_y - self.start_y) * progress)
             return x, y
 
-        elapsed = min(self.elapsed_frame - duration, duration)
-        x = self.target_x + (self.start_x - self.target_x) * elapsed // duration
-        linear_y = self.target_y + (self.start_y - self.target_y) * elapsed // duration
-        remaining = duration - elapsed
-        jump = 4 * self.jump_height * elapsed * remaining // (duration**2)
+        return_duration = self.return_frame_count
+        elapsed = min(self.elapsed_frame - approach_duration, return_duration)
+        x = (
+            self.target_x
+            + (self.start_x - self.target_x) * elapsed // return_duration
+        )
+        linear_y = (
+            self.target_y
+            + (self.start_y - self.target_y) * elapsed // return_duration
+        )
+        remaining = return_duration - elapsed
+        jump = (
+            4
+            * self.jump_height
+            * elapsed
+            * remaining
+            // (return_duration**2)
+        )
         return x, linear_y - jump
 
 
@@ -5386,7 +5444,8 @@ class BattleScene:
         start_x, start_y = MONSTER_POSITIONS[actor_index]
         target_x, target_y = self._monster_charge_destination(actor, target_index)
         distance = hypot(target_x - start_x, target_y - start_y)
-        approach_frames = max(1, ceil(distance / MONSTER_CHARGE_MOVE_SPEED))
+        approach_frames = monster_charge_approach_frame_count(distance)
+        return_frames = max(1, ceil(distance / MONSTER_CHARGE_RETURN_SPEED))
         reference_frames = self._monster_charge_reference_frame_count(actor)
         jump_height = max(
             1,
@@ -5403,7 +5462,9 @@ class BattleScene:
             start_y=start_y,
             target_x=target_x,
             target_y=target_y,
+            travel_distance=distance,
             approach_frame_count=approach_frames,
+            return_frame_count=return_frames,
             jump_height=min(MONSTER_CHARGE_MAX_JUMP_HEIGHT, jump_height),
         )
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT
@@ -5446,7 +5507,7 @@ class BattleScene:
                         maximum_distance,
                         hypot(target_x - start_x, target_y - start_y),
                     )
-        return max(1, ceil(maximum_distance / MONSTER_CHARGE_MOVE_SPEED))
+        return monster_charge_approach_frame_count(maximum_distance)
 
     def _update_monster_charge(self) -> None:
         presentation = self.monster_charge_presentation
