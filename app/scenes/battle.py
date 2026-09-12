@@ -6,6 +6,7 @@ import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from math import ceil, hypot
 from pathlib import Path
 from typing import Callable, TypeVar
 
@@ -36,8 +37,13 @@ from battle_magic import (
     resolve_spell_damage,
     resolve_status_spell,
 )
+from monster_ai import MonsterAction, select_monster_action
 from battle_speed import MIN_SPEED_MODIFIER, modified_agility
-from battle_physical import member_physical_attack, resolve_physical_attack
+from battle_physical import (
+    PhysicalAttackResult,
+    member_physical_attack,
+    resolve_physical_attack,
+)
 from battle_timeline import (
     TimelineAdvance,
     TimelineOrder,
@@ -58,6 +64,8 @@ from member import (
 from monster import (
     MonsterBattleState,
     MonsterCombatStats,
+    MonsterSpecialAction,
+    monster_special_actions_from_record,
     promote_rear_monsters_if_front_empty,
 )
 from resistance import ResistanceType, resistances_from_tolerance
@@ -124,6 +132,7 @@ BATTLE_WIN_BGM_ID = "da3-win"
 BATTLE_LEVEL_UP_BGM_ID = "da3-lvup"
 BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
+BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
 BATTLE_FOCUS_SE_ID = "battle_focus"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
@@ -235,6 +244,21 @@ DA2_BLINK_VISIBLE_FRAMES = 3
 MONSTER_BLINK_FRAME_COUNT = DA2_BLINK_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_PERIOD = DA2_BLINK_PERIOD * FPS // DA2_REFERENCE_FPS
 MONSTER_BLINK_VISIBLE_FRAMES = DA2_BLINK_VISIBLE_FRAMES * FPS // DA2_REFERENCE_FPS
+# Monster special-action tuning values. Charge uses straight-line travel at
+# this speed in both directions. Its return arc scales from the actual travel
+# frame count so the longest layout-supported trip reaches approximately the
+# configured maximum height.
+MONSTER_CHARGE_MOVE_SPEED = 8
+MONSTER_CHARGE_MAX_JUMP_HEIGHT = 64
+MONSTER_CHARGE_ATTACK_MULTIPLIER_NUMERATOR = 3
+MONSTER_CHARGE_ATTACK_MULTIPLIER_DENOMINATOR = 2
+MONSTER_CHARGE_TARGET_CENTER_OFFSET_X = 0
+DA2_MONSTER_ESCAPE_SPEED = 16
+MONSTER_ESCAPE_SPEED = DA2_MONSTER_ESCAPE_SPEED * DA2_REFERENCE_FPS // FPS
+DA2_MONSTER_ESCAPE_START_DELAY_FRAME_COUNT = 3
+MONSTER_ESCAPE_START_DELAY_FRAME_COUNT = (
+    DA2_MONSTER_ESCAPE_START_DELAY_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
+)
 DA2_DAMAGE_VERTICAL_OFFSETS = (
     2,
     8,
@@ -792,6 +816,70 @@ class BattleAttackPresentation:
 
 
 @dataclass
+class BattleMonsterChargePresentation:
+    """Own ZERO's approach, impact, and parabolic charge return."""
+
+    actor_index: int
+    target_index: int
+    damage: int
+    is_critical: bool
+    start_x: int
+    start_y: int
+    target_x: int
+    target_y: int
+    approach_frame_count: int
+    jump_height: int
+    elapsed_frame: int = 0
+    damage_applied: bool = False
+
+    def __post_init__(self) -> None:
+        if self.approach_frame_count <= 0:
+            raise ValueError("charge approach_frame_count must be positive")
+        if self.jump_height < 0:
+            raise ValueError("charge jump_height must not be negative")
+
+    @property
+    def impact_reached(self) -> bool:
+        return self.elapsed_frame >= self.approach_frame_count
+
+    @property
+    def motion_complete(self) -> bool:
+        return self.elapsed_frame >= self.approach_frame_count * 2
+
+    @property
+    def result_elapsed_frame(self) -> int:
+        return self.elapsed_frame - self.approach_frame_count
+
+    @property
+    def result_complete(self) -> bool:
+        frame_count = (
+            MONSTER_MISS_FRAME_COUNT if self.damage == 0 else MONSTER_DAMAGE_FRAME_COUNT
+        )
+        return self.result_elapsed_frame >= frame_count
+
+    @property
+    def completed(self) -> bool:
+        return self.motion_complete and self.result_complete
+
+    def position(self) -> tuple[int, int]:
+        """Return the current straight approach or parabolic return position."""
+
+        duration = self.approach_frame_count
+        if self.elapsed_frame <= duration:
+            elapsed = min(self.elapsed_frame, duration)
+            x = self.start_x + (self.target_x - self.start_x) * elapsed // duration
+            y = self.start_y + (self.target_y - self.start_y) * elapsed // duration
+            return x, y
+
+        elapsed = min(self.elapsed_frame - duration, duration)
+        x = self.target_x + (self.start_x - self.target_x) * elapsed // duration
+        linear_y = self.target_y + (self.start_y - self.target_y) * elapsed // duration
+        remaining = duration - elapsed
+        jump = 4 * self.jump_height * elapsed * remaining // (duration**2)
+        return x, linear_y - jump
+
+
+@dataclass
 class BattleTimedPopup:
     """A non-blocking battle popup whose timer survives phase changes."""
 
@@ -895,6 +983,7 @@ class BattleMonster:
     is_front_row: bool
     state: MonsterBattleState
     agility: int
+    special_actions: tuple[MonsterSpecialAction, ...] = ()
     level: int = 1
     early_appear: int = 0
     max_occurrence: int = 1
@@ -953,6 +1042,7 @@ class BattleMonster:
             state=MonsterBattleState.from_record(record),
             combat_stats=MonsterCombatStats.from_record(record),
             agility=_required_nonnegative_integer(record, "agi", key),
+            special_actions=monster_special_actions_from_record(record),
             level=_required_nonnegative_integer(record, "lv", key),
             early_appear=_required_nonnegative_integer(
                 record, "early_appear", key
@@ -1402,6 +1492,12 @@ class BattleScene:
         self.monster_attack_damage: int | None = None
         self.monster_attack_critical = False
         self.monster_attack_animation_frame = 0
+        self.monster_attack_damage_applied = False
+        self.monster_action: MonsterAction | None = None
+        self.monster_charge_presentation: BattleMonsterChargePresentation | None = None
+        self.monster_escape_actor_index: int | None = None
+        self.monster_escape_animation_frame = 0
+        self.escaped_monster_indexes: set[int] = set()
         self.timeline_animation_phase: TimelineAnimationPhase | None = None
         self.timeline_animation_frame = 0
         self.timeline_advance: (
@@ -1763,6 +1859,12 @@ class BattleScene:
         self.monster_attack_damage = None
         self.monster_attack_critical = False
         self.monster_attack_animation_frame = 0
+        self.monster_attack_damage_applied = False
+        self.monster_action = None
+        self.monster_charge_presentation = None
+        self.monster_escape_actor_index = None
+        self.monster_escape_animation_frame = 0
+        self.escaped_monster_indexes.clear()
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
         self.timeline_advance = None
@@ -3761,8 +3863,28 @@ class BattleScene:
             BATTLE_POPUP_FRAME_COUNT,
         )
 
-    def _show_battle_popup(self, message: str, frame_count: int) -> None:
-        """Right-align a content-sized action popup and restart its timer."""
+    def _show_monster_action_message(self, text_key: str) -> None:
+        """Show one content-sized monster action popup at the upper left."""
+
+        if (
+            getattr(self, "action_popup_window", None) is None
+            or getattr(self, "battle_popup", None) is None
+        ):
+            return
+        self._show_battle_popup(
+            self.texts.text(text_key, self.localizer),
+            BATTLE_POPUP_FRAME_COUNT,
+            align_left=True,
+        )
+
+    def _show_battle_popup(
+        self,
+        message: str,
+        frame_count: int,
+        *,
+        align_left: bool = False,
+    ) -> None:
+        """Place a content-sized action popup and restart its timer."""
 
         window = getattr(self, "action_popup_window", None)
         battle_popup = getattr(self, "battle_popup", None)
@@ -3774,7 +3896,7 @@ class BattleScene:
             BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID
             + (text_width + TEXT_GRID_X - 1) // TEXT_GRID_X,
         )
-        window.x = SCREEN_WIDTH // TEXT_GRID_X - window.width
+        window.x = 0 if align_left else SCREEN_WIDTH // TEXT_GRID_X - window.width
         window.clear_texts()
         window.add_text(message, *BATTLE_ACTION_POPUP_TEXT_POSITION)
         battle_popup.show(frame_count)
@@ -4775,6 +4897,11 @@ class BattleScene:
             self.monster_attack_damage = None
             self.monster_attack_critical = False
             self.monster_attack_animation_frame = 0
+            self.monster_attack_damage_applied = False
+            self.monster_action = None
+            self.monster_charge_presentation = None
+            self.monster_escape_actor_index = None
+            self.monster_escape_animation_frame = 0
             if self._apply_turn_start_poison(actor):
                 return
             if actor.state.elapse_sleep_turn():
@@ -4782,7 +4909,7 @@ class BattleScene:
                 self.monster_blink_frames_remaining = 0
                 self._start_timeline_animation()
                 return
-            if not self._monster_attack_target_indexes(actor):
+            if not self._monster_can_attempt_action(actor):
                 self.blinking_monster_index = None
                 self.monster_blink_frames_remaining = 0
                 self._start_timeline_animation()
@@ -4873,6 +5000,23 @@ class BattleScene:
             index
             for index in self._active_party_indexes()
             if self._party_member_is_front_row(index)
+        )
+
+    def _monster_charge_target_indexes(self) -> tuple[int, ...]:
+        """Return every living member because charge has ranged reach."""
+
+        return self._active_party_indexes()
+
+    def _monster_can_attempt_action(self, actor: BattleMonster) -> bool:
+        """Return whether a monster has any action worth evaluating."""
+
+        if self._monster_attack_target_indexes(actor):
+            return True
+        if MonsterSpecialAction.CHARGE in actor.special_actions:
+            return bool(self._monster_charge_target_indexes())
+        return (
+            MonsterSpecialAction.ESCAPE in actor.special_actions
+            and bool(self._active_party_indexes())
         )
 
     def _active_member_attack_targets(self) -> tuple[int, ...]:
@@ -5104,6 +5248,12 @@ class BattleScene:
 
     def _update_monster_action(self) -> None:
         self.command_window.update(None)
+        if getattr(self, "monster_charge_presentation", None) is not None:
+            self._update_monster_charge()
+            return
+        if getattr(self, "monster_escape_actor_index", None) is not None:
+            self._update_monster_escape()
+            return
         if self.monster_attack_target_index is not None:
             self.monster_attack_animation_frame += 1
             if (
@@ -5120,40 +5270,244 @@ class BattleScene:
         if not isinstance(actor, BattleMonster):
             self._start_timeline_animation()
             return
-        target_indexes = self._monster_attack_target_indexes(actor)
-        if not target_indexes:
+        action = self._select_monster_action(actor)
+        if action is None:
             self._start_timeline_animation()
             return
+        self.monster_action = action
+        self.blinking_monster_index = None
         if hasattr(self, "progression"):
             self.progression.record_enemy_action(self.monsters.index(actor))
-        self.monster_attack_target_index = random.choice(target_indexes)
-        target = self.party[self.monster_attack_target_index]
+        if action is MonsterAction.ESCAPE:
+            self._begin_monster_escape(actor)
+            return
+        if action is MonsterAction.CHARGE:
+            self._begin_monster_charge(actor)
+            return
+        self._begin_standard_monster_attack(actor)
+
+    def _select_monster_action(
+        self,
+        actor: BattleMonster,
+    ) -> MonsterAction | None:
+        """Evaluate structured specials and choose one equal-weight candidate."""
+
+        party_attacks: tuple[int, ...] = ()
+        if MonsterSpecialAction.ESCAPE in actor.special_actions:
+            party_attacks = tuple(
+                self._member_actual_physical_attack(self.party[index])
+                for index in self._active_party_indexes()
+            )
+        return select_monster_action(
+            special_actions=actor.special_actions,
+            is_front_row=actor.is_front_row,
+            can_attack=bool(self._monster_attack_target_indexes(actor)),
+            can_charge=bool(self._monster_charge_target_indexes()),
+            party_actual_attacks=party_attacks,
+            monster_attack=actor.combat_stats.attack,
+        )
+
+    @staticmethod
+    def _member_actual_physical_attack(member: object) -> int:
+        """Return the same total attack used by an actual member strike."""
+
+        if not isinstance(member, Member):
+            return max(0, int(getattr(member, "actual_attack", 0)))
+        weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+        if weapon is None:
+            return 0
+        return member_physical_attack(
+            weapon_attack=member.battle_stats.attack_right,
+            strength=member.adjusted_abilities.strength,
+            weapon_level=member.weapon_level(weapon),
+            internal_level=member.internal_level,
+        )
+
+    def _resolve_monster_attack(
+        self,
+        actor: BattleMonster,
+        target_indexes: tuple[int, ...],
+        *,
+        attack: int,
+    ) -> tuple[int, PhysicalAttackResult]:
+        """Resolve one monster physical attack without starting presentation."""
+
+        target_index = random.choice(target_indexes)
+        target = self.party[target_index]
         target_stats = target.battle_stats
         target_incapacitated = bool(getattr(target, "sleeping", 0))
         result = resolve_physical_attack(
-            attack=actor.combat_stats.attack,
+            attack=attack,
             hit=actor.combat_stats.hit,
             agility=actor.effective_agility,
             target_defense=target_stats.defense,
             target_evasion=target_stats.evasion,
             hit_roll=random.randint(0, 99),
             target_defending=(
-                self.monster_attack_target_index in self.defending_party_indexes
+                target_index in self.defending_party_indexes
             ),
             target_unable_to_evade=(
-                self.monster_attack_target_index
-                in getattr(self, "focused_target_by_party_index", {})
+                target_index in getattr(self, "focused_target_by_party_index", {})
             ),
             target_incapacitated=target_incapacitated,
             critical_roll=(
                 random.randint(0, 99) if target_incapacitated else None
             ),
         )
+        return target_index, result
+
+    def _begin_standard_monster_attack(self, actor: BattleMonster) -> None:
+        target_index, result = self._resolve_monster_attack(
+            actor,
+            self._monster_attack_target_indexes(actor),
+            attack=actor.combat_stats.attack,
+        )
+        self.monster_attack_target_index = target_index
         self.monster_attack_damage = result.damage
         self.monster_attack_critical = getattr(result, "critical", False)
         self.monster_attack_animation_frame = 0
+        self.monster_attack_damage_applied = False
         if result.hit:
             play_se(BATTLE_HIT_SE_ID)
+
+    def _begin_monster_charge(self, actor: BattleMonster) -> None:
+        """Start a ranged 1.5x charge toward one living party member."""
+
+        actor_index = self.monsters.index(actor)
+        target_index, result = self._resolve_monster_attack(
+            actor,
+            self._monster_charge_target_indexes(),
+            attack=(
+                actor.combat_stats.attack
+                * MONSTER_CHARGE_ATTACK_MULTIPLIER_NUMERATOR
+                // MONSTER_CHARGE_ATTACK_MULTIPLIER_DENOMINATOR
+            ),
+        )
+        start_x, start_y = MONSTER_POSITIONS[actor_index]
+        target_x, target_y = self._monster_charge_destination(actor, target_index)
+        distance = hypot(target_x - start_x, target_y - start_y)
+        approach_frames = max(1, ceil(distance / MONSTER_CHARGE_MOVE_SPEED))
+        reference_frames = self._monster_charge_reference_frame_count(actor)
+        jump_height = max(
+            1,
+            MONSTER_CHARGE_MAX_JUMP_HEIGHT
+            * approach_frames
+            // reference_frames,
+        )
+        self.monster_charge_presentation = BattleMonsterChargePresentation(
+            actor_index=actor_index,
+            target_index=target_index,
+            damage=result.damage,
+            is_critical=getattr(result, "critical", False),
+            start_x=start_x,
+            start_y=start_y,
+            target_x=target_x,
+            target_y=target_y,
+            approach_frame_count=approach_frames,
+            jump_height=min(MONSTER_CHARGE_MAX_JUMP_HEIGHT, jump_height),
+        )
+        self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT
+        self._show_monster_action_message("battle.monster.charge")
+
+    def _monster_charge_destination(
+        self,
+        actor: BattleMonster,
+        target_index: int,
+    ) -> tuple[int, int]:
+        position = self._party_draw_position(target_index)
+        if position is None:
+            raise RuntimeError("charge target must be visible")
+        party_x, party_y = position
+        return (
+            party_x
+            + PARTY_SPRITE_WIDTH // 2
+            + MONSTER_CHARGE_TARGET_CENTER_OFFSET_X
+            - actor.width,
+            party_y + 16 - actor.height // 2,
+        )
+
+    @staticmethod
+    def _monster_charge_reference_frame_count(actor: BattleMonster) -> int:
+        """Return the longest layout-supported approach for this image size."""
+
+        maximum_distance = 0.0
+        for start_x, start_y in MONSTER_POSITIONS:
+            for party_index, party_y in enumerate(PARTY_SPRITE_Y):
+                for is_back_row in (False, True):
+                    party_x = 156 + party_index * 4 + (16 if is_back_row else 0)
+                    target_x = (
+                        party_x
+                        + PARTY_SPRITE_WIDTH // 2
+                        + MONSTER_CHARGE_TARGET_CENTER_OFFSET_X
+                        - actor.width
+                    )
+                    target_y = party_y + 16 - actor.height // 2
+                    maximum_distance = max(
+                        maximum_distance,
+                        hypot(target_x - start_x, target_y - start_y),
+                    )
+        return max(1, ceil(maximum_distance / MONSTER_CHARGE_MOVE_SPEED))
+
+    def _update_monster_charge(self) -> None:
+        presentation = self.monster_charge_presentation
+        if presentation is None:
+            raise RuntimeError("charge action requires a presentation")
+        presentation.elapsed_frame += 1
+        if presentation.impact_reached and not presentation.damage_applied:
+            self.monster_attack_target_index = presentation.target_index
+            self.monster_attack_damage = presentation.damage
+            self.monster_attack_critical = presentation.is_critical
+            self.monster_attack_animation_frame = 0
+            self.monster_attack_damage_applied = True
+            presentation.damage_applied = True
+            self._apply_monster_attack_damage(
+                presentation.target_index,
+                presentation.damage,
+            )
+            if presentation.damage > 0:
+                play_se(BATTLE_HIT_SE_ID)
+        elif presentation.damage_applied:
+            self.monster_attack_animation_frame += 1
+        if presentation.completed:
+            self._finish_monster_attack()
+
+    def _begin_monster_escape(self, actor: BattleMonster) -> None:
+        """Start DA2's leftward enemy escape without death presentation."""
+
+        actor_index = self.monsters.index(actor)
+        self.monster_escape_actor_index = actor_index
+        self.monster_escape_animation_frame = 0
+        self.escaped_monster_indexes.add(actor_index)
+        actor.state.defeat()
+        promote_rear_monsters_if_front_empty(self.monsters)
+        if hasattr(self, "progression"):
+            self.progression.record_enemy_escape(actor_index)
+        self._show_monster_action_message("battle.monster.escape")
+        play_se(BATTLE_MONSTER_ESCAPE_SE_ID)
+
+    def _update_monster_escape(self) -> None:
+        actor_index = self.monster_escape_actor_index
+        if actor_index is None:
+            raise RuntimeError("monster escape requires an actor")
+        self.monster_escape_animation_frame += 1
+        monster = self.monsters[actor_index]
+        if self._monster_escape_x(actor_index) + monster.width > 0:
+            return
+        self.monster_escape_actor_index = None
+        self.monster_escape_animation_frame = 0
+        self.monster_action = None
+        if self._monsters_are_defeated():
+            self._begin_victory_summary()
+            return
+        self._start_timeline_removal_animation()
+
+    def _monster_escape_x(self, actor_index: int) -> int:
+        elapsed = max(
+            0,
+            self.monster_escape_animation_frame
+            - MONSTER_ESCAPE_START_DELAY_FRAME_COUNT,
+        )
+        return MONSTER_POSITIONS[actor_index][0] - elapsed * MONSTER_ESCAPE_SPEED
 
     def _monster_attack_animation_frame_count(self) -> int:
         return (
@@ -5167,26 +5521,15 @@ class BattleScene:
         damage = self.monster_attack_damage
         if target_index is None or damage is None:
             raise RuntimeError("monster attack requires a target and result")
-        if damage > 0:
-            member = self.party[target_index]
-            if isinstance(member, Member):
-                member.take_damage(damage)
-            else:
-                member.hp = max(0, member.hp - damage)
-                if hasattr(member, "sleeping"):
-                    member.sleeping = 0
-                if hasattr(member, "confused"):
-                    member.confused = 0
-            self._refresh_party_hp_text(target_index)
-            if self._member_focus_is_interrupted(member):
-                getattr(self, "focused_target_by_party_index", {}).pop(
-                    target_index,
-                    None,
-                )
+        if not getattr(self, "monster_attack_damage_applied", False):
+            self._apply_monster_attack_damage(target_index, damage)
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
         self.monster_attack_critical = False
         self.monster_attack_animation_frame = 0
+        self.monster_attack_damage_applied = False
+        self.monster_charge_presentation = None
+        self.monster_action = None
         if damage > 0 and self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
             self._remove_defeated_party_from_timeline()
@@ -5201,6 +5544,27 @@ class BattleScene:
             ):
                 return
         self._start_timeline_animation()
+
+    def _apply_monster_attack_damage(self, target_index: int, damage: int) -> None:
+        """Apply a resolved enemy hit at its presentation's impact frame."""
+
+        if damage <= 0:
+            return
+        member = self.party[target_index]
+        if isinstance(member, Member):
+            member.take_damage(damage)
+        else:
+            member.hp = max(0, member.hp - damage)
+            if hasattr(member, "sleeping"):
+                member.sleeping = 0
+            if hasattr(member, "confused"):
+                member.confused = 0
+        self._refresh_party_hp_text(target_index)
+        if self._member_focus_is_interrupted(member):
+            getattr(self, "focused_target_by_party_index", {}).pop(
+                target_index,
+                None,
+            )
 
     def _party_is_defeated(self) -> bool:
         """Return whether every battle participant has died."""
@@ -5908,7 +6272,7 @@ class BattleScene:
             x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_monsters(self) -> None:
-        for index, (monster, (_, y)) in enumerate(
+        for index, (monster, _) in enumerate(
             zip(self.monsters, MONSTER_POSITIONS)
         ):
             is_dying = (
@@ -5935,12 +6299,17 @@ class BattleScene:
                 "pending_monster_death_indexes",
                 (),
             )
+            is_escaping = (
+                self.phase is BattlePhase.MONSTER_ACTION
+                and index == getattr(self, "monster_escape_actor_index", None)
+            )
             if (
                 not monster.is_alive
                 and not is_dying
                 and not is_attack_target
                 and not is_spell_damage_target
                 and not is_pending_death
+                and not is_escaping
             ):
                 continue
             if (
@@ -5950,13 +6319,18 @@ class BattleScene:
                 >= MONSTER_BLINK_VISIBLE_FRAMES
             ):
                 continue
-            x = self._monster_draw_x(index)
+            x, y = self._monster_draw_position(index)
             if not is_dying:
                 if self.phase is BattlePhase.ACTION_PRESENTATION:
                     self._draw_spell_effect_target(
                         "enemy",
                         index,
-                        lambda: self._draw_monster_image(monster, x, y),
+                        lambda: self._draw_monster_image(
+                            monster,
+                            x,
+                            y,
+                            flip_x=is_escaping,
+                        ),
                     )
                     continue
                 is_unselectable_rear_target = (
@@ -5965,7 +6339,12 @@ class BattleScene:
                     and index not in self.selectable_target_indexes
                 )
                 if not is_unselectable_rear_target:
-                    self._draw_monster_image(monster, x, y)
+                    self._draw_monster_image(
+                        monster,
+                        x,
+                        y,
+                        flip_x=is_escaping,
+                    )
                     continue
                 with self.palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
                     self._draw_monster_image(monster, x, y)
@@ -6292,6 +6671,8 @@ class BattleScene:
         monster: BattleMonster,
         x: int,
         y: int,
+        *,
+        flip_x: bool = False,
     ) -> None:
         pyxel.blt(
             x,
@@ -6299,15 +6680,30 @@ class BattleScene:
             self.monster_images[monster.key],
             0,
             0,
-            monster.width,
+            -monster.width if flip_x else monster.width,
             monster.height,
             TRANSPARENT_INDEX,
         )
 
     def _monster_draw_x(self, index: int) -> int:
-        target_x = MONSTER_POSITIONS[index][0]
+        return self._monster_draw_position(index)[0]
+
+    def _monster_draw_position(self, index: int) -> tuple[int, int]:
+        target_x, target_y = MONSTER_POSITIONS[index]
+        presentation = getattr(self, "monster_charge_presentation", None)
+        if (
+            self.phase is BattlePhase.MONSTER_ACTION
+            and presentation is not None
+            and index == presentation.actor_index
+        ):
+            return presentation.position()
+        if (
+            self.phase is BattlePhase.MONSTER_ACTION
+            and index == getattr(self, "monster_escape_actor_index", None)
+        ):
+            return self._monster_escape_x(index), target_y
         if self.phase is not BattlePhase.ENTRANCE:
-            return target_x
+            return target_x, target_y
 
         duration = MONSTER_ENTRANCE_FRAME_COUNTS[index]
         elapsed = min(self.entrance_animation_frame, duration)
@@ -6315,7 +6711,7 @@ class BattleScene:
         initial_offset = (
             DA2_MONSTER_ENTRANCE_SLIDE_STEPS[index] * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
         )
-        return target_x - initial_offset * remaining // duration
+        return target_x - initial_offset * remaining // duration, target_y
 
     def _draw_target_cursor(self) -> None:
         if self.phase is BattlePhase.TARGET:

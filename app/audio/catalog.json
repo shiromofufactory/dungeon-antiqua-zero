@@ -13,6 +13,10 @@
       "channel": 0,
       "sound": 10
     },
+    "battle_monster_escape": {
+      "channel": 0,
+      "sound": 49
+    },
     "battle_escape": {
       "channel": 0,
       "sound": 26

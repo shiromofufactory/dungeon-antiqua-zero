@@ -151,6 +151,7 @@ class BattleProgression:
             raise TypeError("enemies must contain EnemyProgressionData")
         self.enemies = tuple(enemies)
         self._enemy_action_counts = [0] * len(self.enemies)
+        self._escaped_enemy_indexes: set[int] = set()
         self._weapon_awards: dict[str, dict[ProficiencyKind, int]] = {}
         self._spell_uses: dict[str, dict[ProficiencyKind, _SpellUse]] = {}
         self._settled = False
@@ -160,6 +161,12 @@ class BattleProgression:
 
         self._require_enemy_index(enemy_index)
         self._enemy_action_counts[enemy_index] += 1
+
+    def record_enemy_escape(self, enemy_index: int) -> None:
+        """Exclude one escaped enemy from EXP and Gold settlement."""
+
+        self._require_enemy_index(enemy_index)
+        self._escaped_enemy_indexes.add(enemy_index)
 
     def record_weapon_action(
         self,
@@ -221,9 +228,17 @@ class BattleProgression:
 
         experience = sum(
             enemy.experience(action_count)
-            for enemy, action_count in zip(self.enemies, self._enemy_action_counts)
+            for index, (enemy, action_count) in enumerate(
+                zip(self.enemies, self._enemy_action_counts)
+            )
+            if index not in self._escaped_enemy_indexes
         )
-        return experience, sum(enemy.gold for enemy in self.enemies)
+        gold = sum(
+            enemy.gold
+            for index, enemy in enumerate(self.enemies)
+            if index not in self._escaped_enemy_indexes
+        )
+        return experience, gold
 
     def settle(
         self,

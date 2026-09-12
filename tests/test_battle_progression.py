@@ -71,6 +71,18 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertEqual(enemy.experience(0), 36)
         self.assertEqual(progression.rewards(), (43, 25))
 
+    def test_escaped_enemy_gives_neither_experience_nor_gold(self) -> None:
+        progression = BattleProgression(
+            (
+                EnemyProgressionData(4, 1, 4, 25),
+                EnemyProgressionData(2, 0, 1, 10),
+            )
+        )
+        progression.record_enemy_action(0)
+        progression.record_enemy_escape(0)
+
+        self.assertEqual(progression.rewards(), (48, 10))
+
     def test_repeated_battles_accumulate_experience_in_the_live_save(self) -> None:
         save_data = SaveData(experience=30)
         member = Member.from_record(member_record("Fighter"))

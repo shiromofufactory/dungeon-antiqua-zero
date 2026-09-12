@@ -54,6 +54,32 @@ class MonsterTribe(StrEnum):
     DEMON = "DEMON"
 
 
+class MonsterSpecialAction(StrEnum):
+    """Stable one-character monster special-action keys."""
+
+    ESCAPE = "逃"
+    CHARGE = "突"
+
+
+def monster_special_actions_from_record(
+    record: Mapping[str, object],
+) -> tuple[MonsterSpecialAction, ...]:
+    """Parse and validate a monster's concatenated special-action keys."""
+
+    if not isinstance(record, Mapping):
+        raise MonsterDataError("monster must be an object")
+    value = record.get("special")
+    if not isinstance(value, str) or "\n" in value or "\r" in value:
+        raise MonsterDataError("monster.special must be a single-line string")
+    try:
+        actions = tuple(MonsterSpecialAction(key) for key in value)
+    except ValueError as error:
+        raise MonsterDataError(f"unsupported monster.special: {value}") from error
+    if len(actions) != len(set(actions)):
+        raise MonsterDataError("monster.special must not contain duplicate actions")
+    return actions
+
+
 def _required_monster_integer(
     record: Mapping[str, object],
     field_name: str,
@@ -368,6 +394,8 @@ __all__ = [
     "MonsterCombatStats",
     "MonsterDataError",
     "MonsterFormationTarget",
+    "MonsterSpecialAction",
     "MonsterTribe",
+    "monster_special_actions_from_record",
     "promote_rear_monsters_if_front_empty",
 ]
