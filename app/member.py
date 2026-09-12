@@ -1119,6 +1119,20 @@ class Member:
             self.speed_modifier = 0
         return old_hp - self.hp
 
+    def take_poison_damage(self, damage: int) -> int:
+        """Apply poison damage without clearing sleep or confusion."""
+
+        if isinstance(damage, bool) or not isinstance(damage, int):
+            raise TypeError("damage must be an integer")
+        if damage < 0:
+            raise ValueError("damage must not be negative")
+        old_hp = self.hp
+        self.hp = max(0, self.hp - damage)
+        if self.hp <= 0:
+            self.protection_level = 0
+            self.speed_modifier = 0
+        return old_hp - self.hp
+
     def apply_sleep(self, turns: int) -> None:
         """Apply DA2's non-shortening sleep duration and clear confusion."""
 

@@ -7,6 +7,7 @@ from app.battle_magic import (
     SpellAffinity,
     member_spell_ability,
     member_spell_modifier,
+    poison_tick_damage,
     resolve_healing,
     resolve_spell_damage,
     resolve_status_spell,
@@ -148,6 +149,13 @@ class ResolveStatusSpellTest(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.success_rate, 0)
         self.assertIs(result.affinity, SpellAffinity.RESIST)
+
+
+class PoisonTickDamageTest(unittest.TestCase):
+    def test_rounds_up_one_sixteenth_and_doubles_for_poison_weakness(self) -> None:
+        self.assertEqual(poison_tick_damage(max_hp=1), 1)
+        self.assertEqual(poison_tick_damage(max_hp=17), 2)
+        self.assertEqual(poison_tick_damage(max_hp=17, weak_to_poison=True), 3)
 
 
 class ResolveHealingTest(unittest.TestCase):

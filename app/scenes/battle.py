@@ -31,6 +31,7 @@ from battle_magic import (
     SpellAffinity,
     member_spell_ability,
     member_spell_modifier,
+    poison_tick_damage,
     resolve_healing,
     resolve_spell_damage,
     resolve_status_spell,
@@ -289,6 +290,12 @@ SLEEP_ICON_PATTERN_COUNT = 4
 SLEEP_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 SLEEP_MIN_TURNS = 2
 SLEEP_MAX_TURNS = 3
+POISON_ICON_SOURCE_X = 32
+POISON_ICON_SOURCE_Y = 16
+POISON_ICON_SIZE = 8
+POISON_MONSTER_OFFSET_X = 24
+POISON_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
+POISON_ICON_DITHER_RATES = (0.0, 0.5, 1.0, 0.5)
 SPEED_ICON_SOURCE_X = 96
 SPEED_ICON_NEGATIVE_SOURCE_Y = 136
 SPEED_ICON_SIZE = 8
@@ -608,6 +615,14 @@ class BattleSlowResult:
 
 
 @dataclass(frozen=True)
+class BattlePoisonResult:
+    """Resolved poison application waiting for its timed application."""
+
+    target_index: int
+    success: bool
+
+
+@dataclass(frozen=True)
 class BattleProtectionResult:
     """One guaranteed PROTECTION stage waiting for its timed application."""
 
@@ -664,6 +679,7 @@ class BattleActionPresentation:
     healing_results: tuple[BattleHealingResult, ...] = ()
     damage_results: tuple[BattleSpellDamageResult, ...] = ()
     sleep_results: tuple[BattleSleepResult, ...] = ()
+    poison_results: tuple[BattlePoisonResult, ...] = ()
     slow_results: tuple[BattleSlowResult, ...] = ()
     protection_results: tuple[BattleProtectionResult, ...] = ()
     result_start_frame: int = 0
@@ -1409,6 +1425,7 @@ class BattleScene:
         self.escape_fade_covered = False
         self.monster_death_animation: MonsterDeathAnimation | None = None
         self.dying_monster_index: int | None = None
+        self.monster_death_from_timeline_head = False
         self.entrance_animation_frame = 0
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.selected_command: str | None = None
@@ -1767,6 +1784,7 @@ class BattleScene:
         self.escape_fade_covered = False
         self.monster_death_animation = None
         self.dying_monster_index = None
+        self.monster_death_from_timeline_head = False
         self.entrance_animation_frame = 0
         self.selected_command = None
         self.escape_return_phase = BattlePhase.COMMAND
@@ -3290,6 +3308,7 @@ class BattleScene:
         healing_results = self._resolve_healing_results(spell, indexes)
         damage_results = self._resolve_spell_damage_results(spell, indexes)
         sleep_results = self._resolve_sleep_results(spell, indexes)
+        poison_results = self._resolve_poison_results(spell, indexes)
         slow_results = self._resolve_slow_results(spell, indexes)
         protection_results = self._resolve_protection_results(spell, indexes)
         status_results = sleep_results or slow_results
@@ -3331,6 +3350,7 @@ class BattleScene:
             healing_results=healing_results,
             damage_results=damage_results,
             sleep_results=sleep_results,
+            poison_results=poison_results,
             slow_results=slow_results,
             protection_results=protection_results,
             result_start_frame=result_start_frame,
@@ -3469,6 +3489,50 @@ class BattleScene:
                     popup_y=base_y + monster.height - 8,
                 )
             )
+        return tuple(results)
+
+    def _resolve_poison_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattlePoisonResult, ...]:
+        """Resolve poison attached to a poison-attribute enemy spell."""
+
+        if spell.attribute is not ResistanceType.POISON:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("poison-attribute spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("poison application requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattlePoisonResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            resolution = resolve_status_spell(
+                spell_modifier=modifier,
+                rate=spell.rate,
+                target_spell_defense=monster.combat_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
+                success_roll=(
+                    0
+                    if spell.attribute in monster.resistances
+                    else random.randint(0, 19)
+                ),
+            )
+            results.append(BattlePoisonResult(index, resolution.success))
         return tuple(results)
 
     def _resolve_protection_results(
@@ -3651,6 +3715,10 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+        for result in presentation.poison_results:
+            monster = self.monsters[result.target_index]
+            if result.success and monster.is_alive:
+                monster.state.apply_poison()
         for result in presentation.slow_results:
             monster = self.monsters[result.target_index]
             if result.success:
@@ -4136,7 +4204,12 @@ class BattleScene:
             return
         self._complete_current_turn()
 
-    def _begin_monster_death(self, index: int | None = None) -> bool:
+    def _begin_monster_death(
+        self,
+        index: int | None = None,
+        *,
+        from_timeline_head: bool = False,
+    ) -> bool:
         """Start the defeat effect for a target whose HP reached zero."""
 
         if index is None:
@@ -4149,6 +4222,7 @@ class BattleScene:
         promote_rear_monsters_if_front_empty(self.monsters)
         self.phase = BattlePhase.MONSTER_DEATH
         self.dying_monster_index = index
+        self.monster_death_from_timeline_head = from_timeline_head
         self.monster_death_animation = MonsterDeathAnimation()
         self.target_cursor.active = False
         self.command_window.close_immediately()
@@ -4171,10 +4245,20 @@ class BattleScene:
         if dying_index is None:
             raise RuntimeError("monster death phase requires a target")
         defeated = self.monsters[dying_index]
-        self._timeline_order = remove_timeline_actor(self._timeline_order, defeated)
-        self.timeline = self._timeline_order.actors
+        from_timeline_head = getattr(
+            self,
+            "monster_death_from_timeline_head",
+            False,
+        )
+        if not from_timeline_head:
+            self._timeline_order = remove_timeline_actor(
+                self._timeline_order,
+                defeated,
+            )
+            self.timeline = self._timeline_order.actors
         self.monster_death_animation = None
         self.dying_monster_index = None
+        self.monster_death_from_timeline_head = False
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
         pending_indexes = getattr(self, "pending_monster_death_indexes", [])
         if pending_indexes:
@@ -4183,6 +4267,9 @@ class BattleScene:
             return
         if self._monsters_are_defeated():
             self._begin_victory_summary()
+            return
+        if from_timeline_head:
+            self._start_timeline_removal_animation()
             return
         if getattr(self, "action_party_index", None) is not None:
             self.phase = BattlePhase.ACTION_RETURN
@@ -4199,6 +4286,7 @@ class BattleScene:
     def _begin_victory_summary(self) -> None:
         """Settle rewards and show DA1's victory message over the battlefield."""
 
+        self._clear_damage_popups_for_victory()
         if not all(
             hasattr(self, name)
             for name in ("party", "result_party", "progression", "save_data")
@@ -4237,6 +4325,13 @@ class BattleScene:
         self.active_party_index = None
         self.timeline = ()
         self._play_victory_jingle(BATTLE_WIN_BGM_ID)
+
+    def _clear_damage_popups_for_victory(self) -> None:
+        """Keep completed-battle damage numbers out of the victory screen."""
+
+        popups = getattr(self, "spell_damage_popups", None)
+        if popups is not None:
+            popups.clear()
 
     def _victory_number(self, value: int) -> str:
         if self.settings.language is Language.JAPANESE:
@@ -4642,6 +4737,8 @@ class BattleScene:
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
             self.defending_party_indexes.discard(self.active_party_index)
+            if self._apply_turn_start_poison(actor):
+                return
             if getattr(actor.member, "sleeping", 0):
                 if isinstance(actor.member, Member):
                     actor.member.elapse_sleep_turn()
@@ -4678,6 +4775,8 @@ class BattleScene:
             self.monster_attack_damage = None
             self.monster_attack_critical = False
             self.monster_attack_animation_frame = 0
+            if self._apply_turn_start_poison(actor):
+                return
             if actor.state.elapse_sleep_turn():
                 self.blinking_monster_index = None
                 self.monster_blink_frames_remaining = 0
@@ -4694,6 +4793,75 @@ class BattleScene:
             )
             self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
         self._refresh_party_text_colors()
+
+    def _apply_turn_start_poison(
+        self,
+        actor: BattleCharacter | BattleMonster,
+    ) -> bool:
+        """Apply one poison tick before this actor acts or loses a sleep turn."""
+
+        damage_popups = getattr(self, "spell_damage_popups", None)
+        if damage_popups is None:
+            damage_popups = []
+            self.spell_damage_popups = damage_popups
+
+        if isinstance(actor, BattleCharacter):
+            member = actor.member
+            if not getattr(member, "poisoned", False):
+                return False
+            damage = poison_tick_damage(max_hp=member.max_hp)
+            member.take_poison_damage(damage)
+            party_index = next(
+                index
+                for index, visual in enumerate(self.party_visuals)
+                if visual is actor
+            )
+            position = self._party_draw_position(party_index)
+            if position is not None:
+                x, y = position
+                damage_popups.append(
+                    BattleSpellDamagePopup(x + 6, y + 16, damage)
+                )
+            self._refresh_party_hp_text(party_index)
+            if member.is_dead:
+                getattr(self, "focused_target_by_party_index", {}).pop(
+                    party_index,
+                    None,
+                )
+                self._start_timeline_removal_animation()
+                return True
+            return False
+
+        if not actor.state.poisoned:
+            return False
+        weak_to_poison = ResistanceType.POISON in actor.weaknesses
+        damage = poison_tick_damage(
+            max_hp=actor.state.max_hp,
+            weak_to_poison=weak_to_poison,
+        )
+        actor.state.take_poison_damage(damage)
+        monster_index = next(
+            index
+            for index, monster in enumerate(self.monsters)
+            if monster is actor
+        )
+        _base_x, y = MONSTER_POSITIONS[monster_index]
+        damage_popups.append(
+            BattleSpellDamagePopup(
+                self._monster_draw_x(monster_index) + actor.width // 2,
+                y + actor.height - 8,
+                damage,
+            )
+        )
+        if not actor.is_alive:
+            self.blinking_monster_index = None
+            self.monster_blink_frames_remaining = 0
+            self._begin_monster_death(
+                monster_index,
+                from_timeline_head=True,
+            )
+            return True
+        return False
 
     def _monster_attack_target_indexes(
         self,
@@ -5162,6 +5330,7 @@ class BattleScene:
         self._draw_party_attack_effect()
         self._draw_spell_effects()
         self._draw_sleeping_icons()
+        self._draw_poison_icons()
         self._draw_speed_modifier_icons()
         self._draw_target_affinity_indicators()
         self._draw_affinity_popups()
@@ -5909,6 +6078,39 @@ class BattleScene:
                 SPEED_ICON_SIZE,
                 SPEED_ICON_TRANSPARENT_INDEX,
             )
+
+    def _draw_poison_icons(self) -> None:
+        """Draw the poison condition icon beside each poisoned monster."""
+
+        poisoned = tuple(
+            (index, monster)
+            for index, monster in enumerate(getattr(self, "monsters", ()))
+            if monster.is_alive and monster.state.poisoned
+        )
+        if not poisoned:
+            return
+        pattern = (
+            pyxel.frame_count // POISON_ICON_PATTERN_FRAME_COUNT
+        ) % len(POISON_ICON_DITHER_RATES)
+        dither_rate = POISON_ICON_DITHER_RATES[pattern]
+        if dither_rate <= 0:
+            return
+        pyxel.dither(dither_rate)
+        try:
+            for index, monster in poisoned:
+                _base_x, y = MONSTER_POSITIONS[index]
+                pyxel.blt(
+                    self._monster_draw_x(index) + POISON_MONSTER_OFFSET_X,
+                    y,
+                    0,
+                    POISON_ICON_SOURCE_X,
+                    POISON_ICON_SOURCE_Y,
+                    POISON_ICON_SIZE,
+                    POISON_ICON_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+        finally:
+            pyxel.dither(1.0)
 
     def _draw_protection_icons(self) -> None:
         """Animate each defense stage immediately left of its party name."""

@@ -96,6 +96,11 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_OFFSET_Y,
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
+    POISON_ICON_SIZE,
+    POISON_ICON_SOURCE_X,
+    POISON_ICON_SOURCE_Y,
+    POISON_ICON_PATTERN_FRAME_COUNT,
+    POISON_MONSTER_OFFSET_X,
     BATTLE_POPUP_FRAME_COUNT,
     ACTION_MOVE_DISTANCE,
     ACTION_MOVE_SPEED,
@@ -249,6 +254,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_monsters = Mock()
         mock._draw_party_attack_effect = Mock()
         mock._draw_spell_effects = Mock()
+        mock._draw_poison_icons = Mock()
         mock._draw_speed_modifier_icons = Mock()
         mock._draw_party_attack_damage = Mock()
         mock._draw_monster_attack_result = Mock()
@@ -263,6 +269,7 @@ class BattleScreenMockTest(unittest.TestCase):
         manager.attach_mock(mock._draw_monsters, "monsters")
         manager.attach_mock(mock._draw_party_attack_effect, "party_attack_effect")
         manager.attach_mock(mock._draw_spell_effects, "spell_effects")
+        manager.attach_mock(mock._draw_poison_icons, "poison_icons")
         manager.attach_mock(mock._draw_speed_modifier_icons, "speed_modifier_icons")
         manager.attach_mock(mock._draw_party_attack_damage, "party_attack_damage")
         manager.attach_mock(mock._draw_monster_attack_result, "monster_attack")
@@ -281,6 +288,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.monsters(),
                 call.party_attack_effect(),
                 call.spell_effects(),
+                call.poison_icons(),
                 call.speed_modifier_icons(),
                 call.party_attack_damage(),
                 call.monster_attack(),
@@ -2009,6 +2017,42 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._start_timeline_animation.assert_called_once_with()
         mock.command_window.open.assert_not_called()
 
+    def test_poison_damage_precedes_a_sleeping_members_skipped_turn(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        member.poisoned = True
+        member.apply_sleep(2)
+        starting_hp = member.hp
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.timeline = (visual,)
+        mock.escape_requested = False
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.defending_party_indexes = set()
+        mock.focused_target_by_party_index = {}
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock.spell_damage_popups = []
+        mock._party_draw_position = Mock(return_value=(172, 64))
+        mock._refresh_party_hp_text = Mock()
+        mock._start_timeline_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        expected_damage = (member.max_hp + 15) // 16
+        self.assertEqual(member.hp, starting_hp - expected_damage)
+        self.assertEqual(member.sleeping, 1)
+        self.assertEqual(mock.spell_damage_popups[0].damage, expected_damage)
+        mock._start_timeline_animation.assert_called_once_with()
+
     def test_lethal_attack_starts_death_then_removes_enemy(self) -> None:
         monster = BattleMockMonster(
             key="monster",
@@ -2084,6 +2128,49 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertIs(mock.result, BattleResult.VICTORY)
         mock._complete_current_turn.assert_not_called()
+
+    def test_poison_death_of_timeline_head_removes_head_after_death_effect(self) -> None:
+        dying = _damage_test_monster(0, hp=1)
+        dying.state.poisoned = True
+        dying.state.take_poison_damage(1)
+        living = _damage_test_monster(1, hp=10)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (dying, living)
+        mock._timeline_order = TimelineOrder(
+            (
+                TimelineEntry(dying, 1, 64.0),
+                TimelineEntry(living, 1, 50.0),
+            )
+        )
+        mock.timeline = mock._timeline_order.actors
+        mock.monster_death_animation = MonsterDeathAnimation()
+        mock.dying_monster_index = 0
+        mock.monster_death_from_timeline_head = True
+        mock.pending_monster_death_indexes = []
+        mock.action_party_index = None
+        mock._sync_monster_death_palette = Mock()
+        mock._release_palette_variant = Mock()
+        mock._start_timeline_removal_animation = Mock()
+
+        frame_count = (
+            MONSTER_DEATH_TINT_FRAME_COUNT
+            + MONSTER_DEATH_BRIGHTEN_FRAME_COUNT
+            + MONSTER_DEATH_DISSOLVE_FRAME_COUNT
+        )
+        for _frame in range(frame_count):
+            mock._update_monster_death_animation()
+
+        self.assertIs(mock.timeline[0], dying)
+        mock._start_timeline_removal_animation.assert_called_once_with()
+        self.assertFalse(mock.monster_death_from_timeline_head)
+
+    def test_victory_clears_remaining_damage_popups(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.spell_damage_popups = [BattleSpellDamagePopup(10, 20, 3)]
+
+        mock._clear_damage_popups_for_victory()
+
+        self.assertEqual(mock.spell_damage_popups, [])
 
     def test_simultaneous_spell_defeats_play_each_monster_death_in_order(self) -> None:
         monsters = (_damage_test_monster(0, hp=1), _damage_test_monster(1, hp=1))
@@ -3101,6 +3188,77 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_damage_popups, [])
         randint.assert_called_once_with(0, 19)
 
+    def test_poison_attribute_uses_status_roll_after_dealing_spell_damage(self) -> None:
+        spell = load_mock_spells()["POISON1"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.monsters = (_damage_test_monster(hp=100),)
+        mock.spell_effects = {}
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+
+        with (
+            patch("scenes.battle.random.random", return_value=0.5),
+            patch("scenes.battle.random.randint", return_value=0) as randint,
+        ):
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        presentation = mock.action_presentation
+        self.assertGreater(presentation.damage_results[0].damage, 0)
+        self.assertTrue(presentation.poison_results[0].success)
+        mock._apply_action_results(presentation)
+
+        self.assertLess(mock.monsters[0].state.hp, 100)
+        self.assertTrue(mock.monsters[0].state.poisoned)
+        randint.assert_called_once_with(0, 19)
+
+    def test_poison_resistance_blocks_poison_but_not_spell_damage(self) -> None:
+        spell = load_mock_spells()["POISON1"]
+        monster = _damage_test_monster(
+            hp=100,
+            resistances=frozenset((ResistanceType.POISON,)),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (monster,)
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with patch("scenes.battle.random.randint") as randint:
+            poison_results = mock._resolve_poison_results(spell, (0,))
+        presentation = BattleActionPresentation(
+            (),
+            damage_results=mock._resolve_spell_damage_results(spell, (0,)),
+            poison_results=poison_results,
+        )
+        mock.spell_damage_popups = []
+
+        mock._apply_action_results(presentation)
+
+        self.assertLess(monster.state.hp, 100)
+        self.assertFalse(monster.state.poisoned)
+        randint.assert_not_called()
+
     def test_failed_slow_shows_miss_without_applying_the_modifier(self) -> None:
         spell = load_mock_spells()["SLOW"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -3389,6 +3547,35 @@ class BattleScreenMockTest(unittest.TestCase):
             SPEED_ICON_SIZE,
             SPEED_ICON_TRANSPARENT_INDEX,
         )
+
+    def test_poison_icon_uses_bank_zero_32_16_beside_monster(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.poisoned = True
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                POISON_ICON_PATTERN_FRAME_COUNT,
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.dither") as dither,
+        ):
+            mock._draw_poison_icons()
+
+        blt.assert_called_once_with(
+            4 + POISON_MONSTER_OFFSET_X,
+            MONSTER_POSITIONS[0][1],
+            0,
+            POISON_ICON_SOURCE_X,
+            POISON_ICON_SOURCE_Y,
+            POISON_ICON_SIZE,
+            POISON_ICON_SIZE,
+            1,
+        )
+        self.assertEqual(dither.call_args_list, [call(0.5), call(1.0)])
 
     def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:
         spell = load_mock_spells()["FIRE1"]
@@ -4414,6 +4601,61 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.blinking_monster_index)
         self.assertEqual(mock.monster_blink_frames_remaining, 0)
         mock._start_timeline_animation.assert_called_once_with()
+
+    def test_poison_damage_precedes_a_sleeping_monsters_skipped_turn(self) -> None:
+        actor = _damage_test_monster(
+            hp=17,
+            weaknesses=frozenset((ResistanceType.POISON,)),
+        )
+        actor.state.poisoned = True
+        actor.state.apply_sleep(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor,)
+        mock.timeline = (actor,)
+        mock.party = (
+            SimpleNamespace(hp=30, formation_row=FormationRow.FRONT),
+        )
+        mock.party_visuals = (
+            SimpleNamespace(member=mock.party[0]),
+        )
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.spell_damage_popups = []
+        mock._monster_draw_x = Mock(return_value=4)
+        mock._start_timeline_animation = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(actor.state.hp, 14)
+        self.assertEqual(actor.state.sleeping, 1)
+        self.assertEqual(mock.spell_damage_popups[0].damage, 3)
+        mock._start_timeline_animation.assert_called_once_with()
+
+    def test_lethal_poison_popup_shows_unclamped_calculated_damage(self) -> None:
+        actor = _damage_test_monster(
+            hp=17,
+            weaknesses=frozenset((ResistanceType.POISON,)),
+        )
+        actor.state.hp = 1
+        actor.state.poisoned = True
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor,)
+        mock.spell_damage_popups = []
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock._monster_draw_x = Mock(return_value=4)
+        mock._begin_monster_death = Mock(return_value=True)
+
+        self.assertTrue(mock._apply_turn_start_poison(actor))
+
+        self.assertEqual(actor.state.hp, 0)
+        self.assertEqual(mock.spell_damage_popups[0].damage, 3)
+        mock._begin_monster_death.assert_called_once_with(
+            0,
+            from_timeline_head=True,
+        )
 
     def test_last_living_rear_member_is_temporarily_promoted_for_enemy_attack(
         self,

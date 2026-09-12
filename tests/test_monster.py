@@ -76,6 +76,17 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.sleeping, 0)
         self.assertFalse(state.elapse_sleep_turn())
 
+    def test_poison_damage_preserves_sleep_and_restore_clears_poison(self) -> None:
+        state = MonsterBattleState(max_hp=10, poisoned=True, sleeping=2)
+
+        self.assertEqual(state.take_poison_damage(1), 1)
+        self.assertEqual(state.hp, 9)
+        self.assertEqual(state.sleeping, 2)
+        state.restore()
+
+        self.assertFalse(state.poisoned)
+        self.assertEqual(state.hp, 10)
+
     def test_defeat_and_restore_manage_mock_battle_lifecycle(self) -> None:
         state = MonsterBattleState.from_record({"mhp": 7})
         state.speed_modifier = -1

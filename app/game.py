@@ -327,10 +327,10 @@ WELCOME_BGM_ID = "da3-welcome"
 ENCOUNTER_JINGLE_ID = "da3-encount"
 RANDOM_BATTLE_ENCOUNTER = BattleEncounter(
     (
+        "ワイルドボア",
         "Giant Spider",
         "Giant Spider",
-        "Giant Spider",
-        "Coyote",
+        "ワイルドボア",
         "Coyote",
     ),
     frozenset((2, 3, 4)),
@@ -424,9 +424,7 @@ class Game:
             raise TypeError("settings must be Settings")
         self.settings = settings
         self.settings_repository = (
-            SettingsRepository()
-            if settings_repository is None
-            else settings_repository
+            SettingsRepository() if settings_repository is None else settings_repository
         )
         self.applied_screen_scale = settings.screen_scale
         self.palette_shifter = palette_shifter
@@ -455,9 +453,7 @@ class Game:
         )
         self._force_reserve_front()
         self.character_records = load_character_records()
-        self.character_states = {
-            member.definition.key: member for member in self.party
-        }
+        self.character_states = {member.definition.key: member for member in self.party}
         self.party_system = PartySystem(
             character_records=self.character_records,
             items=self.items,
@@ -470,8 +466,7 @@ class Game:
             inventory=self.inventory_system,
         )
         character_definitions = tuple(
-            CharacterDefinition.from_record(record)
-            for record in self.character_records
+            CharacterDefinition.from_record(record) for record in self.character_records
         )
         self.character_face_positions = {
             definition.key: definition.face_position
@@ -615,9 +610,7 @@ class Game:
         current_map = getattr(self, "current_map", None)
         if getattr(current_map, "profile", None) != "dungeon":
             return False
-        advanced = self.encounter_system.advance(
-            self.save_data.encounter_count
-        )
+        advanced = self.encounter_system.advance(self.save_data.encounter_count)
         self.save_data.encounter_count = advanced.count
         if not advanced.triggered:
             return False
@@ -829,13 +822,12 @@ class Game:
 
         catalog = getattr(self, "world_sites", None)
         field = getattr(self, "field", None)
-        if (
-            not isinstance(catalog, WorldSiteCatalog)
-            or getattr(self, "current_map", None) is not getattr(
-                self,
-                "world_map",
-                None,
-            )
+        if not isinstance(catalog, WorldSiteCatalog) or getattr(
+            self, "current_map", None
+        ) is not getattr(
+            self,
+            "world_map",
+            None,
         ):
             self.site_name_site = None
             self.site_name_text = None
@@ -932,8 +924,7 @@ class Game:
         if self.current_map.profile in ("town", "dungeon"):
             entry = self.images.entry(FIELD_PLAYER_CHARACTER_ASSET_ID)
             minimum_width = (
-                FIELD_PLAYER_CHARACTER_SET_WIDTH
-                * FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+                FIELD_PLAYER_CHARACTER_SET_WIDTH * FIELD_PLAYER_CHARACTER_SETS_PER_ROW
             )
             if (
                 entry.width < minimum_width
@@ -1090,17 +1081,14 @@ class Game:
         row_height = self._member_row_height_grid(len(party))
         for index, member in enumerate(party):
             is_reserve = (
-                len(party) > BATTLE_PARTY_MEMBER_COUNT
-                and index == len(party) - 1
+                len(party) > BATTLE_PARTY_MEMBER_COUNT and index == len(party) - 1
             )
             row_y = (
                 2
                 + index * row_height
                 + (RESERVE_MEMBER_Y_OFFSET_GRID if is_reserve else 0)
             )
-            base_color = (
-                RESERVE_MEMBER_TEXT_COLOR if is_reserve else DEFAULT_TEXT_COLOR
-            )
+            base_color = RESERVE_MEMBER_TEXT_COLOR if is_reserve else DEFAULT_TEXT_COLOR
             name = member.definition.localized_name(localizer)
             if is_reserve:
                 name += localized["term.formation.reserve"]
@@ -1130,9 +1118,7 @@ class Game:
                         ),
                         PARTY_POINT_TEXT_X,
                         row_y + 6,
-                        color=(
-                            DISABLED_COLOR if member.max_mp == 0 else base_color
-                        ),
+                        color=(DISABLED_COLOR if member.max_mp == 0 else base_color),
                     ),
                 )
             )
@@ -1171,8 +1157,7 @@ class Game:
 
     def _is_reserve_index(self, index: int) -> bool:
         return (
-            len(self.party) > BATTLE_PARTY_MEMBER_COUNT
-            and index == len(self.party) - 1
+            len(self.party) > BATTLE_PARTY_MEMBER_COUNT and index == len(self.party) - 1
         )
 
     def _member_y_offset_grid(self, index: int) -> int:
@@ -1201,9 +1186,7 @@ class Game:
         return tuple(
             CursorTarget(
                 PARTY_CURSOR_X,
-                PARTY_CURSOR_Y
-                + index * row_height
-                + self._member_y_offset_grid(index),
+                PARTY_CURSOR_Y + index * row_height + self._member_y_offset_grid(index),
                 key=index,
             )
             for index in range(len(self.party))
@@ -1235,10 +1218,7 @@ class Game:
         self.sort_source_cursor = None
 
     def _can_change_formation(self, member: Member) -> bool:
-        if (
-            self._is_reserve_index(len(self.party) - 1)
-            and self.party[-1] is member
-        ):
+        if self._is_reserve_index(len(self.party) - 1) and self.party[-1] is member:
             return not member.is_front_row
         return (
             not member.is_front_row
@@ -1690,7 +1670,8 @@ class Game:
             raise RuntimeError("field screen change is already pending")
         frame_count = (
             SITE_MAP_FADE_FRAME_COUNT
-            if change in (
+            if change
+            in (
                 GameScreenChange.CHANGE_MAP,
                 GameScreenChange.TELEPORT,
             )
@@ -2259,7 +2240,13 @@ class Game:
             self.event_release_confirm = release_confirm
             self.last_event_error = None
             self._continue_event()
-        except (KeyError, EventRuntimeError, EventMessageDataError, AudioResourceError, ValueError) as error:
+        except (
+            KeyError,
+            EventRuntimeError,
+            EventMessageDataError,
+            AudioResourceError,
+            ValueError,
+        ) as error:
             self._abort_event(error)
         return self.event_runner is not None or self.last_event_error is None
 
@@ -2325,7 +2312,9 @@ class Game:
             if isinstance(effect, (MovePartyEffect, MoveActorEffect)):
                 self.event_move_remaining = effect.steps
                 return
-            raise EventRuntimeError(runner.event_id, "effect", "unsupported event effect")
+            raise EventRuntimeError(
+                runner.event_id, "effect", "unsupported event effect"
+            )
 
     def _update_event(self, input_state: InputState) -> None:
         runner = self.event_runner
@@ -2334,7 +2323,9 @@ class Game:
             return
         try:
             if isinstance(effect, MessageEffect):
-                if self.event_message is not None and self.event_message.update(input_state):
+                if self.event_message is not None and self.event_message.update(
+                    input_state
+                ):
                     runner.complete_effect(effect)
                     self.event_effect = None
                     self.event_message = None
@@ -2364,7 +2355,9 @@ class Game:
                 )
                 movement = self.field_actors.actor(effect.actor_id).movement
             else:
-                raise EventRuntimeError(runner.event_id, "effect", "unsupported waiting effect")
+                raise EventRuntimeError(
+                    runner.event_id, "effect", "unsupported waiting effect"
+                )
             if not moved and not movement.is_moving:
                 raise EventRuntimeError(
                     runner.event_id,
@@ -2377,7 +2370,13 @@ class Game:
                     runner.complete_effect(effect)
                     self.event_effect = None
                     self._continue_event()
-        except (KeyError, EventRuntimeError, EventMessageDataError, AudioResourceError, ValueError) as error:
+        except (
+            KeyError,
+            EventRuntimeError,
+            EventMessageDataError,
+            AudioResourceError,
+            ValueError,
+        ) as error:
             self._abort_event(error)
 
     def _abort_event(self, error: BaseException) -> None:
@@ -2534,9 +2533,7 @@ class Game:
             y = self.field.position.y + self.field.facing.dy
             if self._try_open_treasure(x, y, release_confirm=True):
                 return
-            if self._try_field_trigger(
-                "interact", x, y, release_confirm=True
-            ):
+            if self._try_field_trigger("interact", x, y, release_confirm=True):
                 return
         direction = input_state.held_direction
         if not self.field.is_moving and direction is not None:
@@ -2548,9 +2545,7 @@ class Game:
                 release_direction=direction,
             ):
                 return
-            if self._try_field_trigger(
-                "touch", x, y, release_direction=direction
-            ):
+            if self._try_field_trigger("touch", x, y, release_direction=direction):
                 return
         if getattr(self, "field_actors", None) is None:
             self.field.update(direction)
@@ -2924,9 +2919,7 @@ class Game:
             source_x = FORMATION_ARROW_LEFT_X
         y = (
             PARTY_FACE_Y
-            + self.sort_source_index
-            * self._member_row_height_grid(len(self.party))
-            * 4
+            + self.sort_source_index * self._member_row_height_grid(len(self.party)) * 4
             + self._member_y_offset_grid(self.sort_source_index) * 4
             + (PARTY_FACE_SIZE - FORMATION_ARROW_HEIGHT) // 2
         )

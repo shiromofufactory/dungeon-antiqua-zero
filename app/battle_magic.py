@@ -16,6 +16,7 @@ DA2_MINIMUM_HEAL_RATE = 0.8
 DA2_HEAL_RATE_RANGE = 0.4
 SPELL_DAMAGE_MINIMUM_RATE = 0.20
 SPELL_DAMAGE_RATE_RANGE = 0.05
+DA2_POISON_DAMAGE_DENOMINATOR = 16
 
 
 class SpellAffinity(StrEnum):
@@ -215,6 +216,20 @@ def resolve_status_spell(
     return StatusSpellResult(success_rate > success_roll, success_rate, affinity)
 
 
+def poison_tick_damage(*, max_hp: int, weak_to_poison: bool = False) -> int:
+    """Return DA2's rounded-up poison damage for one acting combatant."""
+
+    max_hp = _nonnegative_integer(max_hp, "max_hp")
+    if max_hp <= 0:
+        raise ValueError("max_hp must be positive")
+    if not isinstance(weak_to_poison, bool):
+        raise TypeError("weak_to_poison must be a boolean")
+    rate = 2 if weak_to_poison else 1
+    return (
+        max_hp * rate + DA2_POISON_DAMAGE_DENOMINATOR - 1
+    ) // DA2_POISON_DAMAGE_DENOMINATOR
+
+
 def resolve_healing(
     *,
     intensity: int,
@@ -255,6 +270,7 @@ __all__ = [
     "DA2_DEFAULT_ITEM_SPELL_ABILITY",
     "DA2_HEAL_RATE_RANGE",
     "DA2_MINIMUM_HEAL_RATE",
+    "DA2_POISON_DAMAGE_DENOMINATOR",
     "HealingResult",
     "SPELL_DAMAGE_MINIMUM_RATE",
     "SPELL_DAMAGE_RATE_RANGE",
@@ -263,6 +279,7 @@ __all__ = [
     "StatusSpellResult",
     "member_spell_ability",
     "member_spell_modifier",
+    "poison_tick_damage",
     "resolve_healing",
     "resolve_spell_damage",
     "resolve_status_spell",

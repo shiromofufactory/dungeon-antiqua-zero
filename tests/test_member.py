@@ -360,6 +360,13 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.sleeping, 0)
         self.assertFalse(self.member.elapse_sleep_turn())
 
+    def test_poison_damage_does_not_wake_the_member(self) -> None:
+        self.member.poisoned = True
+        self.member.apply_sleep(2)
+
+        self.assertEqual(self.member.take_poison_damage(1), 1)
+        self.assertEqual(self.member.sleeping, 2)
+
     def test_temporary_sleep_and_confusion_are_cleared_after_battle(self) -> None:
         self.member.sleeping = 2
         self.member.confused = 3

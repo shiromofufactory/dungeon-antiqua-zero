@@ -89,6 +89,7 @@ class MonsterBattleState:
 
     max_hp: int
     hp: int | None = None
+    poisoned: bool = False
     sleeping: int = 0
     speed_modifier: int = 0
 
@@ -103,6 +104,8 @@ class MonsterBattleState:
             raise TypeError("hp must be an integer")
         if not 0 <= self.hp <= self.max_hp:
             raise ValueError("hp must be from 0 to max_hp")
+        if not isinstance(self.poisoned, bool):
+            raise TypeError("poisoned must be a boolean")
         if isinstance(self.sleeping, bool) or not isinstance(self.sleeping, int):
             raise TypeError("sleeping must be an integer")
         if self.sleeping < 0:
@@ -161,6 +164,28 @@ class MonsterBattleState:
             raise ValueError("turns must be positive")
         self.sleeping = max(self.sleeping, turns)
 
+    def apply_poison(self) -> bool:
+        """Apply persistent poison and report whether the state changed."""
+
+        if self.poisoned or not self.is_alive:
+            return False
+        self.poisoned = True
+        return True
+
+    def take_poison_damage(self, damage: int) -> int:
+        """Apply poison damage without waking the monster from sleep."""
+
+        if isinstance(damage, bool) or not isinstance(damage, int):
+            raise TypeError("damage must be an integer")
+        if damage < 0:
+            raise ValueError("damage must not be negative")
+        previous = self.hp
+        assert previous is not None
+        self.hp = max(0, previous - damage)
+        if self.hp <= 0:
+            self.speed_modifier = 0
+        return previous - self.hp
+
     def elapse_sleep_turn(self) -> bool:
         """Consume one sleeping action and report whether it was skipped."""
 
@@ -187,6 +212,7 @@ class MonsterBattleState:
         """Restore initial HP when restarting a battle fixture."""
 
         self.hp = self.max_hp
+        self.poisoned = False
         self.sleeping = 0
         self.speed_modifier = 0
 
