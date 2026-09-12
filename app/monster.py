@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Protocol
 
 if __package__ == "":
@@ -17,6 +18,13 @@ else:
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
     )
+
+if __package__ == "":
+    from localization import Localizer
+    from resistance import ResistanceType, resistances_from_tolerance
+else:
+    from .localization import Localizer
+    from .resistance import ResistanceType, resistances_from_tolerance
 
 
 class MonsterDataError(ValueError):
@@ -44,6 +52,131 @@ class MonsterTribe(StrEnum):
     DRAGON = "DRAGON"
     ANIMATED = "ANIMATED"
     DEMON = "DEMON"
+
+
+def _required_monster_integer(
+    record: Mapping[str, object],
+    field_name: str,
+    *,
+    positive: bool = False,
+) -> int:
+    value = record.get(field_name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise MonsterDataError(f"monster.{field_name} must be an integer")
+    minimum = 1 if positive else 0
+    if value < minimum:
+        qualifier = "positive" if positive else "non-negative"
+        raise MonsterDataError(f"monster.{field_name} must be {qualifier}")
+    return value
+
+
+@dataclass(frozen=True)
+class MonsterDefinition:
+    """Immutable monster master data shared by non-battle features."""
+
+    key: str
+    names: Mapping[str, str]
+    image_id: str
+    width: int
+    height: int
+    is_boss: bool
+    tribe: MonsterTribe
+    max_hp: int
+    max_mp: int
+    level: int
+    weaknesses: frozenset[ResistanceType]
+    resistances: frozenset[ResistanceType]
+    treasure_item_key: str
+    is_shadow: bool = False
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, object]) -> MonsterDefinition:
+        """Validate the monster fields needed outside a battle instance."""
+
+        if not isinstance(record, Mapping):
+            raise MonsterDataError("monster must be an object")
+        key = record.get("name_en")
+        if not isinstance(key, str) or not key:
+            raise MonsterDataError("monster.name_en must be a non-empty string")
+
+        names: dict[str, str] = {}
+        for field_name, value in record.items():
+            if not field_name.startswith("name_"):
+                continue
+            if not isinstance(value, str):
+                raise MonsterDataError(f"monster.{field_name} must be a string")
+            names[field_name] = value
+        if not any(names.values()):
+            raise MonsterDataError("monster must have a localized name")
+
+        image_id = record.get("image_id")
+        if isinstance(image_id, bool) or not isinstance(image_id, (str, int)):
+            raise MonsterDataError("monster.image_id must be a string or integer")
+        image_id_text = str(image_id)
+        if not image_id_text:
+            raise MonsterDataError("monster.image_id must not be empty")
+
+        try:
+            tribe = MonsterTribe(record.get("tribe"))
+        except (TypeError, ValueError) as error:
+            raise MonsterDataError(
+                f"unsupported monster.tribe: {record.get('tribe')}"
+            ) from error
+
+        weakness = record.get("weakness")
+        tolerance = record.get("tolerance")
+        treasure_item_key = record.get("treasure_item")
+        for field_name, value in (
+            ("weakness", weakness),
+            ("tolerance", tolerance),
+            ("treasure_item", treasure_item_key),
+        ):
+            if not isinstance(value, str):
+                raise MonsterDataError(f"monster.{field_name} must be a string")
+        if not treasure_item_key:
+            raise MonsterDataError("monster.treasure_item must not be empty")
+
+        flags: dict[str, bool] = {}
+        for field_name in ("is_boss", "shadow"):
+            value = record.get(field_name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value not in (0, 1)
+            ):
+                raise MonsterDataError(f"monster.{field_name} must be 0 or 1")
+            flags[field_name] = bool(value)
+
+        return cls(
+            key=key,
+            names=MappingProxyType(names),
+            image_id=image_id_text,
+            width=_required_monster_integer(record, "width", positive=True),
+            height=_required_monster_integer(record, "height", positive=True),
+            is_boss=flags["is_boss"],
+            tribe=tribe,
+            max_hp=_required_monster_integer(record, "mhp", positive=True),
+            max_mp=_required_monster_integer(record, "mmp"),
+            level=_required_monster_integer(record, "lv", positive=True),
+            weaknesses=resistances_from_tolerance(weakness),
+            resistances=resistances_from_tolerance(tolerance),
+            treasure_item_key=treasure_item_key,
+            is_shadow=flags["shadow"],
+        )
+
+    @property
+    def image_resource_id(self) -> str:
+        return f"monsters/{self.image_id}"
+
+    def localized_name(self, localizer: Localizer) -> str:
+        """Return the localized display name for the current language."""
+
+        if not isinstance(localizer, Localizer):
+            raise TypeError("localizer must be a Localizer")
+        name = localizer.text(self.names, "name")
+        if not name:
+            raise MonsterDataError(f"localized monster name is missing: {self.key}")
+        return name
 
 
 @dataclass(frozen=True)

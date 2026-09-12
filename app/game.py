@@ -16,6 +16,7 @@ from game_data import (
     create_party,
     load_character_records,
     load_items,
+    load_monsters,
     load_shops,
     load_skills,
     load_spells,
@@ -29,6 +30,10 @@ from ui.equipment_menu import (
 from ui.item_menu import (
     ItemMenuDataError,
     ItemMenuOverlay,
+)
+from ui.information_menu import (
+    InformationMenuDataError,
+    InformationMenuOverlay,
 )
 from ui.status_menu import (
     StatusMenuDataError,
@@ -352,6 +357,8 @@ class GameScreenChange(Enum):
     CLOSE_EQUIPMENT = auto()
     OPEN_STATUS = auto()
     CLOSE_STATUS = auto()
+    OPEN_INFO = auto()
+    CLOSE_INFO = auto()
     OPEN_SAVE = auto()
     CLOSE_SAVE = auto()
     OPEN_SHOP = auto()
@@ -436,6 +443,7 @@ class Game:
         self.bgm.play(WELCOME_BGM_ID)
         self.save_data = SaveData(gold=INITIAL_GOLD)
         self.items = load_items()
+        self.monsters = load_monsters()
         self.inventory_system = InventorySystem(self.items)
         self.skills = load_skills()
         self.spells = load_spells()
@@ -530,6 +538,7 @@ class Game:
         self.item_screen: ItemMenuOverlay | None = None
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
+        self.information_screen: InformationMenuOverlay | None = None
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
@@ -1661,6 +1670,23 @@ class Game:
         else:
             self.command_cursor.active = True
 
+    def _start_information(self) -> None:
+        self.command_cursor.active = False
+        self.information_screen = InformationMenuOverlay(
+            monsters=self.monsters,
+            monster_records=self.save_data.monster_records,
+            items=self.items,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            images=self.images,
+            on_invalid_action=self.alert.start,
+        )
+
+    def _finish_information(self) -> None:
+        self.information_screen = None
+        self.command_cursor.active = True
+
     def _begin_screen_change(self, change: GameScreenChange) -> None:
         """Reserve one menu-related screen replacement and begin fading out."""
 
@@ -1693,6 +1719,7 @@ class Game:
             GameScreenChange.OPEN_SPELL,
             GameScreenChange.OPEN_EQUIPMENT,
             GameScreenChange.OPEN_STATUS,
+            GameScreenChange.OPEN_INFO,
             GameScreenChange.OPEN_SAVE,
         ):
             self.command_cursor.active = False
@@ -1728,6 +1755,10 @@ class Game:
             self._start_status()
         elif change is GameScreenChange.CLOSE_STATUS:
             self._finish_status()
+        elif change is GameScreenChange.OPEN_INFO:
+            self._start_information()
+        elif change is GameScreenChange.CLOSE_INFO:
+            self._finish_information()
         elif change is GameScreenChange.OPEN_SAVE:
             self._start_save()
         elif change is GameScreenChange.CLOSE_SAVE:
@@ -2641,6 +2672,11 @@ class Game:
             if status_screen.update(input_state):
                 self._begin_screen_change(GameScreenChange.CLOSE_STATUS)
             return
+        information_screen = getattr(self, "information_screen", None)
+        if information_screen is not None:
+            if information_screen.update(input_state):
+                self._begin_screen_change(GameScreenChange.CLOSE_INFO)
+            return
         save_screen = getattr(self, "save_screen", None)
         if save_screen is not None:
             if save_screen.update(input_state):
@@ -2735,6 +2771,9 @@ class Game:
         if input_state.confirm.triggered and self.command_cursor.selected_key == "sort":
             self._start_sort()
             return
+        if input_state.confirm.triggered and self.command_cursor.selected_key == "info":
+            self._begin_screen_change(GameScreenChange.OPEN_INFO)
+            return
         if (
             input_state.confirm.triggered
             and self.command_cursor.selected_key == "config"
@@ -2783,6 +2822,10 @@ class Game:
             status_screen = getattr(self, "status_screen", None)
             if status_screen is not None:
                 status_screen.draw()
+                return
+            information_screen = getattr(self, "information_screen", None)
+            if information_screen is not None:
+                information_screen.draw()
                 return
             save_screen = getattr(self, "save_screen", None)
             if save_screen is not None:
@@ -2949,6 +2992,7 @@ GAME_ERRORS = (
     MapResourceError,
     ItemDataError,
     ItemMenuDataError,
+    InformationMenuDataError,
     MemberDataError,
     MonsterDataError,
     GameDataError,

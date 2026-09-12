@@ -1625,6 +1625,99 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.selected_member_index, 3)
 
+    @patch("game.InformationMenuOverlay")
+    def test_confirming_info_command_opens_connected_information_screen(
+        self,
+        information_screen_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        input_state = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.input_reader = Mock(poll=Mock(return_value=input_state))
+        mock.alert = Mock()
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="info", active=True)
+        mock.party_cursor = None
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+        mock.information_screen = None
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.monsters = (Mock(),)
+        mock.save_data = SaveData(monster_records={"monster": set()})
+        mock.items = {"POTION": Mock()}
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.images = Mock()
+
+        mock.update()
+
+        self.assertIs(
+            mock.pending_screen_change,
+            GameScreenChange.OPEN_INFO,
+        )
+        self.assertFalse(mock.command_cursor.active)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        information_screen_class.assert_called_once_with(
+            monsters=mock.monsters,
+            monster_records=mock.save_data.monster_records,
+            items=mock.items,
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+            images=mock.images,
+            on_invalid_action=mock.alert.start,
+        )
+        self.assertIs(
+            mock.information_screen,
+            information_screen_class.return_value,
+        )
+        self.assertIsNone(mock.pending_screen_change)
+
+    def test_cancel_from_information_returns_to_info_menu_command(self) -> None:
+        mock = Game.__new__(Game)
+        input_state = InputState(cancel=InputButton(triggered=True, held=True))
+        mock.input_reader = Mock(poll=Mock(return_value=input_state))
+        mock.alert = Mock()
+        mock.command_cursor = Mock(active=False)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.information_screen = Mock()
+        mock.information_screen.update.return_value = True
+
+        information_screen = mock.information_screen
+        mock.update()
+
+        information_screen.update.assert_called_once_with(input_state)
+        self.assertIs(
+            mock.pending_screen_change,
+            GameScreenChange.CLOSE_INFO,
+        )
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            mock._update_fade()
+
+        self.assertIsNone(mock.information_screen)
+        self.assertTrue(mock.command_cursor.active)
+
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
+    def test_draw_uses_information_screen_while_information_is_active(
+        self,
+        clear_screen: Mock,
+        camera: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.information_screen = Mock()
+        mock.alert = Mock(camera_x=0)
+
+        mock.draw()
+
+        clear_screen.assert_called_once_with(0)
+        mock.information_screen.draw.assert_called_once_with()
+        self.assertEqual(camera.call_args_list, [call(0, 0), call()])
+
     @patch("game.SaveMenuOverlay")
     def test_confirming_save_command_opens_connected_save_screen(
         self,

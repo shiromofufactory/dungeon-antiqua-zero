@@ -85,6 +85,7 @@ app/
 │   ├── item_menu.py          # アイテムメニューOverlay
 │   ├── equipment_menu.py     # 装備メニューOverlay
 │   ├── status_menu.py        # ステータスメニューOverlay
+│   ├── information_menu.py   # 情報サブメニューとモンスター図鑑Overlay
 │   ├── spell_menu.py         # 呪文メニューOverlay
 │   ├── debug_menu.py         # 現在の開発用デバッグOverlay
 │   ├── debug_text.py         # 翻訳対象外のデバッグ専用日本語テキスト
@@ -195,6 +196,7 @@ app/
 │   ├── item_menu.py         # アイテムメニューOverlay
 │   ├── equipment_menu.py    # 装備メニューOverlay
 │   ├── status_menu.py       # ステータスメニューOverlay
+│   ├── information_menu.py  # 情報サブメニューとモンスター図鑑Overlay
 │   ├── spell_menu.py        # 呪文メニューOverlay
 │   └── shop.py              # ショップOverlay
 │
@@ -1002,6 +1004,13 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 `battle_physical.py` が計算する。BattleSceneと単独戦闘テストは、`Member` の装備・能力・熟練度、
 または `MonsterCombatStats` から入力値を組み立て、0～99の命中乱数を明示的に渡す。
 演出側は計算結果の命中可否とダメージだけを受け取り、同じ式を重複実装しない。
+
+情報サブメニューとモンスター図鑑は `ui/information_menu.py` のOverlayが入力、一覧カーソル、
+開示段階、Window構成、モンスター画像描画を所有する。図鑑一覧用の不変データは
+`MonsterDefinition` として `monsters.json` から読み込み、遭遇順ではなくマスター順で
+`SaveData.monster_records` のキーと照合する。Overlayはセーブ状態を更新せず、戦闘側の
+`MonsterRecordSystem` が記録した項目だけを表示する。詳細な操作と開示規則は
+[`features/information-menu.md`](./features/information-menu.md) を正本とする。
 
 ステータスメニューOverlayは左右方向または前後ページ入力で表示中のMemberを切り替え、
 両端では循環する。切り替え時は名前だけでなく、顔、装備、能力値、熟練度を含むWindow全体を

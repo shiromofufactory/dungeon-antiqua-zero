@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from item import Item
 from member import FormationRow, Member, MemberDataError
+from monster import MonsterDefinition
 from resources import load_record_array
 from shop import Shop
 from skill import Skill
@@ -20,6 +21,22 @@ def load_character_records() -> tuple[dict[str, object], ...]:
     """Load character records in their stable shared-data order."""
 
     return tuple(load_record_array("characters.json"))
+
+
+def load_monsters() -> tuple[MonsterDefinition, ...]:
+    """Load monsters in the stable master order used by the bestiary."""
+
+    monsters: list[MonsterDefinition] = []
+    seen: set[str] = set()
+    for record in load_record_array("monsters.json"):
+        monster = MonsterDefinition.from_record(record)
+        if monster.key in seen:
+            raise GameDataError(f"モンスターキーが重複しています: {monster.key}")
+        seen.add(monster.key)
+        monsters.append(monster)
+    if not monsters:
+        raise GameDataError("モンスターデータがありません")
+    return tuple(monsters)
 
 
 def load_items() -> dict[str, Item]:
@@ -130,6 +147,7 @@ __all__ = [
     "create_party",
     "load_character_records",
     "load_items",
+    "load_monsters",
     "load_shops",
     "load_skills",
     "load_spells",
