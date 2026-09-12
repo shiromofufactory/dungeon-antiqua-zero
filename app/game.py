@@ -203,6 +203,11 @@ TREASURE_GOLD_TEXT_KEY = "treasure.found_gold"
 TREASURE_ITEM_TEXT_KEY = "treasure.found_item"
 TREASURE_CAPACITY_TEXT_KEY = "treasure.capacity_exceeded"
 TREASURE_OPEN_SE_ID = "treasure_open"
+FIELD_POISON_SE_ID = "field_poison"
+FIELD_POISON_SE_CHANNEL = 3
+FIELD_MEMBER_DEAD_TEXT_KEY = "field.member.dead"
+FIELD_MEMBER_ADVANCED_TEXT_KEY = "field.member.advanced"
+FIELD_PARTY_ANNIHILATED_TEXT_KEY = "field.party.annihilated"
 MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
@@ -311,7 +316,11 @@ TELEPORT_SOUND_CHANNEL = 0
 TELEPORT_SOUND_ID = 8
 ALERT_CHANNEL = 1
 ALERT_SOUND_ID = 7
-SE_CHANNELS = (TELEPORT_SOUND_CHANNEL, ALERT_CHANNEL)
+SE_CHANNELS = (
+    TELEPORT_SOUND_CHANNEL,
+    ALERT_CHANNEL,
+    FIELD_POISON_SE_CHANNEL,
+)
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
 SETTINGS_WINDOW_GRID = (4, 12, 56, 39)
@@ -333,10 +342,10 @@ ENCOUNTER_JINGLE_ID = "da3-encount"
 RANDOM_BATTLE_ENCOUNTER = BattleEncounter(
     (
         "ワイルドボア",
-        "Giant Spider",
-        "Giant Spider",
-        "ワイルドボア",
-        "Coyote",
+        "Cobra",
+        "Cobra",
+        "Cobra",
+        "Cobra",
     ),
     frozenset((2, 3, 4)),
 )
@@ -513,6 +522,7 @@ class Game:
         self.event_effect = None
         self.event_message: EventMessageOverlay | None = None
         self.treasure_message: MessageOverlay | None = None
+        self.field_condition_message: MessageOverlay | None = None
         self.pending_treasure_close_actor_id: str | None = None
         self.event_move_remaining = 0
         self.event_release_direction: Direction | None = None
@@ -626,6 +636,99 @@ class Game:
         self._begin_random_encounter()
         return True
 
+    def _apply_dungeon_step_health_changes(self) -> None:
+        """Apply DA2's step HP change, death notice, and row correction."""
+
+        if self.current_map.profile != "dungeon":
+            return
+        previous_hp = tuple(member.hp for member in self.party)
+        for member in self.party:
+            member.apply_heal_and_poison()
+
+        defeated = tuple(
+            member
+            for member, old_hp in zip(self.party, previous_hp, strict=True)
+            if old_hp > 0 and member.hp <= 0
+        )
+        if not defeated:
+            return
+
+        localizer = Localizer(self.settings.language)
+        lines = [
+            self.texts.formatted_text(
+                FIELD_MEMBER_DEAD_TEXT_KEY,
+                localizer,
+                {"MEMBER": member.definition.localized_name(localizer)},
+            )
+            for member in defeated
+        ]
+        promoted = self._promote_first_recoverable_member()
+        if promoted is not None:
+            lines.append(
+                self.texts.formatted_text(
+                    FIELD_MEMBER_ADVANCED_TEXT_KEY,
+                    localizer,
+                    {"MEMBER": promoted.definition.localized_name(localizer)},
+                )
+            )
+        if not any(
+            self._member_is_field_recoverable(member) for member in self.party
+        ):
+            lines.append(
+                self.texts.text(FIELD_PARTY_ANNIHILATED_TEXT_KEY, localizer)
+            )
+        self.field_condition_message = MessageOverlay(
+            lines=tuple(lines),
+            settings=self.settings,
+            fonts=self.fonts,
+        )
+
+    @staticmethod
+    def _member_is_field_recoverable(member: Member) -> bool:
+        """Match DA2's field leader/front-row eligibility."""
+
+        return member.hp > 0 and not member.paralyzed
+
+    def _promote_first_recoverable_member(self) -> Member | None:
+        """Keep one recoverable battle participant in the permanent front row."""
+
+        active_party = self.party[:BATTLE_PARTY_MEMBER_COUNT]
+        recoverable = tuple(
+            member
+            for member in active_party
+            if self._member_is_field_recoverable(member)
+        )
+        if not recoverable or any(member.is_front_row for member in recoverable):
+            return None
+        promoted = recoverable[0]
+        promoted.formation_row = FormationRow.FRONT
+        return promoted
+
+    def _field_player_member(self) -> Member:
+        """Return DA2's first recoverable member, falling back to party leader."""
+
+        return next(
+            (
+                member
+                for member in self.party
+                if self._member_is_field_recoverable(member)
+            ),
+            self.party[0],
+        )
+
+    def _play_dungeon_poison_movement_sound(self) -> None:
+        """Repeat DA2's poison sound while a poisoned party walks."""
+
+        current_map = getattr(self, "current_map", None)
+        if (
+            getattr(current_map, "profile", None) != "dungeon"
+            or not self.field.is_moving
+            or not any(member.poisoned for member in self.party)
+            or pyxel.play_pos(FIELD_POISON_SE_CHANNEL) is not None
+        ):
+            return
+        play_se(FIELD_POISON_SE_ID)
+
     def _begin_random_encounter(self) -> None:
         """Freeze the field and begin the PC-centered encounter transition."""
 
@@ -699,6 +802,8 @@ class Game:
         battle_scene = getattr(self, "battle_scene", None)
         if battle_scene is not None:
             battle_scene.clear_temporary_member_conditions()
+        if getattr(self, "party", ()):
+            self._promote_first_recoverable_member()
         if result is BattleResult.VICTORY:
             self.save_data.battle_count += 1
         elif result is BattleResult.DEFEAT:
@@ -1050,6 +1155,9 @@ class Game:
         arrival = self.pending_target_arrival
         if target_map is None or arrival is None:
             raise RuntimeError("map change has incomplete destination data")
+        if target_map is getattr(self, "world_map", None):
+            for member in self.party:
+                member.recover_world_map_entry_ailments()
         self.current_map = target_map
         self.current_sites = WorldSiteCatalog(target_map.sites)
         self.field = FieldMovement(
@@ -1592,10 +1700,10 @@ class Game:
             self.settings_cursor = None
 
     def _apply_pending_debug_teleport(self) -> None:
-        """Apply a debug teleport and return directly to the field."""
+        """Apply a debug teleport and return directly to the world map."""
 
-        self._apply_pending_map_destination()
         self._finish_debug_menu(resume_settings=False)
+        self._apply_pending_map_destination()
         self.showing_field = True
 
     def _start_status(self) -> None:
@@ -2338,8 +2446,7 @@ class Game:
                     face_positions=self.character_face_positions,
                 )
                 self.save_data.logs.insert(
-                    0,
-                    {"message_id": effect.message_id, "arguments": {}}
+                    0, {"message_id": effect.message_id, "arguments": {}}
                 )
                 del self.save_data.logs[20:]
                 return
@@ -2588,6 +2695,7 @@ class Game:
                 direction,
                 blocked_positions=self.field_actors.blocked_positions(),
             )
+        self._play_dungeon_poison_movement_sound()
         arrived = self.field.arrived_position
         if arrived is not None and self._try_field_trigger(
             "step",
@@ -2597,6 +2705,13 @@ class Game:
         ):
             return
         self._handle_arrived_site()
+        if (
+            isinstance(arrived, FieldPosition)
+            and getattr(self, "pending_screen_change", None) is None
+        ):
+            self._apply_dungeon_step_health_changes()
+            if getattr(self, "field_condition_message", None) is not None:
+                return
         if (
             arrived is not None
             and getattr(self, "pending_screen_change", None) is None
@@ -2649,6 +2764,15 @@ class Game:
             if treasure_message is not None:
                 if treasure_message.update(input_state):
                     self._finish_treasure_message()
+                return
+            field_condition_message = getattr(
+                self,
+                "field_condition_message",
+                None,
+            )
+            if field_condition_message is not None:
+                if field_condition_message.update(input_state):
+                    self.field_condition_message = None
                 return
             if getattr(self, "event_runner", None) is not None:
                 self._update_event(input_state)
@@ -2874,7 +2998,9 @@ class Game:
                 "prop_image": self.field_prop_image,
                 "actor_character_image": self.field_actor_character_image,
                 "player_character_image": self.field_player_character_image,
-                "player_sprite_index": self.party[0].definition.battle_sprite,
+                "player_sprite_index": (
+                    self._field_player_member().definition.battle_sprite
+                ),
                 "treasure_image": self.field_treasure_image,
             }
             if not draw_player:
@@ -2891,6 +3017,9 @@ class Game:
         treasure_message = getattr(self, "treasure_message", None)
         if treasure_message is not None:
             treasure_message.draw()
+        field_condition_message = getattr(self, "field_condition_message", None)
+        if field_condition_message is not None:
+            field_condition_message.draw()
 
     def _draw_encounter_transition(self) -> None:
         """Capture the field once, then transform that immutable framebuffer."""

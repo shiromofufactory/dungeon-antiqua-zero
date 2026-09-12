@@ -101,6 +101,10 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_OFFSET_Y,
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
+    PARTY_CONDITION_ICON_OFFSET_X,
+    PARALYZE_ICON_SIZE,
+    PARALYZE_ICON_SOURCE_X,
+    PARALYZE_ICON_SOURCE_Y,
     POISON_ICON_SIZE,
     POISON_ICON_SOURCE_X,
     POISON_ICON_SOURCE_Y,
@@ -266,7 +270,10 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_monsters = Mock()
         mock._draw_party_attack_effect = Mock()
         mock._draw_spell_effects = Mock()
+        mock._draw_sleeping_icons = Mock()
         mock._draw_poison_icons = Mock()
+        mock._draw_paralyze_icons = Mock()
+        mock._draw_stun_icons = Mock()
         mock._draw_speed_modifier_icons = Mock()
         mock._draw_party_attack_damage = Mock()
         mock._draw_monster_attack_result = Mock()
@@ -281,7 +288,10 @@ class BattleScreenMockTest(unittest.TestCase):
         manager.attach_mock(mock._draw_monsters, "monsters")
         manager.attach_mock(mock._draw_party_attack_effect, "party_attack_effect")
         manager.attach_mock(mock._draw_spell_effects, "spell_effects")
+        manager.attach_mock(mock._draw_sleeping_icons, "sleeping_icons")
         manager.attach_mock(mock._draw_poison_icons, "poison_icons")
+        manager.attach_mock(mock._draw_paralyze_icons, "paralyze_icons")
+        manager.attach_mock(mock._draw_stun_icons, "stun_icons")
         manager.attach_mock(mock._draw_speed_modifier_icons, "speed_modifier_icons")
         manager.attach_mock(mock._draw_party_attack_damage, "party_attack_damage")
         manager.attach_mock(mock._draw_monster_attack_result, "monster_attack")
@@ -300,7 +310,10 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.monsters(),
                 call.party_attack_effect(),
                 call.spell_effects(),
+                call.sleeping_icons(),
                 call.poison_icons(),
+                call.paralyze_icons(),
+                call.stun_icons(),
                 call.speed_modifier_icons(),
                 call.party_attack_damage(),
                 call.monster_attack(),
@@ -3676,6 +3689,85 @@ class BattleScreenMockTest(unittest.TestCase):
             1,
         )
         self.assertEqual(dither.call_args_list, [call(0.5), call(1.0)])
+
+    def test_party_condition_icons_line_up_from_the_character_upper_right(
+        self,
+    ) -> None:
+        member = SimpleNamespace(
+            is_alive=True,
+            poisoned=True,
+            sleeping=2,
+            paralyzed=True,
+            stunned=True,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (SimpleNamespace(member=member),)
+        mock.monsters = ()
+        mock._party_draw_position = Mock(return_value=(156, 64))
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                POISON_ICON_PATTERN_FRAME_COUNT,
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.dither"),
+        ):
+            mock._draw_sleeping_icons()
+            mock._draw_poison_icons()
+            mock._draw_paralyze_icons()
+            mock._draw_stun_icons()
+
+        first_x = 156 + PARTY_CONDITION_ICON_OFFSET_X
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    first_x + SLEEP_ICON_SIZE,
+                    64,
+                    0,
+                    SLEEP_ICON_SOURCE_X + SLEEP_ICON_SIZE,
+                    SLEEP_ICON_SOURCE_Y,
+                    SLEEP_ICON_SIZE,
+                    SLEEP_ICON_SIZE,
+                    1,
+                ),
+                call(
+                    first_x,
+                    64,
+                    0,
+                    POISON_ICON_SOURCE_X,
+                    POISON_ICON_SOURCE_Y,
+                    POISON_ICON_SIZE,
+                    POISON_ICON_SIZE,
+                    1,
+                ),
+                call(
+                    first_x + PARALYZE_ICON_SIZE * 2,
+                    64,
+                    0,
+                    PARALYZE_ICON_SOURCE_X,
+                    PARALYZE_ICON_SOURCE_Y,
+                    PARALYZE_ICON_SIZE,
+                    PARALYZE_ICON_SIZE,
+                    1,
+                ),
+                call(
+                    first_x + STUN_ICON_SIZE * 3,
+                    64,
+                    0,
+                    STUN_ICON_SOURCE_X,
+                    STUN_ICON_SOURCE_Y,
+                    STUN_ICON_SIZE,
+                    STUN_ICON_SIZE,
+                    1,
+                ),
+            ],
+        )
+        self.assertEqual(
+            (PARALYZE_ICON_SOURCE_X, PARALYZE_ICON_SOURCE_Y),
+            (40, 16),
+        )
 
     def test_stun_icon_uses_authored_bank_zero_sprite_beside_monster(self) -> None:
         monster = _damage_test_monster()

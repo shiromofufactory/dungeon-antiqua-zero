@@ -37,6 +37,10 @@
       "channel": 1,
       "sound": 9
     },
+    "field_poison": {
+      "channel": 3,
+      "sound": 43
+    },
     "result_increment": {
       "channel": 1,
       "sound": 2

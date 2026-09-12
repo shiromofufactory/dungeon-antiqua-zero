@@ -213,8 +213,8 @@ JSONオブジェクトのプロパティ順には意味を持たせない。書�
 | `mp` | integer、0〜`max_mp` | 現在MP |
 | `max_mp` | integer、0〜255 | 成長を反映した最大MP |
 | `formation_row` | `FRONT` / `BACK` | 前列・後列 |
-| `poisoned` | boolean | フィールドへ持ち越す毒状態 |
-| `paralyzed` | boolean | フィールドへ持ち越す麻痺状態 |
+| `poisoned` | boolean | 現在の毒状態。ワールドマップへ移動する際は自動解除する |
+| `paralyzed` | boolean | 現在の麻痺状態。ワールドマップへ移動する際は自動解除する |
 | `ability_bonuses` | object | 永続成長アイテムによる能力上昇量 |
 | `skill_keys` | string[] | 現在習得しているスキルの安定キー |
 | `event_spell_keys` | string[] | 熟練度から導出できないイベント習得呪文の安定キー |

@@ -13,6 +13,7 @@ from game import (
     Game,
 )
 from input import Direction, InputButton, InputState
+from member import FormationRow
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     ENCOUNTER_TRANSITION_FRAME_COUNT,
@@ -276,11 +277,14 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         arrived = FieldPosition(3, 4)
         game.field = Mock(is_moving=False, arrived_position=arrived)
         game.field_actors = None
+        game.current_map = Mock(profile="dungeon")
+        game.party = ()
         game.pending_screen_change = None
         game._release_latch_blocks_field = Mock(return_value=False)
         game._try_open_treasure = Mock(return_value=False)
         game._try_field_trigger = Mock(return_value=False)
         game._handle_arrived_site = Mock()
+        game._apply_dungeon_step_health_changes = Mock()
         game._advance_random_encounter = Mock(return_value=True)
         game._refresh_site_name_label = Mock()
 
@@ -292,6 +296,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             4,
             release_direction=None,
         )
+        game._apply_dungeon_step_health_changes.assert_called_once_with()
         game._advance_random_encounter.assert_called_once_with()
         game._refresh_site_name_label.assert_not_called()
 
@@ -383,7 +388,9 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game = Game.__new__(Game)
         game.battle_return_result = BattleResult.VICTORY
         battle_scene = Mock()
+        member = Mock(hp=10, paralyzed=False, is_front_row=True)
         game.battle_scene = battle_scene
+        game.party = (member,)
         game.save_data = SaveData(battle_count=4)
         game.current_map = Mock(bgm_id="da3-forest")
         game.bgm = Mock()
@@ -392,6 +399,34 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertEqual(game.save_data.battle_count, 5)
         battle_scene.clear_temporary_member_conditions.assert_called_once_with()
+        member.recover_world_map_entry_ailments.assert_not_called()
+
+    def test_battle_return_permanently_advances_first_recoverable_rear(
+        self,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.battle_return_result = BattleResult.VICTORY
+        defeated_front = Mock(
+            hp=0,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        rear = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=False,
+            formation_row=FormationRow.BACK,
+        )
+        game.party = (defeated_front, rear)
+        game.battle_scene = Mock()
+        game.save_data = SaveData()
+        game.current_map = Mock(bgm_id="da3-forest")
+        game.bgm = Mock()
+
+        game._apply_battle_return()
+
+        self.assertIs(rear.formation_row, FormationRow.FRONT)
 
     def test_escape_reuses_battle_blackout_and_starts_with_field_fade_in(
         self,

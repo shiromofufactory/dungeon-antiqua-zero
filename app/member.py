@@ -1089,7 +1089,20 @@ class Member:
             self.max_hp,
             max(0, self.hp + self.heal_and_poison_amount),
         )
+        if old_hp > 0 and self.hp <= 0:
+            self._clear_conditions_on_death()
         return self.hp - old_hp
+
+    def _clear_conditions_on_death(self) -> None:
+        """Clear persistent and temporary conditions when HP reaches zero."""
+
+        self.poisoned = False
+        self.paralyzed = False
+        self.sleeping = 0
+        self.confused = 0
+        self.stunned = False
+        self.protection_level = 0
+        self.speed_modifier = 0
 
     def apply_healing(self, amount: int, *, cure_ailments: bool = False) -> int:
         """Apply a non-negative recovery and optionally clear all ailments."""
@@ -1123,9 +1136,7 @@ class Member:
             self.sleeping = 0
             self.confused = 0
         if self.hp <= 0:
-            self.stunned = False
-            self.protection_level = 0
-            self.speed_modifier = 0
+            self._clear_conditions_on_death()
         return old_hp - self.hp
 
     def take_poison_damage(self, damage: int) -> int:
@@ -1138,9 +1149,7 @@ class Member:
         old_hp = self.hp
         self.hp = max(0, self.hp - damage)
         if self.hp <= 0:
-            self.stunned = False
-            self.protection_level = 0
-            self.speed_modifier = 0
+            self._clear_conditions_on_death()
         return old_hp - self.hp
 
     def apply_poison(self) -> bool:
@@ -1213,9 +1222,7 @@ class Member:
         """Set HP to zero and clear battle modifiers after instant death."""
 
         self.hp = 0
-        self.stunned = False
-        self.protection_level = 0
-        self.speed_modifier = 0
+        self._clear_conditions_on_death()
 
     @property
     def effective_agility(self) -> int:
@@ -1234,6 +1241,12 @@ class Member:
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
+
+    def recover_world_map_entry_ailments(self) -> None:
+        """Clear ZERO's persistent ailments when entering the world map."""
+
+        self.poisoned = False
+        self.paralyzed = False
 
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""

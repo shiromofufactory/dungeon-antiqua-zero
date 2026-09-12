@@ -339,10 +339,20 @@ POISON_ICON_SIZE = 8
 POISON_MONSTER_OFFSET_X = 24
 POISON_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 POISON_ICON_DITHER_RATES = (0.0, 0.5, 1.0, 0.5)
+PARALYZE_ICON_SOURCE_X = 40
+PARALYZE_ICON_SOURCE_Y = 16
+PARALYZE_ICON_SIZE = 8
 STUN_ICON_SOURCE_X = 224
 STUN_ICON_SOURCE_Y = 16
 STUN_ICON_SIZE = 8
 STUN_MONSTER_OFFSET_X = 32
+PARTY_CONDITION_ICON_OFFSET_X = 12
+PARTY_CONDITION_ICON_FIELDS = (
+    "poisoned",
+    "sleeping",
+    "paralyzed",
+    "stunned",
+)
 SPEED_ICON_SOURCE_X = 96
 SPEED_ICON_NEGATIVE_SOURCE_Y = 136
 SPEED_ICON_SIZE = 8
@@ -6070,6 +6080,7 @@ class BattleScene:
         self._draw_spell_effects()
         self._draw_sleeping_icons()
         self._draw_poison_icons()
+        self._draw_paralyze_icons()
         self._draw_stun_icons()
         self._draw_speed_modifier_icons()
         self._draw_target_affinity_indicators()
@@ -6850,12 +6861,12 @@ class BattleScene:
         for index, visual in enumerate(getattr(self, "party_visuals", ())):
             if not getattr(visual.member, "sleeping", 0):
                 continue
-            position = self._party_draw_position(index)
+            position = self._party_condition_icon_position(index, "sleeping")
             if position is None:
                 continue
             x, y = position
             pyxel.blt(
-                x + 12,
+                x,
                 y,
                 0,
                 source_x,
@@ -6905,14 +6916,22 @@ class BattleScene:
             )
 
     def _draw_poison_icons(self) -> None:
-        """Draw the poison condition icon beside each poisoned monster."""
+        """Draw the animated poison icon beside poisoned combatants."""
+
+        party_positions: list[tuple[int, int]] = []
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if not getattr(visual.member, "poisoned", False):
+                continue
+            position = self._party_condition_icon_position(index, "poisoned")
+            if position is not None:
+                party_positions.append(position)
 
         poisoned = tuple(
             (index, monster)
             for index, monster in enumerate(getattr(self, "monsters", ()))
             if monster.is_alive and monster.state.poisoned
         )
-        if not poisoned:
+        if not party_positions and not poisoned:
             return
         pattern = (
             pyxel.frame_count // POISON_ICON_PATTERN_FRAME_COUNT
@@ -6922,6 +6941,17 @@ class BattleScene:
             return
         pyxel.dither(dither_rate)
         try:
+            for x, y in party_positions:
+                pyxel.blt(
+                    x,
+                    y,
+                    0,
+                    POISON_ICON_SOURCE_X,
+                    POISON_ICON_SOURCE_Y,
+                    POISON_ICON_SIZE,
+                    POISON_ICON_SIZE,
+                    TRANSPARENT_INDEX,
+                )
             for index, monster in poisoned:
                 _base_x, y = MONSTER_POSITIONS[index]
                 pyxel.blt(
@@ -6937,8 +6967,47 @@ class BattleScene:
         finally:
             pyxel.dither(1.0)
 
+    def _draw_paralyze_icons(self) -> None:
+        """Draw the bank-zero paralysis icon beside paralyzed party members."""
+
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if not getattr(visual.member, "paralyzed", False):
+                continue
+            position = self._party_condition_icon_position(index, "paralyzed")
+            if position is None:
+                continue
+            x, y = position
+            pyxel.blt(
+                x,
+                y,
+                0,
+                PARALYZE_ICON_SOURCE_X,
+                PARALYZE_ICON_SOURCE_Y,
+                PARALYZE_ICON_SIZE,
+                PARALYZE_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
+
     def _draw_stun_icons(self) -> None:
-        """Draw the authored persistent stun icon beside stunned monsters."""
+        """Draw the authored persistent stun icon beside stunned combatants."""
+
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if not getattr(visual.member, "stunned", False):
+                continue
+            position = self._party_condition_icon_position(index, "stunned")
+            if position is None:
+                continue
+            x, y = position
+            pyxel.blt(
+                x,
+                y,
+                0,
+                STUN_ICON_SOURCE_X,
+                STUN_ICON_SOURCE_Y,
+                STUN_ICON_SIZE,
+                STUN_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
 
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.stunned:
@@ -6954,6 +7023,32 @@ class BattleScene:
                 STUN_ICON_SIZE,
                 TRANSPARENT_INDEX,
             )
+
+    def _party_condition_icon_position(
+        self,
+        index: int,
+        condition: str,
+    ) -> tuple[int, int] | None:
+        """Place active party condition icons in one compact upper-right row."""
+
+        visual = self.party_visuals[index]
+        member = visual.member
+        if not getattr(member, "is_alive", True):
+            return None
+        position = self._party_draw_position(index)
+        if position is None:
+            return None
+        preceding_count = sum(
+            bool(getattr(member, field, False))
+            for field in PARTY_CONDITION_ICON_FIELDS[
+                : PARTY_CONDITION_ICON_FIELDS.index(condition)
+            ]
+        )
+        x, y = position
+        return (
+            x + PARTY_CONDITION_ICON_OFFSET_X + preceding_count * SLEEP_ICON_SIZE,
+            y,
+        )
 
     def _draw_protection_icons(self) -> None:
         """Animate each defense stage immediately left of its party name."""

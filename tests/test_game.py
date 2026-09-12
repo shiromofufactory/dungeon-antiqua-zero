@@ -10,6 +10,8 @@ from ui.debug_menu import DebugShopTarget, DebugTeleportTarget
 from game import (
     ALERT_CHANNEL,
     ALERT_SOUND_ID,
+    FIELD_POISON_SE_CHANNEL,
+    FIELD_POISON_SE_ID,
     FACES_IMAGE_ID,
     INITIAL_GOLD,
     INITIAL_PARTY_KEYS,
@@ -764,6 +766,248 @@ class GameTest(unittest.TestCase):
 
         mock.field.update.assert_called_once_with(Direction.LEFT)
 
+    def test_dungeon_step_applies_member_health_changes_before_encounter(
+        self,
+    ) -> None:
+        calls: list[str] = []
+        arrived = FieldPosition(3, 4)
+        members = (Mock(), Mock())
+        for member in members:
+            member.hp = 10
+            member.apply_heal_and_poison.side_effect = (
+                lambda: calls.append("health")
+            )
+        mock = Game.__new__(Game)
+        mock.current_map = Mock(profile="dungeon")
+        mock.party = members
+        mock.field = Mock(is_moving=False, arrived_position=arrived)
+        mock.field_actors = None
+        mock.pending_screen_change = None
+        mock._release_latch_blocks_field = Mock(return_value=False)
+        mock._try_open_treasure = Mock(return_value=False)
+        mock._try_field_trigger = Mock(return_value=False)
+        mock._handle_arrived_site = Mock()
+        mock._advance_random_encounter = Mock(
+            side_effect=lambda: calls.append("encounter") or False
+        )
+        mock._refresh_site_name_label = Mock()
+
+        mock._update_field(InputState())
+
+        for member in members:
+            member.apply_heal_and_poison.assert_called_once_with()
+        self.assertEqual(calls, ["health", "health", "encounter"])
+
+    def test_step_health_changes_are_limited_to_dungeons(self) -> None:
+        member = Mock()
+        mock = Game.__new__(Game)
+        mock.party = (member,)
+
+        for profile in ("world", "town"):
+            with self.subTest(profile=profile):
+                mock.current_map = Mock(profile=profile)
+                mock._apply_dungeon_step_health_changes()
+
+        member.apply_heal_and_poison.assert_not_called()
+
+    def test_field_death_message_precedes_random_encounter(self) -> None:
+        arrived = FieldPosition(3, 4)
+        game = Game.__new__(Game)
+        game.current_map = Mock(profile="dungeon")
+        game.field = Mock(is_moving=False, arrived_position=arrived)
+        game.field_actors = None
+        game.pending_screen_change = None
+        game.field_condition_message = None
+        game._release_latch_blocks_field = Mock(return_value=False)
+        game._try_open_treasure = Mock(return_value=False)
+        game._try_field_trigger = Mock(return_value=False)
+        game._handle_arrived_site = Mock()
+        game._apply_dungeon_step_health_changes = Mock(
+            side_effect=lambda: setattr(
+                game,
+                "field_condition_message",
+                Mock(),
+            )
+        )
+        game._advance_random_encounter = Mock()
+        game._refresh_site_name_label = Mock()
+
+        game._update_field(InputState())
+
+        game._advance_random_encounter.assert_not_called()
+        game._refresh_site_name_label.assert_not_called()
+
+    @patch("game.MessageOverlay")
+    def test_field_death_is_reported_and_first_recoverable_rear_advances(
+        self,
+        message_overlay: Mock,
+    ) -> None:
+        defeated = Mock(
+            hp=1,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        defeated.definition.localized_name.return_value = "フィオラ"
+        defeated.apply_heal_and_poison.side_effect = lambda: setattr(
+            defeated,
+            "hp",
+            0,
+        )
+        rear = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=False,
+            formation_row=FormationRow.BACK,
+        )
+        rear.definition.localized_name.return_value = "セリオン"
+        reserve = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        reserve.definition.localized_name.return_value = "エリカ"
+        game = Game.__new__(Game)
+        game.current_map = Mock(profile="dungeon")
+        game.party = (defeated, rear, Mock(hp=0), Mock(hp=0), Mock(hp=0), reserve)
+        game.settings = Settings(language=Language.JAPANESE)
+        game.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        game.fonts = object()
+
+        game._apply_dungeon_step_health_changes()
+
+        self.assertIs(rear.formation_row, FormationRow.FRONT)
+        self.assertIs(game.field_condition_message, message_overlay.return_value)
+        self.assertEqual(
+            message_overlay.call_args.kwargs["lines"],
+            (
+                "フィオラは　ちからつきた",
+                "セリオンが　ぜんれつに　すすみでた",
+            ),
+        )
+
+    @patch("game.MessageOverlay")
+    def test_field_death_reports_annihilation_when_no_member_is_recoverable(
+        self,
+        message_overlay: Mock,
+    ) -> None:
+        defeated = Mock(
+            hp=1,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        defeated.definition.localized_name.return_value = "フィオラ"
+        defeated.apply_heal_and_poison.side_effect = lambda: setattr(
+            defeated,
+            "hp",
+            0,
+        )
+        game = Game.__new__(Game)
+        game.current_map = Mock(profile="dungeon")
+        game.party = (defeated,)
+        game.settings = Settings(language=Language.JAPANESE)
+        game.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        game.fonts = object()
+
+        game._apply_dungeon_step_health_changes()
+
+        self.assertEqual(
+            message_overlay.call_args.kwargs["lines"],
+            (
+                "フィオラは　ちからつきた",
+                "ぼうけんしゃたちは　ぜんめつした",
+            ),
+        )
+
+    def test_field_player_uses_first_recoverable_member(self) -> None:
+        defeated = Mock(hp=0, paralyzed=False)
+        paralyzed = Mock(hp=10, paralyzed=True)
+        recoverable = Mock(hp=10, paralyzed=False)
+        game = Game.__new__(Game)
+        game.party = (defeated, paralyzed, recoverable)
+
+        self.assertIs(game._field_player_member(), recoverable)
+
+    @patch("game.play_se")
+    @patch("game.pyxel.play_pos", return_value=None)
+    def test_poison_sound_repeats_while_walking_in_a_dungeon(
+        self,
+        play_pos: Mock,
+        play_se_mock: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.current_map = Mock(profile="dungeon")
+        mock.field = Mock(is_moving=True)
+        mock.party = (Mock(poisoned=True),)
+
+        mock._play_dungeon_poison_movement_sound()
+
+        play_pos.assert_called_once_with(FIELD_POISON_SE_CHANNEL)
+        play_se_mock.assert_called_once_with(FIELD_POISON_SE_ID)
+
+    @patch("game.play_se")
+    @patch("game.pyxel.play_pos")
+    def test_hp_reducing_equipment_alone_does_not_play_poison_sound(
+        self,
+        play_pos: Mock,
+        play_se_mock: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.current_map = Mock(profile="dungeon")
+        mock.field = Mock(is_moving=True)
+        mock.party = (Mock(poisoned=False, heal_and_poison_amount=-1),)
+
+        mock._play_dungeon_poison_movement_sound()
+
+        play_pos.assert_not_called()
+        play_se_mock.assert_not_called()
+
+    def test_step_event_skips_dungeon_health_changes(self) -> None:
+        arrived = FieldPosition(3, 4)
+        member = Mock()
+        mock = Game.__new__(Game)
+        mock.current_map = Mock(profile="dungeon")
+        mock.party = (member,)
+        mock.field = Mock(is_moving=False, arrived_position=arrived)
+        mock.field_actors = None
+        mock.pending_screen_change = None
+        mock._release_latch_blocks_field = Mock(return_value=False)
+        mock._try_open_treasure = Mock(return_value=False)
+        mock._try_field_trigger = Mock(return_value=True)
+
+        mock._update_field(InputState())
+
+        member.apply_heal_and_poison.assert_not_called()
+
+    def test_map_exit_step_skips_dungeon_health_changes(self) -> None:
+        arrived = FieldPosition(3, 4)
+        member = Mock()
+        mock = Game.__new__(Game)
+        mock.current_map = Mock(profile="dungeon")
+        mock.party = (member,)
+        mock.field = Mock(is_moving=False, arrived_position=arrived)
+        mock.field_actors = None
+        mock.pending_screen_change = None
+        mock._release_latch_blocks_field = Mock(return_value=False)
+        mock._try_open_treasure = Mock(return_value=False)
+        mock._try_field_trigger = Mock(return_value=False)
+        mock._handle_arrived_site = Mock(
+            side_effect=lambda: setattr(
+                mock,
+                "pending_screen_change",
+                GameScreenChange.CHANGE_MAP,
+            )
+        )
+        mock._advance_random_encounter = Mock()
+        mock._refresh_site_name_label = Mock()
+
+        mock._update_field(InputState())
+
+        member.apply_heal_and_poison.assert_not_called()
+        mock._advance_random_encounter.assert_not_called()
+
     @patch("game.LocalizedWindowTextFactory")
     def test_nearby_site_name_uses_current_language_text(
         self,
@@ -937,6 +1181,8 @@ class GameTest(unittest.TestCase):
         mock.pending_target_map = None
         mock.pending_target_arrival = None
         mock.bgm = Mock()
+        member = Mock()
+        mock.party = (member,)
 
         mock._handle_arrived_site()
 
@@ -960,6 +1206,7 @@ class GameTest(unittest.TestCase):
         )
         self.assertIs(mock.current_map, target_map)
         mock.bgm.play.assert_called_once_with("da3-town")
+        member.recover_world_map_entry_ailments.assert_not_called()
         play.assert_not_called()
 
     def test_missing_site_map_does_not_mark_site_visited(self) -> None:
@@ -1025,6 +1272,8 @@ class GameTest(unittest.TestCase):
         mock.pending_target_map = None
         mock.pending_target_arrival = None
         mock.bgm = Mock()
+        members = (Mock(), Mock())
+        mock.party = members
 
         mock._handle_arrived_site()
         mock._apply_pending_screen_change()
@@ -1043,6 +1292,8 @@ class GameTest(unittest.TestCase):
             screen_height=240,
         )
         mock.bgm.play.assert_called_once_with("da3-field")
+        for member in members:
+            member.recover_world_map_entry_ailments.assert_called_once_with()
 
     def test_debug_teleport_targets_use_visited_sites_and_localized_names(
         self,
@@ -1151,10 +1402,12 @@ class GameTest(unittest.TestCase):
             "sample_town",
         )
         target_map = Mock(sites=(), bgm_id="da3-field")
-        party = (Mock(),)
+        member = Mock()
+        party = (member,)
         mock = Game.__new__(Game)
         mock.pending_target_map = target_map
         mock.pending_target_arrival = arrival
+        mock.world_map = target_map
         mock.debug_screen = Mock(party=party)
         mock.party = ()
         mock._force_reserve_front = Mock()
@@ -1185,6 +1438,7 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.settings_window)
         self.assertIsNone(mock.settings_cursor)
         mock.bgm.play.assert_called_once_with("da3-field")
+        member.recover_world_map_entry_ailments.assert_called_once_with()
         self.assertTrue(mock.command_cursor.active)
         self.assertEqual(mock.party, party)
         self.assertEqual(mock.selected_member_index, 0)

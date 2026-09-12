@@ -329,6 +329,7 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.heal_and_poison_amount, -1)
         self.assertEqual(self.member.apply_heal_and_poison(), -1)
         self.assertEqual(self.member.hp, 0)
+        self.assertFalse(self.member.poisoned)
         self.assertEqual(self.member.heal_and_poison_amount, 0)
 
     def test_battle_healing_caps_hp_and_can_clear_all_ailments(self) -> None:
@@ -394,6 +395,23 @@ class MemberTest(unittest.TestCase):
         self.assertTrue(self.member.poisoned)
         self.assertTrue(self.member.paralyzed)
 
+    def test_world_map_entry_cures_only_poison_and_paralysis(self) -> None:
+        self.member.hp = 1
+        self.member.mp = 2
+        self.member.poisoned = True
+        self.member.paralyzed = True
+        self.member.sleeping = 2
+        self.member.stunned = True
+
+        self.member.recover_world_map_entry_ailments()
+
+        self.assertFalse(self.member.poisoned)
+        self.assertFalse(self.member.paralyzed)
+        self.assertEqual(self.member.sleeping, 2)
+        self.assertTrue(self.member.stunned)
+        self.assertEqual(self.member.hp, 1)
+        self.assertEqual(self.member.mp, 2)
+
     def test_protection_raises_defense_twice_using_da2_formula(self) -> None:
         armor = self.item("ARMOR", "BODY", defense=10)
         self.member.equipment = EquipmentSet({EquipmentSlot.BODY: armor})
@@ -420,11 +438,21 @@ class MemberTest(unittest.TestCase):
         self.assertFalse(self.member.apply_defense_down())
 
     def test_death_clears_battle_modifiers(self) -> None:
+        self.member.poisoned = True
+        self.member.paralyzed = True
+        self.member.sleeping = 2
+        self.member.confused = 2
+        self.member.stunned = True
         self.member.protection_level = 2
         self.member.speed_modifier = -1
 
         self.member.take_damage(self.member.hp)
 
+        self.assertFalse(self.member.poisoned)
+        self.assertFalse(self.member.paralyzed)
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 0)
+        self.assertFalse(self.member.stunned)
         self.assertEqual(self.member.protection_level, 0)
         self.assertEqual(self.member.speed_modifier, 0)
 
@@ -453,6 +481,18 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.heal_and_poison_amount, -2)
         self.assertEqual(self.member.apply_heal_and_poison(), -2)
         self.assertEqual(self.member.hp, 38)
+
+    def test_poison_and_negative_equipment_healing_stack_per_step(self) -> None:
+        cursed_ring = self.item("CURSED RING", "ARM", healing=-2)
+        self.member.equipment = EquipmentSet(
+            {EquipmentSlot.ARM: cursed_ring}
+        )
+        self.member.poisoned = True
+        self.member.hp = 40
+
+        self.assertEqual(self.member.heal_and_poison_amount, -3)
+        self.assertEqual(self.member.apply_heal_and_poison(), -3)
+        self.assertEqual(self.member.hp, 37)
 
     def test_keeps_base_and_adjusted_ability_layers_separate(self) -> None:
         self.assertEqual(
