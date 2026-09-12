@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass
 from enum import Enum
 
 import pyxel
@@ -24,8 +25,18 @@ from input import InputState
 from localization import Localizer
 from member import Member
 from resources import TRANSPARENT_INDEX, FontResources, play_se
-from spell import Spell, SpellAction, SpellType
+from spell import (
+    SPELL_PROFICIENCY_BY_TYPE,
+    SPELL_TYPE_ICON_TAGS,
+    Spell,
+    SpellAction,
+    SpellType,
+)
 from state import Language, Settings
+from systems.spell_progression import (
+    MenuSpellProficiencyGrowth,
+    apply_menu_spell_proficiency_growth,
+)
 from text_catalog import TextCatalog
 from ui import (
     DEFAULT_TEXT_COLOR,
@@ -62,6 +73,19 @@ SPELL_CURSOR_X = (2, 22, 42)
 SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
 HEALING_SE_ID = "spell_healing1"
+PROFICIENCY_ANIMATION_FRAME_COUNT = 15
+PROFICIENCY_WINDOW_GRID = (50, 38, 14, 7)
+PROFICIENCY_TEXT_X = 2
+PROFICIENCY_TEXT_Y = 2
+
+
+@dataclass
+class _ProficiencyAnimation:
+    growth: MenuSpellProficiencyGrowth
+    spell: Spell
+    preferred_target_index: int
+    frame: int = 0
+
 
 class SpellSelectionPhase(Enum):
     """Selection stage used by the DA2-style spell menu."""
@@ -122,6 +146,7 @@ class SpellMenuOverlay:
         self.event_spell_keys = frozenset(event_spell_keys)
         self.on_invalid_action = on_invalid_action
         self.phase = SpellSelectionPhase.CASTER
+        self._proficiency_animation: _ProficiencyAnimation | None = None
         self._spells_by_position = self._index_spells()
         self._build_windows()
 
@@ -222,6 +247,10 @@ class SpellMenuOverlay:
             targets,
             active=self.phase is SpellSelectionPhase.SPELL,
         )
+        self.proficiency_window = windows.create(
+            *PROFICIENCY_WINDOW_GRID,
+            (),
+        )
 
         self.guide_window = windows.create(
             *GUIDE_WINDOW_GRID,
@@ -238,10 +267,20 @@ class SpellMenuOverlay:
         )
         self.party_window = self.party_panel.window
         self.member_cursor = self.party_panel.cursor
+        self._refresh_proficiency_window()
+        self._refresh_visible_windows()
+
+    def _refresh_visible_windows(self) -> None:
+        proficiency_windows = (
+            (self.proficiency_window,)
+            if self.phase is SpellSelectionPhase.TARGET
+            else ()
+        )
         self.windows = (
             self.member_window,
             self.guide_window,
             self.spell_window,
+            *proficiency_windows,
             self.party_window,
         )
 
@@ -320,6 +359,42 @@ class SpellMenuOverlay:
                 font_spans=placement.font_spans,
             )
 
+    @staticmethod
+    def _proficiency_display(total: int) -> str:
+        level, progress = divmod(total, 100)
+        return f"{pad(level, 1, fill='0')}－{pad(progress, 2, fill='0')}"
+
+    def _displayed_proficiency_total(self) -> int | None:
+        spell = self.selected_spell
+        if spell is None:
+            return None
+        kind = SPELL_PROFICIENCY_BY_TYPE.get(spell.type)
+        if kind is None:
+            return None
+        animation = self._proficiency_animation
+        if animation is None or animation.growth.kind is not kind:
+            proficiency = self.member.proficiency(kind)
+            return proficiency.level * 100 + proficiency.progress
+        growth = animation.growth
+        return growth.before_total + (
+            (growth.after_total - growth.before_total)
+            * animation.frame
+            // PROFICIENCY_ANIMATION_FRAME_COUNT
+        )
+
+    def _refresh_proficiency_window(self) -> None:
+        self.proficiency_window.clear_texts()
+        spell = self.selected_spell
+        total = self._displayed_proficiency_total()
+        if spell is None or total is None:
+            return
+        icon = SPELL_TYPE_ICON_TAGS.get(spell.type, "")
+        self.proficiency_window.add_text(
+            f"{icon}{self._proficiency_display(total)}",
+            PROFICIENCY_TEXT_X,
+            PROFICIENCY_TEXT_Y,
+        )
+
     def _switch_member(self, distance: int) -> None:
         if distance not in (-1, 1):
             raise ValueError("member switch distance must be -1 or 1")
@@ -359,11 +434,14 @@ class SpellMenuOverlay:
         self.spell_cursor.active = False
         self.member_cursor.active = True
         self.member_cursor.select_key(target_indexes[0])
+        self._refresh_proficiency_window()
+        self._refresh_visible_windows()
 
     def _return_to_spell_selection(self) -> None:
         self.phase = SpellSelectionPhase.SPELL
         self.spell_cursor.active = True
         self.member_cursor.active = False
+        self._refresh_visible_windows()
 
     @staticmethod
     def _is_supported_menu_spell(spell: Spell) -> bool:
@@ -431,16 +509,45 @@ class SpellMenuOverlay:
         preferred_target_index: int,
     ) -> None:
         next_target = self._next_target_index(spell, preferred_target_index)
-        self.phase = (
-            SpellSelectionPhase.TARGET
-            if next_target is not None and len(self.party_panel.party) > 1
-            else SpellSelectionPhase.SPELL
-        )
+        self.phase = SpellSelectionPhase.TARGET
         self._build_windows()
         self.spell_cursor.select_key(spell.key)
         self._refresh_guide()
-        if self.phase is SpellSelectionPhase.TARGET and next_target is not None:
-            self.member_cursor.select_key(next_target)
+        self._refresh_proficiency_window()
+        self.member_cursor.select_key(
+            preferred_target_index if next_target is None else next_target
+        )
+
+    def _start_proficiency_animation(
+        self,
+        growth: MenuSpellProficiencyGrowth,
+        spell: Spell,
+        preferred_target_index: int,
+    ) -> None:
+        self._proficiency_animation = _ProficiencyAnimation(
+            growth,
+            spell,
+            preferred_target_index,
+        )
+        self._build_windows()
+        self.spell_cursor.select_key(spell.key)
+        self.member_cursor.select_key(preferred_target_index)
+        self._refresh_guide()
+        self._refresh_proficiency_window()
+
+    def _update_proficiency_animation(self) -> None:
+        animation = self._proficiency_animation
+        if animation is None:
+            return
+        if animation.frame >= PROFICIENCY_ANIMATION_FRAME_COUNT:
+            self._proficiency_animation = None
+            self._refresh_after_healing(
+                animation.spell,
+                animation.preferred_target_index,
+            )
+            return
+        animation.frame += 1
+        self._refresh_proficiency_window()
 
     def _use_selected_healing_spell(self) -> bool:
         spell = self.selected_spell
@@ -485,11 +592,24 @@ class SpellMenuOverlay:
             )
         self.member.mp -= spell.mp
         play_se(HEALING_SE_ID)
-        self._refresh_after_healing(spell, selected_target)
+        kind = SPELL_PROFICIENCY_BY_TYPE[spell.type]
+        growth = apply_menu_spell_proficiency_growth(
+            self.member,
+            kind,
+            mp_spent=spell.mp,
+        )
+        if growth.applied_amount > 0:
+            self._start_proficiency_animation(growth, spell, selected_target)
+        else:
+            self._refresh_after_healing(spell, selected_target)
         return True
 
     def update(self, input_state: InputState) -> bool:
         """Update selection and report whether the menu should be restored."""
+
+        if self._proficiency_animation is not None:
+            self._update_proficiency_animation()
+            return False
 
         if self.phase is SpellSelectionPhase.CASTER:
             self.caster_cursor.update()
@@ -561,4 +681,8 @@ __all__ = [
     "SpellMenuOverlay",
     "SpellSelectionPhase",
     "HEALING_SE_ID",
+    "PROFICIENCY_ANIMATION_FRAME_COUNT",
+    "PROFICIENCY_TEXT_X",
+    "PROFICIENCY_TEXT_Y",
+    "PROFICIENCY_WINDOW_GRID",
 ]

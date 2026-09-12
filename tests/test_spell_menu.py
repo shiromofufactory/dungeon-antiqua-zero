@@ -9,6 +9,7 @@ from tools._bootstrap import APP_ROOT as _APP_ROOT
 from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
 from app.spell import SpellType
+from member import ProficiencyKind
 from ui.spell_menu import (
     FACE_SIZE,
     GUIDE_WINDOW_GRID,
@@ -34,6 +35,10 @@ from ui.spell_menu import (
     SPELL_TEXT_X,
     SPELL_TYPE_ORDER,
     SPELL_WINDOW_GRID,
+    PROFICIENCY_ANIMATION_FRAME_COUNT,
+    PROFICIENCY_TEXT_X,
+    PROFICIENCY_TEXT_Y,
+    PROFICIENCY_WINDOW_GRID,
     SpellMenuDataError,
     SpellSelectionPhase,
 )
@@ -236,7 +241,7 @@ class SpellMenuTest(unittest.TestCase):
 
         self.assertEqual(target.hp, target.max_hp)
         self.assertEqual(mock.member.mp, initial_mp - mock.spells["HEALING1"].mp)
-        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertEqual(mock.selected_spell.key, "HEALING1")
         member_texts = {(text.x, text.y): text.text for text in mock.member_window.texts}
         self.assertEqual(
@@ -247,6 +252,15 @@ class SpellMenuTest(unittest.TestCase):
         self.assertEqual(party_texts[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
         random_value.assert_called_once_with()
         play_se.assert_called_once_with("spell_healing1")
+
+        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
+            mock.update(InputState())
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 0)
+        self.assertIn(mock.proficiency_window, mock.windows)
+
+        mock.update(InputState(cancel=InputButton(True, True)))
+        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
 
     def test_target_cursor_appears_only_after_usable_spell_is_selected(self) -> None:
         mock = SpellMenuHarness(member_index=1)
@@ -268,6 +282,32 @@ class SpellMenuTest(unittest.TestCase):
         self.assertFalse(mock.spell_cursor.active)
         self.assertTrue(mock.member_cursor.active)
         self.assertEqual(mock.member_cursor.selected_key, 0)
+        self.assertEqual(
+            (
+                mock.proficiency_window.x,
+                mock.proficiency_window.y,
+                mock.proficiency_window.width,
+                mock.proficiency_window.height,
+            ),
+            PROFICIENCY_WINDOW_GRID,
+        )
+        sacred = mock.member.proficiency(ProficiencyKind.SACRED)
+        self.assertEqual(
+            [
+                (text.text, text.x, text.y)
+                for text in mock.proficiency_window.texts
+            ],
+            [
+                (
+                    f"%SACRED%{sacred.level}－{sacred.progress:02d}".translate(
+                        str.maketrans("0123456789", "０１２３４５６７８９")
+                    ),
+                    PROFICIENCY_TEXT_X,
+                    PROFICIENCY_TEXT_Y,
+                )
+            ],
+        )
+        self.assertIn(mock.proficiency_window, mock.windows)
 
         mock.update(InputState(navigation=Direction.RIGHT))
         self.assertEqual(mock.member_cursor.selected_key, 1)
@@ -275,6 +315,43 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
         self.assertTrue(mock.spell_cursor.active)
         self.assertFalse(mock.member_cursor.active)
+        self.assertNotIn(mock.proficiency_window, mock.windows)
+
+    @patch("ui.spell_menu.play_se")
+    @patch("ui.spell_menu.random.random", return_value=0.5)
+    def test_spell_use_animates_applied_proficiency_for_fifteen_frames(
+        self,
+        _random_value: Mock,
+        play_se: Mock,
+    ) -> None:
+        mock = SpellMenuHarness(member_index=1)
+        target = mock.party[0]
+        target.hp = 1
+        sacred = mock.member.proficiency(ProficiencyKind.SACRED)
+        sacred.level = 1
+        sacred.progress = 95
+        mock.member.proficiency(ProficiencyKind.MYSTIC).level = 5
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual((sacred.level, sacred.progress), (2, 2))
+        self.assertEqual(mock.proficiency_window.texts[0].text, "%SACRED%１－９５")
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        play_se.assert_called_once_with("spell_healing1")
+
+        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT):
+            mock.update(InputState())
+
+        self.assertEqual(mock.proficiency_window.texts[0].text, "%SACRED%２－０２")
+        play_se.assert_called_once_with("spell_healing1")
+
+        mock.update(InputState())
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 0)
+        self.assertIn(mock.proficiency_window, mock.windows)
 
     def test_healing_with_no_valid_target_reports_an_error(self) -> None:
         invalid_action = Mock()
@@ -304,6 +381,9 @@ class SpellMenuTest(unittest.TestCase):
         mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
+
+        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
+            mock.update(InputState())
 
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertEqual(mock.selected_spell.key, "HEALING1")

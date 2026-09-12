@@ -51,6 +51,11 @@ from .settings import (
     SettingsSystemError,
 )
 from .shop import MAX_GOLD, ShopSystem
+from .spell_progression import (
+    MenuSpellProficiencyGrowth,
+    apply_menu_spell_proficiency_growth,
+    menu_spell_proficiency_gain,
+)
 from .battle_progression import (
     BattleGrowthResult,
     BattleProgression,
@@ -76,6 +81,7 @@ __all__ = [
     "MONSTER_PROFILE_FIELD_KEY",
     "MONSTER_TREASURE_ACQUIRED_FIELD_KEY",
     "MonsterRecordSystem",
+    "MenuSpellProficiencyGrowth",
     "ChangeBgmEffect",
     "EventContext",
     "EventRunner",
@@ -111,5 +117,7 @@ __all__ = [
     "TreasureOpenStatus",
     "TreasureSystem",
     "create_save_document",
+    "apply_menu_spell_proficiency_growth",
+    "menu_spell_proficiency_gain",
     "restore_save_document",
 ]
