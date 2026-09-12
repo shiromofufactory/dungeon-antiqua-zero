@@ -76,6 +76,24 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.sleeping, 0)
         self.assertFalse(state.elapse_sleep_turn())
 
+    def test_stun_skips_exactly_one_future_action(self) -> None:
+        state = MonsterBattleState(max_hp=10)
+
+        self.assertTrue(state.apply_stun())
+        self.assertFalse(state.apply_stun())
+        self.assertTrue(state.consume_stun())
+        self.assertFalse(state.consume_stun())
+
+    def test_defense_down_applies_once_with_da2_formula(self) -> None:
+        state = MonsterBattleState(max_hp=10)
+
+        self.assertEqual(state.modified_defense(20), 20)
+        self.assertTrue(state.apply_defense_down())
+        self.assertEqual(state.defense_modifier, -1)
+        self.assertEqual(state.modified_defense(20), 5)
+        self.assertEqual(state.modified_defense(5), 0)
+        self.assertFalse(state.apply_defense_down())
+
     def test_poison_damage_preserves_sleep_and_restore_clears_poison(self) -> None:
         state = MonsterBattleState(max_hp=10, poisoned=True, sleeping=2)
 
@@ -85,6 +103,8 @@ class MonsterBattleStateTest(unittest.TestCase):
         state.restore()
 
         self.assertFalse(state.poisoned)
+        self.assertFalse(state.stunned)
+        self.assertEqual(state.defense_modifier, 0)
         self.assertEqual(state.hp, 10)
 
     def test_defeat_and_restore_manage_mock_battle_lifecycle(self) -> None:

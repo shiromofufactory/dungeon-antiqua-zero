@@ -123,6 +123,7 @@ MAX_INTERNAL_LEVEL = 99
 MAX_HP = 999
 MAX_MP = 255
 MAX_ABILITY = 32
+MIN_PROTECTION_LEVEL = -1
 MAX_PROTECTION_LEVEL = 2
 EQUIPMENT_RECORD_FIELDS = MappingProxyType(
     {
@@ -724,6 +725,7 @@ class Member:
     paralyzed: bool = False
     sleeping: int = 0
     confused: int = 0
+    stunned: bool = False
     protection_level: int = 0
     speed_modifier: int = 0
     skills: list[Skill] = field(default_factory=list)
@@ -809,7 +811,7 @@ class Member:
             raise ValueError("mp must not exceed max_mp")
         if not isinstance(self.formation_row, FormationRow):
             raise TypeError("formation_row must be a FormationRow")
-        for name in ("poisoned", "paralyzed"):
+        for name in ("poisoned", "paralyzed", "stunned"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a boolean")
         for name in ("sleeping", "confused"):
@@ -823,9 +825,14 @@ class Member:
             or not isinstance(self.protection_level, int)
         ):
             raise TypeError("protection_level must be an integer")
-        if not 0 <= self.protection_level <= MAX_PROTECTION_LEVEL:
+        if not (
+            MIN_PROTECTION_LEVEL
+            <= self.protection_level
+            <= MAX_PROTECTION_LEVEL
+        ):
             raise ValueError(
-                f"protection_level must be from 0 to {MAX_PROTECTION_LEVEL}"
+                "protection_level must be from "
+                f"{MIN_PROTECTION_LEVEL} to {MAX_PROTECTION_LEVEL}"
             )
         if (
             isinstance(self.speed_modifier, bool)
@@ -1100,6 +1107,7 @@ class Member:
             self.paralyzed = False
             self.sleeping = 0
             self.confused = 0
+            self.stunned = False
         return self.hp - old_hp
 
     def take_damage(self, damage: int) -> int:
@@ -1115,6 +1123,7 @@ class Member:
             self.sleeping = 0
             self.confused = 0
         if self.hp <= 0:
+            self.stunned = False
             self.protection_level = 0
             self.speed_modifier = 0
         return old_hp - self.hp
@@ -1129,9 +1138,18 @@ class Member:
         old_hp = self.hp
         self.hp = max(0, self.hp - damage)
         if self.hp <= 0:
+            self.stunned = False
             self.protection_level = 0
             self.speed_modifier = 0
         return old_hp - self.hp
+
+    def apply_poison(self) -> bool:
+        """Apply persistent poison and report whether the state changed."""
+
+        if self.poisoned or not self.is_alive:
+            return False
+        self.poisoned = True
+        return True
 
     def apply_sleep(self, turns: int) -> None:
         """Apply DA2's non-shortening sleep duration and clear confusion."""
@@ -1151,12 +1169,36 @@ class Member:
         self.sleeping -= 1
         return True
 
+    def apply_stun(self) -> bool:
+        """Mark the next timeline action to be skipped once."""
+
+        if self.stunned or not self.is_alive:
+            return False
+        self.stunned = True
+        return True
+
+    def consume_stun(self) -> bool:
+        """Clear one pending stun and report that this action must be skipped."""
+
+        if not self.stunned:
+            return False
+        self.stunned = False
+        return True
+
     def apply_protection(self) -> bool:
         """Raise DA2's defense buff by one stage, up to its second stage."""
 
         if self.protection_level >= MAX_PROTECTION_LEVEL:
             return False
         self.protection_level += 1
+        return True
+
+    def apply_defense_down(self) -> bool:
+        """Lower DA2's defense stage once, cancelling protection first."""
+
+        if self.protection_level <= MIN_PROTECTION_LEVEL or not self.is_alive:
+            return False
+        self.protection_level -= 1
         return True
 
     def apply_slow(self) -> bool:
@@ -1166,6 +1208,14 @@ class Member:
             return False
         self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
         return True
+
+    def defeat(self) -> None:
+        """Set HP to zero and clear battle modifiers after instant death."""
+
+        self.hp = 0
+        self.stunned = False
+        self.protection_level = 0
+        self.speed_modifier = 0
 
     @property
     def effective_agility(self) -> int:
@@ -1181,6 +1231,7 @@ class Member:
 
         self.sleeping = 0
         self.confused = 0
+        self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
 
@@ -1193,6 +1244,7 @@ class Member:
         self.paralyzed = False
         self.sleeping = 0
         self.confused = 0
+        self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
 
@@ -1407,13 +1459,15 @@ class Member:
 
         armor = self.equipment.armor_items()
         base_defense = sum(item.defense for item in armor)
-        defense = (
-            base_defense
-            if self.protection_level == 0
-            else int(
-                (base_defense + self.protection_level * 5)
-                * (1.0 + self.protection_level / 4)
-            )
+        defense_level = (
+            -2 if self.protection_level < 0 else self.protection_level
+        )
+        defense = max(
+            0,
+            int(
+                (base_defense + defense_level * 5)
+                * (1.0 + defense_level / 4)
+            ),
         )
         abilities = self.adjusted_abilities
         agility_bonus = max(0, (self.effective_agility - 20) * 2)

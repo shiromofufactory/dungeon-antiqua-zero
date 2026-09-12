@@ -40,8 +40,10 @@ from battle_magic import (
 from monster_ai import MonsterAction, select_monster_action
 from battle_speed import MIN_SPEED_MODIFIER, modified_agility
 from battle_physical import (
+    PHYSICAL_STATUS_EFFECTS,
     PhysicalAttackResult,
     member_physical_attack,
+    resolve_physical_additional_effect,
     resolve_physical_attack,
 )
 from battle_timeline import (
@@ -53,7 +55,14 @@ from battle_timeline import (
     remove_timeline_actor,
     remove_timeline_head,
 )
-from item import Item, ItemEquipType, ItemSpecial
+from item import (
+    AdditionalEffect,
+    Item,
+    ItemDataError,
+    ItemEquipType,
+    ItemSpecial,
+    additional_effect_from_character,
+)
 from localization import Localizer, ascii_to_fullwidth, format_number
 from member import (
     EquipmentSlot,
@@ -310,6 +319,13 @@ CRITICAL_MARKER_SOURCE_Y = 24
 CRITICAL_MARKER_WIDTH = 28
 CRITICAL_MARKER_HEIGHT = 8
 CRITICAL_MARKER_FRAME_COUNT = MONSTER_MISS_FRAME_COUNT
+STUN_MARKER_SOURCE_X = 208
+STUN_MARKER_SOURCE_Y = 8
+DEFENSE_DOWN_MARKER_SOURCE_X = 224
+DEFENSE_DOWN_MARKER_SOURCE_Y = 8
+ADDITIONAL_EFFECT_MARKER_WIDTH = 16
+ADDITIONAL_EFFECT_MARKER_HEIGHT = 8
+ADDITIONAL_EFFECT_MARKER_FRAME_COUNT = CRITICAL_MARKER_FRAME_COUNT
 SLEEP_ICON_SOURCE_X = 32
 SLEEP_ICON_SOURCE_Y = 136
 SLEEP_ICON_SIZE = 8
@@ -323,6 +339,10 @@ POISON_ICON_SIZE = 8
 POISON_MONSTER_OFFSET_X = 24
 POISON_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 POISON_ICON_DITHER_RATES = (0.0, 0.5, 1.0, 0.5)
+STUN_ICON_SOURCE_X = 224
+STUN_ICON_SOURCE_Y = 16
+STUN_ICON_SIZE = 8
+STUN_MONSTER_OFFSET_X = 32
 SPEED_ICON_SOURCE_X = 96
 SPEED_ICON_NEGATIVE_SOURCE_Y = 136
 SPEED_ICON_SIZE = 8
@@ -422,6 +442,21 @@ ATTACK_SE_ID_BY_SUBTYPE = {
     "WAND": ATTACK_BLUNT_SE_ID,
     "ROD": ATTACK_BLUNT_SE_ID,
     "SPEAR": ATTACK_SLASH_SE_ID,
+}
+ADDITIONAL_EFFECT_RESISTANCE = {
+    AdditionalEffect.SLEEP: ResistanceType.SLEEP,
+    AdditionalEffect.DEATH: ResistanceType.DEATH,
+    AdditionalEffect.STUN: ResistanceType.STUN,
+    AdditionalEffect.POISON: ResistanceType.POISON,
+    AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
+    AdditionalEffect.DEFENSE_DOWN: None,
+}
+ADDITIONAL_EFFECT_MARKER_SOURCE = {
+    AdditionalEffect.STUN: (STUN_MARKER_SOURCE_X, STUN_MARKER_SOURCE_Y),
+    AdditionalEffect.DEFENSE_DOWN: (
+        DEFENSE_DOWN_MARKER_SOURCE_X,
+        DEFENSE_DOWN_MARKER_SOURCE_Y,
+    ),
 }
 COMMAND_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.command.attack",
@@ -774,6 +809,7 @@ class BattleAttackPresentation:
     is_critical: bool = False
     is_aimed: bool = False
     is_focused: bool = False
+    additional_effects: tuple[AdditionalEffect, ...] = ()
     sound_effect_id: str = ATTACK_SLASH_SE_ID
     elapsed_frame: int = 0
     damage_applied: bool = False
@@ -862,6 +898,7 @@ class BattleMonsterChargePresentation:
     approach_frame_count: int
     return_frame_count: int
     jump_height: int
+    additional_effects: tuple[AdditionalEffect, ...] = ()
     elapsed_frame: int = 0
     damage_applied: bool = False
 
@@ -1041,6 +1078,8 @@ class BattleMonster:
     is_front_row: bool
     state: MonsterBattleState
     agility: int
+    is_boss: bool = False
+    additional_effect: AdditionalEffect | None = None
     special_actions: tuple[MonsterSpecialAction, ...] = ()
     level: int = 1
     early_appear: int = 0
@@ -1088,6 +1127,19 @@ class BattleMonster:
             or shadow not in (0, 1)
         ):
             raise BattleDataError(f"{key}.shadow must be 0 or 1")
+        is_boss = record.get("is_boss")
+        if (
+            isinstance(is_boss, bool)
+            or not isinstance(is_boss, int)
+            or is_boss not in (0, 1)
+        ):
+            raise BattleDataError(f"{key}.is_boss must be 0 or 1")
+        try:
+            additional_effect = additional_effect_from_character(
+                record.get("extra")
+            )
+        except ItemDataError as error:
+            raise BattleDataError(f"{key}.extra is invalid") from error
         return cls(
             key=key,
             names=record,
@@ -1100,6 +1152,8 @@ class BattleMonster:
             state=MonsterBattleState.from_record(record),
             combat_stats=MonsterCombatStats.from_record(record),
             agility=_required_nonnegative_integer(record, "agi", key),
+            is_boss=bool(is_boss),
+            additional_effect=additional_effect,
             special_actions=monster_special_actions_from_record(record),
             level=_required_nonnegative_integer(record, "lv", key),
             early_appear=_required_nonnegative_integer(
@@ -1128,6 +1182,12 @@ class BattleMonster:
         """Return master agility with ZERO's current battle modifier."""
 
         return modified_agility(self.agility, self.state.speed_modifier)
+
+    @property
+    def effective_defense(self) -> int:
+        """Return master defense with ZERO's current battle modifier."""
+
+        return self.state.modified_defense(self.combat_stats.defense)
 
     def restore(self) -> None:
         """Restore mutable battle values to this encounter's initial state."""
@@ -1549,6 +1609,7 @@ class BattleScene:
         self.monster_attack_target_index: int | None = None
         self.monster_attack_damage: int | None = None
         self.monster_attack_critical = False
+        self.monster_attack_additional_effects: tuple[AdditionalEffect, ...] = ()
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         self.monster_action: MonsterAction | None = None
@@ -1916,6 +1977,7 @@ class BattleScene:
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
         self.monster_attack_critical = False
+        self.monster_attack_additional_effects = ()
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         self.monster_action = None
@@ -4296,7 +4358,7 @@ class BattleScene:
             attack=attack,
             hit=member_stats.hit_right.total,
             agility=member.effective_agility,
-            target_defense=monster_stats.defense,
+            target_defense=monster.effective_defense,
             target_evasion=monster_stats.evasion,
             hit_roll=random.randint(0, 99),
             target_incapacitated=target_incapacitated,
@@ -4316,6 +4378,12 @@ class BattleScene:
                 else None
             ),
         )
+        additional_effects = self._resolve_member_attack_additional_effects(
+            member,
+            weapon,
+            monster,
+            result,
+        )
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
             damage=result.damage,
@@ -4325,6 +4393,7 @@ class BattleScene:
             is_critical=getattr(result, "critical", False),
             is_aimed=is_aimed,
             is_focused=is_focused,
+            additional_effects=additional_effects,
             sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
                 weapon.subtype,
                 ATTACK_SLASH_SE_ID,
@@ -4345,6 +4414,96 @@ class BattleScene:
         self._refresh_monster_name_colors()
         return True
 
+    @staticmethod
+    def _effect_candidates_for_member_attack(
+        member: Member,
+        weapon: Item,
+    ) -> tuple[tuple[AdditionalEffect, bool], ...]:
+        """Return weapon/Lethal effects, merging duplicate instant death."""
+
+        weapon_effect = weapon.additional_effect
+        if weapon_effect not in PHYSICAL_STATUS_EFFECTS:
+            weapon_effect = None
+        has_lethal = member.has_skill("Lethal")
+        if weapon_effect is AdditionalEffect.DEATH and has_lethal:
+            return ((AdditionalEffect.DEATH, True),)
+        effects: list[tuple[AdditionalEffect, bool]] = []
+        if weapon_effect is not None:
+            effects.append((weapon_effect, False))
+        if has_lethal:
+            effects.append((AdditionalEffect.DEATH, False))
+        return tuple(effects)
+
+    def _resolve_member_attack_additional_effects(
+        self,
+        member: Member,
+        weapon: Item,
+        monster: BattleMonster,
+        result: PhysicalAttackResult,
+    ) -> tuple[AdditionalEffect, ...]:
+        """Resolve all DA2-style effects carried by one successful strike."""
+
+        candidates = self._effect_candidates_for_member_attack(member, weapon)
+        if not result.hit or not candidates:
+            return ()
+        effect_roll = random.randint(0, 99)
+        successful: list[AdditionalEffect] = []
+        for effect, stacked_death in candidates:
+            resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
+            resolution = resolve_physical_additional_effect(
+                effect=effect,
+                adjusted_hit=result.adjusted_hit,
+                effect_roll=effect_roll,
+                target_is_member=False,
+                target_is_boss=monster.is_boss,
+                target_is_weak=(
+                    resistance is not None
+                    and resistance in monster.weaknesses
+                ),
+                target_is_resistant=(
+                    resistance is not None
+                    and resistance in monster.resistances
+                ),
+                critical=result.critical,
+                stacked_death=stacked_death,
+            )
+            if resolution.success:
+                successful.append(effect)
+        return tuple(successful)
+
+    def _apply_additional_effects_to_monster(
+        self,
+        target_index: int,
+        effects: tuple[AdditionalEffect, ...],
+    ) -> tuple[AdditionalEffect, ...]:
+        """Apply successful effects after damage while the target still lives."""
+
+        monster = self.monsters[target_index]
+        if not monster.is_alive:
+            return ()
+        applied: list[AdditionalEffect] = []
+        for effect in effects:
+            changed = False
+            if effect is AdditionalEffect.DEATH:
+                monster.state.defeat()
+                changed = True
+            elif effect is AdditionalEffect.SLEEP:
+                monster.state.apply_sleep(
+                    random.randint(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS)
+                )
+                changed = True
+            elif effect is AdditionalEffect.POISON:
+                changed = monster.state.apply_poison()
+            elif effect is AdditionalEffect.STUN:
+                changed = monster.state.apply_stun()
+            elif effect is AdditionalEffect.DEFENSE_DOWN:
+                changed = monster.state.apply_defense_down()
+            if changed:
+                applied.append(effect)
+        if applied:
+            promote_rear_monsters_if_front_empty(self.monsters)
+        return tuple(applied)
+
     def _update_attack_presentation(self) -> None:
         """Apply the hit, show its result, and start the jumping return."""
 
@@ -4357,6 +4516,12 @@ class BattleScene:
             monster = self.monsters[presentation.target_index]
             if presentation.is_hit:
                 monster.state.take_damage(presentation.damage)
+                presentation.additional_effects = (
+                    self._apply_additional_effects_to_monster(
+                        presentation.target_index,
+                        presentation.additional_effects,
+                    )
+                )
                 promote_rear_monsters_if_front_empty(self.monsters)
                 play_se(presentation.sound_effect_id)
             party_index = getattr(self, "action_party_index", None)
@@ -4897,8 +5062,11 @@ class BattleScene:
 
     def _activate_timeline_head(self) -> None:
         self._remove_defeated_party_from_timeline()
-        if not self._active_party_indexes():
-            if getattr(self, "escape_requested", False):
+        if self._party_is_defeated():
+            if (
+                getattr(self, "escape_requested", False)
+                and not self._active_party_indexes()
+            ):
                 self._begin_escape_animation()
             else:
                 self._begin_defeat_message()
@@ -4918,6 +5086,24 @@ class BattleScene:
             self.monster_blink_frames_remaining = 0
             self.defending_party_indexes.discard(self.active_party_index)
             if self._apply_turn_start_poison(actor):
+                return
+            if getattr(actor.member, "stunned", False):
+                if isinstance(actor.member, Member):
+                    actor.member.consume_stun()
+                else:
+                    actor.member.stunned = False
+                getattr(self, "focused_target_by_party_index", {}).pop(
+                    self.active_party_index,
+                    None,
+                )
+                self._start_timeline_animation()
+                return
+            if getattr(actor.member, "paralyzed", False):
+                getattr(self, "focused_target_by_party_index", {}).pop(
+                    self.active_party_index,
+                    None,
+                )
+                self._start_timeline_animation()
                 return
             if getattr(actor.member, "sleeping", 0):
                 if isinstance(actor.member, Member):
@@ -4954,6 +5140,7 @@ class BattleScene:
             self.monster_attack_target_index = None
             self.monster_attack_damage = None
             self.monster_attack_critical = False
+            self.monster_attack_additional_effects = ()
             self.monster_attack_animation_frame = 0
             self.monster_attack_damage_applied = False
             self.monster_action = None
@@ -4961,6 +5148,11 @@ class BattleScene:
             self.monster_escape_actor_index = None
             self.monster_escape_animation_frame = 0
             if self._apply_turn_start_poison(actor):
+                return
+            if actor.state.consume_stun():
+                self.blinking_monster_index = None
+                self.monster_blink_frames_remaining = 0
+                self._start_timeline_animation()
                 return
             if actor.state.elapse_sleep_turn():
                 self.blinking_monster_index = None
@@ -5414,6 +5606,37 @@ class BattleScene:
         )
         return target_index, result
 
+    def _resolve_monster_attack_additional_effects(
+        self,
+        actor: BattleMonster,
+        target_index: int,
+        result: PhysicalAttackResult,
+    ) -> tuple[AdditionalEffect, ...]:
+        """Resolve the monster master-data effect for one physical hit."""
+
+        effect = actor.additional_effect
+        if effect not in PHYSICAL_STATUS_EFFECTS:
+            return ()
+        target_defending = target_index in self.defending_party_indexes
+        hit_reached_guard = target_defending and result.hit_value >= 0
+        if not result.hit and not hit_reached_guard:
+            return ()
+        resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
+        target = self.party[target_index]
+        target_resistances = getattr(target, "resistances", frozenset())
+        resolution = resolve_physical_additional_effect(
+            effect=effect,
+            adjusted_hit=result.adjusted_hit,
+            effect_roll=random.randint(0, 99),
+            target_is_member=True,
+            target_is_resistant=(
+                resistance is not None and resistance in target_resistances
+            ),
+            target_defending=target_defending,
+            critical=result.critical,
+        )
+        return (effect,) if resolution.success else ()
+
     def _begin_standard_monster_attack(self, actor: BattleMonster) -> None:
         target_index, result = self._resolve_monster_attack(
             actor,
@@ -5423,6 +5646,13 @@ class BattleScene:
         self.monster_attack_target_index = target_index
         self.monster_attack_damage = result.damage
         self.monster_attack_critical = getattr(result, "critical", False)
+        self.monster_attack_additional_effects = (
+            self._resolve_monster_attack_additional_effects(
+                actor,
+                target_index,
+                result,
+            )
+        )
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         if result.hit:
@@ -5466,6 +5696,11 @@ class BattleScene:
             approach_frame_count=approach_frames,
             return_frame_count=return_frames,
             jump_height=min(MONSTER_CHARGE_MAX_JUMP_HEIGHT, jump_height),
+            additional_effects=self._resolve_monster_attack_additional_effects(
+                actor,
+                target_index,
+                result,
+            ),
         )
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT
         self._show_monster_action_message("battle.monster.charge")
@@ -5518,12 +5753,19 @@ class BattleScene:
             self.monster_attack_target_index = presentation.target_index
             self.monster_attack_damage = presentation.damage
             self.monster_attack_critical = presentation.is_critical
+            self.monster_attack_additional_effects = (
+                presentation.additional_effects
+            )
             self.monster_attack_animation_frame = 0
             self.monster_attack_damage_applied = True
             presentation.damage_applied = True
             self._apply_monster_attack_damage(
                 presentation.target_index,
                 presentation.damage,
+            )
+            self._apply_additional_effects_to_member(
+                presentation.target_index,
+                presentation.additional_effects,
             )
             if presentation.damage > 0:
                 play_se(BATTLE_HIT_SE_ID)
@@ -5584,17 +5826,22 @@ class BattleScene:
             raise RuntimeError("monster attack requires a target and result")
         if not getattr(self, "monster_attack_damage_applied", False):
             self._apply_monster_attack_damage(target_index, damage)
+            self._apply_additional_effects_to_member(
+                target_index,
+                getattr(self, "monster_attack_additional_effects", ()),
+            )
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
         self.monster_attack_critical = False
+        self.monster_attack_additional_effects = ()
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         self.monster_charge_presentation = None
         self.monster_action = None
-        if damage > 0 and self._member_is_dead(self.party[target_index]):
+        if self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
             self._remove_defeated_party_from_timeline()
-            if not self._active_party_indexes():
+            if self._party_is_defeated():
                 if getattr(self, "escape_requested", False):
                     self._begin_escape_animation()
                 else:
@@ -5604,6 +5851,9 @@ class BattleScene:
                 FormationAnimationCompletion.START_TIMELINE
             ):
                 return
+        elif self._party_is_defeated():
+            self._begin_defeat_message()
+            return
         self._start_timeline_animation()
 
     def _apply_monster_attack_damage(self, target_index: int, damage: int) -> None:
@@ -5627,12 +5877,76 @@ class BattleScene:
                 None,
             )
 
-    def _party_is_defeated(self) -> bool:
-        """Return whether every battle participant has died."""
+    def _apply_additional_effects_to_member(
+        self,
+        target_index: int,
+        effects: tuple[AdditionalEffect, ...],
+    ) -> tuple[AdditionalEffect, ...]:
+        """Apply resolved enemy-hit effects after damage to a living member."""
 
-        return bool(self.party_visuals) and all(
-            self._party_member_is_dead(index)
-            for index in range(len(self.party_visuals))
+        member = self.party[target_index]
+        if self._member_is_dead(member):
+            return ()
+        applied: list[AdditionalEffect] = []
+        for effect in effects:
+            changed = False
+            if effect is AdditionalEffect.DEATH:
+                if isinstance(member, Member):
+                    member.defeat()
+                else:
+                    member.hp = 0
+                changed = True
+            elif effect is AdditionalEffect.SLEEP:
+                if isinstance(member, Member):
+                    member.apply_sleep(
+                        random.randint(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS)
+                    )
+                else:
+                    member.sleeping = max(
+                        getattr(member, "sleeping", 0),
+                        random.randint(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS),
+                    )
+                    member.confused = 0
+                changed = True
+            elif effect is AdditionalEffect.POISON:
+                if isinstance(member, Member):
+                    changed = member.apply_poison()
+                elif not getattr(member, "poisoned", False):
+                    member.poisoned = True
+                    changed = True
+            elif effect is AdditionalEffect.PARALIZE:
+                if not getattr(member, "paralyzed", False):
+                    member.paralyzed = True
+                    changed = True
+            elif effect is AdditionalEffect.STUN:
+                if isinstance(member, Member):
+                    changed = member.apply_stun()
+                elif not getattr(member, "stunned", False):
+                    member.stunned = True
+                    changed = True
+            elif effect is AdditionalEffect.DEFENSE_DOWN:
+                if isinstance(member, Member):
+                    changed = member.apply_defense_down()
+            if changed:
+                applied.append(effect)
+        if applied:
+            self._refresh_party_hp_text(target_index)
+            getattr(self, "focused_target_by_party_index", {}).pop(
+                target_index,
+                None,
+            )
+        return tuple(applied)
+
+    def _party_is_defeated(self) -> bool:
+        """Return whether no on-field member can recover the battle."""
+
+        active = self._active_party_indexes()
+        party = getattr(self, "party", None)
+        if party is None:
+            party = tuple(visual.member for visual in self.party_visuals)
+        return not active or all(
+            bool(getattr(party[index], "paralyzed", False))
+            for index in active
         )
 
     def _remove_defeated_party_from_timeline(self) -> None:
@@ -5756,6 +6070,7 @@ class BattleScene:
         self._draw_spell_effects()
         self._draw_sleeping_icons()
         self._draw_poison_icons()
+        self._draw_stun_icons()
         self._draw_speed_modifier_icons()
         self._draw_target_affinity_indicators()
         self._draw_affinity_popups()
@@ -5763,6 +6078,7 @@ class BattleScene:
         self._draw_healing_popups()
         self._draw_party_attack_damage()
         self._draw_monster_attack_result()
+        self._draw_additional_effect_markers()
         self._draw_critical_markers()
         self._draw_timeline()
         self._draw_windows()
@@ -5814,16 +6130,7 @@ class BattleScene:
         if settings is None or settings.screen_flash_enabled:
             return
         presentation = getattr(self, "attack_presentation", None)
-        if (
-            getattr(self, "phase", None) is BattlePhase.ATTACK_PRESENTATION
-            and presentation is not None
-            and presentation.is_hit
-            and presentation.is_critical
-            and presentation.damage_applied
-            and 0
-            <= presentation.damage_popup_elapsed_frame
-            < CRITICAL_MARKER_FRAME_COUNT
-        ):
+        if self._party_attack_smash_marker_visible(presentation):
             monster = self.monsters[presentation.target_index]
             _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
             self._draw_critical_marker(
@@ -5844,6 +6151,84 @@ class BattleScene:
                 self._party_sprite_x(target_index),
                 PARTY_SPRITE_Y[target_index],
             )
+
+    def _party_attack_smash_marker_visible(
+        self,
+        presentation: BattleAttackPresentation | None,
+    ) -> bool:
+        """Return whether SMASH currently occupies the result-marker slot."""
+
+        settings = getattr(self, "settings", None)
+        return bool(
+            settings is not None
+            and not settings.screen_flash_enabled
+            and getattr(self, "phase", None) is BattlePhase.ATTACK_PRESENTATION
+            and presentation is not None
+            and presentation.is_hit
+            and presentation.is_critical
+            and presentation.damage_applied
+            and 0
+            <= presentation.damage_popup_elapsed_frame
+            < CRITICAL_MARKER_FRAME_COUNT
+        )
+
+    def _draw_additional_effect_markers(self) -> None:
+        """Draw STUN or defense-down text over the affected monster."""
+
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            getattr(self, "phase", None) is not BattlePhase.ATTACK_PRESENTATION
+            or presentation is None
+            or not presentation.is_hit
+            or not presentation.damage_applied
+            or not (
+                0
+                <= presentation.damage_popup_elapsed_frame
+                < ADDITIONAL_EFFECT_MARKER_FRAME_COUNT
+            )
+            or self._party_attack_smash_marker_visible(presentation)
+        ):
+            return
+        monster = self.monsters[presentation.target_index]
+        if not monster.is_alive:
+            return
+        effect = next(
+            (
+                candidate
+                for candidate in (
+                    AdditionalEffect.STUN,
+                    AdditionalEffect.DEFENSE_DOWN,
+                )
+                if candidate in presentation.additional_effects
+                and (
+                    (
+                        candidate is AdditionalEffect.STUN
+                        and monster.state.stunned
+                    )
+                    or (
+                        candidate is AdditionalEffect.DEFENSE_DOWN
+                        and monster.state.defense_modifier < 0
+                    )
+                )
+            ),
+            None,
+        )
+        if effect is None:
+            return
+        _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
+        source_x, source_y = ADDITIONAL_EFFECT_MARKER_SOURCE[effect]
+        pyxel.blt(
+            self._monster_draw_x(presentation.target_index)
+            + monster.width // 2
+            - CRITICAL_MARKER_WIDTH // 2,
+            target_y + 20,
+            0,
+            source_x,
+            source_y,
+            ADDITIONAL_EFFECT_MARKER_WIDTH,
+            ADDITIONAL_EFFECT_MARKER_HEIGHT,
+            TRANSPARENT_INDEX,
+        )
 
     @staticmethod
     def _draw_critical_marker(x: int, y: int) -> None:
@@ -6551,6 +6936,24 @@ class BattleScene:
                 )
         finally:
             pyxel.dither(1.0)
+
+    def _draw_stun_icons(self) -> None:
+        """Draw the authored persistent stun icon beside stunned monsters."""
+
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            if not monster.is_alive or not monster.state.stunned:
+                continue
+            _base_x, y = MONSTER_POSITIONS[index]
+            pyxel.blt(
+                self._monster_draw_x(index) + STUN_MONSTER_OFFSET_X,
+                y,
+                0,
+                STUN_ICON_SOURCE_X,
+                STUN_ICON_SOURCE_Y,
+                STUN_ICON_SIZE,
+                STUN_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
 
     def _draw_protection_icons(self) -> None:
         """Animate each defense stage immediately left of its party name."""

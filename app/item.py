@@ -155,6 +155,19 @@ _ADDITIONAL_EFFECT_BY_CHARACTER = MappingProxyType(
     }
 )
 
+
+def additional_effect_from_character(value: str) -> AdditionalEffect | None:
+    """Parse the shared one-character item/monster additional-effect code."""
+
+    if not isinstance(value, str):
+        raise ItemDataError("additional effect must be a string")
+    if not value:
+        return None
+    try:
+        return _ADDITIONAL_EFFECT_BY_CHARACTER[value]
+    except KeyError as error:
+        raise ItemDataError(f"unsupported additional effect: {value}") from error
+
 Code = TypeVar("Code")
 
 

@@ -250,6 +250,8 @@ class MonsterBattleState:
     hp: int | None = None
     poisoned: bool = False
     sleeping: int = 0
+    stunned: bool = False
+    defense_modifier: int = 0
     speed_modifier: int = 0
 
     def __post_init__(self) -> None:
@@ -269,6 +271,15 @@ class MonsterBattleState:
             raise TypeError("sleeping must be an integer")
         if self.sleeping < 0:
             raise ValueError("sleeping must not be negative")
+        if not isinstance(self.stunned, bool):
+            raise TypeError("stunned must be a boolean")
+        if (
+            isinstance(self.defense_modifier, bool)
+            or not isinstance(self.defense_modifier, int)
+        ):
+            raise TypeError("defense_modifier must be an integer")
+        if self.defense_modifier not in (-1, 0):
+            raise ValueError("defense_modifier must be -1 or 0")
         if (
             isinstance(self.speed_modifier, bool)
             or not isinstance(self.speed_modifier, int)
@@ -311,6 +322,8 @@ class MonsterBattleState:
         if damage > 0:
             self.sleeping = 0
         if self.hp <= 0:
+            self.stunned = False
+            self.defense_modifier = 0
             self.speed_modifier = 0
         return previous - self.hp
 
@@ -342,6 +355,8 @@ class MonsterBattleState:
         assert previous is not None
         self.hp = max(0, previous - damage)
         if self.hp <= 0:
+            self.stunned = False
+            self.defense_modifier = 0
             self.speed_modifier = 0
         return previous - self.hp
 
@@ -352,6 +367,41 @@ class MonsterBattleState:
             return False
         self.sleeping -= 1
         return True
+
+    def apply_stun(self) -> bool:
+        """Mark the next timeline action to be skipped once."""
+
+        if self.stunned or not self.is_alive:
+            return False
+        self.stunned = True
+        return True
+
+    def consume_stun(self) -> bool:
+        """Clear one pending stun and report that this action must be skipped."""
+
+        if not self.stunned:
+            return False
+        self.stunned = False
+        return True
+
+    def apply_defense_down(self) -> bool:
+        """Apply DA2's single persistent physical-defense reduction."""
+
+        if self.defense_modifier < 0 or not self.is_alive:
+            return False
+        self.defense_modifier = -1
+        return True
+
+    def modified_defense(self, base_defense: int) -> int:
+        """Return base defense after DA2's negative defense-stage formula."""
+
+        if isinstance(base_defense, bool) or not isinstance(base_defense, int):
+            raise TypeError("base_defense must be an integer")
+        if base_defense < 0:
+            raise ValueError("base_defense must not be negative")
+        if self.defense_modifier >= 0:
+            return base_defense
+        return max(0, int((base_defense - 10) * 0.5))
 
     def apply_slow(self) -> bool:
         """Apply SLOW once, cancelling a positive speed modifier first."""
@@ -365,6 +415,8 @@ class MonsterBattleState:
         """Set HP to zero for a mock attack that always defeats its target."""
 
         self.hp = 0
+        self.stunned = False
+        self.defense_modifier = 0
         self.speed_modifier = 0
 
     def restore(self) -> None:
@@ -373,6 +425,8 @@ class MonsterBattleState:
         self.hp = self.max_hp
         self.poisoned = False
         self.sleeping = 0
+        self.stunned = False
+        self.defense_modifier = 0
         self.speed_modifier = 0
 
 

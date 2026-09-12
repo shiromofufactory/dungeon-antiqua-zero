@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from app.battle_physical import member_physical_attack, resolve_physical_attack
+from app.battle_physical import (
+    member_physical_attack,
+    resolve_physical_additional_effect,
+    resolve_physical_attack,
+)
+from app.item import AdditionalEffect
 
 
 class MemberPhysicalAttackTest(unittest.TestCase):
@@ -204,6 +209,26 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertFalse(result.hit)
         self.assertEqual(result.damage, 0)
 
+    def test_defending_miss_keeps_critical_for_additional_effect_check(
+        self,
+    ) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=0,
+            target_evasion=0,
+            hit_roll=76,
+            target_defending=True,
+            attacker_has_power_hit=True,
+            critical_roll=0,
+        )
+
+        self.assertEqual(result.hit_value, 24.0)
+        self.assertFalse(result.hit)
+        self.assertEqual(result.damage, 0)
+        self.assertTrue(result.critical)
+
     def test_defending_halves_damage_at_da2_guard_threshold(self) -> None:
         result = resolve_physical_attack(
             attack=100,
@@ -218,6 +243,140 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertEqual(result.hit_value, 25.0)
         self.assertTrue(result.hit)
         self.assertEqual(result.damage, 45)
+
+
+class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
+    def test_ordinary_status_uses_monster_rate_and_adjusted_hit(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.POISON,
+            adjusted_hit=115,
+            effect_roll=34,
+            target_is_member=False,
+        )
+
+        self.assertEqual(result.activation_points, 2)
+        self.assertEqual(result.success_rate, 34.5)
+        self.assertTrue(result.success)
+
+    def test_boss_halves_ordinary_status_rate(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.STUN,
+            adjusted_hit=115,
+            effect_roll=17,
+            target_is_member=False,
+            target_is_boss=True,
+        )
+
+        self.assertEqual(result.activation_points, 1)
+        self.assertEqual(result.success_rate, 17.25)
+        self.assertTrue(result.success)
+
+    def test_boss_does_not_halve_da2_defense_down_rate(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.DEFENSE_DOWN,
+            adjusted_hit=115,
+            effect_roll=34,
+            target_is_member=False,
+            target_is_boss=True,
+        )
+
+        self.assertEqual(result.activation_points, 1)
+        self.assertEqual(result.success_rate, 34.5)
+        self.assertTrue(result.success)
+
+    def test_stun_does_not_use_da2_pinshot_guarantee(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.STUN,
+            adjusted_hit=100,
+            effect_roll=30,
+            target_is_member=False,
+        )
+
+        self.assertEqual(result.success_rate, 30)
+        self.assertFalse(result.success)
+
+    def test_monsters_cannot_be_paralyzed(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.PARALIZE,
+            adjusted_hit=999,
+            effect_roll=0,
+            target_is_member=False,
+            target_is_weak=True,
+            critical=True,
+        )
+
+        self.assertEqual(result.activation_points, 0)
+        self.assertEqual(result.success_rate, 0)
+        self.assertFalse(result.success)
+
+    def test_member_target_uses_twelve_percent_status_rate(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.PARALIZE,
+            adjusted_hit=100,
+            effect_roll=11,
+            target_is_member=True,
+        )
+
+        self.assertEqual(result.success_rate, 12)
+        self.assertTrue(result.success)
+
+    def test_resistance_and_defense_keep_da2_critical_point_behavior(self) -> None:
+        resistant = resolve_physical_additional_effect(
+            effect=AdditionalEffect.SLEEP,
+            adjusted_hit=100,
+            effect_roll=99,
+            target_is_member=True,
+            target_is_resistant=True,
+            critical=True,
+        )
+        defending = resolve_physical_additional_effect(
+            effect=AdditionalEffect.STUN,
+            adjusted_hit=100,
+            effect_roll=99,
+            target_is_member=True,
+            target_defending=True,
+            critical=True,
+        )
+
+        self.assertEqual(resistant.activation_points, 1)
+        self.assertTrue(resistant.success)
+        self.assertEqual(defending.activation_points, 1)
+        self.assertTrue(defending.success)
+
+    def test_instant_death_uses_lower_rate_and_boss_point_penalty(self) -> None:
+        ordinary = resolve_physical_additional_effect(
+            effect=AdditionalEffect.DEATH,
+            adjusted_hit=130,
+            effect_roll=12,
+            target_is_member=False,
+        )
+        boss = resolve_physical_additional_effect(
+            effect=AdditionalEffect.DEATH,
+            adjusted_hit=130,
+            effect_roll=0,
+            target_is_member=False,
+            target_is_boss=True,
+            target_is_weak=True,
+            critical=True,
+        )
+
+        self.assertEqual(ordinary.success_rate, 13)
+        self.assertTrue(ordinary.success)
+        self.assertLessEqual(boss.activation_points, 0)
+        self.assertFalse(boss.success)
+
+    def test_lethal_and_weapon_death_keep_da2_stacked_point(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.DEATH,
+            adjusted_hit=100,
+            effect_roll=9,
+            target_is_member=False,
+            target_is_resistant=True,
+            stacked_death=True,
+        )
+
+        self.assertEqual(result.activation_points, 1)
+        self.assertTrue(result.success)
 
 
 if __name__ == "__main__":

@@ -337,6 +337,7 @@ class MemberTest(unittest.TestCase):
         self.member.paralyzed = True
         self.member.sleeping = 2
         self.member.confused = 3
+        self.member.stunned = True
 
         recovered = self.member.apply_healing(999, cure_ailments=True)
 
@@ -346,6 +347,7 @@ class MemberTest(unittest.TestCase):
         self.assertFalse(self.member.paralyzed)
         self.assertEqual(self.member.sleeping, 0)
         self.assertEqual(self.member.confused, 0)
+        self.assertFalse(self.member.stunned)
 
     def test_sleep_skips_actions_and_positive_damage_wakes_the_member(self) -> None:
         self.member.confused = 3
@@ -367,9 +369,16 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.take_poison_damage(1), 1)
         self.assertEqual(self.member.sleeping, 2)
 
-    def test_temporary_sleep_and_confusion_are_cleared_after_battle(self) -> None:
+    def test_stun_skips_exactly_one_future_action(self) -> None:
+        self.assertTrue(self.member.apply_stun())
+        self.assertFalse(self.member.apply_stun())
+        self.assertTrue(self.member.consume_stun())
+        self.assertFalse(self.member.consume_stun())
+
+    def test_temporary_battle_ailments_are_cleared_after_battle(self) -> None:
         self.member.sleeping = 2
         self.member.confused = 3
+        self.member.stunned = True
         self.member.protection_level = 2
         self.member.speed_modifier = -1
         self.member.poisoned = True
@@ -379,6 +388,7 @@ class MemberTest(unittest.TestCase):
 
         self.assertEqual(self.member.sleeping, 0)
         self.assertEqual(self.member.confused, 0)
+        self.assertFalse(self.member.stunned)
         self.assertEqual(self.member.protection_level, 0)
         self.assertEqual(self.member.speed_modifier, 0)
         self.assertTrue(self.member.poisoned)
@@ -395,6 +405,19 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.battle_stats.defense, 30)
         self.assertFalse(self.member.apply_protection())
         self.assertEqual(self.member.protection_level, 2)
+
+    def test_defense_down_cancels_protection_then_uses_da2_formula(self) -> None:
+        armor = self.item("ARMOR", "BODY", defense=20)
+        self.member.equipment = EquipmentSet({EquipmentSlot.BODY: armor})
+        self.member.protection_level = 1
+
+        self.assertTrue(self.member.apply_defense_down())
+        self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.battle_stats.defense, 20)
+        self.assertTrue(self.member.apply_defense_down())
+        self.assertEqual(self.member.protection_level, -1)
+        self.assertEqual(self.member.battle_stats.defense, 5)
+        self.assertFalse(self.member.apply_defense_down())
 
     def test_death_clears_battle_modifiers(self) -> None:
         self.member.protection_level = 2
@@ -1017,6 +1040,8 @@ class MemberTest(unittest.TestCase):
             Member(self.member.definition, protection_level=True)
         with self.assertRaisesRegex(ValueError, "protection_level"):
             Member(self.member.definition, protection_level=3)
+        with self.assertRaisesRegex(ValueError, "protection_level"):
+            Member(self.member.definition, protection_level=-2)
         with self.assertRaisesRegex(TypeError, "speed_modifier"):
             Member(self.member.definition, speed_modifier=True)
         with self.assertRaisesRegex(ValueError, "speed_modifier"):

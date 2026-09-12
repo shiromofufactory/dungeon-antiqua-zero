@@ -49,6 +49,9 @@ from tools.screen_mocks.battle import (
     COMMAND_GUIDE_TEXT_X,
     COMMAND_GUIDE_WINDOW_GRID,
     COMMAND_TEXT_KEYS,
+    ADDITIONAL_EFFECT_MARKER_FRAME_COUNT,
+    ADDITIONAL_EFFECT_MARKER_HEIGHT,
+    ADDITIONAL_EFFECT_MARKER_WIDTH,
     CRITICAL_FLASH_COLOR,
     CRITICAL_FLASH_FRAME_COUNT,
     CRITICAL_MARKER_FRAME_COUNT,
@@ -56,6 +59,8 @@ from tools.screen_mocks.battle import (
     CRITICAL_MARKER_SOURCE_X,
     CRITICAL_MARKER_SOURCE_Y,
     CRITICAL_MARKER_WIDTH,
+    DEFENSE_DOWN_MARKER_SOURCE_X,
+    DEFENSE_DOWN_MARKER_SOURCE_Y,
     FORMATION_COMMAND_GUIDE_TEXT_KEYS,
     ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT,
     DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT,
@@ -101,6 +106,12 @@ from tools.screen_mocks.battle import (
     POISON_ICON_SOURCE_Y,
     POISON_ICON_PATTERN_FRAME_COUNT,
     POISON_MONSTER_OFFSET_X,
+    STUN_ICON_SIZE,
+    STUN_ICON_SOURCE_X,
+    STUN_ICON_SOURCE_Y,
+    STUN_MARKER_SOURCE_X,
+    STUN_MARKER_SOURCE_Y,
+    STUN_MONSTER_OFFSET_X,
     BATTLE_POPUP_FRAME_COUNT,
     ACTION_MOVE_DISTANCE,
     ACTION_MOVE_SPEED,
@@ -175,6 +186,7 @@ from member import (
     ProficiencyKind,
 )
 from battle_magic import SpellAffinity, member_spell_ability, member_spell_modifier
+from item import AdditionalEffect
 from resistance import ResistanceType
 from state import Language, Settings
 from spell_effect import SpellEffectDefinition, SpellEffectPlayer
@@ -401,6 +413,94 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertFalse(mock._critical_flash_visible())
         self.assertEqual(CRITICAL_FLASH_COLOR, 33)
+
+    def test_stun_marker_uses_authored_text_at_the_smash_position(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.stunned = True
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=True)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.monsters = (monster,)
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            additional_effects=(AdditionalEffect.STUN,),
+            elapsed_frame=(
+                ATTACK_HIT_START_FRAME + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+            ),
+            damage_applied=True,
+        )
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_additional_effect_markers()
+
+        blt.assert_called_once_with(
+            22,
+            76,
+            0,
+            STUN_MARKER_SOURCE_X,
+            STUN_MARKER_SOURCE_Y,
+            ADDITIONAL_EFFECT_MARKER_WIDTH,
+            ADDITIONAL_EFFECT_MARKER_HEIGHT,
+            1,
+        )
+        self.assertEqual((STUN_MARKER_SOURCE_X, STUN_MARKER_SOURCE_Y), (208, 8))
+        self.assertEqual(ADDITIONAL_EFFECT_MARKER_FRAME_COUNT, 26)
+
+    def test_defense_down_marker_uses_authored_text(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.defense_modifier = -1
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=True)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.monsters = (monster,)
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            additional_effects=(AdditionalEffect.DEFENSE_DOWN,),
+            elapsed_frame=(
+                ATTACK_HIT_START_FRAME + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+            ),
+            damage_applied=True,
+        )
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_additional_effect_markers()
+
+        self.assertEqual(blt.call_args.args[3], DEFENSE_DOWN_MARKER_SOURCE_X)
+        self.assertEqual(blt.call_args.args[4], DEFENSE_DOWN_MARKER_SOURCE_Y)
+        self.assertEqual(
+            (DEFENSE_DOWN_MARKER_SOURCE_X, DEFENSE_DOWN_MARKER_SOURCE_Y),
+            (224, 8),
+        )
+
+    def test_smash_suppresses_an_overlapping_stun_marker(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=False)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            additional_effects=(AdditionalEffect.STUN,),
+            elapsed_frame=(
+                ATTACK_HIT_START_FRAME + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+            ),
+            damage_applied=True,
+        )
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_additional_effect_markers()
+
+        blt.assert_not_called()
 
     def test_battle_fixture_uses_configured_members_at_level_ninety_nine(self) -> None:
         self.assertEqual(
@@ -3577,6 +3677,28 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(dither.call_args_list, [call(0.5), call(1.0)])
 
+    def test_stun_icon_uses_authored_bank_zero_sprite_beside_monster(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.stunned = True
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_stun_icons()
+
+        blt.assert_called_once_with(
+            4 + STUN_MONSTER_OFFSET_X,
+            MONSTER_POSITIONS[0][1],
+            0,
+            STUN_ICON_SOURCE_X,
+            STUN_ICON_SOURCE_Y,
+            STUN_ICON_SIZE,
+            STUN_ICON_SIZE,
+            1,
+        )
+        self.assertEqual((STUN_ICON_SOURCE_X, STUN_ICON_SOURCE_Y), (224, 16))
+
     def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:
         spell = load_mock_spells()["FIRE1"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -6281,6 +6403,149 @@ class BattleScreenMockTest(unittest.TestCase):
 
         quit_game.assert_not_called()
         mock._open_global_command_menu.assert_called_once_with()
+
+    def test_member_attack_effects_apply_to_a_living_monster(self) -> None:
+        for effect, state_field in (
+            (AdditionalEffect.POISON, "poisoned"),
+            (AdditionalEffect.SLEEP, "sleeping"),
+            (AdditionalEffect.STUN, "stunned"),
+            (AdditionalEffect.DEFENSE_DOWN, "defense_modifier"),
+        ):
+            with self.subTest(effect=effect):
+                monster = _damage_test_monster()
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.monsters = (monster,)
+                mock._show_battle_popup = Mock()
+
+                with patch("scenes.battle.random.randint", return_value=2):
+                    applied = mock._apply_additional_effects_to_monster(
+                        0,
+                        (effect,),
+                    )
+
+                self.assertEqual(applied, (effect,))
+                self.assertTrue(getattr(monster.state, state_field))
+                mock._show_battle_popup.assert_not_called()
+
+    def test_instant_death_effect_defeats_a_living_monster(self) -> None:
+        monster = _damage_test_monster()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock._show_battle_popup = Mock()
+
+        applied = mock._apply_additional_effects_to_monster(
+            0,
+            (AdditionalEffect.DEATH,),
+        )
+
+        self.assertEqual(applied, (AdditionalEffect.DEATH,))
+        self.assertFalse(monster.is_alive)
+        mock._show_battle_popup.assert_not_called()
+
+    def test_lethal_and_death_weapon_are_merged_into_one_check(self) -> None:
+        member = SimpleNamespace(has_skill=Mock(return_value=True))
+        weapon = SimpleNamespace(additional_effect=AdditionalEffect.DEATH)
+
+        candidates = BattleScreenMock._effect_candidates_for_member_attack(
+            member,
+            weapon,
+        )
+
+        self.assertEqual(candidates, ((AdditionalEffect.DEATH, True),))
+
+    def test_weapon_effect_and_lethal_share_one_random_roll(self) -> None:
+        member = SimpleNamespace(has_skill=Mock(return_value=True))
+        weapon = SimpleNamespace(additional_effect=AdditionalEffect.POISON)
+        monster = SimpleNamespace(
+            is_boss=False,
+            weaknesses=frozenset(),
+            resistances=frozenset(),
+        )
+        result = SimpleNamespace(
+            hit=True,
+            adjusted_hit=100,
+            critical=False,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+
+        with patch(
+            "scenes.battle.random.randint",
+            return_value=0,
+        ) as randint:
+            effects = mock._resolve_member_attack_additional_effects(
+                member,
+                weapon,
+                monster,
+                result,
+            )
+
+        self.assertEqual(
+            effects,
+            (AdditionalEffect.POISON, AdditionalEffect.DEATH),
+        )
+        randint.assert_called_once_with(0, 99)
+
+    def test_enemy_attack_effects_apply_to_a_living_member(self) -> None:
+        for effect, state_field in (
+            (AdditionalEffect.POISON, "poisoned"),
+            (AdditionalEffect.SLEEP, "sleeping"),
+            (AdditionalEffect.PARALIZE, "paralyzed"),
+            (AdditionalEffect.STUN, "stunned"),
+            (AdditionalEffect.DEFENSE_DOWN, "protection_level"),
+        ):
+            with self.subTest(effect=effect):
+                member = load_mock_party(
+                    load_mock_items(),
+                    load_mock_skills(),
+                    character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+                    internal_level=MAX_INTERNAL_LEVEL,
+                )[0]
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = (member,)
+                mock.party_visuals = (BattleMockCharacter(member, 0, 0, 0),)
+                mock.localizer = Localizer(Language.JAPANESE)
+                mock.focused_target_by_party_index = {0: 0}
+                mock._refresh_party_hp_text = Mock()
+                mock._show_battle_popup = Mock()
+
+                with patch("scenes.battle.random.randint", return_value=2):
+                    applied = mock._apply_additional_effects_to_member(
+                        0,
+                        (effect,),
+                    )
+
+                self.assertEqual(applied, (effect,))
+                self.assertTrue(getattr(member, state_field))
+                self.assertEqual(mock.focused_target_by_party_index, {})
+                mock._show_battle_popup.assert_not_called()
+
+    def test_stun_skips_the_next_timeline_head_once(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )[0]
+        member.stunned = True
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.timeline = (visual,)
+        mock.defending_party_indexes = set()
+        mock.focused_target_by_party_index = {0: 0}
+        mock._remove_defeated_party_from_timeline = Mock()
+        mock._party_is_defeated = Mock(return_value=False)
+        mock._begin_front_promotion_if_needed = Mock(return_value=False)
+        mock._apply_turn_start_poison = Mock(return_value=False)
+        mock._start_timeline_animation = Mock()
+        mock._refresh_party_text_colors = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertFalse(member.stunned)
+        self.assertEqual(mock.focused_target_by_party_index, {})
+        mock._start_timeline_animation.assert_called_once_with()
 
 
 if __name__ == "__main__":
