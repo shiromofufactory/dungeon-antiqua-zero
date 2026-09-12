@@ -95,6 +95,37 @@ class DebugPartyEditorTest(unittest.TestCase):
         with self.assertRaisesRegex(DebugPartyError, "1 to 6 total"):
             self.editor.toggle_member("Cress")
 
+    def test_edits_current_hp_and_mp_within_each_members_maximum(self) -> None:
+        member = self.editor.member("Fiora")
+
+        self.editor.set_member_hp("Fiora", 0)
+        self.editor.set_member_mp("Fiora", member.max_mp - 1)
+
+        self.assertEqual(member.hp, 0)
+        self.assertEqual(member.mp, member.max_mp - 1)
+        with self.assertRaisesRegex(DebugPartyError, "HP"):
+            self.editor.set_member_hp("Fiora", member.max_hp + 1)
+        with self.assertRaisesRegex(DebugPartyError, "MP"):
+            self.editor.set_member_mp("Fiora", -1)
+
+    def test_freely_sets_and_clears_poison_and_paralysis(self) -> None:
+        member = self.editor.member("Fiora")
+        self.editor.set_member_hp("Fiora", 0)
+
+        self.editor.set_member_poisoned("Fiora", True)
+        self.editor.set_member_paralyzed("Fiora", True)
+
+        self.assertTrue(member.poisoned)
+        self.assertTrue(member.paralyzed)
+        self.editor.set_member_poisoned("Fiora", False)
+        self.editor.set_member_paralyzed("Fiora", False)
+        self.assertFalse(member.poisoned)
+        self.assertFalse(member.paralyzed)
+
+    def test_rejects_status_edits_for_a_member_outside_the_party(self) -> None:
+        with self.assertRaisesRegex(DebugPartyError, "not in the debug party"):
+            self.editor.set_member_hp("Cress", 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -116,6 +116,45 @@ class DebugPartyEditor:
     def party(self) -> tuple[Member, ...]:
         return tuple(self._party_by_key[key] for key in self._party_order)
 
+    def member(self, character_key: str) -> Member:
+        """Return one currently selected member by stable character key."""
+
+        self._definition(character_key)
+        try:
+            return self._party_by_key[character_key]
+        except KeyError as error:
+            raise DebugPartyError(
+                f"character is not in the debug party: {character_key}"
+            ) from error
+
+    def set_member_hp(self, character_key: str, hp: int) -> None:
+        """Set current HP without changing independently editable conditions."""
+
+        member = self.member(character_key)
+        self._validate_current_value(hp, maximum=member.max_hp, name="HP")
+        member.hp = hp
+
+    def set_member_mp(self, character_key: str, mp: int) -> None:
+        """Set current MP within the selected member's current maximum."""
+
+        member = self.member(character_key)
+        self._validate_current_value(mp, maximum=member.max_mp, name="MP")
+        member.mp = mp
+
+    def set_member_poisoned(self, character_key: str, poisoned: bool) -> None:
+        """Freely set or clear a selected member's persistent poison state."""
+
+        if not isinstance(poisoned, bool):
+            raise TypeError("poisoned must be a boolean")
+        self.member(character_key).poisoned = poisoned
+
+    def set_member_paralyzed(self, character_key: str, paralyzed: bool) -> None:
+        """Freely set or clear a selected member's paralysis state."""
+
+        if not isinstance(paralyzed, bool):
+            raise TypeError("paralyzed must be a boolean")
+        self.member(character_key).paralyzed = paralyzed
+
     def effective_internal_level(self, character_key: str) -> int:
         """Return one member's level relative to Fiora's baseline."""
 
@@ -195,6 +234,15 @@ class DebugPartyEditor:
             raise DebugPartyError(
                 "debug party must contain Fiora and from 1 to "
                 f"{MAX_PARTY_MEMBER_COUNT} total members"
+            )
+
+    @staticmethod
+    def _validate_current_value(value: int, *, maximum: int, name: str) -> None:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"debug member {name} must be an integer")
+        if not 0 <= value <= maximum:
+            raise DebugPartyError(
+                f"debug member {name} must be from 0 to {maximum}"
             )
 
 

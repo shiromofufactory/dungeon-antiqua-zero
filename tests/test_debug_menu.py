@@ -133,6 +133,94 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertEqual(self.save_data.gold, 654321)
         self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
 
+    def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
+        target_y = [target.y for target in self.screen.main_cursor.targets]
+
+        self.assertEqual(len(target_y), 6)
+        self.assertTrue(
+            all(
+                next_y - current_y == 3
+                for current_y, next_y in zip(target_y, target_y[1:])
+            )
+        )
+
+    def test_edits_each_members_hp_mp_poison_and_paralysis(self) -> None:
+        self.screen.main_cursor.select_key("member_status")
+        self.screen.update(self.confirm())
+
+        self.assertIs(
+            self.screen.phase,
+            DebugMenuPhase.MEMBER_STATUS_LIST,
+        )
+        self.assertEqual(
+            len(self.screen.member_status_list_cursor.targets),
+            len(self.screen.party),
+        )
+        self.screen.update(
+            InputState(
+                navigation=Direction.DOWN,
+                held_direction=Direction.DOWN,
+            )
+        )
+        self.screen.update(self.confirm())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MEMBER_STATUS)
+        self.assertEqual(self.screen.member_status_key, "Cerion")
+
+        member = self.editor.member("Cerion")
+        self.screen.member_status_cursor.select_key("hp")
+        self.screen.update(self.confirm())
+        self.screen.numeric_cursor.select_key("0")
+        self.screen.update(self.confirm())
+        self.screen.numeric_cursor.select_key("confirm")
+        self.screen.update(self.confirm())
+        self.assertEqual(member.hp, 0)
+        self.assertIs(self.screen.phase, DebugMenuPhase.MEMBER_STATUS)
+
+        self.screen.member_status_cursor.select_key("mp")
+        self.screen.update(self.confirm())
+        for digit in str(member.max_mp):
+            self.screen.numeric_cursor.select_key(digit)
+            self.screen.update(self.confirm())
+        self.screen.update(self.confirm())
+        self.assertEqual(member.mp, member.max_mp)
+
+        self.screen.member_status_cursor.select_key("poisoned")
+        self.screen.update(self.confirm())
+        self.screen.member_status_cursor.select_key("paralyzed")
+        self.screen.update(self.confirm())
+        self.assertTrue(member.poisoned)
+        self.assertTrue(member.paralyzed)
+
+        self.screen.member_status_cursor.select_key("poisoned")
+        self.screen.update(self.confirm())
+        self.screen.member_status_cursor.select_key("paralyzed")
+        self.screen.update(self.confirm())
+        self.assertFalse(member.poisoned)
+        self.assertFalse(member.paralyzed)
+
+    def test_member_status_cancel_returns_through_each_parent_screen(self) -> None:
+        self.screen.main_cursor.select_key("member_status")
+        self.screen.update(self.confirm())
+        self.screen.update(self.confirm())
+        self.screen.update(self.confirm())
+        self.assertIs(self.screen.phase, DebugMenuPhase.NUMBER)
+
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MEMBER_STATUS)
+        self.assertEqual(self.screen.member_status_cursor.selected_key, "hp")
+
+        self.screen.update(self.cancel())
+        self.assertIs(
+            self.screen.phase,
+            DebugMenuPhase.MEMBER_STATUS_LIST,
+        )
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+        self.assertEqual(
+            self.screen.main_cursor.selected_key,
+            "member_status",
+        )
+
     def test_member_list_contains_all_characters_in_two_columns(self) -> None:
         self.screen._open_members()
         self.assertEqual(len(self.editor.candidate_definitions), 20)
@@ -252,7 +340,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
     def test_teleport_list_scrolls_beyond_the_visible_rows(self) -> None:
         targets = tuple(
             DebugTeleportTarget(f"site_{index}", f"拠点{index}")
-            for index in range(12)
+            for index in range(15)
         )
         screen = DebugMenuOverlay(
             editor=self.editor,
@@ -266,7 +354,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         screen.main_cursor.select_key("teleport")
         screen.update(self.confirm())
 
-        for _index in range(10):
+        for _index in range(13):
             screen.update(
                 InputState(
                     navigation=Direction.DOWN,
@@ -274,10 +362,10 @@ class DebugMenuOverlayTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(screen.teleport_index, 10)
+        self.assertEqual(screen.teleport_index, 13)
         self.assertEqual(screen.teleport_scroll_offset, 1)
-        self.assertEqual(screen.teleport_cursor.selected_key, "site_10")
-        self.assertEqual(len(screen.teleport_cursor.targets), 10)
+        self.assertEqual(screen.teleport_cursor.selected_key, "site_13")
+        self.assertEqual(len(screen.teleport_cursor.targets), 13)
 
     def test_shop_list_opens_the_selected_production_shop(self) -> None:
         on_shop = Mock(return_value=True)
@@ -327,6 +415,8 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertIsInstance(DEBUG_TEXT, DebugText)
         self.assertEqual(DEBUG_TEXT.title, "デバッグメニュー")
         self.assertEqual(DEBUG_TEXT.member_count(0), "フィオラ＋０にん")
+        self.assertEqual(DEBUG_TEXT.party_member_count(6), "６にん")
+        self.assertEqual(DEBUG_TEXT.member_status, "メンバー状態")
         self.assertEqual(DEBUG_TEXT.teleport_count(2), "２かしょ")
         self.assertEqual(DEBUG_TEXT.shop, "ショップ")
         self.assertEqual(DEBUG_TEXT.shop_count(13), "１３けん")

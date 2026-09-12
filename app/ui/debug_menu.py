@@ -31,34 +31,51 @@ from ui import (
 )
 
 DEBUG_WINDOW_GRID = (2, 2, 60, 56)
-MAIN_ROWS = (
-    ("party_level", 11),
-    ("gold", 17),
-    ("members", 23),
-    ("teleport", 29),
-    ("shop", 35),
+DEBUG_ROW_HEIGHT = 3
+MAIN_ITEM_KEYS = (
+    "party_level",
+    "gold",
+    "members",
+    "member_status",
+    "teleport",
+    "shop",
+)
+MAIN_FIRST_Y = 9
+MAIN_ROWS = tuple(
+    (key, MAIN_FIRST_Y + index * DEBUG_ROW_HEIGHT)
+    for index, key in enumerate(MAIN_ITEM_KEYS)
 )
 MAIN_CURSOR_X = 4
 MAIN_LABEL_X = 6
 MAIN_VALUE_X = 34
 MEMBER_FIRST_Y = 9
-MEMBER_ROW_HEIGHT = 3
+MEMBER_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 MEMBER_ROW_COUNT = 10
 MEMBER_TEXT_X = (6, 34)
 MEMBER_CURSOR_X = (4, 32)
+MEMBER_STATUS_FIRST_Y = 9
+MEMBER_STATUS_LABEL_X = 6
+MEMBER_STATUS_VALUE_X = 21
+MEMBER_STATUS_COLON_X = 18
+MEMBER_STATUS_ROWS = (
+    ("hp", MEMBER_STATUS_FIRST_Y),
+    ("mp", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT),
+    ("poisoned", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT * 2),
+    ("paralyzed", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT * 3),
+)
 TELEPORT_FIRST_Y = 9
-TELEPORT_ROW_HEIGHT = 4
-TELEPORT_VISIBLE_COUNT = 10
+TELEPORT_ROW_HEIGHT = DEBUG_ROW_HEIGHT
+TELEPORT_VISIBLE_COUNT = 13
 TELEPORT_TEXT_X = 6
 TELEPORT_CURSOR_X = 4
 SHOP_FIRST_Y = 7
-SHOP_ROW_HEIGHT = 3
+SHOP_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 SHOP_VISIBLE_COUNT = 13
 SHOP_TEXT_X = 6
 SHOP_CURSOR_X = 4
 NUMERIC_WINDOW_GRID = (12, 14, 40, 30)
 NUMERIC_DIGIT_X = (6, 10, 14, 18, 22)
-NUMERIC_ROW_Y = (11, 15)
+NUMERIC_ROW_Y = (11, 11 + DEBUG_ROW_HEIGHT)
 NUMERIC_ACTION_X = 29
 NUMERIC_DISPLAY_X = 6
 NUMERIC_DISPLAY_Y = 6
@@ -72,6 +89,8 @@ class DebugMenuPhase(Enum):
 
     MAIN = auto()
     MEMBERS = auto()
+    MEMBER_STATUS_LIST = auto()
+    MEMBER_STATUS = auto()
     TELEPORT = auto()
     SHOP = auto()
     NUMBER = auto()
@@ -236,6 +255,12 @@ class DebugMenuOverlay:
         self.member_window: Window | None = None
         self.member_cursor: WindowCursor | None = None
         self.member_index = 0
+        self.member_status_list_window: Window | None = None
+        self.member_status_list_cursor: WindowCursor | None = None
+        self.member_status_window: Window | None = None
+        self.member_status_cursor: WindowCursor | None = None
+        self.member_status_index = 0
+        self.member_status_key: str | None = None
         self.teleport_window: Window | None = None
         self.teleport_cursor: WindowCursor | None = None
         self.teleport_index = 0
@@ -248,6 +273,7 @@ class DebugMenuOverlay:
         self.numeric_cursor: WindowCursor | None = None
         self.numeric_entry: NumericEntry | None = None
         self.numeric_target: str | None = None
+        self.numeric_member_key: str | None = None
         self._build_main_window()
 
     @property
@@ -262,6 +288,9 @@ class DebugMenuOverlay:
 
     def _shop_count_text(self) -> str:
         return DEBUG_TEXT.shop_count(len(self.shop_targets))
+
+    def _party_member_count_text(self) -> str:
+        return DEBUG_TEXT.party_member_count(len(self.editor.party))
 
     def _guide_text(self) -> WindowText:
         return self.debug_texts.create(
@@ -278,6 +307,7 @@ class DebugMenuOverlay:
             "party_level": format_number(self.editor.baseline_level),
             "gold": format_number(self.save_data.gold),
             "members": self._member_count_text(),
+            "member_status": self._party_member_count_text(),
             "teleport": self._teleport_count_text(),
             "shop": self._shop_count_text(),
         }
@@ -285,6 +315,7 @@ class DebugMenuOverlay:
             "party_level": DEBUG_TEXT.party_level,
             "gold": DEBUG_TEXT.gold,
             "members": DEBUG_TEXT.members,
+            "member_status": DEBUG_TEXT.member_status,
             "teleport": DEBUG_TEXT.teleport,
             "shop": DEBUG_TEXT.shop,
         }
@@ -378,6 +409,176 @@ class DebugMenuOverlay:
         except DebugPartyError:
             self.alert.start()
         self._build_member_window()
+
+    def _build_member_status_list_window(self) -> None:
+        party = self.editor.party
+        placements = [
+            self.debug_texts.create(DEBUG_TEXT.member_status_selection, 4, 3),
+            self.debug_texts.create(self._party_member_count_text(), 34, 3),
+        ]
+        targets: list[CursorTarget] = []
+        for index, member in enumerate(party):
+            y = MEMBER_STATUS_FIRST_Y + index * DEBUG_ROW_HEIGHT
+            key = member.definition.key
+            placements.append(
+                self.member_texts.create(
+                    member.definition.localized_name(self.localizer),
+                    MEMBER_STATUS_LABEL_X,
+                    y,
+                )
+            )
+            targets.append(CursorTarget(MAIN_CURSOR_X, y, key=key))
+        placements.append(self._guide_text())
+        self.member_status_list_window = self.windows.create(
+            *DEBUG_WINDOW_GRID,
+            tuple(placements),
+            opened=True,
+        )
+        self.member_status_list_cursor = (
+            self.member_status_list_window.set_cursor(tuple(targets))
+        )
+        selected_key = party[self.member_status_index].definition.key
+        self._select_cursor_key(self.member_status_list_cursor, selected_key)
+
+    def _open_member_status_list(self) -> None:
+        self.phase = DebugMenuPhase.MEMBER_STATUS_LIST
+        self.member_status_index = 0
+        self.member_status_key = None
+        self._build_member_status_list_window()
+
+    def _close_member_status_list(self) -> None:
+        self.phase = DebugMenuPhase.MAIN
+        self.member_status_list_window = None
+        self.member_status_list_cursor = None
+        self._build_main_window(selected_key="member_status")
+
+    def _build_member_status_window(self, selected_key: str = "hp") -> None:
+        if self.member_status_key is None:
+            raise RuntimeError("member status editing is not active")
+        member = self.editor.member(self.member_status_key)
+        condition = {
+            True: DEBUG_TEXT.condition_on,
+            False: DEBUG_TEXT.condition_off,
+        }
+        labels = {
+            "hp": DEBUG_TEXT.hp,
+            "mp": DEBUG_TEXT.mp,
+            "poisoned": DEBUG_TEXT.poisoned,
+            "paralyzed": DEBUG_TEXT.paralyzed,
+        }
+        values = {
+            "hp": f"{format_number(member.hp)}／{format_number(member.max_hp)}",
+            "mp": f"{format_number(member.mp)}／{format_number(member.max_mp)}",
+            "poisoned": condition[member.poisoned],
+            "paralyzed": condition[member.paralyzed],
+        }
+        placements = [
+            self.debug_texts.create(DEBUG_TEXT.member_status, 4, 3),
+            self.member_texts.create(
+                member.definition.localized_name(self.localizer),
+                32,
+                3,
+            ),
+        ]
+        for key, y in MEMBER_STATUS_ROWS:
+            placements.extend(
+                (
+                    self.debug_texts.create(
+                        labels[key],
+                        MEMBER_STATUS_LABEL_X,
+                        y,
+                    ),
+                    self.debug_texts.create("：", MEMBER_STATUS_COLON_X, y),
+                    self.debug_texts.create(
+                        values[key],
+                        MEMBER_STATUS_VALUE_X,
+                        y,
+                    ),
+                )
+            )
+        placements.append(self._guide_text())
+        self.member_status_window = self.windows.create(
+            *DEBUG_WINDOW_GRID,
+            tuple(placements),
+            opened=True,
+        )
+        self.member_status_cursor = self.member_status_window.set_cursor(
+            tuple(
+                CursorTarget(MAIN_CURSOR_X, y, key=key)
+                for key, y in MEMBER_STATUS_ROWS
+            )
+        )
+        self._select_cursor_key(self.member_status_cursor, selected_key)
+
+    def _open_selected_member_status(self) -> None:
+        if self.member_status_list_cursor is None:
+            self.alert.start()
+            return
+        key = self.member_status_list_cursor.selected_key
+        if not isinstance(key, str):
+            self.alert.start()
+            return
+        self.member_status_key = key
+        self.phase = DebugMenuPhase.MEMBER_STATUS
+        self._build_member_status_window()
+
+    def _close_member_status(self) -> None:
+        self.phase = DebugMenuPhase.MEMBER_STATUS_LIST
+        self.member_status_key = None
+        self.member_status_window = None
+        self.member_status_cursor = None
+        self._build_member_status_list_window()
+
+    def _toggle_member_condition(self, target: str) -> None:
+        if self.member_status_key is None:
+            return
+        member = self.editor.member(self.member_status_key)
+        if target == "poisoned":
+            self.editor.set_member_poisoned(
+                self.member_status_key,
+                not member.poisoned,
+            )
+        elif target == "paralyzed":
+            self.editor.set_member_paralyzed(
+                self.member_status_key,
+                not member.paralyzed,
+            )
+        else:
+            raise ValueError(f"unsupported member condition: {target}")
+        self._build_member_status_window(selected_key=target)
+
+    def _update_member_status_list(self, input_state: InputState) -> None:
+        if input_state.cancel.triggered:
+            self._close_member_status_list()
+            return
+        if input_state.confirm.triggered:
+            self._open_selected_member_status()
+            return
+        if (
+            self.member_status_list_window is not None
+            and self.member_status_list_window.update(input_state.navigation)
+            and self.member_status_list_cursor is not None
+        ):
+            selected_key = self.member_status_list_cursor.selected_key
+            self.member_status_index = next(
+                index
+                for index, member in enumerate(self.editor.party)
+                if member.definition.key == selected_key
+            )
+
+    def _update_member_status(self, input_state: InputState) -> None:
+        if input_state.cancel.triggered:
+            self._close_member_status()
+            return
+        if input_state.confirm.triggered and self.member_status_cursor is not None:
+            target = self.member_status_cursor.selected_key
+            if target in ("hp", "mp"):
+                self._open_member_numeric(target)
+            elif isinstance(target, str):
+                self._toggle_member_condition(target)
+            return
+        if self.member_status_window is not None:
+            self.member_status_window.update(input_state.navigation)
 
     def _build_teleport_window(self) -> None:
         placements = [
@@ -574,17 +775,39 @@ class DebugMenuOverlay:
             raise ValueError(f"unsupported numeric target: {target}")
         self.phase = DebugMenuPhase.NUMBER
         self.numeric_target = target
+        self.numeric_member_key = None
         self.numeric_entry = entry
+        self._build_numeric_window()
+
+    def _open_member_numeric(self, target: object) -> None:
+        if (
+            not isinstance(target, str)
+            or target not in ("hp", "mp")
+            or self.member_status_key is None
+        ):
+            raise ValueError(f"unsupported member numeric target: {target}")
+        member = self.editor.member(self.member_status_key)
+        maximum = member.max_hp if target == "hp" else member.max_mp
+        self.phase = DebugMenuPhase.NUMBER
+        self.numeric_target = target
+        self.numeric_member_key = self.member_status_key
+        self.numeric_entry = NumericEntry(
+            0,
+            maximum,
+            len(str(maximum)),
+        )
         self._build_numeric_window()
 
     def _build_numeric_window(self) -> None:
         if self.numeric_entry is None or self.numeric_target is None:
             raise RuntimeError("numeric input is not active")
-        label = (
-            DEBUG_TEXT.party_level
-            if self.numeric_target == "party_level"
-            else DEBUG_TEXT.gold
-        )
+        labels = {
+            "party_level": DEBUG_TEXT.party_level,
+            "gold": DEBUG_TEXT.gold,
+            "hp": DEBUG_TEXT.hp,
+            "mp": DEBUG_TEXT.mp,
+        }
+        label = labels[self.numeric_target]
         digits = self.numeric_entry.digits
         display = digits + (
             "■" if len(digits) < self.numeric_entry.max_digits else ""
@@ -652,14 +875,26 @@ class DebugMenuOverlay:
         target = self.numeric_target
         if target == "party_level":
             self.editor.set_baseline_level(value)
-        else:
+        elif target == "gold":
             self.save_data.gold = value
+        elif target == "hp" and self.numeric_member_key is not None:
+            self.editor.set_member_hp(self.numeric_member_key, value)
+        elif target == "mp" and self.numeric_member_key is not None:
+            self.editor.set_member_mp(self.numeric_member_key, value)
+        else:
+            raise RuntimeError(f"numeric target has no destination: {target}")
+        member_key = self.numeric_member_key
         self.numeric_entry = None
         self.numeric_target = None
+        self.numeric_member_key = None
         self.numeric_window = None
         self.numeric_cursor = None
-        self.phase = DebugMenuPhase.MAIN
-        self._build_main_window(selected_key=target)
+        if member_key is not None:
+            self.phase = DebugMenuPhase.MEMBER_STATUS
+            self._build_member_status_window(selected_key=target)
+        else:
+            self.phase = DebugMenuPhase.MAIN
+            self._build_main_window(selected_key=target)
 
     def _update_numeric(self, input_state: InputState) -> None:
         if self.numeric_entry is None or self.numeric_cursor is None:
@@ -669,12 +904,18 @@ class DebugMenuOverlay:
                 self._build_numeric_window()
             else:
                 target = self.numeric_target or "party_level"
+                member_key = self.numeric_member_key
                 self.numeric_entry = None
                 self.numeric_target = None
+                self.numeric_member_key = None
                 self.numeric_window = None
                 self.numeric_cursor = None
-                self.phase = DebugMenuPhase.MAIN
-                self._build_main_window(selected_key=target)
+                if member_key is not None:
+                    self.phase = DebugMenuPhase.MEMBER_STATUS
+                    self._build_member_status_window(selected_key=target)
+                else:
+                    self.phase = DebugMenuPhase.MAIN
+                    self._build_main_window(selected_key=target)
             return
         if input_state.confirm.triggered:
             key = self.numeric_cursor.selected_key
@@ -707,6 +948,12 @@ class DebugMenuOverlay:
         if self.phase is DebugMenuPhase.SHOP:
             self._update_shop(input_state)
             return False
+        if self.phase is DebugMenuPhase.MEMBER_STATUS_LIST:
+            self._update_member_status_list(input_state)
+            return False
+        if self.phase is DebugMenuPhase.MEMBER_STATUS:
+            self._update_member_status(input_state)
+            return False
         if self.phase is DebugMenuPhase.MEMBERS:
             if input_state.cancel.triggered:
                 self.phase = DebugMenuPhase.MAIN
@@ -736,12 +983,16 @@ class DebugMenuOverlay:
             key = self.main_cursor.selected_key
             if key == "members":
                 self._open_members()
+            elif key == "member_status":
+                self._open_member_status_list()
             elif key == "teleport":
                 self._open_teleport()
             elif key == "shop":
                 self._open_shops()
-            elif isinstance(key, str):
+            elif isinstance(key, str) and key in ("party_level", "gold"):
                 self._open_numeric(key)
+            else:
+                self.alert.start()
             return False
         self.main_window.update(input_state.navigation)
         return False
@@ -751,6 +1002,16 @@ class DebugMenuOverlay:
             self.numeric_window.draw()
         elif self.phase is DebugMenuPhase.MEMBERS and self.member_window is not None:
             self.member_window.draw()
+        elif (
+            self.phase is DebugMenuPhase.MEMBER_STATUS_LIST
+            and self.member_status_list_window is not None
+        ):
+            self.member_status_list_window.draw()
+        elif (
+            self.phase is DebugMenuPhase.MEMBER_STATUS
+            and self.member_status_window is not None
+        ):
+            self.member_status_window.draw()
         elif (
             self.phase is DebugMenuPhase.TELEPORT
             and self.teleport_window is not None

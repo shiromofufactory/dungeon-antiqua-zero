@@ -16,6 +16,14 @@ class DebugText:
     party_level: str = "パーティＬＶ"
     gold: str = "Ｇｏｌｄ"
     members: str = "メンバー"
+    member_status: str = "メンバー状態"
+    member_status_selection: str = "メンバーせんたく"
+    hp: str = "ＨＰ"
+    mp: str = "ＭＰ"
+    poisoned: str = "どく"
+    paralyzed: str = "まひ"
+    condition_on: str = "あり"
+    condition_off: str = "なし"
     teleport: str = "テレポート"
     teleport_destination: str = "テレポートさき"
     teleport_count_template: str = "{count}かしょ"
@@ -25,6 +33,7 @@ class DebugText:
     shop_count_template: str = "{count}けん"
     no_shops: str = "ショップが　ありません"
     member_count_template: str = "フィオラ＋{count}にん"
+    party_member_count_template: str = "{count}にん"
     numeric_delete: str = "けす"
     numeric_confirm: str = "けってい"
     close_guide: str = "%CANCEL%：もどる"
@@ -38,6 +47,11 @@ class DebugText:
         """Format the number of currently available teleport destinations."""
 
         return self._format_count(count, self.teleport_count_template)
+
+    def party_member_count(self, count: int) -> str:
+        """Format the current total party-member count."""
+
+        return self._format_count(count, self.party_member_count_template)
 
     def shop_count(self, count: int) -> str:
         """Format the number of selectable debug shops."""
