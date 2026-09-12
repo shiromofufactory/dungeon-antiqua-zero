@@ -4,7 +4,6 @@ from types import MappingProxyType
 import unittest
 from unittest.mock import ANY, Mock, patch
 
-from tools._bootstrap import APP_ROOT
 from game import Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
@@ -19,6 +18,7 @@ from rendering import FadeThroughBlack
 from state import SaveData, Settings
 from systems import (
     InventorySystem,
+    MessageEffect,
     MovePartyEffect,
     OpenShopEffect,
     TreasureSystem,
@@ -362,6 +362,32 @@ class GameEventTriggerTest(unittest.TestCase):
         game._begin_screen_change.assert_called_once_with(
             GameScreenChange.OPEN_SHOP
         )
+
+    @patch("game.EventMessageOverlay")
+    def test_event_message_log_is_added_newest_first_and_capped_at_twenty(
+        self,
+        _event_message_overlay: Mock,
+    ) -> None:
+        game = Game.__new__(Game)
+        effect = MessageEffect("sample.new")
+        game.event_runner = Mock(advance=Mock(return_value=effect))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.settings = Settings()
+        game.event_messages = Mock()
+        game.fonts = Mock()
+        game.faces = Mock()
+        game.character_face_positions = {}
+        old_logs = [
+            {"message_id": f"sample.old{index}", "arguments": {}}
+            for index in range(20)
+        ]
+        game.save_data = SaveData(logs=old_logs)
+
+        game._continue_event()
+
+        self.assertEqual(len(game.save_data.logs), 20)
+        self.assertEqual(game.save_data.logs[0]["message_id"], "sample.new")
+        self.assertEqual(game.save_data.logs[-1]["message_id"], "sample.old18")
 
     def test_closing_event_shop_defers_event_resume_until_fade_finishes(self) -> None:
         game = Game.__new__(Game)

@@ -1676,8 +1676,10 @@ class Game:
             monsters=self.monsters,
             monster_records=self.save_data.monster_records,
             items=self.items,
+            logs=self.save_data.logs,
             settings=self.settings,
             texts=self.texts,
+            event_messages=self.event_messages,
             fonts=self.fonts,
             images=self.images,
             on_invalid_action=self.alert.start,
@@ -2335,10 +2337,11 @@ class Game:
                     faces=self.faces,
                     face_positions=self.character_face_positions,
                 )
-                self.save_data.logs.append(
+                self.save_data.logs.insert(
+                    0,
                     {"message_id": effect.message_id, "arguments": {}}
                 )
-                del self.save_data.logs[:-20]
+                del self.save_data.logs[20:]
                 return
             if isinstance(effect, (MovePartyEffect, MoveActorEffect)):
                 self.event_move_remaining = effect.steps

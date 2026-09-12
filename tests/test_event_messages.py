@@ -146,6 +146,27 @@ class EventMessageCatalogTest(unittest.TestCase):
             "Alvan",
         )
 
+    def test_formats_logged_message_arguments(self) -> None:
+        catalog = EventMessageCatalog.from_records(
+            [
+                {
+                    "message_id": "sample.formatted",
+                    "text_ja": ["$COUNT$個もらった"],
+                    "text_en": [],
+                    "text_zhcn": [],
+                }
+            ]
+        )
+
+        self.assertEqual(
+            catalog.formatted_lines(
+                "sample.formatted",
+                Localizer(Language.JAPANESE),
+                {"COUNT": "3"},
+            ),
+            ("３個もらった",),
+        )
+
     def test_loads_compiled_json_and_rejects_unknown_fields(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "messages.json"

@@ -168,6 +168,27 @@ class TextCatalogTest(unittest.TestCase):
             ("こうれつからも", "こうげきかのう"),
         )
 
+    def test_formats_each_line_before_display_normalization(self) -> None:
+        catalog = TextCatalog.from_records(
+            [
+                {
+                    "text_key": "log.message",
+                    "text_ja": ["王様から$COUNT$個", "$ITEM$をもらった"],
+                    "text_en": [],
+                    "text_zhcn": [],
+                }
+            ]
+        )
+
+        self.assertEqual(
+            catalog.formatted_lines(
+                "log.message",
+                Localizer(Language.JAPANESE),
+                {"COUNT": "3", "ITEM": "薬"},
+            ),
+            ("王様から３個", "薬をもらった"),
+        )
+
     def test_rejects_duplicate_keys(self) -> None:
         with self.assertRaises(TextCatalogError):
             TextCatalog.from_records(

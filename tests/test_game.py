@@ -1648,6 +1648,7 @@ class GameTest(unittest.TestCase):
         mock.items = {"POTION": Mock()}
         mock.settings = Settings()
         mock.texts = Mock()
+        mock.event_messages = Mock()
         mock.fonts = Mock()
         mock.images = Mock()
 
@@ -1665,8 +1666,10 @@ class GameTest(unittest.TestCase):
             monsters=mock.monsters,
             monster_records=mock.save_data.monster_records,
             items=mock.items,
+            logs=mock.save_data.logs,
             settings=mock.settings,
             texts=mock.texts,
+            event_messages=mock.event_messages,
             fonts=mock.fonts,
             images=mock.images,
             on_invalid_action=mock.alert.start,

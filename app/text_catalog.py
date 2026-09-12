@@ -214,3 +214,45 @@ class TextCatalog:
             localizer.text({selected_field: line}, "text")
             for line in source_lines
         )
+
+    def formatted_lines(
+        self,
+        key: str,
+        localizer: Localizer,
+        values: Mapping[str, str],
+        *,
+        default: tuple[str, ...] = (),
+    ) -> tuple[str, ...]:
+        """Format placeholders before localizing one or more authored lines."""
+
+        if not isinstance(key, str) or not key:
+            raise ValueError("key must be a non-empty string")
+        if not isinstance(localizer, Localizer):
+            raise TypeError("localizer must be a Localizer")
+        if not isinstance(values, Mapping):
+            raise TypeError("formatted text values must be a mapping")
+        if not isinstance(default, tuple) or not all(
+            isinstance(line, str) for line in default
+        ):
+            raise TypeError("default must be a tuple of strings")
+
+        record = self._records.get(key, {})
+        value = localizer.value(record, "text", default)
+        if isinstance(value, str):
+            source_lines = (value,)
+        elif isinstance(value, (list, tuple)) and all(
+            isinstance(line, str) for line in value
+        ):
+            source_lines = tuple(value)
+        else:
+            raise TextCatalogError(
+                f"localized text must be a string or array of strings: {key}"
+            )
+        selected_field = f"text_{localizer.language.value}"
+        return tuple(
+            localizer.text(
+                {selected_field: format_text_template(line, values)},
+                "text",
+            )
+            for line in source_lines
+        )

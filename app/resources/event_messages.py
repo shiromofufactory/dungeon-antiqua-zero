@@ -115,6 +115,16 @@ class EventMessageCatalog:
     def lines(self, message_id: str, localizer: Localizer) -> tuple[str, ...]:
         return self._texts.lines(message_id, localizer)
 
+    def formatted_lines(
+        self,
+        message_id: str,
+        localizer: Localizer,
+        values: Mapping[str, str],
+    ) -> tuple[str, ...]:
+        """Resolve a logged event message with its saved arguments."""
+
+        return self._texts.formatted_lines(message_id, localizer, values)
+
     def portrait_character_key(self, message_id: str) -> str | None:
         try:
             return self._portrait_character_keys[message_id]

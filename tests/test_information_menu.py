@@ -8,6 +8,8 @@ from tools._bootstrap import APP_ROOT
 from game_data import load_items, load_monsters
 from input import Direction, InputButton, InputState
 from resistance import ResistanceType
+from resources import FontRole
+from resources.event_messages import EventMessageCatalog
 from state import Language, Settings
 from systems import (
     MONSTER_COMBAT_FIELD_KEYS,
@@ -54,11 +56,23 @@ class InformationMenuOverlayTest(unittest.TestCase):
         records: dict[str, set[str]] | None = None,
         *,
         invalid_action: Mock | None = None,
+        logs: list[dict[str, object]] | None = None,
+        event_messages: EventMessageCatalog | None = None,
+        language: Language = Language.JAPANESE,
     ) -> InformationMenuOverlay:
         fonts = Mock()
-        font = Mock()
-        font.text_width.side_effect = lambda text: len(text) * 8
-        fonts.font_for.return_value = font
+        font_map = {
+            (font_language, role): Mock()
+            for font_language in Language
+            for role in FontRole
+        }
+        for font in font_map.values():
+            font.text_width.side_effect = lambda text: len(text) * 8
+        fonts.font_for.side_effect = (
+            lambda font_language, *, role=FontRole.STANDARD: font_map[
+                (font_language, role)
+            ]
+        )
         fonts.baseline_offset_for.return_value = 0
         images = Mock()
         images.image.return_value = object()
@@ -66,18 +80,29 @@ class InformationMenuOverlayTest(unittest.TestCase):
             monsters=load_monsters(),
             monster_records={} if records is None else records,
             items=load_items(),
-            settings=Settings(language=Language.JAPANESE),
+            logs=[] if logs is None else logs,
+            settings=Settings(language=language),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
+            event_messages=(
+                EventMessageCatalog.from_records(())
+                if event_messages is None
+                else event_messages
+            ),
             fonts=fonts,
             images=images,
             on_invalid_action=invalid_action,
         )
 
-    def test_starts_at_information_submenu_with_only_monster_book(self) -> None:
+    @staticmethod
+    def open_monster_book(overlay: InformationMenuOverlay) -> None:
+        overlay.update(input_state(navigation=Direction.DOWN))
+        overlay.update(input_state(confirm=True))
+
+    def test_starts_at_conversation_log_then_lists_monster_book(self) -> None:
         overlay = self.create_overlay()
 
         self.assertIs(overlay.phase, InformationPhase.MENU)
-        self.assertEqual(overlay.header_cursor.selected_key, "monster_book")
+        self.assertEqual(overlay.header_cursor.selected_key, "conversation_log")
         self.assertEqual(
             (
                 overlay.header_window.x,
@@ -98,13 +123,187 @@ class InformationMenuOverlayTest(unittest.TestCase):
         )
         self.assertEqual(
             [text.text for text in overlay.header_window.texts],
-            ["モンスターずかん"],
+            ["かいわログ", "モンスターずかん"],
         )
+
+    def test_empty_conversation_log_alerts_and_stays_in_submenu(self) -> None:
+        invalid_action = Mock()
+        overlay = self.create_overlay(invalid_action=invalid_action)
+
+        self.assertFalse(overlay.update(input_state(confirm=True)))
+
+        invalid_action.assert_called_once_with()
+        self.assertIs(overlay.phase, InformationPhase.MENU)
+        self.assertTrue(overlay.header_cursor.active)
+
+    def test_conversation_log_resolves_current_language_and_saved_arguments(
+        self,
+    ) -> None:
+        messages = EventMessageCatalog.from_records(
+            (
+                {
+                    "message_id": "sample.log",
+                    "text_ja": ["王様から$COUNT$個もらった"],
+                    "text_en": ["Received $COUNT$ items"],
+                    "text_zhcn": ["收到$COUNT$件物品"],
+                },
+            )
+        )
+        overlay = self.create_overlay(
+            logs=[{"message_id": "sample.log", "arguments": {"COUNT": 3}}],
+            event_messages=messages,
+        )
+
+        displayed = overlay.main_window.texts
+
+        self.assertIsNone(overlay.conversation_cursor)
+        self.assertEqual(
+            [text.text for text in displayed],
+            ["１／１", "王様から３個もらった", ""],
+        )
+        self.assertIs(displayed[0].font, overlay.log_number_text_factory.font)
+        self.assertTrue(
+            all(
+                text.font is overlay.log_text_factory.font
+                for text in displayed[1:]
+            )
+        )
+        self.assertIsNot(displayed[0].font, displayed[1].font)
+        self.assertEqual([text.y for text in displayed], [2, 6, 10])
+        overlay.fonts.font_for.assert_any_call(
+            Language.JAPANESE,
+            role=FontRole.LARGE,
+        )
+
+    def test_log_counter_uses_fullwidth_8x12_font_in_every_language(self) -> None:
+        messages = EventMessageCatalog.from_records(
+            (
+                {
+                    "message_id": "sample.log",
+                    "text_ja": ["日本語"],
+                    "text_en": ["English"],
+                    "text_zhcn": ["简体中文"],
+                },
+            )
+        )
+
+        for language in Language:
+            with self.subTest(language=language):
+                overlay = self.create_overlay(
+                    logs=[
+                        {"message_id": "sample.log", "arguments": {}},
+                        {"message_id": "sample.log", "arguments": {}},
+                        {"message_id": "sample.log", "arguments": {}},
+                    ],
+                    event_messages=messages,
+                    language=language,
+                )
+
+                counter = overlay.main_window.texts[0]
+                self.assertEqual(counter.text, "１／３")
+                self.assertIs(
+                    counter.font,
+                    overlay.log_number_text_factory.font,
+                )
+                self.assertIsNot(counter.font, overlay.log_text_factory.font)
+                overlay.fonts.font_for.assert_any_call(Language.JAPANESE)
+
+    def test_conversation_log_selection_scrolls_and_cancel_returns_to_header(
+        self,
+    ) -> None:
+        messages = EventMessageCatalog.from_records(
+            tuple(
+                {
+                    "message_id": f"sample.log{index}",
+                    "text_ja": [f"会話{index}"],
+                    "text_en": [],
+                    "text_zhcn": [],
+                }
+                for index in range(6)
+            )
+        )
+        logs = [
+            {"message_id": f"sample.log{index}", "arguments": {}}
+            for index in range(6)
+        ]
+        overlay = self.create_overlay(logs=logs, event_messages=messages)
+
+        overlay.update(input_state(confirm=True))
+        overlay.update(input_state(navigation=Direction.UP))
+        self.assertEqual(overlay.selected_log_index, 5)
+        overlay.update(input_state(navigation=Direction.DOWN))
+        for _ in range(4):
+            overlay.update(input_state(navigation=Direction.DOWN))
+
+        self.assertIs(overlay.phase, InformationPhase.CONVERSATION_LOG)
+        self.assertEqual(overlay.selected_log_index, 4)
+        self.assertGreater(overlay.conversation_scroll_row, 0)
+        self.assertTrue(overlay.main_window.vertical_navigation)
+        self.assertFalse(overlay.update(input_state(cancel=True)))
+        self.assertIs(overlay.phase, InformationPhase.MENU)
+        self.assertTrue(overlay.header_cursor.active)
+        self.assertIsNone(overlay.conversation_cursor)
+        self.assertEqual(overlay.header_cursor.selected_key, "conversation_log")
+
+    def test_scroll_keeps_the_selected_log_body_visible(self) -> None:
+        messages = EventMessageCatalog.from_records(
+            tuple(
+                {
+                    "message_id": f"sample.log{index}",
+                    "text_ja": [f"会話{index}の一行目", f"会話{index}の二行目"],
+                    "text_en": [],
+                    "text_zhcn": [],
+                }
+                for index in range(4)
+            )
+        )
+        overlay = self.create_overlay(
+            logs=[
+                {"message_id": f"sample.log{index}", "arguments": {}}
+                for index in range(4)
+            ],
+            event_messages=messages,
+        )
+        overlay.update(input_state(confirm=True))
+
+        for _ in range(3):
+            overlay.update(input_state(navigation=Direction.DOWN))
+
+        visible_texts = [text.text for text in overlay.main_window.texts]
+        self.assertEqual(overlay.selected_log_index, 3)
+        self.assertEqual(overlay.conversation_scroll_row, 5)
+        self.assertIn("４／４", visible_texts)
+        self.assertIn("会話３の一行目", visible_texts)
+        self.assertIn("会話３の二行目", visible_texts)
+        self.assertLessEqual(max(text.y for text in overlay.main_window.texts), 38)
+
+    def test_category_navigation_swaps_log_body_for_empty_bestiary_body(self) -> None:
+        messages = EventMessageCatalog.from_records(
+            (
+                {
+                    "message_id": "sample.log",
+                    "text_ja": ["記録"],
+                    "text_en": [],
+                    "text_zhcn": [],
+                },
+            )
+        )
+        overlay = self.create_overlay(
+            logs=[{"message_id": "sample.log", "arguments": {}}],
+            event_messages=messages,
+        )
+
+        self.assertTrue(overlay.main_window.texts)
+        overlay.update(input_state(navigation=Direction.DOWN))
+
+        self.assertEqual(overlay.header_cursor.selected_key, "monster_book")
+        self.assertEqual(overlay.main_window.texts, ())
 
     def test_empty_book_alerts_and_stays_in_information_submenu(self) -> None:
         invalid_action = Mock()
         overlay = self.create_overlay(invalid_action=invalid_action)
 
+        overlay.update(input_state(navigation=Direction.DOWN))
         self.assertFalse(overlay.update(input_state(confirm=True)))
 
         invalid_action.assert_called_once_with()
@@ -125,7 +324,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
             [(number, monster.key) for number, monster in overlay.registered_monsters],
             [(1, monsters[0].key), (5, monsters[4].key)],
         )
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         self.assertIs(overlay.phase, InformationPhase.MONSTER_BOOK)
         self.assertFalse(overlay.header_cursor.active)
@@ -158,7 +357,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
     def test_incomplete_record_hides_stats_and_identification_details(self) -> None:
         monster = load_monsters()[0]
         overlay = self.create_overlay({monster.key: {"profile", "FIRE"}})
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         detail = [text.text for text in overlay.monster_detail_window.texts]
 
@@ -177,7 +376,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         overlay = self.create_overlay(
             {monster.key: set(MONSTER_COMBAT_FIELD_KEYS)}
         )
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         detail = [text.text for text in overlay.monster_detail_window.texts]
 
@@ -208,7 +407,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         fields = set(MONSTER_COMBAT_FIELD_KEYS)
         fields.add(MONSTER_TREASURE_ACQUIRED_FIELD_KEY)
         overlay = self.create_overlay({monster.key: fields})
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         detail = [text.text for text in overlay.monster_detail_window.texts]
 
@@ -223,7 +422,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         overlay = self.create_overlay(
             {monster.key: set(MONSTER_COMBAT_FIELD_KEYS)}
         )
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         detail = [text.text for text in overlay.monster_detail_window.texts]
 
@@ -240,7 +439,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
     def test_up_down_and_page_inputs_move_through_all_registered_entries(self) -> None:
         monsters = load_monsters()
         overlay = self.create_overlay({monster.key: set() for monster in monsters})
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         overlay.update(input_state(navigation=Direction.UP))
         self.assertEqual(overlay.selected_monster_index, len(monsters) - 1)
@@ -257,7 +456,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
     def test_cancel_returns_to_submenu_before_closing_information(self) -> None:
         monster = load_monsters()[0]
         overlay = self.create_overlay({monster.key: set()})
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         self.assertFalse(overlay.update(input_state(cancel=True)))
         self.assertIs(overlay.phase, InformationPhase.MENU)
@@ -273,7 +472,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
     ) -> None:
         monster = load_monsters()[0]
         overlay = self.create_overlay({monster.key: set()})
-        overlay.update(input_state(confirm=True))
+        self.open_monster_book(overlay)
 
         overlay.draw()
 

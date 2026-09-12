@@ -1005,8 +1005,10 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 または `MonsterCombatStats` から入力値を組み立て、0～99の命中乱数を明示的に渡す。
 演出側は計算結果の命中可否とダメージだけを受け取り、同じ式を重複実装しない。
 
-情報サブメニューとモンスター図鑑は `ui/information_menu.py` のOverlayが入力、一覧カーソル、
-開示段階、Window構成、モンスター画像描画を所有する。図鑑一覧用の不変データは
+情報サブメニュー、会話ログ、モンスター図鑑は `ui/information_menu.py` のOverlayが入力、
+一覧カーソル、開示段階、Window構成、モンスター画像描画を所有する。会話ログは
+`SaveData.logs` の安定キーと引数を現在言語で解決し、日本語本文にはイベントメッセージと同じ
+`FontRole.LARGE` を使う。図鑑一覧用の不変データは
 `MonsterDefinition` として `monsters.json` から読み込み、遭遇順ではなくマスター順で
 `SaveData.monster_records` のキーと照合する。Overlayはセーブ状態を更新せず、戦闘側の
 `MonsterRecordSystem` が記録した項目だけを表示する。詳細な操作と開示規則は
