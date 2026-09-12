@@ -1603,6 +1603,34 @@ class GameTest(unittest.TestCase):
         self.assertFalse(mock.command_cursor.active)
         mock.command_window.update.assert_not_called()
 
+    def test_left_shortcut_selects_sort_command_and_activates_member_cursor(
+        self,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            navigation=Direction.LEFT,
+            held_direction=Direction.LEFT,
+        )
+        mock.command_window = Mock()
+        mock.command_cursor = Mock(selected_key="item", active=True)
+        mock.party_window = Mock()
+        party_cursor = mock.party_window.set_cursor.return_value
+        mock.party = tuple(Mock() for _ in range(5))
+        mock.party_cursor = None
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+
+        mock.update()
+
+        mock.command_cursor.select_key.assert_called_once_with("sort")
+        self.assertIs(mock.party_cursor, party_cursor)
+        self.assertFalse(mock.command_cursor.active)
+        mock.command_window.update.assert_not_called()
+
     @patch("game.ItemMenuOverlay")
     def test_confirming_item_command_opens_connected_item_screen(
         self,
@@ -2513,7 +2541,14 @@ class GameTest(unittest.TestCase):
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
         mock.party = tuple(
-            Mock(key=key) for key in ("Fiora", "b", "c", "d", "e", "reserve")
+            Mock(
+                key=key,
+                hp=10,
+                paralyzed=False,
+                is_front_row=True,
+                formation_row=FormationRow.FRONT,
+            )
+            for key in ("Fiora", "b", "c", "d", "e", "reserve")
         )
         mock.sort_source_index = None
         mock.sort_source_cursor = None
@@ -2550,8 +2585,18 @@ class GameTest(unittest.TestCase):
         mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
-        front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
-        other_front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
+        front = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        other_front = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
         mock.party = (front, other_front)
         mock.sort_source_index = None
         mock.sort_source_cursor = None
@@ -2573,12 +2618,16 @@ class GameTest(unittest.TestCase):
         mock.party_cursor = Mock()
         front = Mock(
             key="front",
+            hp=10,
+            paralyzed=False,
             is_front_row=True,
             formation_row=FormationRow.FRONT,
         )
         back_members = tuple(
             Mock(
                 key=f"back-{index}",
+                hp=10,
+                paralyzed=False,
                 is_front_row=False,
                 formation_row=FormationRow.BACK,
             )
@@ -2586,6 +2635,8 @@ class GameTest(unittest.TestCase):
         )
         reserve = Mock(
             key="reserve",
+            hp=10,
+            paralyzed=False,
             is_front_row=True,
             formation_row=FormationRow.FRONT,
         )
@@ -2656,8 +2707,18 @@ class GameTest(unittest.TestCase):
         mock = Game.__new__(Game)
         mock.party_window = Mock()
         mock.party_cursor = Mock(selected_key=0)
-        front = Mock(is_front_row=True, formation_row=FormationRow.FRONT)
-        back = Mock(is_front_row=False, formation_row=FormationRow.BACK)
+        front = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        back = Mock(
+            hp=10,
+            paralyzed=False,
+            is_front_row=False,
+            formation_row=FormationRow.BACK,
+        )
         mock.party = (front, back)
         mock.sort_source_index = None
         mock.sort_source_cursor = None
@@ -2669,6 +2730,86 @@ class GameTest(unittest.TestCase):
         self.assertIs(front.formation_row, FormationRow.FRONT)
         self.assertIsNone(mock.sort_source_index)
         mock.alert.start.assert_called_once_with()
+
+    @patch("game.WindowCursor")
+    def test_dead_or_paralyzed_front_does_not_replace_last_recoverable_front(
+        self,
+        _window_cursor: Mock,
+    ) -> None:
+        for hp, paralyzed in ((0, False), (10, True)):
+            with self.subTest(hp=hp, paralyzed=paralyzed):
+                mock = Game.__new__(Game)
+                mock.party_window = Mock()
+                mock.party_cursor = Mock(selected_key=0)
+                recoverable = Mock(
+                    hp=10,
+                    paralyzed=False,
+                    is_front_row=True,
+                    formation_row=FormationRow.FRONT,
+                )
+                unavailable = Mock(
+                    hp=hp,
+                    paralyzed=paralyzed,
+                    is_front_row=True,
+                    formation_row=FormationRow.FRONT,
+                )
+                mock.party = (recoverable, unavailable)
+                mock.sort_source_index = None
+                mock.sort_source_cursor = None
+                mock.alert = Mock()
+
+                mock._confirm_sort_member()
+                mock._confirm_sort_member()
+
+                self.assertIs(recoverable.formation_row, FormationRow.FRONT)
+                mock.alert.start.assert_called_once_with()
+
+    @patch("game.WindowCursor")
+    def test_cannot_swap_last_recoverable_front_with_unavailable_reserve(
+        self,
+        _window_cursor: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.party_window = Mock()
+        mock.party_cursor = Mock(selected_key=0)
+        recoverable = Mock(
+            key="recoverable",
+            hp=10,
+            paralyzed=False,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        rear_members = tuple(
+            Mock(
+                key=f"rear-{index}",
+                hp=10 if index == 0 else 0,
+                paralyzed=False,
+                is_front_row=False,
+                formation_row=FormationRow.BACK,
+            )
+            for index in range(4)
+        )
+        reserve = Mock(
+            key="reserve",
+            hp=10,
+            paralyzed=True,
+            is_front_row=True,
+            formation_row=FormationRow.FRONT,
+        )
+        mock.party = (recoverable, *rear_members, reserve)
+        original_party = mock.party
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+        mock._refresh_party_window_texts = Mock()
+
+        mock._confirm_sort_member()
+        mock.party_cursor.selected_key = 5
+        mock._confirm_sort_member()
+
+        self.assertEqual(mock.party, original_party)
+        mock.alert.start.assert_called_once_with()
+        mock._refresh_party_window_texts.assert_not_called()
 
     def test_cancel_steps_back_from_source_then_from_sort_mode(self) -> None:
         mock = Game.__new__(Game)
@@ -2754,8 +2895,8 @@ class GameTest(unittest.TestCase):
         mock.sort_source_index = 0
         mock.party_cursor = Mock(selected_key=0)
         mock.party = (
-            Mock(is_front_row=True),
-            Mock(is_front_row=True),
+            Mock(hp=10, paralyzed=False, is_front_row=True),
+            Mock(hp=10, paralyzed=False, is_front_row=True),
         )
 
         with patch("game.pyxel.frame_count", 0):
@@ -2773,8 +2914,8 @@ class GameTest(unittest.TestCase):
         mock.sort_source_index = 0
         mock.party_cursor = Mock(selected_key=0)
         mock.party = (
-            Mock(is_front_row=True),
-            Mock(is_front_row=False),
+            Mock(hp=10, paralyzed=False, is_front_row=True),
+            Mock(hp=10, paralyzed=False, is_front_row=False),
         )
 
         mock._draw_formation_arrow()

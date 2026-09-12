@@ -1337,13 +1337,19 @@ class Game:
     def _can_change_formation(self, member: Member) -> bool:
         if self._is_reserve_index(len(self.party) - 1) and self.party[-1] is member:
             return not member.is_front_row
-        return (
-            not member.is_front_row
-            or sum(
-                party_member.is_front_row
-                for party_member in self.party[:BATTLE_PARTY_MEMBER_COUNT]
-            )
-            > 1
+        if not member.is_front_row:
+            return True
+        return any(
+            party_member is not member
+            and party_member.is_front_row
+            and self._member_is_field_recoverable(party_member)
+            for party_member in self.party[:BATTLE_PARTY_MEMBER_COUNT]
+        )
+
+    def _party_has_recoverable_front(self, party: tuple[Member, ...]) -> bool:
+        return any(
+            member.is_front_row and self._member_is_field_recoverable(member)
+            for member in party[:BATTLE_PARTY_MEMBER_COUNT]
         )
 
     def _confirm_sort_member(self) -> None:
@@ -1378,9 +1384,13 @@ class Game:
                 party[target_index],
                 party[source_index],
             )
-            self.party = tuple(party)
-            self._force_reserve_front()
-            self._refresh_party_window_texts()
+            sorted_party = tuple(party)
+            if not self._party_has_recoverable_front(sorted_party):
+                self.alert.start()
+            else:
+                self.party = sorted_party
+                self._force_reserve_front()
+                self._refresh_party_window_texts()
         self._clear_sort_source()
 
     def _refresh_party_window_texts(self) -> None:
@@ -2873,6 +2883,10 @@ class Game:
 
         if input_state.cancel.triggered:
             self._begin_screen_change(GameScreenChange.SHOW_FIELD)
+            return
+        if input_state.navigation is Direction.LEFT:
+            self.command_cursor.select_key("sort")
+            self._start_sort()
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "item":
             self._begin_screen_change(GameScreenChange.OPEN_ITEM)
