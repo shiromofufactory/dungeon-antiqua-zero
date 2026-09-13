@@ -144,6 +144,7 @@ BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
 BATTLE_FOCUS_SE_ID = "battle_focus"
+BATTLE_HIDE_SE_ID = "battle_hide"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
@@ -234,6 +235,9 @@ PARTY_ENTRANCE_JUMP_HEIGHT = 24
 PARTY_ENTRANCE_COMPLETE_FRAME = (
     PARTY_ENTRANCE_FRAME_COUNT + 2 * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
 )
+DA2_VICTORY_RETURN_SPEED = 4
+VICTORY_RETURN_SPEED = DA2_VICTORY_RETURN_SPEED * DA2_REFERENCE_FPS // FPS
+VICTORY_RETURN_START_X = SCREEN_WIDTH
 TIMELINE_ENTRANCE_FRAME_COUNT = 10
 TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT = 2
 TIMELINE_ENTRANCE_START_X = SCREEN_WIDTH
@@ -374,6 +378,16 @@ UNSELECTABLE_TARGET_PALETTE = "unselectable_target"
 UNSELECTABLE_TARGET_PALETTE_BASE_RATE = 0.5
 FORMATION_MOVE_FRAME_COUNT = 8
 FORMATION_WALK_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
+HIDE_PRESENTATION_FRAME_COUNT = 7 * FPS // DA2_REFERENCE_FPS
+HIDE_REFERENCE_OFFSETS = (
+    (0, 0),
+    (10, -4),
+    (20, -7),
+    (30, -9),
+    (40, -10),
+    (50, -10),
+    (60, -9),
+)
 COMMAND_GUIDE_DELAY_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
 PARTY_SPRITE_WIDTH = 16
@@ -470,6 +484,7 @@ ADDITIONAL_EFFECT_MARKER_SOURCE = {
 }
 COMMAND_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.command.attack",
+    BattleCommand.AMBUSH: "battle.command.ambush",
     BattleCommand.SPELL: "battle.command.spell",
     BattleCommand.AIM: "battle.command.aim",
     BattleCommand.HIDE: "battle.command.hide",
@@ -491,6 +506,7 @@ FORMATION_COMMAND_TEXT_KEYS = {
 }
 COMMAND_GUIDE_TEXT_KEYS = {
     BattleCommand.ATTACK: "battle.guide.attack",
+    BattleCommand.AMBUSH: "battle.guide.ambush",
     BattleCommand.SPELL: "battle.guide.spell",
     BattleCommand.AIM: "battle.guide.aim",
     BattleCommand.HIDE: "battle.guide.hide",
@@ -591,6 +607,7 @@ class BattlePhase(StrEnum):
     ACTION_TARGET = "action_target"
     ATTACK_PRESENTATION = "attack_presentation"
     FOCUS_PRESENTATION = "focus_presentation"
+    HIDE_PRESENTATION = "hide_presentation"
     ACTION_PRESENTATION = "action_presentation"
     ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
@@ -1378,11 +1395,7 @@ class BattleScene:
             raise ValueError("return_bgm_id must be a non-empty string or None")
         self.return_bgm_id = return_bgm_id
         self.palette_shifter = palette_shifter
-        self.palette_shifter.define_mix(
-            UNSELECTABLE_TARGET_PALETTE,
-            base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
-            target_color=self.palette_shifter.base_colors[DISABLED_COLOR],
-        )
+        self._sync_unselectable_target_palette()
         self.bgm = bgm
 
         background_entry = resources.entry(BACKGROUND_IMAGE_ID)
@@ -1676,6 +1689,10 @@ class BattleScene:
         self.battle_popup = BattleTimedPopup()
         self.focused_target_by_party_index: dict[int, int] = {}
         self.focus_presentation_elapsed_frame = 0
+        self.hidden_party_indexes: set[int] = set()
+        self.hide_presentation_elapsed_frame = 0
+        self.victory_returning_party_indexes: set[int] = set()
+        self.victory_return_frame = 0
         self.action_party_index: int | None = None
         self.action_offset_x = 0
         self.action_motion_frame = 0
@@ -1852,6 +1869,9 @@ class BattleScene:
         if self.phase is BattlePhase.FOCUS_PRESENTATION:
             self._update_focus_presentation()
             return
+        if self.phase is BattlePhase.HIDE_PRESENTATION:
+            self._update_hide_presentation()
+            return
         if self.phase is BattlePhase.ITEM:
             self._update_item_selection(input_state)
             return
@@ -1877,6 +1897,10 @@ class BattleScene:
                     self._remember_active_command(command)
                 if command == BattleCommand.ATTACK:
                     self._begin_attack_target_selection()
+                elif command == BattleCommand.AMBUSH:
+                    self._begin_attack_target_selection(
+                        command=BattleCommand.AMBUSH
+                    )
                 elif command == BattleCommand.AIM:
                     self._begin_attack_target_selection(command=BattleCommand.AIM)
                 elif command == BattleCommand.FOCUS:
@@ -1887,6 +1911,8 @@ class BattleScene:
                     self._begin_formation_change()
                 elif command == BattleCommand.DEFEND:
                     self._begin_defense()
+                elif command == BattleCommand.HIDE:
+                    self._begin_hide()
                 elif command == BattleCommand.ITEM:
                     self._begin_item_selection()
                 else:
@@ -2052,6 +2078,10 @@ class BattleScene:
         self.action_gauge_adjustment = 0.0
         self.focused_target_by_party_index.clear()
         self.focus_presentation_elapsed_frame = 0
+        self.hidden_party_indexes.clear()
+        self.hide_presentation_elapsed_frame = 0
+        self.victory_returning_party_indexes.clear()
+        self.victory_return_frame = 0
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.clear()
@@ -2216,8 +2246,17 @@ class BattleScene:
     def _begin_auto_action(self) -> None:
         """Choose the active member's automatic action for this turn."""
 
-        if self._active_member_attack_targets():
-            self._begin_attack_target_selection()
+        command = (
+            BattleCommand.AMBUSH
+            if getattr(self, "active_party_index", None)
+            in getattr(self, "hidden_party_indexes", set())
+            else BattleCommand.ATTACK
+        )
+        if self._active_member_attack_targets(command=command):
+            if command is BattleCommand.AMBUSH:
+                self._begin_attack_target_selection(command=command)
+            else:
+                self._begin_attack_target_selection()
             return
         self._begin_defense()
 
@@ -2419,6 +2458,8 @@ class BattleScene:
         if self.active_party_index is None:
             return False
         index = self.active_party_index
+        if index in getattr(self, "hidden_party_indexes", set()):
+            return False
         member = self.party[index]
         active_indexes = self._active_party_indexes()
         is_front = self._party_member_is_front_row(index)
@@ -2490,8 +2531,13 @@ class BattleScene:
         """Animate battle-only promotion when no active front member remains."""
 
         active_indexes = self._active_party_indexes()
-        if not active_indexes or any(
-            self._party_member_is_front_row(index) for index in active_indexes
+        visible_indexes = tuple(
+            index
+            for index in active_indexes
+            if index not in getattr(self, "hidden_party_indexes", set())
+        )
+        if not visible_indexes or any(
+            self._party_member_is_front_row(index) for index in visible_indexes
         ):
             return False
         start_x_by_index = {
@@ -2526,6 +2572,44 @@ class BattleScene:
         self.selected_command = BattleCommand.DEFEND
         self._complete_current_turn()
         return True
+
+    def _begin_hide(self) -> bool:
+        """Start DA2's disappearing motion and mark the actor untargetable."""
+
+        index = self.active_party_index
+        hidden = getattr(self, "hidden_party_indexes", None)
+        if hidden is None:
+            hidden = set()
+            self.hidden_party_indexes = hidden
+        if index is None or index in hidden:
+            return False
+        if not self.party[index].has_skill("Hide"):
+            return False
+        hidden.add(index)
+        self.hide_presentation_elapsed_frame = 0
+        self.phase = BattlePhase.HIDE_PRESENTATION
+        self.selected_command = BattleCommand.HIDE
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        play_se(BATTLE_HIDE_SE_ID)
+        self._refresh_party_text_colors()
+        return True
+
+    def _update_hide_presentation(self) -> None:
+        """Finish hiding after the DA2 motion converted to ZERO's frame rate."""
+
+        self.hide_presentation_elapsed_frame += 1
+        if self.hide_presentation_elapsed_frame < HIDE_PRESENTATION_FRAME_COUNT:
+            return
+        self.hide_presentation_elapsed_frame = HIDE_PRESENTATION_FRAME_COUNT
+        index = self.active_party_index
+        if index is not None:
+            self._show_battle_popup(
+                self.texts.text("battle.command.hide", self.localizer),
+                12 * FPS // DA2_REFERENCE_FPS,
+            )
+        self._reveal_hidden_party_if_all_unavailable()
+        self._complete_current_turn()
 
     def _begin_focus_presentation(self) -> bool:
         """Store a charged attack and hold the guard pose for 36 frames."""
@@ -3286,7 +3370,13 @@ class BattleScene:
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return living ally targets that can still receive the spell."""
 
-        indexes = self._active_party_indexes()
+        hidden = getattr(self, "hidden_party_indexes", set())
+        indexes = tuple(
+            index
+            for index in self._active_party_indexes()
+            if index not in hidden
+            or (not spell.to_all and index == self.active_party_index)
+        )
         if spell.action is not SpellAction.PROTECTION:
             return indexes
         return tuple(
@@ -3397,6 +3487,10 @@ class BattleScene:
                 )
         else:
             return False
+        if self.active_party_index is not None:
+            getattr(self, "hidden_party_indexes", set()).discard(
+                self.active_party_index
+            )
         if effect_spell is not None:
             self._record_action_target_information(effect_spell)
         if effect_spell is not None and self._begin_action_presentation(effect_spell):
@@ -4083,6 +4177,7 @@ class BattleScene:
             self.action_progression_weapon = None
             self.action_progression_enemy_levels = ()
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
+            self._sync_unselectable_target_palette()
             if defeated_indexes:
                 if getattr(self, "action_party_index", None) is not None:
                     self._begin_action_return()
@@ -4095,6 +4190,7 @@ class BattleScene:
             self._complete_current_turn()
             return
         if presentation.spell_effects:
+            self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
             self.spell_effect_renderer.prepare(presentation.spell_effects[0].player)
 
     def _update_healing_popups(self) -> None:
@@ -4279,11 +4375,12 @@ class BattleScene:
     ) -> bool:
         if command not in (
             BattleCommand.ATTACK,
+            BattleCommand.AMBUSH,
             BattleCommand.AIM,
             BattleCommand.FOCUS,
         ):
             raise ValueError("attack target selection requires attack, aim, or focus")
-        selectable = self._active_member_attack_targets()
+        selectable = self._active_member_attack_targets(command=command)
         if not selectable:
             return False
 
@@ -4351,6 +4448,11 @@ class BattleScene:
         effect_row = ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype)
         is_aimed = self.selected_command == BattleCommand.AIM
         is_focused = self.selected_command == BattleCommand.FOCUS
+        attacker_hidden = self.active_party_index in getattr(
+            self,
+            "hidden_party_indexes",
+            set(),
+        )
         member_stats = member.battle_stats
         monster_stats = monster.combat_stats
         attack = member_physical_attack(
@@ -4372,6 +4474,7 @@ class BattleScene:
             target_evasion=monster_stats.evasion,
             hit_roll=random.randint(0, 99),
             target_incapacitated=target_incapacitated,
+            attacker_hidden=attacker_hidden,
             hit_value_bonus=AIM_HIT_VALUE_BONUS if is_aimed else 0,
             attacker_has_power_hit=attacker_has_power_hit,
             weapon_has_power_hit=weapon_has_power_hit,
@@ -4382,6 +4485,7 @@ class BattleScene:
                 random.randint(0, 99)
                 if (
                     target_incapacitated
+                    or attacker_hidden
                     or attacker_has_power_hit
                     or weapon_has_power_hit
                 )
@@ -4393,6 +4497,7 @@ class BattleScene:
             weapon,
             monster,
             result,
+            attacker_hidden=attacker_hidden,
         )
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
@@ -4421,6 +4526,8 @@ class BattleScene:
             )
         self.target_cursor.active = False
         self.command_window.close_immediately()
+        if attacker_hidden:
+            self.hidden_party_indexes.discard(self.active_party_index)
         self._refresh_monster_name_colors()
         return True
 
@@ -4450,6 +4557,8 @@ class BattleScene:
         weapon: Item,
         monster: BattleMonster,
         result: PhysicalAttackResult,
+        *,
+        attacker_hidden: bool = False,
     ) -> tuple[AdditionalEffect, ...]:
         """Resolve all DA2-style effects carried by one successful strike."""
 
@@ -4475,6 +4584,7 @@ class BattleScene:
                     and resistance in monster.resistances
                 ),
                 critical=result.critical,
+                attacker_hidden=attacker_hidden,
                 stacked_death=stacked_death,
             )
             if resolution.success:
@@ -4620,6 +4730,7 @@ class BattleScene:
             next_index = pending_indexes.pop(0)
             self._begin_monster_death(next_index)
             return
+        self._sync_unselectable_target_palette()
         if self._monsters_are_defeated():
             self._begin_victory_summary()
             return
@@ -4641,6 +4752,7 @@ class BattleScene:
     def _begin_victory_summary(self) -> None:
         """Settle rewards and show DA1's victory message over the battlefield."""
 
+        self._begin_hidden_party_victory_return()
         self._clear_damage_popups_for_victory()
         if not all(
             hasattr(self, name)
@@ -4681,6 +4793,43 @@ class BattleScene:
         self.timeline = ()
         self._play_victory_jingle(BATTLE_WIN_BGM_ID)
 
+    def _begin_hidden_party_victory_return(self) -> None:
+        """Bring DA2's hidden survivors back from beyond the right edge."""
+
+        hidden = getattr(self, "hidden_party_indexes", None)
+        if hidden is None:
+            hidden = set()
+            self.hidden_party_indexes = hidden
+        active = set(self._active_party_indexes())
+        self.victory_returning_party_indexes = hidden.intersection(active)
+        self.victory_return_frame = 0
+        hidden.clear()
+
+    def _update_hidden_party_victory_return(self) -> bool:
+        """Advance hidden survivors leftward at DA2's converted run speed."""
+
+        returning = getattr(self, "victory_returning_party_indexes", None)
+        if not returning:
+            return False
+        self.victory_return_frame += 1
+        returning.intersection_update(
+            index
+            for index in returning
+            if VICTORY_RETURN_START_X
+            - self.victory_return_frame * VICTORY_RETURN_SPEED
+            >= self._party_sprite_x(index)
+        )
+        return bool(returning)
+
+    def _victory_return_x(self, index: int) -> int:
+        """Return one formerly hidden member's current victory-entry X."""
+
+        return max(
+            self._party_sprite_x(index),
+            VICTORY_RETURN_START_X
+            - self.victory_return_frame * VICTORY_RETURN_SPEED,
+        )
+
     def _clear_damage_popups_for_victory(self) -> None:
         """Keep completed-battle damage numbers out of the victory screen."""
 
@@ -4705,6 +4854,8 @@ class BattleScene:
             VICTORY_MOTION_LIMIT,
         )
         if self._finish_pending_victory():
+            return
+        if self._update_hidden_party_victory_return():
             return
         if not input_state.confirm.triggered:
             return
@@ -4783,6 +4934,7 @@ class BattleScene:
 
         self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
+        self._sync_unselectable_target_palette()
 
     def clear_temporary_member_conditions(self) -> None:
         """Clear DA2's battle-only member ailments before leaving the scene."""
@@ -4795,10 +4947,26 @@ class BattleScene:
         if palette_shifter is not None:
             palette_shifter.remove_variant(name)
 
+    def _sync_unselectable_target_palette(self) -> None:
+        """Restore the target-selection block after a transient battle effect."""
+
+        palette_shifter = getattr(self, "palette_shifter", None)
+        if palette_shifter is None:
+            return
+        base_colors = getattr(palette_shifter, "base_colors", ())
+        if not isinstance(base_colors, tuple) or len(base_colors) <= DISABLED_COLOR:
+            return
+        palette_shifter.define_mix(
+            UNSELECTABLE_TARGET_PALETTE,
+            base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
+            target_color=base_colors[DISABLED_COLOR],
+        )
+
     def _sync_monster_death_palette(self) -> None:
         animation = self.monster_death_animation
         if animation is None:
             return
+        self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
         self.palette_shifter.define_mix(
             MONSTER_DEATH_PALETTE,
             base_rate=MONSTER_DEATH_PALETTE_BASE_RATE,
@@ -5215,6 +5383,8 @@ class BattleScene:
                     party_index,
                     None,
                 )
+                getattr(self, "hidden_party_indexes", set()).discard(party_index)
+                self._reveal_hidden_party_if_all_unavailable()
                 self._start_timeline_removal_animation()
                 return True
             return False
@@ -5260,12 +5430,16 @@ class BattleScene:
             index
             for index in self._active_party_indexes()
             if self._party_member_is_front_row(index)
+            and index not in getattr(self, "hidden_party_indexes", set())
         )
 
     def _monster_charge_target_indexes(self) -> tuple[int, ...]:
         """Return every living member because charge has ranged reach."""
 
-        return self._active_party_indexes()
+        hidden = getattr(self, "hidden_party_indexes", set())
+        return tuple(
+            index for index in self._active_party_indexes() if index not in hidden
+        )
 
     def _monster_can_attempt_action(self, actor: BattleMonster) -> bool:
         """Return whether a monster has any action worth evaluating."""
@@ -5279,7 +5453,11 @@ class BattleScene:
             and bool(self._active_party_indexes())
         )
 
-    def _active_member_attack_targets(self) -> tuple[int, ...]:
+    def _active_member_attack_targets(
+        self,
+        *,
+        command: BattleCommand = BattleCommand.ATTACK,
+    ) -> tuple[int, ...]:
         if self.active_party_index is None:
             return ()
         actor = self.party[self.active_party_index]
@@ -5291,6 +5469,7 @@ class BattleScene:
             ),
             weapon_reach=member_attack_reach(actor),
             monsters=self.monsters,
+            unrestricted_range=command is BattleCommand.AMBUSH,
         )
 
     def _active_member_command_options(self) -> tuple[BattleCommandOption, ...]:
@@ -5306,6 +5485,10 @@ class BattleScene:
             self.monsters,
             context=BattleCommandContext(
                 item_available=bool(self._active_member_item_candidates()),
+                actor_hidden=(
+                    self.active_party_index
+                    in getattr(self, "hidden_party_indexes", set())
+                ),
             ),
             party_front_rows=tuple(
                 self._party_member_is_front_row(index) for index in active_indexes
@@ -5383,7 +5566,11 @@ class BattleScene:
                 return
         options = self._active_member_command_options()
         attack = next(
-            (option for option in options if option.command is BattleCommand.ATTACK),
+            (
+                option
+                for option in options
+                if option.command in (BattleCommand.ATTACK, BattleCommand.AMBUSH)
+            ),
             None,
         )
         if attack is not None and not attack.enabled:
@@ -5404,7 +5591,9 @@ class BattleScene:
             # the member's next turn, rather than restoring an older command.
             commands.pop(active_index, None)
             return
-        commands[active_index] = command
+        commands[active_index] = (
+            BattleCommand.HIDE if command is BattleCommand.AMBUSH else command
+        )
 
     def _command_label(self, command: BattleCommand) -> str:
         """Resolve one command's localized display label from the text catalog."""
@@ -5848,6 +6037,7 @@ class BattleScene:
         self.monster_attack_damage_applied = False
         self.monster_charge_presentation = None
         self.monster_action = None
+        self._reveal_hidden_party_if_all_unavailable()
         if self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
             self._remove_defeated_party_from_timeline()
@@ -5969,6 +6159,13 @@ class BattleScene:
         )
         if not defeated:
             return
+        hidden = getattr(self, "hidden_party_indexes", None)
+        if hidden is not None:
+            hidden.difference_update(
+                index
+                for index in range(len(self.party_visuals))
+                if self._party_member_is_dead(index)
+            )
         order = getattr(self, "_timeline_order", None)
         if order is None:
             self.timeline = tuple(
@@ -5983,6 +6180,31 @@ class BattleScene:
                 visual,
             )
         self.timeline = self._timeline_order.actors
+
+    def _reveal_hidden_party_if_all_unavailable(self) -> bool:
+        """Match DA2 by revealing everyone when no living member is targetable."""
+
+        hidden = getattr(self, "hidden_party_indexes", None)
+        if not hidden:
+            return False
+        active = self._active_party_indexes()
+        party = getattr(self, "party", ())
+        visuals = getattr(self, "party_visuals", ())
+
+        def can_act(index: int) -> bool:
+            member = visuals[index].member if visuals else party[index]
+            return not (
+                bool(getattr(member, "paralyzed", False))
+                or bool(getattr(member, "sleeping", 0))
+                or bool(getattr(member, "confused", 0))
+            )
+
+        if not active or any(
+            index not in hidden and can_act(index) for index in active
+        ):
+            return False
+        hidden.difference_update(active)
+        return True
 
     def _refresh_all_party_hp_texts(self) -> None:
         if not hasattr(self, "party_status_texts"):
@@ -6258,10 +6480,42 @@ class BattleScene:
         for index, visual in enumerate(self.party_visuals):
             if index in getattr(self, "escaped_party_indexes", ()):
                 continue
+            is_hide_motion = (
+                self.phase is BattlePhase.HIDE_PRESENTATION
+                and index == self.active_party_index
+            )
+            if (
+                index in getattr(self, "hidden_party_indexes", ())
+                and not is_hide_motion
+            ):
+                continue
             position = self._party_draw_position(index)
             if position is None:
                 continue
             x, y = position
+            if is_hide_motion:
+                reference_frame = min(
+                    self.hide_presentation_elapsed_frame
+                    * DA2_REFERENCE_FPS
+                    // FPS,
+                    len(HIDE_REFERENCE_OFFSETS) - 1,
+                )
+                opacity = max(0.0, 1.0 - max(reference_frame - 1, 0) / 5)
+                pyxel.dither(opacity)
+                try:
+                    pyxel.blt(
+                        x,
+                        y,
+                        self.character_sprites,
+                        FORMATION_SPRITE_STEP_X,
+                        visual.battle_sprite * 32,
+                        PARTY_SPRITE_WIDTH,
+                        32,
+                        TRANSPARENT_INDEX,
+                    )
+                finally:
+                    pyxel.dither(1.0)
+                continue
             if (
                 self.phase is BattlePhase.MONSTER_ACTION
                 and index == getattr(self, "monster_attack_target_index", None)
@@ -6385,6 +6639,23 @@ class BattleScene:
             return None
         target_x = self._party_sprite_x(index)
         target_y = PARTY_SPRITE_Y[index]
+        if (
+            self.phase is BattlePhase.HIDE_PRESENTATION
+            and index == getattr(self, "active_party_index", None)
+        ):
+            reference_frame = min(
+                self.hide_presentation_elapsed_frame * DA2_REFERENCE_FPS // FPS,
+                len(HIDE_REFERENCE_OFFSETS) - 1,
+            )
+            offset_x, offset_y = HIDE_REFERENCE_OFFSETS[reference_frame]
+            return target_x + offset_x, target_y + offset_y
+        if index in getattr(self, "hidden_party_indexes", ()):
+            return None
+        if (
+            self.phase is BattlePhase.VICTORY_SUMMARY
+            and index in getattr(self, "victory_returning_party_indexes", ())
+        ):
+            return self._victory_return_x(index), target_y
         if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
             self, "escape_actor_index", None
         ):
@@ -6489,6 +6760,14 @@ class BattleScene:
     def _party_sprite_source_x(self, index: int) -> int:
         if self._party_member_is_dead(index):
             return DEAD_SPRITE_SOURCE_X
+        if (
+            self.phase is BattlePhase.VICTORY_SUMMARY
+            and index in getattr(self, "victory_returning_party_indexes", ())
+        ):
+            pattern = (
+                self.victory_return_frame // FORMATION_WALK_PATTERN_FRAME_COUNT
+            ) % 2
+            return pattern * FORMATION_SPRITE_STEP_X
         if self.phase in (
             BattlePhase.VICTORY_SUMMARY,
             BattlePhase.RESULT_TRANSITION,

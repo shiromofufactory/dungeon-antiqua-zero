@@ -62,7 +62,12 @@ MEMBER_STATUS_ROWS = (
     ("mp", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT),
     ("poisoned", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT * 2),
     ("paralyzed", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT * 3),
+    ("skills", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT * 4),
 )
+MEMBER_SKILL_FIRST_Y = 9
+MEMBER_SKILL_ROW_COUNT = 10
+MEMBER_SKILL_TEXT_X = (6, 34)
+MEMBER_SKILL_CURSOR_X = (4, 32)
 TELEPORT_FIRST_Y = 9
 TELEPORT_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 TELEPORT_VISIBLE_COUNT = 13
@@ -91,6 +96,7 @@ class DebugMenuPhase(Enum):
     MEMBERS = auto()
     MEMBER_STATUS_LIST = auto()
     MEMBER_STATUS = auto()
+    MEMBER_SKILLS = auto()
     TELEPORT = auto()
     SHOP = auto()
     NUMBER = auto()
@@ -261,6 +267,9 @@ class DebugMenuOverlay:
         self.member_status_cursor: WindowCursor | None = None
         self.member_status_index = 0
         self.member_status_key: str | None = None
+        self.member_skill_window: Window | None = None
+        self.member_skill_cursor: WindowCursor | None = None
+        self.member_skill_index = 0
         self.teleport_window: Window | None = None
         self.teleport_cursor: WindowCursor | None = None
         self.teleport_index = 0
@@ -291,6 +300,9 @@ class DebugMenuOverlay:
 
     def _party_member_count_text(self) -> str:
         return DEBUG_TEXT.party_member_count(len(self.editor.party))
+
+    def _member_skill_count_text(self, member: Member) -> str:
+        return DEBUG_TEXT.skill_count(len(member.skills))
 
     def _guide_text(self) -> WindowText:
         return self.debug_texts.create(
@@ -465,12 +477,14 @@ class DebugMenuOverlay:
             "mp": DEBUG_TEXT.mp,
             "poisoned": DEBUG_TEXT.poisoned,
             "paralyzed": DEBUG_TEXT.paralyzed,
+            "skills": DEBUG_TEXT.skills,
         }
         values = {
             "hp": f"{format_number(member.hp)}／{format_number(member.max_hp)}",
             "mp": f"{format_number(member.mp)}／{format_number(member.max_mp)}",
             "poisoned": condition[member.poisoned],
             "paralyzed": condition[member.paralyzed],
+            "skills": self._member_skill_count_text(member),
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.member_status, 4, 3),
@@ -547,6 +561,101 @@ class DebugMenuOverlay:
             raise ValueError(f"unsupported member condition: {target}")
         self._build_member_status_window(selected_key=target)
 
+    def _build_member_skill_window(self) -> None:
+        if self.member_status_key is None:
+            raise RuntimeError("member skill editing is not active")
+        member = self.editor.member(self.member_status_key)
+        skills = self.editor.candidate_skills
+        placements = [
+            self.debug_texts.create(DEBUG_TEXT.skill_selection, 4, 3),
+            self.member_texts.create(
+                member.definition.localized_name(self.localizer),
+                32,
+                3,
+            ),
+        ]
+        targets: list[CursorTarget] = []
+        for index, skill in enumerate(skills):
+            column, row = divmod(index, MEMBER_SKILL_ROW_COUNT)
+            y = MEMBER_SKILL_FIRST_Y + row * DEBUG_ROW_HEIGHT
+            selected = member.has_skill(skill.key)
+            marker = "●" if selected else "○"
+            placements.extend(
+                (
+                    self.debug_texts.create(
+                        marker,
+                        MEMBER_SKILL_TEXT_X[column],
+                        y,
+                    ),
+                    self.member_texts.create(
+                        skill.localized_name(self.localizer),
+                        MEMBER_SKILL_TEXT_X[column] + 2,
+                        y,
+                    ),
+                )
+            )
+            targets.append(
+                CursorTarget(
+                    MEMBER_SKILL_CURSOR_X[column],
+                    y,
+                    key=skill.key,
+                )
+            )
+        placements.append(self._guide_text())
+        self.member_skill_window = self.windows.create(
+            *DEBUG_WINDOW_GRID,
+            tuple(placements),
+            opened=True,
+        )
+        self.member_skill_cursor = self.member_skill_window.set_cursor(
+            tuple(targets)
+        )
+        selected_key = skills[self.member_skill_index].key
+        self._select_cursor_key(self.member_skill_cursor, selected_key)
+
+    def _open_member_skills(self) -> None:
+        self.phase = DebugMenuPhase.MEMBER_SKILLS
+        self.member_skill_index = 0
+        self._build_member_skill_window()
+
+    def _close_member_skills(self) -> None:
+        self.phase = DebugMenuPhase.MEMBER_STATUS
+        self.member_skill_window = None
+        self.member_skill_cursor = None
+        self._build_member_status_window(selected_key="skills")
+
+    def _toggle_selected_member_skill(self) -> None:
+        if self.member_status_key is None or self.member_skill_cursor is None:
+            return
+        skill_key = self.member_skill_cursor.selected_key
+        if not isinstance(skill_key, str):
+            self.alert.start()
+            return
+        try:
+            self.editor.toggle_member_skill(self.member_status_key, skill_key)
+        except DebugPartyError:
+            self.alert.start()
+        self._build_member_skill_window()
+
+    def _update_member_skills(self, input_state: InputState) -> None:
+        if input_state.cancel.triggered:
+            self._close_member_skills()
+            return
+        if input_state.confirm.triggered:
+            self._toggle_selected_member_skill()
+            return
+        if (
+            self.member_skill_window is not None
+            and self.member_skill_window.update(input_state.navigation)
+            and self.member_skill_cursor is not None
+        ):
+            selected_key = self.member_skill_cursor.selected_key
+            self.member_skill_index = next(
+                index
+                for index, skill in enumerate(self.editor.candidate_skills)
+                if skill.key == selected_key
+            )
+
     def _update_member_status_list(self, input_state: InputState) -> None:
         if input_state.cancel.triggered:
             self._close_member_status_list()
@@ -574,6 +683,8 @@ class DebugMenuOverlay:
             target = self.member_status_cursor.selected_key
             if target in ("hp", "mp"):
                 self._open_member_numeric(target)
+            elif target == "skills":
+                self._open_member_skills()
             elif isinstance(target, str):
                 self._toggle_member_condition(target)
             return
@@ -954,6 +1065,9 @@ class DebugMenuOverlay:
         if self.phase is DebugMenuPhase.MEMBER_STATUS:
             self._update_member_status(input_state)
             return False
+        if self.phase is DebugMenuPhase.MEMBER_SKILLS:
+            self._update_member_skills(input_state)
+            return False
         if self.phase is DebugMenuPhase.MEMBERS:
             if input_state.cancel.triggered:
                 self.phase = DebugMenuPhase.MAIN
@@ -1012,6 +1126,11 @@ class DebugMenuOverlay:
             and self.member_status_window is not None
         ):
             self.member_status_window.draw()
+        elif (
+            self.phase is DebugMenuPhase.MEMBER_SKILLS
+            and self.member_skill_window is not None
+        ):
+            self.member_skill_window.draw()
         elif (
             self.phase is DebugMenuPhase.TELEPORT
             and self.teleport_window is not None

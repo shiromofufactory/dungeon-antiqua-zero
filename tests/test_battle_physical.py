@@ -162,6 +162,41 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertEqual(result.critical_rate, 20.0)
         self.assertTrue(result.critical)
 
+    def test_attack_from_hiding_uses_da2_ambush_advantage(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=80,
+            agility=20,
+            target_defense=0,
+            target_evasion=100,
+            hit_roll=99,
+            attacker_hidden=True,
+            critical_roll=17,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertEqual(result.adjusted_hit, 180.0)
+        self.assertEqual(result.hit_value, 81.0)
+        self.assertEqual(result.damage, 225)
+        self.assertEqual(result.critical_rate, 18.0)
+        self.assertTrue(result.critical)
+
+    def test_hiding_and_incapacitation_share_one_critical_rate_unit(self) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=0,
+            target_evasion=0,
+            hit_roll=0,
+            target_incapacitated=True,
+            attacker_hidden=True,
+            critical_roll=20,
+        )
+
+        self.assertEqual(result.critical_rate, 20.0)
+        self.assertFalse(result.critical)
+
     def test_all_critical_sources_and_two_handed_rate_stack_like_da2(self) -> None:
         result = resolve_physical_attack(
             attack=100,
@@ -246,6 +281,17 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
 
 
 class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
+    def test_attack_from_hiding_adds_one_activation_point(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.POISON,
+            adjusted_hit=100,
+            effect_roll=99,
+            target_is_member=False,
+            attacker_hidden=True,
+        )
+
+        self.assertEqual(result.activation_points, 3)
+
     def test_ordinary_status_uses_monster_rate_and_adjusted_hit(self) -> None:
         result = resolve_physical_additional_effect(
             effect=AdditionalEffect.POISON,

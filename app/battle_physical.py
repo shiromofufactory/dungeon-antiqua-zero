@@ -90,6 +90,7 @@ def resolve_physical_attack(
     target_defending: bool = False,
     target_unable_to_evade: bool = False,
     target_incapacitated: bool = False,
+    attacker_hidden: bool = False,
     hit_value_bonus: int = 0,
     attacker_has_power_hit: bool = False,
     weapon_has_power_hit: bool = False,
@@ -117,6 +118,8 @@ def resolve_physical_attack(
         raise TypeError("target_unable_to_evade must be a boolean")
     if not isinstance(target_incapacitated, bool):
         raise TypeError("target_incapacitated must be a boolean")
+    if not isinstance(attacker_hidden, bool):
+        raise TypeError("attacker_hidden must be a boolean")
     if not isinstance(attacker_has_power_hit, bool):
         raise TypeError("attacker_has_power_hit must be a boolean")
     if not isinstance(weapon_has_power_hit, bool):
@@ -135,9 +138,10 @@ def resolve_physical_attack(
     elif agility < 10:
         adjusted_hit *= 1 + (agility - 10) / 20
 
-    if target_incapacitated:
-        # DA2 adds 100 to basic accuracy for an incapacitated target, ignores
-        # evasion, and enables the corresponding critical-rate unit.
+    has_ambush_advantage = target_incapacitated or attacker_hidden
+    if has_ambush_advantage:
+        # DA2 uses the same +100 accuracy, evasion bypass, and critical-rate
+        # unit for an incapacitated target and an attack from hiding.
         adjusted_hit += 100
         hit_value = adjusted_hit - hit_roll + hit_value_bonus
     elif target_unable_to_evade:
@@ -159,7 +163,7 @@ def resolve_physical_attack(
         )
 
     critical_rate_units = (
-        int(target_incapacitated)
+        int(has_ambush_advantage)
         + int(attacker_has_power_hit)
         + int(weapon_has_power_hit)
     )

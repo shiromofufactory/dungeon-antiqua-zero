@@ -73,6 +73,17 @@ class BattleCommandRulesTest(unittest.TestCase):
             (1,),
         )
 
+    def test_unrestricted_attack_range_targets_every_living_row(self) -> None:
+        self.assertEqual(
+            selectable_attack_target_indexes(
+                attacker_is_front_row=False,
+                weapon_reach=1,
+                monsters=self.monsters,
+                unrestricted_range=True,
+            ),
+            (0, 1, 2, 3, 4),
+        )
+
     def test_unarmed_member_cannot_select_attack(self) -> None:
         self.party[0].equipment = self.party[0].equipment.replaced(
             {EquipmentSlot.RIGHT: None}
@@ -262,6 +273,30 @@ class BattleCommandRulesTest(unittest.TestCase):
                 BattleCommand.ITEM,
             ),
         )
+
+    def test_hidden_member_uses_ambush_instead_of_attack_or_hide(self) -> None:
+        skills = load_mock_skills()
+        self.party[0].skills.append(skills["Hide"])
+        self.party[0].formation_row = FormationRow.BACK
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party,
+            self.monsters,
+            context=BattleCommandContext(actor_hidden=True),
+        )
+        command_keys = tuple(option.command for option in commands)
+
+        self.assertEqual(command_keys[0], BattleCommand.AMBUSH)
+        self.assertTrue(commands[0].enabled)
+        self.assertNotIn(BattleCommand.ATTACK, command_keys)
+        self.assertNotIn(BattleCommand.HIDE, command_keys)
+        formation = next(
+            option
+            for option in commands
+            if option.command is BattleCommand.FORMATION
+        )
+        self.assertFalse(formation.enabled)
 
 
 if __name__ == "__main__":

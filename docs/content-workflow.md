@@ -37,7 +37,7 @@
 共有リポジトリ Sheets同期対象JSON（texts.jsonを除く）
         ├──→ put-data.mjs ──→ GAS ──→ Google Sheets
         ├──→ portal:build ──→ スタッフポータル
-        └──→ mainのcontent:sync ──→ app/data ──→ Pyxelゲーム
+        └──→ mainのsync ──→ app/data ──→ Pyxelゲーム
 
 Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象JSON
                                             ↓
@@ -45,7 +45,7 @@ Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象J
 
 共有リポジトリ texts.json（Sheets同期対象外）
         ├──→ portal:build ──→ スタッフポータル
-        └──→ mainのcontent:sync ──→ app/data ──→ Pyxelゲーム
+        └──→ mainのsync ──→ app/data ──→ Pyxelゲーム
 ```
 
 画像はGoogle Sheetsとは同期せず、次の経路で利用する。
@@ -105,7 +105,7 @@ npm run content:update
 手元のsubmoduleにある内容だけを再反映する場合は次を使う。
 
 ```sh
-npm run content:sync
+npm run sync
 npm run content:check
 ```
 
@@ -218,7 +218,7 @@ npm run content:get-data
 git -C content diff -- data
 ```
 
-`content:get-data` は共有JSONの取得と検証に成功した後、`content:sync` を実行して
+`content:get-data` は共有JSONの取得と検証に成功した後、`sync` を実行して
 `app/data` も同じ内容へ更新する。取得または検証に失敗した場合は `app/data` を更新しない。
 
 キャラクターシートの加入時装備は、順序依存の複数行セルではなく

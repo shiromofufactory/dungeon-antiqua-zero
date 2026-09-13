@@ -60,6 +60,31 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertIs(scene.result, BattleResult.VICTORY)
 
+    def test_victory_confirmation_waits_for_hidden_member_return(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.phase = BattlePhase.VICTORY_SUMMARY
+        scene.result = None
+        scene.victory_motion_frame = 0
+        scene.victory_return_frame = 0
+        scene.victory_returning_party_indexes = {0}
+        scene.party_visuals = (
+            Mock(
+                member=Mock(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                )
+            ),
+        )
+        scene.growth_result = Mock(has_result_growth=False)
+
+        scene._update_victory_summary(
+            InputState(confirm=InputButton(triggered=True))
+        )
+
+        self.assertIsNone(scene.result)
+        self.assertEqual(scene.victory_return_frame, 1)
+        self.assertEqual(scene.victory_returning_party_indexes, {0})
+
     def test_waits_for_victory_jingle_before_leaving_results(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         scene.phase = BattlePhase.VICTORY_SUMMARY

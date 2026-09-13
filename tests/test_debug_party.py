@@ -10,7 +10,11 @@ from tools.screen_mocks._fixtures import (
 )
 from member import FormationRow, ProficiencyKind
 from resources import load_record_array
-from systems import DebugPartyEditor, DebugPartyError
+from systems import (
+    DebugPartyEditor,
+    DebugPartyError,
+    MAX_MEMBER_SKILL_COUNT,
+)
 
 
 class DebugPartyEditorTest(unittest.TestCase):
@@ -125,6 +129,27 @@ class DebugPartyEditorTest(unittest.TestCase):
     def test_rejects_status_edits_for_a_member_outside_the_party(self) -> None:
         with self.assertRaisesRegex(DebugPartyError, "not in the debug party"):
             self.editor.set_member_hp("Cress", 0)
+
+    def test_adds_and_removes_catalog_skills_up_to_two_without_duplicates(
+        self,
+    ) -> None:
+        fiora = self.editor.member("Fiora")
+        self.assertEqual(len(self.editor.candidate_skills), 19)
+        self.assertEqual(fiora.skills, [])
+
+        self.editor.toggle_member_skill("Fiora", "Aim")
+        self.editor.toggle_member_skill("Fiora", "Hide")
+
+        self.assertEqual([skill.key for skill in fiora.skills], ["Aim", "Hide"])
+        self.assertEqual(len(fiora.skills), MAX_MEMBER_SKILL_COUNT)
+        with self.assertRaisesRegex(DebugPartyError, "at most 2"):
+            self.editor.toggle_member_skill("Fiora", "Identify")
+        self.editor.toggle_member_skill("Fiora", "Aim")
+        self.assertEqual([skill.key for skill in fiora.skills], ["Hide"])
+
+    def test_rejects_an_unknown_debug_skill(self) -> None:
+        with self.assertRaisesRegex(DebugPartyError, "unknown skill key"):
+            self.editor.toggle_member_skill("Fiora", "Missing")
 
 
 if __name__ == "__main__":

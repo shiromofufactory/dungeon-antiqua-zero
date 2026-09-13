@@ -31,6 +31,7 @@ else:
 
 MIN_OTHER_MEMBER_COUNT = 0
 MAX_OTHER_MEMBER_COUNT = MAX_PARTY_MEMBER_COUNT - 1
+MAX_MEMBER_SKILL_COUNT = 2
 
 
 class DebugPartyError(ValueError):
@@ -54,6 +55,15 @@ class DebugPartyEditor:
             raise TypeError("items must be a mapping")
         if not isinstance(skills, Mapping):
             raise TypeError("skills must be a mapping")
+        if not all(
+            isinstance(key, str)
+            and isinstance(skill, Skill)
+            and key == skill.key
+            for key, skill in skills.items()
+        ):
+            raise TypeError(
+                "skills must map stable skill keys to matching Skill values"
+            )
         if not isinstance(party, Sequence) or not all(
             isinstance(member, Member) for member in party
         ):
@@ -105,6 +115,10 @@ class DebugPartyEditor:
         return self._definitions
 
     @property
+    def candidate_skills(self) -> tuple[Skill, ...]:
+        return tuple(self._skills.values())
+
+    @property
     def selected_keys(self) -> frozenset[str]:
         return frozenset(self._party_by_key)
 
@@ -154,6 +168,30 @@ class DebugPartyEditor:
         if not isinstance(paralyzed, bool):
             raise TypeError("paralyzed must be a boolean")
         self.member(character_key).paralyzed = paralyzed
+
+    def toggle_member_skill(self, character_key: str, skill_key: str) -> None:
+        """Add or remove one catalog skill within the two-skill limit."""
+
+        member = self.member(character_key)
+        if not isinstance(skill_key, str):
+            raise TypeError("skill_key must be a string")
+        try:
+            skill = self._skills[skill_key]
+        except KeyError as error:
+            raise DebugPartyError(f"unknown skill key: {skill_key}") from error
+        if not isinstance(skill, Skill):
+            raise TypeError(f"skills[{skill_key!r}] must be a Skill")
+        if member.has_skill(skill_key):
+            member.skills = [
+                current for current in member.skills if current.key != skill_key
+            ]
+        else:
+            if len(member.skills) >= MAX_MEMBER_SKILL_COUNT:
+                raise DebugPartyError(
+                    "debug member skills must contain at most "
+                    f"{MAX_MEMBER_SKILL_COUNT} skills"
+                )
+            member.skills.append(skill)
 
     def effective_internal_level(self, character_key: str) -> int:
         """Return one member's level relative to Fiora's baseline."""
@@ -249,6 +287,7 @@ class DebugPartyEditor:
 __all__ = [
     "DebugPartyEditor",
     "DebugPartyError",
+    "MAX_MEMBER_SKILL_COUNT",
     "MAX_OTHER_MEMBER_COUNT",
     "MIN_OTHER_MEMBER_COUNT",
 ]

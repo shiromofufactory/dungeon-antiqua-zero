@@ -27,6 +27,7 @@ class BattleCommand(StrEnum):
     """Stable command keys shared by battle rules and presentation."""
 
     ATTACK = "attack"
+    AMBUSH = "ambush"
     SPELL = "spell"
     AIM = "aim"
     HIDE = "hide"
@@ -56,12 +57,14 @@ class BattleCommandContext:
     silenced: bool = False
     item_available: bool = True
     escape_available: bool = True
+    actor_hidden: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
             "silenced",
             "item_available",
             "escape_available",
+            "actor_hidden",
         ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be a boolean")
@@ -105,17 +108,24 @@ def selectable_attack_target_indexes(
     attacker_is_front_row: bool,
     weapon_reach: int,
     monsters: Sequence[BattleTarget],
+    unrestricted_range: bool = False,
 ) -> tuple[int, ...]:
-    """Return targetable monster indexes for one normal attack."""
+    """Return targetable monster indexes for one physical attack."""
 
     if not isinstance(attacker_is_front_row, bool):
         raise TypeError("attacker_is_front_row must be a boolean")
     if isinstance(weapon_reach, bool) or weapon_reach not in (1, 2, 3):
         raise ValueError("weapon_reach must be 1, 2, or 3")
+    if not isinstance(unrestricted_range, bool):
+        raise TypeError("unrestricted_range must be a boolean")
 
-    if weapon_reach == 1 and not attacker_is_front_row:
+    if (
+        not unrestricted_range
+        and weapon_reach == 1
+        and not attacker_is_front_row
+    ):
         return ()
-    can_target_back_row = weapon_reach == 3 or (
+    can_target_back_row = unrestricted_range or weapon_reach == 3 or (
         weapon_reach == 2 and attacker_is_front_row
     )
     return tuple(
@@ -187,7 +197,7 @@ def resolve_battle_commands(
     if not isinstance(current, BattleCommandContext):
         raise TypeError("context must be a BattleCommandContext")
     left_commands: list[BattleCommandOption] = []
-    attack_targets = (
+    normal_attack_targets = (
         selectable_attack_target_indexes(
             attacker_is_front_row=member_is_front_row,
             weapon_reach=member_attack_reach(member),
@@ -196,11 +206,24 @@ def resolve_battle_commands(
         if member_can_attack(member)
         else ()
     )
+    attack_targets = (
+        selectable_attack_target_indexes(
+            attacker_is_front_row=member_is_front_row,
+            weapon_reach=member_attack_reach(member),
+            monsters=monsters,
+            unrestricted_range=True,
+        )
+        if current.actor_hidden and member_can_attack(member)
+        else normal_attack_targets
+    )
     # Keep normal attack visible even when it cannot currently reach a target.
     # A member without a main-hand weapon and a back-row member with a
     # short-range weapon cannot attack, so the option is disabled.
+    attack_command = (
+        BattleCommand.AMBUSH if current.actor_hidden else BattleCommand.ATTACK
+    )
     left_commands.append(
-        BattleCommandOption(BattleCommand.ATTACK, enabled=bool(attack_targets))
+        BattleCommandOption(attack_command, enabled=bool(attack_targets))
     )
     if len(left_commands) < 3 and member_has_spell_aptitude(member):
         left_commands.append(
@@ -212,14 +235,16 @@ def resolve_battle_commands(
     for skill_key, command in _SKILL_COMMANDS:
         if len(left_commands) == 3:
             break
-        if not member.has_skill(skill_key):
+        if not member.has_skill(skill_key) or (
+            command is BattleCommand.HIDE and current.actor_hidden
+        ):
             continue
         left_commands.append(
             BattleCommandOption(
                 command,
                 enabled=(
                     command not in (BattleCommand.AIM, BattleCommand.FOCUS)
-                    or bool(attack_targets)
+                    or bool(normal_attack_targets)
                 ),
             )
         )
@@ -234,7 +259,10 @@ def resolve_battle_commands(
         right_commands.append(
             BattleCommandOption(
                 BattleCommand.FORMATION,
-                enabled=not member_is_front_row or sum(front_rows) >= 2,
+                enabled=(
+                    not current.actor_hidden
+                    and (not member_is_front_row or sum(front_rows) >= 2)
+                ),
             )
         )
     return tuple((*left_commands, *right_commands))

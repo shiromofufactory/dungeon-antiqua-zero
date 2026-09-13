@@ -3,6 +3,7 @@
 from .debug import (
     DebugPartyEditor,
     DebugPartyError,
+    MAX_MEMBER_SKILL_COUNT,
     MAX_OTHER_MEMBER_COUNT,
     MIN_OTHER_MEMBER_COUNT,
 )
@@ -103,6 +104,7 @@ __all__ = [
     "EnemyProgressionData",
     "MemberGrowthSnapshot",
     "ProficiencySnapshot",
+    "MAX_MEMBER_SKILL_COUNT",
     "MAX_OTHER_MEMBER_COUNT",
     "MIN_OTHER_MEMBER_COUNT",
     "SaveRepository",

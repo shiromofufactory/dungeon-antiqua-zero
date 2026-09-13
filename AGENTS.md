@@ -74,7 +74,7 @@
 
 ## データの扱い
 
-`content/data/*.json` は配列形式のゲームデータの正本である。`app/data/*.json` は `npm run content:sync` で生成し、直接編集しない。識別に使用する英名・キーと表示文字列を区別し、既存キーを安易に変更しない。キー変更が必要な場合は、参照箇所、Google Sheets、セーブ互換性への影響を確認する。
+`content/data/*.json` は配列形式のゲームデータの正本である。`app/data/*.json` は `npm run sync` で生成し、直接編集しない。識別に使用する英名・キーと表示文字列を区別し、既存キーを安易に変更しない。キー変更が必要な場合は、参照箇所、Google Sheets、セーブ互換性への影響を確認する。
 
 データを変更するときは次を守る。
 
@@ -105,7 +105,7 @@
 ## 検証方針
 
 - JSON変更時は少なくとも全対象ファイルをパースする。
-- 共有JSON変更時は `npm run content:validate` と `npm run content:sync` を実行する。
+- 共有JSON変更時は `npm run content:validate` と `npm run sync` を実行する。
 - ゲーム用JSONが正本と一致するかは `node scripts/sync-content.mjs --check` で確認する。
   この検証コマンドは `package.json` のnpm scriptsへ復元しない。
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。

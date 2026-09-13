@@ -221,6 +221,70 @@ class DebugMenuOverlayTest(unittest.TestCase):
             "member_status",
         )
 
+    def test_adds_and_removes_up_to_two_skills_for_selected_member(self) -> None:
+        self.screen.main_cursor.select_key("member_status")
+        self.screen.update(self.confirm())
+        self.screen.update(self.confirm())
+        self.screen.member_status_cursor.select_key("skills")
+        self.screen.update(self.confirm())
+
+        self.assertIs(self.screen.phase, DebugMenuPhase.MEMBER_SKILLS)
+        self.assertEqual(len(self.screen.member_skill_cursor.targets), 19)
+        self.assertEqual(
+            self.screen.member_skill_cursor.selected_key,
+            "Aim",
+        )
+        self.assertEqual(
+            (
+                self.screen.member_skill_cursor.targets[10].x,
+                self.screen.member_skill_cursor.targets[10].y,
+            ),
+            (32, 9),
+        )
+
+        member = self.editor.member("Fiora")
+        self.screen.update(self.confirm())
+        self.assertEqual([skill.key for skill in member.skills], ["Aim"])
+        self.screen.update(
+            InputState(
+                navigation=Direction.DOWN,
+                held_direction=Direction.DOWN,
+            )
+        )
+        self.screen.update(self.confirm())
+        self.assertEqual(
+            [skill.key for skill in member.skills],
+            ["Aim", "Hide"],
+        )
+
+        self.screen.update(
+            InputState(
+                navigation=Direction.DOWN,
+                held_direction=Direction.DOWN,
+            )
+        )
+        self.screen.update(self.confirm())
+        self.assertEqual(
+            [skill.key for skill in member.skills],
+            ["Aim", "Hide"],
+        )
+        self.alert.start.assert_called_once_with()
+
+        self.screen.member_skill_cursor.select_key("Hide")
+        self.screen.update(self.confirm())
+        self.assertEqual([skill.key for skill in member.skills], ["Aim"])
+
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MEMBER_STATUS)
+        self.assertEqual(
+            self.screen.member_status_cursor.selected_key,
+            "skills",
+        )
+        self.assertIn(
+            "１／２",
+            [placement.text for placement in self.screen.member_status_window.texts],
+        )
+
     def test_member_list_contains_all_characters_in_two_columns(self) -> None:
         self.screen._open_members()
         self.assertEqual(len(self.editor.candidate_definitions), 20)
@@ -417,6 +481,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertEqual(DEBUG_TEXT.member_count(0), "フィオラ＋０にん")
         self.assertEqual(DEBUG_TEXT.party_member_count(6), "６にん")
         self.assertEqual(DEBUG_TEXT.member_status, "メンバー状態")
+        self.assertEqual(DEBUG_TEXT.skill_count(2), "２／２")
         self.assertEqual(DEBUG_TEXT.teleport_count(2), "２かしょ")
         self.assertEqual(DEBUG_TEXT.shop, "ショップ")
         self.assertEqual(DEBUG_TEXT.shop_count(13), "１３けん")

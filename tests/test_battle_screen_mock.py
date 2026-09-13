@@ -33,6 +33,7 @@ from tools.screen_mocks.battle import (
     BATTLE_BGM_ID,
     BATTLE_ESCAPE_SE_ID,
     BATTLE_FOCUS_SE_ID,
+    BATTLE_HIDE_SE_ID,
     BATTLE_HIT_SE_ID,
     BATTLE_MONSTER_DEATH_SE_ID,
     BATTLE_MOCK_MONSTER_KEYS,
@@ -84,6 +85,9 @@ from tools.screen_mocks.battle import (
     FORMATION_WALK_PATTERN_FRAME_COUNT,
     FOCUS_ATTACK_MULTIPLIER,
     FOCUS_PRESENTATION_FRAME_COUNT,
+    HIDE_PRESENTATION_FRAME_COUNT,
+    VICTORY_RETURN_SPEED,
+    VICTORY_RETURN_START_X,
     GLOBAL_COMMAND_WINDOW_GRID,
     ITEM_WINDOW_GRID,
     ITEM_GUIDE_WINDOW_GRID,
@@ -99,6 +103,7 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_COMPLETE_FRAME,
     PARTY_ENTRANCE_FRAME_COUNT,
     PARTY_ENTRANCE_OFFSET_Y,
+    PARTY_SPRITE_Y,
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
     PARTY_CONDITION_ICON_OFFSET_X,
@@ -153,6 +158,7 @@ from tools.screen_mocks.battle import (
     BattleScreenMock,
     BattleTargetSpellEffect,
     BattleTimedPopup,
+    FormationAnimationCompletion,
     FormationRow,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
@@ -208,10 +214,13 @@ from input import Direction, InputButton, InputDevice, InputState
 from monster import MonsterBattleState, MonsterCombatStats
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
+    DIMMED_PALETTE,
     MONSTER_DEATH_BRIGHTEN_FRAME_COUNT,
     MONSTER_DEATH_DISSOLVE_FRAME_COUNT,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_TINT_FRAME_COUNT,
+    MONOCHROME_PALETTE,
+    PaletteShifter,
     SPELL_EFFECT_FLASH_PALETTE,
     FadeThroughBlack,
     MonsterDeathAnimation,
@@ -222,8 +231,10 @@ from ui import CursorTarget, Window, WindowCursor
 
 _JAPANESE_COMMAND_LABELS = {
     BattleCommand.ATTACK: "こうげき",
+    BattleCommand.AMBUSH: "きしゅう",
     BattleCommand.SPELL: "じゅもん",
     BattleCommand.AIM: "ねらう",
+    BattleCommand.HIDE: "かくれる",
     BattleCommand.DEFEND: "ぼうぎょ",
     BattleCommand.ESCAPE: "にげる",
     BattleCommand.ITEM: "アイテム",
@@ -710,6 +721,11 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             palette_shifter.define_mix.call_args_list,
             [
+                call(
+                    UNSELECTABLE_TARGET_PALETTE,
+                    base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
+                    target_color=0x858585,
+                ),
                 call(
                     UNSELECTABLE_TARGET_PALETTE,
                     base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
@@ -1642,6 +1658,34 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         self.assertIsNone(mock.selected_target_index)
 
+    def test_ambush_ignores_weapon_reach_and_targets_every_monster_row(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (SimpleNamespace(is_front_row=False),)
+        mock.active_party_index = 0
+        mock.monsters = tuple(
+            SimpleNamespace(is_front_row=is_front_row, is_alive=True)
+            for is_front_row in (False, False, False, True, True)
+        )
+        mock.command_cursor = SimpleNamespace(active=True)
+        mock.target_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.phase = BattleMockPhase.COMMAND
+        mock.selected_command = None
+        mock.selectable_target_indexes = ()
+        mock.selected_target_index = None
+        mock._refresh_monster_name_colors = Mock()
+
+        with (
+            patch("scenes.battle.member_can_attack", return_value=True),
+            patch("scenes.battle.member_attack_reach", return_value=1),
+        ):
+            self.assertTrue(
+                mock._begin_attack_target_selection(command=BattleCommand.AMBUSH)
+            )
+
+        self.assertEqual(mock.selectable_target_indexes, (0, 1, 2, 3, 4))
+        self.assertEqual(mock.selected_target_index, 4)
+
     def test_target_navigation_uses_da2_order_and_skips_unreachable_enemies(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.selectable_target_indexes = (3, 4)
@@ -1869,6 +1913,42 @@ class BattleScreenMockTest(unittest.TestCase):
             "ねらう",
             BATTLE_POPUP_FRAME_COUNT,
         )
+
+    def test_ambush_uses_hidden_attack_rules_then_reveals_member(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )[0]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.hidden_party_indexes = {0}
+        mock.monsters = (_damage_test_monster(),)
+        mock.attack_poses = {}
+        mock.selected_command = BattleCommand.AMBUSH
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.target_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._resolve_member_attack_additional_effects = Mock(return_value=())
+        result = SimpleNamespace(hit=True, damage=20, critical=False)
+
+        with (
+            patch("scenes.battle.random.randint", side_effect=(99, 99)),
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                return_value=result,
+            ) as resolve,
+        ):
+            self.assertTrue(mock._begin_attack_presentation())
+
+        self.assertTrue(resolve.call_args.kwargs["attacker_hidden"])
+        self.assertEqual(resolve.call_args.kwargs["critical_roll"], 99)
+        self.assertEqual(mock.hidden_party_indexes, set())
+        self.assertIs(mock.phase, BattleMockPhase.ATTACK_PRESENTATION)
 
     def test_power_hit_and_sleep_are_passed_to_critical_resolution(self) -> None:
         items = load_mock_items()
@@ -2236,11 +2316,43 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.timeline[0], actor)
         self.assertIsNone(mock.dying_monster_index)
         self.assertIsNone(mock.monster_death_animation)
-        mock.palette_shifter.remove_variant.assert_called_once_with(
-            MONSTER_DEATH_PALETTE
+        self.assertEqual(
+            mock.palette_shifter.remove_variant.call_args_list[0],
+            call(UNSELECTABLE_TARGET_PALETTE),
+        )
+        self.assertEqual(
+            mock.palette_shifter.remove_variant.call_args_list[-1],
+            call(MONSTER_DEATH_PALETTE),
         )
         self.assertIs(mock.result, BattleResult.VICTORY)
         mock._complete_current_turn.assert_not_called()
+
+    def test_monster_death_reuses_unselectable_palette_slot(self) -> None:
+        colors = list(range(62))
+        palette_shifter = PaletteShifter(colors, Mock())
+        base_variant = tuple(colors)
+        palette_shifter.define_variant(DIMMED_PALETTE, base_variant)
+        palette_shifter.define_variant(MONOCHROME_PALETTE, base_variant)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.palette_shifter = palette_shifter
+        mock.monster_death_animation = MonsterDeathAnimation()
+
+        mock._sync_unselectable_target_palette()
+        self.assertEqual(len(colors), 248)
+
+        mock._sync_monster_death_palette()
+
+        self.assertEqual(len(colors), 248)
+        with palette_shifter.shifted(MONSTER_DEATH_PALETTE):
+            pass
+        with self.assertRaisesRegex(KeyError, UNSELECTABLE_TARGET_PALETTE):
+            with palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
+                pass
+
+        mock._release_palette_variant(MONSTER_DEATH_PALETTE)
+        mock._sync_unselectable_target_palette()
+        with palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
+            pass
 
     def test_poison_death_of_timeline_head_removes_head_after_death_effect(self) -> None:
         dying = _damage_test_monster(0, hp=1)
@@ -2492,7 +2604,7 @@ class BattleScreenMockTest(unittest.TestCase):
             confirm=InputButton(triggered=True, held=True)
         )
         mock.command_cursor = Mock()
-        mock.command_cursor.selected_key = BattleCommand.HIDE
+        mock.command_cursor.selected_key = BattleCommand.IDENTIFY
         mock.command_window = Mock()
         mock.command_window.is_closed = False
         mock.command_window.is_open = True
@@ -2503,12 +2615,200 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock.update()
 
-        self.assertEqual(mock.selected_command, BattleCommand.HIDE)
+        self.assertEqual(mock.selected_command, BattleCommand.IDENTIFY)
         self.assertEqual(
             mock.last_command_by_party_index,
-            {1: BattleCommand.HIDE},
+            {1: BattleCommand.IDENTIFY},
         )
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_hide_starts_da2_motion_and_marks_member_hidden(self) -> None:
+        member = SimpleNamespace(has_skill=Mock(return_value=True))
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.hidden_party_indexes = set()
+        mock.hide_presentation_elapsed_frame = 99
+        mock.command_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_party_text_colors = Mock()
+
+        with patch("scenes.battle.play_se") as play_se:
+            self.assertTrue(mock._begin_hide())
+
+        self.assertEqual(mock.hidden_party_indexes, {0})
+        self.assertEqual(mock.hide_presentation_elapsed_frame, 0)
+        self.assertIs(mock.phase, BattleMockPhase.HIDE_PRESENTATION)
+        self.assertIs(mock.selected_command, BattleCommand.HIDE)
+        self.assertFalse(mock.command_cursor.active)
+        mock.command_window.close_immediately.assert_called_once_with()
+        play_se.assert_called_once_with(BATTLE_HIDE_SE_ID)
+
+    def test_hide_finishes_after_da2_timing_and_advances_turn(self) -> None:
+        visual = SimpleNamespace(display_name=Mock(return_value="シルファ"))
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party_visuals = (visual,)
+        mock.hide_presentation_elapsed_frame = HIDE_PRESENTATION_FRAME_COUNT - 1
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock._show_battle_popup = Mock()
+        mock._reveal_hidden_party_if_all_unavailable = Mock()
+        mock._complete_current_turn = Mock()
+
+        mock._update_hide_presentation()
+
+        mock._show_battle_popup.assert_called_once()
+        self.assertEqual(
+            mock._show_battle_popup.call_args.args[0],
+            "かくれる",
+        )
+        mock._reveal_hidden_party_if_all_unavailable.assert_called_once_with()
+        mock._complete_current_turn.assert_called_once_with()
+
+    def test_all_hidden_living_members_are_forcibly_revealed(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.hidden_party_indexes = {0, 1}
+        mock.party = tuple(
+            SimpleNamespace(paralyzed=False, sleeping=0, confused=0)
+            for _index in range(2)
+        )
+        mock._active_party_indexes = Mock(return_value=(0, 1))
+
+        self.assertTrue(mock._reveal_hidden_party_if_all_unavailable())
+
+        self.assertEqual(mock.hidden_party_indexes, set())
+
+    def test_hidden_member_reappears_when_only_visible_member_cannot_act(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.hidden_party_indexes = {0}
+        mock.party = (
+            SimpleNamespace(paralyzed=False, sleeping=0, confused=0),
+            SimpleNamespace(paralyzed=True, sleeping=0, confused=0),
+        )
+        mock._active_party_indexes = Mock(return_value=(0, 1))
+
+        self.assertTrue(mock._reveal_hidden_party_if_all_unavailable())
+
+        self.assertEqual(mock.hidden_party_indexes, set())
+
+    def test_hidden_member_sprite_is_not_drawn(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.active_party_index = None
+        mock.party_visuals = (SimpleNamespace(),)
+        mock.escaped_party_indexes = set()
+        mock.hidden_party_indexes = {0}
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
+
+        blt.assert_not_called()
+
+    def test_hidden_survivor_runs_in_from_screen_right_for_victory(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                ),
+                battle_sprite=0,
+            ),
+            SimpleNamespace(
+                member=SimpleNamespace(
+                    formation_row=FormationRow.BACK,
+                    is_dead=False,
+                ),
+                battle_sprite=1,
+            ),
+        )
+        mock.escaped_party_indexes = {1}
+        mock.hidden_party_indexes = {0, 1}
+
+        mock._begin_hidden_party_victory_return()
+
+        self.assertEqual(mock.hidden_party_indexes, set())
+        self.assertEqual(mock.victory_returning_party_indexes, {0})
+        self.assertEqual(mock.victory_return_frame, 0)
+
+        mock.phase = BattleMockPhase.VICTORY_SUMMARY
+        self.assertEqual(
+            mock._party_draw_position(0),
+            (VICTORY_RETURN_START_X, PARTY_SPRITE_Y[0]),
+        )
+        self.assertTrue(mock._update_hidden_party_victory_return())
+        self.assertEqual(
+            mock._party_draw_position(0),
+            (VICTORY_RETURN_START_X - VICTORY_RETURN_SPEED, PARTY_SPRITE_Y[0]),
+        )
+        self.assertTrue(mock._update_hidden_party_victory_return())
+        self.assertEqual(
+            mock._party_sprite_source_x(0),
+            FORMATION_SPRITE_STEP_X,
+        )
+
+        while mock._update_hidden_party_victory_return():
+            pass
+
+        self.assertEqual(mock.victory_returning_party_indexes, set())
+        self.assertEqual(
+            mock._party_draw_position(0),
+            (mock._party_sprite_x(0), PARTY_SPRITE_Y[0]),
+        )
+
+    def test_hidden_members_are_excluded_from_monster_targets(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.hidden_party_indexes = {1}
+        mock._active_party_indexes = Mock(return_value=(0, 1, 2))
+        mock._party_member_is_front_row = Mock(return_value=True)
+        actor = SimpleNamespace(is_front_row=True)
+
+        self.assertEqual(mock._monster_attack_target_indexes(actor), (0, 2))
+        self.assertEqual(mock._monster_charge_target_indexes(), (0, 2))
+
+    def test_hidden_front_member_does_not_block_visible_rear_promotion(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.hidden_party_indexes = {0}
+        mock._active_party_indexes = Mock(return_value=(0, 1))
+        mock._party_member_is_front_row = Mock(
+            side_effect=lambda index: index == 0
+        )
+        mock._party_sprite_x = Mock(side_effect=lambda index: 156 + index * 16)
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock._refresh_party_text_colors = Mock()
+
+        self.assertTrue(
+            mock._begin_front_promotion_if_needed(
+                FormationAnimationCompletion.START_TIMELINE
+            )
+        )
+
+        self.assertEqual(mock.formation_actor_indexes, (0, 1))
+        self.assertEqual(mock.temporary_front_party_indexes, {0, 1})
+
+    def test_ally_actions_skip_hidden_members_except_the_caster(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.hidden_party_indexes = {0, 1}
+        mock._active_party_indexes = Mock(return_value=(0, 1, 2))
+        mock.party = tuple(
+            SimpleNamespace(protection_level=0) for _index in range(3)
+        )
+
+        single = SimpleNamespace(to_all=False, action=None)
+        all_targets = SimpleNamespace(to_all=True, action=None)
+
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(single),
+            (0, 2),
+        )
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(all_targets),
+            (2,),
+        )
 
     def test_item_command_opens_item_selection_instead_of_completing_turn(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -2922,8 +3222,13 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._complete_current_turn.assert_not_called()
         mock._update_action_presentation()
         mock._complete_current_turn.assert_called_once_with()
-        mock.palette_shifter.remove_variant.assert_called_once_with(
-            SPELL_EFFECT_FLASH_PALETTE
+        self.assertEqual(
+            mock.palette_shifter.remove_variant.call_args_list[0],
+            call(UNSELECTABLE_TARGET_PALETTE),
+        )
+        self.assertEqual(
+            mock.palette_shifter.remove_variant.call_args_list[-1],
+            call(SPELL_EFFECT_FLASH_PALETTE),
         )
 
     def test_heal_applies_at_da2_overlap_and_popup_does_not_delay_return(self) -> None:
@@ -5616,6 +5921,23 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIs(party[2].formation_row, FormationRow.FRONT)
         mock.command_window.close_immediately.assert_not_called()
 
+    def test_hidden_member_cannot_start_formation_animation(self) -> None:
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = party
+        mock.active_party_index = 0
+        mock.hidden_party_indexes = {0}
+        mock.command_window = Mock()
+
+        self.assertFalse(mock._begin_formation_change())
+
+        mock.command_window.close_immediately.assert_not_called()
+
     def test_target_cursor_uses_window_cursor_rendering(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.TARGET
@@ -5805,6 +6127,24 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._begin_attack_target_selection.assert_not_called()
         mock._begin_defense.assert_called_once_with()
+
+    def test_auto_battle_uses_unrestricted_ambush_while_hidden(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.hidden_party_indexes = {0}
+        mock._active_member_attack_targets = Mock(return_value=(0, 1, 2, 3, 4))
+        mock._begin_attack_target_selection = Mock()
+        mock._begin_defense = Mock()
+
+        mock._begin_auto_action()
+
+        mock._active_member_attack_targets.assert_called_once_with(
+            command=BattleCommand.AMBUSH
+        )
+        mock._begin_attack_target_selection.assert_called_once_with(
+            command=BattleCommand.AMBUSH
+        )
+        mock._begin_defense.assert_not_called()
 
     def test_auto_target_selection_confirms_the_default_target(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

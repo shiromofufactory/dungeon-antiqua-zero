@@ -22,6 +22,9 @@ class DebugText:
     mp: str = "ＭＰ"
     poisoned: str = "どく"
     paralyzed: str = "まひ"
+    skills: str = "スキル"
+    skill_selection: str = "スキルいれかえ"
+    skill_count_template: str = "{count}／２"
     condition_on: str = "あり"
     condition_off: str = "なし"
     teleport: str = "テレポート"
@@ -52,6 +55,11 @@ class DebugText:
         """Format the current total party-member count."""
 
         return self._format_count(count, self.party_member_count_template)
+
+    def skill_count(self, count: int) -> str:
+        """Format the number of skills currently assigned to one member."""
+
+        return self._format_count(count, self.skill_count_template)
 
     def shop_count(self, count: int) -> str:
         """Format the number of selectable debug shops."""
