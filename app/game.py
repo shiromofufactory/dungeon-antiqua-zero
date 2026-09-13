@@ -2893,6 +2893,12 @@ class Game:
                 return
             if input_state.confirm.triggered:
                 self._confirm_sort_member()
+            elif (
+                input_state.navigation is Direction.RIGHT
+                and self.sort_source_index is None
+            ):
+                self._finish_sort()
+                return
             self.party_window.update(input_state.navigation)
             selected_member_index = self.party_cursor.selected_key
             if isinstance(selected_member_index, int):

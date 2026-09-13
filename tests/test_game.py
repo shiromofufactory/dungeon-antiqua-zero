@@ -2936,6 +2936,56 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.command_cursor.active)
         mock.party_window.clear_cursor.assert_called_once_with()
 
+    def test_right_returns_from_sort_mode_before_selecting_source(self) -> None:
+        mock = Game.__new__(Game)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            navigation=Direction.RIGHT,
+            held_direction=Direction.RIGHT,
+        )
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.party_window = Mock()
+        mock.party_cursor = Mock()
+        mock.sort_source_index = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+
+        mock.update()
+
+        self.assertIsNone(mock.party_cursor)
+        self.assertTrue(mock.command_cursor.active)
+        mock.party_window.clear_cursor.assert_called_once_with()
+        mock.party_window.update.assert_not_called()
+
+    def test_right_does_not_return_after_selecting_sort_source(self) -> None:
+        mock = Game.__new__(Game)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            navigation=Direction.RIGHT,
+            held_direction=Direction.RIGHT,
+        )
+        mock.command_cursor = Mock(active=False)
+        mock.command_window = Mock()
+        mock.party_window = Mock()
+        mock.party_cursor = Mock(selected_key=2)
+        mock.sort_source_index = 2
+        mock.sort_source_cursor = Mock()
+        mock.selected_member_index = 2
+        mock.alert = Mock()
+        mock.settings_cursor = None
+        mock.confirmation_cursor = None
+
+        mock.update()
+
+        self.assertIsNotNone(mock.party_cursor)
+        self.assertEqual(mock.sort_source_index, 2)
+        self.assertFalse(mock.command_cursor.active)
+        mock.party_window.clear_cursor.assert_not_called()
+        mock.party_window.update.assert_called_once_with(Direction.RIGHT)
+
     @patch("game.pyxel.play")
     def test_alert_matches_da2_sound_and_three_frame_shake(self, play: Mock) -> None:
         alert = MenuAlertEffect()
