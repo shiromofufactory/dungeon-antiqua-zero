@@ -12,6 +12,7 @@ else:
 
 DEFENDING_HIT_VALUE_THRESHOLD = 25
 DA2_CRITICAL_RATE_UNIT = 0.1
+DA2_EFFECTIVE_HIT_VALUE_BONUS = 60
 DA2_MEMBER_STATUS_BASE_RATE = 12
 DA2_MONSTER_STATUS_BASE_RATE = 30
 DA2_MEMBER_DEATH_BASE_RATE = 6
@@ -94,6 +95,7 @@ def resolve_physical_attack(
     hit_value_bonus: int = 0,
     attacker_has_power_hit: bool = False,
     weapon_has_power_hit: bool = False,
+    weapon_effective: bool = False,
     critical_rate_scale: float = 1.0,
     critical_roll: int | None = None,
 ) -> PhysicalAttackResult:
@@ -124,6 +126,8 @@ def resolve_physical_attack(
         raise TypeError("attacker_has_power_hit must be a boolean")
     if not isinstance(weapon_has_power_hit, bool):
         raise TypeError("weapon_has_power_hit must be a boolean")
+    if not isinstance(weapon_effective, bool):
+        raise TypeError("weapon_effective must be a boolean")
     if isinstance(critical_rate_scale, bool) or not isinstance(
         critical_rate_scale,
         (int, float),
@@ -162,18 +166,24 @@ def resolve_physical_attack(
             hit_value=hit_value,
         )
 
+    if weapon_effective:
+        # DA2's tribe-effective weapon rule applies after the ordinary hit
+        # check, then improves damage and the defend-command threshold.
+        hit_value += DA2_EFFECTIVE_HIT_VALUE_BONUS
+
     critical_rate_units = (
         int(has_ambush_advantage)
         + int(attacker_has_power_hit)
         + int(weapon_has_power_hit)
     )
     critical_rate = (
-        critical_rate_units
-        * DA2_CRITICAL_RATE_UNIT
+        (1.0 if weapon_effective else critical_rate_units * DA2_CRITICAL_RATE_UNIT)
         * critical_rate_scale
         * max(adjusted_hit, 100)
     )
-    critical = critical_roll is not None and critical_rate > critical_roll
+    critical = weapon_effective or (
+        critical_roll is not None and critical_rate > critical_roll
+    )
 
     if target_defending and hit_value < DEFENDING_HIT_VALUE_THRESHOLD:
         return PhysicalAttackResult(
@@ -218,6 +228,7 @@ def resolve_physical_additional_effect(
     critical: bool = False,
     attacker_hidden: bool = False,
     tribe_effective: bool = False,
+    weapon_effective: bool = False,
     stacked_death: bool = False,
 ) -> PhysicalAdditionalEffectResult:
     """Resolve DA2's point gate and percentage roll for one hit effect.
@@ -250,6 +261,7 @@ def resolve_physical_additional_effect(
         (critical, "critical"),
         (attacker_hidden, "attacker_hidden"),
         (tribe_effective, "tribe_effective"),
+        (weapon_effective, "weapon_effective"),
         (stacked_death, "stacked_death"),
     ):
         if not isinstance(value, bool):
@@ -261,7 +273,7 @@ def resolve_physical_additional_effect(
     is_death = effect is AdditionalEffect.DEATH
     activation_points = 2 if not is_death or stacked_death else 1
     activation_points += int(critical)
-    activation_points += int(tribe_effective)
+    activation_points += int(tribe_effective or weapon_effective)
     activation_points += int(attacker_hidden)
     if target_is_resistant:
         activation_points -= 1 if is_death else 2
@@ -302,6 +314,7 @@ def resolve_physical_additional_effect(
 
 __all__ = [
     "DA2_CRITICAL_RATE_UNIT",
+    "DA2_EFFECTIVE_HIT_VALUE_BONUS",
     "DA2_MEMBER_DEATH_BASE_RATE",
     "DA2_MEMBER_STATUS_BASE_RATE",
     "DA2_MONSTER_DEATH_BASE_RATE",

@@ -58,6 +58,7 @@ from battle_timeline import (
 )
 from item import (
     AdditionalEffect,
+    AttackAttribute,
     Item,
     ItemDataError,
     ItemEquipType,
@@ -500,6 +501,11 @@ ADDITIONAL_EFFECT_RESISTANCE = {
     AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
     AdditionalEffect.DEFENSE_DOWN: None,
 }
+WEAPON_ATTRIBUTE_RESISTANCE = {
+    AttackAttribute.FIRE: ResistanceType.FIRE,
+    AttackAttribute.FREEZE: ResistanceType.FREEZE,
+    AttackAttribute.DARK: ResistanceType.DARK,
+}
 ADDITIONAL_EFFECT_MARKER_SOURCE = {
     AdditionalEffect.STUN: (STUN_MARKER_SOURCE_X, STUN_MARKER_SOURCE_Y),
     AdditionalEffect.DEFENSE_DOWN: (
@@ -862,12 +868,14 @@ class BattleAttackPresentation:
     effect_row: int | None
     is_hit: bool = True
     is_critical: bool = False
+    is_weak: bool = False
     is_aimed: bool = False
     is_focused: bool = False
     additional_effects: tuple[AdditionalEffect, ...] = ()
     sound_effect_id: str = ATTACK_SLASH_SE_ID
     elapsed_frame: int = 0
     damage_applied: bool = False
+    affinity_popup_started: bool = False
     return_started: bool = False
 
     @property
@@ -3737,30 +3745,55 @@ class BattleScene:
                 records.reveal_affinity(monster_key, spell.attribute)
 
     def _target_affinity(self, index: int) -> SpellAffinity:
-        """Return a known affinity for one current enemy action target."""
+        """Return a known affinity for one current enemy target."""
 
-        if (
-            self.phase is not BattlePhase.ACTION_TARGET
-            or not self.action_targets_enemy
-            or index not in self.selectable_target_indexes
-        ):
+        if index not in self.selectable_target_indexes:
             return SpellAffinity.NORMAL
-        spell = self.pending_spell
-        if spell is None and self.pending_item_candidate is not None:
-            use_spell_key = self.pending_item_candidate.item.use_spell_key
-            spell = getattr(self, "spells", {}).get(use_spell_key)
-        if spell is None or spell.attribute is None:
+
+        attribute: ResistanceType | None = None
+        if self.phase is BattlePhase.TARGET:
+            if (
+                self.selected_command
+                not in (
+                    BattleCommand.ATTACK,
+                    BattleCommand.AMBUSH,
+                    BattleCommand.AIM,
+                    BattleCommand.FOCUS,
+                )
+                or self.active_party_index is None
+            ):
+                return SpellAffinity.NORMAL
+            member = self.party[self.active_party_index]
+            weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+            if weapon is not None:
+                attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(
+                    weapon.attack_attribute
+                )
+        elif (
+            self.phase is BattlePhase.ACTION_TARGET
+            and self.action_targets_enemy
+        ):
+            spell = self.pending_spell
+            if spell is None and self.pending_item_candidate is not None:
+                use_spell_key = self.pending_item_candidate.item.use_spell_key
+                spell = getattr(self, "spells", {}).get(use_spell_key)
+            if spell is not None:
+                attribute = spell.attribute
+        else:
+            return SpellAffinity.NORMAL
+
+        if attribute is None:
             return SpellAffinity.NORMAL
         records = getattr(self, "monster_record_system", None)
         monster = self.monsters[index]
         if records is None or not records.affinity_is_revealed(
             monster.key,
-            spell.attribute,
+            attribute,
         ):
             return SpellAffinity.NORMAL
-        if spell.attribute in monster.resistances:
+        if attribute in monster.resistances:
             return SpellAffinity.RESIST
-        if spell.attribute in monster.weaknesses:
+        if attribute in monster.weaknesses:
             return SpellAffinity.WEAK
         return SpellAffinity.NORMAL
 
@@ -4779,6 +4812,14 @@ class BattleScene:
         target_incapacitated = monster.state.sleeping > 0
         attacker_has_power_hit = member.has_skill("Power Hit")
         weapon_has_power_hit = weapon.special is ItemSpecial.POWER_HIT
+        weapon_attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(
+            weapon.attack_attribute
+        )
+        weapon_effective = bool(
+            weapon_attribute is not None
+            and weapon_attribute in monster.weaknesses
+            and weapon_attribute not in monster.resistances
+        )
         result = resolve_physical_attack(
             attack=attack,
             hit=member_stats.hit_right.total,
@@ -4791,6 +4832,7 @@ class BattleScene:
             hit_value_bonus=AIM_HIT_VALUE_BONUS if is_aimed else 0,
             attacker_has_power_hit=attacker_has_power_hit,
             weapon_has_power_hit=weapon_has_power_hit,
+            weapon_effective=weapon_effective,
             critical_rate_scale=(
                 1.5 if member.uses_two_handed_weapon(weapon) else 1.0
             ),
@@ -4801,6 +4843,7 @@ class BattleScene:
                     or attacker_hidden
                     or attacker_has_power_hit
                     or weapon_has_power_hit
+                    or weapon_effective
                 )
                 else None
             ),
@@ -4811,6 +4854,7 @@ class BattleScene:
             monster,
             result,
             attacker_hidden=attacker_hidden,
+            weapon_effective=weapon_effective,
         )
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
@@ -4819,6 +4863,7 @@ class BattleScene:
             effect_row=effect_row,
             is_hit=result.hit,
             is_critical=getattr(result, "critical", False),
+            is_weak=weapon_effective,
             is_aimed=is_aimed,
             is_focused=is_focused,
             additional_effects=additional_effects,
@@ -4830,6 +4875,8 @@ class BattleScene:
         records = getattr(self, "monster_record_system", None)
         if records is not None:
             records.reveal_profile(monster.key)
+            if weapon_attribute is not None:
+                records.reveal_affinity(monster.key, weapon_attribute)
         self.phase = BattlePhase.ATTACK_PRESENTATION
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT if is_aimed else 0.0
         if is_aimed:
@@ -4872,6 +4919,7 @@ class BattleScene:
         result: PhysicalAttackResult,
         *,
         attacker_hidden: bool = False,
+        weapon_effective: bool = False,
     ) -> tuple[AdditionalEffect, ...]:
         """Resolve all DA2-style effects carried by one successful strike."""
 
@@ -4898,6 +4946,7 @@ class BattleScene:
                 ),
                 critical=result.critical,
                 attacker_hidden=attacker_hidden,
+                weapon_effective=weapon_effective,
                 stacked_death=stacked_death,
             )
             if resolution.success:
@@ -4966,6 +5015,30 @@ class BattleScene:
                     critical=presentation.is_critical,
                 )
             presentation.damage_applied = True
+        if (
+            presentation.is_hit
+            and presentation.is_weak
+            and not presentation.affinity_popup_started
+            and presentation.damage_popup_elapsed_frame >= 0
+        ):
+            monster = self.monsters[presentation.target_index]
+            _base_x, base_y = MONSTER_POSITIONS[presentation.target_index]
+            center_x = (
+                self._monster_draw_x(presentation.target_index)
+                + monster.width // 2
+            )
+            affinity_popups = getattr(self, "affinity_popups", None)
+            if affinity_popups is None:
+                affinity_popups = []
+                self.affinity_popups = affinity_popups
+            affinity_popups.append(
+                BattleAffinityPopup(
+                    center_x - AFFINITY_ICON_WIDTH // 2,
+                    base_y + 20,
+                    SpellAffinity.WEAK,
+                )
+            )
+            presentation.affinity_popup_started = True
         if (
             not presentation.return_started
             and presentation.elapsed_frame >= presentation.motion_frame_count
@@ -6888,6 +6961,7 @@ class BattleScene:
             and presentation is not None
             and presentation.is_hit
             and presentation.is_critical
+            and not presentation.is_weak
             and presentation.damage_applied
             and 0
             <= presentation.damage_popup_elapsed_frame
@@ -6903,6 +6977,7 @@ class BattleScene:
             or presentation is None
             or not presentation.is_hit
             or not presentation.damage_applied
+            or presentation.is_weak
             or not (
                 0
                 <= presentation.damage_popup_elapsed_frame
@@ -8027,9 +8102,13 @@ class BattleScene:
     def _draw_target_affinity_indicators(self) -> None:
         """Blink learned WEAK/RESIST markers during enemy target selection."""
 
+        phase = getattr(self, "phase", None)
         if (
-            getattr(self, "phase", None) is not BattlePhase.ACTION_TARGET
-            or not getattr(self, "action_targets_enemy", False)
+            phase not in (BattlePhase.TARGET, BattlePhase.ACTION_TARGET)
+            or (
+                phase is BattlePhase.ACTION_TARGET
+                and not getattr(self, "action_targets_enemy", False)
+            )
             or pyxel.frame_count % TARGET_AFFINITY_BLINK_FRAME_COUNT
             >= TARGET_AFFINITY_VISIBLE_FRAME_COUNT
         ):

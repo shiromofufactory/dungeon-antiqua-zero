@@ -447,6 +447,11 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 `systems/monster_records.py` が `SaveData.monster_records` に対して行う。BattleSceneは遭遇、
 行動確定、ターゲット表示の契機だけを調停し、マスターデータの弱点・耐性そのものをSaveDataへ
 複製しない。ターゲット表示はSystemが返す開示状態とBattleMonsterの不変な弱点・耐性を照合する。
+属性武器による通常攻撃も、`AttackAttribute` を対応する `ResistanceType` へ変換して開示対象とする。
+通常攻撃系のターゲット選択中は、右手武器の変換後属性が開示済みの場合だけ既存の
+`WEAK` / `RESIST` ターゲット表示へ反映する。
+物理攻撃計算は属性特効の命中値加算・確定会心を `battle_physical.py` で解決し、BattleSceneは
+武器属性と対象の弱点・耐性の照合、追加効果への特効情報の伝達、`WEAK` 表示を担当する。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。

@@ -187,6 +187,7 @@ from tools.screen_mocks.battle import (
     TIMELINE_VISIBLE_ENTRY_COUNT,
     UNSELECTABLE_TARGET_PALETTE,
     UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
+    WEAPON_ATTRIBUTE_RESISTANCE,
     TimelineAnimationPhase,
     WindowText,
     ascii_to_fullwidth,
@@ -209,7 +210,7 @@ from member import (
     ProficiencyKind,
 )
 from battle_magic import SpellAffinity, member_spell_ability, member_spell_modifier
-from item import AdditionalEffect
+from item import AdditionalEffect, AttackAttribute
 from resistance import ResistanceType
 from state import Language, SaveData, Settings
 from systems import (
@@ -291,6 +292,16 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_mock_uses_sixty_fps(self) -> None:
         self.assertEqual(FPS, 60)
+
+    def test_all_weapon_attack_attributes_map_to_monster_weaknesses(self) -> None:
+        self.assertEqual(
+            WEAPON_ATTRIBUTE_RESISTANCE,
+            {
+                AttackAttribute.FIRE: ResistanceType.FIRE,
+                AttackAttribute.FREEZE: ResistanceType.FREEZE,
+                AttackAttribute.DARK: ResistanceType.DARK,
+            },
+        )
 
     def test_draw_uses_explicit_back_to_front_order(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -543,6 +554,51 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_additional_effect_markers()
 
         blt.assert_not_called()
+
+    def test_weak_marker_suppresses_overlapping_smash_and_status_markers(
+        self,
+    ) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=False)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            is_weak=True,
+            additional_effects=(AdditionalEffect.STUN,),
+            elapsed_frame=(
+                ATTACK_HIT_START_FRAME + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+            ),
+            damage_applied=True,
+        )
+        mock.monster_attack_target_index = None
+        mock.monster_attack_animation_frame = -1
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_critical_markers()
+            mock._draw_additional_effect_markers()
+
+        blt.assert_not_called()
+
+    def test_elemental_weak_critical_keeps_the_normal_flash(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.settings = Settings(screen_flash_enabled=True)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            is_weak=True,
+            elapsed_frame=ATTACK_HIT_START_FRAME,
+            damage_applied=True,
+        )
+
+        self.assertTrue(mock._critical_flash_visible())
 
     def test_battle_fixture_uses_configured_members_at_level_ninety_nine(self) -> None:
         self.assertEqual(
@@ -2023,6 +2079,105 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(resolve.call_args.kwargs["critical_roll"], 9)
         self.assertTrue(mock.attack_presentation.is_critical)
         self.assertEqual(randint.call_args_list, [call(0, 99), call(0, 99)])
+
+    def test_elemental_weapon_weakness_uses_effective_attack_and_is_recorded(
+        self,
+    ) -> None:
+        items = load_mock_items()
+        member = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )[0]
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.RIGHT: items["FIRE SPEAR"]}
+        )
+        monster = _damage_test_monster(
+            weaknesses=frozenset((ResistanceType.FIRE,)),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.monsters = (monster,)
+        mock.attack_poses = {}
+        mock.selected_command = BattleCommand.ATTACK
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.target_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._resolve_member_attack_additional_effects = Mock(return_value=())
+        mock.monster_record_system = Mock()
+        result = SimpleNamespace(hit=True, damage=20, critical=True)
+
+        with (
+            patch("scenes.battle.random.randint", side_effect=(40, 99)),
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                return_value=result,
+            ) as resolve,
+        ):
+            self.assertTrue(mock._begin_attack_presentation())
+
+        self.assertTrue(resolve.call_args.kwargs["weapon_effective"])
+        self.assertEqual(resolve.call_args.kwargs["critical_roll"], 99)
+        self.assertTrue(mock.attack_presentation.is_weak)
+        self.assertTrue(mock.attack_presentation.is_critical)
+        mock._resolve_member_attack_additional_effects.assert_called_once_with(
+            member,
+            items["FIRE SPEAR"],
+            monster,
+            result,
+            attacker_hidden=False,
+            weapon_effective=True,
+        )
+        mock.monster_record_system.reveal_profile.assert_called_once_with(
+            monster.key
+        )
+        mock.monster_record_system.reveal_affinity.assert_called_once_with(
+            monster.key,
+            ResistanceType.FIRE,
+        )
+
+    def test_physical_weak_popup_starts_with_the_damage_result_only_once(
+        self,
+    ) -> None:
+        monster = _damage_test_monster()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock.action_party_index = None
+        mock.affinity_popups = []
+        mock._monster_draw_x = Mock(return_value=4)
+        mock.attack_presentation = BattleAttackPresentation(
+            target_index=0,
+            damage=10,
+            poses=(),
+            effect_row=2,
+            is_critical=True,
+            is_weak=True,
+            elapsed_frame=(
+                ATTACK_HIT_START_FRAME
+                + ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+                - 1
+            ),
+            damage_applied=True,
+            return_started=True,
+        )
+
+        mock._update_attack_presentation()
+        mock._update_attack_presentation()
+
+        self.assertEqual(len(mock.affinity_popups), 1)
+        popup = mock.affinity_popups[0]
+        self.assertEqual(
+            (popup.affinity, popup.x, popup.y),
+            (
+                SpellAffinity.WEAK,
+                24,
+                MONSTER_POSITIONS[0][1] + 20,
+            ),
+        )
 
     def test_aim_gauge_is_consumed_by_timeline_reinsertion(self) -> None:
         actor = SimpleNamespace(agility=50)

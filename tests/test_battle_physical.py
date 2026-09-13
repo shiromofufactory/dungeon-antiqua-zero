@@ -229,6 +229,25 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         self.assertEqual(result.critical_rate, 0.0)
         self.assertFalse(result.critical)
 
+    def test_effective_weapon_adds_sixty_hit_value_and_guarantees_critical(
+        self,
+    ) -> None:
+        result = resolve_physical_attack(
+            attack=100,
+            hit=100,
+            agility=20,
+            target_defense=40,
+            target_evasion=0,
+            hit_roll=0,
+            weapon_effective=True,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertEqual(result.hit_value, 160.0)
+        self.assertEqual(result.critical_rate, 100.0)
+        self.assertTrue(result.critical)
+        self.assertEqual(result.damage, 173)
+
     def test_defending_avoids_an_attack_below_da2_guard_threshold(self) -> None:
         result = resolve_physical_attack(
             attack=100,
@@ -281,6 +300,19 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
 
 
 class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
+    def test_effective_weapon_adds_one_activation_point(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.POISON,
+            adjusted_hit=100,
+            effect_roll=99,
+            target_is_member=False,
+            weapon_effective=True,
+            critical=True,
+        )
+
+        self.assertEqual(result.activation_points, 4)
+        self.assertTrue(result.success)
+
     def test_attack_from_hiding_adds_one_activation_point(self) -> None:
         result = resolve_physical_additional_effect(
             effect=AdditionalEffect.POISON,

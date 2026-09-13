@@ -7,6 +7,8 @@ from unittest.mock import Mock, call, patch
 from tools._bootstrap import APP_ROOT  # noqa: F401 - adds app/ to sys.path
 
 from battle_magic import SpellAffinity
+from battle_commands import BattleCommand
+from item import AttackAttribute
 from resistance import ResistanceType
 from scenes.battle import (
     AFFINITY_ICON_HEIGHT,
@@ -134,6 +136,88 @@ class BattleMonsterRecordTest(unittest.TestCase):
         )
 
         self.assertIs(scene._target_affinity(1), SpellAffinity.RESIST)
+
+    def test_physical_target_weakness_uses_known_right_weapon_attribute(
+        self,
+    ) -> None:
+        scene = self._target_scene()
+        weapon = SimpleNamespace(attack_attribute=AttackAttribute.FIRE)
+        equipment = SimpleNamespace(weapon_at=Mock(return_value=weapon))
+        scene.phase = BattlePhase.TARGET
+        scene.selected_command = BattleCommand.ATTACK
+        scene.active_party_index = 0
+        scene.party = (SimpleNamespace(equipment=equipment),)
+
+        self.assertIs(scene._target_affinity(0), SpellAffinity.NORMAL)
+
+        scene.monster_record_system.reveal_affinity(
+            "Fire Weak",
+            ResistanceType.FIRE,
+        )
+
+        self.assertIs(scene._target_affinity(0), SpellAffinity.WEAK)
+
+    def test_physical_target_affinity_keeps_known_resistance_priority(
+        self,
+    ) -> None:
+        scene = self._target_scene()
+        weapon = SimpleNamespace(attack_attribute=AttackAttribute.FIRE)
+        scene.phase = BattlePhase.TARGET
+        scene.selected_command = BattleCommand.AIM
+        scene.active_party_index = 0
+        scene.party = (
+            SimpleNamespace(
+                equipment=SimpleNamespace(weapon_at=Mock(return_value=weapon))
+            ),
+        )
+        scene.monsters = (
+            _monster(
+                "Fire Both",
+                weaknesses=frozenset((ResistanceType.FIRE,)),
+                resistances=frozenset((ResistanceType.FIRE,)),
+            ),
+            scene.monsters[1],
+        )
+        scene.monster_record_system.reveal_affinity(
+            "Fire Both",
+            ResistanceType.FIRE,
+        )
+
+        self.assertIs(scene._target_affinity(0), SpellAffinity.RESIST)
+
+    def test_draws_known_physical_weakness_during_target_selection(self) -> None:
+        scene = self._target_scene()
+        weapon = SimpleNamespace(attack_attribute=AttackAttribute.FIRE)
+        scene.phase = BattlePhase.TARGET
+        scene.selected_command = BattleCommand.ATTACK
+        scene.active_party_index = 0
+        scene.party = (
+            SimpleNamespace(
+                equipment=SimpleNamespace(weapon_at=Mock(return_value=weapon))
+            ),
+        )
+        scene.monster_record_system.reveal_affinity(
+            "Fire Weak",
+            ResistanceType.FIRE,
+        )
+        scene._monster_draw_x = Mock(return_value=4)
+
+        with (
+            patch("scenes.battle.pyxel.frame_count", 0),
+            patch("scenes.battle.pyxel.blt") as blt,
+        ):
+            scene._draw_target_affinity_indicators()
+
+        blt.assert_called_once_with(
+            24,
+            MONSTER_POSITIONS[0][1] + 20,
+            0,
+            AFFINITY_ICON_SOURCE_X,
+            WEAK_ICON_SOURCE_Y,
+            AFFINITY_ICON_WIDTH,
+            AFFINITY_ICON_HEIGHT,
+            TRANSPARENT_INDEX,
+        )
 
     def test_draws_known_affinities_for_each_all_target_marker(self) -> None:
         scene = self._target_scene()
