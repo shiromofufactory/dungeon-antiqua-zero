@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from dataclasses import replace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
 from app.input import Direction, InputButton, InputState
 from app.member import FacePosition
+from app.rendering import MONOCHROME_PALETTE
 from app.state import Language, Settings
 from app.systems import SAVE_SLOT_COUNT, SaveSlotSummary
 from app.text_catalog import TextCatalog
@@ -36,6 +39,7 @@ class StartMenuOverlayTest(unittest.TestCase):
         on_load: Mock | None = None,
         on_delete: Mock | None = None,
         on_invalid_action: Mock | None = None,
+        palette_shifter: Mock | None = None,
         language: Language = Language.JAPANESE,
     ) -> StartMenuOverlay:
         fonts = Mock()
@@ -57,6 +61,7 @@ class StartMenuOverlayTest(unittest.TestCase):
                 "Fiora": FacePosition(0, 0),
                 "Cerion": FacePosition(32, 0),
             },
+            palette_shifter=palette_shifter,
             on_new_game=Mock() if on_new_game is None else on_new_game,
             on_load=Mock(return_value=True) if on_load is None else on_load,
             on_delete=Mock(return_value=True) if on_delete is None else on_delete,
@@ -168,6 +173,29 @@ class StartMenuOverlayTest(unittest.TestCase):
             overlay.command_window.texts[0].text,
             "セーブデータを　さくじょしました",
         )
+
+    @patch("app.ui.start_menu.pyxel.blt")
+    @patch("app.ui.window.Window.draw")
+    def test_dead_load_preview_face_uses_monochrome_palette(
+        self,
+        _draw_window: Mock,
+        _blt: Mock,
+    ) -> None:
+        slot_summaries = list(summaries(1))
+        slot_summaries[0] = replace(
+            slot_summaries[0],
+            dead_character_keys=("Cerion",),
+        )
+        palette_shifter = Mock()
+        palette_shifter.shifted.return_value = nullcontext()
+        overlay = self.create_overlay(
+            tuple(slot_summaries),
+            palette_shifter=palette_shifter,
+        )
+
+        overlay.draw()
+
+        palette_shifter.shifted.assert_called_once_with(MONOCHROME_PALETTE)
 
 
 if __name__ == "__main__":

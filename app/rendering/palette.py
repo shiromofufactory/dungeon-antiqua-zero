@@ -15,6 +15,7 @@ MAX_PALETTE_COLOR_COUNT = 256
 DIMMED_PALETTE = "dimmed"
 DIMMED_BASE_RATE = 0.5
 DIMMED_TARGET_COLOR = 0x000000
+MONOCHROME_PALETTE = "monochrome"
 
 
 def _validate_color(color: object, label: str) -> int:
@@ -45,6 +46,17 @@ def mix_color(base_color: int, base_rate: float, target_color: int) -> int:
     green = int(base_green * base_rate + target_green * (1.0 - base_rate))
     blue = int(base_blue * base_rate + target_blue * (1.0 - base_rate))
     return (red << 16) | (green << 8) | blue
+
+
+def grayscale_color(color: int) -> int:
+    """Convert one packed RGB color to perceptual monochrome."""
+
+    color = _validate_color(color, "color")
+    red = (color >> 16) & 0xFF
+    green = (color >> 8) & 0xFF
+    blue = color & 0xFF
+    gray = (red * 30 + green * 59 + blue * 11) // 100
+    return (gray << 16) | (gray << 8) | gray
 
 
 @dataclass(frozen=True)
@@ -235,5 +247,9 @@ def create_default_palette_shifter() -> PaletteShifter:
         DIMMED_PALETTE,
         base_rate=DIMMED_BASE_RATE,
         target_color=DIMMED_TARGET_COLOR,
+    )
+    shifter.define_variant(
+        MONOCHROME_PALETTE,
+        tuple(grayscale_color(color) for color in shifter.base_colors),
     )
     return shifter

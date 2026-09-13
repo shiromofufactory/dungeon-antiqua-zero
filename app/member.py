@@ -14,7 +14,7 @@ if __package__ == "":
         modified_agility,
     )
     from item import Item, ItemEquipType
-    from localization import Localizer, format_number
+    from localization import Localizer
     from resistance import ResistanceType
     from skill import Skill
     from text_catalog import TextCatalog
@@ -25,7 +25,7 @@ else:
         modified_agility,
     )
     from .item import Item, ItemEquipType
-    from .localization import Localizer, format_number
+    from .localization import Localizer
     from .resistance import ResistanceType
     from .skill import Skill
     from .text_catalog import TextCatalog
@@ -1508,9 +1508,8 @@ class Member:
         texts: TextCatalog,
         *,
         show_ok: bool = False,
-        show_mhp: bool = True,
     ) -> str:
-        """Return the localized condition or the healthy maximum-HP display."""
+        """Return the localized condition, optional healthy text, or nothing."""
 
         if not isinstance(localizer, Localizer):
             raise TypeError("localizer must be a Localizer")
@@ -1518,12 +1517,12 @@ class Member:
             raise TypeError("texts must be a TextCatalog")
         if not isinstance(show_ok, bool):
             raise TypeError("show_ok must be a boolean")
-        if not isinstance(show_mhp, bool):
-            raise TypeError("show_mhp must be a boolean")
 
         text_key = None
+        icon = ""
         if self.hp <= 0:
             text_key = "status.dead"
+            icon = "%DEATH%"
         elif self.paralyzed:
             text_key = "term.condition.PARALIZE"
         elif self.sleeping:
@@ -1541,9 +1540,7 @@ class Member:
                 raise MemberDataError(
                     f"localized member text is missing: {text_key}"
                 )
-            return value
-        if show_mhp:
-            return format_number(self.max_hp)
+            return icon + value
         return ""
 
     def display_identity(

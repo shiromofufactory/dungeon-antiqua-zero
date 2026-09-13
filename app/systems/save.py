@@ -63,6 +63,7 @@ class SaveSlotSummary:
     occupied: bool
     saved_at: str | None = None
     party_character_keys: tuple[str, ...] = ()
+    dead_character_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_slot(self.slot)
@@ -82,8 +83,20 @@ class SaveSlotSummary:
             raise ValueError("party_character_keys must not contain duplicates")
         if len(self.party_character_keys) > MAX_PARTY_MEMBER_COUNT:
             raise ValueError("party_character_keys exceeds the member limit")
+        if not isinstance(self.dead_character_keys, tuple) or not all(
+            isinstance(key, str) and key for key in self.dead_character_keys
+        ):
+            raise TypeError(
+                "dead_character_keys must be a tuple of non-empty strings"
+            )
+        if len(set(self.dead_character_keys)) != len(self.dead_character_keys):
+            raise ValueError("dead_character_keys must not contain duplicates")
+        if not set(self.dead_character_keys).issubset(self.party_character_keys):
+            raise ValueError("dead_character_keys must belong to the active party")
         if not self.occupied and (
-            self.saved_at is not None or self.party_character_keys
+            self.saved_at is not None
+            or self.party_character_keys
+            or self.dead_character_keys
         ):
             raise ValueError("an empty save slot cannot contain preview values")
 
@@ -856,7 +869,21 @@ class SaveRepository:
             raise ValueError("invalid save timestamp") from error
         if timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise ValueError("save timestamp must include a UTC offset")
-        return SaveSlotSummary(slot, True, saved_at, tuple(active_keys))
+        character_states = party.get("character_states")
+        dead_keys = tuple(
+            key
+            for key in active_keys
+            if isinstance(character_states, Mapping)
+            and isinstance(character_states.get(key), Mapping)
+            and character_states[key].get("hp") == 0
+        )
+        return SaveSlotSummary(
+            slot,
+            True,
+            saved_at,
+            tuple(active_keys),
+            dead_keys,
+        )
 
 
 def _validate_slot(slot: int) -> None:

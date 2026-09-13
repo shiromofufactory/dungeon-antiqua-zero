@@ -169,6 +169,7 @@ class SaveSystemTest(unittest.TestCase):
                 summary.party_character_keys,
                 ("Fiora", "Cerion"),
             )
+            self.assertEqual(summary.dead_character_keys, ())
             self.assertEqual(
                 json.loads(repository.slot_path(SAVE_SLOT_COUNT).read_text()),
                 document,
@@ -180,6 +181,22 @@ class SaveSystemTest(unittest.TestCase):
             self.assertEqual(len(summaries), SAVE_SLOT_COUNT)
             self.assertFalse(summaries[0].occupied)
             self.assertEqual(summaries[-1], summary)
+
+    def test_repository_preview_derives_dead_active_members_from_saved_hp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            document = self.save_document()
+            states = document["party"]["character_states"]
+            states["Fiora"]["hp"] = 0
+            states["Cerion"]["hp"] = 0
+            states["Alvan"]["hp"] = 0
+
+            summary = repository.save(1, document)
+
+            self.assertEqual(
+                summary.dead_character_keys,
+                ("Fiora", "Cerion"),
+            )
 
     def test_corrupt_slot_remains_occupied_without_preview_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

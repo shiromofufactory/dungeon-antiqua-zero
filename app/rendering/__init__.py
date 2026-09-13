@@ -53,8 +53,10 @@ from .monster_death import (
 )
 from .palette import (
     DIMMED_PALETTE,
+    MONOCHROME_PALETTE,
     PaletteShifter,
     create_default_palette_shifter,
+    grayscale_color,
     mix_color,
 )
 from .spell_effect import SPELL_EFFECT_FLASH_PALETTE, SpellEffectRenderer
@@ -62,6 +64,7 @@ from .spell_effect import SPELL_EFFECT_FLASH_PALETTE, SpellEffectRenderer
 
 __all__ = [
     "DIMMED_PALETTE",
+    "MONOCHROME_PALETTE",
     "DEFAULT_FADE_FRAME_COUNT",
     "FadeEvent",
     "FadePhase",
@@ -109,5 +112,6 @@ __all__ = [
     "SPELL_EFFECT_FLASH_PALETTE",
     "SpellEffectRenderer",
     "create_default_palette_shifter",
+    "grayscale_color",
     "mix_color",
 ]

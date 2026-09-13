@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from dataclasses import replace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
 from app.input import Direction, InputButton, InputState
 from app.member import FacePosition
+from app.rendering import MONOCHROME_PALETTE
 from app.state import Language, Settings
 from app.systems import SaveSlotSummary
 from app.text_catalog import TextCatalog
@@ -103,6 +106,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
         *,
         current_slot: int | None = None,
         on_save: Mock | None = None,
+        palette_shifter: Mock | None = None,
         language: Language = Language.JAPANESE,
     ) -> SaveMenuOverlay:
         fonts = Mock()
@@ -131,6 +135,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
                 "Ragna": FacePosition(128, 0),
                 "Dain": FacePosition(160, 0),
             },
+            palette_shifter=palette_shifter,
             on_save=Mock() if on_save is None else on_save,
         )
 
@@ -335,6 +340,32 @@ class SaveMenuOverlayTest(unittest.TestCase):
                 call.args[5:7] == (SAVE_FACE_SIZE, SAVE_FACE_SIZE)
                 for call in blt.call_args_list
             )
+        )
+
+    @patch("app.ui.save_menu.pyxel.blt")
+    @patch("app.ui.window.Window.draw")
+    def test_multiple_dead_faces_reuse_the_monochrome_palette(
+        self,
+        _draw_window: Mock,
+        _blt: Mock,
+    ) -> None:
+        slot_summaries = list(summaries(1))
+        slot_summaries[0] = replace(
+            slot_summaries[0],
+            dead_character_keys=("Fiora", "Alvan"),
+        )
+        palette_shifter = Mock()
+        palette_shifter.shifted.side_effect = lambda _name: nullcontext()
+        overlay = self.create_overlay(
+            tuple(slot_summaries),
+            palette_shifter=palette_shifter,
+        )
+
+        overlay.draw()
+
+        self.assertEqual(
+            palette_shifter.shifted.call_args_list,
+            [call(MONOCHROME_PALETTE), call(MONOCHROME_PALETTE)],
         )
 
 

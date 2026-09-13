@@ -35,6 +35,7 @@ from game import (
     PARTY_NAME_TEXT_X,
     PARTY_POINT_TEXT_X,
     PARTY_RECOVERY_TEXT_X,
+    PARTY_STATUS_TEXT_X,
     PARTY_WINDOW_GRID,
     RESERVE_MEMBER_Y_OFFSET_GRID,
     SE_CHANNELS,
@@ -73,7 +74,12 @@ from resources import (
     MapDestination,
     WorldSite,
 )
-from rendering import DIMMED_PALETTE, DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
+from rendering import (
+    DEFAULT_FADE_FRAME_COUNT,
+    DIMMED_PALETTE,
+    MONOCHROME_PALETTE,
+    FadeThroughBlack,
+)
 from scenes import BattleResult
 from state import DisplayMode, Language, SaveData, Settings
 from systems import InventorySystem
@@ -604,6 +610,43 @@ class GameTest(unittest.TestCase):
                 )
                 self.assertEqual(recovery.text, expected_text)
                 self.assertEqual(recovery.color, expected_color)
+
+    def test_party_condition_uses_name_row_and_negative_color(self) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Mock(language=Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        text_factory = Mock()
+        text_factory.create.side_effect = (
+            lambda text, x, y, **kwargs: Mock(
+                text=text,
+                x=x,
+                y=y,
+                color=kwargs.get("color", DEFAULT_TEXT_COLOR),
+            )
+        )
+        member = Mock(
+            hp=40,
+            max_hp=44,
+            mp=12,
+            max_mp=12,
+            heal_and_poison_amount=-1,
+        )
+        member.definition.localized_name.return_value = "フィオラ"
+        member.status.return_value = "%POISON%どく"
+
+        texts = mock._party_window_texts(
+            (member,),
+            localized_menu_texts(mock.texts, Language.JAPANESE),
+            text_factory,
+        )
+
+        condition = next(text for text in texts if text.x == PARTY_STATUS_TEXT_X)
+        self.assertEqual((condition.text, condition.y), ("%POISON%どく", 2))
+        self.assertEqual(condition.color, NEGATIVE_COLOR)
+        member.status.assert_called_once_with(
+            Localizer(Language.JAPANESE),
+            mock.texts,
+        )
 
     def test_shared_semantic_color_numbers_match_palette_roles(self) -> None:
         self.assertEqual(DISABLED_COLOR, 3)
@@ -1485,12 +1528,14 @@ class GameTest(unittest.TestCase):
         mock.palette_shifter.shifted.return_value = nullcontext()
         front_members = tuple(
             Mock(
+                is_dead=False,
                 is_front_row=True,
                 face_position=Mock(x=index * 32, y=0),
             )
             for index in range(5)
         )
         back = Mock(
+            is_dead=False,
             is_front_row=False,
             face_position=Mock(x=160, y=0),
         )
@@ -1533,6 +1578,39 @@ class GameTest(unittest.TestCase):
             ],
         )
         mock.palette_shifter.shifted.assert_called_once_with(DIMMED_PALETTE)
+
+    @patch("game.pyxel.cls")
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.blt")
+    def test_dead_main_menu_face_uses_monochrome_palette(
+        self,
+        blt: Mock,
+        _camera: Mock,
+        _clear_screen: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.windows = (Mock(is_open=True),)
+        mock.party_window = mock.windows[0]
+        mock.party_cursor = None
+        mock.sort_source_cursor = None
+        mock.alert = Mock(camera_x=0)
+        mock.settings_window = None
+        mock.confirmation_window = None
+        mock.faces = object()
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
+        mock.party = (
+            Mock(
+                is_dead=True,
+                is_front_row=True,
+                face_position=Mock(x=32, y=0),
+            ),
+        )
+
+        mock.draw()
+
+        mock.palette_shifter.shifted.assert_called_once_with(MONOCHROME_PALETTE)
+        blt.assert_called_once()
 
     @patch("game.pyxel.blt")
     def test_five_member_faces_keep_twelve_pixel_gaps(self, blt: Mock) -> None:
@@ -1887,6 +1965,7 @@ class GameTest(unittest.TestCase):
             texts=mock.texts,
             fonts=mock.fonts,
             faces=mock.faces,
+            palette_shifter=mock.palette_shifter,
             member_index=3,
         )
         self.assertIs(mock.status_screen, status_screen_class.return_value)
@@ -2064,6 +2143,7 @@ class GameTest(unittest.TestCase):
             fonts=mock.fonts,
             faces=mock.faces,
             face_positions=mock.character_face_positions,
+            palette_shifter=mock.palette_shifter,
             on_save=mock._save_to_slot,
             on_invalid_action=mock.alert.start,
         )

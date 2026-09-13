@@ -1047,17 +1047,13 @@ class MemberTest(unittest.TestCase):
         with self.assertRaisesRegex(MemberDataError, "cannot be equipped"):
             EquipmentSet({EquipmentSlot.HEAD: robe})
 
-    def test_healthy_status_can_show_max_hp_ok_or_nothing(self) -> None:
+    def test_healthy_status_can_show_ok_or_nothing(self) -> None:
         localizer = Localizer(Language.JAPANESE)
 
-        self.assertEqual(self.member.status(localizer, self.texts), "４４")
+        self.assertEqual(self.member.status(localizer, self.texts), "")
         self.assertEqual(
             self.member.status(localizer, self.texts, show_ok=True),
             "ＯＫ",
-        )
-        self.assertEqual(
-            self.member.status(localizer, self.texts, show_mhp=False),
-            "",
         )
 
     def test_status_uses_da2_condition_priority(self) -> None:
@@ -1075,7 +1071,7 @@ class MemberTest(unittest.TestCase):
         self.member.hp = 0
         self.assertEqual(
             self.member.status(localizer, self.texts, show_ok=True),
-            "Ｄｅａｄ",
+            "%DEATH%Ｄｅａｄ",
         )
 
     def test_each_condition_uses_shared_condition_term(self) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import Enum
 
 import pyxel
@@ -16,6 +17,7 @@ from member import (
     ProficiencyAptitude,
     ProficiencyKind,
 )
+from rendering import MONOCHROME_PALETTE, PaletteShifter
 from resistance import ResistanceType
 from resources import (
     TRANSPARENT_INDEX,
@@ -28,6 +30,8 @@ from ui import (
     CursorTarget,
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
+    NEGATIVE_COLOR,
+    TEXT_GRID_X,
     TEXT_ICONS,
     LocalizedWindowTextFactory,
     Window,
@@ -36,6 +40,7 @@ from ui import (
     WindowText,
     input_icon_tag,
     pad,
+    tagged_text_width,
 )
 
 FACES_IMAGE_ID = "faces/faces_pc"
@@ -113,6 +118,8 @@ RESISTANCE_POSITIONS = tuple(
 )
 ATTACK_VALUE_X = 46
 DUAL_ATTACK_VALUE_X = ATTACK_VALUE_X - 2
+STATUS_CONDITION_OK_X = 22
+STATUS_CONDITION_Y = 20
 STATUS_WINDOW_GRID = (0, 0, 64, 60)
 SKILL_GUIDE_WINDOW_GRID = (48, 1, 16, 4)
 SKILL_DESCRIPTION_WINDOW_GRID = (0, 50, 64, 10)
@@ -180,6 +187,7 @@ class StatusMenuOverlay:
         texts: TextCatalog,
         fonts: FontResources,
         faces: object,
+        palette_shifter: PaletteShifter | None = None,
         member_index: int = 0,
         input_device: InputDevice = InputDevice.KEYBOARD,
         window_factory_class: type[WindowFactory] = WindowFactory,
@@ -203,6 +211,7 @@ class StatusMenuOverlay:
         self.member_index = member_index
         self.fonts = fonts
         self.faces = faces
+        self.palette_shifter = palette_shifter
         self.input_device = input_device
         self.window_factory_class = window_factory_class
         self.window_cursor_class = window_cursor_class
@@ -241,6 +250,45 @@ class StatusMenuOverlay:
             self.fonts,
             self.settings.language,
         )
+        condition = localized_texts.create(
+            localized["value.condition"],
+            STATUS_CONDITION_OK_X,
+            STATUS_CONDITION_Y,
+            color=(
+                NEGATIVE_COLOR
+                if self.member.status(localizer, self.texts)
+                else DEFAULT_TEXT_COLOR
+            ),
+        )
+        healthy = localized_texts.create(
+            self.texts.text("status.ok", localizer),
+            STATUS_CONDITION_OK_X,
+            STATUS_CONDITION_Y,
+        )
+        condition_right_edge = (
+            STATUS_CONDITION_OK_X * TEXT_GRID_X
+            + tagged_text_width(
+                healthy.text,
+                healthy.font,
+                font_spans=healthy.font_spans,
+            )
+        )
+        condition = replace(
+            condition,
+            x=max(
+                0,
+                (
+                    condition_right_edge
+                    - tagged_text_width(
+                        condition.text,
+                        condition.font,
+                        font_spans=condition.font_spans,
+                    )
+                    + TEXT_GRID_X // 2
+                )
+                // TEXT_GRID_X,
+            ),
+        )
 
         windows = self.window_factory_class(self.fonts.font_for(Language.JAPANESE))
         return windows.create(
@@ -265,7 +313,7 @@ class StatusMenuOverlay:
                     ),
                 ),
                 localized_texts.create(localized["label.condition"], 6, 20),
-                localized_texts.create(localized["value.condition"], 22, 20),
+                condition,
                 localized_texts.create(localized["label.strength"], 6, 26),
                 WindowText(pad(abilities.strength, 2), 20, 26),
                 localized_texts.create(localized["label.agility"], 6, 29),
@@ -549,15 +597,22 @@ class StatusMenuOverlay:
             window.draw()
         # 顔
         face_position = self.member.face_position
+        if self.member.is_dead and self.palette_shifter is not None:
+            with self.palette_shifter.shifted(MONOCHROME_PALETTE):
+                self._draw_face(face_position.x, face_position.y)
+        else:
+            self._draw_face(face_position.x, face_position.y)
+        if self.phase is StatusSelectionPhase.SKILL:
+            self.skill_cursor.draw()
+
+    def _draw_face(self, source_x: int, source_y: int) -> None:
         pyxel.blt(
             16,
             10,
             self.faces,
-            face_position.x,
-            face_position.y,
+            source_x,
+            source_y,
             32,
             32,
             TRANSPARENT_INDEX,
         )
-        if self.phase is StatusSelectionPhase.SKILL:
-            self.skill_cursor.draw()

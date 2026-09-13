@@ -12,6 +12,7 @@ if __package__ == "ui":
     from input import Direction, InputState
     from localization import Localizer, ascii_to_fullwidth, format_number
     from member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
+    from rendering import MONOCHROME_PALETTE, PaletteShifter
     from resources import FontResources, TRANSPARENT_INDEX
     from state import Language, Settings
     from systems import SAVE_SLOT_COUNT, SaveSlotSummary
@@ -20,6 +21,7 @@ else:
     from ..input import Direction, InputState
     from ..localization import Localizer, ascii_to_fullwidth, format_number
     from ..member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
+    from ..rendering import MONOCHROME_PALETTE, PaletteShifter
     from ..resources import FontResources, TRANSPARENT_INDEX
     from ..state import Language, Settings
     from ..systems import SAVE_SLOT_COUNT, SaveSlotSummary
@@ -35,6 +37,7 @@ from .text_layout import right_aligned_grid_x
 from .window import (
     DEFAULT_TEXT_COLOR,
     CursorTarget,
+    Window,
     WindowCursor,
     WindowFactory,
 )
@@ -103,6 +106,7 @@ class SaveMenuOverlay:
         fonts: FontResources,
         faces: object,
         face_positions: Mapping[str, FacePosition],
+        palette_shifter: PaletteShifter | None = None,
         on_save: Callable[[int], SaveSlotSummary | None],
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
@@ -136,6 +140,7 @@ class SaveMenuOverlay:
         self.fonts = fonts
         self.faces = faces
         self.face_positions = dict(face_positions)
+        self.palette_shifter = palette_shifter
         self.on_save = on_save
         self.on_invalid_action = on_invalid_action
         self.pending_overwrite_slot: int | None = None
@@ -420,18 +425,33 @@ class SaveMenuOverlay:
                 face = self.face_positions.get(character_key)
                 if face is None:
                     continue
-                pyxel.blt(
-                    SAVE_FACE_FIRST_X + member_index * SAVE_FACE_COLUMN_WIDTH,
-                    slot_window.pixel_y + SAVE_FACE_Y_OFFSET * 4,
-                    self.faces,
-                    face.x,
-                    face.y,
-                    SAVE_FACE_SIZE,
-                    SAVE_FACE_SIZE,
-                    TRANSPARENT_INDEX,
-                )
+                if (
+                    character_key in summary.dead_character_keys
+                    and self.palette_shifter is not None
+                ):
+                    with self.palette_shifter.shifted(MONOCHROME_PALETTE):
+                        self._draw_face(slot_window, member_index, face)
+                else:
+                    self._draw_face(slot_window, member_index, face)
         if self.confirmation_window is not None:
             self.confirmation_window.draw()
+
+    def _draw_face(
+        self,
+        slot_window: Window,
+        member_index: int,
+        face: FacePosition,
+    ) -> None:
+        pyxel.blt(
+            SAVE_FACE_FIRST_X + member_index * SAVE_FACE_COLUMN_WIDTH,
+            slot_window.pixel_y + SAVE_FACE_Y_OFFSET * 4,
+            self.faces,
+            face.x,
+            face.y,
+            SAVE_FACE_SIZE,
+            SAVE_FACE_SIZE,
+            TRANSPARENT_INDEX,
+        )
 
 
 __all__ = [

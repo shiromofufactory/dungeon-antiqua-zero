@@ -74,6 +74,7 @@ class StatusMenuHarness(StatusMenuOverlay):
         texts: TextCatalog | None = None,
         fonts: FontResources | None = None,
         faces: object | None = None,
+        palette_shifter: PaletteShifter | None = None,
         member_index: int = 0,
         input_device: InputDevice = InputDevice.KEYBOARD,
     ) -> None:
@@ -92,6 +93,7 @@ class StatusMenuHarness(StatusMenuOverlay):
             faces=(
                 ImageResources().image(FACES_IMAGE_ID) if faces is None else faces
             ),
+            palette_shifter=palette_shifter,
             member_index=member_index,
             input_device=input_device,
             window_factory_class=WindowFactory,

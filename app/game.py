@@ -87,6 +87,7 @@ from resources.event_messages import (
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
+    MONOCHROME_PALETTE,
     FadeEvent,
     FadePhase,
     FadeThroughBlack,
@@ -307,6 +308,7 @@ PARTY_FACE_Y = 10
 PARTY_FACE_SIZE = 32
 PARTY_NAME_TEXT_X = 17
 PARTY_POINT_TEXT_X = 19
+PARTY_STATUS_TEXT_X = 32
 PARTY_RECOVERY_TEXT_X = 39
 PARTY_CURSOR_X = 3
 PARTY_CURSOR_Y = 5
@@ -578,6 +580,7 @@ class Game:
             fonts=self.fonts,
             faces=self.faces,
             face_positions=self.character_face_positions,
+            palette_shifter=self.palette_shifter,
             on_new_game=self._start_new_game,
             on_load=self._load_from_slot,
             on_delete=self._delete_save_slot,
@@ -1256,15 +1259,14 @@ class Game:
             condition = member.status(
                 localizer,
                 self.texts,
-                show_mhp=False,
             )
             if condition:
                 texts.append(
                     text_factory.create(
                         condition,
-                        PARTY_RECOVERY_TEXT_X,
-                        row_y + 3,
-                        color=base_color,
+                        PARTY_STATUS_TEXT_X,
+                        row_y,
+                        color=NEGATIVE_COLOR,
                     )
                 )
                 continue
@@ -1738,6 +1740,7 @@ class Game:
             texts=self.texts,
             fonts=self.fonts,
             faces=self.faces,
+            palette_shifter=self.palette_shifter,
             member_index=self.selected_member_index,
         )
 
@@ -2005,6 +2008,7 @@ class Game:
             fonts=self.fonts,
             faces=self.faces,
             face_positions=self.character_face_positions,
+            palette_shifter=self.palette_shifter,
             on_save=self._save_to_slot,
             on_invalid_action=self.alert.start,
         )
@@ -2994,7 +2998,14 @@ class Game:
             if self.party_window.is_open:
                 main_menu_members = self._main_menu_members()
                 for index, member in enumerate(main_menu_members):
-                    if self._is_reserve_index(index):
+                    if member.is_dead:
+                        with self.palette_shifter.shifted(MONOCHROME_PALETTE):
+                            self._draw_party_face(
+                                index,
+                                member,
+                                y_offset=self._member_y_offset_grid(index) * 4,
+                            )
+                    elif self._is_reserve_index(index):
                         with self.palette_shifter.shifted(DIMMED_PALETTE):
                             self._draw_party_face(
                                 index,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -7,9 +8,10 @@ from unittest.mock import Mock, patch
 from tools._bootstrap import APP_ROOT as _APP_ROOT
 
 from app.member import BattleStats, HandHit
+from app.rendering import MONOCHROME_PALETTE
 from app.resistance import ResistanceType
 from app.resources import load_record_array
-from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
+from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR, NEGATIVE_COLOR, tagged_text_width
 from tests.ui_test_support import (
     TEST_PARTY_CHARACTER_KEYS,
     StatusMenuHarness,
@@ -20,6 +22,7 @@ from ui.status_menu import (
     DUAL_ATTACK_VALUE_X,
     LOCALIZED_POSITIONS,
     RESISTANCE_POSITIONS,
+    STATUS_CONDITION_OK_X,
     SKILL_DESCRIPTION_WINDOW_GRID,
     SKILL_GUIDE_WINDOW_GRID,
     Direction,
@@ -34,6 +37,14 @@ from ui.status_menu import (
     pad,
     resistance_icon_tag,
 )
+
+
+class FixedWidthFont:
+    def __init__(self, width: int = 8) -> None:
+        self.width = width
+
+    def text_width(self, text: str) -> int:
+        return len(text) * self.width
 
 
 def input_state(
@@ -84,6 +95,33 @@ class StatusMenuTest(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def test_abnormal_condition_is_negative_and_right_aligned_with_ok(self) -> None:
+        with (
+            patch("tests.ui_test_support.ImageResources") as images,
+            patch("tests.ui_test_support.FontResources") as fonts,
+        ):
+            images.return_value.image.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
+            fonts.return_value.baseline_offset_for.return_value = 0
+            mock = StatusMenuHarness()
+
+        mock.member.poisoned = True
+        mock._rebuild_window()
+
+        condition = next(
+            text
+            for text in mock.status_window.texts
+            if text.y == 20 and text.x != 6
+        )
+        ok_width = FixedWidthFont().text_width("ＯＫ")
+        condition_width = tagged_text_width(condition.text, condition.font)
+        self.assertEqual(condition.text, "%POISON%どく")
+        self.assertEqual(condition.color, NEGATIVE_COLOR)
+        self.assertEqual(
+            condition.x * 4 + condition_width,
+            STATUS_CONDITION_OK_X * 4 + ok_width,
+        )
+
     def test_first_three_lines_use_localized_member_identity(self) -> None:
         with (
             patch("tests.ui_test_support.ImageResources") as images,
@@ -91,7 +129,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.WindowFactory") as factory,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
 
             mock = StatusMenuHarness()
@@ -213,7 +251,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness()
 
@@ -236,7 +274,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.WindowCursor"),
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
 
             mock = StatusMenuHarness(member_index=2)
@@ -252,7 +290,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness()
 
@@ -272,7 +310,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness()
 
@@ -330,7 +368,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             single = StatusMenuHarness(member_index=0)
             dual = StatusMenuHarness(member_index=3)
@@ -375,7 +413,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness(member_index=4)
 
@@ -405,7 +443,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness(member_index=4)
 
@@ -450,7 +488,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness(member_index=1)
 
@@ -469,7 +507,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness(member_index=0)
 
@@ -540,8 +578,8 @@ class StatusMenuTest(unittest.TestCase):
                 self.assertFalse(returned)
 
     def test_english_localized_text_is_rebuilt_as_fullwidth(self) -> None:
-        japanese_font = object()
-        english_font = object()
+        japanese_font = FixedWidthFont(8)
+        english_font = FixedWidthFont(6)
         with (
             patch("tests.ui_test_support.ImageResources") as images,
             patch("tests.ui_test_support.FontResources") as fonts,
@@ -622,7 +660,7 @@ class StatusMenuTest(unittest.TestCase):
             patch("tests.ui_test_support.FontResources") as fonts,
         ):
             images.return_value.image.return_value = object()
-            fonts.return_value.font_for.return_value = object()
+            fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
             mock = StatusMenuHarness()
 
@@ -680,8 +718,9 @@ class StatusMenuTest(unittest.TestCase):
     def test_draws_all_windows_before_face(self) -> None:
         mock = StatusMenuHarness.__new__(StatusMenuHarness)
         mock.faces = object()
-        mock.party = (Mock(face_position=Mock(x=64, y=96)),)
+        mock.party = (Mock(is_dead=False, face_position=Mock(x=64, y=96)),)
         mock.member_index = 0
+        mock.palette_shifter = None
         mock.phase = StatusSelectionPhase.STATUS
         first_window = Mock(is_open=True)
         second_window = Mock()
@@ -708,6 +747,22 @@ class StatusMenuTest(unittest.TestCase):
             32,
             TRANSPARENT_INDEX,
         )
+
+    def test_dead_status_face_uses_monochrome_palette(self) -> None:
+        mock = StatusMenuHarness.__new__(StatusMenuHarness)
+        mock.faces = object()
+        mock.party = (Mock(is_dead=True, face_position=Mock(x=64, y=96)),)
+        mock.member_index = 0
+        mock.phase = StatusSelectionPhase.STATUS
+        mock.windows = (Mock(),)
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
+
+        with patch("ui.status_menu.pyxel.blt") as blt:
+            mock.draw()
+
+        mock.palette_shifter.shifted.assert_called_once_with(MONOCHROME_PALETTE)
+        blt.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

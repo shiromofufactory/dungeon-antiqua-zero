@@ -3,10 +3,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, call
 
-from app.rendering.palette import PaletteShifter, mix_color
+from app.rendering.palette import PaletteShifter, grayscale_color, mix_color
 
 
 class PaletteShifterTest(unittest.TestCase):
+    def test_grayscale_color_preserves_luminance_as_equal_channels(self) -> None:
+        self.assertEqual(grayscale_color(0x80C040), 0x9E9E9E)
+
     def test_mix_color_uses_da2_channel_formula(self) -> None:
         self.assertEqual(mix_color(0x80C040, 0.5, 0x000000), 0x406020)
         self.assertEqual(mix_color(0x80C040, 0.0, 0x102030), 0x102030)
