@@ -55,6 +55,7 @@ class SpellAction(StrEnum):
     HASTE = "HASTE"
     HEAL = "HEAL"
     HEAVENGATE = "HEAVENGATE"
+    IDENTIFY = "IDENTIFY"
     MAGIC_SHIELD = "MAGIC_SHIELD"
     MAGIC_UP = "MAG_UP"
     MANA = "MANA"

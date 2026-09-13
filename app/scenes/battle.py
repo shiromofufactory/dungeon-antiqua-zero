@@ -3713,6 +3713,11 @@ class BattleScene:
             getattr(self, "hidden_party_indexes", set()).discard(
                 self.active_party_index
             )
+        if (
+            effect_spell is not None
+            and effect_spell.action is SpellAction.IDENTIFY
+        ):
+            return self._begin_identify_presentation()
         if effect_spell is not None:
             self._record_action_target_information(effect_spell)
         if effect_spell is not None and self._begin_action_presentation(effect_spell):

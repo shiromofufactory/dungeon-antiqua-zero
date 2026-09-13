@@ -3336,6 +3336,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(candidates[1].is_equipped)
         self.assertTrue(all(not candidate.is_equipped for candidate in candidates[2:]))
         candidate_keys = {candidate.item.key for candidate in candidates}
+        self.assertIn("MAGNIFIER", candidate_keys)
         self.assertNotIn("FRUIT of STR", candidate_keys)
         self.assertNotIn("FRUIT of AGI", candidate_keys)
         self.assertNotIn("FRUIT of MAG", candidate_keys)
@@ -4797,6 +4798,31 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock._complete_current_turn.assert_not_called()
 
+    def test_magnifier_is_consumed_and_starts_the_shared_identify_effect(self) -> None:
+        items = load_mock_items()
+        magnifier = items["MAGNIFIER"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem.with_one_each(items)
+        mock.active_party_index = 0
+        mock.pending_item_candidate = BattleItemCandidate(magnifier)
+        mock.pending_spell = None
+        mock.spells = load_mock_spells()
+        mock.hidden_party_indexes = set()
+        mock._show_item_use_message = Mock()
+        mock._begin_identify_presentation = Mock(return_value=True)
+        mock._record_action_target_information = Mock()
+        mock._begin_action_presentation = Mock()
+
+        self.assertTrue(mock._confirm_action_target_selection())
+
+        self.assertEqual(mock.inventory_system.quantity(magnifier), 0)
+        mock._show_item_use_message.assert_called_once_with(magnifier)
+        mock._begin_identify_presentation.assert_called_once_with()
+        mock._record_action_target_information.assert_not_called()
+        mock._begin_action_presentation.assert_not_called()
+
     def test_target_cancel_returns_to_the_item_list_without_consuming_it(self) -> None:
         items = load_mock_items()
         potion = items["POTION"]
@@ -4845,6 +4871,43 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._begin_action_target_selection(spell))
 
         self.assertIs(mock.phase, BattleMockPhase.ACTION_TARGET)
+        self.assertTrue(mock.action_targets_enemy)
+        self.assertFalse(mock.action_targets_all)
+        self.assertEqual(mock.selected_target_index, 1)
+        self.assertTrue(mock.target_cursor.active)
+
+    def test_magnifier_selects_an_enemy_without_requiring_identify_skill(self) -> None:
+        spell = load_mock_spells()["IDENTIFY"]
+        magnifier = load_mock_items()["MAGNIFIER"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (
+            SimpleNamespace(is_alive=True),
+            SimpleNamespace(is_alive=True),
+        )
+        mock.target_window = Window(0, 0, 64, 60, transparent=True)
+        mock.target_cursor = WindowCursor(
+            mock.target_window,
+            tuple(
+                CursorTarget((x + 8) // 4, (y + 16) // 4, key=index)
+                for index, (x, y) in enumerate(MONSTER_POSITIONS[:2])
+            ),
+            active=False,
+        )
+        mock.party_target_window = Window(0, 0, 64, 60, transparent=True)
+        mock.item_window = Mock()
+        mock.item_guide_window = Mock()
+        mock._close_spell_windows = Mock()
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(
+            mock._begin_action_target_selection(
+                spell,
+                item_candidate=BattleItemCandidate(magnifier),
+            )
+        )
+
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_TARGET)
+        self.assertIs(mock.selected_command, BattleCommand.ITEM)
         self.assertTrue(mock.action_targets_enemy)
         self.assertFalse(mock.action_targets_all)
         self.assertEqual(mock.selected_target_index, 1)

@@ -75,7 +75,7 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 32, 39))
         self.assertEqual(ITEM_INFO_WINDOW_GRID, (31, 5, 33, 39))
         self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24, 36))
-        self.assertEqual(len(mock.items), 122)
+        self.assertEqual(len(mock.items), 123)
         self.assertEqual(len(mock.inventory), len(mock.items))
         self.assertEqual(set(mock.item_counts.values()), {1})
         self.assertEqual(mock.important_items, ())
@@ -124,9 +124,9 @@ class ItemMenuTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "１２２",
+                "１２３",
                 "きろくずみ：",
-                "１２２／１２２",
+                "１２３／１２３",
             ],
         )
         self.assertEqual(
@@ -718,9 +718,9 @@ class ItemMenuTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "アイテムしょじすう：",
-                "１２１",
+                "１２２",
                 "きろくずみ：",
-                "１２２／１２２",
+                "１２３／１２３",
             ],
         )
 

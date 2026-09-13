@@ -74,6 +74,17 @@ class SpellTest(unittest.TestCase):
             "－",
         )
 
+    def test_identify_item_effect_targets_one_enemy_only_in_battle(self) -> None:
+        identify = self.spells["IDENTIFY"]
+
+        self.assertIs(identify.type, SpellType.ITEM)
+        self.assertIs(identify.action, SpellAction.IDENTIFY)
+        self.assertFalse(identify.on_camp)
+        self.assertTrue(identify.on_battle)
+        self.assertTrue(identify.to_enemy)
+        self.assertFalse(identify.to_all)
+        self.assertFalse(identify.is_learned_by(self.party[0]))
+
     def test_loads_every_current_heal_effect_by_its_stable_action(self) -> None:
         self.assertEqual(
             {
