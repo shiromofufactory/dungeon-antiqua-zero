@@ -2246,6 +2246,55 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_damage_popups[0].damage, expected_damage)
         mock._start_timeline_animation.assert_called_once_with()
 
+    def test_regenerate_recovers_one_sixteenth_at_turn_start(self) -> None:
+        skills = load_mock_skills()
+        member = load_mock_party(
+            load_mock_items(),
+            skills,
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        member.skills.append(skills["Regenerate"])
+        member.hp = 1
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.spell_damage_popups = []
+        mock.healing_popups = []
+        mock._party_draw_position = Mock(return_value=(172, 64))
+        mock._refresh_party_hp_text = Mock()
+
+        self.assertFalse(mock._apply_turn_start_hp_change(visual))
+
+        expected_healing = (member.max_hp + 15) // 16
+        self.assertEqual(member.hp, 1 + expected_healing)
+        self.assertEqual(mock.healing_popups[0].amount, expected_healing)
+        self.assertEqual(mock.spell_damage_popups, [])
+        mock._refresh_party_hp_text.assert_called_once_with(0)
+
+    def test_regenerate_cancels_normal_poison_at_turn_start(self) -> None:
+        skills = load_mock_skills()
+        member = load_mock_party(
+            load_mock_items(),
+            skills,
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        member.skills.append(skills["Regenerate"])
+        member.poisoned = True
+        starting_hp = member.hp
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.spell_damage_popups = []
+        mock.healing_popups = []
+
+        self.assertFalse(mock._apply_turn_start_hp_change(visual))
+
+        self.assertEqual(member.hp, starting_hp)
+        self.assertEqual(mock.healing_popups, [])
+        self.assertEqual(mock.spell_damage_popups, [])
+
     def test_lethal_attack_starts_death_then_removes_enemy(self) -> None:
         monster = BattleMockMonster(
             key="monster",
@@ -5167,7 +5216,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._monster_draw_x = Mock(return_value=4)
         mock._begin_monster_death = Mock(return_value=True)
 
-        self.assertTrue(mock._apply_turn_start_poison(actor))
+        self.assertTrue(mock._apply_turn_start_hp_change(actor))
 
         self.assertEqual(actor.state.hp, 0)
         self.assertEqual(mock.spell_damage_popups[0].damage, 3)
@@ -6969,7 +7018,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._remove_defeated_party_from_timeline = Mock()
         mock._party_is_defeated = Mock(return_value=False)
         mock._begin_front_promotion_if_needed = Mock(return_value=False)
-        mock._apply_turn_start_poison = Mock(return_value=False)
+        mock._apply_turn_start_hp_change = Mock(return_value=False)
         mock._start_timeline_animation = Mock()
         mock._refresh_party_text_colors = Mock()
 

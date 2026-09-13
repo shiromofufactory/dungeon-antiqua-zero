@@ -17,6 +17,7 @@ DA2_HEAL_RATE_RANGE = 0.4
 SPELL_DAMAGE_MINIMUM_RATE = 0.20
 SPELL_DAMAGE_RATE_RANGE = 0.05
 DA2_POISON_DAMAGE_DENOMINATOR = 16
+DA2_BATTLE_HEALING_DENOMINATOR = 16
 
 
 class SpellAffinity(StrEnum):
@@ -230,6 +231,22 @@ def poison_tick_damage(*, max_hp: int, weak_to_poison: bool = False) -> int:
     ) // DA2_POISON_DAMAGE_DENOMINATOR
 
 
+def battle_healing_amount(*, max_hp: int, healing: int) -> int:
+    """Return the signed HP change for battle recovery equipment and skills."""
+
+    max_hp = _nonnegative_integer(max_hp, "max_hp")
+    if max_hp <= 0:
+        raise ValueError("max_hp must be positive")
+    if isinstance(healing, bool) or not isinstance(healing, int):
+        raise TypeError("healing must be an integer")
+    if healing == 0:
+        return 0
+    magnitude = (
+        max_hp * abs(healing) + DA2_BATTLE_HEALING_DENOMINATOR - 1
+    ) // DA2_BATTLE_HEALING_DENOMINATOR
+    return magnitude if healing > 0 else -magnitude
+
+
 def resolve_healing(
     *,
     intensity: int,
@@ -268,6 +285,7 @@ def resolve_healing(
 
 __all__ = [
     "DA2_DEFAULT_ITEM_SPELL_ABILITY",
+    "DA2_BATTLE_HEALING_DENOMINATOR",
     "DA2_HEAL_RATE_RANGE",
     "DA2_MINIMUM_HEAL_RATE",
     "DA2_POISON_DAMAGE_DENOMINATOR",
@@ -277,6 +295,7 @@ __all__ = [
     "SpellAffinity",
     "SpellDamageResult",
     "StatusSpellResult",
+    "battle_healing_amount",
     "member_spell_ability",
     "member_spell_modifier",
     "poison_tick_damage",

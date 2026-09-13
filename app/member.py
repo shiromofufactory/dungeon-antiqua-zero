@@ -177,6 +177,7 @@ _EQUIPMENT_PROFICIENCY_BY_SUBTYPE = MappingProxyType(
     }
 )
 _TWO_HANDED_SKILL_KEY = "Two-Handed"
+_REGENERATE_SKILL_KEY = "Regenerate"
 _TWO_HANDED_SKILL_KINDS = frozenset(
     (
         ProficiencyKind.SWORD,
@@ -1072,6 +1073,14 @@ class Member:
         if self.hp <= 0:
             return 0
         return sum(item.healing for item in self.equipment.equipped_items())
+
+    @property
+    def battle_healing(self) -> int:
+        """Return battle recovery levels from equipment and Regenerate."""
+
+        if self.hp <= 0:
+            return 0
+        return self.healing + int(self.has_skill(_REGENERATE_SKILL_KEY))
 
     @property
     def heal_and_poison_amount(self) -> int:

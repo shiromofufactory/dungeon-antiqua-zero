@@ -322,6 +322,19 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.apply_heal_and_poison(), 1)
         self.assertEqual(self.member.hp, 43)
 
+    def test_regenerate_adds_one_battle_healing_level_only_in_battle(self) -> None:
+        self.member.skills.append(self.skill("Regenerate"))
+        self.member.hp = 40
+
+        self.assertEqual(self.member.healing, 0)
+        self.assertEqual(self.member.battle_healing, 1)
+
+        ring = self.item("RING", "ARM", healing=1)
+        self.member.equipment = EquipmentSet({EquipmentSlot.ARM: ring})
+
+        self.assertEqual(self.member.healing, 1)
+        self.assertEqual(self.member.battle_healing, 2)
+
     def test_poison_tick_cannot_reduce_hp_below_zero(self) -> None:
         self.member.hp = 1
         self.member.poisoned = True

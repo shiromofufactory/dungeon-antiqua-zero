@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.battle_magic import (
+    battle_healing_amount,
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
     SpellAffinity,
     member_spell_ability,
@@ -156,6 +157,16 @@ class PoisonTickDamageTest(unittest.TestCase):
         self.assertEqual(poison_tick_damage(max_hp=1), 1)
         self.assertEqual(poison_tick_damage(max_hp=17), 2)
         self.assertEqual(poison_tick_damage(max_hp=17, weak_to_poison=True), 3)
+
+
+class BattleHealingAmountTest(unittest.TestCase):
+    def test_rounds_up_one_sixteenth_for_each_recovery_level(self) -> None:
+        self.assertEqual(battle_healing_amount(max_hp=1, healing=1), 1)
+        self.assertEqual(battle_healing_amount(max_hp=17, healing=1), 2)
+        self.assertEqual(battle_healing_amount(max_hp=17, healing=2), 3)
+
+    def test_preserves_negative_healing_as_damage(self) -> None:
+        self.assertEqual(battle_healing_amount(max_hp=17, healing=-1), -2)
 
 
 class ResolveHealingTest(unittest.TestCase):

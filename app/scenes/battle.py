@@ -30,6 +30,7 @@ from battle_commands import (
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
     SpellAffinity,
+    battle_healing_amount,
     member_spell_ability,
     member_spell_modifier,
     poison_tick_damage,
@@ -5263,7 +5264,7 @@ class BattleScene:
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
             self.defending_party_indexes.discard(self.active_party_index)
-            if self._apply_turn_start_poison(actor):
+            if self._apply_turn_start_hp_change(actor):
                 return
             if getattr(actor.member, "stunned", False):
                 if isinstance(actor.member, Member):
@@ -5325,7 +5326,7 @@ class BattleScene:
             self.monster_charge_presentation = None
             self.monster_escape_actor_index = None
             self.monster_escape_animation_frame = 0
-            if self._apply_turn_start_poison(actor):
+            if self._apply_turn_start_hp_change(actor):
                 return
             if actor.state.consume_stun():
                 self.blinking_monster_index = None
@@ -5349,11 +5350,11 @@ class BattleScene:
             self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
         self._refresh_party_text_colors()
 
-    def _apply_turn_start_poison(
+    def _apply_turn_start_hp_change(
         self,
         actor: BattleCharacter | BattleMonster,
     ) -> bool:
-        """Apply one poison tick before this actor acts or loses a sleep turn."""
+        """Apply poison and automatic recovery before the actor's turn."""
 
         damage_popups = getattr(self, "spell_damage_popups", None)
         if damage_popups is None:
@@ -5362,21 +5363,47 @@ class BattleScene:
 
         if isinstance(actor, BattleCharacter):
             member = actor.member
-            if not getattr(member, "poisoned", False):
+            poisoned = getattr(member, "poisoned", False)
+            healing_level = getattr(member, "battle_healing", 0)
+            if not poisoned and healing_level == 0:
                 return False
-            damage = poison_tick_damage(max_hp=member.max_hp)
-            member.take_poison_damage(damage)
+            poison_damage = (
+                poison_tick_damage(max_hp=member.max_hp)
+                if poisoned
+                else 0
+            )
+            healing = battle_healing_amount(
+                max_hp=member.max_hp,
+                healing=healing_level,
+            )
+            hp_change = healing - poison_damage
+            if hp_change == 0:
+                return False
             party_index = next(
                 index
                 for index, visual in enumerate(self.party_visuals)
                 if visual is actor
             )
             position = self._party_draw_position(party_index)
-            if position is not None:
-                x, y = position
-                damage_popups.append(
-                    BattleSpellDamagePopup(x + 6, y + 16, damage)
-                )
+            if hp_change > 0:
+                member.apply_healing(hp_change)
+                if position is not None:
+                    x, y = position
+                    healing_popups = getattr(self, "healing_popups", None)
+                    if healing_popups is None:
+                        healing_popups = []
+                        self.healing_popups = healing_popups
+                    healing_popups.append(
+                        BattleHealingPopup(x + 6, y + 16, hp_change)
+                    )
+            else:
+                damage = -hp_change
+                member.take_poison_damage(damage)
+                if position is not None:
+                    x, y = position
+                    damage_popups.append(
+                        BattleSpellDamagePopup(x + 6, y + 16, damage)
+                    )
             self._refresh_party_hp_text(party_index)
             if member.is_dead:
                 getattr(self, "focused_target_by_party_index", {}).pop(
