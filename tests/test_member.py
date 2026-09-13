@@ -412,6 +412,29 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.hp, 1)
         self.assertEqual(self.member.mp, 2)
 
+    def test_full_recovery_restores_points_and_all_conditions(self) -> None:
+        self.member.hp = 1
+        self.member.mp = 2
+        self.member.poisoned = True
+        self.member.paralyzed = True
+        self.member.sleeping = 2
+        self.member.confused = 2
+        self.member.stunned = True
+        self.member.protection_level = -1
+        self.member.speed_modifier = -1
+
+        self.member.fully_recover()
+
+        self.assertEqual(self.member.hp, self.member.max_hp)
+        self.assertEqual(self.member.mp, self.member.max_mp)
+        self.assertFalse(self.member.poisoned)
+        self.assertFalse(self.member.paralyzed)
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 0)
+        self.assertFalse(self.member.stunned)
+        self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.speed_modifier, 0)
+
     def test_protection_raises_defense_twice_using_da2_formula(self) -> None:
         armor = self.item("ARMOR", "BODY", defense=10)
         self.member.equipment = EquipmentSet({EquipmentSlot.BODY: armor})

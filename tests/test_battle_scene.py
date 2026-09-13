@@ -369,6 +369,11 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             FieldPosition(16, 38),
             Direction.DOWN,
         )
+        members = (
+            Mock(hp=10, paralyzed=False, is_front_row=True),
+            Mock(hp=10, paralyzed=False, is_front_row=True),
+        )
+        game.party = members
         game._reset_field_actors = Mock()
         game.bgm = Mock()
 
@@ -381,6 +386,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             facing=Direction.DOWN,
         )
         self.assertIsNone(game.battle_scene)
+        for member in members:
+            member.fully_recover.assert_called_once_with()
         game._reset_field_actors.assert_called_once_with()
         game.bgm.transition_to.assert_called_once_with("da3-forest")
 
@@ -399,6 +406,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertEqual(game.save_data.battle_count, 5)
         battle_scene.clear_temporary_member_conditions.assert_called_once_with()
+        member.fully_recover.assert_not_called()
         member.recover_world_map_entry_ailments.assert_not_called()
 
     def test_battle_return_permanently_advances_first_recoverable_rear(

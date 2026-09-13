@@ -523,6 +523,7 @@ class Game:
         self.event_message: EventMessageOverlay | None = None
         self.treasure_message: MessageOverlay | None = None
         self.field_condition_message: MessageOverlay | None = None
+        self.field_party_annihilated_pending = False
         self.pending_treasure_close_actor_id: str | None = None
         self.event_move_remaining = 0
         self.event_release_direction: Direction | None = None
@@ -671,17 +672,28 @@ class Game:
                     {"MEMBER": promoted.definition.localized_name(localizer)},
                 )
             )
-        if not any(
+        annihilated = not any(
             self._member_is_field_recoverable(member) for member in self.party
-        ):
+        )
+        if annihilated:
             lines.append(
                 self.texts.text(FIELD_PARTY_ANNIHILATED_TEXT_KEY, localizer)
             )
+        self.field_party_annihilated_pending = annihilated
         self.field_condition_message = MessageOverlay(
             lines=tuple(lines),
             settings=self.settings,
             fonts=self.fonts,
         )
+
+    def _finish_field_condition_message(self) -> None:
+        """Close a step-health notice and begin defeat return after a wipe."""
+
+        self.field_condition_message = None
+        if not getattr(self, "field_party_annihilated_pending", False):
+            return
+        self.field_party_annihilated_pending = False
+        self._begin_battle_return(BattleResult.DEFEAT)
 
     @staticmethod
     def _member_is_field_recoverable(member: Member) -> bool:
@@ -802,11 +814,11 @@ class Game:
         battle_scene = getattr(self, "battle_scene", None)
         if battle_scene is not None:
             battle_scene.clear_temporary_member_conditions()
-        if getattr(self, "party", ()):
-            self._promote_first_recoverable_member()
         if result is BattleResult.VICTORY:
             self.save_data.battle_count += 1
         elif result is BattleResult.DEFEAT:
+            for member in self.party:
+                member.fully_recover()
             destination = self.encounter_system.defeat_return(
                 self.current_map,
                 self.field.position,
@@ -818,6 +830,8 @@ class Game:
                     facing=destination.facing,
                 )
                 self._reset_field_actors()
+        if getattr(self, "party", ()):
+            self._promote_first_recoverable_member()
         self.battle_scene = None
         self.bgm.set_fade_rate(0.0)
         self.bgm.transition_to(self.current_map.bgm_id)
@@ -2782,7 +2796,7 @@ class Game:
             )
             if field_condition_message is not None:
                 if field_condition_message.update(input_state):
-                    self.field_condition_message = None
+                    self._finish_field_condition_message()
                 return
             if getattr(self, "event_runner", None) is not None:
                 self._update_event(input_state)

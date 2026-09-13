@@ -74,6 +74,7 @@ from resources import (
     WorldSite,
 )
 from rendering import DIMMED_PALETTE, DEFAULT_FADE_FRAME_COUNT, FadeThroughBlack
+from scenes import BattleResult
 from state import DisplayMode, Language, SaveData, Settings
 from systems import InventorySystem
 from ui import (
@@ -877,13 +878,14 @@ class GameTest(unittest.TestCase):
 
         game._apply_dungeon_step_health_changes()
 
+        self.assertFalse(game.field_party_annihilated_pending)
         self.assertIs(rear.formation_row, FormationRow.FRONT)
         self.assertIs(game.field_condition_message, message_overlay.return_value)
         self.assertEqual(
             message_overlay.call_args.kwargs["lines"],
             (
-                "フィオラは　ちからつきた",
-                "セリオンが　ぜんれつに　すすみでた",
+                "フィオラは　力尽きた",
+                "セリオンが　前列に進み出た",
             ),
         )
 
@@ -913,13 +915,28 @@ class GameTest(unittest.TestCase):
 
         game._apply_dungeon_step_health_changes()
 
+        self.assertTrue(game.field_party_annihilated_pending)
         self.assertEqual(
             message_overlay.call_args.kwargs["lines"],
             (
-                "フィオラは　ちからつきた",
-                "ぼうけんしゃたちは　ぜんめつした",
+                "フィオラは　力尽きた",
+                "全滅した．．．",
             ),
         )
+
+    def test_closing_field_annihilation_message_begins_defeat_return(
+        self,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.field_condition_message = Mock()
+        game.field_party_annihilated_pending = True
+        game._begin_battle_return = Mock()
+
+        game._finish_field_condition_message()
+
+        self.assertIsNone(game.field_condition_message)
+        self.assertFalse(game.field_party_annihilated_pending)
+        game._begin_battle_return.assert_called_once_with(BattleResult.DEFEAT)
 
     def test_field_player_uses_first_recoverable_member(self) -> None:
         defeated = Mock(hp=0, paralyzed=False)
