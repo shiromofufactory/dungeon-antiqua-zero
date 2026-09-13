@@ -85,6 +85,12 @@ class InventorySystem:
         )
 
     @property
+    def catalog_items(self) -> tuple[Item, ...]:
+        """Return every registered item in master-data order."""
+
+        return tuple(self._items.values())
+
+    @property
     def quantities(self) -> Mapping[str, int]:
         """Expose current quantities without allowing callers to mutate them."""
 

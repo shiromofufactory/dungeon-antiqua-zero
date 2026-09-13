@@ -104,6 +104,14 @@ class InventorySystemTest(unittest.TestCase):
         self.assertEqual(inventory.quantity(self.potion), 0)
         self.assertEqual(inventory.items, (self.quest_item,))
 
+    def test_catalog_items_include_unowned_items_in_master_order(self) -> None:
+        inventory = InventorySystem(self.items, {self.quest_item.key: 1})
+
+        self.assertEqual(
+            inventory.catalog_items,
+            (self.potion, self.quest_item),
+        )
+
     def test_price_zero_item_cannot_be_discarded(self) -> None:
         inventory = InventorySystem(self.items, {self.quest_item.key: 1})
 

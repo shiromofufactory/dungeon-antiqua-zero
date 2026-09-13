@@ -1628,6 +1628,7 @@ class Game:
         )
         self.debug_screen = DebugMenuOverlay(
             editor=editor,
+            inventory_system=self.inventory_system,
             save_data=self.save_data,
             settings=self.settings,
             fonts=self.fonts,

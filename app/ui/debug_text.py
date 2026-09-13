@@ -17,6 +17,12 @@ class DebugText:
     gold: str = "Ｇｏｌｄ"
     members: str = "メンバー"
     member_status: str = "メンバー状態"
+    items: str = "アイテム"
+    item_inventory: str = "もちもの"
+    item_warehouse: str = "そうこ"
+    item_switch_guide: str = "←→：きりかえ"
+    item_count_template: str = "{count}しゅ"
+    no_items: str = "なし"
     member_status_selection: str = "メンバーせんたく"
     hp: str = "ＨＰ"
     mp: str = "ＭＰ"
@@ -61,6 +67,11 @@ class DebugText:
 
         return self._format_count(count, self.skill_count_template)
 
+    def item_count(self, count: int) -> str:
+        """Format the number of currently owned item types."""
+
+        return self._format_count(count, self.item_count_template)
+
     def shop_count(self, count: int) -> str:
         """Format the number of selectable debug shops."""
 
@@ -68,12 +79,16 @@ class DebugText:
 
     @staticmethod
     def _format_count(count: int, template: str) -> str:
+        count_text = DebugText._validated_count_text(count)
+        return template.format(count=count_text)
+
+    @staticmethod
+    def _validated_count_text(count: int) -> str:
         if isinstance(count, bool) or not isinstance(count, int):
             raise TypeError("debug count must be an integer")
         if count < 0:
             raise ValueError("debug count must not be negative")
-        count_text = str(count).translate(_FULLWIDTH_DIGITS)
-        return template.format(count=count_text)
+        return str(count).translate(_FULLWIDTH_DIGITS)
 
 
 DEBUG_TEXT = DebugText()

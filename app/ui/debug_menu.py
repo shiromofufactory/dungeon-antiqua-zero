@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from input import Direction, InputAction, InputDevice, InputState
+from item import Item
 from localization import Localizer, format_number
 from member import (
     FIORA_CHARACTER_KEY,
@@ -16,12 +17,12 @@ from member import (
 )
 from resources import FontResources, FontRole
 from state import Language, SaveData, Settings
-from systems import DebugPartyEditor, DebugPartyError
-from ui.debug_text import DEBUG_TEXT
+from systems import DebugPartyEditor, DebugPartyError, InventorySystem
+
 from ui import (
-    CursorTarget,
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
+    CursorTarget,
     LocalizedWindowTextFactory,
     Window,
     WindowCursor,
@@ -29,6 +30,7 @@ from ui import (
     WindowText,
     input_icon_tag,
 )
+from ui.debug_text import DEBUG_TEXT
 
 DEBUG_WINDOW_GRID = (2, 2, 60, 56)
 DEBUG_ROW_HEIGHT = 3
@@ -37,6 +39,7 @@ MAIN_ITEM_KEYS = (
     "gold",
     "members",
     "member_status",
+    "items",
     "teleport",
     "shop",
 )
@@ -68,6 +71,14 @@ MEMBER_SKILL_FIRST_Y = 9
 MEMBER_SKILL_ROW_COUNT = 10
 MEMBER_SKILL_TEXT_X = (6, 34)
 MEMBER_SKILL_CURSOR_X = (4, 32)
+ITEM_FIRST_Y = 7
+ITEM_ROW_HEIGHT = DEBUG_ROW_HEIGHT
+ITEM_VISIBLE_COUNT = 13
+ITEM_TEXT_X = (6, 36)
+ITEM_CURSOR_X = (4, 34)
+ITEM_GUIDE_X = 24
+ITEM_QUANTITY_X = 28
+ITEM_GUIDE_Y = 52
 TELEPORT_FIRST_Y = 9
 TELEPORT_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 TELEPORT_VISIBLE_COUNT = 13
@@ -97,9 +108,17 @@ class DebugMenuPhase(Enum):
     MEMBER_STATUS_LIST = auto()
     MEMBER_STATUS = auto()
     MEMBER_SKILLS = auto()
+    ITEMS = auto()
     TELEPORT = auto()
     SHOP = auto()
     NUMBER = auto()
+
+
+class DebugItemPane(Enum):
+    """Active column in the debug item warehouse."""
+
+    INVENTORY = auto()
+    WAREHOUSE = auto()
 
 
 @dataclass(frozen=True)
@@ -186,6 +205,7 @@ class DebugMenuOverlay:
         self,
         *,
         editor: DebugPartyEditor,
+        inventory_system: InventorySystem,
         save_data: SaveData,
         settings: Settings,
         fonts: FontResources,
@@ -197,6 +217,8 @@ class DebugMenuOverlay:
     ) -> None:
         if not isinstance(editor, DebugPartyEditor):
             raise TypeError("editor must be a DebugPartyEditor")
+        if not isinstance(inventory_system, InventorySystem):
+            raise TypeError("inventory_system must be an InventorySystem")
         if not isinstance(save_data, SaveData):
             raise TypeError("save_data must be SaveData")
         if not isinstance(settings, Settings):
@@ -232,6 +254,7 @@ class DebugMenuOverlay:
             raise ValueError("on_shop is required for shop targets")
 
         self.editor = editor
+        self.inventory_system = inventory_system
         self.save_data = save_data
         self.settings = settings
         self.fonts = fonts
@@ -270,6 +293,13 @@ class DebugMenuOverlay:
         self.member_skill_window: Window | None = None
         self.member_skill_cursor: WindowCursor | None = None
         self.member_skill_index = 0
+        self.item_window: Window | None = None
+        self.item_cursor: WindowCursor | None = None
+        self.item_pane = DebugItemPane.WAREHOUSE
+        self.inventory_item_index = 0
+        self.inventory_item_scroll_offset = 0
+        self.warehouse_item_index = 0
+        self.warehouse_item_scroll_offset = 0
         self.teleport_window: Window | None = None
         self.teleport_cursor: WindowCursor | None = None
         self.teleport_index = 0
@@ -298,20 +328,23 @@ class DebugMenuOverlay:
     def _shop_count_text(self) -> str:
         return DEBUG_TEXT.shop_count(len(self.shop_targets))
 
+    def _item_count_text(self) -> str:
+        return DEBUG_TEXT.item_count(len(self.inventory_system.items))
+
     def _party_member_count_text(self) -> str:
         return DEBUG_TEXT.party_member_count(len(self.editor.party))
 
     def _member_skill_count_text(self, member: Member) -> str:
         return DEBUG_TEXT.skill_count(len(member.skills))
 
-    def _guide_text(self) -> WindowText:
+    def _guide_text(self, y: int = GUIDE_Y) -> WindowText:
         return self.debug_texts.create(
             DEBUG_TEXT.close_guide.replace(
                 "%CANCEL%",
                 input_icon_tag(InputAction.CANCEL, InputDevice.KEYBOARD),
             ),
             GUIDE_X,
-            GUIDE_Y,
+            y,
         )
 
     def _build_main_window(self, selected_key: str = "party_level") -> None:
@@ -320,6 +353,7 @@ class DebugMenuOverlay:
             "gold": format_number(self.save_data.gold),
             "members": self._member_count_text(),
             "member_status": self._party_member_count_text(),
+            "items": self._item_count_text(),
             "teleport": self._teleport_count_text(),
             "shop": self._shop_count_text(),
         }
@@ -328,6 +362,7 @@ class DebugMenuOverlay:
             "gold": DEBUG_TEXT.gold,
             "members": DEBUG_TEXT.members,
             "member_status": DEBUG_TEXT.member_status,
+            "items": DEBUG_TEXT.items,
             "teleport": DEBUG_TEXT.teleport,
             "shop": DEBUG_TEXT.shop,
         }
@@ -691,6 +726,195 @@ class DebugMenuOverlay:
         if self.member_status_window is not None:
             self.member_status_window.update(input_state.navigation)
 
+    def _item_entries(self, pane: DebugItemPane) -> tuple[Item, ...]:
+        if pane is DebugItemPane.INVENTORY:
+            return self.inventory_system.items
+        return self.inventory_system.catalog_items
+
+    def _item_position(self, pane: DebugItemPane) -> tuple[int, int]:
+        if pane is DebugItemPane.INVENTORY:
+            return self.inventory_item_index, self.inventory_item_scroll_offset
+        return self.warehouse_item_index, self.warehouse_item_scroll_offset
+
+    def _set_item_position(
+        self,
+        pane: DebugItemPane,
+        index: int,
+        scroll_offset: int,
+    ) -> None:
+        if pane is DebugItemPane.INVENTORY:
+            self.inventory_item_index = index
+            self.inventory_item_scroll_offset = scroll_offset
+        else:
+            self.warehouse_item_index = index
+            self.warehouse_item_scroll_offset = scroll_offset
+
+    def _selected_item(self) -> Item | None:
+        entries = self._item_entries(self.item_pane)
+        if not entries:
+            return None
+        index, _scroll_offset = self._item_position(self.item_pane)
+        return entries[index]
+
+    def _build_item_window(self) -> None:
+        inventory_items = self.inventory_system.items
+        warehouse_items = self.inventory_system.catalog_items
+        pane_entries = {
+            DebugItemPane.INVENTORY: inventory_items,
+            DebugItemPane.WAREHOUSE: warehouse_items,
+        }
+        placements = [
+            self.debug_texts.create(DEBUG_TEXT.item_inventory, 4, 3),
+            self.debug_texts.create(DEBUG_TEXT.item_warehouse, 36, 3),
+        ]
+        cursor_targets: list[CursorTarget] = []
+        for column, pane in enumerate(
+            (DebugItemPane.INVENTORY, DebugItemPane.WAREHOUSE)
+        ):
+            entries = pane_entries[pane]
+            _index, scroll_offset = self._item_position(pane)
+            visible_entries = entries[
+                scroll_offset : scroll_offset + ITEM_VISIBLE_COUNT
+            ]
+            if not visible_entries:
+                placements.append(
+                    self.debug_texts.create(
+                        DEBUG_TEXT.no_items,
+                        ITEM_TEXT_X[column],
+                        ITEM_FIRST_Y,
+                        color=DISABLED_COLOR,
+                    )
+                )
+                continue
+            for row, item in enumerate(visible_entries):
+                y = ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT
+                placements.append(
+                    self.member_texts.create(
+                        item.localized_name(self.localizer),
+                        ITEM_TEXT_X[column],
+                        y,
+                    )
+                )
+                if pane is DebugItemPane.INVENTORY:
+                    placements.append(
+                        self.debug_texts.create(
+                            format_number(self.inventory_system.quantity(item)),
+                            ITEM_QUANTITY_X,
+                            y,
+                        )
+                    )
+                if pane is self.item_pane:
+                    cursor_targets.append(
+                        CursorTarget(ITEM_CURSOR_X[column], y, key=item.key)
+                    )
+
+        placements.extend(
+            (
+                self._guide_text(ITEM_GUIDE_Y),
+                self.debug_texts.create(
+                    DEBUG_TEXT.item_switch_guide,
+                    ITEM_GUIDE_X,
+                    ITEM_GUIDE_Y,
+                ),
+            )
+        )
+        active_entries = pane_entries[self.item_pane]
+        self.item_window = self.windows.create(
+            *DEBUG_WINDOW_GRID,
+            tuple(placements),
+            vertical_navigation=len(active_entries) > ITEM_VISIBLE_COUNT,
+            opened=True,
+        )
+        if not cursor_targets:
+            self.item_cursor = None
+            return
+        self.item_cursor = self.item_window.set_cursor(tuple(cursor_targets))
+        index, _scroll_offset = self._item_position(self.item_pane)
+        self._select_cursor_key(self.item_cursor, active_entries[index].key)
+
+    def _open_items(self) -> None:
+        self.phase = DebugMenuPhase.ITEMS
+        self.item_pane = DebugItemPane.WAREHOUSE
+        self.inventory_item_index = 0
+        self.inventory_item_scroll_offset = 0
+        self.warehouse_item_index = 0
+        self.warehouse_item_scroll_offset = 0
+        self._build_item_window()
+
+    def _close_items(self) -> None:
+        self.phase = DebugMenuPhase.MAIN
+        self.item_window = None
+        self.item_cursor = None
+        self._build_main_window(selected_key="items")
+
+    def _switch_item_pane(self, pane: DebugItemPane) -> None:
+        if pane is self.item_pane:
+            return
+        self.item_pane = pane
+        entries = self._item_entries(pane)
+        index, scroll_offset = self._item_position(pane)
+        if entries:
+            index = min(index, len(entries) - 1)
+            scroll_offset = min(
+                scroll_offset,
+                max(0, len(entries) - ITEM_VISIBLE_COUNT),
+            )
+        else:
+            index = 0
+            scroll_offset = 0
+        self._set_item_position(pane, index, scroll_offset)
+        self._build_item_window()
+
+    def _move_item(self, distance: int) -> None:
+        if (
+            isinstance(distance, bool)
+            or not isinstance(distance, int)
+            or distance == 0
+        ):
+            raise ValueError("item distance must be a non-zero integer")
+        entries = self._item_entries(self.item_pane)
+        if not entries:
+            return
+        index, scroll_offset = self._item_position(self.item_pane)
+        index = (index + distance) % len(entries)
+        if index < scroll_offset:
+            scroll_offset = index
+        elif index >= scroll_offset + ITEM_VISIBLE_COUNT:
+            scroll_offset = index - ITEM_VISIBLE_COUNT + 1
+        self._set_item_position(self.item_pane, index, scroll_offset)
+        self._build_item_window()
+
+    def _acquire_selected_item(self) -> None:
+        if self.item_pane is not DebugItemPane.WAREHOUSE:
+            self.alert.start()
+            return
+        item = self._selected_item()
+        if item is None or not self.inventory_system.add(
+            item,
+            members=self.editor.party,
+        ):
+            self.alert.start()
+            return
+        self._build_item_window()
+
+    def _update_items(self, input_state: InputState) -> None:
+        if input_state.cancel.triggered:
+            self._close_items()
+            return
+        if input_state.confirm.triggered:
+            self._acquire_selected_item()
+            return
+        if input_state.navigation is Direction.LEFT:
+            self._switch_item_pane(DebugItemPane.INVENTORY)
+        elif input_state.navigation is Direction.RIGHT:
+            self._switch_item_pane(DebugItemPane.WAREHOUSE)
+        elif input_state.navigation is Direction.UP:
+            self._move_item(-1)
+        elif input_state.navigation is Direction.DOWN:
+            self._move_item(1)
+        elif self.item_window is not None:
+            self.item_window.update()
+
     def _build_teleport_window(self) -> None:
         placements = [
             self.debug_texts.create(DEBUG_TEXT.teleport_destination, 4, 3)
@@ -1053,6 +1277,9 @@ class DebugMenuOverlay:
         if self.phase is DebugMenuPhase.NUMBER:
             self._update_numeric(input_state)
             return False
+        if self.phase is DebugMenuPhase.ITEMS:
+            self._update_items(input_state)
+            return False
         if self.phase is DebugMenuPhase.TELEPORT:
             self._update_teleport(input_state)
             return False
@@ -1099,6 +1326,8 @@ class DebugMenuOverlay:
                 self._open_members()
             elif key == "member_status":
                 self._open_member_status_list()
+            elif key == "items":
+                self._open_items()
             elif key == "teleport":
                 self._open_teleport()
             elif key == "shop":
@@ -1131,6 +1360,8 @@ class DebugMenuOverlay:
             and self.member_skill_window is not None
         ):
             self.member_skill_window.draw()
+        elif self.phase is DebugMenuPhase.ITEMS and self.item_window is not None:
+            self.item_window.draw()
         elif (
             self.phase is DebugMenuPhase.TELEPORT
             and self.teleport_window is not None
@@ -1147,10 +1378,11 @@ class DebugMenuOverlay:
 
 
 __all__ = [
-    "DebugMenuPhase",
+    "MAX_GOLD",
+    "DebugItemPane",
     "DebugMenuOverlay",
+    "DebugMenuPhase",
     "DebugShopTarget",
     "DebugTeleportTarget",
-    "MAX_GOLD",
     "NumericEntry",
 ]

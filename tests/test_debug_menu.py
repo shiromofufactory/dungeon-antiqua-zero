@@ -1,7 +1,23 @@
 from __future__ import annotations
 
 import unittest
+from itertools import pairwise
 from unittest.mock import Mock
+
+from input import Direction, InputButton, InputState
+from resources import FontResources, FontRole
+from state import Language, SaveData, Settings
+from systems import DebugPartyEditor, InventorySystem
+from ui.debug_menu import (
+    MAX_GOLD,
+    DebugItemPane,
+    DebugMenuOverlay,
+    DebugMenuPhase,
+    DebugShopTarget,
+    DebugTeleportTarget,
+    NumericEntry,
+)
+from ui.debug_text import DEBUG_TEXT, DebugText
 
 from tools.screen_mocks._fixtures import (
     load_mock_character_records,
@@ -9,19 +25,6 @@ from tools.screen_mocks._fixtures import (
     load_mock_party,
     load_mock_skills,
 )
-from ui.debug_menu import (
-    DebugMenuPhase,
-    DebugMenuOverlay,
-    DebugShopTarget,
-    DebugTeleportTarget,
-    MAX_GOLD,
-    NumericEntry,
-)
-from ui.debug_text import DEBUG_TEXT, DebugText
-from input import Direction, InputButton, InputState
-from resources import FontResources, FontRole
-from state import Language, SaveData, Settings
-from systems import DebugPartyEditor
 
 
 class NumericEntryTest(unittest.TestCase):
@@ -58,10 +61,12 @@ class DebugMenuOverlayTest(unittest.TestCase):
             skills=skills,
             party=party,
         )
+        self.inventory = InventorySystem(items)
         self.save_data = SaveData()
         self.alert = Mock()
         self.screen = DebugMenuOverlay(
             editor=self.editor,
+            inventory_system=self.inventory,
             save_data=self.save_data,
             settings=Settings(),
             fonts=FontResources(),
@@ -136,13 +141,142 @@ class DebugMenuOverlayTest(unittest.TestCase):
     def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
         target_y = [target.y for target in self.screen.main_cursor.targets]
 
-        self.assertEqual(len(target_y), 6)
+        self.assertEqual(len(target_y), 7)
         self.assertTrue(
             all(
                 next_y - current_y == 3
-                for current_y, next_y in zip(target_y, target_y[1:])
+                for current_y, next_y in pairwise(target_y)
             )
         )
+
+    def test_item_warehouse_acquires_one_without_consuming_its_catalog(self) -> None:
+        item = self.inventory.catalog_items[0]
+        self.screen.main_cursor.select_key("items")
+
+        self.screen.update(self.confirm())
+
+        self.assertIs(self.screen.phase, DebugMenuPhase.ITEMS)
+        self.assertIs(self.screen.item_pane, DebugItemPane.WAREHOUSE)
+        self.assertEqual(self.screen.item_cursor.selected_key, item.key)
+        self.assertEqual(
+            len(self.screen.item_cursor.targets),
+            min(13, self.inventory.catalog_count),
+        )
+        texts = self.screen.item_window.texts
+        self.assertIn("もちもの", [placement.text for placement in texts])
+        self.assertIn("そうこ", [placement.text for placement in texts])
+        self.assertFalse(
+            any("∞" in placement.text for placement in texts)
+        )
+        self.assertFalse(
+            any("１こ入手" in placement.text for placement in texts)
+        )
+        self.assertFalse(any("／" in placement.text for placement in texts))
+        self.assertIn(
+            (DEBUG_TEXT.item_switch_guide, 52),
+            [(placement.text, placement.y) for placement in texts],
+        )
+        self.assertTrue(
+            any(
+                placement.text.endswith("：もどる") and placement.y == 52
+                for placement in texts
+            )
+        )
+
+        self.screen.update(self.confirm())
+
+        self.assertEqual(self.inventory.quantity(item), 1)
+        self.assertEqual(self.inventory.catalog_items[0], item)
+        self.assertIn(item, self.inventory.items)
+        self.assertEqual(self.screen.item_cursor.selected_key, item.key)
+        self.assertIn(
+            ("１", 28, 7),
+            [
+                (placement.text, placement.x, placement.y)
+                for placement in self.screen.item_window.texts
+            ],
+        )
+        self.alert.start.assert_not_called()
+
+    def test_item_inventory_column_is_read_only_and_can_return_to_main(self) -> None:
+        item = self.inventory.catalog_items[0]
+        self.inventory.add(item)
+        self.screen.main_cursor.select_key("items")
+        self.screen.update(self.confirm())
+
+        self.screen.update(
+            InputState(
+                navigation=Direction.LEFT,
+                held_direction=Direction.LEFT,
+            )
+        )
+
+        self.assertIs(self.screen.item_pane, DebugItemPane.INVENTORY)
+        self.assertEqual(self.screen.item_cursor.selected_key, item.key)
+        self.screen.update(self.confirm())
+        self.assertEqual(self.inventory.quantity(item), 1)
+        self.alert.start.assert_called_once_with()
+
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+        self.assertEqual(self.screen.main_cursor.selected_key, "items")
+
+    def test_item_warehouse_scrolls_and_rejects_the_shared_stack_limit(self) -> None:
+        first_item = self.inventory.catalog_items[0]
+        for _index in range(self.inventory.stack_limit(first_item)):
+            self.assertTrue(self.inventory.add(first_item))
+        self.screen.main_cursor.select_key("items")
+        self.screen.update(self.confirm())
+
+        self.screen.update(self.confirm())
+
+        self.assertEqual(
+            self.inventory.quantity(first_item),
+            self.inventory.stack_limit(first_item),
+        )
+        self.alert.start.assert_called_once_with()
+
+        for _index in range(13):
+            self.screen.update(
+                InputState(
+                    navigation=Direction.DOWN,
+                    held_direction=Direction.DOWN,
+                )
+            )
+
+        self.assertEqual(self.screen.warehouse_item_index, 13)
+        self.assertEqual(self.screen.warehouse_item_scroll_offset, 1)
+        self.assertEqual(
+            self.screen.item_cursor.selected_key,
+            self.inventory.catalog_items[13].key,
+        )
+
+    def test_item_warehouse_counts_equipped_copies_toward_the_limit(self) -> None:
+        equipped_item = self.editor.party[0].equipment.equipped_items()[0]
+        remaining = self.inventory.remaining_capacity(
+            equipped_item,
+            self.editor.party,
+        )
+        self.assertTrue(
+            self.inventory.add(
+                equipped_item,
+                remaining,
+                members=self.editor.party,
+            )
+        )
+        catalog_index = self.inventory.catalog_items.index(equipped_item)
+        self.screen._open_items()
+        self.screen.warehouse_item_index = catalog_index
+        self.screen.warehouse_item_scroll_offset = max(0, catalog_index - 12)
+        self.screen._build_item_window()
+
+        self.screen.update(self.confirm())
+
+        self.assertEqual(
+            self.inventory.total_quantity(equipped_item, self.editor.party),
+            self.inventory.stack_limit(equipped_item),
+        )
+        self.alert.start.assert_called_once_with()
 
     def test_edits_each_members_hp_mp_poison_and_paralysis(self) -> None:
         self.screen.main_cursor.select_key("member_status")
@@ -356,6 +490,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         on_teleport = Mock(return_value=True)
         screen = DebugMenuOverlay(
             editor=self.editor,
+            inventory_system=self.inventory,
             save_data=self.save_data,
             settings=Settings(),
             fonts=FontResources(),
@@ -408,6 +543,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         )
         screen = DebugMenuOverlay(
             editor=self.editor,
+            inventory_system=self.inventory,
             save_data=self.save_data,
             settings=Settings(),
             fonts=FontResources(),
@@ -435,6 +571,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         on_shop = Mock(return_value=True)
         screen = DebugMenuOverlay(
             editor=self.editor,
+            inventory_system=self.inventory,
             save_data=self.save_data,
             settings=Settings(),
             fonts=FontResources(),
@@ -482,6 +619,10 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertEqual(DEBUG_TEXT.party_member_count(6), "６にん")
         self.assertEqual(DEBUG_TEXT.member_status, "メンバー状態")
         self.assertEqual(DEBUG_TEXT.skill_count(2), "２／２")
+        self.assertEqual(DEBUG_TEXT.items, "アイテム")
+        self.assertEqual(DEBUG_TEXT.item_count(2), "２しゅ")
+        self.assertEqual(DEBUG_TEXT.item_inventory, "もちもの")
+        self.assertEqual(DEBUG_TEXT.item_warehouse, "そうこ")
         self.assertEqual(DEBUG_TEXT.teleport_count(2), "２かしょ")
         self.assertEqual(DEBUG_TEXT.shop, "ショップ")
         self.assertEqual(DEBUG_TEXT.shop_count(13), "１３けん")
