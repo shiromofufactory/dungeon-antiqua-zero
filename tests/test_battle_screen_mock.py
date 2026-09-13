@@ -35,6 +35,7 @@ from tools.screen_mocks.battle import (
     BATTLE_FOCUS_SE_ID,
     BATTLE_HIDE_SE_ID,
     BATTLE_HIT_SE_ID,
+    BATTLE_IDENTIFY_SE_ID,
     BATTLE_MONSTER_DEATH_SE_ID,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
@@ -86,6 +87,17 @@ from tools.screen_mocks.battle import (
     FOCUS_ATTACK_MULTIPLIER,
     FOCUS_PRESENTATION_FRAME_COUNT,
     HIDE_PRESENTATION_FRAME_COUNT,
+    IDENTIFY_EFFECT_CENTER_SOURCE_X,
+    IDENTIFY_EFFECT_FRAME_COUNT,
+    IDENTIFY_EFFECT_SOURCE_Y,
+    IDENTIFY_EFFECT_TILE_SIZE,
+    IDENTIFY_EFFECT_TRANSPARENT_INDEX,
+    IDENTIFY_DETAIL_IMAGE_Y,
+    IDENTIFY_DETAIL_SMALL_IMAGE_X,
+    IDENTIFY_DETAIL_SMALL_WINDOW_GRID,
+    IDENTIFIED_MONSTER_HP_LABEL_OFFSET_X,
+    IDENTIFIED_MONSTER_HP_OFFSET_Y,
+    IDENTIFIED_MONSTER_HP_VALUE_OFFSET_X,
     VICTORY_RETURN_SPEED,
     VICTORY_RETURN_START_X,
     GLOBAL_COMMAND_WINDOW_GRID,
@@ -178,6 +190,7 @@ from tools.screen_mocks.battle import (
     TimelineAnimationPhase,
     WindowText,
     ascii_to_fullwidth,
+    identify_detail_texts,
     member_attack_reach,
     selectable_attack_target_indexes,
 )
@@ -198,7 +211,11 @@ from member import (
 from battle_magic import SpellAffinity, member_spell_ability, member_spell_modifier
 from item import AdditionalEffect
 from resistance import ResistanceType
-from state import Language, Settings
+from state import Language, SaveData, Settings
+from systems import (
+    MONSTER_IDENTIFY_FIELD_KEYS,
+    MonsterRecordSystem,
+)
 from spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from text_catalog import TextCatalog
 from tools._bootstrap import APP_ROOT
@@ -211,7 +228,7 @@ from tools.screen_mocks._fixtures import (
 )
 from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputDevice, InputState
-from monster import MonsterBattleState, MonsterCombatStats
+from monster import MonsterBattleState, MonsterCombatStats, MonsterDefinition
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
@@ -227,6 +244,7 @@ from rendering import (
 )
 from resources import load_record_array
 from ui import CursorTarget, Window, WindowCursor
+from ui import DEFAULT_TEXT_COLOR
 
 
 _JAPANESE_COMMAND_LABELS = {
@@ -399,7 +417,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         blt.assert_called_once_with(
             22,
-            76,
+            MONSTER_POSITIONS[0][1] + 20,
             0,
             CRITICAL_MARKER_SOURCE_X,
             CRITICAL_MARKER_SOURCE_Y,
@@ -463,7 +481,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         blt.assert_called_once_with(
             22,
-            76,
+            MONSTER_POSITIONS[0][1] + 20,
             0,
             STUN_MARKER_SOURCE_X,
             STUN_MARKER_SOURCE_Y,
@@ -756,7 +774,10 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(
             [(target.x, target.y, target.key) for target in target_definitions],
-            [(3, 18, 0), (3, 34, 1), (19, 10, 2), (19, 26, 3), (19, 42, 4)],
+            [
+                ((x + 8) // 4, (y + 16) // 4, index)
+                for index, (x, y) in enumerate(MONSTER_POSITIONS)
+            ],
         )
         self.assertFalse(mock.target_cursor.active)
         self.assertFalse(mock.escape_cursor.active)
@@ -1212,7 +1233,16 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
-                call(4, 64, mock.attack_effect_image, 0, 128, 64, 64, 1),
+                call(
+                    MONSTER_POSITIONS[0][0],
+                    MONSTER_POSITIONS[0][1] + 8,
+                    mock.attack_effect_image,
+                    0,
+                    128,
+                    64,
+                    64,
+                    1,
+                ),
             ],
         )
 
@@ -1225,7 +1255,7 @@ class BattleScreenMockTest(unittest.TestCase):
             [
                 call(
                     28,
-                    110,
+                    MONSTER_POSITIONS[0][1] + monster.height - 10,
                     0,
                     DAMAGE_NUMBER_SPRITE_X + 8,
                     DAMAGE_NUMBER_SPRITE_Y,
@@ -1235,7 +1265,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 ),
                 call(
                     36,
-                    110,
+                    MONSTER_POSITIONS[0][1] + monster.height - 10,
                     0,
                     DAMAGE_NUMBER_SPRITE_X + 16,
                     DAMAGE_NUMBER_SPRITE_Y,
@@ -1286,7 +1316,7 @@ class BattleScreenMockTest(unittest.TestCase):
         play_se.assert_not_called()
         blt.assert_called_once_with(
             28,
-            112,
+            MONSTER_POSITIONS[0][1] + monster.height - 8,
             0,
             MISS_SPRITE_SOURCE_X,
             DAMAGE_NUMBER_SPRITE_Y,
@@ -1549,7 +1579,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
-                call(4, 56, image, 0, 0, 96, 64, 1),
+                call(*MONSTER_POSITIONS[0], image, 0, 0, 96, 64, 1),
                 call(70, 220, 1, 224, 16, 16, 16, 1),
                 call(74, 216, 0, 88, 16, 8, 8, 1),
             ],
@@ -2537,8 +2567,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual(dither.call_args_list, [call(0.5), call(1.0)])
         blt.assert_called_once_with(
-            4,
-            56,
+            *MONSTER_POSITIONS[0],
             mock.monster_images["Coyote"],
             0,
             0,
@@ -2645,7 +2674,7 @@ class BattleScreenMockTest(unittest.TestCase):
         dither.assert_not_called()
         self.assertEqual(blt.call_count, 2)
 
-    def test_non_item_non_attack_command_also_completes_current_turn(self) -> None:
+    def test_identify_command_opens_enemy_target_selection(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.COMMAND
         mock.input_reader = Mock()
@@ -2660,16 +2689,254 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.selected_command = None
         mock.active_party_index = 1
         mock.last_command_by_party_index = {}
+        mock._begin_identify_target_selection = Mock(return_value=True)
         mock._complete_current_turn = Mock()
 
         mock.update()
 
-        self.assertEqual(mock.selected_command, BattleCommand.IDENTIFY)
         self.assertEqual(
             mock.last_command_by_party_index,
             {1: BattleCommand.IDENTIFY},
         )
-        mock._complete_current_turn.assert_called_once_with()
+        mock._begin_identify_target_selection.assert_called_once_with()
+        mock._complete_current_turn.assert_not_called()
+
+    def test_identify_can_target_any_living_monster_and_uses_cast_motion(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.party = (
+            SimpleNamespace(has_skill=lambda key: key == "Identify"),
+        )
+        mock.monsters = (
+            SimpleNamespace(is_alive=True),
+            SimpleNamespace(is_alive=False),
+            SimpleNamespace(is_alive=True),
+        )
+        mock.command_cursor = Mock(active=True)
+        mock.target_cursor = Mock(active=False)
+        mock._begin_action_motion = Mock()
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(mock._begin_identify_target_selection())
+
+        self.assertIs(mock.selected_command, BattleCommand.IDENTIFY)
+        self.assertEqual(mock.selectable_target_indexes, (0, 2))
+        self.assertEqual(mock.selected_target_index, 2)
+        self.assertIs(mock.phase, BattleMockPhase.TARGET)
+        mock._begin_action_motion.assert_called_once_with(use_cast_pose=True)
+        mock.target_cursor.select_key.assert_called_once_with(2)
+
+    def test_identify_effect_uses_the_authored_bank_zero_tiles(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.IDENTIFY_PRESENTATION
+        mock.identify_target_index = 0
+        mock.monsters = (SimpleNamespace(width=64, height=64),)
+        mock._monster_draw_position = Mock(return_value=(4, 56))
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock.identify_effect_elapsed_frame = 0
+            mock._draw_identify_effect()
+
+            self.assertEqual(
+                blt.call_args_list,
+                [
+                    call(12, 64, 0, 0, 144, 16, 16, 1),
+                    call(44, 64, 0, 16, 144, 16, 16, 1),
+                    call(12, 96, 0, 32, 144, 16, 16, 1),
+                    call(44, 96, 0, 48, 144, 16, 16, 1),
+                ],
+            )
+            self.assertEqual(IDENTIFY_EFFECT_TRANSPARENT_INDEX, 1)
+
+            blt.reset_mock()
+            mock.identify_effect_elapsed_frame = 2
+            mock._draw_identify_effect()
+
+        blt.assert_called_once_with(
+            28,
+            80,
+            0,
+            IDENTIFY_EFFECT_CENTER_SOURCE_X,
+            IDENTIFY_EFFECT_SOURCE_Y,
+            IDENTIFY_EFFECT_TILE_SIZE,
+            IDENTIFY_EFFECT_TILE_SIZE,
+            IDENTIFY_EFFECT_TRANSPARENT_INDEX,
+        )
+
+    def test_identify_confirmation_starts_the_effect_and_da2_sound(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.selected_target_index = 2
+        mock.selectable_target_indexes = (0, 2)
+        mock.target_cursor = Mock(active=True)
+        mock.hidden_party_indexes = {0}
+        mock._refresh_monster_name_colors = Mock()
+
+        with patch("scenes.battle.play_se") as play_se:
+            self.assertTrue(mock._begin_identify_presentation())
+
+        self.assertIs(mock.phase, BattleMockPhase.IDENTIFY_PRESENTATION)
+        self.assertEqual(mock.identify_target_index, 2)
+        self.assertEqual(mock.identify_effect_elapsed_frame, 0)
+        self.assertFalse(mock.target_cursor.active)
+        self.assertEqual(mock.hidden_party_indexes, set())
+        play_se.assert_called_once_with(BATTLE_IDENTIFY_SE_ID)
+
+    def test_identify_reveals_the_record_after_its_effect_and_opens_da2_detail(
+        self,
+    ) -> None:
+        save_data = SaveData()
+        records = MonsterRecordSystem(save_data)
+        records.register_encounter(("Giant Spider",))
+        monster = SimpleNamespace(key="Giant Spider", width=64, height=64)
+        definition = object()
+        detail_window = Mock()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.identify_target_index = 0
+        mock.identify_effect_elapsed_frame = IDENTIFY_EFFECT_FRAME_COUNT - 1
+        mock.monsters = (monster,)
+        mock.monster_record_system = records
+        mock.monster_definitions_by_key = {monster.key: definition}
+        mock.monster_book_number_by_key = {monster.key: 1}
+        mock.save_data = save_data
+        mock.item_catalog = {}
+        mock.texts = object()
+        mock.localizer = object()
+        mock.identify_text_factory = object()
+        mock.identified_monster_indexes = set()
+        mock.window_factory = Mock()
+        mock.window_factory.create.return_value = detail_window
+
+        with patch(
+            "scenes.battle.identify_detail_texts",
+            return_value=(WindowText("detail", 2, 2),),
+        ) as detail_texts:
+            mock._update_identify_presentation()
+
+        self.assertEqual(
+            save_data.monster_records[monster.key],
+            set(MONSTER_IDENTIFY_FIELD_KEYS),
+        )
+        self.assertEqual(mock.identified_monster_indexes, {0})
+        self.assertIs(mock.phase, BattleMockPhase.IDENTIFY_RESULT)
+        detail_texts.assert_called_once()
+        self.assertIs(detail_texts.call_args.kwargs["definition"], definition)
+        self.assertEqual(
+            detail_texts.call_args.kwargs["revealed_fields"],
+            set(MONSTER_IDENTIFY_FIELD_KEYS),
+        )
+        self.assertEqual(
+            mock.window_factory.create.call_args.args[:4],
+            (*IDENTIFY_DETAIL_SMALL_WINDOW_GRID, 18),
+        )
+        detail_window.open_immediately.assert_called_once_with()
+
+    def test_identify_detail_shows_boss_hp_and_omits_stun_affinity(self) -> None:
+        records = load_record_array("monsters.json")
+        record = dict(next(record for record in records if record["is_boss"] == 1))
+        record["tolerance"] = "炎止"
+        definition = MonsterDefinition.from_record(record)
+        text_factory = Mock()
+        text_factory.create.side_effect = (
+            lambda text, x, y, **kwargs: WindowText(text, x, y, **kwargs)
+        )
+
+        detail = identify_detail_texts(
+            number=1,
+            definition=definition,
+            revealed_fields=set(MONSTER_IDENTIFY_FIELD_KEYS),
+            items=load_mock_items(),
+            texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
+            localizer=Localizer(Language.JAPANESE),
+            text_factory=text_factory,
+        )
+        lines = [text.text for text in detail]
+
+        hp_line = next(text for text in lines if text.startswith("ＨＰ"))
+        self.assertIn(ascii_to_fullwidth(str(definition.max_hp)), hp_line)
+        self.assertNotIn("？？？？", hp_line)
+        self.assertTrue(any(text.startswith("おたから：") for text in lines))
+        self.assertFalse(any(text == "おたから：？？？？" for text in lines))
+        self.assertTrue(any("%FIRE%" in text for text in lines))
+        self.assertFalse(any("スタン" in text or "止" in text for text in lines))
+
+    def test_identify_result_uses_da2_monster_image_position(self) -> None:
+        record = load_record_array("monsters.json")[0]
+        monster = BattleMockMonster.from_record(record, is_front_row=True)
+        definition = MonsterDefinition.from_record(record)
+        window = SimpleNamespace(
+            content_x=48,
+            content_y=8,
+            texts=tuple(WindowText("", 0, index * 3) for index in range(11)),
+            draw=Mock(),
+        )
+        image = object()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.IDENTIFY_RESULT
+        mock.identify_detail_window = window
+        mock.identify_target_index = 0
+        mock.monsters = (monster,)
+        mock.monster_definitions_by_key = {monster.key: definition}
+        mock.monster_images = {monster.key: image}
+
+        with patch("scenes.battle.pyxel.blt") as blt:
+            mock._draw_identify_result()
+
+        window.draw.assert_called_once_with()
+        blt.assert_called_once_with(
+            window.content_x + IDENTIFY_DETAIL_SMALL_IMAGE_X,
+            window.content_y + IDENTIFY_DETAIL_IMAGE_Y,
+            image,
+            0,
+            0,
+            definition.width,
+            definition.height,
+            1,
+        )
+
+    def test_identified_monster_keeps_showing_current_hp_below_image(self) -> None:
+        monster = _damage_test_monster(hp=25)
+        monster.state.hp = 17
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.identified_monster_indexes = {0}
+        mock._draw_small_text_with_edge = Mock()
+
+        mock._draw_identified_monster_hp(0, monster, 4, 56)
+
+        baseline_y = 56 + monster.height + IDENTIFIED_MONSTER_HP_OFFSET_Y
+        self.assertEqual(
+            mock._draw_small_text_with_edge.call_args_list,
+            [
+                call(
+                    4 + IDENTIFIED_MONSTER_HP_LABEL_OFFSET_X,
+                    baseline_y,
+                    "HP",
+                    DEFAULT_TEXT_COLOR,
+                ),
+                call(
+                    4 + IDENTIFIED_MONSTER_HP_VALUE_OFFSET_X,
+                    baseline_y,
+                    "17",
+                    DEFAULT_TEXT_COLOR,
+                ),
+            ],
+        )
+
+    def test_identify_result_closes_on_confirm_and_returns_the_actor(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.identify_detail_window = Mock()
+        mock.identify_target_index = 2
+        mock.identify_effect_elapsed_frame = IDENTIFY_EFFECT_FRAME_COUNT
+        mock._begin_action_return = Mock()
+
+        mock._update_identify_result(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        self.assertIsNone(mock.identify_detail_window)
+        self.assertIsNone(mock.identify_target_index)
+        self.assertEqual(mock.identify_effect_elapsed_frame, 0)
+        mock._begin_action_return.assert_called_once_with(complete_turn=True)
 
     def test_hide_starts_da2_motion_and_marks_member_hidden(self) -> None:
         member = SimpleNamespace(has_skill=Mock(return_value=True))
@@ -3258,7 +3525,13 @@ class BattleScreenMockTest(unittest.TestCase):
         assert mock.action_presentation is not None
         target_effect = mock.action_presentation.spell_effects[0]
         self.assertEqual((target_effect.target_side, target_effect.target_index), ("enemy", 0))
-        self.assertEqual(target_effect.player.center, (39, 92))
+        self.assertEqual(
+            target_effect.player.center,
+            (
+                39,
+                MONSTER_POSITIONS[0][1] + mock.monsters[0].height // 2 + 4,
+            ),
+        )
         play_se.assert_called_once_with("spell_fire1")
 
         for _frame in range(definition.total_frames - 1):
@@ -3549,7 +3822,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_damage_popups[0].damage, expected_damage)
         self.assertEqual(
             (mock.spell_damage_popups[0].x, mock.spell_damage_popups[0].y),
-            (36, 112),
+            (36, MONSTER_POSITIONS[0][1] + mock.monsters[0].height - 8),
         )
         self.assertEqual(
             (
@@ -3557,7 +3830,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 mock.affinity_popups[0].x,
                 mock.affinity_popups[0].y,
             ),
-            (SpellAffinity.WEAK, 24, 76),
+            (SpellAffinity.WEAK, 24, MONSTER_POSITIONS[0][1] + 20),
         )
 
         for _frame in range(definition.total_frames - updates_until_result):
@@ -3945,7 +4218,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 ),
                 call(
                     52,
-                    56,
+                    MONSTER_POSITIONS[0][1],
                     0,
                     SLEEP_ICON_SOURCE_X + SLEEP_ICON_SIZE,
                     SLEEP_ICON_SOURCE_Y,
@@ -4947,7 +5220,15 @@ class BattleScreenMockTest(unittest.TestCase):
 
             mock.monster_blink_frames_remaining = 5
             mock._draw_monsters()
-            blt.assert_called_once_with(4, 56, image, 0, 0, 64, 64, 1)
+            blt.assert_called_once_with(
+                *MONSTER_POSITIONS[0],
+                image,
+                0,
+                0,
+                64,
+                64,
+                1,
+            )
 
     def test_front_monster_attacks_only_a_living_front_party_member(self) -> None:
         actor = BattleMockMonster(

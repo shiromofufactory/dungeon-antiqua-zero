@@ -29,6 +29,10 @@
       "channel": 0,
       "sound": 30
     },
+    "battle_identify": {
+      "channel": 0,
+      "sound": 20
+    },
     "battle_weapon_slash": {
       "channel": 0,
       "sound": 11

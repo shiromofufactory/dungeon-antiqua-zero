@@ -87,23 +87,25 @@ Settingsと言語で `TextCatalog` または `EventMessageCatalog` から再解�
 - 図鑑No.
 - 現在言語のモンスター名
 - `term.monster_tribe.*` から解決した種族名
+- `monsters.json.lv` の実際のモンスターレベル
 - HPとMPの `？？？？`
 - `monster_book.unidentified`
 
 `profile` と全 `ResistanceType` が `revealed_field_keys` に揃った場合を完全識別とする。
-`treasure_acquired` は完全識別の判定へ含めない。完全識別後は次を追加または開示する。
+`treasure_identified` と `treasure_acquired` は完全識別の判定へ含めない。完全識別後は
+次を追加または開示する。
 
-- 通常モンスターの最大HPと最大MP
-- `monsters.json.lv` のモンスターレベル。ZEROでは戦闘行動数により経験値が変動するため、
-  DA2のEXP欄は表示しない。
+- 全モンスターの最大HPと最大MP
 - 耐性と弱点のアイコン列。該当属性は通常アイコン、非該当属性はdisabledアイコンにする。
-  DA2の9属性にないZEROの `STUN` は、共通画像に専用アイコンがない間は列末尾の「止」を通常色／
-  disabled色で切り替える。
-- `treasure_acquired` がある場合は `treasure_item` が参照する現在言語のアイテム名、ない場合は
+  DA2の9属性にないZEROの `STUN` は表示しない。
+- `treasure_identified` または `treasure_acquired` がある場合は `treasure_item` が参照する
+  現在言語のアイテム名、どちらもない場合は
   `monster_book.treasure_unknown`
 
-DA2のクリア後解禁に相当する状態がZEROにはまだないため、ボスの最大HPは完全識別後も
-`？？？？` のままとする。最大MP、LV、相性、お宝は通常の完全識別規則で表示する。
+LVはHPの直前へ置き、値をHP・MPと同じ数値欄へ右揃えする。「おたから」「たいせい」
+「じゃくてん」は開示状態や内容にかかわらず通常色で表示する。
+
+ボスを含め、完全識別後は最大HPを実値で表示する。
 
 画像は `image_id` の `monsters/{image_id}` を使い、詳細Window内のDA2相当位置へ原寸表示する。
 表示名や一覧順から画像を推測しない。
@@ -134,7 +136,8 @@ DA2のクリア後解禁に相当する状態がZEROにはまだないため、�
 - 情報サブメニューからモンスター図鑑を開き、キャンセルで情報サブメニュー、さらにキャンセルで
   メインメニューへ戻れる。
 - 一覧に遭遇済みモンスターだけがマスター順で表示され、No.は未遭遇分を詰めない。
-- 不完全記録では能力値・LV・お宝・相性を開示しない。
-- 完全識別後はEXPではなくLVを表示し、ボスHPだけは伏せる。
-- お宝名はアイテム図鑑ではなく、そのモンスターの `treasure_acquired` だけで開示される。
+- 不完全記録でもLVは実値を表示し、HP・MP・お宝・相性は開示しない。
+- 完全識別後はボスを含めて最大HPを表示する。
+- お宝名はアイテム図鑑ではなく、そのモンスターの `treasure_identified` または
+  `treasure_acquired` で開示される。
 - セーブ・ロード後も同じ一覧と開示段階が復元される。

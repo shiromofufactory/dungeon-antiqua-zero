@@ -18,8 +18,10 @@ from .encounter import (
 from .inventory import InventorySystem
 from .monster_records import (
     MONSTER_COMBAT_FIELD_KEYS,
+    MONSTER_IDENTIFY_FIELD_KEYS,
     MONSTER_PROFILE_FIELD_KEY,
     MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+    MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
     MonsterRecordSystem,
 )
 from .events import (
@@ -79,8 +81,10 @@ __all__ = [
     "EncounterSystem",
     "InventorySystem",
     "MONSTER_COMBAT_FIELD_KEYS",
+    "MONSTER_IDENTIFY_FIELD_KEYS",
     "MONSTER_PROFILE_FIELD_KEY",
     "MONSTER_TREASURE_ACQUIRED_FIELD_KEY",
+    "MONSTER_TREASURE_IDENTIFIED_FIELD_KEY",
     "MonsterRecordSystem",
     "MenuSpellProficiencyGrowth",
     "ChangeBgmEffect",

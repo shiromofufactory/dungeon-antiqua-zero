@@ -8,8 +8,10 @@ from resistance import ResistanceType
 from state import SaveData
 from systems import (
     MONSTER_COMBAT_FIELD_KEYS,
+    MONSTER_IDENTIFY_FIELD_KEYS,
     MONSTER_PROFILE_FIELD_KEY,
     MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+    MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
     MonsterRecordSystem,
 )
 
@@ -49,12 +51,25 @@ class MonsterRecordSystemTest(unittest.TestCase):
             {MONSTER_PROFILE_FIELD_KEY},
         )
 
-    def test_identify_reveals_every_combat_field_but_not_treasure(self) -> None:
+    def test_reveal_all_combat_fields_does_not_mark_treasure(self) -> None:
         self.records.reveal_all_combat_fields("Giant Spider")
 
         self.assertEqual(
             self.save_data.monster_records["Giant Spider"],
             set(MONSTER_COMBAT_FIELD_KEYS),
+        )
+        self.assertFalse(self.records.treasure_was_acquired("Giant Spider"))
+
+    def test_identify_reveals_combat_fields_and_treasure_name(self) -> None:
+        self.records.reveal_all_identify_fields("Giant Spider")
+
+        self.assertEqual(
+            self.save_data.monster_records["Giant Spider"],
+            set(MONSTER_IDENTIFY_FIELD_KEYS),
+        )
+        self.assertIn(
+            MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
+            self.save_data.monster_records["Giant Spider"],
         )
         self.assertFalse(self.records.treasure_was_acquired("Giant Spider"))
 

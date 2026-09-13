@@ -72,6 +72,7 @@ from member import (
     Member,
 )
 from monster import (
+    MonsterDefinition,
     MonsterBattleState,
     MonsterCombatStats,
     MonsterSpecialAction,
@@ -126,6 +127,7 @@ from ui import (
     WindowFactory,
     WindowText,
     input_icon_tag,
+    monster_detail_texts,
     tagged_text_width,
 )
 from item_detail import ItemDetailContext, item_detail_lines
@@ -146,6 +148,7 @@ BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
 BATTLE_FOCUS_SE_ID = "battle_focus"
 BATTLE_HIDE_SE_ID = "battle_hide"
+BATTLE_IDENTIFY_SE_ID = "battle_identify"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
@@ -156,7 +159,7 @@ ACTIVE_PARTY_PULSE_TARGET_COLOR = 0xFFFFFF
 ACTIVE_PARTY_PULSE_MIN_BASE_RATE = 0.5
 ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT = 90
 ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT // 2
-MONSTER_POSITIONS = ((4, 56), (4, 120), (68, 24), (68, 88), (68, 152))
+MONSTER_POSITIONS = ((4, 48), (4, 112), (68, 16), (68, 80), (68, 144))
 TIMELINE_BASE_X = 70
 TIMELINE_BASE_Y = 220
 TIMELINE_SLOT_SPACING = 20
@@ -306,6 +309,26 @@ MONSTER_MISS_FRAME_COUNT = len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE
 MONSTER_DAMAGE_SPRITE_SOURCE_X = 16 * 5
 MONSTER_DAMAGE_SHAKE_X = (8, 9)
 COVER_POSITION_OFFSET_X = 26
+IDENTIFY_EFFECT_SOURCE_Y = 144
+IDENTIFY_EFFECT_CENTER_SOURCE_X = 64
+IDENTIFY_EFFECT_TILE_SIZE = 16
+IDENTIFY_EFFECT_TRANSPARENT_INDEX = TRANSPARENT_INDEX
+DA2_IDENTIFY_EFFECT_FRAME_COUNT = 12
+IDENTIFY_EFFECT_FRAME_COUNT = (
+    DA2_IDENTIFY_EFFECT_FRAME_COUNT * FPS // DA2_REFERENCE_FPS
+)
+IDENTIFY_DETAIL_SMALL_WINDOW_GRID = (10, 0, 44)
+IDENTIFY_DETAIL_LARGE_WINDOW_GRID = (4, 0, 56)
+IDENTIFY_DETAIL_TEXT_X = 2
+IDENTIFY_DETAIL_FIRST_Y = 2
+IDENTIFY_DETAIL_ROW_HEIGHT = 3
+IDENTIFY_DETAIL_SMALL_IMAGE_X = 96
+IDENTIFY_DETAIL_LARGE_IMAGE_X = 112
+IDENTIFY_DETAIL_IMAGE_Y = -2
+IDENTIFIED_MONSTER_HP_LABEL_OFFSET_X = 8
+IDENTIFIED_MONSTER_HP_VALUE_OFFSET_X = 20
+IDENTIFIED_MONSTER_HP_OFFSET_Y = 2
+IDENTIFIED_MONSTER_HP_EDGE_COLOR = 0
 DAMAGE_NUMBER_SPRITE_X = 128
 DAMAGE_NUMBER_SPRITE_Y = 0
 DAMAGE_NUMBER_SPRITE_SIZE = 8
@@ -611,6 +634,8 @@ class BattlePhase(StrEnum):
     ATTACK_PRESENTATION = "attack_presentation"
     FOCUS_PRESENTATION = "focus_presentation"
     HIDE_PRESENTATION = "hide_presentation"
+    IDENTIFY_PRESENTATION = "identify_presentation"
+    IDENTIFY_RESULT = "identify_result"
     ACTION_PRESENTATION = "action_presentation"
     ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
@@ -1226,6 +1251,56 @@ class BattleMonster:
         self.is_front_row = self.initial_is_front_row
 
 
+def identify_detail_texts(
+    *,
+    number: int,
+    definition: MonsterDefinition,
+    revealed_fields: set[str],
+    items: Mapping[str, Item],
+    texts: TextCatalog,
+    localizer: Localizer,
+    text_factory: LocalizedWindowTextFactory,
+) -> tuple[WindowText, ...]:
+    """Place bestiary information in DA2's battle Identify layout."""
+
+    return monster_detail_texts(
+        number=number,
+        monster=definition,
+        revealed_fields=revealed_fields,
+        items=items,
+        texts=texts,
+        localizer=localizer,
+        text_factory=text_factory,
+        text_x=IDENTIFY_DETAIL_TEXT_X,
+        first_y=IDENTIFY_DETAIL_FIRST_Y,
+        row_height=IDENTIFY_DETAIL_ROW_HEIGHT,
+    )
+
+
+def identify_detail_layout(
+    monster: BattleMonster,
+    line_count: int,
+) -> tuple[tuple[int, int, int, int], int]:
+    """Translate DA2's dynamic Identify window and image offset to ZERO's grid."""
+
+    if isinstance(line_count, bool) or not isinstance(line_count, int):
+        raise TypeError("line_count must be an integer")
+    if line_count <= 0:
+        raise ValueError("line_count must be positive")
+    content_rows = max(line_count - 1, monster.height // 16)
+    x, y, width = (
+        IDENTIFY_DETAIL_SMALL_WINDOW_GRID
+        if monster.width <= 64
+        else IDENTIFY_DETAIL_LARGE_WINDOW_GRID
+    )
+    image_x = (
+        IDENTIFY_DETAIL_SMALL_IMAGE_X
+        if monster.width <= 64
+        else IDENTIFY_DETAIL_LARGE_IMAGE_X
+    )
+    return (x, y, width, content_rows * IDENTIFY_DETAIL_ROW_HEIGHT + 6), image_x
+
+
 @dataclass(frozen=True)
 class BattleItemCandidate:
     """One DA2-style battle item and the place from which it is used."""
@@ -1390,6 +1465,7 @@ class BattleScene:
         self.reset_inventory_on_restart = reset_inventory_on_restart
         self.settings = settings
         self.fonts = FontResources() if fonts is None else fonts
+        self.window_factory = windows
         self.save_data = SaveData() if save_data is None else save_data
         self.monster_record_system = MonsterRecordSystem(self.save_data)
         if return_bgm_id is not None and (
@@ -1418,6 +1494,7 @@ class BattleScene:
         self.spell_effect_renderer = spell_effect_renderer
         self.spell_effects = spell_effects
         self.localizer = Localizer(settings.language)
+        self.identify_text_factory: LocalizedWindowTextFactory | None = None
         self.texts = texts
         self.spells = dict(spells)
         self.item_catalog = dict(item_catalog)
@@ -1455,6 +1532,14 @@ class BattleScene:
             monster_records,
             label="monster",
         )
+        self.monster_book_number_by_key = {
+            key: number
+            for number, key in enumerate(monsters_by_key, start=1)
+        }
+        self.monster_definitions_by_key = {
+            key: MonsterDefinition.from_record(record)
+            for key, record in monsters_by_key.items()
+        }
         self.monsters = tuple(
             BattleMonster.from_record(
                 _record_for_key(monsters_by_key, key, label="monster"),
@@ -1694,6 +1779,10 @@ class BattleScene:
         self.focus_presentation_elapsed_frame = 0
         self.hidden_party_indexes: set[int] = set()
         self.hide_presentation_elapsed_frame = 0
+        self.identify_target_index: int | None = None
+        self.identify_effect_elapsed_frame = 0
+        self.identify_detail_window: Window | None = None
+        self.identified_monster_indexes: set[int] = set()
         self.victory_returning_party_indexes: set[int] = set()
         self.victory_return_frame = 0
         self.action_party_index: int | None = None
@@ -1882,6 +1971,12 @@ class BattleScene:
         if self.phase is BattlePhase.HIDE_PRESENTATION:
             self._update_hide_presentation()
             return
+        if self.phase is BattlePhase.IDENTIFY_PRESENTATION:
+            self._update_identify_presentation()
+            return
+        if self.phase is BattlePhase.IDENTIFY_RESULT:
+            self._update_identify_result(input_state)
+            return
         if self.phase is BattlePhase.ITEM:
             self._update_item_selection(input_state)
             return
@@ -1923,6 +2018,8 @@ class BattleScene:
                     self._begin_defense()
                 elif command == BattleCommand.HIDE:
                     self._begin_hide()
+                elif command == BattleCommand.IDENTIFY:
+                    self._begin_identify_target_selection()
                 elif command == BattleCommand.COVER:
                     self._begin_cover_target_selection()
                 elif command == BattleCommand.ITEM:
@@ -2093,6 +2190,12 @@ class BattleScene:
         self.focus_presentation_elapsed_frame = 0
         self.hidden_party_indexes.clear()
         self.hide_presentation_elapsed_frame = 0
+        self.identify_target_index = None
+        self.identify_effect_elapsed_frame = 0
+        self.identified_monster_indexes.clear()
+        if self.identify_detail_window is not None:
+            self.identify_detail_window.close_immediately()
+        self.identify_detail_window = None
         self.victory_returning_party_indexes.clear()
         self.victory_return_frame = 0
         battle_popup = getattr(self, "battle_popup", None)
@@ -4479,6 +4582,32 @@ class BattleScene:
         self.all_target_cursors = ()
         self._refresh_monster_name_colors()
 
+    def _begin_identify_target_selection(self) -> bool:
+        """Select any living monster, regardless of formation or weapon reach."""
+
+        if (
+            self.active_party_index is None
+            or not self.party[self.active_party_index].has_skill("Identify")
+        ):
+            return False
+        selectable = tuple(
+            index
+            for index, monster in enumerate(self.monsters)
+            if monster.is_alive
+        )
+        if not selectable:
+            return False
+        self.selected_command = BattleCommand.IDENTIFY
+        self.selectable_target_indexes = selectable
+        self.selected_target_index = selectable[-1]
+        self.phase = BattlePhase.TARGET
+        self._begin_action_motion(use_cast_pose=True)
+        self.command_cursor.active = False
+        self.target_cursor.active = True
+        self.target_cursor.select_key(self.selected_target_index)
+        self._refresh_monster_name_colors()
+        return True
+
     def _begin_attack_target_selection(
         self,
         *,
@@ -4525,6 +4654,8 @@ class BattleScene:
         if input_state.confirm.triggered:
             if self.selected_command is BattleCommand.FOCUS:
                 self._begin_focus_presentation()
+            elif self.selected_command is BattleCommand.IDENTIFY:
+                self._begin_identify_presentation()
             else:
                 self._begin_attack_presentation()
             return
@@ -4533,6 +4664,77 @@ class BattleScene:
         if navigation is not None:
             self._move_target(navigation)
         self.target_cursor.update()
+
+    def _begin_identify_presentation(self) -> bool:
+        """Start DA2's twelve-frame Identify effect at ZERO's frame rate."""
+
+        target_index = self.selected_target_index
+        if (
+            self.active_party_index is None
+            or target_index is None
+            or target_index not in self.selectable_target_indexes
+        ):
+            return False
+        self.identify_target_index = target_index
+        self.identify_effect_elapsed_frame = 0
+        self.phase = BattlePhase.IDENTIFY_PRESENTATION
+        self.target_cursor.active = False
+        getattr(self, "hidden_party_indexes", set()).discard(
+            self.active_party_index
+        )
+        self._refresh_monster_name_colors()
+        play_se(BATTLE_IDENTIFY_SE_ID)
+        return True
+
+    def _update_identify_presentation(self) -> None:
+        """Reveal the record and open DA2's battle detail after the effect."""
+
+        self.identify_effect_elapsed_frame += 1
+        if self.identify_effect_elapsed_frame < IDENTIFY_EFFECT_FRAME_COUNT:
+            return
+        target_index = self.identify_target_index
+        if target_index is None:
+            raise RuntimeError("identify presentation requires a target")
+        monster = self.monsters[target_index]
+        self.monster_record_system.reveal_all_identify_fields(monster.key)
+        self.identified_monster_indexes.add(target_index)
+        definition = self.monster_definitions_by_key[monster.key]
+        if self.identify_text_factory is None:
+            self.identify_text_factory = LocalizedWindowTextFactory.from_language(
+                self.fonts,
+                self.settings.language,
+            )
+        detail_texts = identify_detail_texts(
+            number=self.monster_book_number_by_key[monster.key],
+            definition=definition,
+            revealed_fields=self.save_data.monster_records[monster.key],
+            items=self.item_catalog,
+            texts=self.texts,
+            localizer=self.localizer,
+            text_factory=self.identify_text_factory,
+        )
+        window_grid, _image_x = identify_detail_layout(
+            monster,
+            len(detail_texts),
+        )
+        self.identify_detail_window = self.window_factory.create(
+            *window_grid,
+            detail_texts,
+        )
+        self.identify_detail_window.open_immediately()
+        self.phase = BattlePhase.IDENTIFY_RESULT
+
+    def _update_identify_result(self, input_state: InputState) -> None:
+        """Close the inspected detail and finish the acting member's turn."""
+
+        if not (input_state.confirm.triggered or input_state.cancel.triggered):
+            return
+        if self.identify_detail_window is not None:
+            self.identify_detail_window.close_immediately()
+        self.identify_detail_window = None
+        self.identify_target_index = None
+        self.identify_effect_elapsed_frame = 0
+        self._begin_action_return(complete_turn=True)
 
     def _begin_attack_presentation(self) -> bool:
         """Start the selected right-hand weapon's authored attack sequence."""
@@ -6505,6 +6707,7 @@ class BattleScene:
         self._draw_aim_reticle()
         self._draw_party_attack_effect()
         self._draw_spell_effects()
+        self._draw_identify_effect()
         self._draw_sleeping_icons()
         self._draw_poison_icons()
         self._draw_paralyze_icons()
@@ -6522,6 +6725,88 @@ class BattleScene:
         self._draw_windows()
         self._draw_protection_icons()
         self._draw_target_cursor()
+        self._draw_identify_result()
+
+    def _draw_identify_effect(self) -> None:
+        """Draw DA2's five-tile Identify pattern from bank 0 at Y=144."""
+
+        if (
+            getattr(self, "phase", None) is not BattlePhase.IDENTIFY_PRESENTATION
+            or getattr(self, "identify_target_index", None) is None
+        ):
+            return
+        target_index = self.identify_target_index
+        monster = self.monsters[target_index]
+        target_x, target_y = self._monster_draw_position(target_index)
+        anchor_x = target_x + monster.width // 2
+        anchor_y = target_y + monster.height // 2
+        reference_frame = min(
+            self.identify_effect_elapsed_frame * DA2_REFERENCE_FPS // FPS,
+            DA2_IDENTIFY_EFFECT_FRAME_COUNT - 1,
+        )
+        pattern = ((reference_frame - 1) // 2) % 3
+        if pattern == 0:
+            pyxel.blt(
+                anchor_x - IDENTIFY_EFFECT_TILE_SIZE // 2,
+                anchor_y - IDENTIFY_EFFECT_TILE_SIZE // 2,
+                0,
+                IDENTIFY_EFFECT_CENTER_SOURCE_X,
+                IDENTIFY_EFFECT_SOURCE_Y,
+                IDENTIFY_EFFECT_TILE_SIZE,
+                IDENTIFY_EFFECT_TILE_SIZE,
+                IDENTIFY_EFFECT_TRANSPARENT_INDEX,
+            )
+            return
+
+        inset = (2 - pattern) * 8
+        left = anchor_x - 24 + inset
+        right = anchor_x + 8 - inset
+        top = anchor_y - 24 + inset
+        bottom = anchor_y + 8 - inset
+        for x, y, source_x in (
+            (left, top, 0),
+            (right, top, 16),
+            (left, bottom, 32),
+            (right, bottom, 48),
+        ):
+            pyxel.blt(
+                x,
+                y,
+                0,
+                source_x,
+                IDENTIFY_EFFECT_SOURCE_Y,
+                IDENTIFY_EFFECT_TILE_SIZE,
+                IDENTIFY_EFFECT_TILE_SIZE,
+                IDENTIFY_EFFECT_TRANSPARENT_INDEX,
+            )
+
+    def _draw_identify_result(self) -> None:
+        """Draw the identified monster in DA2's battle detail window."""
+
+        if (
+            getattr(self, "phase", None) is not BattlePhase.IDENTIFY_RESULT
+            or getattr(self, "identify_detail_window", None) is None
+            or getattr(self, "identify_target_index", None) is None
+        ):
+            return
+        window = self.identify_detail_window
+        target = self.monsters[self.identify_target_index]
+        definition = self.monster_definitions_by_key[target.key]
+        _window_grid, image_x = identify_detail_layout(
+            target,
+            len(window.texts),
+        )
+        window.draw()
+        pyxel.blt(
+            window.content_x + image_x,
+            window.content_y + IDENTIFY_DETAIL_IMAGE_Y,
+            self.monster_images[target.key],
+            0,
+            0,
+            definition.width,
+            definition.height,
+            TRANSPARENT_INDEX,
+        )
 
     def _draw_background(self) -> None:
         pyxel.blt(
@@ -7289,6 +7574,7 @@ class BattleScene:
                             flip_x=is_escaping,
                         ),
                     )
+                    self._draw_identified_monster_hp(index, monster, x, y)
                     continue
                 is_unselectable_rear_target = (
                     self.phase is BattlePhase.TARGET
@@ -7302,9 +7588,11 @@ class BattleScene:
                         y,
                         flip_x=is_escaping,
                     )
+                    self._draw_identified_monster_hp(index, monster, x, y)
                     continue
                 with self.palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
                     self._draw_monster_image(monster, x, y)
+                self._draw_identified_monster_hp(index, monster, x, y)
                 continue
             animation = self.monster_death_animation
             if animation is None:
@@ -7315,6 +7603,51 @@ class BattleScene:
                     self._draw_monster_image(monster, x, y)
             finally:
                 pyxel.dither(1.0)
+
+    def _draw_identified_monster_hp(
+        self,
+        index: int,
+        monster: BattleMonster,
+        x: int,
+        y: int,
+    ) -> None:
+        """Keep DA2's current-HP label below a monster identified this battle."""
+
+        if index not in getattr(self, "identified_monster_indexes", ()):
+            return
+        baseline_y = y + monster.height + IDENTIFIED_MONSTER_HP_OFFSET_Y
+        self._draw_small_text_with_edge(
+            x + IDENTIFIED_MONSTER_HP_LABEL_OFFSET_X,
+            baseline_y,
+            "HP",
+            DEFAULT_TEXT_COLOR,
+        )
+        self._draw_small_text_with_edge(
+            x + IDENTIFIED_MONSTER_HP_VALUE_OFFSET_X,
+            baseline_y,
+            str(monster.state.hp),
+            DEFAULT_TEXT_COLOR,
+        )
+
+    @staticmethod
+    def _draw_small_text_with_edge(
+        x: int,
+        y: int,
+        text: str,
+        color: int,
+    ) -> None:
+        """Draw legible built-in-font text with DA2's one-pixel outline."""
+
+        for offset_y in (-1, 0, 1):
+            for offset_x in (-1, 0, 1):
+                if offset_x or offset_y:
+                    pyxel.text(
+                        x + offset_x,
+                        y + offset_y,
+                        text,
+                        IDENTIFIED_MONSTER_HP_EDGE_COLOR,
+                    )
+        pyxel.text(x, y, text, color)
 
     def _draw_spell_effect_target(
         self,

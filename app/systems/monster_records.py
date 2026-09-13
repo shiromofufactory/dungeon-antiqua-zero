@@ -14,11 +14,15 @@ else:
 
 MONSTER_PROFILE_FIELD_KEY = "profile"
 MONSTER_TREASURE_ACQUIRED_FIELD_KEY = "treasure_acquired"
+MONSTER_TREASURE_IDENTIFIED_FIELD_KEY = "treasure_identified"
 MONSTER_COMBAT_FIELD_KEYS = frozenset(
     (
         MONSTER_PROFILE_FIELD_KEY,
         *(resistance.value for resistance in ResistanceType),
     )
+)
+MONSTER_IDENTIFY_FIELD_KEYS = frozenset(
+    (*MONSTER_COMBAT_FIELD_KEYS, MONSTER_TREASURE_IDENTIFIED_FIELD_KEY)
 )
 
 
@@ -55,9 +59,14 @@ class MonsterRecordSystem:
         self._fields(monster_key).add(MONSTER_PROFILE_FIELD_KEY)
 
     def reveal_all_combat_fields(self, monster_key: str) -> None:
-        """Reveal the fields that DA2's identify command discovers."""
+        """Reveal the profile and every battle affinity."""
 
         self._fields(monster_key).update(MONSTER_COMBAT_FIELD_KEYS)
+
+    def reveal_all_identify_fields(self, monster_key: str) -> None:
+        """Reveal every field discovered by ZERO's Identify skill."""
+
+        self._fields(monster_key).update(MONSTER_IDENTIFY_FIELD_KEYS)
 
     def record_treasure_acquired(self, monster_key: str) -> None:
         """Remember that this monster has successfully yielded its treasure."""
@@ -111,7 +120,9 @@ class MonsterRecordSystem:
 
 __all__ = [
     "MONSTER_COMBAT_FIELD_KEYS",
+    "MONSTER_IDENTIFY_FIELD_KEYS",
     "MONSTER_PROFILE_FIELD_KEY",
     "MONSTER_TREASURE_ACQUIRED_FIELD_KEY",
+    "MONSTER_TREASURE_IDENTIFIED_FIELD_KEY",
     "MonsterRecordSystem",
 ]

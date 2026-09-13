@@ -45,6 +45,10 @@ from .information_menu import (
     InformationMenuDataError,
     InformationMenuOverlay,
     InformationPhase,
+    MONSTER_DETAIL_WINDOW_GRID,
+    MONSTER_IMAGE_CENTER_X,
+    MONSTER_IMAGE_CENTER_Y,
+    monster_detail_texts,
 )
 from .event_message import EventMessageDataError, EventMessageOverlay, MessageOverlay
 from .battle_result import BattleResultOverlay
@@ -67,6 +71,9 @@ __all__ = [
     "InformationMenuDataError",
     "InformationMenuOverlay",
     "InformationPhase",
+    "MONSTER_DETAIL_WINDOW_GRID",
+    "MONSTER_IMAGE_CENTER_X",
+    "MONSTER_IMAGE_CENTER_Y",
     "LocalizedWindowTextFactory",
     "NEGATIVE_COLOR",
     "TEXT_GRID_X",
@@ -104,6 +111,7 @@ __all__ = [
     "format_saved_at",
     "format_play_time",
     "input_icon_tag",
+    "monster_detail_texts",
     "pad",
     "spacing",
     "split_tagged_text",

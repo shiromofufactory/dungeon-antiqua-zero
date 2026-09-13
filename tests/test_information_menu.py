@@ -14,16 +14,16 @@ from state import Language, Settings
 from systems import (
     MONSTER_COMBAT_FIELD_KEYS,
     MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+    MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
 )
 from text_catalog import TextCatalog
+from ui import DEFAULT_TEXT_COLOR
 from ui.information_menu import (
     INFORMATION_HEADER_WINDOW_GRID,
     INFORMATION_MAIN_WINDOW_GRID,
     MONSTER_DETAIL_WINDOW_GRID,
     MONSTER_LIST_VISIBLE_COUNT,
     MONSTER_LIST_WINDOW_GRID,
-    MONSTER_STUN_MARKER,
-    MONSTER_STUN_MARKER_X,
     InformationMenuOverlay,
     InformationPhase,
     monster_affinity_icon_row,
@@ -363,10 +363,11 @@ class InformationMenuOverlayTest(unittest.TestCase):
 
         self.assertEqual(detail[0], "Ｎｏ：　１")
         self.assertEqual(detail[1], monster.localized_name(overlay.localizer))
-        self.assertIn("？？？？", detail[3])
+        self.assertTrue(detail[3].startswith("ＬＶ"))
+        self.assertTrue(detail[3].endswith("１"))
         self.assertIn("？？？？", detail[4])
+        self.assertIn("？？？？", detail[5])
         self.assertIn("しきべつ　されていません", detail)
-        self.assertFalse(any("ＬＶ" in text for text in detail))
         self.assertFalse(any("おたから" in text for text in detail))
 
     def test_complete_record_shows_level_stats_affinities_and_unknown_treasure(
@@ -389,18 +390,46 @@ class InformationMenuOverlayTest(unittest.TestCase):
         self.assertTrue(
             any(text.startswith("ＬＶ") and text.endswith("１") for text in detail)
         )
+        level_index = next(i for i, text in enumerate(detail) if text.startswith("ＬＶ"))
+        hp_index = next(i for i, text in enumerate(detail) if text.startswith("ＨＰ"))
+        mp_index = next(i for i, text in enumerate(detail) if text.startswith("ＭＰ"))
+        self.assertLess(level_index, hp_index)
+        self.assertLess(hp_index, mp_index)
+        self.assertEqual(
+            len(detail[level_index]),
+            len(detail[hp_index]),
+        )
+        self.assertEqual(len(detail[level_index]), len(detail[mp_index]))
         self.assertIn("おたから：？？？？", detail)
         self.assertIn(monster_affinity_icon_row(monster.resistances), detail)
         self.assertIn(monster_affinity_icon_row(monster.weaknesses), detail)
-        stun_markers = [
-            text
-            for text in overlay.monster_detail_window.texts
-            if text.text == MONSTER_STUN_MARKER
-        ]
-        self.assertEqual(len(stun_markers), 2)
+        self.assertNotIn("止", "".join(detail))
+        white_labels = {
+            "おたから：？？？？",
+            "たいせい：",
+            "じゃくてん：",
+        }
         self.assertTrue(
-            all(text.x == MONSTER_STUN_MARKER_X for text in stun_markers)
+            all(
+                text.color == DEFAULT_TEXT_COLOR
+                for text in overlay.monster_detail_window.texts
+                if text.text in white_labels
+            )
         )
+
+    def test_identify_reveals_the_monster_treasure_name(self) -> None:
+        monster = load_monsters()[0]
+        fields = set(MONSTER_COMBAT_FIELD_KEYS)
+        fields.add(MONSTER_TREASURE_IDENTIFIED_FIELD_KEY)
+        overlay = self.create_overlay({monster.key: fields})
+        self.open_monster_book(overlay)
+
+        detail = [text.text for text in overlay.monster_detail_window.texts]
+        expected_item = overlay.items[monster.treasure_item_key].localized_name(
+            overlay.localizer
+        )
+
+        self.assertIn(f"おたから：{expected_item}", detail)
 
     def test_treasure_name_requires_the_per_monster_acquired_flag(self) -> None:
         monster = load_monsters()[0]
@@ -413,7 +442,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
 
         self.assertIn("おたから：ちりょうやく", detail)
 
-    def test_boss_hp_remains_hidden_after_complete_identification(self) -> None:
+    def test_boss_hp_is_shown_after_complete_identification(self) -> None:
         number, monster = next(
             (number, monster)
             for number, monster in enumerate(load_monsters(), start=1)
@@ -431,7 +460,12 @@ class InformationMenuOverlayTest(unittest.TestCase):
             str.maketrans("0123456789", "０１２３４５６７８９")
         )
         self.assertTrue(detail[0].endswith(fullwidth_number))
-        self.assertIn("ＨＰ　　　？？？？", detail)
+        hp_line = next(text for text in detail if text.startswith("ＨＰ"))
+        fullwidth_hp = str(monster.max_hp).translate(
+            str.maketrans("0123456789", "０１２３４５６７８９")
+        )
+        self.assertNotIn("？？？？", hp_line)
+        self.assertTrue(hp_line.endswith(fullwidth_hp))
         self.assertTrue(
             any("ＭＰ" in text and "？？？？" not in text for text in detail)
         )
@@ -493,13 +527,21 @@ class InformationMenuOverlayTest(unittest.TestCase):
 class MonsterAffinityIconRowTest(unittest.TestCase):
     def test_uses_enabled_and_disabled_da2_icon_variants(self) -> None:
         row = monster_affinity_icon_row(
-            frozenset((ResistanceType.FIRE, ResistanceType.POISON))
+            frozenset(
+                (
+                    ResistanceType.FIRE,
+                    ResistanceType.POISON,
+                    ResistanceType.STUN,
+                )
+            )
         )
 
         self.assertIn("%FIRE%", row)
         self.assertIn("%POISON%", row)
         self.assertIn("%FREEZE_DISABLED%", row)
         self.assertIn("%DEATH_DISABLED%", row)
+        self.assertNotIn("STUN", row)
+        self.assertNotIn("止", row)
 
 
 if __name__ == "__main__":

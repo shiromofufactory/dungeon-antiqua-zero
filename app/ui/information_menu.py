@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
 
 import pyxel
@@ -24,6 +24,7 @@ if __package__ == "ui":
     from systems import (
         MONSTER_COMBAT_FIELD_KEYS,
         MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+        MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
     )
     from text_catalog import TextCatalog
 else:
@@ -43,14 +44,13 @@ else:
     from ..systems import (
         MONSTER_COMBAT_FIELD_KEYS,
         MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+        MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
     )
     from ..text_catalog import TextCatalog
 
 from .colors import (
     BLUE_TEXT_COLOR,
-    DISABLED_COLOR,
     NEGATIVE_COLOR,
-    POSITIVE_COLOR,
 )
 from .localized_text import LocalizedWindowTextFactory
 from .text_format import pad
@@ -89,13 +89,10 @@ MONSTER_DETAIL_FIRST_Y = 2
 MONSTER_DETAIL_ROW_HEIGHT = 3
 MONSTER_IMAGE_CENTER_X = 58
 MONSTER_IMAGE_CENTER_Y = 180
-MONSTER_STUN_MARKER_X = 22
-MONSTER_STUN_MARKER = "止"
 UNKNOWN_VALUE = "？？？？"
 
-# DA2's bestiary has one icon position for each of these nine affinities. ZERO's
-# additional STUN resistance is placed after them as a one-character marker
-# because the current common icon sheet does not have a STUN icon.
+# DA2's bestiary has one icon position for each of these nine affinities.
+# STUN is a battle-control rule and is intentionally omitted from the display.
 MONSTER_BOOK_ICON_TYPES = (
     ResistanceType.FIRE,
     ResistanceType.FREEZE,
@@ -150,6 +147,119 @@ def monster_affinity_icon_row(
         if resistance in affinities
         else f"%{resistance.value}_DISABLED%"
         for resistance in MONSTER_BOOK_ICON_TYPES
+    )
+
+
+def monster_detail_texts(
+    *,
+    number: int,
+    monster: MonsterDefinition,
+    revealed_fields: Collection[str],
+    items: Mapping[str, Item],
+    texts: TextCatalog,
+    localizer: Localizer,
+    text_factory: LocalizedWindowTextFactory,
+    text_x: int = MONSTER_DETAIL_TEXT_X,
+    first_y: int = MONSTER_DETAIL_FIRST_Y,
+    row_height: int = MONSTER_DETAIL_ROW_HEIGHT,
+) -> tuple[WindowText, ...]:
+    """Build the detail shared by the monster book and battle Identify."""
+
+    fully_identified = MONSTER_COMBAT_FIELD_KEYS.issubset(revealed_fields)
+    hp_value = UNKNOWN_VALUE if not fully_identified else pad(monster.max_hp, 4)
+    mp_value = UNKNOWN_VALUE if not fully_identified else pad(monster.max_mp, 4)
+
+    def formatted(key: str, **values: str) -> str:
+        return texts.formatted_text(key, localizer, values)
+
+    lines: list[tuple[str, int]] = [
+        (
+            formatted(
+                "monster_book.number",
+                NUMBER=format_number(number),
+            ),
+            DEFAULT_TEXT_COLOR,
+        ),
+        (monster.localized_name(localizer), DEFAULT_TEXT_COLOR),
+        (
+            texts.text(f"term.monster_tribe.{monster.tribe.value}", localizer),
+            DEFAULT_TEXT_COLOR,
+        ),
+        (
+            formatted(
+                "monster_book.level",
+                VALUE=pad(monster.level, 4),
+            ),
+            DEFAULT_TEXT_COLOR,
+        ),
+        (
+            formatted("monster_book.hp", VALUE=hp_value),
+            DEFAULT_TEXT_COLOR,
+        ),
+        (
+            formatted("monster_book.mp", VALUE=mp_value),
+            DEFAULT_TEXT_COLOR,
+        ),
+    ]
+    if not fully_identified:
+        lines.extend(
+            (
+                ("", DEFAULT_TEXT_COLOR),
+                (texts.text("monster_book.unidentified", localizer), NEGATIVE_COLOR),
+            )
+        )
+    else:
+        treasure_known = bool(
+            {
+                MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+                MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
+            }.intersection(revealed_fields)
+        )
+        if treasure_known:
+            try:
+                treasure_name = items[
+                    monster.treasure_item_key
+                ].localized_name(localizer)
+            except KeyError as error:
+                raise InformationMenuDataError(
+                    "モンスターのお宝がアイテムデータにありません: "
+                    f"{monster.key}: {monster.treasure_item_key}"
+                ) from error
+            treasure = formatted(
+                "monster_book.treasure",
+                ITEM=treasure_name,
+            )
+        else:
+            treasure = texts.text("monster_book.treasure_unknown", localizer)
+        lines.extend(
+            (
+                (treasure, DEFAULT_TEXT_COLOR),
+                (
+                    texts.text("monster_book.tolerance", localizer),
+                    DEFAULT_TEXT_COLOR,
+                ),
+                (
+                    monster_affinity_icon_row(monster.resistances),
+                    DEFAULT_TEXT_COLOR,
+                ),
+                (
+                    texts.text("monster_book.weakness", localizer),
+                    DEFAULT_TEXT_COLOR,
+                ),
+                (
+                    monster_affinity_icon_row(monster.weaknesses),
+                    DEFAULT_TEXT_COLOR,
+                ),
+            )
+        )
+    return tuple(
+        text_factory.create(
+            text,
+            text_x,
+            first_y + index * row_height,
+            color=color,
+        )
+        for index, (text, color) in enumerate(lines)
     )
 
 
@@ -550,130 +660,20 @@ class InformationMenuOverlay:
             self.monster_detail_window,
         ]
 
-    def _formatted(self, key: str, **values: str) -> str:
-        return self.texts.formatted_text(key, self.localizer, values)
-
     def _monster_detail_texts(self) -> tuple[WindowText, ...]:
         selected = self.selected_monster
         if selected is None:
             return ()
         number, monster = selected
-        fields = self.monster_records[monster.key]
-        fully_identified = MONSTER_COMBAT_FIELD_KEYS.issubset(fields)
-        hp_value = (
-            UNKNOWN_VALUE
-            if monster.is_boss or not fully_identified
-            else pad(monster.max_hp, 4)
+        return monster_detail_texts(
+            number=number,
+            monster=monster,
+            revealed_fields=self.monster_records[monster.key],
+            items=self.items,
+            texts=self.texts,
+            localizer=self.localizer,
+            text_factory=self.text_factory,
         )
-        mp_value = UNKNOWN_VALUE if not fully_identified else pad(monster.max_mp, 4)
-        lines: list[tuple[str, int]] = [
-            (
-                self._formatted(
-                    "monster_book.number",
-                    NUMBER=format_number(number),
-                ),
-                DEFAULT_TEXT_COLOR,
-            ),
-            (monster.localized_name(self.localizer), DEFAULT_TEXT_COLOR),
-            (
-                self.localized[f"term.monster_tribe.{monster.tribe.value}"],
-                DEFAULT_TEXT_COLOR,
-            ),
-            (
-                self._formatted("monster_book.hp", VALUE=hp_value),
-                DEFAULT_TEXT_COLOR,
-            ),
-            (
-                self._formatted("monster_book.mp", VALUE=mp_value),
-                DEFAULT_TEXT_COLOR,
-            ),
-        ]
-        if not fully_identified:
-            lines.extend(
-                (
-                    ("", DEFAULT_TEXT_COLOR),
-                    (self.localized["monster_book.unidentified"], NEGATIVE_COLOR),
-                )
-            )
-        else:
-            treasure_known = MONSTER_TREASURE_ACQUIRED_FIELD_KEY in fields
-            if treasure_known:
-                try:
-                    treasure_name = self.items[
-                        monster.treasure_item_key
-                    ].localized_name(self.localizer)
-                except KeyError as error:
-                    raise InformationMenuDataError(
-                        "モンスターのお宝がアイテムデータにありません: "
-                        f"{monster.key}: {monster.treasure_item_key}"
-                    ) from error
-                treasure = self._formatted(
-                    "monster_book.treasure",
-                    ITEM=treasure_name,
-                )
-                treasure_color = DEFAULT_TEXT_COLOR
-            else:
-                treasure = self.localized["monster_book.treasure_unknown"]
-                treasure_color = NEGATIVE_COLOR
-            lines.extend(
-                (
-                    (
-                        self._formatted(
-                            "monster_book.level",
-                            VALUE=format_number(monster.level),
-                        ),
-                        DEFAULT_TEXT_COLOR,
-                    ),
-                    (treasure, treasure_color),
-                    (self.localized["monster_book.tolerance"], BLUE_TEXT_COLOR),
-                    (
-                        monster_affinity_icon_row(monster.resistances),
-                        DEFAULT_TEXT_COLOR,
-                    ),
-                    (self.localized["monster_book.weakness"], POSITIVE_COLOR),
-                    (
-                        monster_affinity_icon_row(monster.weaknesses),
-                        DEFAULT_TEXT_COLOR,
-                    ),
-                )
-            )
-        placements = [
-            self.text_factory.create(
-                text,
-                MONSTER_DETAIL_TEXT_X,
-                MONSTER_DETAIL_FIRST_Y + index * MONSTER_DETAIL_ROW_HEIGHT,
-                color=color,
-            )
-            for index, (text, color) in enumerate(lines)
-        ]
-        if fully_identified:
-            placements.extend(
-                (
-                    self.text_factory.create(
-                        MONSTER_STUN_MARKER,
-                        MONSTER_STUN_MARKER_X,
-                        MONSTER_DETAIL_FIRST_Y
-                        + 8 * MONSTER_DETAIL_ROW_HEIGHT,
-                        color=(
-                            DEFAULT_TEXT_COLOR
-                            if ResistanceType.STUN in monster.resistances
-                            else DISABLED_COLOR
-                        ),
-                    ),
-                    self.text_factory.create(
-                        MONSTER_STUN_MARKER,
-                        MONSTER_STUN_MARKER_X,
-                        MONSTER_DETAIL_FIRST_Y
-                        + 10 * MONSTER_DETAIL_ROW_HEIGHT,
-                        color=(
-                            DEFAULT_TEXT_COLOR
-                            if ResistanceType.STUN in monster.weaknesses
-                            else DISABLED_COLOR
-                        ),
-                    ),
-                )
-            )
-        return tuple(placements)
 
     def _move_monster_selection(self, distance: int) -> None:
         entries = self.registered_monsters
@@ -804,9 +804,10 @@ __all__ = [
     "InformationPhase",
     "MONSTER_BOOK_ICON_TYPES",
     "MONSTER_DETAIL_WINDOW_GRID",
+    "MONSTER_IMAGE_CENTER_X",
+    "MONSTER_IMAGE_CENTER_Y",
     "MONSTER_LIST_VISIBLE_COUNT",
     "MONSTER_LIST_WINDOW_GRID",
-    "MONSTER_STUN_MARKER",
-    "MONSTER_STUN_MARKER_X",
     "monster_affinity_icon_row",
+    "monster_detail_texts",
 ]

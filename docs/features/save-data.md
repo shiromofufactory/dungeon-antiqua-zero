@@ -120,6 +120,7 @@
       "revealed_field_keys": [
         "profile",
         "FIRE",
+        "treasure_identified",
         "treasure_acquired"
       ]
     }
@@ -304,6 +305,7 @@ JSONオブジェクトのプロパティ順には意味を持たせない。書�
   "revealed_field_keys": [
     "profile",
     "FIRE",
+    "treasure_identified",
     "treasure_acquired"
   ]
 }
@@ -312,7 +314,8 @@ JSONオブジェクトのプロパティ順には意味を持たせない。書�
 `revealed_field_keys` は重複のない安定キーの配列とし、DA2と同様に「遭遇済みだが一部の情報は
 未判明」という状態を表せるようにする。`profile` は基礎情報、`ResistanceType` の各値は対応する
 属性の弱点・耐性を確認済みであることを表す。`treasure_acquired` は、そのモンスターからお宝を
-実際に取得済みであることを表す。遭遇、攻撃・呪文・アイテム・識別による開示条件と、戦闘中の
+実際に取得済みであることを表し、`treasure_identified` は「しきべつ」でお宝名を確認済みで
+あることを表す。遭遇、攻撃・呪文・アイテム・識別による開示条件と、戦闘中の
 相性表示は [`battle.md`](./battle.md) を正本とする。未知の開示キーを別の意味へ読み替えない。
 
 ## ログ
