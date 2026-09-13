@@ -4490,6 +4490,15 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_target_cursor()
         self.assertEqual([cursor.draw.call_count for cursor in mock.all_target_cursors], [1, 1])
 
+    def test_cover_target_cursor_is_drawn(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COVER_TARGET
+        mock.party_target_cursor = Mock()
+
+        mock._draw_target_cursor()
+
+        mock.party_target_cursor.draw.assert_called_once_with()
+
     def test_equipment_without_a_use_effect_stays_selectable_but_is_not_used(self) -> None:
         items = load_mock_items()
         dagger = items["DAGGER"]
@@ -4525,6 +4534,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock.timeline = (visual,)
         mock.party_visuals = (visual,)
+        mock.cover_target_by_party_index = {0: 1}
         mock.phase = BattleMockPhase.TIMELINE
         mock.command_cursor = Mock()
         mock.command_window = Mock()
@@ -4534,7 +4544,51 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._activate_timeline_head()
 
         self.assertEqual(mock.defending_party_indexes, set())
+        self.assertEqual(mock.cover_target_by_party_index, {})
         self.assertIs(mock.phase, BattleMockPhase.COMMAND)
+
+    def test_cover_command_selects_an_ally_and_starts_guarding_them(self) -> None:
+        members = (
+            SimpleNamespace(hp=30, has_skill=lambda key: key == "Cover"),
+            SimpleNamespace(hp=30),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = members
+        mock.active_party_index = 0
+        mock.escaped_party_indexes = set()
+        mock.hidden_party_indexes = set()
+        mock.party_target_window = Window(0, 0, 64, 60, transparent=True)
+        mock.command_cursor = Mock(active=True)
+        mock._party_target_cursor_x = Mock(side_effect=(148, 152))
+        mock.last_cover_target_by_party_index = {0: 1}
+        mock.cover_target_by_party_index = {}
+        mock.defending_party_indexes = set()
+        mock._complete_current_turn = Mock()
+
+        self.assertTrue(mock._begin_cover_target_selection())
+        self.assertIs(mock.phase, BattleMockPhase.COVER_TARGET)
+        self.assertEqual(mock.selectable_party_target_indexes, (0, 1))
+        self.assertEqual(mock.selected_party_target_index, 1)
+        self.assertFalse(mock.command_cursor.active)
+
+        self.assertTrue(mock._confirm_cover_target_selection())
+        self.assertEqual(mock.cover_target_by_party_index, {0: 1})
+        self.assertEqual(mock.defending_party_indexes, {0})
+        self.assertIs(mock.selected_command, BattleCommand.COVER)
+        mock._complete_current_turn.assert_called_once_with()
+
+    def test_covering_self_uses_defend_instead(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 0
+        mock.selected_party_target_index = 0
+        mock.selectable_party_target_indexes = (0, 1)
+        mock.last_cover_target_by_party_index = {}
+        mock._begin_defense = Mock(return_value=True)
+
+        self.assertTrue(mock._confirm_cover_target_selection())
+
+        self.assertEqual(mock.last_cover_target_by_party_index, {0: 0})
+        mock._begin_defense.assert_called_once_with()
 
     def test_spell_command_opens_spell_selection(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -5007,6 +5061,155 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(mock.monster_attack_damage, 45)
         play_se.assert_called_once_with(BATTLE_HIT_SE_ID)
+
+    def test_manual_cover_redirects_a_physical_attack_with_guard(self) -> None:
+        actor = SimpleNamespace(
+            combat_stats=SimpleNamespace(hit=90),
+            effective_agility=12,
+        )
+        coverer = SimpleNamespace(
+            hp=100,
+            max_hp=100,
+            paralyzed=False,
+            sleeping=0,
+            confused=0,
+            battle_stats=SimpleNamespace(defense=17, evasion=8),
+        )
+        protected = SimpleNamespace(
+            hp=100,
+            max_hp=100,
+            battle_stats=SimpleNamespace(defense=3, evasion=2),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (coverer, protected)
+        mock.cover_target_by_party_index = {0: 1}
+        mock.defending_party_indexes = {0}
+        mock.focused_target_by_party_index = {}
+        mock.hidden_party_indexes = set()
+        mock._active_party_indexes = Mock(return_value=(0, 1))
+        result = SimpleNamespace(hit=True, damage=20)
+
+        with (
+            patch("tools.screen_mocks.battle.random.choice", return_value=1),
+            patch("tools.screen_mocks.battle.random.randint", return_value=5),
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                return_value=result,
+            ) as resolve,
+        ):
+            target_index, resolved = mock._resolve_monster_attack(
+                actor,
+                (0, 1),
+                attack=50,
+            )
+
+        self.assertEqual(target_index, 0)
+        self.assertIs(resolved, result)
+        self.assertEqual(mock.protected_party_index, 1)
+        self.assertEqual(mock.covering_party_index, 0)
+        self.assertEqual(resolve.call_args.kwargs["target_defense"], 17)
+        self.assertTrue(resolve.call_args.kwargs["target_defending"])
+
+    def test_cover_skill_automatically_protects_an_ally_in_crisis(self) -> None:
+        actor = SimpleNamespace(
+            combat_stats=SimpleNamespace(hit=90),
+            effective_agility=12,
+        )
+        coverer = SimpleNamespace(
+            hp=26,
+            max_hp=100,
+            paralyzed=False,
+            sleeping=0,
+            confused=0,
+            has_skill=lambda key: key == "Cover",
+            battle_stats=SimpleNamespace(defense=17, evasion=8),
+        )
+        protected = SimpleNamespace(
+            hp=25,
+            max_hp=100,
+            sleeping=0,
+            paralyzed=False,
+            battle_stats=SimpleNamespace(defense=3, evasion=2),
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (coverer, protected)
+        mock.cover_target_by_party_index = {}
+        mock.defending_party_indexes = set()
+        mock.focused_target_by_party_index = {}
+        mock.hidden_party_indexes = set()
+        mock._active_party_indexes = Mock(return_value=(0, 1))
+        result = SimpleNamespace(hit=True, damage=20)
+
+        with (
+            patch("tools.screen_mocks.battle.random.choice", return_value=1),
+            patch("tools.screen_mocks.battle.random.randint", return_value=5),
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                return_value=result,
+            ) as resolve,
+        ):
+            target_index, _resolved = mock._resolve_monster_attack(
+                actor,
+                (0, 1),
+                attack=50,
+            )
+
+        self.assertEqual(target_index, 0)
+        self.assertFalse(resolve.call_args.kwargs["target_defending"])
+
+    def test_automatic_cover_requires_a_healthy_actionable_coverer(self) -> None:
+        protected = SimpleNamespace(
+            hp=25,
+            max_hp=100,
+            sleeping=0,
+            paralyzed=False,
+        )
+        for field, value in (
+            ("hp", 25),
+            ("sleeping", 1),
+            ("paralyzed", True),
+            ("confused", 1),
+        ):
+            with self.subTest(field=field):
+                coverer = SimpleNamespace(
+                    hp=100,
+                    max_hp=100,
+                    sleeping=0,
+                    paralyzed=False,
+                    confused=0,
+                    has_skill=lambda key: key == "Cover",
+                )
+                setattr(coverer, field, value)
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = (coverer, protected)
+                mock.cover_target_by_party_index = {}
+                mock._active_party_indexes = Mock(return_value=(0, 1))
+
+                self.assertEqual(mock._covering_member_index(1), 1)
+
+    def test_coverer_moves_beside_the_protected_member_and_uses_guard_on_miss(
+        self,
+    ) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (SimpleNamespace(hp=30), SimpleNamespace(hp=30))
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+        mock.covering_party_index = 0
+        mock.protected_party_index = 1
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_damage = 0
+        mock._party_sprite_x = Mock(side_effect=lambda index: 156 + index * 4)
+
+        self.assertEqual(
+            mock._party_draw_position(0),
+            (160 - 26, PARTY_SPRITE_Y[1]),
+        )
+        self.assertEqual(mock._party_sprite_source_x(0), DEFEND_SPRITE_SOURCE_X)
+
+        mock.monster_attack_damage = 10
+        self.assertEqual(
+            mock._party_sprite_source_x(0),
+            MONSTER_DAMAGE_SPRITE_SOURCE_X,
+        )
 
     def test_focusing_member_cannot_evade_monster_attack(self) -> None:
         actor = BattleMockMonster(
@@ -5629,6 +5832,32 @@ class BattleScreenMockTest(unittest.TestCase):
                     8,
                     1,
                 ),
+            ],
+        )
+
+    def test_covered_damage_popup_uses_the_coverers_moved_position(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+        mock.party_visuals = (
+            SimpleNamespace(member=SimpleNamespace(formation_row=FormationRow.FRONT)),
+            SimpleNamespace(member=SimpleNamespace(formation_row=FormationRow.FRONT)),
+        )
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_damage = 15
+        mock.monster_attack_animation_frame = 0
+        mock.covering_party_index = 0
+        mock.protected_party_index = 1
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_monster_attack_result()
+
+        cover_x = mock._party_sprite_x(1) - 26
+        expected_y = PARTY_SPRITE_Y[1] + 14
+        self.assertEqual(
+            [entry.args[:2] for entry in blt.call_args_list],
+            [
+                (cover_x + 6, expected_y),
+                (cover_x + 14, expected_y),
             ],
         )
 

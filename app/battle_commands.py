@@ -235,8 +235,10 @@ def resolve_battle_commands(
     for skill_key, command in _SKILL_COMMANDS:
         if len(left_commands) == 3:
             break
-        if not member.has_skill(skill_key) or (
-            command is BattleCommand.HIDE and current.actor_hidden
+        if (
+            not member.has_skill(skill_key)
+            or (command is BattleCommand.HIDE and current.actor_hidden)
+            or (command is BattleCommand.COVER and len(party) <= 1)
         ):
             continue
         left_commands.append(

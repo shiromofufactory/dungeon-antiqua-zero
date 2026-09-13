@@ -305,6 +305,7 @@ MONSTER_DAMAGE_FRAME_COUNT = DAMAGE_POPUP_FRAME_COUNT
 MONSTER_MISS_FRAME_COUNT = len(DA2_MISS_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
 MONSTER_DAMAGE_SPRITE_SOURCE_X = 16 * 5
 MONSTER_DAMAGE_SHAKE_X = (8, 9)
+COVER_POSITION_OFFSET_X = 26
 DAMAGE_NUMBER_SPRITE_X = 128
 DAMAGE_NUMBER_SPRITE_Y = 0
 DAMAGE_NUMBER_SPRITE_SIZE = 8
@@ -605,6 +606,7 @@ class BattlePhase(StrEnum):
     ITEM = "item"
     SPELL = "spell"
     TARGET = "target"
+    COVER_TARGET = "cover_target"
     ACTION_TARGET = "action_target"
     ATTACK_PRESENTATION = "attack_presentation"
     FOCUS_PRESENTATION = "focus_presentation"
@@ -1719,7 +1721,11 @@ class BattleScene:
         self.last_item_selection_by_party_index: dict[
             int, tuple[str, EquipmentSlot | None]
         ] = {}
+        self.last_cover_target_by_party_index: dict[int, int] = {}
         self.defending_party_indexes: set[int] = set()
+        self.cover_target_by_party_index: dict[int, int] = {}
+        self.protected_party_index: int | None = None
+        self.covering_party_index: int | None = None
         self.escaped_party_indexes: set[int] = set()
         self.temporary_front_party_indexes: set[int] = set()
         self.victory_motion_frame = 0
@@ -1858,6 +1864,9 @@ class BattleScene:
         if self.phase is BattlePhase.TARGET:
             self._update_target_selection(input_state)
             return
+        if self.phase is BattlePhase.COVER_TARGET:
+            self._update_cover_target_selection(input_state)
+            return
         if self.phase is BattlePhase.ACTION_TARGET:
             self._update_action_target_selection(input_state)
             return
@@ -1914,6 +1923,8 @@ class BattleScene:
                     self._begin_defense()
                 elif command == BattleCommand.HIDE:
                     self._begin_hide()
+                elif command == BattleCommand.COVER:
+                    self._begin_cover_target_selection()
                 elif command == BattleCommand.ITEM:
                     self._begin_item_selection()
                 else:
@@ -2062,6 +2073,7 @@ class BattleScene:
         self.last_command_by_party_index.clear()
         self.last_spell_key_by_party_index.clear()
         self.last_item_selection_by_party_index.clear()
+        self.last_cover_target_by_party_index.clear()
         self.selectable_party_target_indexes = ()
         self.selected_party_target_index = None
         self.action_targets_enemy = False
@@ -2094,6 +2106,9 @@ class BattleScene:
         self.item_guide_window.clear_texts()
         self._close_spell_windows()
         self.defending_party_indexes.clear()
+        self.cover_target_by_party_index.clear()
+        self.protected_party_index = None
+        self.covering_party_index = None
         self.escaped_party_indexes.clear()
         self.temporary_front_party_indexes.clear()
         self.victory_motion_frame = 0
@@ -2333,6 +2348,7 @@ class BattleScene:
             for party_index in range(len(self.party_visuals))
         )
         getattr(self, "defending_party_indexes", set()).discard(index)
+        getattr(self, "cover_target_by_party_index", {}).pop(index, None)
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self._refresh_party_text_colors()
@@ -2571,6 +2587,100 @@ class BattleScene:
             return False
         self.defending_party_indexes.add(self.active_party_index)
         self.selected_command = BattleCommand.DEFEND
+        self._complete_current_turn()
+        return True
+
+    def _begin_cover_target_selection(self) -> bool:
+        """Select one visible ally to protect with DA2's Cover command."""
+
+        party_index = self.active_party_index
+        if party_index is None or not self.party[party_index].has_skill("Cover"):
+            return False
+        hidden = getattr(self, "hidden_party_indexes", set())
+        selectable = tuple(
+            index
+            for index in self._active_party_indexes()
+            if index == party_index or index not in hidden
+        )
+        if not selectable:
+            return False
+        targets = tuple(
+            CursorTarget(
+                self._party_target_cursor_x(index) // 4,
+                (PARTY_SPRITE_Y[index] + 8) // 4,
+                key=index,
+            )
+            for index in selectable
+        )
+        remembered = getattr(self, "last_cover_target_by_party_index", {}).get(
+            party_index
+        )
+        selected = remembered if remembered in selectable else selectable[0]
+        self.selectable_party_target_indexes = selectable
+        self.selected_party_target_index = selected
+        self.party_target_cursor = WindowCursor(
+            self.party_target_window,
+            targets,
+            active=True,
+        )
+        self.party_target_cursor.select_key(selected)
+        self.selected_command = BattleCommand.COVER
+        self.phase = BattlePhase.COVER_TARGET
+        self.command_cursor.active = False
+        return True
+
+    def _update_cover_target_selection(self, input_state: InputState) -> None:
+        """Confirm a Cover target or return to the member command list."""
+
+        if input_state.cancel.triggered:
+            self._cancel_cover_target_selection()
+            return
+        if input_state.confirm.triggered:
+            self._confirm_cover_target_selection()
+            return
+        if input_state.navigation is not None:
+            self._move_party_target(input_state.navigation)
+        if self.party_target_cursor is not None:
+            self.party_target_cursor.update()
+
+    def _cancel_cover_target_selection(self) -> None:
+        """Close the Cover cursor without consuming the current turn."""
+
+        self.phase = BattlePhase.COMMAND
+        self.selected_command = None
+        self.selectable_party_target_indexes = ()
+        self.selected_party_target_index = None
+        if self.party_target_cursor is not None:
+            self.party_target_cursor.active = False
+        self.party_target_cursor = None
+        self.command_cursor.active = True
+
+    def _confirm_cover_target_selection(self) -> bool:
+        """Protect the selected ally, treating self-selection as Defend."""
+
+        party_index = self.active_party_index
+        target_index = self.selected_party_target_index
+        if (
+            party_index is None
+            or target_index is None
+            or target_index not in self.selectable_party_target_indexes
+        ):
+            return False
+        remembered = getattr(self, "last_cover_target_by_party_index", None)
+        if remembered is None:
+            remembered = {}
+            self.last_cover_target_by_party_index = remembered
+        remembered[party_index] = target_index
+        if target_index == party_index:
+            return self._begin_defense()
+
+        cover_targets = getattr(self, "cover_target_by_party_index", None)
+        if cover_targets is None:
+            cover_targets = {}
+            self.cover_target_by_party_index = cover_targets
+        cover_targets[party_index] = target_index
+        self.defending_party_indexes.add(party_index)
+        self.selected_command = BattleCommand.COVER
         self._complete_current_turn()
         return True
 
@@ -5085,6 +5195,7 @@ class BattleScene:
                 BattlePhase.ITEM,
                 BattlePhase.SPELL,
                 BattlePhase.TARGET,
+                BattlePhase.COVER_TARGET,
                 BattlePhase.ESCAPE_CONFIRMATION,
             )
             and getattr(self, "active_party_index", None) is not None
@@ -5264,6 +5375,10 @@ class BattleScene:
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
             self.defending_party_indexes.discard(self.active_party_index)
+            getattr(self, "cover_target_by_party_index", {}).pop(
+                self.active_party_index,
+                None,
+            )
             if self._apply_turn_start_hp_change(actor):
                 return
             if getattr(actor.member, "stunned", False):
@@ -5799,6 +5914,54 @@ class BattleScene:
             internal_level=member.internal_level,
         )
 
+    def _party_member_can_cover(self, index: int) -> bool:
+        """Return DA2's actionable condition for a potential coverer."""
+
+        if index not in self._active_party_indexes():
+            return False
+        member = self.party[index]
+        return not (
+            getattr(member, "paralyzed", False)
+            or getattr(member, "sleeping", 0)
+            or getattr(member, "confused", 0)
+        )
+
+    def _covering_member_index(self, protected_index: int) -> int:
+        """Resolve manual Cover first, then DA2's automatic rescue rule."""
+
+        active_indexes = self._active_party_indexes()
+        manual_targets = getattr(self, "cover_target_by_party_index", {})
+        for index in active_indexes:
+            if (
+                index != protected_index
+                and manual_targets.get(index) == protected_index
+                and self._party_member_can_cover(index)
+            ):
+                return index
+
+        protected = self.party[protected_index]
+        protected_hp = getattr(protected, "hp", 0)
+        protected_max_hp = getattr(protected, "max_hp", protected_hp)
+        needs_cover = (
+            protected_hp <= protected_max_hp // 4
+            or bool(getattr(protected, "sleeping", 0))
+            or bool(getattr(protected, "paralyzed", False))
+        )
+        if not needs_cover:
+            return protected_index
+        for index in active_indexes:
+            member = self.party[index]
+            has_cover = getattr(member, "has_skill", None)
+            if (
+                index != protected_index
+                and callable(has_cover)
+                and has_cover("Cover")
+                and self._party_member_can_cover(index)
+                and member.hp > member.max_hp // 4
+            ):
+                return index
+        return protected_index
+
     def _resolve_monster_attack(
         self,
         actor: BattleMonster,
@@ -5808,7 +5971,16 @@ class BattleScene:
     ) -> tuple[int, PhysicalAttackResult]:
         """Resolve one monster physical attack without starting presentation."""
 
-        target_index = random.choice(target_indexes)
+        protected_index = random.choice(target_indexes)
+        target_index = self._covering_member_index(protected_index)
+        self.protected_party_index = (
+            protected_index if target_index != protected_index else None
+        )
+        self.covering_party_index = (
+            target_index if target_index != protected_index else None
+        )
+        if target_index != protected_index:
+            getattr(self, "hidden_party_indexes", set()).discard(target_index)
         target = self.party[target_index]
         target_stats = target.battle_stats
         target_incapacitated = bool(getattr(target, "sleeping", 0))
@@ -6064,9 +6236,15 @@ class BattleScene:
         self.monster_attack_damage_applied = False
         self.monster_charge_presentation = None
         self.monster_action = None
+        self.protected_party_index = None
+        self.covering_party_index = None
         self._reveal_hidden_party_if_all_unavailable()
         if self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
+            getattr(self, "cover_target_by_party_index", {}).pop(
+                target_index,
+                None,
+            )
             self._remove_defeated_party_from_timeline()
             if self._party_is_defeated():
                 if getattr(self, "escape_requested", False):
@@ -6407,10 +6585,9 @@ class BattleScene:
             and bool(getattr(self, "monster_attack_critical", False))
             and 0 <= animation_frame < CRITICAL_MARKER_FRAME_COUNT
         ):
-            self._draw_critical_marker(
-                self._party_sprite_x(target_index),
-                PARTY_SPRITE_Y[target_index],
-            )
+            position = self._party_draw_position(target_index)
+            if position is not None:
+                self._draw_critical_marker(*position)
 
     def _party_attack_smash_marker_visible(
         self,
@@ -6679,6 +6856,16 @@ class BattleScene:
         if index in getattr(self, "hidden_party_indexes", ()):
             return None
         if (
+            self.phase is BattlePhase.MONSTER_ACTION
+            and index == getattr(self, "covering_party_index", None)
+            and getattr(self, "protected_party_index", None) is not None
+        ):
+            protected_index = self.protected_party_index
+            return (
+                self._party_sprite_x(protected_index) - COVER_POSITION_OFFSET_X,
+                PARTY_SPRITE_Y[protected_index],
+            )
+        if (
             self.phase is BattlePhase.VICTORY_SUMMARY
             and index in getattr(self, "victory_returning_party_indexes", ())
         ):
@@ -6828,6 +7015,11 @@ class BattleScene:
             and getattr(self, "monster_attack_damage", None)
         ):
             return MONSTER_DAMAGE_SPRITE_SOURCE_X
+        if (
+            self.phase is BattlePhase.MONSTER_ACTION
+            and index == getattr(self, "covering_party_index", None)
+        ):
+            return DEFEND_SPRITE_SOURCE_X
         if index == getattr(self, "action_party_index", None):
             attack_presentation = getattr(self, "attack_presentation", None)
             if (
@@ -6874,8 +7066,10 @@ class BattleScene:
         vertical_offset = offsets[reference_frame]
         if vertical_offset < 0:
             return
-        target_x = self._party_sprite_x(target_index)
-        target_y = PARTY_SPRITE_Y[target_index]
+        position = self._party_draw_position(target_index)
+        if position is None:
+            return
+        target_x, target_y = position
         anchor_x = target_x + 14
         y = target_y + 16 - vertical_offset
         if damage == 0:
@@ -7581,6 +7775,10 @@ class BattleScene:
     def _draw_target_cursor(self) -> None:
         if self.phase is BattlePhase.TARGET:
             self.target_cursor.draw()
+            return
+        if self.phase is BattlePhase.COVER_TARGET:
+            if self.party_target_cursor is not None:
+                self.party_target_cursor.draw()
             return
         if self.phase is not BattlePhase.ACTION_TARGET:
             return

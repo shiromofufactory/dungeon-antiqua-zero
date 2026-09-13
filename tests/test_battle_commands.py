@@ -274,6 +274,21 @@ class BattleCommandRulesTest(unittest.TestCase):
             ),
         )
 
+    def test_single_member_party_does_not_show_cover(self) -> None:
+        skills = load_mock_skills()
+        self.party[0].skills.append(skills["Cover"])
+
+        commands = resolve_battle_commands(
+            self.party[0],
+            self.party[:1],
+            self.monsters,
+        )
+
+        self.assertNotIn(
+            BattleCommand.COVER,
+            tuple(option.command for option in commands),
+        )
+
     def test_hidden_member_uses_ambush_instead_of_attack_or_hide(self) -> None:
         skills = load_mock_skills()
         self.party[0].skills.append(skills["Hide"])
