@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from math import ceil, hypot
@@ -167,6 +167,8 @@ ACTIVE_PARTY_PULSE_MIN_BASE_RATE = 0.5
 ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT = 90
 ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT // 2
 MONSTER_POSITIONS = ((4, 48), (4, 112), (68, 16), (68, 80), (68, 144))
+TALL_FIRST_MONSTER_SIZE = (64, 96)
+TALL_FIRST_MONSTER_SLOT_INDEXES = (0, 2, 3, 4)
 TIMELINE_BASE_X = 70
 TIMELINE_BASE_Y = 220
 TIMELINE_SLOT_SPACING = 20
@@ -566,36 +568,6 @@ COMMAND_CURSOR_X = (2, 16)
 COMMAND_ROW_Y = (2, 5, 8)
 GLOBAL_COMMAND_TEXT_X = 4
 GLOBAL_COMMAND_CURSOR_X = 2
-DA2_MONSTER_TARGET_ORDER = {
-    Direction.LEFT: (
-        (2, 4, 1, 3),
-        (3, 0, 2, 4),
-        (4, 1, 3, 0),
-        (0, 2, 4, 1),
-        (1, 3, 0, 2),
-    ),
-    Direction.RIGHT: (
-        (3, 1, 4, 2),
-        (4, 2, 0, 3),
-        (0, 3, 1, 4),
-        (1, 4, 2, 0),
-        (2, 0, 3, 1),
-    ),
-    Direction.UP: (
-        (1, 2, 3, 4),
-        (0, 4, 3, 2),
-        (4, 0, 3, 1),
-        (2, 0, 4, 1),
-        (3, 1, 2, 0),
-    ),
-    Direction.DOWN: (
-        (1, 3, 2, 4),
-        (0, 2, 3, 4),
-        (3, 0, 4, 1),
-        (4, 1, 2, 0),
-        (2, 1, 3, 0),
-    ),
-}
 RecordValue = TypeVar("RecordValue")
 
 
@@ -1380,6 +1352,22 @@ class BattleEncounter:
             raise TypeError("surprise_enabled must be a boolean")
 
 
+def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
+    """Select presentation slots for the encountered monster image sizes."""
+
+    if not monsters:
+        return ()
+    first = monsters[0]
+    first_size = (getattr(first, "width", None), getattr(first, "height", None))
+    if first_size != TALL_FIRST_MONSTER_SIZE:
+        return tuple(range(len(monsters)))
+    if len(monsters) > len(TALL_FIRST_MONSTER_SLOT_INDEXES):
+        raise BattleDataError(
+            "a battle with a 64x96 first monster supports at most 4 monsters"
+        )
+    return TALL_FIRST_MONSTER_SLOT_INDEXES[: len(monsters)]
+
+
 class BattleScene:
     """Own one battle's input, temporary state, update order, and rendering."""
 
@@ -1566,6 +1554,10 @@ class BattleScene:
             )
             for index, key in enumerate(encounter.monster_keys)
         )
+        self.monster_slot_indexes = monster_slot_indexes(self.monsters)
+        self.monster_positions = tuple(
+            MONSTER_POSITIONS[index] for index in self.monster_slot_indexes
+        )
         self.monster_record_system.register_encounter(
             monster.key for monster in self.monsters
         )
@@ -1663,7 +1655,7 @@ class BattleScene:
                     (y + 16) // 4,
                     key=index,
                 )
-                for index, (x, y) in enumerate(MONSTER_POSITIONS)
+                for index, (x, y) in enumerate(self.monster_positions)
             )
         )
         self.target_cursor.active = False
@@ -1889,8 +1881,13 @@ class BattleScene:
             self.party_status_texts.append((name_text, hp_text))
             self.windows.append(window)
 
-        for monster, (x, y) in zip(self.monsters, MONSTER_POSITIONS):
-            window = windows.create(x // 4 + 2, y // 4 + 13, 20, 4, transparent=True)
+        for monster, (x, y) in zip(self.monsters, self.monster_positions):
+            name_x, name_y = self._monster_name_window_grid_position(
+                monster,
+                x,
+                y,
+            )
+            window = windows.create(name_x, name_y, 20, 4, transparent=True)
             name_text = window.add_text(
                 monster.display_name(self.localizer),
                 0,
@@ -4189,6 +4186,7 @@ class BattleScene:
                 effect.player.take_start_sound()
             if se_id is not None:
                 play_se(se_id)
+            self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
             self.spell_effect_renderer.prepare(first_player)
         return True
 
@@ -4277,7 +4275,7 @@ class BattleScene:
                 target_resistances=monster.resistances,
                 success_roll=random.randint(0, 19),
             )
-            _base_x, base_y = MONSTER_POSITIONS[index]
+            _base_x, base_y = self._monster_base_position(index)
             center_x = self._monster_draw_x(index) + monster.width // 2
             results.append(
                 BattleSlowResult(
@@ -4384,7 +4382,7 @@ class BattleScene:
                 target_is_shadow=monster.is_shadow,
                 random_factor=random.random(),
             )
-            _base_x, base_y = MONSTER_POSITIONS[index]
+            _base_x, base_y = self._monster_base_position(index)
             center_x = self._monster_draw_x(index) + monster.width // 2
             results.append(
                 BattleSpellDamageResult(
@@ -4441,7 +4439,7 @@ class BattleScene:
                     else random.randint(0, 19)
                 ),
             )
-            _base_x, base_y = MONSTER_POSITIONS[index]
+            _base_x, base_y = self._monster_base_position(index)
             center_x = self._monster_draw_x(index) + monster.width // 2
             results.append(
                 BattleSleepResult(
@@ -4608,7 +4606,7 @@ class BattleScene:
             return x + 8, y + 16
         if target_side == "enemy":
             monster = self.monsters[index]
-            _target_x, target_y = MONSTER_POSITIONS[index]
+            _target_x, target_y = self._monster_base_position(index)
             return (
                 self._monster_draw_x(index) + monster.width // 2,
                 target_y + monster.height // 2,
@@ -5247,7 +5245,9 @@ class BattleScene:
             and presentation.damage_popup_elapsed_frame >= 0
         ):
             monster = self.monsters[presentation.target_index]
-            _base_x, base_y = MONSTER_POSITIONS[presentation.target_index]
+            _base_x, base_y = self._monster_base_position(
+                presentation.target_index
+            )
             center_x = (
                 self._monster_draw_x(presentation.target_index)
                 + monster.width // 2
@@ -5585,20 +5585,73 @@ class BattleScene:
         )
 
     def _move_target(self, direction: Direction) -> bool:
+        """Move among selectable enemies according to their visible columns."""
+
         selected = self.selected_target_index
         if selected is None:
             return False
         try:
-            candidates = DA2_MONSTER_TARGET_ORDER[direction][selected]
-        except (KeyError, IndexError):
+            current_x, current_y = self._monster_base_position(selected)
+            selectable_positions = tuple(
+                (index, *self._monster_base_position(index))
+                for index in self.selectable_target_indexes
+            )
+        except (IndexError, TypeError):
             return False
-        for candidate in candidates:
-            if candidate in self.selectable_target_indexes:
-                moved = candidate != selected
-                self.selected_target_index = candidate
-                self.target_cursor.select_key(candidate)
-                return moved
-        return False
+
+        if direction in (Direction.UP, Direction.DOWN):
+            column = sorted(
+                (
+                    (index, y)
+                    for index, x, y in selectable_positions
+                    if x == current_x
+                ),
+                key=lambda candidate: candidate[1],
+            )
+            if len(column) <= 1:
+                return False
+            indexes = tuple(index for index, _y in column)
+            try:
+                current_position = indexes.index(selected)
+            except ValueError:
+                return False
+            distance = -1 if direction is Direction.UP else 1
+            candidate = indexes[(current_position + distance) % len(indexes)]
+        elif direction in (Direction.LEFT, Direction.RIGHT):
+            opposite_column = sorted(
+                (
+                    (index, y)
+                    for index, x, y in selectable_positions
+                    if x != current_x
+                ),
+                key=lambda candidate: candidate[1],
+            )
+            if not opposite_column:
+                return False
+            if direction is Direction.RIGHT:
+                candidate = next(
+                    (
+                        index
+                        for index, y in opposite_column
+                        if y >= current_y
+                    ),
+                    opposite_column[0][0],
+                )
+            else:
+                candidate = next(
+                    (
+                        index
+                        for index, y in reversed(opposite_column)
+                        if y <= current_y
+                    ),
+                    opposite_column[-1][0],
+                )
+        else:
+            return False
+
+        self.selected_target_index = candidate
+        self.target_cursor.select_key(candidate)
+        return True
 
     def _complete_current_turn(self) -> None:
         self.selected_command = None
@@ -6066,7 +6119,7 @@ class BattleScene:
             for index, monster in enumerate(self.monsters)
             if monster is actor
         )
-        _base_x, y = MONSTER_POSITIONS[monster_index]
+        _base_x, y = self._monster_base_position(monster_index)
         damage_popups.append(
             BattleSpellDamagePopup(
                 self._monster_draw_x(monster_index) + actor.width // 2,
@@ -6591,7 +6644,7 @@ class BattleScene:
                 // MONSTER_CHARGE_ATTACK_MULTIPLIER_DENOMINATOR
             ),
         )
-        start_x, start_y = MONSTER_POSITIONS[actor_index]
+        start_x, start_y = self._monster_base_position(actor_index)
         target_x, target_y = self._monster_charge_destination(actor, target_index)
         distance = hypot(target_x - start_x, target_y - start_y)
         approach_frames = monster_charge_approach_frame_count(distance)
@@ -6730,7 +6783,10 @@ class BattleScene:
             self.monster_escape_animation_frame
             - MONSTER_ESCAPE_START_DELAY_FRAME_COUNT,
         )
-        return MONSTER_POSITIONS[actor_index][0] - elapsed * MONSTER_ESCAPE_SPEED
+        return (
+            self._monster_base_position(actor_index)[0]
+            - elapsed * MONSTER_ESCAPE_SPEED
+        )
 
     def _monster_attack_animation_frame_count(self) -> int:
         return (
@@ -7179,7 +7235,9 @@ class BattleScene:
         presentation = getattr(self, "attack_presentation", None)
         if self._party_attack_smash_marker_visible(presentation):
             monster = self.monsters[presentation.target_index]
-            _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
+            _target_x, target_y = self._monster_base_position(
+                presentation.target_index
+            )
             self._draw_critical_marker(
                 self._monster_draw_x(presentation.target_index)
                 + monster.width // 2
@@ -7263,7 +7321,9 @@ class BattleScene:
         )
         if effect is None:
             return
-        _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
+        _target_x, target_y = self._monster_base_position(
+            presentation.target_index
+        )
         source_x, source_y = ADDITIONAL_EFFECT_MARKER_SOURCE[effect]
         pyxel.blt(
             self._monster_draw_x(presentation.target_index)
@@ -7813,7 +7873,9 @@ class BattleScene:
         if vertical_offset < 0:
             return
         monster = self.monsters[presentation.target_index]
-        _target_x, target_y = MONSTER_POSITIONS[presentation.target_index]
+        _target_x, target_y = self._monster_base_position(
+            presentation.target_index
+        )
         anchor_x = self._monster_draw_x(presentation.target_index) + monster.width // 2
         y = target_y + monster.height - 8 - vertical_offset
         if not presentation.is_hit:
@@ -7844,9 +7906,7 @@ class BattleScene:
             x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_monsters(self) -> None:
-        for index, (monster, _) in enumerate(
-            zip(self.monsters, MONSTER_POSITIONS)
-        ):
+        for index, monster in enumerate(self.monsters):
             is_dying = (
                 self.phase is BattlePhase.MONSTER_DEATH
                 and index == self.dying_monster_index
@@ -8041,7 +8101,7 @@ class BattleScene:
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.sleeping:
                 continue
-            _base_x, y = MONSTER_POSITIONS[index]
+            _base_x, y = self._monster_base_position(index)
             pyxel.blt(
                 self._monster_draw_x(index) + 48,
                 y,
@@ -8066,7 +8126,7 @@ class BattleScene:
                 or monster.state.speed_modifier >= 0
             ):
                 continue
-            _base_x, y = MONSTER_POSITIONS[index]
+            _base_x, y = self._monster_base_position(index)
             pyxel.blt(
                 self._monster_draw_x(index) + monster.width - 24,
                 y + monster.height,
@@ -8116,7 +8176,7 @@ class BattleScene:
                     TRANSPARENT_INDEX,
                 )
             for index, monster in poisoned:
-                _base_x, y = MONSTER_POSITIONS[index]
+                _base_x, y = self._monster_base_position(index)
                 pyxel.blt(
                     self._monster_draw_x(index) + POISON_MONSTER_OFFSET_X,
                     y,
@@ -8175,7 +8235,7 @@ class BattleScene:
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.stunned:
                 continue
-            _base_x, y = MONSTER_POSITIONS[index]
+            _base_x, y = self._monster_base_position(index)
             pyxel.blt(
                 self._monster_draw_x(index) + STUN_MONSTER_OFFSET_X,
                 y,
@@ -8373,7 +8433,7 @@ class BattleScene:
             if affinity is SpellAffinity.NORMAL:
                 continue
             monster = self.monsters[index]
-            _base_x, base_y = MONSTER_POSITIONS[index]
+            _base_x, base_y = self._monster_base_position(index)
             source_y = (
                 WEAK_ICON_SOURCE_Y
                 if affinity is SpellAffinity.WEAK
@@ -8414,8 +8474,39 @@ class BattleScene:
     def _monster_draw_x(self, index: int) -> int:
         return self._monster_draw_position(index)[0]
 
+    def _monster_slot_index(self, index: int) -> int:
+        slots = getattr(self, "monster_slot_indexes", None)
+        if slots is None:
+            monsters = getattr(self, "monsters", ())
+            if not monsters:
+                return index
+            slots = monster_slot_indexes(monsters)
+        return slots[index]
+
+    def _monster_base_position(self, index: int) -> tuple[int, int]:
+        positions = getattr(self, "monster_positions", None)
+        if positions is None:
+            monsters = getattr(self, "monsters", ())
+            if not monsters:
+                return MONSTER_POSITIONS[index]
+            positions = tuple(
+                MONSTER_POSITIONS[slot]
+                for slot in monster_slot_indexes(monsters)
+            )
+        return positions[index]
+
+    @staticmethod
+    def _monster_name_window_grid_position(
+        monster: BattleMonster,
+        x: int,
+        y: int,
+    ) -> tuple[int, int]:
+        """Place the name at the same distance from every image's bottom."""
+
+        return x // 4 + 2, (y + monster.height - 12) // 4
+
     def _monster_draw_position(self, index: int) -> tuple[int, int]:
-        target_x, target_y = MONSTER_POSITIONS[index]
+        target_x, target_y = self._monster_base_position(index)
         presentation = getattr(self, "monster_charge_presentation", None)
         if (
             self.phase is BattlePhase.MONSTER_ACTION
@@ -8431,11 +8522,13 @@ class BattleScene:
         if self.phase is not BattlePhase.ENTRANCE:
             return target_x, target_y
 
-        duration = MONSTER_ENTRANCE_FRAME_COUNTS[index]
+        slot_index = self._monster_slot_index(index)
+        duration = MONSTER_ENTRANCE_FRAME_COUNTS[slot_index]
         elapsed = min(self.entrance_animation_frame, duration)
         remaining = duration - elapsed
         initial_offset = (
-            DA2_MONSTER_ENTRANCE_SLIDE_STEPS[index] * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
+            DA2_MONSTER_ENTRANCE_SLIDE_STEPS[slot_index]
+            * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
         )
         return target_x - initial_offset * remaining // duration, target_y
 

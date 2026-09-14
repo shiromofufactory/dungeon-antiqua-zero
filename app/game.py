@@ -343,13 +343,12 @@ WELCOME_BGM_ID = "da3-welcome"
 ENCOUNTER_JINGLE_ID = "da3-encount"
 RANDOM_BATTLE_ENCOUNTER = BattleEncounter(
     (
-        "ワイルドボア",
-        "Cobra",
+        "Treant",
         "Cobra",
         "Cobra",
         "Cobra",
     ),
-    frozenset((2, 3, 4)),
+    frozenset((1, 2, 3)),
     surprise_enabled=True,
 )
 INITIAL_GOLD = 100
@@ -680,9 +679,7 @@ class Game:
             self._member_is_field_recoverable(member) for member in self.party
         )
         if annihilated:
-            lines.append(
-                self.texts.text(FIELD_PARTY_ANNIHILATED_TEXT_KEY, localizer)
-            )
+            lines.append(self.texts.text(FIELD_PARTY_ANNIHILATED_TEXT_KEY, localizer))
         self.field_party_annihilated_pending = annihilated
         self.field_condition_message = MessageOverlay(
             lines=tuple(lines),

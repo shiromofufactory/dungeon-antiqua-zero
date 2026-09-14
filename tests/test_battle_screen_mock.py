@@ -241,10 +241,11 @@ from rendering import (
     MONOCHROME_PALETTE,
     PaletteShifter,
     SPELL_EFFECT_FLASH_PALETTE,
+    SpellEffectRenderer,
     FadeThroughBlack,
     MonsterDeathAnimation,
 )
-from resources import load_record_array
+from resources import ImageResources, load_record_array
 from ui import CursorTarget, Window, WindowCursor
 from ui import DEFAULT_TEXT_COLOR
 
@@ -1725,6 +1726,25 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
+    def test_monster_name_position_follows_image_height(self) -> None:
+        monster_64 = SimpleNamespace(height=64)
+        monster_96 = SimpleNamespace(height=96)
+
+        self.assertEqual(
+            BattleScreenMock._monster_name_window_grid_position(
+                monster_64,
+                *MONSTER_POSITIONS[0],
+            ),
+            (3, 25),
+        )
+        self.assertEqual(
+            BattleScreenMock._monster_name_window_grid_position(
+                monster_96,
+                *MONSTER_POSITIONS[0],
+            ),
+            (3, 33),
+        )
+
     def test_monster_entrance_matches_da2_slide_timing_at_sixty_fps(self) -> None:
         self.assertEqual(MONSTER_ENTRANCE_FRAME_COUNTS, (16, 16, 14, 14, 12))
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -1856,15 +1876,15 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selectable_target_indexes, (0, 1, 2, 3, 4))
         self.assertEqual(mock.selected_target_index, 4)
 
-    def test_target_navigation_uses_da2_order_and_skips_unreachable_enemies(self) -> None:
+    def test_vertical_target_navigation_skips_unselectable_enemies(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.selectable_target_indexes = (3, 4)
+        mock.selectable_target_indexes = (2, 4)
         mock.selected_target_index = 4
         mock.target_cursor = Mock()
 
-        self.assertTrue(mock._move_target(Direction.LEFT))
-        self.assertEqual(mock.selected_target_index, 3)
-        self.assertTrue(mock._move_target(Direction.RIGHT))
+        self.assertTrue(mock._move_target(Direction.UP))
+        self.assertEqual(mock.selected_target_index, 2)
+        self.assertTrue(mock._move_target(Direction.DOWN))
         self.assertEqual(mock.selected_target_index, 4)
 
     def test_requested_direction_mapping_matches_numbered_monster_layout(self) -> None:
@@ -1900,34 +1920,71 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._move_target(Direction.LEFT))
         self.assertEqual(mock.selected_target_index, 1)
 
-    def test_horizontal_target_navigation_cycles_in_both_directions(self) -> None:
+    def test_vertical_target_navigation_cycles_within_each_column(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.selectable_target_indexes = (0, 1, 2, 3, 4)
         mock.target_cursor = Mock()
 
-        # Display numbers 1 -> 4 -> 2 -> 5 -> 3 -> 1.
-        right_cycle = (0, 3, 1, 4, 2, 0)
-        mock.selected_target_index = right_cycle[0]
-        for expected_index in right_cycle[1:]:
-            self.assertTrue(mock._move_target(Direction.RIGHT))
-            self.assertEqual(mock.selected_target_index, expected_index)
+        for cycle in ((0, 1, 0), (2, 3, 4, 2)):
+            mock.selected_target_index = cycle[0]
+            for expected_index in cycle[1:]:
+                self.assertTrue(mock._move_target(Direction.DOWN))
+                self.assertEqual(mock.selected_target_index, expected_index)
 
-        # LEFT follows the exact reverse path.
-        left_cycle = tuple(reversed(right_cycle))
-        for expected_index in left_cycle[1:]:
-            self.assertTrue(mock._move_target(Direction.LEFT))
-            self.assertEqual(mock.selected_target_index, expected_index)
+        for cycle in ((0, 1, 0), (2, 4, 3, 2)):
+            mock.selected_target_index = cycle[0]
+            for expected_index in cycle[1:]:
+                self.assertTrue(mock._move_target(Direction.UP))
+                self.assertEqual(mock.selected_target_index, expected_index)
 
-    def test_fiora_right_skips_monster_two_and_moves_from_four_to_five(self) -> None:
+    def test_horizontal_target_navigation_uses_y_position_across_columns(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.selectable_target_indexes = (3, 4)
+        mock.selectable_target_indexes = (0, 1, 2, 3, 4)
+        mock.target_cursor = Mock()
+
+        expected_by_origin = {
+            0: {Direction.LEFT: 2, Direction.RIGHT: 3},
+            1: {Direction.LEFT: 3, Direction.RIGHT: 4},
+            2: {Direction.LEFT: 1, Direction.RIGHT: 0},
+            3: {Direction.LEFT: 0, Direction.RIGHT: 1},
+            4: {Direction.LEFT: 1, Direction.RIGHT: 0},
+        }
+        for origin, expected_by_direction in expected_by_origin.items():
+            for direction, expected_index in expected_by_direction.items():
+                with self.subTest(origin=origin, direction=direction):
+                    mock.selected_target_index = origin
+                    self.assertTrue(mock._move_target(direction))
+                    self.assertEqual(mock.selected_target_index, expected_index)
+
+    def test_tall_first_monster_navigation_uses_visible_columns(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monster_positions = tuple(
+            MONSTER_POSITIONS[index] for index in (0, 2, 3, 4)
+        )
+        mock.selectable_target_indexes = (0, 1, 2, 3)
+        mock.target_cursor = Mock()
+
+        mock.selected_target_index = 0
+        self.assertFalse(mock._move_target(Direction.UP))
+        self.assertEqual(mock.selected_target_index, 0)
+        self.assertTrue(mock._move_target(Direction.RIGHT))
+        self.assertEqual(mock.selected_target_index, 2)
+        mock.target_cursor.select_key.assert_called_once_with(2)
+
+        for expected_index in (3, 1, 2):
+            self.assertTrue(mock._move_target(Direction.DOWN))
+            self.assertEqual(mock.selected_target_index, expected_index)
+
+    def test_horizontal_target_navigation_stays_put_without_opposite_target(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.selectable_target_indexes = (2, 3, 4)
         mock.selected_target_index = 3
         mock.target_cursor = Mock()
 
-        self.assertTrue(mock._move_target(Direction.RIGHT))
+        self.assertFalse(mock._move_target(Direction.RIGHT))
 
-        self.assertEqual(mock.selected_target_index, 4)
-        mock.target_cursor.select_key.assert_called_once_with(4)
+        self.assertEqual(mock.selected_target_index, 3)
+        mock.target_cursor.select_key.assert_not_called()
 
     def test_target_cancel_returns_to_command_selection(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -3737,8 +3794,19 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.pending_item_candidate = None
         mock.pending_spell = spell
         mock.spell_effects = {spell.key: definition}
-        mock.spell_effect_renderer = Mock()
-        mock.palette_shifter = Mock()
+        colors = list(range(62))
+        palette_shifter = PaletteShifter(colors, Mock())
+        base_variant = tuple(colors)
+        palette_shifter.define_variant(DIMMED_PALETTE, base_variant)
+        palette_shifter.define_variant(MONOCHROME_PALETTE, base_variant)
+        mock.palette_shifter = palette_shifter
+        mock._sync_unselectable_target_palette()
+        images = ImageResources.__new__(ImageResources)
+        mock.spell_effect_renderer = SpellEffectRenderer(
+            images,
+            palette_shifter,
+            pyxel_api=Mock(),
+        )
         mock.phase = BattleMockPhase.ACTION_TARGET
         mock.action_targets_enemy = True
         mock.action_targets_all = False
@@ -3772,6 +3840,12 @@ class BattleScreenMockTest(unittest.TestCase):
                 MONSTER_POSITIONS[0][1] + mock.monsters[0].height // 2 + 4,
             ),
         )
+        self.assertNotIn(
+            UNSELECTABLE_TARGET_PALETTE,
+            palette_shifter._variants,
+        )
+        self.assertIn(SPELL_EFFECT_FLASH_PALETTE, palette_shifter._variants)
+        self.assertEqual(len(colors), 248)
         play_se.assert_called_once_with("spell_fire1")
 
         for _frame in range(definition.total_frames - 1):
@@ -3784,14 +3858,12 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._complete_current_turn.assert_not_called()
         mock._update_action_presentation()
         mock._complete_current_turn.assert_called_once_with()
-        self.assertEqual(
-            mock.palette_shifter.remove_variant.call_args_list[0],
-            call(UNSELECTABLE_TARGET_PALETTE),
+        self.assertNotIn(SPELL_EFFECT_FLASH_PALETTE, palette_shifter._variants)
+        self.assertIn(
+            UNSELECTABLE_TARGET_PALETTE,
+            palette_shifter._variants,
         )
-        self.assertEqual(
-            mock.palette_shifter.remove_variant.call_args_list[-1],
-            call(SPELL_EFFECT_FLASH_PALETTE),
-        )
+        self.assertEqual(len(colors), 248)
 
     def test_heal_applies_at_da2_overlap_and_popup_does_not_delay_return(self) -> None:
         items = load_mock_items()

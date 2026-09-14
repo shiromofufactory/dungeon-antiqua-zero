@@ -26,9 +26,11 @@ from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
+    MONSTER_POSITIONS,
     BattleCharacter,
     BattlePhase,
     FormationAnimationCompletion,
+    monster_slot_indexes,
 )
 from state import Language, SaveData, Settings
 from systems import DungeonExitReturn, EncounterAdvance
@@ -51,6 +53,37 @@ class BattleEncounterTest(unittest.TestCase):
 
     def test_random_encounter_enables_surprise(self) -> None:
         self.assertTrue(RANDOM_BATTLE_ENCOUNTER.surprise_enabled)
+
+    def test_standard_first_monster_keeps_all_five_slots(self) -> None:
+        monsters = tuple(
+            SimpleNamespace(width=64, height=64) for _ in range(5)
+        )
+
+        self.assertEqual(monster_slot_indexes(monsters), (0, 1, 2, 3, 4))
+
+    def test_64_by_96_first_monster_skips_the_second_rear_slot(self) -> None:
+        monsters = (
+            SimpleNamespace(width=64, height=96),
+            SimpleNamespace(width=64, height=64),
+            SimpleNamespace(width=64, height=64),
+            SimpleNamespace(width=64, height=64),
+        )
+        slots = monster_slot_indexes(monsters)
+
+        self.assertEqual(slots, (0, 2, 3, 4))
+        self.assertEqual(
+            tuple(MONSTER_POSITIONS[index] for index in slots),
+            ((4, 48), (68, 16), (68, 80), (68, 144)),
+        )
+
+    def test_64_by_96_first_monster_rejects_a_fifth_monster(self) -> None:
+        monsters = tuple(
+            SimpleNamespace(width=64, height=96 if index == 0 else 64)
+            for index in range(5)
+        )
+
+        with self.assertRaisesRegex(ValueError, "supports at most 4 monsters"):
+            monster_slot_indexes(monsters)
 
 
 class BattleSurpriseIntegrationTest(unittest.TestCase):
@@ -579,12 +612,15 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertEqual(
             RANDOM_BATTLE_ENCOUNTER.monster_keys,
             (
-                "Giant Spider",
-                "Giant Spider",
-                "Giant Spider",
-                "Coyote",
-                "Coyote",
+                "Treant",
+                "Cobra",
+                "Cobra",
+                "Cobra",
             ),
+        )
+        self.assertEqual(
+            RANDOM_BATTLE_ENCOUNTER.front_monster_indexes,
+            frozenset((1, 2, 3)),
         )
 
     @patch("game.pyxel.Image")
