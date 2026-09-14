@@ -624,6 +624,51 @@ function objectFrameTiles(object, choiceIndex, frameIndex) {
   return tiles;
 }
 
+function centerSourceSelection() {
+  const scroll = byId("source-scroll");
+  const scale = 16 * state.zoom;
+  scroll.scrollLeft = state.selection.x * scale + state.selection.width * scale / 2 - scroll.clientWidth / 2;
+  scroll.scrollTop = state.selection.y * scale + state.selection.height * scale / 2 - scroll.clientHeight / 2;
+}
+
+function focusVisualFrameInSource(element) {
+  const visual = currentVisual();
+  const choiceIndex = Number(element.dataset.choice);
+  const frameIndex = Number(element.dataset.frame);
+  const tile = visual?.choices?.[choiceIndex]?.frames?.[frameIndex]?.tile;
+  if (!tile) return;
+  state.choiceIndex = choiceIndex;
+  state.frameIndex = frameIndex;
+  state.selection = { x: tile[0], y: tile[1], width: 1, height: 1 };
+  drawSource();
+  renderEditor();
+  centerSourceSelection();
+}
+
+function focusObjectFrameInSource(element) {
+  const object = currentObject();
+  if (!object) return;
+  const choiceIndex = Number(element.dataset.choice);
+  const frameIndex = Number(element.dataset.frame);
+  const tiles = objectFrameTiles(object, choiceIndex, frameIndex);
+  const tileIndex = tiles.findIndex(Boolean);
+  if (tileIndex < 0) return;
+  const tile = tiles[tileIndex];
+  const offsetX = tileIndex % object.size[0];
+  const offsetY = Math.floor(tileIndex / object.size[0]);
+  state.choiceIndex = choiceIndex;
+  state.frameIndex = frameIndex;
+  state.selection = {
+    x: tile[0] - offsetX,
+    y: tile[1] - offsetY,
+    width: object.size[0],
+    height: object.size[1],
+  };
+  drawSource();
+  renderEditor();
+  centerSourceSelection();
+}
+
 function objectFrameThumb(object, choiceIndex, frameIndex) {
   return `<span class="object-frame-thumb" style="--object-columns:${object.size[0]}">
     ${objectFrameTiles(object, choiceIndex, frameIndex).map((tile) => tile ? tileThumbImage(tile) : `<span class="tile-thumb empty"></span>`).join("")}
@@ -767,7 +812,7 @@ function renderVisualEditor(visual) {
           ${(choice.frames || []).map((frame, frameIndex) => `
             <button type="button" class="frame-button ${choiceIndex === state.choiceIndex && frameIndex === state.frameIndex ? "active" : ""}"
               data-action="set-frame-tile" data-choice="${choiceIndex}" data-frame="${frameIndex}"
-              title="現在のソース選択で置き換える" aria-label="表示候補 ${choiceIndex + 1} のフレーム ${frameIndex + 1} を現在のソース選択で置き換える">
+              title="左: 現在のソース選択で置き換える・右: ソース画像で表示" aria-label="表示候補 ${choiceIndex + 1} のフレーム ${frameIndex + 1}。左クリックで現在のソース選択に置き換え、右クリックでソース画像に表示">
               ${tileThumb(frame.tile)}
             </button>`).join("")}
           <button type="button" class="frame-button" data-action="add-frame" data-choice="${choiceIndex}">＋<span>frame</span></button>
@@ -867,7 +912,7 @@ function renderObjectVisualEditor(object) {
           ${(choice.frames || []).map((_frame, frameIndex) => `
             <button type="button" class="object-frame-button ${choiceIndex === state.choiceIndex && frameIndex === state.frameIndex ? "active" : ""}"
               data-action="object-set-frame" data-choice="${choiceIndex}" data-frame="${frameIndex}"
-              title="現在の同寸法の矩形で置き換える" aria-label="表示候補 ${choiceIndex + 1} のフレーム ${frameIndex + 1} を現在の矩形選択で置き換える">
+              title="左: 現在の同寸法の矩形で置き換える・右: ソース画像で表示" aria-label="表示候補 ${choiceIndex + 1} のフレーム ${frameIndex + 1}。左クリックで現在の矩形選択に置き換え、右クリックでソース画像に表示">
               ${objectFrameThumb(object, choiceIndex, frameIndex)}
               <span>frame ${frameIndex + 1}</span>
             </button>`).join("")}
@@ -1612,6 +1657,18 @@ byId("editor-content").addEventListener("pointermove", handleDefinitionPointerMo
 byId("editor-content").addEventListener("pointerup", (event) => finishDefinitionPointerDrag(event));
 byId("editor-content").addEventListener("pointercancel", (event) => finishDefinitionPointerDrag(event, true));
 byId("editor-content").addEventListener("contextmenu", (event) => {
+  const visualFrame = event.target.closest('[data-action="set-frame-tile"]');
+  if (visualFrame) {
+    event.preventDefault();
+    focusVisualFrameInSource(visualFrame);
+    return;
+  }
+  const objectFrame = event.target.closest('[data-action="object-set-frame"]');
+  if (objectFrame) {
+    event.preventDefault();
+    focusObjectFrameInSource(objectFrame);
+    return;
+  }
   const target = event.target.closest('[data-action="toggle-object-cell-collision"]');
   if (!target) return;
   event.preventDefault();

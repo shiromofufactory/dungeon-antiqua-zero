@@ -1111,6 +1111,38 @@ function drawActors(context, scale) {
   }
 }
 
+function drawTabCellHighlights(context, scale) {
+  if (state.tab !== "object" && state.tab !== "event") return;
+  const positions = new Set();
+  const addPosition = (position) => {
+    if (!position) return;
+    const [x, y] = position;
+    if (x < 0 || y < 0 || x >= state.data.size[0] || y >= state.data.size[1]) return;
+    positions.add(`${x},${y}`);
+  };
+  if (state.tab === "object") {
+    for (const instance of state.data.objects) {
+      const definition = objectDefinition(instance);
+      for (const cell of definition?.cells || []) addPosition(addPoint(instance.origin, cell.offset));
+    }
+  } else {
+    for (const actor of state.data.actors) addPosition(actor.position);
+    for (const trigger of state.data.event_triggers) {
+      for (const position of triggerPositions(trigger)) addPosition(position);
+    }
+  }
+  context.save();
+  context.fillStyle = "rgba(255,79,163,.18)";
+  context.strokeStyle = "rgba(255,103,189,.82)";
+  context.lineWidth = Math.max(2, state.zoom);
+  for (const key of positions) {
+    const [x, y] = key.split(",").map(Number);
+    context.fillRect(x * scale + 1, y * scale + 1, scale - 2, scale - 2);
+    context.strokeRect(x * scale + 1, y * scale + 1, scale - 2, scale - 2);
+  }
+  context.restore();
+}
+
 function drawRangeSelection(context, scale) {
   if (!state.selectionRect) return;
   const { left, top, right, bottom } = state.selectionRect;
@@ -1204,6 +1236,7 @@ function drawMap(now) {
       drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
     }
   }
+  if (!groundOnly) drawTabCellHighlights(context, scale);
   if (!groundOnly) for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
     const definition = state.tileset.objects.find((object) => object.id === selected.definition_id);
     if (definition) {
@@ -1880,7 +1913,11 @@ function selectAnyAt(cell) {
   else if (candidate.kind === "trigger") state.selectedTriggerId = candidate.id;
   else if (candidate.kind === "arrival") state.selectedArrivalId = candidate.id;
   else if (candidate.kind === "site") state.selectedSiteId = candidate.id;
-  else state.selectedInstanceId = candidate.id;
+  else {
+    const instance = state.data.objects.find((item) => item.id === candidate.id);
+    state.selectedInstanceId = candidate.id;
+    if (instance) state.objectId = instance.definition_id;
+  }
   const actor = candidate.kind === "actor" ? currentActor() : null;
   if (actor && actor.kind !== "treasure" && !actorTrigger(actor.id)) commit(() => ensureActorTrigger(actor));
   else renderAll();

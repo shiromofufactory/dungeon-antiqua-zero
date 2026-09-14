@@ -308,10 +308,18 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('const emphasized = state.tab === "event"', script)
         self.assertIn("function drawCellSelectionFrame(context, position, scale)", script)
         self.assertIn("if (selected) drawCellSelectionFrame(context, arrival.position, scale)", script)
+        self.assertIn("function drawTabCellHighlights(context, scale)", script)
+        self.assertIn('if (state.tab === "object")', script)
+        self.assertIn("for (const actor of state.data.actors) addPosition(actor.position)", script)
+        self.assertIn("for (const trigger of state.data.event_triggers)", script)
+        self.assertIn('context.strokeStyle = "rgba(255,103,189,.82)"', script)
+        self.assertIn("context.strokeRect(x * scale + 1, y * scale + 1, scale - 2, scale - 2)", script)
+        self.assertIn("drawTabCellHighlights(context, scale)", script)
         self.assertIn("function mapSelectionCandidatesAt(cell)", script)
         self.assertIn("function prioritizeMapSelectionCandidates(candidates)", script)
         self.assertIn("candidate.tab === state.tab", script)
         self.assertIn("function selectAnyAt(cell)", script)
+        self.assertIn("state.objectId = instance.definition_id", script)
         self.assertIn("selectAnyAt(drag.start)", script)
 
     def test_right_drag_selects_and_bulk_edits_all_placed_kinds(self) -> None:

@@ -217,6 +217,11 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn("LAST_TILESET_STORAGE_KEY", tileset_script)
         self.assertIn("loadLastTilesetId()", tileset_script)
         self.assertIn("saveLastTilesetId()", tileset_script)
+        self.assertIn("function focusObjectFrameInSource(element)", tileset_script)
+        self.assertIn("focusObjectFrameInSource(objectFrame)", tileset_script)
+        self.assertIn("function focusVisualFrameInSource(element)", tileset_script)
+        self.assertIn("focusVisualFrameInSource(visualFrame)", tileset_script)
+        self.assertIn("centerSourceSelection()", tileset_script)
         for script in (map_script, event_script, tileset_script):
             self.assertIn("handleNavigationChoice(choice)", script)
             self.assertIn("navigateToEditor(link.href)", script)
