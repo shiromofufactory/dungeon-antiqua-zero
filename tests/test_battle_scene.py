@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from inspect import signature
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
@@ -25,7 +26,9 @@ from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
+    BattleCharacter,
     BattlePhase,
+    FormationAnimationCompletion,
 )
 from state import Language, SaveData, Settings
 from systems import DungeonExitReturn, EncounterAdvance
@@ -40,10 +43,208 @@ class BattleEncounterTest(unittest.TestCase):
 
         self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
         self.assertEqual(encounter.front_monster_indexes, frozenset((1,)))
+        self.assertFalse(encounter.surprise_enabled)
 
     def test_encounter_rejects_an_index_outside_its_lineup(self) -> None:
         with self.assertRaisesRegex(ValueError, "front monster indexes"):
             BattleEncounter(("Coyote",), frozenset((1,)))
+
+    def test_random_encounter_enables_surprise(self) -> None:
+        self.assertTrue(RANDOM_BATTLE_ENCOUNTER.surprise_enabled)
+
+
+class BattleSurpriseIntegrationTest(unittest.TestCase):
+    @staticmethod
+    def _member(
+        agility: int,
+        row: FormationRow,
+        *,
+        vigilant: bool = False,
+        alive: bool = True,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            adjusted_abilities=SimpleNamespace(agility=agility),
+            formation_row=row,
+            is_alive=alive,
+            hp=1 if alive else 0,
+            has_skill=lambda key: vigilant and key == "Vigilance",
+        )
+
+    @staticmethod
+    def _scene(
+        *members: SimpleNamespace,
+        surprise_enabled: bool = True,
+    ) -> BattleScene:
+        scene = BattleScene.__new__(BattleScene)
+        scene.party = members
+        scene.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in members
+        )
+        scene.monsters = (SimpleNamespace(agility=12, is_alive=True),)
+        scene.encounter = BattleEncounter(
+            ("Coyote",),
+            surprise_enabled=surprise_enabled,
+        )
+        scene.temporary_front_party_indexes = set()
+        scene.escaped_party_indexes = set()
+        return scene
+
+    def test_surprise_inverts_mixed_rows_without_mutating_members(self) -> None:
+        front = self._member(10, FormationRow.FRONT)
+        rear = self._member(10, FormationRow.BACK)
+        scene = self._scene(front, rear)
+
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
+            scene._prepare_surprise()
+
+        self.assertTrue(scene.surprise_active)
+        self.assertFalse(scene._party_member_is_front_row(0))
+        self.assertTrue(scene._party_member_is_front_row(1))
+        self.assertIs(front.formation_row, FormationRow.FRONT)
+        self.assertIs(rear.formation_row, FormationRow.BACK)
+        self.assertEqual(scene.surprise_pending_party_indexes, {0, 1})
+
+    def test_all_front_party_stays_front_during_surprise(self) -> None:
+        scene = self._scene(
+            self._member(10, FormationRow.FRONT),
+            self._member(10, FormationRow.FRONT),
+        )
+
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
+            scene._prepare_surprise()
+
+        self.assertTrue(scene._party_member_is_front_row(0))
+        self.assertTrue(scene._party_member_is_front_row(1))
+
+    def test_living_vigilance_owner_prevents_only_a_winning_draw(self) -> None:
+        vigilant = self._member(10, FormationRow.FRONT, vigilant=True)
+        scene = self._scene(vigilant)
+
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
+            scene._prepare_surprise()
+
+        self.assertFalse(scene.surprise_active)
+        self.assertEqual(scene.surprise_prevented_by_index, 0)
+
+        dead_vigilant = self._member(
+            10,
+            FormationRow.FRONT,
+            vigilant=True,
+            alive=False,
+        )
+        living = self._member(10, FormationRow.FRONT)
+        scene = self._scene(dead_vigilant, living)
+        with patch("scenes.battle.pyxel.rndi", return_value=2):
+            scene._prepare_surprise()
+        self.assertIsNone(scene.surprise_prevented_by_index)
+        self.assertFalse(scene.surprise_active)
+
+    def test_non_random_encounter_does_not_draw(self) -> None:
+        scene = self._scene(
+            self._member(10, FormationRow.FRONT),
+            surprise_enabled=False,
+        )
+
+        with patch("scenes.battle.pyxel.rndi") as rndi:
+            scene._prepare_surprise()
+
+        rndi.assert_not_called()
+
+    def test_agility_average_includes_dead_battle_participants(self) -> None:
+        scene = self._scene(
+            self._member(32, FormationRow.FRONT, alive=False),
+            self._member(0, FormationRow.FRONT),
+        )
+
+        with patch("scenes.battle.pyxel.rndi", return_value=1):
+            scene._prepare_surprise()
+
+        self.assertEqual(scene.surprise_roll.threshold, 1)
+        self.assertFalse(scene.surprise_active)
+
+    def test_repeated_party_handoffs_skip_until_every_member_was_reached(
+        self,
+    ) -> None:
+        front = self._member(10, FormationRow.FRONT)
+        rear = self._member(10, FormationRow.BACK)
+        scene = self._scene(front, rear)
+        scene.command_cursor = Mock()
+        scene.command_window = Mock()
+        scene._refresh_party_text_colors = Mock()
+        scene._start_timeline_animation = Mock()
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
+            scene._prepare_surprise()
+
+        self.assertTrue(scene._skip_surprised_party_turn(0))
+        self.assertEqual(scene.surprise_pending_party_indexes, {1})
+        self.assertTrue(scene._skip_surprised_party_turn(0))
+        self.assertEqual(scene.surprise_pending_party_indexes, {1})
+        self.assertTrue(scene._skip_surprised_party_turn(1))
+
+        self.assertFalse(scene.surprise_active)
+        self.assertIs(scene.phase, BattlePhase.FORMATION)
+        self.assertIs(front.formation_row, FormationRow.FRONT)
+        self.assertIs(rear.formation_row, FormationRow.BACK)
+        self.assertEqual(scene._start_timeline_animation.call_count, 2)
+
+        for _frame in range(8):
+            scene._update_formation_animation()
+        self.assertEqual(scene._start_timeline_animation.call_count, 3)
+
+    def test_status_is_processed_before_the_single_surprise_skip(self) -> None:
+        member = self._member(10, FormationRow.FRONT)
+        member.sleeping = 2
+        member.poisoned = False
+        member.battle_healing = 0
+        member.paralyzed = False
+        member.stunned = False
+        actor = BattleCharacter(member, 0, 0, 0)
+        scene = self._scene(member)
+        scene.party_visuals = (actor,)
+        scene.timeline = (actor,)
+        scene.surprise_active = True
+        scene.surprise_pending_party_indexes = {0}
+        scene.surprise_original_front_rows = {0: True}
+        scene.surprise_front_party_indexes = {0}
+        scene.surprise_temporary_front_party_indexes = set()
+        scene.escape_requested = False
+        scene.defending_party_indexes = set()
+        scene.focused_target_by_party_index = {}
+        scene.blinking_monster_index = None
+        scene.monster_blink_frames_remaining = 0
+        scene.command_cursor = Mock()
+        scene.command_window = Mock()
+        scene._refresh_party_text_colors = Mock()
+        scene._start_timeline_animation = Mock()
+
+        scene._activate_timeline_head()
+
+        self.assertEqual(member.sleeping, 1)
+        self.assertFalse(scene.surprise_active)
+        scene._start_timeline_animation.assert_called_once_with()
+
+    def test_restore_keeps_survivors_front_when_original_front_died(self) -> None:
+        defeated_front = self._member(10, FormationRow.FRONT, alive=False)
+        living_rear = self._member(10, FormationRow.BACK)
+        scene = self._scene(defeated_front, living_rear)
+        scene.surprise_active = True
+        scene.surprise_pending_party_indexes = set()
+        scene.surprise_original_front_rows = {0: True, 1: False}
+        scene.surprise_front_party_indexes = {1}
+        scene.surprise_temporary_front_party_indexes = set()
+        scene.command_cursor = Mock()
+        scene.command_window = Mock()
+        scene._refresh_party_text_colors = Mock()
+        scene._start_timeline_animation = Mock()
+
+        scene._restore_surprise_formation(
+            FormationAnimationCompletion.START_TIMELINE
+        )
+
+        self.assertEqual(scene.temporary_front_party_indexes, {1})
+        self.assertTrue(scene._party_member_is_front_row(1))
+        self.assertIs(living_rear.formation_row, FormationRow.BACK)
+        scene._start_timeline_animation.assert_called_once_with()
 
 
 class BattleSceneIntegrationTest(unittest.TestCase):

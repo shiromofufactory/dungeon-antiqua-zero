@@ -56,6 +56,12 @@ from battle_timeline import (
     remove_timeline_actor,
     remove_timeline_head,
 )
+from battle_surprise import (
+    SURPRISE_ROLL_MAX,
+    VIGILANCE_SKILL_KEY,
+    SurpriseRoll,
+    resolve_surprise_roll,
+)
 from item import (
     AdditionalEffect,
     AttackAttribute,
@@ -1353,6 +1359,7 @@ class BattleEncounter:
 
     monster_keys: tuple[str, ...]
     front_monster_indexes: frozenset[int] = frozenset()
+    surprise_enabled: bool = False
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.monster_keys) <= len(MONSTER_POSITIONS):
@@ -1368,6 +1375,8 @@ class BattleEncounter:
             for index in self.front_monster_indexes
         ):
             raise ValueError("front monster indexes must refer to encounter monsters")
+        if not isinstance(self.surprise_enabled, bool):
+            raise TypeError("surprise_enabled must be a boolean")
 
 
 class BattleScene:
@@ -1512,6 +1521,7 @@ class BattleScene:
             label="character",
         )
         self.party = party
+        self.encounter = encounter
         self.result_party = party if result_party is None else result_party
         if (
             not self.result_party
@@ -1825,6 +1835,13 @@ class BattleScene:
         self.covering_party_index: int | None = None
         self.escaped_party_indexes: set[int] = set()
         self.temporary_front_party_indexes: set[int] = set()
+        self.surprise_roll: SurpriseRoll | None = None
+        self.surprise_prevented_by_index: int | None = None
+        self.surprise_pending_party_indexes: set[int] = set()
+        self.surprise_original_front_rows: dict[int, bool] = {}
+        self.surprise_front_party_indexes: set[int] | None = None
+        self.surprise_temporary_front_party_indexes: set[int] = set()
+        self.surprise_active = False
         self.victory_motion_frame = 0
         self.victory_summary_window: Window | None = None
         self.result_overlay: BattleResultOverlay | None = None
@@ -2222,6 +2239,7 @@ class BattleScene:
         self.covering_party_index = None
         self.escaped_party_indexes.clear()
         self.temporary_front_party_indexes.clear()
+        self._prepare_surprise()
         self.victory_motion_frame = 0
         self.victory_summary_window = None
         self.result_overlay = None
@@ -2248,6 +2266,92 @@ class BattleScene:
         self.palette_shifter.set_global_mix(
             base_rate=0.0,
             target_color=self.palette_shifter.base_colors[0],
+        )
+
+    def _prepare_surprise(self) -> None:
+        """Roll and prepare battle-local surprise state for random encounters."""
+
+        self.surprise_roll = None
+        self.surprise_prevented_by_index = None
+        self.surprise_pending_party_indexes = set()
+        self.surprise_original_front_rows = {}
+        self.surprise_front_party_indexes = None
+        self.surprise_temporary_front_party_indexes = set(
+            getattr(self, "temporary_front_party_indexes", set())
+        )
+        self.surprise_active = False
+        if not self.encounter.surprise_enabled:
+            return
+
+        living_indexes = tuple(
+            index for index, member in enumerate(self.party) if member.is_alive
+        )
+        if not living_indexes or not self.monsters:
+            return
+        result = resolve_surprise_roll(
+            tuple(
+                member.adjusted_abilities.agility for member in self.party
+            ),
+            tuple(monster.agility for monster in self.monsters),
+            pyxel.rndi(0, SURPRISE_ROLL_MAX),
+        )
+        self.surprise_roll = result
+        if not result.triggered:
+            return
+
+        vigilant_index = next(
+            (
+                index
+                for index in living_indexes
+                if self.party[index].has_skill(VIGILANCE_SKILL_KEY)
+            ),
+            None,
+        )
+        if vigilant_index is not None:
+            self.surprise_prevented_by_index = vigilant_index
+            return
+
+        original_rows = {
+            index: self._party_member_is_front_row(index)
+            for index in living_indexes
+        }
+        all_front = all(original_rows.values())
+        self.surprise_original_front_rows = original_rows
+        self.surprise_front_party_indexes = (
+            set(living_indexes)
+            if all_front
+            else {
+                index
+                for index, was_front in original_rows.items()
+                if not was_front
+            }
+        )
+        self.surprise_pending_party_indexes = set(living_indexes)
+        self.surprise_active = True
+
+    def _show_surprise_notice(self) -> None:
+        """Show a notice only for a hit or a Vigilance prevention."""
+
+        prevented_by_index = getattr(
+            self,
+            "surprise_prevented_by_index",
+            None,
+        )
+        if prevented_by_index is not None:
+            member = self.party[prevented_by_index]
+            message = self.texts.formatted_text(
+                "battle.surprise.prevented",
+                self.localizer,
+                {"MEMBER": member.definition.localized_name(self.localizer)},
+            )
+        elif getattr(self, "surprise_active", False):
+            message = self.texts.text("battle.surprise", self.localizer)
+        else:
+            return
+        self._show_battle_popup(
+            message,
+            BATTLE_POPUP_FRAME_COUNT,
+            align_left=True,
         )
 
     def _prepare_party_for_restart(self) -> None:
@@ -2278,6 +2382,7 @@ class BattleScene:
         self.entrance_animation_frame += 1
         if self.entrance_animation_frame >= BATTLE_ENTRANCE_FRAME_COUNT:
             self.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT
+            self._show_surprise_notice()
             self._activate_timeline_head()
 
     def _open_global_command_menu(self) -> None:
@@ -2645,12 +2750,97 @@ class BattleScene:
 
         if index in getattr(self, "temporary_front_party_indexes", set()):
             return True
+        surprise_rows = getattr(self, "surprise_front_party_indexes", None)
+        original_rows = getattr(self, "surprise_original_front_rows", {})
+        if surprise_rows is not None and index in original_rows:
+            return index in surprise_rows
         visuals = getattr(self, "party_visuals", ())
         member = visuals[index].member if visuals else self.party[index]
         formation_row = getattr(member, "formation_row", None)
         if formation_row is not None:
             return formation_row is FormationRow.FRONT
         return bool(getattr(member, "is_front_row", True))
+
+    def _prune_surprise_pending_party(
+        self,
+        completion: FormationAnimationCompletion,
+    ) -> bool:
+        """Drop unavailable members and restore rows when none remain pending."""
+
+        if not getattr(self, "surprise_active", False):
+            return False
+        pending = self.surprise_pending_party_indexes
+        pending.intersection_update(self._active_party_indexes())
+        if pending:
+            return False
+        self._restore_surprise_formation(completion)
+        return True
+
+    def _skip_surprised_party_turn(self, party_index: int) -> bool:
+        """Consume one surprise handoff, including repeated-turn failsafe skips."""
+
+        if not getattr(self, "surprise_active", False):
+            return False
+        self.surprise_pending_party_indexes.discard(party_index)
+        if self.surprise_pending_party_indexes:
+            self._start_timeline_animation()
+        else:
+            self._restore_surprise_formation(
+                FormationAnimationCompletion.START_TIMELINE
+            )
+        return True
+
+    def _restore_surprise_formation(
+        self,
+        completion: FormationAnimationCompletion,
+    ) -> None:
+        """Remove the battle-only back-attack rows and continue the timeline."""
+
+        active_indexes = self._active_party_indexes()
+        start_x_by_index = {
+            index: self._party_sprite_x(index) for index in active_indexes
+        }
+        self.surprise_active = False
+        self.surprise_pending_party_indexes.clear()
+        self.surprise_front_party_indexes = None
+        self.temporary_front_party_indexes.clear()
+        self.temporary_front_party_indexes.update(
+            self.surprise_temporary_front_party_indexes
+        )
+        if active_indexes and not any(
+            self._party_member_is_front_row(index) for index in active_indexes
+        ):
+            # Preserve the ordinary battle invariant without walking a member
+            # backward only to promote them again on the next handoff.
+            self.temporary_front_party_indexes.update(active_indexes)
+        destination_x_by_index = {
+            index: self._party_sprite_x(index) for index in active_indexes
+        }
+        moving_indexes = tuple(
+            index
+            for index in active_indexes
+            if start_x_by_index[index] != destination_x_by_index[index]
+        )
+        self.surprise_original_front_rows = {}
+        if not moving_indexes:
+            self._continue_after_formation(completion)
+            return
+
+        self.formation_actor_index = None
+        self.formation_actor_indexes = moving_indexes
+        self.formation_start_x_by_index = {
+            index: start_x_by_index[index] for index in moving_indexes
+        }
+        self.formation_destination_x_by_index = {
+            index: destination_x_by_index[index] for index in moving_indexes
+        }
+        self.formation_animation_frame = 0
+        self.formation_animation_completion = completion
+        self.phase = BattlePhase.FORMATION
+        self.active_party_index = None
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self._refresh_party_text_colors()
 
     def _begin_front_promotion_if_needed(
         self,
@@ -2937,6 +3127,14 @@ class BattleScene:
         self.formation_animation_completion = (
             FormationAnimationCompletion.COMPLETE_CURRENT_TURN
         )
+        self._continue_after_formation(completion)
+
+    def _continue_after_formation(
+        self,
+        completion: FormationAnimationCompletion,
+    ) -> None:
+        """Resume the operation that requested a formation walk."""
+
         if completion is FormationAnimationCompletion.COMPLETE_CURRENT_TURN:
             self._complete_current_turn()
         elif completion is FormationAnimationCompletion.START_TIMELINE:
@@ -5641,6 +5839,10 @@ class BattleScene:
             else:
                 self._begin_defeat_message()
             return
+        if self._prune_surprise_pending_party(
+            FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD
+        ):
+            return
         if self._begin_front_promotion_if_needed(
             FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD
         ):
@@ -5661,6 +5863,7 @@ class BattleScene:
             )
             if self._apply_turn_start_hp_change(actor):
                 return
+            status_skips_turn = False
             if getattr(actor.member, "stunned", False):
                 if isinstance(actor.member, Member):
                     actor.member.consume_stun()
@@ -5670,16 +5873,14 @@ class BattleScene:
                     self.active_party_index,
                     None,
                 )
-                self._start_timeline_animation()
-                return
-            if getattr(actor.member, "paralyzed", False):
+                status_skips_turn = True
+            elif getattr(actor.member, "paralyzed", False):
                 getattr(self, "focused_target_by_party_index", {}).pop(
                     self.active_party_index,
                     None,
                 )
-                self._start_timeline_animation()
-                return
-            if getattr(actor.member, "sleeping", 0):
+                status_skips_turn = True
+            elif getattr(actor.member, "sleeping", 0):
                 if isinstance(actor.member, Member):
                     actor.member.elapse_sleep_turn()
                 else:
@@ -5688,6 +5889,10 @@ class BattleScene:
                     self.active_party_index,
                     None,
                 )
+                status_skips_turn = True
+            if self._skip_surprised_party_turn(self.active_party_index):
+                return
+            if status_skips_turn:
                 self._start_timeline_animation()
                 return
             if getattr(self, "escape_requested", False):
@@ -5807,6 +6012,21 @@ class BattleScene:
                 )
                 getattr(self, "hidden_party_indexes", set()).discard(party_index)
                 self._reveal_hidden_party_if_all_unavailable()
+                surprise_pending = getattr(
+                    self,
+                    "surprise_pending_party_indexes",
+                    None,
+                )
+                if surprise_pending is not None:
+                    surprise_pending.discard(party_index)
+                if (
+                    getattr(self, "surprise_active", False)
+                    and not surprise_pending
+                ):
+                    self._restore_surprise_formation(
+                        FormationAnimationCompletion.START_TIMELINE_REMOVAL
+                    )
+                    return True
                 self._start_timeline_removal_animation()
                 return True
             return False
@@ -6531,6 +6751,10 @@ class BattleScene:
                     self._begin_escape_animation()
                 else:
                     self._begin_defeat_message()
+                return
+            if self._prune_surprise_pending_party(
+                FormationAnimationCompletion.START_TIMELINE
+            ):
                 return
             if self._begin_front_promotion_if_needed(
                 FormationAnimationCompletion.START_TIMELINE

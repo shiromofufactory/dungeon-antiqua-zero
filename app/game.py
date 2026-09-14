@@ -350,6 +350,7 @@ RANDOM_BATTLE_ENCOUNTER = BattleEncounter(
         "Cobra",
     ),
     frozenset((2, 3, 4)),
+    surprise_enabled=True,
 )
 INITIAL_GOLD = 100
 INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
