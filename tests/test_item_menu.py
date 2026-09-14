@@ -10,6 +10,8 @@ from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
 from app.rendering import DIMMED_PALETTE
 from ui.party_status import (
+    PARTY_AILMENT_ICON_X,
+    PARTY_AILMENT_ICON_Y,
     PARTY_COLUMN_WIDTH,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
@@ -19,6 +21,7 @@ from ui.party_status import (
     PARTY_TEXT_X,
     PARTY_WINDOW_GRID,
 )
+from ui.tagged_text import ICON_BANK, ICON_COLKEY, ICON_SIZE, TEXT_ICONS
 from ui.item_menu import (
     CATEGORY_CURSOR_X,
     CATEGORY_TEXT_X,
@@ -459,6 +462,72 @@ class ItemMenuTest(unittest.TestCase):
                     TRANSPARENT_INDEX,
                 )
             for index, member in enumerate(mock.party_panel.party)
+            ],
+        )
+
+    def test_shared_party_panel_draws_poison_and_paralysis_beside_faces(
+        self,
+    ) -> None:
+        faces = object()
+        mock = ItemMenuHarness(faces=faces)
+        mock.party[0].poisoned = True
+        mock.party[1].paralyzed = True
+        mock.party[2].poisoned = True
+        mock.party[2].paralyzed = True
+        poison = TEXT_ICONS["%POISON%"]
+        paralysis = TEXT_ICONS["%PARALIZE%"]
+
+        with patch("ui.party_status.pyxel.blt") as blt:
+            mock.party_panel.draw_faces()
+
+        icon_calls = [
+            draw_call
+            for draw_call in blt.call_args_list
+            if draw_call.args[2] == ICON_BANK
+        ]
+        self.assertEqual(
+            icon_calls,
+            [
+                call(
+                    PARTY_AILMENT_ICON_X,
+                    PARTY_AILMENT_ICON_Y,
+                    ICON_BANK,
+                    poison.u,
+                    poison.v,
+                    ICON_SIZE,
+                    ICON_SIZE,
+                    ICON_COLKEY,
+                ),
+                call(
+                    PARTY_AILMENT_ICON_X + PARTY_COLUMN_WIDTH * 4,
+                    PARTY_AILMENT_ICON_Y,
+                    ICON_BANK,
+                    paralysis.u,
+                    paralysis.v,
+                    ICON_SIZE,
+                    ICON_SIZE,
+                    ICON_COLKEY,
+                ),
+                call(
+                    PARTY_AILMENT_ICON_X + PARTY_COLUMN_WIDTH * 8,
+                    PARTY_AILMENT_ICON_Y,
+                    ICON_BANK,
+                    poison.u,
+                    poison.v,
+                    ICON_SIZE,
+                    ICON_SIZE,
+                    ICON_COLKEY,
+                ),
+                call(
+                    PARTY_AILMENT_ICON_X + PARTY_COLUMN_WIDTH * 8 + ICON_SIZE,
+                    PARTY_AILMENT_ICON_Y,
+                    ICON_BANK,
+                    paralysis.u,
+                    paralysis.v,
+                    ICON_SIZE,
+                    ICON_SIZE,
+                    ICON_COLKEY,
+                ),
             ],
         )
 

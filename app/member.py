@@ -1049,6 +1049,17 @@ class Member:
         )
 
     @property
+    def has_curable_ailment(self) -> bool:
+        """Return whether DA2's CURE spell can clear a current ailment."""
+
+        return bool(
+            self.poisoned
+            or self.paralyzed
+            or self.sleeping
+            or self.confused
+        )
+
+    @property
     def is_npc(self) -> bool:
         """Return whether this member uses the NPC equipment rules."""
 
@@ -1131,6 +1142,16 @@ class Member:
             self.confused = 0
             self.stunned = False
         return self.hp - old_hp
+
+    def cure_ailments(self) -> bool:
+        """Clear the four ailments removed by DA2's CURE spell."""
+
+        cured = self.has_curable_ailment
+        self.poisoned = False
+        self.paralyzed = False
+        self.sleeping = 0
+        self.confused = 0
+        return cured
 
     def take_damage(self, damage: int) -> int:
         """Apply battle damage, waking from sleep or confusion like DA2."""

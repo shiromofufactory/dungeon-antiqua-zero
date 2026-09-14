@@ -450,24 +450,17 @@ class SpellMenuOverlay:
         return (
             spell.on_camp
             and not spell.to_enemy
-            and spell.action is SpellAction.HEAL
+            and spell.action in (SpellAction.HEAL, SpellAction.CURE)
         )
 
-    @staticmethod
-    def _has_curable_ailment(member: Member) -> bool:
-        return bool(
-            member.poisoned
-            or member.paralyzed
-            or member.sleeping
-            or member.confused
-        )
-
-    def _can_heal_target(self, spell: Spell, target: Member) -> bool:
+    def _can_use_spell_on_target(self, spell: Spell, target: Member) -> bool:
         if target.hp <= 0:
             return False
+        if spell.action is SpellAction.CURE:
+            return target.has_curable_ailment
         if target.hp < target.max_hp:
             return True
-        return spell.intensity == 0 and self._has_curable_ailment(target)
+        return spell.intensity == 0 and target.has_curable_ailment
 
     def _usable_target_indexes(self, spell: Spell) -> tuple[int, ...]:
         if (
@@ -478,7 +471,7 @@ class SpellMenuOverlay:
         return tuple(
             index
             for index, target in enumerate(self.party_panel.party)
-            if self._can_heal_target(spell, target)
+            if self._can_use_spell_on_target(spell, target)
         )
 
     def _notify_invalid_action(self) -> None:
@@ -549,7 +542,7 @@ class SpellMenuOverlay:
         animation.frame += 1
         self._refresh_proficiency_window()
 
-    def _use_selected_healing_spell(self) -> bool:
+    def _use_selected_spell(self) -> bool:
         spell = self.selected_spell
         selected_target = self.member_cursor.selected_key
         if (
@@ -573,23 +566,27 @@ class SpellMenuOverlay:
             self._notify_invalid_action()
             return False
 
-        ability = member_spell_ability(
-            magic=self.member.adjusted_abilities.magic,
-            internal_level=self.member.internal_level,
-        )
-        for index in target_indexes:
-            target = self.party_panel.party[index]
-            result = resolve_healing(
-                intensity=spell.intensity,
-                ability=ability,
-                current_hp=target.hp,
-                max_hp=target.max_hp,
-                random_factor=random.random(),
+        if spell.action is SpellAction.HEAL:
+            ability = member_spell_ability(
+                magic=self.member.adjusted_abilities.magic,
+                internal_level=self.member.internal_level,
             )
-            target.apply_healing(
-                result.amount,
-                cure_ailments=result.cures_ailments,
-            )
+            for index in target_indexes:
+                target = self.party_panel.party[index]
+                result = resolve_healing(
+                    intensity=spell.intensity,
+                    ability=ability,
+                    current_hp=target.hp,
+                    max_hp=target.max_hp,
+                    random_factor=random.random(),
+                )
+                target.apply_healing(
+                    result.amount,
+                    cure_ailments=result.cures_ailments,
+                )
+        else:
+            for index in target_indexes:
+                self.party_panel.party[index].cure_ailments()
         self.member.mp -= spell.mp
         play_se(HEALING_SE_ID)
         kind = SPELL_PROFICIENCY_BY_TYPE[spell.type]
@@ -647,7 +644,7 @@ class SpellMenuOverlay:
             return False
         self.member_cursor.update(input_state.navigation)
         if input_state.confirm.triggered:
-            self._use_selected_healing_spell()
+            self._use_selected_spell()
         return False
 
     def draw(self) -> None:

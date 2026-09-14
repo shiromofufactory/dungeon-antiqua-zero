@@ -367,6 +367,67 @@ class SpellMenuTest(unittest.TestCase):
         invalid_action.assert_called_once_with()
 
     @patch("ui.spell_menu.play_se")
+    @patch("ui.spell_menu.random.random")
+    def test_cure_clears_da2_ailments_without_healing_or_clearing_stun(
+        self,
+        random_value: Mock,
+        play_se: Mock,
+    ) -> None:
+        mock = SpellMenuHarness(member_index=1)
+        proficiency = mock.member.proficiency(ProficiencyKind.SACRED)
+        proficiency.level = 3
+        mock._build_windows()
+        target = mock.party[0]
+        initial_hp = target.hp
+        initial_mp = mock.member.mp
+        target.poisoned = True
+        target.paralyzed = True
+        target.sleeping = 2
+        target.confused = 3
+        target.stunned = True
+        mock.party[2].hp = 0
+        mock.party[2].poisoned = True
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.spell_cursor.select_key("CURE")
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 0)
+        self.assertEqual(mock._usable_target_indexes(mock.spells["CURE"]), (0,))
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(target.hp, initial_hp)
+        self.assertFalse(target.poisoned)
+        self.assertFalse(target.paralyzed)
+        self.assertEqual(target.sleeping, 0)
+        self.assertEqual(target.confused, 0)
+        self.assertTrue(target.stunned)
+        self.assertEqual(mock.member.mp, initial_mp - mock.spells["CURE"].mp)
+        self.assertEqual(proficiency.progress, 85)
+        random_value.assert_not_called()
+        play_se.assert_called_once_with("spell_healing1")
+
+        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
+            mock.update(InputState())
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 0)
+        self.assertIn(mock.proficiency_window, mock.windows)
+
+        invalid_action = Mock()
+        mock.on_invalid_action = invalid_action
+        remaining_mp = mock.member.mp
+        self.assertEqual(mock._usable_target_indexes(mock.spells["CURE"]), ())
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.member.mp, remaining_mp)
+        self.assertTrue(target.stunned)
+        invalid_action.assert_called_once_with()
+
+    @patch("ui.spell_menu.play_se")
     @patch("ui.spell_menu.random.random", return_value=0.5)
     def test_healing_keeps_target_selection_on_next_injured_member(
         self,

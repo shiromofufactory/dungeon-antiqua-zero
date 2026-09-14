@@ -363,6 +363,24 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.confused, 0)
         self.assertFalse(self.member.stunned)
 
+    def test_cure_clears_da2_ailments_but_not_stun(self) -> None:
+        self.member.poisoned = True
+        self.member.paralyzed = True
+        self.member.sleeping = 2
+        self.member.confused = 3
+        self.member.stunned = True
+
+        self.assertTrue(self.member.has_curable_ailment)
+        self.assertTrue(self.member.cure_ailments())
+
+        self.assertFalse(self.member.poisoned)
+        self.assertFalse(self.member.paralyzed)
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 0)
+        self.assertTrue(self.member.stunned)
+        self.assertFalse(self.member.has_curable_ailment)
+        self.assertFalse(self.member.cure_ailments())
+
     def test_sleep_skips_actions_and_positive_damage_wakes_the_member(self) -> None:
         self.member.confused = 3
         self.member.apply_sleep(2)

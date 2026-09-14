@@ -19,6 +19,7 @@ from ui import (
     WindowText,
     pad,
 )
+from ui.tagged_text import ICON_BANK, ICON_COLKEY, ICON_SIZE, TEXT_ICONS
 
 PARTY_WINDOW_GRID = (0, 44, 64, 16)
 PARTY_COLUMN_WIDTH = 12
@@ -29,6 +30,8 @@ PARTY_HP_Y = 9
 PARTY_MAX_HP_Y = 12
 PARTY_CURSOR_Y = 1
 PARTY_FACE_SIZE = 32
+PARTY_AILMENT_ICON_X = PARTY_FACE_X + PARTY_FACE_SIZE
+PARTY_AILMENT_ICON_Y = PARTY_FACE_Y
 
 
 class PartyStatusPanel:
@@ -118,6 +121,7 @@ class PartyStatusPanel:
                     self._draw_face(index, face_position.x, face_position.y)
             else:
                 self._draw_face(index, face_position.x, face_position.y)
+            self._draw_ailment_icons(index, member)
 
     def _draw_face(self, index: int, source_x: int, source_y: int) -> None:
         pyxel.blt(
@@ -131,10 +135,33 @@ class PartyStatusPanel:
             TRANSPARENT_INDEX,
         )
 
+    def _draw_ailment_icons(self, index: int, member: Member) -> None:
+        x = PARTY_AILMENT_ICON_X + index * PARTY_COLUMN_WIDTH * 4
+        for active, tag in (
+            (member.poisoned, "%POISON%"),
+            (member.paralyzed, "%PARALIZE%"),
+        ):
+            if not active:
+                continue
+            icon = TEXT_ICONS[tag]
+            pyxel.blt(
+                x,
+                PARTY_AILMENT_ICON_Y,
+                ICON_BANK,
+                icon.u,
+                icon.v,
+                ICON_SIZE,
+                ICON_SIZE,
+                ICON_COLKEY,
+            )
+            x += ICON_SIZE
+
 
 __all__ = [
     "PARTY_COLUMN_WIDTH",
     "PARTY_CURSOR_Y",
+    "PARTY_AILMENT_ICON_X",
+    "PARTY_AILMENT_ICON_Y",
     "PARTY_FACE_SIZE",
     "PARTY_FACE_X",
     "PARTY_FACE_Y",
