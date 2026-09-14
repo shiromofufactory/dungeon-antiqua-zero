@@ -112,6 +112,18 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertTrue(state.consume_stun())
         self.assertFalse(state.consume_stun())
 
+    def test_silence_does_not_shorten_and_elapses_by_monster_turn(self) -> None:
+        state = MonsterBattleState(max_hp=10)
+
+        self.assertTrue(state.apply_silence(6))
+        self.assertFalse(state.apply_silence(4))
+        self.assertEqual(state.silenced, 6)
+        self.assertTrue(state.elapse_silence_turn())
+        self.assertEqual(state.silenced, 5)
+
+        state.defeat()
+        self.assertEqual(state.silenced, 0)
+
     def test_defense_down_applies_once_with_da2_formula(self) -> None:
         state = MonsterBattleState(max_hp=10)
 

@@ -373,6 +373,18 @@ class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
         self.assertEqual(result.success_rate, 30)
         self.assertFalse(result.success)
 
+    def test_silence_uses_the_ordinary_status_rate(self) -> None:
+        result = resolve_physical_additional_effect(
+            effect=AdditionalEffect.SILENCE,
+            adjusted_hit=100,
+            effect_roll=29,
+            target_is_member=False,
+        )
+
+        self.assertEqual(result.activation_points, 2)
+        self.assertEqual(result.success_rate, 30)
+        self.assertTrue(result.success)
+
     def test_monsters_cannot_be_paralyzed(self) -> None:
         result = resolve_physical_additional_effect(
             effect=AdditionalEffect.PARALIZE,

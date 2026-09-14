@@ -17,6 +17,7 @@ from tools.screen_mocks.battle import (
     BattleScreenMock,
 )
 from monster import MonsterBattleState, MonsterCombatStats
+from monster_ai import MonsterSpellAction
 
 
 def spellcaster(
@@ -65,6 +66,7 @@ def spell_scene(actor: BattleMockMonster) -> BattleScreenMock:
     )
     mock._show_spell_cast_message = Mock()
     mock._show_monster_spell_mp_lack_message = Mock()
+    mock._show_monster_spell_sealed_message = Mock()
     return mock
 
 
@@ -140,6 +142,35 @@ class MonsterSpellTest(unittest.TestCase):
             24,
         )
         mock._show_monster_spell_mp_lack_message.assert_called_once_with(actor)
+
+    def test_silenced_monster_spell_fails_without_spending_mp(self) -> None:
+        actor = spellcaster(magic=15, spell_key="SLEEP")
+        actor.state.apply_silence(4)
+        mock = spell_scene(actor)
+        mock.command_window = Mock()
+        mock.timeline = (actor,)
+        mock.monster_charge_presentation = None
+        mock.monster_escape_actor_index = None
+        mock.monster_attack_target_index = None
+        mock.monster_blink_frames_remaining = 1
+        mock.blinking_monster_index = 0
+        mock.progression = Mock()
+        mock._select_monster_action = Mock(
+            return_value=MonsterSpellAction("SLEEP")
+        )
+        mock._start_timeline_animation = Mock()
+
+        mock._update_monster_action()
+
+        self.assertEqual(actor.state.mp, 12)
+        self.assertEqual(actor.state.silenced, 3)
+        presentation = mock.action_presentation
+        assert presentation is not None
+        self.assertEqual(presentation.party_sleep_results, ())
+        self.assertEqual(presentation.post_effect_wait_frame_count, 24)
+        mock._show_monster_spell_sealed_message.assert_called_once_with()
+        mock._show_monster_spell_mp_lack_message.assert_not_called()
+        mock.progression.record_enemy_action.assert_called_once_with(0)
 
     def test_rear_spellcaster_can_attempt_action_without_physical_target(
         self,

@@ -25,6 +25,7 @@ PHYSICAL_STATUS_EFFECTS = frozenset(
         AdditionalEffect.STUN,
         AdditionalEffect.POISON,
         AdditionalEffect.PARALIZE,
+        AdditionalEffect.SILENCE,
         AdditionalEffect.DEFENSE_DOWN,
     )
 )

@@ -377,6 +377,12 @@ SLEEP_ICON_PATTERN_COUNT = 4
 SLEEP_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 SLEEP_MIN_TURNS = 2
 SLEEP_MAX_TURNS = 3
+SILENCE_MIN_TURNS = 4
+SILENCE_MAX_TURNS = 6
+SILENCE_ICON_SOURCE_X = 56
+SILENCE_ICON_SOURCE_Y = 16
+SILENCE_ICON_SIZE = 8
+SILENCE_MONSTER_OFFSET_X = 36
 POISON_ICON_SOURCE_X = 32
 POISON_ICON_SOURCE_Y = 16
 POISON_ICON_SIZE = 8
@@ -514,6 +520,7 @@ ADDITIONAL_EFFECT_RESISTANCE = {
     AdditionalEffect.STUN: ResistanceType.STUN,
     AdditionalEffect.POISON: ResistanceType.POISON,
     AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
+    AdditionalEffect.SILENCE: ResistanceType.SILENCE,
     AdditionalEffect.DEFENSE_DOWN: None,
 }
 WEAPON_ATTRIBUTE_RESISTANCE = {
@@ -4669,6 +4676,20 @@ class BattleScene:
             align_left=True,
         )
 
+    def _show_monster_spell_sealed_message(self) -> None:
+        """Show DA2's sealed-spell result on the enemy side."""
+
+        if (
+            getattr(self, "action_popup_window", None) is None
+            or getattr(self, "battle_popup", None) is None
+        ):
+            return
+        self._show_battle_popup(
+            self.texts.text("battle.monster.spell_sealed", self.localizer),
+            MONSTER_SPELL_FAILURE_FRAME_COUNT,
+            align_left=True,
+        )
+
     def _show_battle_popup(
         self,
         message: str,
@@ -5297,6 +5318,10 @@ class BattleScene:
                 changed = True
             elif effect is AdditionalEffect.POISON:
                 changed = monster.state.apply_poison()
+            elif effect is AdditionalEffect.SILENCE and monster.spell_keys:
+                changed = monster.state.apply_silence(
+                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                )
             elif effect is AdditionalEffect.STUN:
                 changed = monster.state.apply_stun()
             elif effect is AdditionalEffect.DEFENSE_DOWN:
@@ -6103,11 +6128,13 @@ class BattleScene:
             if self._apply_turn_start_hp_change(actor):
                 return
             if actor.state.consume_stun():
+                actor.state.elapse_silence_turn()
                 self.blinking_monster_index = None
                 self.monster_blink_frames_remaining = 0
                 self._start_timeline_animation()
                 return
             if actor.state.elapse_sleep_turn():
+                actor.state.elapse_silence_turn()
                 self.blinking_monster_index = None
                 self.monster_blink_frames_remaining = 0
                 self._start_timeline_animation()
@@ -6540,6 +6567,7 @@ class BattleScene:
             self._start_timeline_animation()
             return
         action = self._select_monster_action(actor)
+        turn_was_silenced = actor.state.elapse_silence_turn()
         if action is None:
             self._start_timeline_animation()
             return
@@ -6559,7 +6587,11 @@ class BattleScene:
             return
         if isinstance(action, MonsterSpellAction):
             spell = self.spells[action.spell_key]
-            if not self._begin_monster_spell(actor, spell):
+            if not self._begin_monster_spell(
+                actor,
+                spell,
+                silenced=turn_was_silenced,
+            ):
                 self._start_timeline_animation()
             return
         self._begin_standard_monster_attack(actor)
@@ -6612,12 +6644,28 @@ class BattleScene:
             index for index, monster in enumerate(self.monsters) if monster.is_alive
         )
 
-    def _begin_monster_spell(self, actor: BattleMonster, spell: Spell) -> bool:
+    def _begin_monster_spell(
+        self,
+        actor: BattleMonster,
+        spell: Spell,
+        *,
+        silenced: bool | None = None,
+    ) -> bool:
         """Attempt one basic-AI spell, applying DA2's shared MP check."""
 
         candidates = self._monster_spell_target_indexes(spell)
         if not candidates:
             return False
+        if silenced is None:
+            silenced = actor.state.silenced > 0
+        if silenced:
+            self.action_presentation = BattleActionPresentation(
+                (),
+                post_effect_wait_frame_count=MONSTER_SPELL_FAILURE_FRAME_COUNT,
+            )
+            self.phase = BattlePhase.ACTION_PRESENTATION
+            self._show_monster_spell_sealed_message()
+            return True
         if not actor.state.spend_mp(spell.mp):
             self.action_presentation = BattleActionPresentation(
                 (),
@@ -7382,6 +7430,7 @@ class BattleScene:
         self._draw_spell_effects()
         self._draw_identify_effect()
         self._draw_sleeping_icons()
+        self._draw_silence_icons()
         self._draw_poison_icons()
         self._draw_paralyze_icons()
         self._draw_stun_icons()
@@ -8429,6 +8478,24 @@ class BattleScene:
                 SPEED_ICON_SIZE,
                 SPEED_ICON_SIZE,
                 SPEED_ICON_TRANSPARENT_INDEX,
+            )
+
+    def _draw_silence_icons(self) -> None:
+        """Draw DA2's silence marker beside silenced monsters."""
+
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            if not monster.is_alive or not monster.state.silenced:
+                continue
+            _base_x, y = self._monster_base_position(index)
+            pyxel.blt(
+                self._monster_draw_x(index) + SILENCE_MONSTER_OFFSET_X,
+                y,
+                0,
+                SILENCE_ICON_SOURCE_X,
+                SILENCE_ICON_SOURCE_Y,
+                SILENCE_ICON_SIZE,
+                SILENCE_ICON_SIZE,
+                TRANSPARENT_INDEX,
             )
 
     def _draw_poison_icons(self) -> None:

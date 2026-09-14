@@ -281,6 +281,7 @@ class MonsterBattleState:
     mp: int | None = None
     poisoned: bool = False
     sleeping: int = 0
+    silenced: int = 0
     stunned: bool = False
     defense_modifier: int = 0
     speed_modifier: int = 0
@@ -312,6 +313,10 @@ class MonsterBattleState:
             raise TypeError("sleeping must be an integer")
         if self.sleeping < 0:
             raise ValueError("sleeping must not be negative")
+        if isinstance(self.silenced, bool) or not isinstance(self.silenced, int):
+            raise TypeError("silenced must be an integer")
+        if self.silenced < 0:
+            raise ValueError("silenced must not be negative")
         if not isinstance(self.stunned, bool):
             raise TypeError("stunned must be a boolean")
         if (
@@ -366,6 +371,7 @@ class MonsterBattleState:
         if damage > 0:
             self.sleeping = 0
         if self.hp <= 0:
+            self.silenced = 0
             self.stunned = False
             self.defense_modifier = 0
             self.speed_modifier = 0
@@ -399,6 +405,7 @@ class MonsterBattleState:
         assert previous is not None
         self.hp = max(0, previous - damage)
         if self.hp <= 0:
+            self.silenced = 0
             self.stunned = False
             self.defense_modifier = 0
             self.speed_modifier = 0
@@ -410,6 +417,27 @@ class MonsterBattleState:
         if self.sleeping <= 0:
             return False
         self.sleeping -= 1
+        return True
+
+    def apply_silence(self, turns: int) -> bool:
+        """Apply DA2's non-shortening silence duration."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
+        if not self.is_alive:
+            return False
+        previous = self.silenced
+        self.silenced = max(self.silenced, turns)
+        return self.silenced != previous
+
+    def elapse_silence_turn(self) -> bool:
+        """Consume one silenced turn and report whether silence was active."""
+
+        if self.silenced <= 0:
+            return False
+        self.silenced -= 1
         return True
 
     def apply_stun(self) -> bool:
@@ -472,6 +500,7 @@ class MonsterBattleState:
         """Set HP to zero for a mock attack that always defeats its target."""
 
         self.hp = 0
+        self.silenced = 0
         self.stunned = False
         self.defense_modifier = 0
         self.speed_modifier = 0
@@ -483,6 +512,7 @@ class MonsterBattleState:
         self.mp = self.max_mp
         self.poisoned = False
         self.sleeping = 0
+        self.silenced = 0
         self.stunned = False
         self.defense_modifier = 0
         self.speed_modifier = 0

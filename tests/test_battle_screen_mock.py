@@ -110,6 +110,7 @@ from tools.screen_mocks.battle import (
     MONSTER_ENTRANCE_FRAME_COUNTS,
     MONSTER_MISS_FRAME_COUNT,
     MONSTER_POSITIONS,
+    MONSTER_SPELL_FAILURE_FRAME_COUNT,
     NEAR_DEATH_SPRITE_SOURCE_X,
     MISS_SPRITE_SOURCE_X,
     MISS_SPRITE_WIDTH,
@@ -144,6 +145,10 @@ from tools.screen_mocks.battle import (
     SLEEP_ICON_SOURCE_Y,
     SLEEP_MAX_TURNS,
     SLEEP_MIN_TURNS,
+    SILENCE_ICON_SIZE,
+    SILENCE_ICON_SOURCE_X,
+    SILENCE_ICON_SOURCE_Y,
+    SILENCE_MONSTER_OFFSET_X,
     SLOW_ICON_PATTERN_FRAME_COUNT,
     SPEED_ICON_NEGATIVE_SOURCE_Y,
     SPEED_ICON_SIZE,
@@ -4731,6 +4736,33 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertEqual((STUN_ICON_SOURCE_X, STUN_ICON_SOURCE_Y), (224, 16))
 
+    def test_silence_icon_uses_authored_bank_zero_sprite_beside_monster(
+        self,
+    ) -> None:
+        monster = _damage_test_monster()
+        monster.state.silenced = 4
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_silence_icons()
+
+        blt.assert_called_once_with(
+            4 + SILENCE_MONSTER_OFFSET_X,
+            MONSTER_POSITIONS[0][1],
+            0,
+            SILENCE_ICON_SOURCE_X,
+            SILENCE_ICON_SOURCE_Y,
+            SILENCE_ICON_SIZE,
+            SILENCE_ICON_SIZE,
+            1,
+        )
+        self.assertEqual(
+            (SILENCE_ICON_SOURCE_X, SILENCE_ICON_SOURCE_Y),
+            (56, 16),
+        )
+
     def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:
         spell = load_mock_spells()["FIRE1"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -4770,6 +4802,28 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             mock.battle_popup.frames_remaining,
             BATTLE_POPUP_FRAME_COUNT,
+        )
+
+    def test_sealed_monster_spell_popup_appears_at_top_left(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = Mock()
+        mock.texts.text.return_value = "じゅもんは　ふうじられている"
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
+        mock.battle_popup = BattleTimedPopup()
+
+        mock._show_monster_spell_sealed_message()
+
+        self.assertEqual(mock.action_popup_window.x, 0)
+        self.assertEqual(
+            mock.action_popup_window.texts,
+            (WindowText("じゅもんは　ふうじられている", 2, 2),),
+        )
+        self.assertEqual(
+            mock.battle_popup.frames_remaining,
+            MONSTER_SPELL_FAILURE_FRAME_COUNT,
         )
 
     def test_item_use_popup_shows_only_name_at_minimum_top_right_width(self) -> None:
@@ -7859,6 +7913,45 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(applied, (AdditionalEffect.DEATH,))
         self.assertFalse(monster.is_alive)
         mock._show_battle_popup.assert_not_called()
+
+    def test_mage_masher_silences_a_spellcasting_monster(self) -> None:
+        monster = _damage_test_monster()
+        monster.spell_keys = ("SLEEP",)
+        member = SimpleNamespace(has_skill=Mock(return_value=False))
+        weapon = load_mock_items()["MAGE MASHER"]
+        result = SimpleNamespace(
+            hit=True,
+            adjusted_hit=100,
+            critical=False,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+
+        with patch("scenes.battle.random.randint", side_effect=(0, 5)):
+            effects = mock._resolve_member_attack_additional_effects(
+                member,
+                weapon,
+                monster,
+                result,
+            )
+            applied = mock._apply_additional_effects_to_monster(0, effects)
+
+        self.assertEqual(effects, (AdditionalEffect.SILENCE,))
+        self.assertEqual(applied, (AdditionalEffect.SILENCE,))
+        self.assertEqual(monster.state.silenced, 5)
+
+    def test_silence_additional_effect_ignores_a_monster_without_spells(self) -> None:
+        monster = _damage_test_monster()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+
+        applied = mock._apply_additional_effects_to_monster(
+            0,
+            (AdditionalEffect.SILENCE,),
+        )
+
+        self.assertEqual(applied, ())
+        self.assertEqual(monster.state.silenced, 0)
 
     def test_lethal_and_death_weapon_are_merged_into_one_check(self) -> None:
         member = SimpleNamespace(has_skill=Mock(return_value=True))
