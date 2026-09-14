@@ -62,6 +62,7 @@ class MonsterSpellDefinitionTest(unittest.TestCase):
         self.assertEqual(goblin.spell_keys, ("SLOW",))
         self.assertEqual((treant.magic, treant.intelligence), (15, 0))
         self.assertEqual(treant.spell_keys, ("SLEEP",))
+        self.assertEqual(treant.treasure_rate, 16)
 
 
 class MonsterBattleStateTest(unittest.TestCase):

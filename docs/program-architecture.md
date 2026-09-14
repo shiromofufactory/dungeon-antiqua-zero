@@ -1015,7 +1015,9 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 モンスターのお宝定義は `treasure_item` をアイテム安定キー、`treasure_rate` を0から16の
 16分率として読込境界で検証する。戦闘終了後のドロップ判定と報酬確定は
 `BattleProgression` 相当のPyxel非依存Systemが所有し、BattleSceneは判定結果の表示だけを
-調停する。アイテム付与と所有上限の判定は既存の `InventorySystem` を経由する。
+調停する。候補は最後に撃破した敵1体とし、1戦闘で1回だけ判定する。アイテム付与と所有上限の
+判定は既存の `InventorySystem` を経由し、付与に成功した場合だけ `MonsterRecordSystem` へ
+取得済みを記録する。
 
 通常攻撃の総合攻撃力、命中判定、物理ダメージは、PyxelやSceneに依存しない
 `battle_physical.py` が計算する。BattleSceneと単独戦闘テストは、`Member` の装備・能力・熟練度、

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import load_mock_items
@@ -12,7 +13,12 @@ from member import (
     required_experience_for_level,
 )
 from state import SaveData
-from systems import BattleProgression, EnemyProgressionData
+from systems import (
+    BattleProgression,
+    EnemyProgressionData,
+    InventorySystem,
+    MonsterRecordSystem,
+)
 
 
 PROFICIENCIES = {kind.value: 0 for kind in ProficiencyKind}
@@ -60,6 +66,9 @@ class BattleProgressionTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.items = load_mock_items()
         cls.sword = next(item for item in cls.items.values() if item.subtype == "SWORD")
+        cls.other_item = next(
+            item for item in cls.items.values() if item.key != cls.sword.key
+        )
 
     def test_enemy_reward_uses_actual_action_count_and_final_floor(self) -> None:
         enemy = EnemyProgressionData(4, 1, 4, 25)
@@ -82,6 +91,131 @@ class BattleProgressionTest(unittest.TestCase):
         progression.record_enemy_escape(0)
 
         self.assertEqual(progression.rewards(), (48, 10))
+
+    def test_only_last_defeated_enemy_can_drop_its_treasure(self) -> None:
+        save_data = SaveData()
+        inventory = InventorySystem(self.items)
+        records = MonsterRecordSystem(save_data)
+        member = Member.from_record(member_record("Fighter"))
+        progression = BattleProgression(
+            (
+                EnemyProgressionData(
+                    1,
+                    1,
+                    1,
+                    0,
+                    "First Enemy",
+                    self.sword.key,
+                    16,
+                ),
+                EnemyProgressionData(
+                    1,
+                    1,
+                    1,
+                    0,
+                    "Last Enemy",
+                    self.other_item.key,
+                    16,
+                ),
+            )
+        )
+        progression.record_enemy_defeat(0)
+        progression.record_enemy_defeat(1)
+
+        with patch("systems.battle_progression.random.randrange", return_value=15):
+            growth = progression.settle(
+                save_data,
+                (member,),
+                inventory_system=inventory,
+                monster_record_system=records,
+            )
+
+        self.assertEqual(growth.treasure_drop.monster_key, "Last Enemy")
+        self.assertEqual(growth.treasure_drop.item_key, self.other_item.key)
+        self.assertEqual(inventory.quantity(self.sword), 0)
+        self.assertEqual(inventory.quantity(self.other_item), 1)
+        self.assertFalse(records.treasure_was_acquired("First Enemy"))
+        self.assertTrue(records.treasure_was_acquired("Last Enemy"))
+
+    def test_treasure_rate_is_a_sixteenth_roll(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+
+        for roll, expected_quantity in ((0, 1), (1, 0)):
+            with self.subTest(roll=roll):
+                save_data = SaveData()
+                inventory = InventorySystem(self.items)
+                records = MonsterRecordSystem(save_data)
+                progression = BattleProgression(
+                    (
+                        EnemyProgressionData(
+                            1,
+                            1,
+                            1,
+                            0,
+                            "Enemy",
+                            self.sword.key,
+                            1,
+                        ),
+                    )
+                )
+                progression.record_enemy_defeat(0)
+
+                with patch(
+                    "systems.battle_progression.random.randrange",
+                    return_value=roll,
+                ):
+                    growth = progression.settle(
+                        save_data,
+                        (member,),
+                        inventory_system=inventory,
+                        monster_record_system=records,
+                    )
+
+                self.assertEqual(inventory.quantity(self.sword), expected_quantity)
+                self.assertEqual(
+                    growth.treasure_drop is not None,
+                    bool(expected_quantity),
+                )
+
+    def test_full_inventory_discards_drop_without_recording_it(self) -> None:
+        save_data = SaveData()
+        inventory = InventorySystem(
+            self.items,
+            {
+                self.sword.key: InventorySystem.stack_limit(self.sword),
+            },
+        )
+        records = MonsterRecordSystem(save_data)
+        member = Member.from_record(member_record("Fighter"))
+        progression = BattleProgression(
+            (
+                EnemyProgressionData(
+                    1,
+                    1,
+                    1,
+                    0,
+                    "Enemy",
+                    self.sword.key,
+                    16,
+                ),
+            )
+        )
+        progression.record_enemy_defeat(0)
+
+        with patch("systems.battle_progression.random.randrange", return_value=0):
+            growth = progression.settle(
+                save_data,
+                (member,),
+                inventory_system=inventory,
+                monster_record_system=records,
+            )
+
+        self.assertIsNone(growth.treasure_drop)
+        self.assertEqual(
+            inventory.quantity(self.sword),
+            InventorySystem.stack_limit(self.sword),
+        )
+        self.assertFalse(records.treasure_was_acquired("Enemy"))
 
     def test_repeated_battles_accumulate_experience_in_the_live_save(self) -> None:
         save_data = SaveData(experience=30)

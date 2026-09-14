@@ -121,6 +121,7 @@ from spell_effect import (
     load_spell_effects,
 )
 from systems import (
+    BattleGrowthResult,
     BattleProgression,
     EnemyProgressionData,
     InventorySystem,
@@ -1165,6 +1166,8 @@ class BattleMonster:
     early_appear: int = 0
     max_occurrence: int = 1
     gold: int = 0
+    treasure_item_key: str = ""
+    treasure_rate: int = 0
     max_mp: int = 0
     magic: int = 0
     intelligence: int = 0
@@ -1224,6 +1227,12 @@ class BattleMonster:
             )
         except ItemDataError as error:
             raise BattleDataError(f"{key}.extra is invalid") from error
+        treasure_item_key = _required_text(record, "treasure_item", key)
+        treasure_rate = _required_nonnegative_integer(
+            record, "treasure_rate", key
+        )
+        if treasure_rate > 16:
+            raise BattleDataError(f"{key}.treasure_rate must be from 0 to 16")
         return cls(
             key=key,
             names=record,
@@ -1245,6 +1254,8 @@ class BattleMonster:
             ),
             max_occurrence=_required_positive_integer(record, "max_occ", key),
             gold=_required_nonnegative_integer(record, "gold", key),
+            treasure_item_key=treasure_item_key,
+            treasure_rate=treasure_rate,
             max_mp=_required_nonnegative_integer(record, "mmp", key),
             magic=_required_nonnegative_integer(record, "mag", key),
             intelligence=_required_nonnegative_integer(record, "int", key),
@@ -1623,6 +1634,9 @@ class BattleScene:
                     monster.early_appear,
                     monster.max_occurrence,
                     monster.gold,
+                    monster.key,
+                    monster.treasure_item_key,
+                    monster.treasure_rate,
                 )
                 for monster in self.monsters
             )
@@ -2179,6 +2193,9 @@ class BattleScene:
                     monster.early_appear,
                     monster.max_occurrence,
                     monster.gold,
+                    monster.key,
+                    monster.treasure_item_key,
+                    monster.treasure_rate,
                 )
                 for monster in self.monsters
             )
@@ -5416,6 +5433,8 @@ class BattleScene:
         if index is None:
             return False
         monster = self.monsters[index]
+        if hasattr(self, "progression"):
+            self.progression.record_enemy_defeat(index)
         if monster.is_alive:
             monster.state.defeat()
         promote_rear_monsters_if_front_empty(self.monsters)
@@ -5503,6 +5522,8 @@ class BattleScene:
             self.save_data,
             self.result_party,
             ineligible_member_keys=ineligible,
+            inventory_system=self.inventory_system,
+            monster_record_system=self.monster_record_system,
         )
         self.growth_result = growth
         message = self.texts.formatted_text(
@@ -5517,15 +5538,47 @@ class BattleScene:
             self.fonts,
             self.settings.language,
         )
-        placement = localized_texts.create(message, 2, 2)
+        placements = self._victory_summary_placements(
+            message,
+            growth,
+            localized_texts,
+        )
+        treasure_drop = growth.treasure_drop
         self.victory_summary_window = WindowFactory(
             self.fonts.font_for(Language.JAPANESE)
-        ).create(0, 0, 64, 7, (placement,))
+        ).create(
+            0,
+            0,
+            64,
+            10 if treasure_drop is not None else 7,
+            placements,
+        )
         self.victory_motion_frame = 0
         self.phase = BattlePhase.VICTORY_SUMMARY
         self.active_party_index = None
         self.timeline = ()
         self._play_victory_jingle(BATTLE_WIN_BGM_ID)
+
+    def _victory_summary_placements(
+        self,
+        reward_message: str,
+        growth: BattleGrowthResult,
+        localized_texts: LocalizedWindowTextFactory,
+    ) -> tuple[WindowText, ...]:
+        """Build the reward line and its optional colored treasure line."""
+
+        placements = [localized_texts.create(reward_message, 2, 2)]
+        treasure_drop = growth.treasure_drop
+        if treasure_drop is None:
+            return tuple(placements)
+        item = self.item_catalog[treasure_drop.item_key]
+        treasure_message = self.texts.formatted_text(
+            "battle.victory.treasure",
+            self.localizer,
+            {"ITEM": item.localized_name(self.localizer)},
+        )
+        placements.append(localized_texts.create(treasure_message, 2, 5))
+        return tuple(placements)
 
     def _begin_hidden_party_victory_return(self) -> None:
         """Bring DA2's hidden survivors back from beyond the right edge."""

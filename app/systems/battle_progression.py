@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from math import isqrt
 from types import MappingProxyType
@@ -11,12 +12,19 @@ if __package__ == "systems":
     from item import Item
     from member import Member, ProficiencyKind
     from state import SaveData
+    from systems.inventory import InventorySystem
+    from systems.monster_records import MonsterRecordSystem
     from systems.shop import MAX_GOLD
 else:
     from ..item import Item
     from ..member import Member, ProficiencyKind
     from ..state import SaveData
+    from .inventory import InventorySystem
+    from .monster_records import MonsterRecordSystem
     from .shop import MAX_GOLD
+
+
+TREASURE_RATE_DENOMINATOR = 16
 
 
 @dataclass(frozen=True)
@@ -27,6 +35,9 @@ class EnemyProgressionData:
     early_appear: int
     max_occurrence: int
     gold: int
+    monster_key: str = ""
+    treasure_item_key: str = ""
+    treasure_rate: int = 0
 
     def __post_init__(self) -> None:
         for name in ("level", "early_appear", "gold"):
@@ -39,6 +50,23 @@ class EnemyProgressionData:
             or self.max_occurrence <= 0
         ):
             raise ValueError("max_occurrence must be a positive integer")
+        for name in ("monster_key", "treasure_item_key"):
+            if not isinstance(getattr(self, name), str):
+                raise TypeError(f"{name} must be a string")
+        if bool(self.monster_key) != bool(self.treasure_item_key):
+            raise ValueError(
+                "monster_key and treasure_item_key must both be set or both be empty"
+            )
+        if (
+            isinstance(self.treasure_rate, bool)
+            or not isinstance(self.treasure_rate, int)
+            or not 0 <= self.treasure_rate <= TREASURE_RATE_DENOMINATOR
+        ):
+            raise ValueError(
+                f"treasure_rate must be from 0 to {TREASURE_RATE_DENOMINATOR}"
+            )
+        if self.treasure_rate and not self.monster_key:
+            raise ValueError("positive treasure_rate requires treasure data")
 
     def experience(self, action_count: int) -> int:
         """Return the per-defeat reward, flooring only the final quotient."""
@@ -77,6 +105,20 @@ class MemberGrowthSnapshot:
 
 
 @dataclass(frozen=True)
+class BattleTreasureDrop:
+    """One item successfully awarded by the last defeated enemy."""
+
+    monster_key: str
+    item_key: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.monster_key, str) or not self.monster_key:
+            raise ValueError("monster_key must be a non-empty string")
+        if not isinstance(self.item_key, str) or not self.item_key:
+            raise ValueError("item_key must be a non-empty string")
+
+
+@dataclass(frozen=True)
 class BattleGrowthResult:
     """Immutable before/after settlement data used by the result screen."""
 
@@ -84,6 +126,7 @@ class BattleGrowthResult:
     gold_gained: int
     before: tuple[MemberGrowthSnapshot, ...]
     after: tuple[MemberGrowthSnapshot, ...]
+    treasure_drop: BattleTreasureDrop | None = None
 
     @property
     def has_result_growth(self) -> bool:
@@ -152,6 +195,8 @@ class BattleProgression:
         self.enemies = tuple(enemies)
         self._enemy_action_counts = [0] * len(self.enemies)
         self._escaped_enemy_indexes: set[int] = set()
+        self._defeated_enemy_indexes: set[int] = set()
+        self._last_defeated_enemy_index: int | None = None
         self._weapon_awards: dict[str, dict[ProficiencyKind, int]] = {}
         self._spell_uses: dict[str, dict[ProficiencyKind, _SpellUse]] = {}
         self._settled = False
@@ -166,7 +211,20 @@ class BattleProgression:
         """Exclude one escaped enemy from EXP and Gold settlement."""
 
         self._require_enemy_index(enemy_index)
+        if enemy_index in self._defeated_enemy_indexes:
+            raise ValueError("a defeated enemy cannot escape")
         self._escaped_enemy_indexes.add(enemy_index)
+
+    def record_enemy_defeat(self, enemy_index: int) -> None:
+        """Remember defeat order so only the last defeated enemy can drop."""
+
+        self._require_enemy_index(enemy_index)
+        if enemy_index in self._escaped_enemy_indexes:
+            raise ValueError("an escaped enemy cannot be defeated")
+        if enemy_index in self._defeated_enemy_indexes:
+            return
+        self._defeated_enemy_indexes.add(enemy_index)
+        self._last_defeated_enemy_index = enemy_index
 
     def record_weapon_action(
         self,
@@ -246,6 +304,8 @@ class BattleProgression:
         members: Sequence[Member],
         *,
         ineligible_member_keys: Iterable[str] = (),
+        inventory_system: InventorySystem | None = None,
+        monster_record_system: MonsterRecordSystem | None = None,
     ) -> BattleGrowthResult:
         """Apply rewards once, including one HP and one eligible MP increase."""
 
@@ -262,6 +322,18 @@ class BattleProgression:
         ineligible = frozenset(ineligible_member_keys)
         if not all(isinstance(key, str) and key for key in ineligible):
             raise ValueError("ineligible_member_keys must contain strings")
+        if (inventory_system is None) != (monster_record_system is None):
+            raise ValueError(
+                "inventory_system and monster_record_system must be supplied together"
+            )
+        if inventory_system is not None and not isinstance(
+            inventory_system, InventorySystem
+        ):
+            raise TypeError("inventory_system must be an InventorySystem")
+        if monster_record_system is not None and not isinstance(
+            monster_record_system, MonsterRecordSystem
+        ):
+            raise TypeError("monster_record_system must be a MonsterRecordSystem")
 
         before = tuple(_snapshot(member) for member in party)
         experience_gained, gold_gained = self.rewards()
@@ -320,13 +392,40 @@ class BattleProgression:
                 member.max_hp = member.calculated_max_hp()
                 break
 
+        treasure_drop = self._settle_treasure(inventory_system, party)
+        if treasure_drop is not None:
+            assert monster_record_system is not None
+            monster_record_system.record_treasure_acquired(
+                treasure_drop.monster_key
+            )
+
         self._settled = True
         return BattleGrowthResult(
             experience_gained,
             gold_gained,
             before,
             tuple(_snapshot(member) for member in party),
+            treasure_drop,
         )
+
+    def _settle_treasure(
+        self,
+        inventory_system: InventorySystem | None,
+        members: Sequence[Member],
+    ) -> BattleTreasureDrop | None:
+        if inventory_system is None or self._last_defeated_enemy_index is None:
+            return None
+        enemy = self.enemies[self._last_defeated_enemy_index]
+        if enemy.treasure_rate == 0:
+            return None
+        if random.randrange(TREASURE_RATE_DENOMINATOR) >= enemy.treasure_rate:
+            return None
+        if not inventory_system.add(
+            enemy.treasure_item_key,
+            members=members,
+        ):
+            return None
+        return BattleTreasureDrop(enemy.monster_key, enemy.treasure_item_key)
 
     def _require_enemy_index(self, enemy_index: int) -> None:
         if (
@@ -353,7 +452,9 @@ class BattleProgression:
 __all__ = [
     "BattleGrowthResult",
     "BattleProgression",
+    "BattleTreasureDrop",
     "EnemyProgressionData",
     "MemberGrowthSnapshot",
     "ProficiencySnapshot",
+    "TREASURE_RATE_DENOMINATOR",
 ]

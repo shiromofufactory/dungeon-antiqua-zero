@@ -139,6 +139,7 @@ class MonsterDefinition:
     weaknesses: frozenset[ResistanceType]
     resistances: frozenset[ResistanceType]
     treasure_item_key: str
+    treasure_rate: int
     is_shadow: bool = False
 
     @classmethod
@@ -187,6 +188,9 @@ class MonsterDefinition:
                 raise MonsterDataError(f"monster.{field_name} must be a string")
         if not treasure_item_key:
             raise MonsterDataError("monster.treasure_item must not be empty")
+        treasure_rate = _required_monster_integer(record, "treasure_rate")
+        if treasure_rate > 16:
+            raise MonsterDataError("monster.treasure_rate must be from 0 to 16")
 
         flags: dict[str, bool] = {}
         for field_name in ("is_boss", "shadow"):
@@ -216,6 +220,7 @@ class MonsterDefinition:
             weaknesses=resistances_from_tolerance(weakness),
             resistances=resistances_from_tolerance(tolerance),
             treasure_item_key=treasure_item_key,
+            treasure_rate=treasure_rate,
             is_shadow=flags["shadow"],
         )
 

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
+from tools.screen_mocks._fixtures import load_mock_items
 
 from field import FieldPosition
 from game import (
@@ -14,6 +15,7 @@ from game import (
     Game,
 )
 from input import Direction, InputButton, InputState
+from localization import Localizer
 from member import FormationRow
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
@@ -34,6 +36,9 @@ from scenes.battle import (
 )
 from state import Language, SaveData, Settings
 from systems import DungeonExitReturn, EncounterAdvance
+from text_catalog import TextCatalog
+from ui import LocalizedWindowTextFactory, POSITIVE_COLOR
+from ui.tagged_text import TextColor, split_tagged_text
 
 
 class BattleEncounterTest(unittest.TestCase):
@@ -388,6 +393,47 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.settings = Settings(language=Language.JAPANESE)
 
         self.assertEqual(scene._victory_number(1234), "１２３４")
+
+    def test_victory_treasure_is_a_second_line_with_only_item_positive(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        items = load_mock_items()
+        item = items["DIVINE TEAR"]
+        scene.item_catalog = items
+        scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        scene.localizer = Localizer(Language.JAPANESE)
+        factory = LocalizedWindowTextFactory(Mock(), 0)
+        growth = SimpleNamespace(
+            treasure_drop=SimpleNamespace(item_key=item.key),
+        )
+
+        placements = scene._victory_summary_placements(
+            "ほうしゅう",
+            growth,
+            factory,
+        )
+
+        self.assertEqual(tuple(text.y for text in placements), (2, 5))
+        parts = split_tagged_text(placements[1].text)
+        self.assertIsInstance(parts[0], TextColor)
+        self.assertEqual(parts[0].color, POSITIVE_COLOR)
+        self.assertEqual(parts[1], item.localized_name(scene.localizer))
+        self.assertIsInstance(parts[2], TextColor)
+        self.assertEqual(parts[3], "を　てにいれた")
+
+    def test_monster_death_records_the_drop_candidate_order(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = (
+            SimpleNamespace(is_alive=False, is_front_row=True),
+        )
+        scene.progression = Mock()
+        scene.target_cursor = Mock()
+        scene.command_window = Mock()
+        scene._sync_monster_death_palette = Mock()
+
+        with patch("scenes.battle.play_se"):
+            self.assertTrue(scene._begin_monster_death(0))
+
+        scene.progression.record_enemy_defeat.assert_called_once_with(0)
 
     def test_victory_jingle_queues_the_field_bgm(self) -> None:
         scene = BattleScene.__new__(BattleScene)
