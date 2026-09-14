@@ -13,7 +13,7 @@ if __package__ == "":
         MIN_SPEED_MODIFIER,
         modified_agility,
     )
-    from item import Item, ItemEquipType
+    from item import Item, ItemEquipType, ItemSpecial
     from localization import Localizer
     from resistance import ResistanceType
     from skill import Skill
@@ -24,7 +24,7 @@ else:
         MIN_SPEED_MODIFIER,
         modified_agility,
     )
-    from .item import Item, ItemEquipType
+    from .item import Item, ItemEquipType, ItemSpecial
     from .localization import Localizer
     from .resistance import ResistanceType
     from .skill import Skill
@@ -177,7 +177,14 @@ _EQUIPMENT_PROFICIENCY_BY_SUBTYPE = MappingProxyType(
     }
 )
 _TWO_HANDED_SKILL_KEY = "Two-Handed"
+_DUAL_WIELD_SKILL_KEY = "Dual-Wield"
 _REGENERATE_SKILL_KEY = "Regenerate"
+_EQUIPMENT_GRANTED_SKILLS = MappingProxyType(
+    {
+        _DUAL_WIELD_SKILL_KEY: ItemSpecial.DUAL_WIELD,
+        _TWO_HANDED_SKILL_KEY: ItemSpecial.TWO_HANDED,
+    }
+)
 _TWO_HANDED_SKILL_KINDS = frozenset(
     (
         ProficiencyKind.SWORD,
@@ -1317,12 +1324,25 @@ class Member:
             for resistance in item.resistances
         )
 
-    def has_skill(self, key: str) -> bool:
-        """Return whether the member currently has one stable skill key."""
+    def has_skill(
+        self,
+        key: str,
+        *,
+        equipment: EquipmentSet | None = None,
+    ) -> bool:
+        """Return whether a learned skill or the supplied equipment grants ``key``."""
 
         if not isinstance(key, str) or not key:
             raise ValueError("key must be a non-empty string")
-        return any(skill.key == key for skill in self.skills)
+        if equipment is not None and not isinstance(equipment, EquipmentSet):
+            raise TypeError("equipment must be an EquipmentSet or None")
+        if any(skill.key == key for skill in self.skills):
+            return True
+        item_special = _EQUIPMENT_GRANTED_SKILLS.get(key)
+        active_equipment = self.equipment if equipment is None else equipment
+        return item_special is not None and any(
+            item.special is item_special for item in active_equipment.equipped_items()
+        )
 
     def can_equip(self, item: Item) -> bool:
         """Return intrinsic eligibility for one equipment item.
@@ -1409,7 +1429,7 @@ class Member:
         if (
             slot is EquipmentSlot.LEFT
             and item.equip_type is ItemEquipType.RIGHT
-            and not self.has_skill("Dual-Wield")
+            and not self.has_skill(_DUAL_WIELD_SKILL_KEY)
         ):
             return False
         return True

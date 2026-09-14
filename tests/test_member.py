@@ -123,6 +123,7 @@ class MemberTest(unittest.TestCase):
         healing: int = 0,
         tolerance: str = "",
         requirements: str = "",
+        special: str = "",
     ) -> Item:
         return Item.from_record(
             {
@@ -141,6 +142,7 @@ class MemberTest(unittest.TestCase):
                 "healing": healing,
                 "tolerance": tolerance,
                 "requirements": requirements,
+                "special": special,
             }
         )
 
@@ -1015,6 +1017,68 @@ class MemberTest(unittest.TestCase):
 
         self.assertEqual(member.battle_stats.attack_right, 61)
         self.assertTrue(member.uses_two_handed_weapon(sword))
+
+    def test_equipment_specials_grant_dual_wield_and_two_handed_skills(self) -> None:
+        sword = self.item(
+            "SWORD",
+            "RIGHT",
+            "SWORD",
+            attack=40,
+            hit=100,
+        )
+        dagger = self.item(
+            "DAGGER",
+            "RIGHT",
+            "KNIFE",
+            attack=20,
+            hit=100,
+        )
+        dual_gloves = self.item(
+            "DUAL GLOVES",
+            "ARM",
+            "HEAVY",
+            special="DUAL_WIELD",
+        )
+        two_handed_gloves = self.item(
+            "TWO HANDED GLOVES",
+            "ARM",
+            "HEAVY",
+            special="TWO_HANDED",
+        )
+        record = {
+            "name_en": "Equipment Skills",
+            "race": "HUMAN",
+            "gender": "MALE",
+            "base_str": 20,
+            "base_agi": 20,
+            "base_mag": 20,
+            **GROWTH_FIELDS,
+            **FACE_FIELDS,
+            **PROFICIENCY_FIELDS,
+            "eq_sword": 2,
+            "eq_knife": 2,
+            "eq_shield": 2,
+            "equip_right": "SWORD",
+            "equip_arm": "DUAL GLOVES",
+        }
+        items = {
+            item.key: item
+            for item in (sword, dagger, dual_gloves, two_handed_gloves)
+        }
+        member = Member.from_record(record, items=items)
+
+        self.assertTrue(member.has_skill("Dual-Wield"))
+        self.assertTrue(member.can_equip_at(dagger, EquipmentSlot.LEFT))
+        self.assertFalse(member.has_skill("Two-Handed"))
+
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.ARM: two_handed_gloves}
+        )
+
+        self.assertFalse(member.has_skill("Dual-Wield"))
+        self.assertTrue(member.has_skill("Two-Handed"))
+        self.assertTrue(member.uses_two_handed_weapon(sword))
+        self.assertEqual(member.battle_stats.attack_right, 60)
 
     def test_resistances_are_union_of_all_equipped_items(self) -> None:
         sword = self.item(

@@ -7,11 +7,7 @@ from enum import Enum
 
 import pyxel
 
-from ui.status_menu import (
-    RESISTANCE_POSITIONS,
-    attack_display,
-    hit_display,
-)
+from ui.status_menu import RESISTANCE_POSITIONS, hit_display
 from input import InputState
 from item import Item, ItemEquipType
 from item_detail import item_detail_lines
@@ -470,10 +466,10 @@ class EquipmentMenuOverlay:
         include_hit_bonus: bool,
     ) -> dict[str, str]:
         return {
-            "attack": (
-                attack_display(stats)
-                if stats.attack_left is not None
-                else pad(stats.attack_right, 3)
+            "attack": pad(
+                stats.attack_right
+                + (stats.attack_left if stats.attack_left is not None else 0),
+                3,
             ),
             "hit": (hit_display(stats) if include_hit_bonus else pad(stats.hit, 3)),
             "defense": pad(stats.defense, 3),

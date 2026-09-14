@@ -34,6 +34,7 @@ def equipment(
     attack: int = 0,
     hit: int = 0,
     defense: int = 0,
+    special: str = "",
 ) -> Item:
     return Item.from_record(
         {
@@ -48,6 +49,7 @@ def equipment(
             "eva": 0,
             "rst": 0,
             "tolerance": "",
+            "special": special,
         }
     )
 
@@ -226,6 +228,49 @@ class InventorySystemTest(unittest.TestCase):
                 dagger,
             )
         )
+
+    def test_dual_wield_equipment_allows_a_left_hand_weapon(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=100)
+        gloves = equipment(
+            "SILVER GLOVES+",
+            "ARM",
+            "HEAVY",
+            special="DUAL_WIELD",
+        )
+        actor = member(initial={EquipmentSlot.ARM: gloves})
+        inventory = InventorySystem({dagger.key: dagger}, {dagger.key: 1})
+
+        self.assertTrue(inventory.equip(actor, EquipmentSlot.LEFT, dagger))
+        self.assertIs(actor.equipment.weapon_at(EquipmentSlot.LEFT), dagger)
+
+    def test_removing_dual_wield_equipment_returns_left_weapon(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=100)
+        gloves = equipment(
+            "SILVER GLOVES+",
+            "ARM",
+            "HEAVY",
+            special="DUAL_WIELD",
+        )
+        actor = member(
+            initial={
+                EquipmentSlot.LEFT: dagger,
+                EquipmentSlot.ARM: gloves,
+            }
+        )
+        inventory = InventorySystem(
+            {dagger.key: dagger, gloves.key: gloves},
+        )
+
+        preview = inventory.preview_equipment(actor, EquipmentSlot.ARM, None)
+        self.assertIsNotNone(preview)
+        assert preview is not None
+        self.assertIsNone(preview.item_at(EquipmentSlot.LEFT))
+
+        self.assertTrue(inventory.equip(actor, EquipmentSlot.ARM, None))
+        self.assertIsNone(actor.equipment.item_at(EquipmentSlot.LEFT))
+        self.assertIsNone(actor.equipment.item_at(EquipmentSlot.ARM))
+        self.assertEqual(inventory.quantity(dagger), 1)
+        self.assertEqual(inventory.quantity(gloves), 1)
 
     def test_only_npc_initial_equipment_is_fixed(self) -> None:
         dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=100)

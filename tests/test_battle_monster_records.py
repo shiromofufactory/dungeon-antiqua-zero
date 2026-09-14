@@ -9,6 +9,7 @@ from tools._bootstrap import APP_ROOT  # noqa: F401 - adds app/ to sys.path
 from battle_magic import SpellAffinity
 from battle_commands import BattleCommand
 from item import AttackAttribute
+from member import EquipmentSlot
 from resistance import ResistanceType
 from scenes.battle import (
     AFFINITY_ICON_HEIGHT,
@@ -184,6 +185,61 @@ class BattleMonsterRecordTest(unittest.TestCase):
         )
 
         self.assertIs(scene._target_affinity(0), SpellAffinity.RESIST)
+
+    def test_dual_wield_alternates_known_right_and_left_affinities(self) -> None:
+        scene = self._target_scene()
+        weapons = {
+            EquipmentSlot.RIGHT: SimpleNamespace(
+                attack_attribute=AttackAttribute.FIRE
+            ),
+            EquipmentSlot.LEFT: SimpleNamespace(
+                attack_attribute=AttackAttribute.FREEZE
+            ),
+        }
+        scene.phase = BattlePhase.TARGET
+        scene.selected_command = BattleCommand.ATTACK
+        scene.active_party_index = 0
+        scene.party = (
+            SimpleNamespace(
+                equipment=SimpleNamespace(weapon_at=weapons.get),
+                has_skill=lambda key: key == "Dual-Wield",
+            ),
+        )
+        scene.monsters = (
+            _monster(
+                "Mixed Affinity",
+                weaknesses=frozenset((ResistanceType.FIRE,)),
+                resistances=frozenset((ResistanceType.FREEZE,)),
+            ),
+            scene.monsters[1],
+        )
+        for attribute in (ResistanceType.FIRE, ResistanceType.FREEZE):
+            scene.monster_record_system.reveal_affinity(
+                "Mixed Affinity",
+                attribute,
+            )
+        scene._monster_draw_x = Mock(return_value=4)
+
+        self.assertEqual(
+            scene._target_affinities(0),
+            (SpellAffinity.WEAK, SpellAffinity.RESIST),
+        )
+        source_y_by_frame = {}
+        for frame in (0, TARGET_AFFINITY_VISIBLE_FRAME_COUNT // 2):
+            with (
+                patch("scenes.battle.pyxel.frame_count", frame),
+                patch("scenes.battle.pyxel.blt") as blt,
+            ):
+                scene._draw_target_affinity_indicators()
+            source_y_by_frame[frame] = blt.call_args.args[4]
+
+        self.assertEqual(
+            source_y_by_frame,
+            {
+                0: WEAK_ICON_SOURCE_Y,
+                TARGET_AFFINITY_VISIBLE_FRAME_COUNT // 2: RESIST_ICON_SOURCE_Y,
+            },
+        )
 
     def test_draws_known_physical_weakness_during_target_selection(self) -> None:
         scene = self._target_scene()

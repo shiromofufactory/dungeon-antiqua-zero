@@ -461,6 +461,7 @@ ATTACK_POSE_SWING_FRAME_COUNT = 8
 ATTACK_MOTION_FRAME_COUNT = (
     ATTACK_POSE_RAISE_FRAME_COUNT + ATTACK_POSE_SWING_FRAME_COUNT
 )
+DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT = 3
 ATTACK_HIT_PATTERN_COUNT = 3
 ATTACK_HIT_PATTERN_FRAME_COUNT = 5
 ATTACK_HIT_FRAME_COUNT = ATTACK_HIT_PATTERN_COUNT * ATTACK_HIT_PATTERN_FRAME_COUNT
@@ -877,46 +878,88 @@ class BattleActionPresentation:
 
 
 @dataclass
-class BattleAttackPresentation:
-    """Own one party member's DA2-timed weapon attack result."""
+class BattleAttackStrike:
+    """Own one independently resolved hand strike on the shared timeline."""
 
-    target_index: int
     damage: int
     poses: tuple[AttackPoseDefinition, ...]
     effect_row: int | None
+    motion_start_frame: int
+    hit_start_frame: int
+    effect_flip_x: bool = False
     is_hit: bool = True
     is_critical: bool = False
     is_weak: bool = False
-    is_aimed: bool = False
-    is_focused: bool = False
     additional_effects: tuple[AdditionalEffect, ...] = ()
     sound_effect_id: str = ATTACK_SLASH_SE_ID
-    elapsed_frame: int = 0
     damage_applied: bool = False
     affinity_popup_started: bool = False
-    return_started: bool = False
 
-    @property
-    def pose(self) -> AttackPoseDefinition | None:
-        if not self.poses or self.elapsed_frame >= self.motion_frame_count:
+    def pose_at(self, elapsed_frame: int) -> AttackPoseDefinition | None:
+        if (
+            not self.poses
+            or elapsed_frame < self.motion_start_frame
+            or elapsed_frame >= self.motion_end_frame
+        ):
             return None
-        if self.aim_guard_pose_visible:
-            return None
-        if len(self.poses) == 1 or self.elapsed_frame < self.hit_start_frame:
+        if len(self.poses) == 1 or elapsed_frame < self.hit_start_frame:
             return self.poses[0]
         return self.poses[1]
 
     @property
+    def motion_end_frame(self) -> int:
+        return self.hit_start_frame + ATTACK_POSE_SWING_FRAME_COUNT
+
+    def hit_elapsed_frame(self, elapsed_frame: int) -> int:
+        return elapsed_frame - self.hit_start_frame
+
+    def damage_popup_elapsed_frame(self, elapsed_frame: int) -> int:
+        delay = ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT if self.is_hit else 0
+        return self.hit_elapsed_frame(elapsed_frame) - delay
+
+    def result_complete(self, elapsed_frame: int) -> bool:
+        frame_count = (
+            ATTACK_DAMAGE_FRAME_COUNT if self.is_hit else MONSTER_MISS_FRAME_COUNT
+        )
+        return self.damage_popup_elapsed_frame(elapsed_frame) >= frame_count
+
+
+@dataclass
+class BattleAttackPresentation:
+    """Own one party member's DA2-timed one- or two-weapon attack."""
+
+    target_index: int
+    strikes: tuple[BattleAttackStrike, ...]
+    is_aimed: bool = False
+    is_focused: bool = False
+    elapsed_frame: int = 0
+    return_started: bool = False
+    progression_recorded: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.strikes:
+            raise ValueError("an attack presentation requires at least one strike")
+
+    @property
+    def pose(self) -> AttackPoseDefinition | None:
+        if self.aim_guard_pose_visible:
+            return None
+        for strike in reversed(self.strikes):
+            if (pose := strike.pose_at(self.elapsed_frame)) is not None:
+                return pose
+        return None
+
+    @property
     def hit_start_frame(self) -> int:
-        return AIM_ATTACK_HIT_START_FRAME if self.is_aimed else ATTACK_HIT_START_FRAME
+        return self.strikes[0].hit_start_frame
 
     @property
     def motion_frame_count(self) -> int:
-        return self.hit_start_frame + ATTACK_POSE_SWING_FRAME_COUNT
+        return self.strikes[-1].motion_end_frame
 
     @property
     def hit_elapsed_frame(self) -> int:
-        return self.elapsed_frame - self.hit_start_frame
+        return self.strikes[0].hit_elapsed_frame(self.elapsed_frame)
 
     @property
     def aim_reticle_distance(self) -> int | None:
@@ -952,15 +995,25 @@ class BattleAttackPresentation:
 
     @property
     def damage_popup_elapsed_frame(self) -> int:
-        delay = ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT if self.is_hit else 0
-        return self.hit_elapsed_frame - delay
+        return self.strikes[0].damage_popup_elapsed_frame(self.elapsed_frame)
 
     @property
     def result_complete(self) -> bool:
-        frame_count = (
-            ATTACK_DAMAGE_FRAME_COUNT if self.is_hit else MONSTER_MISS_FRAME_COUNT
+        return all(
+            strike.result_complete(self.elapsed_frame) for strike in self.strikes
         )
-        return self.damage_popup_elapsed_frame >= frame_count
+
+    def latest_result_strike(self) -> BattleAttackStrike | None:
+        """Return the newest strike with an active result-marker interval."""
+
+        for strike in reversed(self.strikes):
+            popup_frame = strike.damage_popup_elapsed_frame(self.elapsed_frame)
+            if (
+                strike.damage_applied
+                and 0 <= popup_frame < CRITICAL_MARKER_FRAME_COUNT
+            ):
+                return strike
+        return None
 
 
 @dataclass
@@ -4038,13 +4091,13 @@ class BattleScene:
             if spell.attribute is not None:
                 records.reveal_affinity(monster_key, spell.attribute)
 
-    def _target_affinity(self, index: int) -> SpellAffinity:
-        """Return a known affinity for one current enemy target."""
+    def _target_affinities(self, index: int) -> tuple[SpellAffinity, ...]:
+        """Return distinct known affinities for one current enemy target."""
 
         if index not in self.selectable_target_indexes:
-            return SpellAffinity.NORMAL
+            return ()
 
-        attribute: ResistanceType | None = None
+        attributes: tuple[ResistanceType, ...] = ()
         if self.phase is BattlePhase.TARGET:
             if (
                 self.selected_command
@@ -4056,13 +4109,22 @@ class BattleScene:
                 )
                 or self.active_party_index is None
             ):
-                return SpellAffinity.NORMAL
+                return ()
             member = self.party[self.active_party_index]
-            weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
-            if weapon is not None:
+            weapon_slots = [EquipmentSlot.RIGHT]
+            if getattr(member, "has_skill", lambda _key: False)("Dual-Wield"):
+                weapon_slots.append(EquipmentSlot.LEFT)
+            selected_attributes: list[ResistanceType] = []
+            for slot in weapon_slots:
+                weapon = member.equipment.weapon_at(slot)
+                if weapon is None:
+                    continue
                 attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(
                     weapon.attack_attribute
                 )
+                if attribute is not None and attribute not in selected_attributes:
+                    selected_attributes.append(attribute)
+            attributes = tuple(selected_attributes)
         elif (
             self.phase is BattlePhase.ACTION_TARGET
             and self.action_targets_enemy
@@ -4071,25 +4133,32 @@ class BattleScene:
             if spell is None and self.pending_item_candidate is not None:
                 use_spell_key = self.pending_item_candidate.item.use_spell_key
                 spell = getattr(self, "spells", {}).get(use_spell_key)
-            if spell is not None:
-                attribute = spell.attribute
+            if spell is not None and spell.attribute is not None:
+                attributes = (spell.attribute,)
         else:
-            return SpellAffinity.NORMAL
+            return ()
 
-        if attribute is None:
-            return SpellAffinity.NORMAL
         records = getattr(self, "monster_record_system", None)
         monster = self.monsters[index]
-        if records is None or not records.affinity_is_revealed(
-            monster.key,
-            attribute,
-        ):
-            return SpellAffinity.NORMAL
-        if attribute in monster.resistances:
-            return SpellAffinity.RESIST
-        if attribute in monster.weaknesses:
-            return SpellAffinity.WEAK
-        return SpellAffinity.NORMAL
+        if records is None:
+            return ()
+        affinities: list[SpellAffinity] = []
+        for attribute in attributes:
+            if not records.affinity_is_revealed(monster.key, attribute):
+                continue
+            affinity = SpellAffinity.NORMAL
+            if attribute in monster.resistances:
+                affinity = SpellAffinity.RESIST
+            elif attribute in monster.weaknesses:
+                affinity = SpellAffinity.WEAK
+            if affinity is not SpellAffinity.NORMAL and affinity not in affinities:
+                affinities.append(affinity)
+        return tuple(affinities)
+
+    def _target_affinity(self, index: int) -> SpellAffinity:
+        """Return the first affinity, retaining the single-marker query API."""
+
+        return next(iter(self._target_affinities(index)), SpellAffinity.NORMAL)
 
     def _current_action_enemy_levels(self) -> tuple[int, ...]:
         """Resolve enemy levels for the currently confirmed spell/item action."""
@@ -5129,7 +5198,7 @@ class BattleScene:
         self._begin_action_return(complete_turn=True)
 
     def _begin_attack_presentation(self) -> bool:
-        """Start the selected right-hand weapon's authored attack sequence."""
+        """Resolve each equipped hand and start its authored attack sequence."""
 
         index = self.selected_target_index
         if (
@@ -5142,15 +5211,9 @@ class BattleScene:
         if not monster.is_alive:
             return False
         member = self.party[self.active_party_index]
-        weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
-        if weapon is None:
+        right_weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+        if right_weapon is None:
             return False
-        weapon_img = weapon.weapon_img
-        poses = attack_sequence(
-            getattr(self, "attack_poses", {}),
-            weapon_img,
-        )
-        effect_row = ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype)
         is_aimed = self.selected_command == BattleCommand.AIM
         is_focused = self.selected_command == BattleCommand.FOCUS
         attacker_hidden = self.active_party_index in getattr(
@@ -5160,82 +5223,132 @@ class BattleScene:
         )
         member_stats = member.battle_stats
         monster_stats = monster.combat_stats
-        attack = member_physical_attack(
-            weapon_attack=member_stats.attack_right,
-            strength=member.adjusted_abilities.strength,
-            weapon_level=member.weapon_level(weapon),
-            internal_level=member.internal_level,
-        )
-        if is_focused:
-            attack *= FOCUS_ATTACK_MULTIPLIER
         target_incapacitated = monster.state.sleeping > 0
         attacker_has_power_hit = member.has_skill("Power Hit")
-        weapon_has_power_hit = weapon.special is ItemSpecial.POWER_HIT
-        weapon_attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(
-            weapon.attack_attribute
-        )
-        weapon_effective = bool(
-            weapon_attribute is not None
-            and weapon_attribute in monster.weaknesses
-            and weapon_attribute not in monster.resistances
-        )
-        result = resolve_physical_attack(
-            attack=attack,
-            hit=member_stats.hit_right.total,
-            agility=member.effective_agility,
-            target_defense=monster.effective_defense,
-            target_evasion=monster_stats.evasion,
-            hit_roll=random.randint(0, 99),
-            target_incapacitated=target_incapacitated,
-            attacker_hidden=attacker_hidden,
-            hit_value_bonus=AIM_HIT_VALUE_BONUS if is_aimed else 0,
-            attacker_has_power_hit=attacker_has_power_hit,
-            weapon_has_power_hit=weapon_has_power_hit,
-            weapon_effective=weapon_effective,
-            critical_rate_scale=(
-                1.5 if member.uses_two_handed_weapon(weapon) else 1.0
-            ),
-            critical_roll=(
-                random.randint(0, 99)
-                if (
-                    target_incapacitated
-                    or attacker_hidden
-                    or attacker_has_power_hit
-                    or weapon_has_power_hit
-                    or weapon_effective
+        left_weapon = member.equipment.weapon_at(EquipmentSlot.LEFT)
+        equipped_attacks: list[tuple[Item, int, int, tuple[str, str]]] = [
+            (
+                right_weapon,
+                member_stats.attack_right,
+                member_stats.hit_right.total,
+                ("1", "2"),
+            )
+        ]
+        if (
+            left_weapon is not None
+            and member.has_skill("Dual-Wield")
+            and member_stats.attack_left is not None
+            and member_stats.hit_left is not None
+        ):
+            equipped_attacks.append(
+                (
+                    left_weapon,
+                    member_stats.attack_left,
+                    member_stats.hit_left.total,
+                    ("3", "4"),
                 )
-                else None
-            ),
-        )
-        additional_effects = self._resolve_member_attack_additional_effects(
-            member,
-            weapon,
-            monster,
-            result,
-            attacker_hidden=attacker_hidden,
-            weapon_effective=weapon_effective,
-        )
+            )
+
+        strikes: list[BattleAttackStrike] = []
+        records = getattr(self, "monster_record_system", None)
+        motion_start_frame = AIM_RETICLE_END_FRAME if is_aimed else 0
+        for weapon, weapon_attack, weapon_hit, pose_branches in equipped_attacks:
+            hit_start_frame = (
+                AIM_ATTACK_HIT_START_FRAME
+                if not strikes and is_aimed
+                else motion_start_frame + ATTACK_POSE_RAISE_FRAME_COUNT
+            )
+            attack = member_physical_attack(
+                weapon_attack=weapon_attack,
+                strength=member.adjusted_abilities.strength,
+                weapon_level=member.weapon_level(weapon),
+                internal_level=member.internal_level,
+            )
+            if is_focused:
+                attack *= FOCUS_ATTACK_MULTIPLIER
+            weapon_has_power_hit = weapon.special is ItemSpecial.POWER_HIT
+            weapon_attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(
+                weapon.attack_attribute
+            )
+            weapon_effective = bool(
+                weapon_attribute is not None
+                and weapon_attribute in monster.weaknesses
+                and weapon_attribute not in monster.resistances
+            )
+            result = resolve_physical_attack(
+                attack=attack,
+                hit=weapon_hit,
+                agility=member.effective_agility,
+                target_defense=monster.effective_defense,
+                target_evasion=monster_stats.evasion,
+                hit_roll=random.randint(0, 99),
+                target_incapacitated=target_incapacitated,
+                attacker_hidden=attacker_hidden,
+                hit_value_bonus=AIM_HIT_VALUE_BONUS if is_aimed else 0,
+                attacker_has_power_hit=attacker_has_power_hit,
+                weapon_has_power_hit=weapon_has_power_hit,
+                weapon_effective=weapon_effective,
+                critical_rate_scale=(
+                    1.5 if member.uses_two_handed_weapon(weapon) else 1.0
+                ),
+                critical_roll=(
+                    random.randint(0, 99)
+                    if (
+                        target_incapacitated
+                        or attacker_hidden
+                        or attacker_has_power_hit
+                        or weapon_has_power_hit
+                        or weapon_effective
+                    )
+                    else None
+                ),
+            )
+            strikes.append(
+                BattleAttackStrike(
+                    damage=result.damage,
+                    poses=attack_sequence(
+                        getattr(self, "attack_poses", {}),
+                        weapon.weapon_img,
+                        branches=pose_branches,
+                    ),
+                    effect_row=ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype),
+                    motion_start_frame=motion_start_frame,
+                    hit_start_frame=hit_start_frame,
+                    effect_flip_x=bool(strikes),
+                    is_hit=result.hit,
+                    is_critical=getattr(result, "critical", False),
+                    is_weak=weapon_effective,
+                    additional_effects=(
+                        self._resolve_member_attack_additional_effects(
+                            member,
+                            weapon,
+                            monster,
+                            result,
+                            attacker_hidden=attacker_hidden,
+                            weapon_effective=weapon_effective,
+                        )
+                    ),
+                    sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
+                        weapon.subtype,
+                        ATTACK_SLASH_SE_ID,
+                    ),
+                )
+            )
+            motion_start_frame = (
+                strikes[-1].motion_end_frame
+                + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT
+            )
+            if records is not None and weapon_attribute is not None:
+                records.reveal_affinity(monster.key, weapon_attribute)
+
         self.attack_presentation = BattleAttackPresentation(
             target_index=index,
-            damage=result.damage,
-            poses=poses,
-            effect_row=effect_row,
-            is_hit=result.hit,
-            is_critical=getattr(result, "critical", False),
-            is_weak=weapon_effective,
+            strikes=tuple(strikes),
             is_aimed=is_aimed,
             is_focused=is_focused,
-            additional_effects=additional_effects,
-            sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
-                weapon.subtype,
-                ATTACK_SLASH_SE_ID,
-            ),
         )
-        records = getattr(self, "monster_record_system", None)
         if records is not None:
             records.reveal_profile(monster.key)
-            if weapon_attribute is not None:
-                records.reveal_affinity(monster.key, weapon_attribute)
         self.phase = BattlePhase.ATTACK_PRESENTATION
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT if is_aimed else 0.0
         if is_aimed:
@@ -5350,60 +5463,71 @@ class BattleScene:
         return tuple(applied)
 
     def _update_attack_presentation(self) -> None:
-        """Apply the hit, show its result, and start the jumping return."""
+        """Apply each hand's hit, show its result, and start the return."""
 
         presentation = getattr(self, "attack_presentation", None)
         if presentation is None:
             self._complete_current_turn()
             return
         presentation.elapsed_frame += 1
-        if not presentation.damage_applied and presentation.hit_elapsed_frame >= 0:
-            monster = self.monsters[presentation.target_index]
-            if presentation.is_hit:
-                monster.state.take_damage(presentation.damage)
-                presentation.additional_effects = (
-                    self._apply_additional_effects_to_monster(
-                        presentation.target_index,
-                        presentation.additional_effects,
+        monster = self.monsters[presentation.target_index]
+        for strike in presentation.strikes:
+            if (
+                not strike.damage_applied
+                and strike.hit_elapsed_frame(presentation.elapsed_frame) >= 0
+            ):
+                if strike.is_hit:
+                    if monster.is_alive:
+                        monster.state.take_damage(strike.damage)
+                        strike.additional_effects = (
+                            self._apply_additional_effects_to_monster(
+                                presentation.target_index,
+                                strike.additional_effects,
+                            )
+                        )
+                        promote_rear_monsters_if_front_empty(self.monsters)
+                    play_se(strike.sound_effect_id)
+                strike.damage_applied = True
+            if (
+                strike.is_hit
+                and strike.is_weak
+                and not strike.affinity_popup_started
+                and strike.damage_popup_elapsed_frame(presentation.elapsed_frame) >= 0
+            ):
+                _base_x, base_y = self._monster_base_position(
+                    presentation.target_index
+                )
+                center_x = (
+                    self._monster_draw_x(presentation.target_index)
+                    + monster.width // 2
+                )
+                affinity_popups = getattr(self, "affinity_popups", None)
+                if affinity_popups is None:
+                    affinity_popups = []
+                    self.affinity_popups = affinity_popups
+                affinity_popups.append(
+                    BattleAffinityPopup(
+                        center_x - AFFINITY_ICON_WIDTH // 2,
+                        base_y + 20,
+                        SpellAffinity.WEAK,
                     )
                 )
-                promote_rear_monsters_if_front_empty(self.monsters)
-                play_se(presentation.sound_effect_id)
+                strike.affinity_popup_started = True
+        if (
+            not presentation.progression_recorded
+            and all(strike.damage_applied for strike in presentation.strikes)
+        ):
             party_index = getattr(self, "action_party_index", None)
             if party_index is not None:
                 self._record_equipped_weapon_action(
                     party_index,
                     (getattr(monster, "level", 1),),
                     defeated_enemy=not monster.is_alive,
-                    critical=presentation.is_critical,
+                    critical=any(
+                        strike.is_critical for strike in presentation.strikes
+                    ),
                 )
-            presentation.damage_applied = True
-        if (
-            presentation.is_hit
-            and presentation.is_weak
-            and not presentation.affinity_popup_started
-            and presentation.damage_popup_elapsed_frame >= 0
-        ):
-            monster = self.monsters[presentation.target_index]
-            _base_x, base_y = self._monster_base_position(
-                presentation.target_index
-            )
-            center_x = (
-                self._monster_draw_x(presentation.target_index)
-                + monster.width // 2
-            )
-            affinity_popups = getattr(self, "affinity_popups", None)
-            if affinity_popups is None:
-                affinity_popups = []
-                self.affinity_popups = affinity_popups
-            affinity_popups.append(
-                BattleAffinityPopup(
-                    center_x - AFFINITY_ICON_WIDTH // 2,
-                    base_y + 20,
-                    SpellAffinity.WEAK,
-                )
-            )
-            presentation.affinity_popup_started = True
+            presentation.progression_recorded = True
         if (
             not presentation.return_started
             and presentation.elapsed_frame >= presentation.motion_frame_count
@@ -7604,12 +7728,15 @@ class BattleScene:
         if (
             getattr(self, "phase", None) is BattlePhase.ATTACK_PRESENTATION
             and presentation is not None
-            and presentation.is_hit
-            and presentation.is_critical
-            and presentation.damage_applied
-            and 0
-            <= presentation.hit_elapsed_frame
-            < CRITICAL_FLASH_FRAME_COUNT
+            and any(
+                strike.is_hit
+                and strike.is_critical
+                and strike.damage_applied
+                and 0
+                <= strike.hit_elapsed_frame(presentation.elapsed_frame)
+                < CRITICAL_FLASH_FRAME_COUNT
+                for strike in presentation.strikes
+            )
         ):
             return True
         return (
@@ -7658,35 +7785,37 @@ class BattleScene:
         """Return whether SMASH currently occupies the result-marker slot."""
 
         settings = getattr(self, "settings", None)
+        strike = (
+            presentation.latest_result_strike()
+            if presentation is not None
+            else None
+        )
         return bool(
             settings is not None
             and not settings.screen_flash_enabled
             and getattr(self, "phase", None) is BattlePhase.ATTACK_PRESENTATION
             and presentation is not None
-            and presentation.is_hit
-            and presentation.is_critical
-            and not presentation.is_weak
-            and presentation.damage_applied
-            and 0
-            <= presentation.damage_popup_elapsed_frame
-            < CRITICAL_MARKER_FRAME_COUNT
+            and strike is not None
+            and strike.is_hit
+            and strike.is_critical
+            and not strike.is_weak
         )
 
     def _draw_additional_effect_markers(self) -> None:
         """Draw STUN or defense-down text over the affected monster."""
 
         presentation = getattr(self, "attack_presentation", None)
+        strike = (
+            presentation.latest_result_strike()
+            if presentation is not None
+            else None
+        )
         if (
             getattr(self, "phase", None) is not BattlePhase.ATTACK_PRESENTATION
             or presentation is None
-            or not presentation.is_hit
-            or not presentation.damage_applied
-            or presentation.is_weak
-            or not (
-                0
-                <= presentation.damage_popup_elapsed_frame
-                < ADDITIONAL_EFFECT_MARKER_FRAME_COUNT
-            )
+            or strike is None
+            or not strike.is_hit
+            or strike.is_weak
             or self._party_attack_smash_marker_visible(presentation)
         ):
             return
@@ -7700,7 +7829,7 @@ class BattleScene:
                     AdditionalEffect.STUN,
                     AdditionalEffect.DEFENSE_DOWN,
                 )
-                if candidate in presentation.additional_effects
+                if candidate in strike.additional_effects
                 and (
                     (
                         candidate is AdditionalEffect.STUN
@@ -8170,32 +8299,43 @@ class BattleScene:
             x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_party_attack_effect(self) -> None:
-        """Draw one of the five three-pattern weapon impact rows."""
+        """Draw active weapon-impact rows for the independently timed strikes."""
 
         presentation = getattr(self, "attack_presentation", None)
         if (
             getattr(self, "phase", None) is not BattlePhase.ATTACK_PRESENTATION
             or presentation is None
-            or not presentation.is_hit
-            or presentation.effect_row is None
-            or not 0 <= presentation.hit_elapsed_frame < ATTACK_HIT_FRAME_COUNT
         ):
             return
-        pattern = presentation.hit_elapsed_frame // ATTACK_HIT_PATTERN_FRAME_COUNT
         anchor_x, anchor_y = self._spell_effect_anchor(
             "enemy",
             presentation.target_index,
         )
-        pyxel.blt(
-            anchor_x - ATTACK_EFFECT_CELL_SIZE // 2,
-            anchor_y - ATTACK_EFFECT_CELL_SIZE // 2 + 8,
-            self.attack_effect_image,
-            pattern * ATTACK_EFFECT_CELL_SIZE,
-            presentation.effect_row * ATTACK_EFFECT_CELL_SIZE,
-            ATTACK_EFFECT_CELL_SIZE,
-            ATTACK_EFFECT_CELL_SIZE,
-            TRANSPARENT_INDEX,
-        )
+        for strike in presentation.strikes:
+            hit_elapsed_frame = strike.hit_elapsed_frame(
+                presentation.elapsed_frame
+            )
+            if (
+                not strike.is_hit
+                or strike.effect_row is None
+                or not 0 <= hit_elapsed_frame < ATTACK_HIT_FRAME_COUNT
+            ):
+                continue
+            pattern = hit_elapsed_frame // ATTACK_HIT_PATTERN_FRAME_COUNT
+            pyxel.blt(
+                anchor_x - ATTACK_EFFECT_CELL_SIZE // 2,
+                anchor_y - ATTACK_EFFECT_CELL_SIZE // 2 + 8,
+                self.attack_effect_image,
+                pattern * ATTACK_EFFECT_CELL_SIZE,
+                strike.effect_row * ATTACK_EFFECT_CELL_SIZE,
+                (
+                    -ATTACK_EFFECT_CELL_SIZE
+                    if strike.effect_flip_x
+                    else ATTACK_EFFECT_CELL_SIZE
+                ),
+                ATTACK_EFFECT_CELL_SIZE,
+                TRANSPARENT_INDEX,
+            )
 
     def _draw_aim_reticle(self) -> None:
         """Draw the four converging corners and timed center marker for Aim."""
@@ -8238,67 +8378,72 @@ class BattleScene:
         )
 
     def _draw_party_attack_damage(self) -> None:
-        """Draw a resolved damage or miss result over the target monster."""
+        """Draw each resolved damage or miss result over the target monster."""
 
         presentation = getattr(self, "attack_presentation", None)
         if (
             getattr(self, "phase", None) is not BattlePhase.ATTACK_PRESENTATION
             or presentation is None
-            or not presentation.damage_applied
         ):
-            return
-        offsets = (
-            DA2_DAMAGE_VERTICAL_OFFSETS
-            if presentation.is_hit
-            else DA2_MISS_VERTICAL_OFFSETS
-        )
-        frame_count = (
-            ATTACK_DAMAGE_FRAME_COUNT
-            if presentation.is_hit
-            else MONSTER_MISS_FRAME_COUNT
-        )
-        popup_elapsed_frame = presentation.damage_popup_elapsed_frame
-        if not 0 <= popup_elapsed_frame < frame_count:
-            return
-        reference_frame = min(
-            popup_elapsed_frame * DA2_REFERENCE_FPS // FPS,
-            len(offsets) - 1,
-        )
-        vertical_offset = offsets[reference_frame]
-        if vertical_offset < 0:
             return
         monster = self.monsters[presentation.target_index]
         _target_x, target_y = self._monster_base_position(
             presentation.target_index
         )
         anchor_x = self._monster_draw_x(presentation.target_index) + monster.width // 2
-        y = target_y + monster.height - 8 - vertical_offset
-        if not presentation.is_hit:
-            pyxel.blt(
-                anchor_x - MISS_SPRITE_WIDTH // 2,
-                y,
-                0,
-                MISS_SPRITE_SOURCE_X,
-                DAMAGE_NUMBER_SPRITE_Y,
-                MISS_SPRITE_WIDTH,
-                DAMAGE_NUMBER_SPRITE_SIZE,
-                TRANSPARENT_INDEX,
+        for strike in presentation.strikes:
+            if not strike.damage_applied:
+                continue
+            offsets = (
+                DA2_DAMAGE_VERTICAL_OFFSETS
+                if strike.is_hit
+                else DA2_MISS_VERTICAL_OFFSETS
             )
-            return
-        digits = str(presentation.damage)
-        x = anchor_x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
-        for digit in digits:
-            pyxel.blt(
-                x,
-                y,
-                0,
-                DAMAGE_NUMBER_SPRITE_X + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
-                DAMAGE_NUMBER_SPRITE_Y,
-                DAMAGE_NUMBER_SPRITE_SIZE,
-                DAMAGE_NUMBER_SPRITE_SIZE,
-                TRANSPARENT_INDEX,
+            frame_count = (
+                ATTACK_DAMAGE_FRAME_COUNT
+                if strike.is_hit
+                else MONSTER_MISS_FRAME_COUNT
             )
-            x += DAMAGE_NUMBER_SPRITE_SIZE
+            popup_elapsed_frame = strike.damage_popup_elapsed_frame(
+                presentation.elapsed_frame
+            )
+            if not 0 <= popup_elapsed_frame < frame_count:
+                continue
+            reference_frame = min(
+                popup_elapsed_frame * DA2_REFERENCE_FPS // FPS,
+                len(offsets) - 1,
+            )
+            vertical_offset = offsets[reference_frame]
+            if vertical_offset < 0:
+                continue
+            y = target_y + monster.height - 8 - vertical_offset
+            if not strike.is_hit:
+                pyxel.blt(
+                    anchor_x - MISS_SPRITE_WIDTH // 2,
+                    y,
+                    0,
+                    MISS_SPRITE_SOURCE_X,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    MISS_SPRITE_WIDTH,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+                continue
+            digits = str(strike.damage)
+            x = anchor_x - len(digits) * DAMAGE_NUMBER_SPRITE_SIZE // 2
+            for digit in digits:
+                pyxel.blt(
+                    x,
+                    y,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X
+                    + int(digit) * DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    DAMAGE_NUMBER_SPRITE_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+                x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_monsters(self) -> None:
         for index, monster in enumerate(self.monsters):
@@ -8842,9 +8987,15 @@ class BattleScene:
         ):
             return
         for index in self.selectable_target_indexes:
-            affinity = self._target_affinity(index)
-            if affinity is SpellAffinity.NORMAL:
+            affinities = self._target_affinities(index)
+            if not affinities:
                 continue
+            visible_frame = pyxel.frame_count % TARGET_AFFINITY_BLINK_FRAME_COUNT
+            affinity_index = min(
+                visible_frame * len(affinities) // TARGET_AFFINITY_VISIBLE_FRAME_COUNT,
+                len(affinities) - 1,
+            )
+            affinity = affinities[affinity_index]
             monster = self.monsters[index]
             _base_x, base_y = self._monster_base_position(index)
             source_y = (

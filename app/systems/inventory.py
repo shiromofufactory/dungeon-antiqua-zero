@@ -253,22 +253,18 @@ class InventorySystem:
         if member.is_equipment_fixed(slot):
             return False
         if item is None:
-            return current is not None
-        if self.quantity(item) <= 0 or not member.can_equip_at(item, slot):
+            if current is None:
+                return False
+        elif self.quantity(item) <= 0 or not member.can_equip_at(item, slot):
             return False
 
-        if slot is EquipmentSlot.RIGHT and item.equip_type is ItemEquipType.TWO_HANDS:
-            left = member.equipment.item_at(EquipmentSlot.LEFT)
-            if left is not None and member.is_equipment_fixed(
-                EquipmentSlot.LEFT
-            ):
-                return False
-        if slot is EquipmentSlot.LEFT:
-            right = member.equipment.item_at(EquipmentSlot.RIGHT)
-            if (
-                member.is_equipment_fixed(EquipmentSlot.RIGHT)
-                and right is not None
-                and right.equip_type is ItemEquipType.TWO_HANDS
+        replacements = self._equipment_replacements(member, slot, item)
+        for replaced_slot, replacement in replacements.items():
+            if replaced_slot is slot:
+                continue
+            previous = member.equipment.item_at(replaced_slot)
+            if previous is not replacement and member.is_equipment_fixed(
+                replaced_slot
             ):
                 return False
         return True
@@ -286,25 +282,10 @@ class InventorySystem:
 
         replacements = self._equipment_replacements(member, slot, item)
         displaced: list[Item] = []
-        current = member.equipment.item_at(slot)
-        if current is not None:
-            displaced.append(current)
-
-        if item is not None:
-            if (
-                slot is EquipmentSlot.RIGHT
-                and item.equip_type is ItemEquipType.TWO_HANDS
-            ):
-                left = member.equipment.item_at(EquipmentSlot.LEFT)
-                if left is not None:
-                    displaced.append(left)
-            elif slot is EquipmentSlot.LEFT:
-                right = member.equipment.item_at(EquipmentSlot.RIGHT)
-                if (
-                    right is not None
-                    and right.equip_type is ItemEquipType.TWO_HANDS
-                ):
-                    displaced.append(right)
+        for replaced_slot, replacement in replacements.items():
+            previous = member.equipment.item_at(replaced_slot)
+            if previous is not None and previous is not replacement:
+                displaced.append(previous)
 
         next_equipment = member.equipment.replaced(replacements)
         if item is not None:
@@ -467,8 +448,8 @@ class InventorySystem:
         if item is not None and item.key not in self._items:
             raise ValueError(f"unknown inventory item key: {item.key!r}")
 
-    @staticmethod
     def _equipment_replacements(
+        self,
         member: Member,
         slot: EquipmentSlot,
         item: Item | None,
@@ -487,6 +468,15 @@ class InventorySystem:
                 and right.equip_type is ItemEquipType.TWO_HANDS
             ):
                 replacements[EquipmentSlot.RIGHT] = None
+
+        proposed = member.equipment.replaced(replacements)
+        left = proposed.item_at(EquipmentSlot.LEFT)
+        if (
+            left is not None
+            and left.equip_type is ItemEquipType.RIGHT
+            and not member.has_skill("Dual-Wield", equipment=proposed)
+        ):
+            replacements[EquipmentSlot.LEFT] = None
         return replacements
 
     def _item_key(self, item: Item | str) -> str:

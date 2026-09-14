@@ -72,6 +72,46 @@ class AttackPoseTest(unittest.TestCase):
             ("1", "2"),
         )
 
+    def test_selects_dual_wield_branches_without_reusing_primary_poses(self) -> None:
+        source = document()
+        source["poses"].extend(
+            [
+                {
+                    **source["poses"][0],
+                    "id": "SPEAR-1_4",
+                    "branch": "4",
+                },
+                {
+                    **source["poses"][1],
+                    "id": "SPEAR-1_3",
+                    "branch": "3",
+                },
+            ]
+        )
+        poses = parse_attack_poses(source)
+
+        self.assertEqual(
+            tuple(
+                pose.branch
+                for pose in attack_sequence(
+                    poses,
+                    "SPEAR-1",
+                    branches=("3", "4"),
+                )
+            ),
+            ("3", "4"),
+        )
+        self.assertEqual(
+            attack_sequence(poses, "UNKNOWN", branches=("3", "4")),
+            (),
+        )
+
+        primary_only = parse_attack_poses(document())
+        self.assertEqual(
+            attack_sequence(primary_only, "SPEAR-1", branches=("3", "4")),
+            (),
+        )
+
     def test_loads_json_from_runtime_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "attack_poses.json"

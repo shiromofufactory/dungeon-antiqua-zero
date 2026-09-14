@@ -123,6 +123,23 @@ class EquipmentMenuTest(unittest.TestCase):
             placed[(STAT_LABEL_X, STAT_Y["spell_resistance"])].text,
             "じゅつぼうぎょ",
         )
+
+    def test_dual_wield_member_displays_total_attack_in_equipment_menu(self) -> None:
+        mock = self.build_mock(member_index=3)
+        placed = {(text.x, text.y): text for text in mock.main_window.texts}
+
+        self.assertEqual(mock.member.definition.key, "Elika")
+        self.assertEqual(
+            (
+                mock.member.battle_stats.attack_right,
+                mock.member.battle_stats.attack_left,
+            ),
+            (39, 27),
+        )
+        self.assertEqual(
+            placed[(STAT_VALUE_X["attack"], STAT_Y["attack"])].text,
+            "　６６",
+        )
         self.assertEqual(
             placed[(STAT_LABEL_X, TOLERANCE_LABEL_Y)].text,
             "たいせい",
@@ -206,7 +223,7 @@ class EquipmentMenuTest(unittest.TestCase):
             self.assertEqual(args.args[0] + 3, icon_right)
             self.assertEqual(len(args.args), 4)
 
-    def test_equipment_stats_use_three_digit_values_and_compact_dual_attack(
+    def test_equipment_stats_use_three_digit_values_and_sum_dual_attack(
         self,
     ) -> None:
         stats = BattleStats(
@@ -225,7 +242,7 @@ class EquipmentMenuTest(unittest.TestCase):
                 include_hit_bonus=False,
             ),
             {
-                "attack": "　４０－　３２",
+                "attack": "　７２",
                 "hit": "１０８",
                 "defense": "　　４",
                 "evasion": "　　５",

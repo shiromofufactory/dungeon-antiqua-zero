@@ -14,6 +14,7 @@ from tools.screen_mocks.battle import (
     ATTACK_MOTION_FRAME_COUNT,
     ATTACK_POSE_RAISE_FRAME_COUNT,
     ATTACK_POSE_SWING_FRAME_COUNT,
+    DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT,
     ATTACK_LANDING_GUARD_FRAME_COUNT,
     ATTACK_RETURN_JUMP_FRAME_COUNT,
     ATTACK_BLUNT_SE_ID,
@@ -25,6 +26,7 @@ from tools.screen_mocks.battle import (
     AIM_HIT_VALUE_BONUS,
     AIM_RETICLE_CENTER_SOURCE,
     AIM_RETICLE_END_DISTANCE,
+    AIM_RETICLE_END_FRAME,
     AIM_RETICLE_HOLD_FRAME_COUNT,
     AIM_RETICLE_MOVE_FRAME_COUNT,
     AIM_RETICLE_START_FRAME,
@@ -163,6 +165,7 @@ from tools.screen_mocks.battle import (
     SPELL_RESULT_OVERLAP_FRAME_COUNT,
     BattleActionPresentation,
     BattleAttackPresentation,
+    BattleAttackStrike,
     BattleHealingPopup,
     BattleAffinityPopup,
     BattleSpellDamagePopup,
@@ -267,6 +270,53 @@ _JAPANESE_COMMAND_LABELS = {
     BattleCommand.ITEM: "アイテム",
     BattleCommand.FORMATION: "こうたい",
 }
+
+
+def _attack_presentation(
+    target_index: int,
+    damage: int,
+    poses: tuple[AttackPoseDefinition, ...],
+    effect_row: int | None,
+    *,
+    is_hit: bool = True,
+    is_critical: bool = False,
+    is_weak: bool = False,
+    is_aimed: bool = False,
+    is_focused: bool = False,
+    additional_effects: tuple[AdditionalEffect, ...] = (),
+    sound_effect_id: str = ATTACK_SLASH_SE_ID,
+    elapsed_frame: int = 0,
+    damage_applied: bool = False,
+    affinity_popup_started: bool = False,
+    return_started: bool = False,
+) -> BattleAttackPresentation:
+    motion_start_frame = AIM_RETICLE_END_FRAME if is_aimed else 0
+    hit_start_frame = (
+        AIM_ATTACK_HIT_START_FRAME if is_aimed else ATTACK_HIT_START_FRAME
+    )
+    return BattleAttackPresentation(
+        target_index=target_index,
+        strikes=(
+            BattleAttackStrike(
+                damage=damage,
+                poses=poses,
+                effect_row=effect_row,
+                motion_start_frame=motion_start_frame,
+                hit_start_frame=hit_start_frame,
+                is_hit=is_hit,
+                is_critical=is_critical,
+                is_weak=is_weak,
+                additional_effects=additional_effects,
+                sound_effect_id=sound_effect_id,
+                damage_applied=damage_applied,
+                affinity_popup_started=affinity_popup_started,
+            ),
+        ),
+        is_aimed=is_aimed,
+        is_focused=is_focused,
+        elapsed_frame=elapsed_frame,
+        return_started=return_started,
+    )
 
 
 def _damage_test_monster(
@@ -393,7 +443,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.settings = Settings(screen_flash_enabled=True)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -416,7 +466,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.settings = Settings(screen_flash_enabled=False)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
         mock.monsters = (monster,)
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -482,7 +532,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.settings = Settings(screen_flash_enabled=True)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
         mock.monsters = (monster,)
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -518,7 +568,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.settings = Settings(screen_flash_enabled=True)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
         mock.monsters = (monster,)
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -545,7 +595,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.settings = Settings(screen_flash_enabled=False)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -569,7 +619,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.settings = Settings(screen_flash_enabled=False)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -595,7 +645,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.settings = Settings(screen_flash_enabled=True)
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -1130,6 +1180,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(ATTACK_POSE_RAISE_FRAME_COUNT, 3)
         self.assertEqual(ATTACK_POSE_SWING_FRAME_COUNT, 8)
         self.assertEqual(ATTACK_MOTION_FRAME_COUNT, 11)
+        self.assertEqual(DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT, 3)
         self.assertEqual(ATTACK_HIT_PATTERN_FRAME_COUNT, 5)
         self.assertEqual(ATTACK_HIT_FRAME_COUNT, 15)
         self.assertEqual(DAMAGE_POPUP_LAST_FRAME_HOLD_COUNT, 3)
@@ -1138,7 +1189,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         first = Mock(spec=AttackPoseDefinition)
         second = Mock(spec=AttackPoseDefinition)
-        presentation = BattleAttackPresentation(0, 10, (first, second), 1)
+        presentation = _attack_presentation(0, 10, (first, second), 1)
         self.assertIs(presentation.pose, first)
         presentation.elapsed_frame = ATTACK_POSE_RAISE_FRAME_COUNT
         self.assertIs(presentation.pose, second)
@@ -1148,7 +1199,7 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_aim_holds_the_first_pose_until_the_reticle_finishes(self) -> None:
         first = Mock(spec=AttackPoseDefinition)
         second = Mock(spec=AttackPoseDefinition)
-        presentation = BattleAttackPresentation(
+        presentation = _attack_presentation(
             0,
             10,
             (first, second),
@@ -1194,7 +1245,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.action_offset_x = ACTION_MOVE_DISTANCE
         mock.action_returning = False
         mock.action_landing_guard_frames_remaining = 0
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             0,
             10,
             (),
@@ -1221,7 +1272,7 @@ class BattleScreenMockTest(unittest.TestCase):
             state=MonsterBattleState(max_hp=20),
             agility=12,
         )
-        presentation = BattleAttackPresentation(
+        presentation = _attack_presentation(
             0,
             10,
             (),
@@ -1359,7 +1410,7 @@ class BattleScreenMockTest(unittest.TestCase):
             state=MonsterBattleState(max_hp=20),
             agility=12,
         )
-        presentation = BattleAttackPresentation(
+        presentation = _attack_presentation(
             0,
             12,
             (),
@@ -1440,7 +1491,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
         mock.monsters = (monster,)
         mock.attack_effect_image = object()
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=0,
             poses=(),
@@ -1459,7 +1510,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_party_attack_damage()
 
         self.assertEqual(monster.state.hp, 20)
-        self.assertTrue(mock.attack_presentation.damage_applied)
+        self.assertTrue(mock.attack_presentation.strikes[0].damage_applied)
         play_se.assert_not_called()
         blt.assert_called_once_with(
             28,
@@ -1489,7 +1540,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = (monster,)
         mock.action_party_index = 0
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -1527,7 +1578,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = (monster,)
         mock.action_party_index = 0
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -1564,7 +1615,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = (monster,)
         mock.action_party_index = 0
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=0,
             poses=(),
@@ -2076,9 +2127,10 @@ class BattleScreenMockTest(unittest.TestCase):
             )
 
             self.assertIs(mock.phase, BattleMockPhase.ATTACK_PRESENTATION)
-            self.assertEqual(mock.attack_presentation.effect_row, 2)
-            self.assertTrue(mock.attack_presentation.is_hit)
-            self.assertEqual(mock.attack_presentation.damage, 43)
+            first_strike = mock.attack_presentation.strikes[0]
+            self.assertEqual(first_strike.effect_row, 2)
+            self.assertTrue(first_strike.is_hit)
+            self.assertEqual(first_strike.damage, 43)
             self.assertEqual(monsters[4].state.hp, 100)
             for _frame in range(ATTACK_HIT_START_FRAME):
                 mock._update_attack_presentation()
@@ -2094,6 +2146,150 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window.close_immediately.assert_called_once_with()
         self.assertIsNone(mock.attack_presentation)
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_dual_wield_resolves_both_hands_and_uses_followup_poses(self) -> None:
+        items = load_mock_items()
+        member = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=("Kagetora",),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )[0]
+        monster = _damage_test_monster()
+        monster.state.hp = 100
+        authored_poses = {
+            f"{weapon_img}_{branch}": SimpleNamespace(
+                weapon_img=weapon_img,
+                branch=branch,
+            )
+            for weapon_img, branches in (
+                ("KATANA-1", ("1", "2")),
+                ("KNIFE-1", ("1", "2", "3", "4")),
+            )
+            for branch in branches
+        }
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.monsters = (monster,)
+        mock.attack_poses = authored_poses
+        mock.selected_command = BattleCommand.ATTACK
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.target_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._resolve_member_attack_additional_effects = Mock(return_value=())
+
+        results = (
+            SimpleNamespace(hit=True, damage=11, critical=False),
+            SimpleNamespace(hit=True, damage=7, critical=False),
+        )
+        with (
+            patch(
+                "scenes.battle.member_physical_attack",
+                side_effect=(101, 81),
+            ) as member_attack,
+            patch(
+                "scenes.battle.resolve_physical_attack",
+                side_effect=results,
+            ) as resolve,
+            patch("scenes.battle.play_se") as play_se,
+        ):
+            self.assertTrue(mock._begin_attack_presentation())
+
+            presentation = mock.attack_presentation
+            self.assertEqual(len(presentation.strikes), 2)
+            self.assertEqual(
+                tuple(pose.branch for pose in presentation.strikes[0].poses),
+                ("1", "2"),
+            )
+            self.assertEqual(
+                tuple(pose.branch for pose in presentation.strikes[1].poses),
+                ("3", "4"),
+            )
+            self.assertEqual(
+                presentation.strikes[1].motion_start_frame,
+                ATTACK_MOTION_FRAME_COUNT
+                + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT,
+            )
+            self.assertEqual(
+                presentation.strikes[1].hit_start_frame,
+                ATTACK_MOTION_FRAME_COUNT
+                + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT
+                + ATTACK_HIT_START_FRAME,
+            )
+            self.assertTrue(presentation.strikes[1].effect_flip_x)
+            self.assertEqual(
+                [call.kwargs["hit"] for call in resolve.call_args_list],
+                [
+                    member.battle_stats.hit_right.total,
+                    member.battle_stats.hit_left.total,
+                ],
+            )
+            self.assertEqual(
+                [call.kwargs["weapon_attack"] for call in member_attack.call_args_list],
+                [
+                    member.battle_stats.attack_right,
+                    member.battle_stats.attack_left,
+                ],
+            )
+
+            for _frame in range(ATTACK_HIT_START_FRAME):
+                mock._update_attack_presentation()
+            self.assertEqual(monster.state.hp, 89)
+            for _frame in range(
+                ATTACK_MOTION_FRAME_COUNT
+                + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT
+            ):
+                mock._update_attack_presentation()
+
+        self.assertEqual(monster.state.hp, 82)
+        self.assertEqual(
+            play_se.call_args_list,
+            [call(ATTACK_SLASH_SE_ID), call(ATTACK_SLASH_SE_ID)],
+        )
+
+        presentation.elapsed_frame = presentation.strikes[1].hit_start_frame + 1
+        mock.attack_effect_image = object()
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party_attack_effect()
+        self.assertEqual(
+            blt.call_args.args[5:7],
+            (-ATTACK_EFFECT_CELL_SIZE, ATTACK_EFFECT_CELL_SIZE),
+        )
+
+    def test_dual_wield_followup_still_attacks_without_authored_poses(self) -> None:
+        items = load_mock_items()
+        member = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=("Kagetora",),
+        )[0]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.monsters = (_damage_test_monster(),)
+        mock.attack_poses = {}
+        mock.selected_command = BattleCommand.ATTACK
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.target_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._resolve_member_attack_additional_effects = Mock(return_value=())
+
+        with patch(
+            "scenes.battle.resolve_physical_attack",
+            side_effect=(
+                SimpleNamespace(hit=False, damage=0, critical=False),
+                SimpleNamespace(hit=False, damage=0, critical=False),
+            ),
+        ):
+            self.assertTrue(mock._begin_attack_presentation())
+
+        self.assertEqual(len(mock.attack_presentation.strikes), 2)
+        self.assertEqual(mock.attack_presentation.strikes[1].poses, ())
 
     def test_aim_attack_applies_bonus_popup_and_delayed_gauge(self) -> None:
         monster = BattleMockMonster(
@@ -2224,7 +2420,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(resolve.call_args.kwargs["attacker_has_power_hit"])
         self.assertTrue(resolve.call_args.kwargs["weapon_has_power_hit"])
         self.assertEqual(resolve.call_args.kwargs["critical_roll"], 9)
-        self.assertTrue(mock.attack_presentation.is_critical)
+        self.assertTrue(mock.attack_presentation.strikes[0].is_critical)
         self.assertEqual(randint.call_args_list, [call(0, 99), call(0, 99)])
 
     def test_elemental_weapon_weakness_uses_effective_attack_and_is_recorded(
@@ -2269,8 +2465,8 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertTrue(resolve.call_args.kwargs["weapon_effective"])
         self.assertEqual(resolve.call_args.kwargs["critical_roll"], 99)
-        self.assertTrue(mock.attack_presentation.is_weak)
-        self.assertTrue(mock.attack_presentation.is_critical)
+        self.assertTrue(mock.attack_presentation.strikes[0].is_weak)
+        self.assertTrue(mock.attack_presentation.strikes[0].is_critical)
         mock._resolve_member_attack_additional_effects.assert_called_once_with(
             member,
             items["FIRE SPEAR"],
@@ -2296,7 +2492,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.action_party_index = None
         mock.affinity_popups = []
         mock._monster_draw_x = Mock(return_value=4)
-        mock.attack_presentation = BattleAttackPresentation(
+        mock.attack_presentation = _attack_presentation(
             target_index=0,
             damage=10,
             poses=(),
@@ -2648,7 +2844,7 @@ class BattleScreenMockTest(unittest.TestCase):
             (TimelineEntry(actor, 10, 64.0), TimelineEntry(monster, 10, 50.0))
         )
         mock.phase = BattleMockPhase.ATTACK_PRESENTATION
-        mock.attack_presentation = BattleAttackPresentation(0, 10, (), 1)
+        mock.attack_presentation = _attack_presentation(0, 10, (), 1)
         mock.action_party_index = 0
         mock.action_offset_x = ACTION_MOVE_DISTANCE
         mock.action_motion_frame = 0

@@ -179,8 +179,16 @@ def load_attack_poses(path: Path) -> Mapping[str, AttackPoseDefinition]:
 def attack_sequence(
     poses: Mapping[str, AttackPoseDefinition],
     weapon_img: str,
+    *,
+    branches: tuple[str, str] = ("1", "2"),
 ) -> tuple[AttackPoseDefinition, ...]:
-    """Return the authored basic attack sequence for one weapon image key."""
+    """Return one authored attack sequence for a weapon image key.
+
+    Branches 1 and 2 are the ordinary right-hand sequence.  Dual wielding
+    explicitly requests branches 3 and 4 for its left-hand follow-up; missing
+    follow-up branches intentionally yield no pose instead of borrowing the
+    right-hand motion.
+    """
 
     ordered = tuple(
         pose for pose in poses.values() if pose.weapon_img == weapon_img
@@ -188,10 +196,12 @@ def attack_sequence(
     if not ordered:
         return ()
     by_branch = {pose.branch: pose for pose in ordered}
-    primary = tuple(
-        pose for branch in ("1", "2") if (pose := by_branch.get(branch)) is not None
+    selected = tuple(
+        pose for branch in branches if (pose := by_branch.get(branch)) is not None
     )
-    return primary or ordered[:2]
+    if selected or branches != ("1", "2"):
+        return selected
+    return ordered[:2]
 
 
 __all__ = [
