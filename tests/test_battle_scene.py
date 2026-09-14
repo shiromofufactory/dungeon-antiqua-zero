@@ -116,7 +116,7 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         self.assertTrue(scene._party_member_is_front_row(0))
         self.assertTrue(scene._party_member_is_front_row(1))
 
-    def test_living_vigilance_owner_prevents_only_a_winning_draw(self) -> None:
+    def test_living_vigilance_owner_prevents_surprise(self) -> None:
         vigilant = self._member(10, FormationRow.FRONT, vigilant=True)
         scene = self._scene(vigilant)
 
@@ -134,9 +134,18 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         )
         living = self._member(10, FormationRow.FRONT)
         scene = self._scene(dead_vigilant, living)
-        with patch("scenes.battle.pyxel.rndi", return_value=2):
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
             scene._prepare_surprise()
         self.assertIsNone(scene.surprise_prevented_by_index)
+        self.assertTrue(scene.surprise_active)
+
+    def test_losing_roll_does_not_start_surprise(self) -> None:
+        scene = self._scene(self._member(32, FormationRow.FRONT))
+
+        with patch("scenes.battle.pyxel.rndi", return_value=31):
+            scene._prepare_surprise()
+
+        self.assertFalse(scene.surprise_roll.triggered)
         self.assertFalse(scene.surprise_active)
 
     def test_non_random_encounter_does_not_draw(self) -> None:
@@ -156,11 +165,11 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
             self._member(0, FormationRow.FRONT),
         )
 
-        with patch("scenes.battle.pyxel.rndi", return_value=1):
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
             scene._prepare_surprise()
 
         self.assertEqual(scene.surprise_roll.threshold, 1)
-        self.assertFalse(scene.surprise_active)
+        self.assertTrue(scene.surprise_active)
 
     def test_repeated_party_handoffs_skip_until_every_member_was_reached(
         self,
@@ -175,6 +184,10 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         with patch("scenes.battle.pyxel.rndi", return_value=0):
             scene._prepare_surprise()
 
+        self.assertEqual(
+            scene._party_sprite_width(0, is_escaping=False),
+            -16,
+        )
         self.assertTrue(scene._skip_surprised_party_turn(0))
         self.assertEqual(scene.surprise_pending_party_indexes, {1})
         self.assertTrue(scene._skip_surprised_party_turn(0))
@@ -182,6 +195,10 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         self.assertTrue(scene._skip_surprised_party_turn(1))
 
         self.assertFalse(scene.surprise_active)
+        self.assertEqual(
+            scene._party_sprite_width(0, is_escaping=False),
+            16,
+        )
         self.assertIs(scene.phase, BattlePhase.FORMATION)
         self.assertIs(front.formation_row, FormationRow.FRONT)
         self.assertIs(rear.formation_row, FormationRow.BACK)

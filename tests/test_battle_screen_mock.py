@@ -79,6 +79,7 @@ from tools.screen_mocks.battle import (
     DEAD_SPRITE_WIDTH,
     DEFEND_SPRITE_SOURCE_X,
     ESCAPE_RUN_DESTINATION_X,
+    ESCAPE_MESSAGE_TEXT_POSITION,
     ESCAPE_RUN_PATTERN_FRAME_COUNT,
     ESCAPE_RUN_SPEED,
     FORMATION_MOVE_FRAME_COUNT,
@@ -914,6 +915,62 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock._activate_timeline_head.assert_called_once_with()
 
+    def test_entrance_waits_before_activating_timeline_when_surprise_is_prevented(
+        self,
+    ) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT - 1
+        mock.entrance_fade = Mock(is_active=False)
+        mock.palette_shifter = Mock()
+        mock._show_surprise_notice = Mock(return_value=True)
+        mock._activate_timeline_head = Mock()
+
+        mock._update_entrance_animation()
+
+        self.assertEqual(
+            mock.entrance_animation_frame,
+            BATTLE_ENTRANCE_FRAME_COUNT,
+        )
+        mock._show_surprise_notice.assert_called_once_with()
+        mock._activate_timeline_head.assert_not_called()
+
+    def test_surprise_prevention_notice_waits_for_acknowledgement(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.surprise_prevented_by_index = 0
+        definition = Mock()
+        definition.localized_name.return_value = "クレス"
+        mock.party = (SimpleNamespace(definition=definition),)
+        mock.texts = Mock()
+        mock.texts.formatted_text.return_value = "クレスが ふいうちを ふせいだ！"
+        mock.localizer = Mock()
+        mock._show_battle_popup = Mock()
+        mock.battle_popup = BattleTimedPopup(frames_remaining=1)
+        mock.battle_popup_window = Mock()
+
+        waiting = mock._show_surprise_notice()
+
+        self.assertTrue(waiting)
+        self.assertIs(mock.phase, BattleMockPhase.SURPRISE_PREVENTED)
+        self.assertFalse(mock.battle_popup.visible)
+        mock.battle_popup_window.clear_texts.assert_called_once_with()
+        mock.battle_popup_window.add_text.assert_called_once_with(
+            "クレスが ふいうちを ふせいだ！",
+            *ESCAPE_MESSAGE_TEXT_POSITION,
+        )
+        mock._show_battle_popup.assert_not_called()
+
+        mock._activate_timeline_head = Mock()
+        mock._update_surprise_prevented(InputState())
+        mock._activate_timeline_head.assert_not_called()
+
+        mock._update_surprise_prevented(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        self.assertFalse(mock.battle_popup.visible)
+        mock._activate_timeline_head.assert_called_once_with()
+
     def test_party_sprites_use_formation_and_defense_source_images(self) -> None:
         self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 7)
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -949,6 +1006,33 @@ class BattleScreenMockTest(unittest.TestCase):
                     1,
                 ),
             ],
+        )
+
+    def test_surprised_party_sprites_face_backward(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.character_sprites = object()
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(formation_row=FormationRow.FRONT),
+                battle_sprite=2,
+            ),
+        )
+        mock.phase = BattleMockPhase.COMMAND
+        mock.surprise_active = True
+        mock.defending_party_indexes = set()
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party()
+
+        blt.assert_called_once_with(
+            156,
+            64,
+            mock.character_sprites,
+            0,
+            64,
+            -16,
+            32,
+            1,
         )
 
     def test_party_uses_near_death_and_wide_dead_poses(self) -> None:
@@ -6240,6 +6324,27 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_windows()
 
         mock.battle_popup_window.draw.assert_called_once_with()
+
+    def test_surprise_prevention_window_stays_visible_while_waiting(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.SURPRISE_PREVENTED
+        mock.windows = []
+        mock.party_status_windows = []
+        mock.monsters = ()
+        mock.monster_name_windows = []
+        mock.command_window = Mock(is_closed=True)
+        mock.global_command_window = Mock(is_open=False, is_closed=True)
+        mock.escape_message_window = Mock()
+        mock.escape_started_message_window = Mock()
+        mock.escape_choice_window = Mock()
+        mock.battle_popup = BattleTimedPopup()
+        mock.battle_popup_window = Mock()
+        mock.action_popup_window = Mock()
+
+        mock._draw_windows()
+
+        mock.battle_popup_window.draw.assert_called_once_with()
+        mock.action_popup_window.draw.assert_not_called()
 
     def test_monster_miss_uses_da2_length_without_reducing_hp(self) -> None:
         member = SimpleNamespace(hp=20, max_hp=30)

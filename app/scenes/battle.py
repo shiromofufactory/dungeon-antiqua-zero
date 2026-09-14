@@ -635,6 +635,7 @@ class BattlePhase(StrEnum):
     """Interactive phases implemented by the battle scene."""
 
     ENTRANCE = "entrance"
+    SURPRISE_PREVENTED = "surprise_prevented"
     INITIAL = "initial"
     COMMAND = "command"
     GLOBAL_COMMAND = "global_command"
@@ -1945,6 +1946,9 @@ class BattleScene:
         if self.phase is BattlePhase.ENTRANCE:
             self._update_entrance_animation()
             return
+        if self.phase is BattlePhase.SURPRISE_PREVENTED:
+            self._update_surprise_prevented(input_state)
+            return
         if self.phase is BattlePhase.DEFEAT_MESSAGE:
             self._update_defeat_message(input_state)
             return
@@ -2329,8 +2333,8 @@ class BattleScene:
         self.surprise_pending_party_indexes = set(living_indexes)
         self.surprise_active = True
 
-    def _show_surprise_notice(self) -> None:
-        """Show a notice only for a hit or a Vigilance prevention."""
+    def _show_surprise_notice(self) -> bool:
+        """Show a hit notice, or start the prevention acknowledgement."""
 
         prevented_by_index = getattr(
             self,
@@ -2344,15 +2348,24 @@ class BattleScene:
                 self.localizer,
                 {"MEMBER": member.definition.localized_name(self.localizer)},
             )
+            self.phase = BattlePhase.SURPRISE_PREVENTED
+            self.battle_popup.clear()
+            self.battle_popup_window.clear_texts()
+            self.battle_popup_window.add_text(
+                message,
+                *ESCAPE_MESSAGE_TEXT_POSITION,
+            )
+            return True
         elif getattr(self, "surprise_active", False):
             message = self.texts.text("battle.surprise", self.localizer)
         else:
-            return
+            return False
         self._show_battle_popup(
             message,
             BATTLE_POPUP_FRAME_COUNT,
             align_left=True,
         )
+        return False
 
     def _prepare_party_for_restart(self) -> None:
         """Allow a composition root to apply fixture state before gauge rolls."""
@@ -2382,8 +2395,17 @@ class BattleScene:
         self.entrance_animation_frame += 1
         if self.entrance_animation_frame >= BATTLE_ENTRANCE_FRAME_COUNT:
             self.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT
-            self._show_surprise_notice()
+            if self._show_surprise_notice():
+                return
             self._activate_timeline_head()
+
+    def _update_surprise_prevented(self, input_state: InputState) -> None:
+        """Wait for acknowledgement before activating the first actor."""
+
+        if not (input_state.confirm.triggered or input_state.cancel.triggered):
+            return
+        self.battle_popup.clear()
+        self._activate_timeline_head()
 
     def _open_global_command_menu(self) -> None:
         """Replace the active member's command list with party-wide commands."""
@@ -7556,9 +7578,13 @@ class BattleScene:
         return bool(getattr(member, "is_dying", False))
 
     def _party_sprite_width(self, index: int, *, is_escaping: bool) -> int:
-        if self._party_member_is_dead(index):
-            return DEAD_SPRITE_WIDTH
-        return -PARTY_SPRITE_WIDTH if is_escaping else PARTY_SPRITE_WIDTH
+        width = (
+            DEAD_SPRITE_WIDTH
+            if self._party_member_is_dead(index)
+            else PARTY_SPRITE_WIDTH
+        )
+        faces_backward = is_escaping or getattr(self, "surprise_active", False)
+        return -width if faces_backward else width
 
     def _party_sprite_source_x(self, index: int) -> int:
         if self._party_member_is_dead(index):
@@ -8693,6 +8719,8 @@ class BattleScene:
             self.escape_started_message_window.draw()
         battle_popup = getattr(self, "battle_popup", None)
         if self.phase is BattlePhase.DEFEAT_MESSAGE:
+            self.battle_popup_window.draw()
+        elif self.phase is BattlePhase.SURPRISE_PREVENTED:
             self.battle_popup_window.draw()
         elif battle_popup is not None and battle_popup.visible:
             self.action_popup_window.draw()
