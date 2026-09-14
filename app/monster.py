@@ -61,6 +61,29 @@ class MonsterSpecialAction(StrEnum):
     CHARGE = "突"
 
 
+def monster_spell_keys_from_record(
+    record: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Parse and validate a monster's newline-delimited spell keys."""
+
+    if not isinstance(record, Mapping):
+        raise MonsterDataError("monster must be an object")
+    value = record.get("spells")
+    if not isinstance(value, str):
+        raise MonsterDataError("monster.spells must be a string")
+    value = value.replace("\r\n", "\n")
+    if "\r" in value:
+        raise MonsterDataError("monster.spells contains an invalid line separator")
+    if not value:
+        return ()
+    keys = tuple(value.split("\n"))
+    if any(not key for key in keys):
+        raise MonsterDataError("monster.spells must not contain empty keys")
+    if len(keys) != len(set(keys)):
+        raise MonsterDataError("monster.spells must not contain duplicate keys")
+    return keys
+
+
 def monster_special_actions_from_record(
     record: Mapping[str, object],
 ) -> tuple[MonsterSpecialAction, ...]:
@@ -110,6 +133,9 @@ class MonsterDefinition:
     max_hp: int
     max_mp: int
     level: int
+    magic: int
+    intelligence: int
+    spell_keys: tuple[str, ...]
     weaknesses: frozenset[ResistanceType]
     resistances: frozenset[ResistanceType]
     treasure_item_key: str
@@ -184,6 +210,9 @@ class MonsterDefinition:
             max_hp=_required_monster_integer(record, "mhp", positive=True),
             max_mp=_required_monster_integer(record, "mmp"),
             level=_required_monster_integer(record, "lv", positive=True),
+            magic=_required_monster_integer(record, "mag"),
+            intelligence=_required_monster_integer(record, "int"),
+            spell_keys=monster_spell_keys_from_record(record),
             weaknesses=resistances_from_tolerance(weakness),
             resistances=resistances_from_tolerance(tolerance),
             treasure_item_key=treasure_item_key,
@@ -244,10 +273,12 @@ class MonsterCombatStats:
 
 @dataclass
 class MonsterBattleState:
-    """Per-battle HP copied from one monster's immutable master data."""
+    """Per-battle HP and MP copied from immutable monster master data."""
 
     max_hp: int
     hp: int | None = None
+    max_mp: int = 0
+    mp: int | None = None
     poisoned: bool = False
     sleeping: int = 0
     stunned: bool = False
@@ -265,6 +296,16 @@ class MonsterBattleState:
             raise TypeError("hp must be an integer")
         if not 0 <= self.hp <= self.max_hp:
             raise ValueError("hp must be from 0 to max_hp")
+        if isinstance(self.max_mp, bool) or not isinstance(self.max_mp, int):
+            raise TypeError("max_mp must be an integer")
+        if self.max_mp < 0:
+            raise ValueError("max_mp must not be negative")
+        if self.mp is None:
+            self.mp = self.max_mp
+        if isinstance(self.mp, bool) or not isinstance(self.mp, int):
+            raise TypeError("mp must be an integer")
+        if not 0 <= self.mp <= self.max_mp:
+            raise ValueError("mp must be from 0 to max_mp")
         if not isinstance(self.poisoned, bool):
             raise TypeError("poisoned must be a boolean")
         if isinstance(self.sleeping, bool) or not isinstance(self.sleeping, int):
@@ -293,14 +334,17 @@ class MonsterBattleState:
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MonsterBattleState:
-        """Create full HP state from the record's ``mhp`` value."""
+        """Create full HP/MP state from the record's master values."""
 
         if not isinstance(record, Mapping):
             raise MonsterDataError("monster must be an object")
         max_hp = record.get("mhp")
         if isinstance(max_hp, bool) or not isinstance(max_hp, int) or max_hp <= 0:
             raise MonsterDataError("monster.mhp must be a positive integer")
-        return cls(max_hp=max_hp)
+        max_mp = record.get("mmp", 0)
+        if isinstance(max_mp, bool) or not isinstance(max_mp, int) or max_mp < 0:
+            raise MonsterDataError("monster.mmp must be a non-negative integer")
+        return cls(max_hp=max_hp, max_mp=max_mp)
 
     @property
     def is_alive(self) -> bool:
@@ -411,6 +455,19 @@ class MonsterBattleState:
         self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
         return True
 
+    def spend_mp(self, amount: int) -> bool:
+        """Spend MP when possible and report whether the spell can proceed."""
+
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise TypeError("MP amount must be an integer")
+        if amount < 0:
+            raise ValueError("MP amount must not be negative")
+        assert self.mp is not None
+        if self.mp < amount:
+            return False
+        self.mp -= amount
+        return True
+
     def defeat(self) -> None:
         """Set HP to zero for a mock attack that always defeats its target."""
 
@@ -423,6 +480,7 @@ class MonsterBattleState:
         """Restore initial HP when restarting a battle fixture."""
 
         self.hp = self.max_hp
+        self.mp = self.max_mp
         self.poisoned = False
         self.sleeping = 0
         self.stunned = False
@@ -450,6 +508,7 @@ __all__ = [
     "MonsterFormationTarget",
     "MonsterSpecialAction",
     "MonsterTribe",
+    "monster_spell_keys_from_record",
     "monster_special_actions_from_record",
     "promote_rear_monsters_if_front_empty",
 ]

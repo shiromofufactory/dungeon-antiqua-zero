@@ -196,6 +196,7 @@ from tools.screen_mocks.battle import (
     member_attack_reach,
     selectable_attack_target_indexes,
 )
+from monster_ai import MonsterAction
 from battle_commands import BattleCommand, BattleCommandOption
 from attack_pose import AttackPoseDefinition, AttackWeaponSprite
 from battle_timeline import (
@@ -4752,6 +4753,25 @@ class BattleScreenMockTest(unittest.TestCase):
             BATTLE_POPUP_FRAME_COUNT,
         )
 
+    def test_enemy_spell_cast_popup_uses_the_same_minimum_width_at_top_left(
+        self,
+    ) -> None:
+        spell = load_mock_spells()["SLEEP"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.localizer = Localizer(Language.JAPANESE)
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
+        mock.battle_popup = BattleTimedPopup()
+
+        mock._show_spell_cast_message(spell, actor_is_enemy=True)
+
+        self.assertEqual(mock.action_popup_window.x, 0)
+        self.assertEqual(
+            mock.battle_popup.frames_remaining,
+            BATTLE_POPUP_FRAME_COUNT,
+        )
+
     def test_item_use_popup_shows_only_name_at_minimum_top_right_width(self) -> None:
         item = load_mock_items()["POTION"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -5971,7 +5991,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.monster_attack_critical)
         self.assertEqual(randint.call_args_list, [call(0, 99), call(0, 99)])
 
-    def test_rear_monster_finishes_without_attacking(self) -> None:
+    def test_rear_monster_selects_idle_without_counting_an_action(self) -> None:
         actor = BattleMockMonster(
             key="Giant Spider",
             names={"name_en": "Giant Spider"},
@@ -5999,8 +6019,20 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._activate_timeline_head()
 
-        self.assertIsNone(mock.blinking_monster_index)
-        self.assertEqual(mock.monster_blink_frames_remaining, 0)
+        self.assertEqual(mock.blinking_monster_index, 0)
+        self.assertEqual(
+            mock.monster_blink_frames_remaining,
+            MONSTER_BLINK_FRAME_COUNT,
+        )
+        mock._start_timeline_animation.assert_not_called()
+
+        mock.monster_blink_frames_remaining = 1
+        mock.progression = Mock()
+        mock._select_monster_action = Mock(return_value=MonsterAction.IDLE)
+        mock._update_monster_action()
+
+        self.assertIsNone(mock.monster_action)
+        mock.progression.record_enemy_action.assert_not_called()
         mock._start_timeline_animation.assert_called_once_with()
 
     def test_sleeping_monster_loses_one_turn_without_attacking(self) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 
 from monster import MonsterSpecialAction
@@ -15,6 +16,21 @@ class MonsterAction(StrEnum):
     ATTACK = "attack"
     ESCAPE = "escape"
     CHARGE = "charge"
+    IDLE = "idle"
+
+
+@dataclass(frozen=True)
+class MonsterSpellAction:
+    """One exact learned spell included in a monster's action candidates."""
+
+    spell_key: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.spell_key, str) or not self.spell_key:
+            raise ValueError("spell_key must be a non-empty string")
+
+
+MonsterActionChoice = MonsterAction | MonsterSpellAction
 
 
 def select_monster_action(
@@ -25,14 +41,17 @@ def select_monster_action(
     can_charge: bool,
     party_actual_attacks: Sequence[int],
     monster_attack: int,
-) -> MonsterAction | None:
+    spell_keys: Sequence[str] = (),
+) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including ZERO's charge action.
 
     Escape retains DA2's two-stage eligibility check: a 50% gate, followed
     by comparing one random living member's actual attack against the
     monster's attack multiplied by a random value from 1.0 through 2.0.
-    Eligible specials are then chosen with the same weight as a normal
-    attack.
+    Eligible specials and each learned spell are then chosen with the same
+    weight as a normal attack. A rear-row monster receives one idle candidate
+    instead of a normal attack. This basic routine deliberately does not
+    inspect MP or silence state.
     """
 
     if not isinstance(is_front_row, bool):
@@ -50,12 +69,18 @@ def select_monster_action(
         for attack in party_actual_attacks
     ):
         raise ValueError("party_actual_attacks must contain non-negative integers")
+    if isinstance(spell_keys, (str, bytes)) or any(
+        not isinstance(key, str) or not key for key in spell_keys
+    ):
+        raise ValueError("spell_keys must contain non-empty strings")
+    if len(spell_keys) != len(set(spell_keys)):
+        raise ValueError("spell_keys must not contain duplicates")
 
     specials = tuple(special_actions)
     if any(not isinstance(action, MonsterSpecialAction) for action in specials):
         raise TypeError("special_actions must contain MonsterSpecialAction values")
 
-    candidates: list[MonsterAction] = []
+    candidates: list[MonsterActionChoice] = []
     if (
         MonsterSpecialAction.ESCAPE in specials
         and party_actual_attacks
@@ -66,8 +91,11 @@ def select_monster_action(
             candidates.append(MonsterAction.ESCAPE)
     if MonsterSpecialAction.CHARGE in specials and can_charge:
         candidates.append(MonsterAction.CHARGE)
+    candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     if is_front_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
+    elif not is_front_row:
+        candidates.append(MonsterAction.IDLE)
 
     if not candidates:
         return None
@@ -76,4 +104,9 @@ def select_monster_action(
     return random.choice(candidates)
 
 
-__all__ = ["MonsterAction", "select_monster_action"]
+__all__ = [
+    "MonsterAction",
+    "MonsterActionChoice",
+    "MonsterSpellAction",
+    "select_monster_action",
+]

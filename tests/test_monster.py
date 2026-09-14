@@ -4,11 +4,13 @@ import unittest
 from types import SimpleNamespace
 
 from app.monster import (
+    MonsterDefinition,
     MonsterBattleState,
     MonsterCombatStats,
     MonsterDataError,
     promote_rear_monsters_if_front_empty,
 )
+from app.resources import load_record_array
 
 
 class MonsterCombatStatsTest(unittest.TestCase):
@@ -46,13 +48,39 @@ class MonsterCombatStatsTest(unittest.TestCase):
                         MonsterCombatStats.from_record(record)
 
 
+class MonsterSpellDefinitionTest(unittest.TestCase):
+    def test_reads_magic_intelligence_and_structured_spell_keys(self) -> None:
+        records = {
+            record["name_en"]: record
+            for record in load_record_array("monsters.json")
+        }
+
+        goblin = MonsterDefinition.from_record(records["Goblin"])
+        treant = MonsterDefinition.from_record(records["Treant"])
+
+        self.assertEqual((goblin.magic, goblin.intelligence), (0, 0))
+        self.assertEqual(goblin.spell_keys, ("SLOW",))
+        self.assertEqual((treant.magic, treant.intelligence), (15, 0))
+        self.assertEqual(treant.spell_keys, ("SLEEP",))
+
+
 class MonsterBattleStateTest(unittest.TestCase):
-    def test_mhp_initializes_current_and_max_hp(self) -> None:
-        state = MonsterBattleState.from_record({"mhp": 12})
+    def test_master_values_initialize_current_and_max_hp_mp(self) -> None:
+        state = MonsterBattleState.from_record({"mhp": 12, "mmp": 5})
 
         self.assertEqual(state.max_hp, 12)
         self.assertEqual(state.hp, 12)
+        self.assertEqual(state.max_mp, 5)
+        self.assertEqual(state.mp, 5)
         self.assertTrue(state.is_alive)
+
+    def test_spend_mp_rejects_shortage_without_changing_current_mp(self) -> None:
+        state = MonsterBattleState(max_hp=10, max_mp=3)
+
+        self.assertTrue(state.spend_mp(2))
+        self.assertEqual(state.mp, 1)
+        self.assertFalse(state.spend_mp(2))
+        self.assertEqual(state.mp, 1)
 
     def test_damage_clamps_at_zero_and_zero_hp_is_dead(self) -> None:
         state = MonsterBattleState.from_record({"mhp": 2})
@@ -108,8 +136,9 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.hp, 10)
 
     def test_defeat_and_restore_manage_mock_battle_lifecycle(self) -> None:
-        state = MonsterBattleState.from_record({"mhp": 7})
+        state = MonsterBattleState.from_record({"mhp": 7, "mmp": 4})
         state.speed_modifier = -1
+        state.spend_mp(3)
 
         state.defeat()
         self.assertEqual(state.hp, 0)
@@ -117,6 +146,7 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.hp, 7)
         self.assertEqual(state.sleeping, 0)
         self.assertEqual(state.speed_modifier, 0)
+        self.assertEqual(state.mp, 4)
 
     def test_slow_cancels_haste_then_applies_once(self) -> None:
         state = MonsterBattleState(max_hp=10, speed_modifier=2)
