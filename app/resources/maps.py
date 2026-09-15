@@ -13,11 +13,11 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 6
+FORMAT_VERSION = 7
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_OBJECT_DRAW_GROUPS = frozenset(
-    ("object", "object_overlay", "object_foreground")
+    ("object", "object_overlay", "object_y_sorted", "object_foreground")
 )
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAP_FACINGS = frozenset(("up", "right", "down", "left"))
@@ -66,6 +66,7 @@ class MapObjectTile:
     draw_group: str
     order: int
     tile: int
+    sort_y: int
 
 
 @dataclass(frozen=True)
@@ -547,6 +548,7 @@ class MapResources:
                 raise MapResourceError(f"object_tiles[{index}].positionが不正です。")
             tile = record.get("tile")
             order = record.get("order")
+            sort_y = record.get("sort_y")
             if (
                 isinstance(tile, bool)
                 or not isinstance(tile, int)
@@ -555,6 +557,12 @@ class MapResources:
                 raise MapResourceError(f"object_tiles[{index}].tileが不正です。")
             if isinstance(order, bool) or not isinstance(order, int):
                 raise MapResourceError(f"object_tiles[{index}].orderが不正です。")
+            if (
+                isinstance(sort_y, bool)
+                or not isinstance(sort_y, int)
+                or not 0 <= sort_y < height
+            ):
+                raise MapResourceError(f"object_tiles[{index}].sort_yが不正です。")
             draw_group = cls._required_id(record, "draw_group")
             if draw_group not in MAP_OBJECT_DRAW_GROUPS:
                 raise MapResourceError(
@@ -569,6 +577,7 @@ class MapResources:
                     draw_group=draw_group,
                     order=order,
                     tile=tile,
+                    sort_y=sort_y,
                 )
             )
         return tuple(loaded)

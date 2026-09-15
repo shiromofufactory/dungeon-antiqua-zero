@@ -348,6 +348,7 @@ class FieldRendererTest(unittest.TestCase):
             draw_group="object",
             order=0,
             tile=0,
+            sort_y=1,
         )
         map_data = compiled_map(("000", "000", "000"), objects=(object_tile,))
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
@@ -498,7 +499,7 @@ class FieldRendererTest(unittest.TestCase):
 
     def test_draws_foreground_objects_after_player(self) -> None:
         objects = (
-            MapObjectTile("floor_1", "floor", 1, 1, "object", 0, 0),
+            MapObjectTile("floor_1", "floor", 1, 1, "object", 0, 0, 1),
             MapObjectTile(
                 "roof_1",
                 "roof",
@@ -507,6 +508,7 @@ class FieldRendererTest(unittest.TestCase):
                 "object_foreground",
                 0,
                 0,
+                1,
             ),
         )
         map_data = compiled_map(("000", "000", "000"), objects=objects)
@@ -529,6 +531,78 @@ class FieldRendererTest(unittest.TestCase):
             pyxel.blt.call_args_list[-1],
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
         )
+
+    def test_y_sorted_object_draws_after_character_on_the_same_row(self) -> None:
+        objects = (
+            MapObjectTile(
+                "counter_1",
+                "counter",
+                1,
+                1,
+                "object_y_sorted",
+                0,
+                0,
+                sort_y=1,
+            ),
+        )
+        map_data = compiled_map(("000", "000", "000"), objects=objects)
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(field)
+
+        player_call = next(
+            index for index, draw_call in enumerate(pyxel.blt.call_args_list)
+            if draw_call.args[2] == 0
+        )
+        counter_call = next(
+            index for index, draw_call in enumerate(pyxel.blt.call_args_list)
+            if draw_call.args[2] is map_data.atlas
+            and len(draw_call.args) == 8
+        )
+        self.assertLess(player_call, counter_call)
+
+    def test_y_sorted_object_draws_before_character_on_a_lower_row(self) -> None:
+        objects = (
+            MapObjectTile(
+                "counter_1",
+                "counter",
+                1,
+                1,
+                "object_y_sorted",
+                0,
+                0,
+                sort_y=1,
+            ),
+        )
+        map_data = compiled_map(("000", "000", "000"), objects=objects)
+        field = FieldMovement(map_data, start=FieldPosition(1, 2))
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(field)
+
+        player_call = next(
+            index for index, draw_call in enumerate(pyxel.blt.call_args_list)
+            if draw_call.args[2] == 0
+        )
+        counter_call = next(
+            index for index, draw_call in enumerate(pyxel.blt.call_args_list)
+            if draw_call.args[2] is map_data.atlas
+            and len(draw_call.args) == 8
+        )
+        self.assertLess(counter_call, player_call)
 
     def test_floating_player_animates_while_idle_without_offsetting_draw_y(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="town")

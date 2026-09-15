@@ -36,7 +36,7 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 6,
+            "format_version": 7,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
@@ -60,6 +60,7 @@ class MapResourcesTest(unittest.TestCase):
                     "position": [1, 1],
                     "draw_group": "object",
                     "order": 0,
+                    "sort_y": 1,
                     "tile": 1,
                 }
             ],
@@ -223,16 +224,26 @@ class MapResourcesTest(unittest.TestCase):
         with self.assertRaisesRegex(MapResourceError, "interact_through_rows"):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
-    def test_accepts_foreground_and_rejects_unknown_object_draw_group(self) -> None:
-        self.runtime["object_tiles"][0]["draw_group"] = "object_foreground"
-        self._write_runtime()
-        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
-        self.assertEqual(loaded.object_tiles[0].draw_group, "object_foreground")
+    def test_accepts_depth_groups_and_rejects_unknown_object_draw_group(self) -> None:
+        for draw_group in ("object_y_sorted", "object_foreground"):
+            with self.subTest(draw_group=draw_group):
+                self.runtime["object_tiles"][0]["draw_group"] = draw_group
+                self._write_runtime()
+                loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+                self.assertEqual(loaded.object_tiles[0].draw_group, draw_group)
 
         self.runtime["object_tiles"][0]["draw_group"] = "unknown"
         self._write_runtime()
         with self.assertRaisesRegex(MapResourceError, "draw_group"):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+    def test_rejects_invalid_object_sort_y(self) -> None:
+        for sort_y in (None, True, -1, 2):
+            with self.subTest(sort_y=sort_y):
+                self.runtime["object_tiles"][0]["sort_y"] = sort_y
+                self._write_runtime()
+                with self.assertRaisesRegex(MapResourceError, "sort_y"):
+                    MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
     def test_rejects_missing_and_unsafe_map_ids(self) -> None:
         resources = MapResources(self.maps_dir, pyxel_api=self.pyxel)

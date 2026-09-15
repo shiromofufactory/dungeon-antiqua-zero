@@ -962,7 +962,7 @@ function renderObjectEditor() {
         <div class="field full"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
-        <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常オブジェクトより手前）</option><option value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>キャラクター前景（屋根など）</option></select></div>
+        <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常オブジェクトより手前）</option><option value="object_y_sorted" ${object.default_draw_group === "object_y_sorted" ? "selected" : ""}>キャラクターY整列（カウンターなど）</option><option value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>キャラクター前景（屋根など）</option></select></div>
         <label class="object-interact-toggle"><input type="checkbox" data-change="object-interact-through" ${object.interact_through === true ? "checked" : ""}>このオブジェクト越しに1セル先を調べる</label>
       </div>
       <div class="row between" style="margin-top:10px">

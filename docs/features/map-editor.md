@@ -95,8 +95,10 @@ app/maps/
 
 オブジェクト実体IDは配置時に定義IDから自動生成する。`origin` は定義の左上起点、`order` は
 描画グループと下端Y座標が同じ実体間の描画順を表す。通常の `object`、既存の前面パーツである
-`object_overlay`、屋根などの `object_foreground` の順に描画する。`object` と
-`object_overlay` はactorより背面、`object_foreground` はactorより前面に置く。各グループ内は
+`object_overlay`、actorと下端Yで前後を切り替える `object_y_sorted`、屋根などの
+`object_foreground` の順に描画する。`object` と `object_overlay` はactorより背面、
+`object_foreground` はactorより前面に置く。`object_y_sorted` はactorの足元Yと実体の下端Yを
+共通の描画列で比較し、同じYではactorを先に描いてオブジェクトを前面にする。各グループ内は
 `origin.y + definition.size.height - 1` で求めた下端Y、`order`、起点X、実体IDの順に奥から手前へ行う。
 
 タイルセットの先頭地面をベース地面とし、全profileで外周をベース地面にする。ベース地面は
@@ -174,6 +176,9 @@ app/maps/
   背面移動・前面移動の操作対象は同じ下端の実体間に限られる。
 - `object_overlay` の前面パーツは通常オブジェクトより必ず手前へ表示し、パレットと選択情報に
   「前面パーツ」と表示する。
+- `object_y_sorted` はカウンターなどに使い、actorより下端Yが大きいときはactorの手前、
+  小さいときはactorの背面へ表示する。同じYではactorの手前へ表示し、パレットと選択情報に
+  「キャラクターY整列」と表示する。
 - `object_foreground` はプレイヤーやactorより手前へ表示し、パレットと選択情報に
   「キャラクター前景」と表示する。屋根や樹冠などに使い、構成セルは通常オブジェクトと同様に
   `passable` を設定できる。

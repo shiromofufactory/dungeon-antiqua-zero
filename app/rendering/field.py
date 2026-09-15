@@ -13,11 +13,11 @@ if __package__ == "rendering":
         floating_character_frame,
         floating_phase_offset,
     )
-    from resources.maps import CompiledMap
+    from resources.maps import CompiledMap, MapObjectTile
 else:
     from ..field import FieldActors, FieldMovement
     from ..input import Direction
-    from ..resources.maps import CompiledMap
+    from ..resources.maps import CompiledMap, MapObjectTile
     from .floating import (
         floating_character_frame,
         floating_phase_offset,
@@ -96,6 +96,17 @@ class FieldRenderer:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self._pyxel = pyxel_api
+        y_sorted_instances: dict[str, list[tuple[int, MapObjectTile]]] = {}
+        for index, object_tile in enumerate(map_data.object_tiles):
+            if object_tile.draw_group != "object_y_sorted":
+                continue
+            y_sorted_instances.setdefault(object_tile.instance_id, []).append(
+                (index, object_tile)
+            )
+        self._y_sorted_object_instances = tuple(
+            tuple(indexed_tiles)
+            for indexed_tiles in y_sorted_instances.values()
+        )
 
     def draw(
         self,
@@ -178,17 +189,44 @@ class FieldRenderer:
                         ),
                     )
                 )
-        for (
-            _world_y,
-            movement,
-            kind,
-            sprite_index,
-            image,
-            floating,
-            floating_phase,
-        ) in sorted(
-            characters, key=lambda item: item[0]
-        ):
+        depth_items: list[tuple[int, int, int, str, Any]] = [
+            (character[0], 0, index, f"character:{index}", character)
+            for index, character in enumerate(characters)
+        ]
+        tile_size = self.map_data.tile_size
+        for indexed_tiles in self._y_sorted_object_instances:
+            first_index, first_tile = indexed_tiles[0]
+            depth_items.append(
+                (
+                    first_tile.sort_y * tile_size,
+                    1,
+                    first_tile.order,
+                    f"object:{first_index}:{first_tile.instance_id}",
+                    indexed_tiles,
+                )
+            )
+
+        for _depth_y, item_kind, _order, _identity, payload in sorted(depth_items):
+            if item_kind == 1:
+                for object_index, object_tile in payload:
+                    self._draw_object_tile(
+                        object_index,
+                        object_tile,
+                        camera_x,
+                        camera_y,
+                        frame_count,
+                    )
+                continue
+
+            (
+                _world_y,
+                movement,
+                kind,
+                sprite_index,
+                image,
+                floating,
+                floating_phase,
+            ) = payload
             if kind == "player":
                 self._draw_player_character(
                     movement,
@@ -279,25 +317,41 @@ class FieldRenderer:
         *,
         draw_groups: tuple[str, ...],
     ) -> None:
-        tile_size = self.map_data.tile_size
         for index, object_tile in enumerate(self.map_data.object_tiles):
             if object_tile.draw_group not in draw_groups:
                 continue
-            x = object_tile.x * tile_size - camera_x
-            y = object_tile.y * tile_size - camera_y
-            if (
-                x <= -tile_size
-                or y <= -tile_size
-                or x >= self.screen_width
-                or y >= self.screen_height
-            ):
-                continue
-            self._draw_atlas_tile(
-                self.map_data.object_tile_at(index, frame_count),
-                x,
-                y,
-                colkey=FIELD_CHARACTER_COLKEY,
+            self._draw_object_tile(
+                index,
+                object_tile,
+                camera_x,
+                camera_y,
+                frame_count,
             )
+
+    def _draw_object_tile(
+        self,
+        index: int,
+        object_tile: MapObjectTile,
+        camera_x: int,
+        camera_y: int,
+        frame_count: int,
+    ) -> None:
+        tile_size = self.map_data.tile_size
+        x = object_tile.x * tile_size - camera_x
+        y = object_tile.y * tile_size - camera_y
+        if (
+            x <= -tile_size
+            or y <= -tile_size
+            or x >= self.screen_width
+            or y >= self.screen_height
+        ):
+            return
+        self._draw_atlas_tile(
+            self.map_data.object_tile_at(index, frame_count),
+            x,
+            y,
+            colkey=FIELD_CHARACTER_COLKEY,
+        )
 
     def _draw_atlas_tile(
         self,

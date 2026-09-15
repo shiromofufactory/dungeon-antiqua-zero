@@ -210,6 +210,13 @@ class MapTilesetTest(unittest.TestCase):
             {item.code for item in diagnostics if item.severity == "error"},
         )
 
+        data["objects"][0]["default_draw_group"] = "object_y_sorted"
+        diagnostics, _ = validate_tileset(data, image_path=self.image_path)
+        self.assertNotIn(
+            "invalid_object_draw_group",
+            {item.code for item in diagnostics if item.severity == "error"},
+        )
+
         data["grounds"][0]["collision"] = "passable_override"
         data["objects"][0]["default_draw_group"] = "unknown_group"
         data["objects"][0]["interact_through"] = "yes"

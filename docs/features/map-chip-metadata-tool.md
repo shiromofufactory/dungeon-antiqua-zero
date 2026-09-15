@@ -206,8 +206,10 @@ sea（通行不可）
 
 マップ上では異なるオブジェクト実体の領域を重ねてよいが、起点座標は同じにできない。
 描画グループは通常の `object`、通常オブジェクトより手前の既存の前面パーツ
-`object_overlay`、プレイヤーやactorより前面の `object_foreground` を使用する。
-`object` と `object_overlay` を描画してからactorを描画し、その後に `object_foreground` を描画する。
+`object_overlay`、actorと足元Yで前後を切り替える `object_y_sorted`、プレイヤーやactorより
+前面の `object_foreground` を使用する。`object` と `object_overlay` を描画してからactorと
+`object_y_sorted` を共通Y整列で描画し、その後に `object_foreground` を描画する。同じYでは
+actorを先に描き、カウンターなどのY整列オブジェクトを前面にする。
 各グループ内はオブジェクト下端Y、`order`、起点X、実体IDの順で固定する。
 「前面へ」「背面へ」は同じ描画グループと下端Yの実体間で `order` を変更する操作とし、
 配列の偶然の並び順には依存しない。

@@ -25,7 +25,7 @@ from .tileset import (
 
 
 SOURCE_FORMAT_VERSION = 6
-RUNTIME_FORMAT_VERSION = 6
+RUNTIME_FORMAT_VERSION = 7
 MAX_MAP_DIMENSION = 512
 MIN_MAP_WIDTH = 16
 MIN_MAP_HEIGHT = 15
@@ -1539,6 +1539,7 @@ def resolve_map(
                 "position": [x, y],
                 "offset": cell["offset"],
                 "order": instance["order"],
+                "sort_y": instance["origin"][1] + definition["size"][1] - 1,
                 "draw_group": definition.get("default_draw_group", "object"),
                 "collision": cell["collision"],
             }
@@ -1693,6 +1694,7 @@ def compile_map(
             "position": object_cell["position"],
             "draw_group": object_cell["draw_group"],
             "order": object_cell["order"],
+            "sort_y": object_cell["sort_y"],
             "tile": compiled_segments[0]["tile"],
         })
         if len(compiled_segments) > 1:

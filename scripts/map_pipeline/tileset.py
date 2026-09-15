@@ -26,11 +26,14 @@ DIRECTIONS = ("n", "ne", "e", "se", "s", "sw", "w", "nw")
 NEIGHBOR_STATES = frozenset(("same", "different", "any"))
 GROUND_COLLISION_STATES = frozenset(("passable", "blocked"))
 OBJECT_COLLISION_STATES = frozenset(("passable", "blocked", "passable_override"))
-OBJECT_DRAW_GROUPS = frozenset(("object", "object_overlay", "object_foreground"))
+OBJECT_DRAW_GROUPS = frozenset(
+    ("object", "object_overlay", "object_y_sorted", "object_foreground")
+)
 OBJECT_DRAW_GROUP_ORDER = {
     "object": 0,
     "object_overlay": 1,
-    "object_foreground": 2,
+    "object_y_sorted": 2,
+    "object_foreground": 3,
 }
 SUPPORTED_PROFILES = frozenset(("world", "dungeon", "town"))
 SUPPORTED_IMAGE_SUFFIXES = (".png", ".gif")
@@ -466,7 +469,7 @@ def _validate_object(
             "error",
             "invalid_object_draw_group",
             f"{path}.default_draw_group",
-            "描画グループはobject、object_overlay、object_foregroundのいずれかで指定してください。",
+            "描画グループはobject、object_overlay、object_y_sorted、object_foregroundのいずれかで指定してください。",
         )
     interact_through = object_value.get("interact_through", False)
     if not isinstance(interact_through, bool):

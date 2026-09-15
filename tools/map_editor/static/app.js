@@ -736,7 +736,7 @@ function renderPalette() {
         <div class="section-title"><h2>オブジェクト</h2><span class="subtle">左クリックで配置・右クリック／ドラッグで選択・移動</span></div>
         <div class="palette-list">${state.tileset.objects.map((object, index) => `
           <button class="palette-item ${object.id === state.objectId ? "active" : ""}" type="button" data-action="select-object-definition" data-id="${escapeHtml(object.id)}">
-            <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group === "object_overlay" ? `<span class="palette-meta">前面パーツ</span>` : ""}
+            <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group !== "object" ? `<span class="palette-meta">${escapeHtml(objectDrawGroupLabel(object))}</span>` : ""}
           </button>`).join("") || `<div class="empty-state">オブジェクト定義がありません。</div>`}</div>
         </div>`;
   } else if (state.tab === "site") {
@@ -933,7 +933,7 @@ function renderInspector() {
     <div class="section">
       <div class="section-title"><h2>選択オブジェクト</h2><span class="subtle">配置数 ${state.data.objects.length}</span></div>
       ${instance ? `
-        <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / ${objectDefinition(instance)?.default_draw_group === "object_overlay" ? "前面パーツ" : "通常オブジェクト"}<br>同一下端内の順序: ${instance.order}</div>
+        <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / ${escapeHtml(objectDrawGroupLabel(objectDefinition(instance)))}<br>同一下端内の順序: ${instance.order}</div>
         <div class="row between" style="margin-top:9px">
           <div class="row"><button class="button ghost small" type="button" data-action="object-back">背面へ</button><button class="button ghost small" type="button" data-action="object-front">前面へ</button></div>
           <button class="button danger small" type="button" data-action="delete-instance">配置を削除</button>
@@ -1173,20 +1173,57 @@ function drawEventMarkers(context, scale) {
   }
 }
 
-function drawActors(context, scale, now) {
-  for (const actor of state.data.actors) {
-    const selected = actor.id === state.selectedActorId || isBulkSelected("actor", actor.id);
-    const rendered = drawActorOnMap(context, actor, scale, now);
-    if (!rendered) {
-      const centerX = (actor.position[0] + .5) * scale;
-      const centerY = (actor.position[1] + .5) * scale;
-      context.fillStyle = selected ? "#ff67bd" : "#76d7c4";
-      context.beginPath();
-      context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
-      context.fill();
-      if (actor.kind === "stationary" || actor.kind === "roaming") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
-    }
-    if (selected) drawCellSelectionFrame(context, actor.position, scale);
+function drawActor(context, actor, scale, now) {
+  const selected = actor.id === state.selectedActorId || isBulkSelected("actor", actor.id);
+  const rendered = drawActorOnMap(context, actor, scale, now);
+  if (!rendered) {
+    const centerX = (actor.position[0] + .5) * scale;
+    const centerY = (actor.position[1] + .5) * scale;
+    context.fillStyle = selected ? "#ff67bd" : "#76d7c4";
+    context.beginPath();
+    context.arc(centerX, centerY, Math.max(5, scale * .22), 0, Math.PI * 2);
+    context.fill();
+    if (actor.kind === "stationary" || actor.kind === "roaming") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
+  }
+  if (selected) drawCellSelectionFrame(context, actor.position, scale);
+}
+
+function drawActorsAndYSortedObjects(context, scale, now) {
+  const items = state.data.actors.map((actor, index) => ({
+    kind: "actor",
+    sortY: actor.position[1],
+    tieOrder: 0,
+    order: index,
+    x: actor.position[0],
+    id: actor.id,
+    actor,
+  }));
+  const instances = new Map();
+  for (const cell of state.resolved?.object_cells || []) {
+    if (cell.draw_group !== "object_y_sorted") continue;
+    if (!instances.has(cell.instance_id)) instances.set(cell.instance_id, []);
+    instances.get(cell.instance_id).push(cell);
+  }
+  for (const [instanceId, cells] of instances) {
+    const first = cells[0];
+    items.push({
+      kind: "object",
+      sortY: first.sort_y ?? Math.max(...cells.map((cell) => cell.position[1])),
+      tieOrder: 1,
+      order: first.order,
+      x: Math.min(...cells.map((cell) => cell.position[0])),
+      id: instanceId,
+      cells,
+    });
+  }
+  items.sort((left, right) => left.sortY - right.sortY
+    || left.tieOrder - right.tieOrder
+    || left.order - right.order
+    || left.x - right.x
+    || left.id.localeCompare(right.id));
+  for (const item of items) {
+    if (item.kind === "actor") drawActor(context, item.actor, scale, now);
+    else for (const cell of item.cells) drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
   }
 }
 
@@ -1292,7 +1329,7 @@ function drawMap(now) {
       for (const layer of cell.layers) drawSourceTile(context, frameTile(layer, now), x, y, scale);
     });
     if (!groundOnly) for (const cell of state.resolved.object_cells) {
-      if (cell.draw_group === "object_foreground") continue;
+      if (cell.draw_group === "object_y_sorted" || cell.draw_group === "object_foreground") continue;
       drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
     }
     if (state.showCollision && !groundOnly) {
@@ -1308,7 +1345,7 @@ function drawMap(now) {
       });
     }
   }
-  if (!groundOnly) drawActors(context, scale, now);
+  if (!groundOnly) drawActorsAndYSortedObjects(context, scale, now);
   if (state.resolved && !groundOnly) {
     for (const cell of state.resolved.object_cells) {
       if (cell.draw_group !== "object_foreground") continue;
@@ -2062,7 +2099,17 @@ function objectBottom(instance) {
 }
 
 function objectDrawGroupOrder(instance) {
-  return objectDefinition(instance)?.default_draw_group === "object_overlay" ? 1 : 0;
+  const drawGroup = objectDefinition(instance)?.default_draw_group;
+  return { object: 0, object_overlay: 1, object_y_sorted: 2, object_foreground: 3 }[drawGroup] ?? 0;
+}
+
+function objectDrawGroupLabel(definition) {
+  return {
+    object: "通常オブジェクト",
+    object_overlay: "前面パーツ",
+    object_y_sorted: "キャラクターY整列",
+    object_foreground: "キャラクター前景",
+  }[definition?.default_draw_group] || "通常オブジェクト";
 }
 
 function compareObjectsBackToFront(left, right) {

@@ -358,7 +358,9 @@ Applicationが同じタイルセットを参照する全制作用マップの定
 `bgm_id` もゲーム用JSONへ収録する。ゲーム実行時のMap Rendererは解決済みのタイルマップ、アニメーション差し替え情報、
 オブジェクト描画面だけを扱い、境界判定、乱数抽選、透過合成を行わない。通行確認も生成済みの
 セルグリッドを参照し、表示画像やオブジェクト定義から毎回再計算しない。
-Rendererは `object`、`object_overlay`、actor、`object_foreground` の順に描画する。
+Rendererは `object`、`object_overlay`、actorと `object_y_sorted` の共通Y整列、
+`object_foreground` の順に描画する。共通Y整列ではactorの足元Yとオブジェクト実体の下端Yを
+比較し、同じYではactorを先に描いてカウンターなどの奥へ隠す。
 タイルセット保存時は、そのタイルセットを参照するマップのゲーム用データも再生成し、
 描画グループなどの定義変更と実行時データを同期する。
 

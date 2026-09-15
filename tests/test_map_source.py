@@ -1001,7 +1001,7 @@ class MapSourceTest(unittest.TestCase):
         tileset["objects"][1]["cells"][0]["collision"] = "passable"
         self.assertTrue(resolve_map(source, tileset)["collision"][2 * 16 + 2])
 
-    def test_foreground_is_resolved_after_overlay(self) -> None:
+    def test_depth_groups_are_resolved_in_layer_order(self) -> None:
         tileset = deepcopy(self.tileset)
         tileset["objects"] = [
             {
@@ -1017,7 +1017,7 @@ class MapSourceTest(unittest.TestCase):
                 ],
             }
             for index, draw_group in enumerate(
-                ("object", "object_overlay", "object_foreground")
+                ("object", "object_overlay", "object_y_sorted", "object_foreground")
             )
         ]
         source = initial_map_source("test_world", tileset, "world", 16, 15)
@@ -1029,7 +1029,7 @@ class MapSourceTest(unittest.TestCase):
                 "order": 0,
             }
             for index, draw_group in enumerate(
-                ("object_foreground", "object_overlay", "object")
+                ("object_foreground", "object_y_sorted", "object_overlay", "object")
             )
         ]
 
@@ -1037,7 +1037,12 @@ class MapSourceTest(unittest.TestCase):
 
         self.assertEqual(
             [cell["draw_group"] for cell in resolved["object_cells"]],
-            ["object", "object_overlay", "object_foreground"],
+            ["object", "object_overlay", "object_y_sorted", "object_foreground"],
+        )
+
+        self.assertEqual(
+            [cell["sort_y"] for cell in resolved["object_cells"]],
+            [2, 2, 2, 2],
         )
 
     def test_warns_when_passable_override_has_no_blocked_object_below(self) -> None:
