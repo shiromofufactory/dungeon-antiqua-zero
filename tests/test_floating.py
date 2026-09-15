@@ -34,10 +34,10 @@ class FloatingAnimationTest(unittest.TestCase):
 
     def test_floating_character_cycles_more_slowly_than_world_map_player(self) -> None:
         self.assertEqual(FLOATING_CHARACTER_FRAMES, (2, 1, 0, 1))
-        self.assertEqual(FLOATING_CHARACTER_FRAME_INTERVAL, 24)
-        self.assertEqual(FLOATING_CHARACTER_CYCLE_FRAMES, 96)
+        self.assertEqual(FLOATING_CHARACTER_FRAME_INTERVAL, 20)
+        self.assertEqual(FLOATING_CHARACTER_CYCLE_FRAMES, 80)
         self.assertEqual(
-            [floating_character_frame(frame) for frame in range(0, 121, 24)],
+            [floating_character_frame(frame) for frame in range(0, 101, 20)],
             [2, 1, 0, 1, 2, 1],
         )
 

@@ -11,7 +11,6 @@ if __package__ == "rendering":
     from input import Direction
     from rendering.floating import (
         floating_character_frame,
-        floating_offset,
         floating_phase_offset,
     )
     from resources.maps import CompiledMap
@@ -21,7 +20,6 @@ else:
     from ..resources.maps import CompiledMap
     from .floating import (
         floating_character_frame,
-        floating_offset,
         floating_phase_offset,
     )
 
@@ -391,16 +389,7 @@ class FieldRenderer:
                 * FIELD_ACTOR_CHARACTER_HEIGHT
             )
             source_image = image
-            draw_y = (
-                field.world_y
-                - camera_y
-                - FIELD_CHARACTER_SIZE
-                - (
-                    floating_offset(frame_count, phase_offset=floating_phase)
-                    if floating
-                    else 0
-                )
-            )
+            draw_y = field.world_y - camera_y - FIELD_CHARACTER_SIZE
             draw_height = FIELD_ACTOR_CHARACTER_HEIGHT
         self._pyxel.blt(
             field.world_x - camera_x,
@@ -473,16 +462,7 @@ class FieldRenderer:
         )
         self._pyxel.blt(
             field.world_x - camera_x,
-            (
-                field.world_y
-                - camera_y
-                - FIELD_CHARACTER_SIZE
-                - (
-                    floating_offset(frame_count, phase_offset=floating_phase)
-                    if floating
-                    else 0
-                )
-            ),
+            field.world_y - camera_y - FIELD_CHARACTER_SIZE,
             image,
             source_x,
             source_y,

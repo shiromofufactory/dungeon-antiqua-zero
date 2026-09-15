@@ -2,10 +2,9 @@
 
 const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
-const FLOATING_OFFSETS = [0, 0, 0, 1, 2, 2, 2, 1];
-const FLOATING_PHASE_FRAMES = 12;
+const FLOATING_PHASE_CYCLE_FRAMES = 96;
 const FLOATING_CHARACTER_FRAMES = [2, 1, 0, 1];
-const FLOATING_CHARACTER_FRAME_INTERVAL = 24;
+const FLOATING_CHARACTER_FRAME_INTERVAL = 20;
 const MIN_MAP_WIDTH = 16;
 const MIN_MAP_HEIGHT = 15;
 const LAST_MAP_STORAGE_KEY = "da0.map-editor.last-map.v1";
@@ -584,20 +583,13 @@ function stableFloatingPhase(identity) {
       checksum = (checksum >>> 1) ^ (0xedb88320 & -(checksum & 1));
     }
   }
-  const phase = ((checksum ^ 0xffffffff) >>> 0) % (FLOATING_OFFSETS.length * FLOATING_PHASE_FRAMES);
+  const phase = ((checksum ^ 0xffffffff) >>> 0) % FLOATING_PHASE_CYCLE_FRAMES;
   floatingPhaseCache.set(identity, phase);
   return phase;
 }
 
 function actorFloatingPhase(actor) {
   return stableFloatingPhase(`actor:${state.data.map_id}:${actor.id}`);
-}
-
-function floatingOffset(now, phaseOffset = 0) {
-  if (state.paused) return 0;
-  const frame = Math.floor((now - state.animationStartedAt) / (1000 / 60)) + phaseOffset;
-  const phase = Math.floor(frame / FLOATING_PHASE_FRAMES) % FLOATING_OFFSETS.length;
-  return FLOATING_OFFSETS[phase];
 }
 
 function floatingCharacterFrame(now, phaseOffset = 0) {
@@ -617,7 +609,7 @@ function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating
   const drawWidth = source.sourceWidth * scale;
   const drawHeight = source.sourceHeight * scale;
   const drawX = Math.floor((canvas.width - drawWidth) / 2);
-  const drawY = Math.floor((canvas.height - drawHeight) / 2) - (floating ? floatingOffset(now, floatingPhase) * scale : 0);
+  const drawY = Math.floor((canvas.height - drawHeight) / 2);
   context.imageSmoothingEnabled = false;
   context.drawImage(source.sheet.canvas, source.sourceX, source.sourceY, source.sourceWidth, source.sourceHeight, drawX, drawY, drawWidth, drawHeight);
 }
@@ -635,8 +627,7 @@ function drawActorOnMap(context, actor, scale, now) {
     source.sourceWidth,
     source.sourceHeight,
     actor.position[0] * scale,
-    actor.position[1] * scale - (source.sourceHeight / CELL_SIZE - 1) * scale
-      - (actor.floating ? floatingOffset(now, floatingPhase) * scale / CELL_SIZE : 0),
+    actor.position[1] * scale - (source.sourceHeight / CELL_SIZE - 1) * scale,
     scale,
     source.sourceHeight / CELL_SIZE * scale,
   );

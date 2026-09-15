@@ -530,7 +530,7 @@ class FieldRendererTest(unittest.TestCase):
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
         )
 
-    def test_floating_player_animates_while_idle_and_only_offsets_draw_y(self) -> None:
+    def test_floating_player_animates_while_idle_without_offsetting_draw_y(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="town")
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
         walking_image = Mock(width=384, height=384)
@@ -545,8 +545,8 @@ class FieldRendererTest(unittest.TestCase):
         expected = (
             (0, 32, -8),
             (FLOATING_CHARACTER_FRAME_INTERVAL, 16, -8),
-            (FLOATING_CHARACTER_FRAME_INTERVAL * 2, 0, -10),
-            (FLOATING_CHARACTER_FRAME_INTERVAL * 3, 16, -10),
+            (FLOATING_CHARACTER_FRAME_INTERVAL * 2, 0, -8),
+            (FLOATING_CHARACTER_FRAME_INTERVAL * 3, 16, -8),
             (FLOATING_CHARACTER_FRAME_INTERVAL * 4, 32, -8),
         )
         for frame_count, source_x, draw_y in expected:
@@ -785,7 +785,7 @@ class FieldRendererTest(unittest.TestCase):
             actor_pc_character_image=pc_image,
         )
 
-        pyxel.blt.assert_any_call(16, -18, npc_image, 0, 0, 16, 32, 1)
+        pyxel.blt.assert_any_call(16, -16, npc_image, 0, 0, 16, 32, 1)
         pyxel.blt.assert_any_call(32, -16, pc_image, 80, 0, 16, 32, 1)
 
     def test_draws_the_current_treasure_animation_frame(self) -> None:
