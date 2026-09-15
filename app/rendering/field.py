@@ -9,6 +9,7 @@ import pyxel
 if __package__ == "rendering":
     from field import FieldActors, FieldMovement
     from input import Direction
+    from rendering.character_shadow import draw_character_shadow
     from rendering.floating import (
         floating_character_frame,
         floating_phase_offset,
@@ -18,6 +19,7 @@ else:
     from ..field import FieldActors, FieldMovement
     from ..input import Direction
     from ..resources.maps import CompiledMap, MapObjectTile
+    from .character_shadow import draw_character_shadow
     from .floating import (
         floating_character_frame,
         floating_phase_offset,
@@ -445,6 +447,11 @@ class FieldRenderer:
             source_image = image
             draw_y = field.world_y - camera_y - FIELD_CHARACTER_SIZE
             draw_height = FIELD_ACTOR_CHARACTER_HEIGHT
+            draw_character_shadow(
+                self._pyxel,
+                field.world_x - camera_x,
+                field.world_y - camera_y,
+            )
         self._pyxel.blt(
             field.world_x - camera_x,
             draw_y,
@@ -513,6 +520,11 @@ class FieldRenderer:
             block_y
             + FIELD_PLAYER_CHARACTER_FACING_ROWS[field.facing]
             * FIELD_PLAYER_CHARACTER_HEIGHT
+        )
+        draw_character_shadow(
+            self._pyxel,
+            field.world_x - camera_x,
+            field.world_y - camera_y,
         )
         self._pyxel.blt(
             field.world_x - camera_x,

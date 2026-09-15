@@ -105,6 +105,7 @@ from rendering import (
     FadeThroughBlack,
     MonsterDeathAnimation,
     SpellEffectRenderer,
+    draw_character_shadow,
     floating_offset,
     floating_phase_offset,
 )
@@ -7903,12 +7904,14 @@ class BattleScene:
                     len(HIDE_REFERENCE_OFFSETS) - 1,
                 )
                 opacity = max(0.0, 1.0 - max(reference_frame - 1, 0) / 5)
-                y -= self._party_floating_offset(
-                    index,
-                    FORMATION_SPRITE_STEP_X,
-                )
                 pyxel.dither(opacity)
                 try:
+                    if self._party_shadow_is_visible(FORMATION_SPRITE_STEP_X):
+                        self._draw_party_shadow(x, y, PARTY_SPRITE_WIDTH)
+                    y -= self._party_floating_offset(
+                        index,
+                        FORMATION_SPRITE_STEP_X,
+                    )
                     pyxel.blt(
                         x,
                         y,
@@ -7946,14 +7949,17 @@ class BattleScene:
                 )
                 else None
             )
+            sprite_source_x = (
+                attack_pose.character_pose * PARTY_SPRITE_WIDTH
+                if attack_pose is not None
+                else self._party_sprite_source_x(index)
+            )
+            if self._party_shadow_is_visible(sprite_source_x):
+                self._draw_party_shadow(x, y, width)
             if attack_pose is not None:
-                y -= self._party_floating_offset(
-                    index,
-                    attack_pose.character_pose * PARTY_SPRITE_WIDTH,
-                )
+                y -= self._party_floating_offset(index, sprite_source_x)
                 self._draw_attack_composite(index, x, y, attack_pose)
                 continue
-            sprite_source_x = self._party_sprite_source_x(index)
             y -= self._party_floating_offset(index, sprite_source_x)
             if self.phase is BattlePhase.ACTION_PRESENTATION:
                 self._draw_spell_effect_target(
@@ -8149,18 +8155,40 @@ class BattleScene:
             x += 16
         return x
 
-    def _party_floating_offset(self, index: int, sprite_source_x: int) -> int:
-        """Return a fairy member's offset unless a collapsed pose is visible."""
+    @staticmethod
+    def _draw_party_shadow(x: int, y: int, sprite_width: int) -> None:
+        """Draw a centered shadow below one visible party sprite."""
 
-        if self._party_member_is_dead(index) or sprite_source_x in (
+        shadow_x = x + (abs(sprite_width) - PARTY_SPRITE_WIDTH) // 2
+        draw_character_shadow(pyxel, shadow_x, y + PARTY_SPRITE_WIDTH)
+
+    @staticmethod
+    def _party_shadow_is_visible(sprite_source_x: int) -> bool:
+        """Hide the shadow only for the seventh and tenth collapsed poses."""
+
+        return sprite_source_x not in (
             NEAR_DEATH_SPRITE_SOURCE_X,
             DEAD_SPRITE_SOURCE_X,
-        ):
-            return 0
+        )
+
+    def _party_floating_is_enabled(self, index: int, sprite_source_x: int) -> bool:
+        """Return whether the member is a fairy in a floating battle state."""
+
+        if not self._party_member_is_fairy(index):
+            return False
+        return self._party_shadow_is_visible(sprite_source_x)
+
+    def _party_member_is_fairy(self, index: int) -> bool:
         member = self.party_visuals[index].member
         definition = getattr(member, "definition", None)
-        if getattr(definition, "race", None) is not Race.FAIRY:
+        return getattr(definition, "race", None) is Race.FAIRY
+
+    def _party_floating_offset(self, index: int, sprite_source_x: int) -> int:
+        """Return the current offset for a fairy in a floating battle state."""
+
+        if not self._party_floating_is_enabled(index, sprite_source_x):
             return 0
+        definition = self.party_visuals[index].member.definition
         return floating_offset(
             pyxel.frame_count,
             phase_offset=floating_phase_offset(f"pc:{definition.key}"),

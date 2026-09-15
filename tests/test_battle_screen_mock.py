@@ -242,6 +242,11 @@ from tools.screen_mocks._runtime import FPS
 from input import Direction, InputButton, InputDevice, InputState
 from monster import MonsterBattleState, MonsterCombatStats, MonsterDefinition
 from rendering import (
+    CHARACTER_SHADOW_BANK,
+    CHARACTER_SHADOW_COLKEY,
+    CHARACTER_SHADOW_SIZE,
+    CHARACTER_SHADOW_SOURCE_X,
+    CHARACTER_SHADOW_SOURCE_Y,
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
     MONSTER_DEATH_BRIGHTEN_FRAME_COUNT,
@@ -258,6 +263,19 @@ from rendering import (
 from resources import ImageResources, load_record_array
 from ui import CursorTarget, Window, WindowCursor
 from ui import DEFAULT_TEXT_COLOR
+
+
+def _character_shadow_call(x: int, y: int):
+    return call(
+        x,
+        y,
+        CHARACTER_SHADOW_BANK,
+        CHARACTER_SHADOW_SOURCE_X,
+        CHARACTER_SHADOW_SOURCE_Y,
+        CHARACTER_SHADOW_SIZE,
+        CHARACTER_SHADOW_SIZE,
+        CHARACTER_SHADOW_COLKEY,
+    )
 
 
 _JAPANESE_COMMAND_LABELS = {
@@ -1052,7 +1070,9 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
+                _character_shadow_call(156, 80),
                 call(156, 64, mock.character_sprites, 0, 64, 16, 32, 1),
+                _character_shadow_call(176, 108),
                 call(
                     176,
                     92,
@@ -1082,15 +1102,12 @@ class BattleScreenMockTest(unittest.TestCase):
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock._draw_party()
 
-        blt.assert_called_once_with(
-            156,
-            64,
-            mock.character_sprites,
-            0,
-            64,
-            -16,
-            32,
-            1,
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                _character_shadow_call(156, 80),
+                call(156, 64, mock.character_sprites, 0, 64, -16, 32, 1),
+            ],
         )
 
     def test_party_uses_near_death_and_wide_dead_poses(self) -> None:
@@ -1204,7 +1221,9 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
+                _character_shadow_call(156, 80),
                 call(156, 62, mock.character_sprites, 0, 0, 16, 32, 1),
+                _character_shadow_call(160, 108),
                 call(160, 92, mock.character_sprites, 0, 32, 16, 32, 1),
                 call(
                     164,
@@ -1229,7 +1248,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_dying_fairy_floats_while_temporary_damage_pose_is_visible(self) -> None:
+    def test_dying_fairy_floats_with_shadow_during_temporary_damage_pose(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (
@@ -1256,16 +1275,73 @@ class BattleScreenMockTest(unittest.TestCase):
         ):
             mock._draw_party()
 
-        blt.assert_called_once_with(
-            164,
-            62,
-            mock.character_sprites,
-            MONSTER_DAMAGE_SPRITE_SOURCE_X,
-            64,
-            16,
-            32,
-            1,
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                _character_shadow_call(164, 80),
+                call(
+                    164,
+                    62,
+                    mock.character_sprites,
+                    MONSTER_DAMAGE_SPRITE_SOURCE_X,
+                    64,
+                    16,
+                    32,
+                    1,
+                ),
+            ],
         )
+
+    def test_fairy_ailments_do_not_hide_shadow_for_a_floating_pose(self) -> None:
+        for field, value in (
+            ("paralyzed", True),
+            ("stunned", True),
+            ("confused", 1),
+        ):
+            with self.subTest(field=field):
+                member = SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                    is_dying=False,
+                    definition=SimpleNamespace(key="Fiora", race=Race.FAIRY),
+                    poisoned=False,
+                    sleeping=0,
+                    paralyzed=False,
+                    stunned=False,
+                    confused=0,
+                )
+                setattr(member, field, value)
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.character_sprites = object()
+                mock.party_visuals = (
+                    SimpleNamespace(member=member, battle_sprite=0),
+                )
+                mock.phase = BattleMockPhase.COMMAND
+                mock.active_party_index = None
+                mock.defending_party_indexes = set()
+
+                with (
+                    patch("tools.screen_mocks.battle.pyxel.frame_count", 0),
+                    patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                ):
+                    mock._draw_party()
+
+                self.assertEqual(
+                    blt.call_args_list,
+                    [
+                        _character_shadow_call(156, 80),
+                        call(
+                            156,
+                            62,
+                            mock.character_sprites,
+                            0,
+                            0,
+                            16,
+                            32,
+                            1,
+                        ),
+                    ],
+                )
 
     def test_fairy_attack_composite_floats_as_one_unit(self) -> None:
         pose = AttackPoseDefinition("SPEAR-1_2", "SPEAR-1", "2", 2, ())
@@ -1287,9 +1363,13 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._party_draw_position = Mock(return_value=(140, 64))
         mock._draw_attack_composite = Mock()
 
-        with patch("tools.screen_mocks.battle.pyxel.frame_count", 0):
+        with (
+            patch("tools.screen_mocks.battle.pyxel.frame_count", 0),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
             mock._draw_party()
 
+        self.assertEqual(blt.call_args, _character_shadow_call(140, 80))
         mock._draw_attack_composite.assert_called_once_with(0, 140, 62, pose)
 
     def test_spell_caster_advances_at_da2_speed_and_uses_defense_pose(self) -> None:
@@ -5758,7 +5838,9 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_party()
 
         mock.palette_shifter.shifted.assert_called_once_with(ACTIVE_PARTY_PULSE_PALETTE)
-        self.assertEqual(blt.call_count, 2)
+        self.assertEqual(blt.call_count, 4)
+        self.assertEqual(blt.call_args_list[0], _character_shadow_call(156, 80))
+        self.assertEqual(blt.call_args_list[2], _character_shadow_call(160, 108))
 
     def test_active_party_pulse_reaches_its_whiteward_peak_mid_cycle(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -6882,15 +6964,21 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_party()
 
         self.assertEqual(MONSTER_DAMAGE_SPRITE_SOURCE_X, 16 * 5)
-        blt.assert_called_once_with(
-            164,
-            64,
-            mock.character_sprites,
-            MONSTER_DAMAGE_SPRITE_SOURCE_X,
-            64,
-            16,
-            32,
-            1,
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                _character_shadow_call(164, 80),
+                call(
+                    164,
+                    64,
+                    mock.character_sprites,
+                    MONSTER_DAMAGE_SPRITE_SOURCE_X,
+                    64,
+                    16,
+                    32,
+                    1,
+                ),
+            ],
         )
 
     def test_monster_damage_draws_bank_zero_digit_sprites(self) -> None:
@@ -7962,15 +8050,22 @@ class BattleScreenMockTest(unittest.TestCase):
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock._draw_party()
 
-        blt.assert_called_once_with(
-            156 + ESCAPE_RUN_SPEED * ESCAPE_RUN_PATTERN_FRAME_COUNT,
-            64,
-            mock.character_sprites,
-            16,
-            64,
-            -16,
-            32,
-            1,
+        draw_x = 156 + ESCAPE_RUN_SPEED * ESCAPE_RUN_PATTERN_FRAME_COUNT
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                _character_shadow_call(draw_x, 80),
+                call(
+                    draw_x,
+                    64,
+                    mock.character_sprites,
+                    16,
+                    64,
+                    -16,
+                    32,
+                    1,
+                ),
+            ],
         )
 
     def test_escape_finishes_when_fade_reaches_black(self) -> None:

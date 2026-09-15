@@ -11,6 +11,11 @@ from app.field import (
     FieldPosition,
 )
 from app.input import Direction
+from app.rendering.character_shadow import (
+    CHARACTER_SHADOW_BANK,
+    CHARACTER_SHADOW_SOURCE_X,
+    CHARACTER_SHADOW_SOURCE_Y,
+)
 from app.rendering.field import (
     FIELD_ACTOR_CHARACTER_ANIMATION_INTERVAL,
     FIELD_ACTOR_CHARACTER_SET_HEIGHT,
@@ -636,6 +641,19 @@ class FieldRendererTest(unittest.TestCase):
                     pyxel.blt.call_args_list[-1],
                     call(8, draw_y, walking_image, source_x, 0, 16, 32, 1),
                 )
+                self.assertEqual(
+                    pyxel.blt.call_args_list[-2],
+                    call(
+                        8,
+                        8,
+                        CHARACTER_SHADOW_BANK,
+                        CHARACTER_SHADOW_SOURCE_X,
+                        CHARACTER_SHADOW_SOURCE_Y,
+                        16,
+                        16,
+                        1,
+                    ),
+                )
 
         self.assertEqual(field.position, FieldPosition(1, 1))
 
@@ -669,21 +687,47 @@ class FieldRendererTest(unittest.TestCase):
             actor_character_image=character_image,
         )
 
-        character_calls = pyxel.blt.call_args_list[-4:]
+        character_calls = pyxel.blt.call_args_list[-6:]
         self.assertEqual(
             character_calls[0],
             call(0, 0, prop_image, 16, 0, 16, 16, 1),
         )
         self.assertEqual(
             character_calls[1],
-            call(16, -16, character_image, 112, 0, 16, 32, 1),
+            call(
+                16,
+                0,
+                CHARACTER_SHADOW_BANK,
+                CHARACTER_SHADOW_SOURCE_X,
+                CHARACTER_SHADOW_SOURCE_Y,
+                16,
+                16,
+                1,
+            ),
         )
         self.assertEqual(
             character_calls[2],
-            call(32, -16, character_image, 160, 64, 16, 32, 1),
+            call(16, -16, character_image, 112, 0, 16, 32, 1),
         )
         self.assertEqual(
             character_calls[3],
+            call(
+                32,
+                0,
+                CHARACTER_SHADOW_BANK,
+                CHARACTER_SHADOW_SOURCE_X,
+                CHARACTER_SHADOW_SOURCE_Y,
+                16,
+                16,
+                1,
+            ),
+        )
+        self.assertEqual(
+            character_calls[4],
+            call(32, -16, character_image, 160, 64, 16, 32, 1),
+        )
+        self.assertEqual(
+            character_calls[5],
             call(16, 16, 0, 0, 96, 16, 16, 1),
         )
 
@@ -723,15 +767,30 @@ class FieldRendererTest(unittest.TestCase):
                     image=character_image,
                     sprite_index=1,
                 )
-                pyxel.blt.assert_called_once_with(
-                    16,
-                    0,
-                    character_image,
-                    FIELD_ACTOR_CHARACTER_SET_WIDTH + 16,
-                    source_y,
-                    16,
-                    32,
-                    1,
+                self.assertEqual(
+                    pyxel.blt.call_args_list,
+                    [
+                        call(
+                            16,
+                            16,
+                            CHARACTER_SHADOW_BANK,
+                            CHARACTER_SHADOW_SOURCE_X,
+                            CHARACTER_SHADOW_SOURCE_Y,
+                            16,
+                            16,
+                            1,
+                        ),
+                        call(
+                            16,
+                            0,
+                            character_image,
+                            FIELD_ACTOR_CHARACTER_SET_WIDTH + 16,
+                            source_y,
+                            16,
+                            32,
+                            1,
+                        ),
+                    ],
                 )
 
         movement.stop()

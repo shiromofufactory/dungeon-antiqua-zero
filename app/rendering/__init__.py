@@ -1,5 +1,14 @@
 """Shared low-level drawing services used across scenes and overlays."""
 
+from .character_shadow import (
+    CHARACTER_SHADOW_BANK,
+    CHARACTER_SHADOW_COLKEY,
+    CHARACTER_SHADOW_SIZE,
+    CHARACTER_SHADOW_SOURCE_X,
+    CHARACTER_SHADOW_SOURCE_Y,
+    draw_character_shadow,
+)
+
 from .fade import (
     DEFAULT_FADE_FRAME_COUNT,
     FadeEvent,
@@ -82,6 +91,11 @@ from .spell_effect import SPELL_EFFECT_FLASH_PALETTE, SpellEffectRenderer
 
 
 __all__ = [
+    "CHARACTER_SHADOW_BANK",
+    "CHARACTER_SHADOW_COLKEY",
+    "CHARACTER_SHADOW_SIZE",
+    "CHARACTER_SHADOW_SOURCE_X",
+    "CHARACTER_SHADOW_SOURCE_Y",
     "DIMMED_PALETTE",
     "MONOCHROME_PALETTE",
     "DEFAULT_FADE_FRAME_COUNT",
@@ -145,6 +159,7 @@ __all__ = [
     "SPELL_EFFECT_FLASH_PALETTE",
     "SpellEffectRenderer",
     "create_default_palette_shifter",
+    "draw_character_shadow",
     "grayscale_color",
     "mix_color",
     "floating_character_frame",
