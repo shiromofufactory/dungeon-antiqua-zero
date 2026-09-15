@@ -1150,7 +1150,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_fairy_party_sprites_keep_their_base_y_positions(self) -> None:
+    def test_fairy_party_sprites_float_except_collapsed_poses(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (
@@ -1195,13 +1195,16 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.active_party_index = None
         mock.defending_party_indexes = set()
 
-        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+        with (
+            patch("tools.screen_mocks.battle.pyxel.frame_count", 0),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
             mock._draw_party()
 
         self.assertEqual(
             blt.call_args_list,
             [
-                call(156, 64, mock.character_sprites, 0, 0, 16, 32, 1),
+                call(156, 62, mock.character_sprites, 0, 0, 16, 32, 1),
                 call(160, 92, mock.character_sprites, 0, 32, 16, 32, 1),
                 call(
                     164,
@@ -1225,6 +1228,69 @@ class BattleScreenMockTest(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_dying_fairy_floats_while_temporary_damage_pose_is_visible(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.character_sprites = object()
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                    is_dying=True,
+                    definition=SimpleNamespace(key="Fiora", race=Race.FAIRY),
+                ),
+                battle_sprite=2,
+            ),
+        )
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+        mock.active_party_index = None
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_damage = 15
+        mock.monster_attack_animation_frame = 0
+        mock.defending_party_indexes = set()
+
+        with (
+            patch("tools.screen_mocks.battle.pyxel.frame_count", 0),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_party()
+
+        blt.assert_called_once_with(
+            164,
+            62,
+            mock.character_sprites,
+            MONSTER_DAMAGE_SPRITE_SOURCE_X,
+            64,
+            16,
+            32,
+            1,
+        )
+
+    def test_fairy_attack_composite_floats_as_one_unit(self) -> None:
+        pose = AttackPoseDefinition("SPEAR-1_2", "SPEAR-1", "2", 2, ())
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (
+            SimpleNamespace(
+                member=SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                    definition=SimpleNamespace(key="Fiora", race=Race.FAIRY),
+                ),
+                battle_sprite=0,
+            ),
+        )
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.active_party_index = None
+        mock.action_party_index = 0
+        mock.attack_presentation = SimpleNamespace(pose=pose)
+        mock._party_draw_position = Mock(return_value=(140, 64))
+        mock._draw_attack_composite = Mock()
+
+        with patch("tools.screen_mocks.battle.pyxel.frame_count", 0):
+            mock._draw_party()
+
+        mock._draw_attack_composite.assert_called_once_with(0, 140, 62, pose)
 
     def test_spell_caster_advances_at_da2_speed_and_uses_defense_pose(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

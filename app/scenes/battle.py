@@ -82,6 +82,7 @@ from member import (
     FormationRow,
     MAX_PROTECTION_LEVEL,
     Member,
+    Race,
 )
 from monster import (
     MonsterDefinition,
@@ -104,6 +105,8 @@ from rendering import (
     FadeThroughBlack,
     MonsterDeathAnimation,
     SpellEffectRenderer,
+    floating_offset,
+    floating_phase_offset,
 )
 from resources import (
     TRANSPARENT_INDEX,
@@ -7900,6 +7903,10 @@ class BattleScene:
                     len(HIDE_REFERENCE_OFFSETS) - 1,
                 )
                 opacity = max(0.0, 1.0 - max(reference_frame - 1, 0) / 5)
+                y -= self._party_floating_offset(
+                    index,
+                    FORMATION_SPRITE_STEP_X,
+                )
                 pyxel.dither(opacity)
                 try:
                     pyxel.blt(
@@ -7940,9 +7947,14 @@ class BattleScene:
                 else None
             )
             if attack_pose is not None:
+                y -= self._party_floating_offset(
+                    index,
+                    attack_pose.character_pose * PARTY_SPRITE_WIDTH,
+                )
                 self._draw_attack_composite(index, x, y, attack_pose)
                 continue
             sprite_source_x = self._party_sprite_source_x(index)
+            y -= self._party_floating_offset(index, sprite_source_x)
             if self.phase is BattlePhase.ACTION_PRESENTATION:
                 self._draw_spell_effect_target(
                     "ally",
@@ -8136,6 +8148,23 @@ class BattleScene:
         if not self._party_member_is_front_row(index):
             x += 16
         return x
+
+    def _party_floating_offset(self, index: int, sprite_source_x: int) -> int:
+        """Return a fairy member's offset unless a collapsed pose is visible."""
+
+        if self._party_member_is_dead(index) or sprite_source_x in (
+            NEAR_DEATH_SPRITE_SOURCE_X,
+            DEAD_SPRITE_SOURCE_X,
+        ):
+            return 0
+        member = self.party_visuals[index].member
+        definition = getattr(member, "definition", None)
+        if getattr(definition, "race", None) is not Race.FAIRY:
+            return 0
+        return floating_offset(
+            pyxel.frame_count,
+            phase_offset=floating_phase_offset(f"pc:{definition.key}"),
+        )
 
     def _party_member_is_dead(self, index: int) -> bool:
         visuals = getattr(self, "party_visuals", ())
