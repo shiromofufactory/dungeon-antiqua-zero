@@ -61,6 +61,7 @@ from member import (
     FormationRow,
     Member,
     MemberDataError,
+    Race,
 )
 from monster import MonsterDataError
 from resources import (
@@ -92,6 +93,8 @@ from rendering import (
     FadePhase,
     FadeThroughBlack,
     EncounterTransition,
+    FIELD_ACTOR_CHARACTER_SET_HEIGHT,
+    FIELD_ACTOR_CHARACTER_SET_WIDTH,
     FIELD_CHARACTER_ASSET_ID,
     FIELD_PLAYER_CHARACTER_ASSET_ID,
     FIELD_PLAYER_CHARACTER_SET_HEIGHT,
@@ -517,6 +520,7 @@ class Game:
         self.field_actors: FieldActors | None = None
         self.field_prop_image = None
         self.field_actor_character_image = None
+        self.field_actor_pc_character_image = None
         self.field_player_character_image = None
         self.field_treasure_image = None
         self._reset_field_actors()
@@ -1001,6 +1005,7 @@ class Game:
             self.field_actors = None
             self.field_prop_image = None
             self.field_actor_character_image = None
+            self.field_actor_pc_character_image = None
             self.field_player_character_image = None
             self.field_treasure_image = None
             return
@@ -1014,8 +1019,17 @@ class Game:
         )
         actors = self.field_actors.actors
         prop_actors = tuple(actor for actor in actors if actor.kind == "prop")
-        character_actors = tuple(
-            actor for actor in actors if actor.kind in ("stationary", "roaming")
+        npc_character_actors = tuple(
+            actor
+            for actor in actors
+            if actor.kind in ("stationary", "roaming")
+            and actor.sprite_source == "npc"
+        )
+        pc_character_actors = tuple(
+            actor
+            for actor in actors
+            if actor.kind in ("stationary", "roaming")
+            and actor.sprite_source == "pc"
         )
         treasure_actors = tuple(actor for actor in actors if actor.kind == "treasure")
         self.field_prop_image = None
@@ -1032,15 +1046,22 @@ class Game:
                 )
             self.field_prop_image = self.images.image(FIELD_PROP_ASSET_ID)
         self.field_actor_character_image = None
-        if character_actors:
+        if npc_character_actors:
             entry = self.images.entry(FIELD_CHARACTER_ASSET_ID)
-            if entry.width % 32 or entry.height % 64:
-                raise ImageResourceError(
-                    f"{FIELD_CHARACTER_ASSET_ID}の寸法は幅32px、高さ64pxの倍数である必要があります。"
-                )
-            character_capacity = (entry.width // 32) * (entry.height // 64)
             if (
-                max(actor.sprite_index for actor in character_actors)
+                entry.width % FIELD_ACTOR_CHARACTER_SET_WIDTH
+                or entry.height % FIELD_ACTOR_CHARACTER_SET_HEIGHT
+            ):
+                raise ImageResourceError(
+                    f"{FIELD_CHARACTER_ASSET_ID}の寸法は幅"
+                    f"{FIELD_ACTOR_CHARACTER_SET_WIDTH}px、高さ"
+                    f"{FIELD_ACTOR_CHARACTER_SET_HEIGHT}pxの倍数である必要があります。"
+                )
+            character_capacity = (
+                entry.width // FIELD_ACTOR_CHARACTER_SET_WIDTH
+            ) * (entry.height // FIELD_ACTOR_CHARACTER_SET_HEIGHT)
+            if (
+                max(actor.sprite_index for actor in npc_character_actors)
                 >= character_capacity
             ):
                 raise ImageResourceError(
@@ -1049,8 +1070,13 @@ class Game:
             self.field_actor_character_image = self.images.image(
                 FIELD_CHARACTER_ASSET_ID
             )
+        self.field_actor_pc_character_image = None
         self.field_player_character_image = None
-        if self.current_map.profile in ("town", "dungeon"):
+        uses_player_character_image = self.current_map.profile in (
+            "town",
+            "dungeon",
+        )
+        if uses_player_character_image or pc_character_actors:
             entry = self.images.entry(FIELD_PLAYER_CHARACTER_ASSET_ID)
             minimum_width = (
                 FIELD_PLAYER_CHARACTER_SET_WIDTH * FIELD_PLAYER_CHARACTER_SETS_PER_ROW
@@ -1065,24 +1091,35 @@ class Game:
                     f"{FIELD_PLAYER_CHARACTER_SET_WIDTH}px単位、高さ"
                     f"{FIELD_PLAYER_CHARACTER_SET_HEIGHT}px単位である必要があります。"
                 )
-            sprite_index = self.party[0].definition.battle_sprite
-            source_x = (
-                sprite_index % FIELD_PLAYER_CHARACTER_SETS_PER_ROW
-            ) * FIELD_PLAYER_CHARACTER_SET_WIDTH
-            source_y = (
-                sprite_index // FIELD_PLAYER_CHARACTER_SETS_PER_ROW
-            ) * FIELD_PLAYER_CHARACTER_SET_HEIGHT
-            if (
-                source_x + FIELD_PLAYER_CHARACTER_SET_WIDTH > entry.width
-                or source_y + FIELD_PLAYER_CHARACTER_SET_HEIGHT > entry.height
-            ):
-                raise ImageResourceError(
-                    f"{FIELD_PLAYER_CHARACTER_ASSET_ID}に先頭キャラクターの"
-                    "battle_spriteが参照する画像セットがありません。"
+            required_sprite_indices = [
+                actor.sprite_index for actor in pc_character_actors
+            ]
+            if uses_player_character_image:
+                required_sprite_indices.append(
+                    self.party[0].definition.battle_sprite
                 )
-            self.field_player_character_image = self.images.image(
+            for sprite_index in required_sprite_indices:
+                source_x = (
+                    sprite_index % FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+                ) * FIELD_PLAYER_CHARACTER_SET_WIDTH
+                source_y = (
+                    sprite_index // FIELD_PLAYER_CHARACTER_SETS_PER_ROW
+                ) * FIELD_PLAYER_CHARACTER_SET_HEIGHT
+                if (
+                    source_x + FIELD_PLAYER_CHARACTER_SET_WIDTH > entry.width
+                    or source_y + FIELD_PLAYER_CHARACTER_SET_HEIGHT > entry.height
+                ):
+                    raise ImageResourceError(
+                        f"{FIELD_PLAYER_CHARACTER_ASSET_ID}にsprite_index "
+                        f"{sprite_index}が参照する画像セットがありません。"
+                    )
+            character_image = self.images.image(
                 FIELD_PLAYER_CHARACTER_ASSET_ID
             )
+            if pc_character_actors:
+                self.field_actor_pc_character_image = character_image
+            if uses_player_character_image:
+                self.field_player_character_image = character_image
         self.field_treasure_image = None
         if treasure_actors:
             entry = self.images.entry(FIELD_TREASURE_ASSET_ID)
@@ -3037,14 +3074,15 @@ class Game:
         """Draw the current field and any field-owned overlays."""
 
         if isinstance(getattr(self, "field_actors", None), FieldActors):
+            player_member = self._field_player_member()
             draw_options = {
                 "actors": self.field_actors,
                 "prop_image": self.field_prop_image,
                 "actor_character_image": self.field_actor_character_image,
+                "actor_pc_character_image": self.field_actor_pc_character_image,
                 "player_character_image": self.field_player_character_image,
-                "player_sprite_index": (
-                    self._field_player_member().definition.battle_sprite
-                ),
+                "player_sprite_index": player_member.definition.battle_sprite,
+                "player_floating": player_member.definition.race is Race.FAIRY,
                 "treasure_image": self.field_treasure_image,
             }
             if not draw_player:

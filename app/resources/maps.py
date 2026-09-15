@@ -22,6 +22,7 @@ MAP_OBJECT_DRAW_GROUPS = frozenset(
 MAP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAP_FACINGS = frozenset(("up", "right", "down", "left"))
 MAP_ACTOR_KINDS = frozenset(("prop", "stationary", "roaming", "treasure"))
+MAP_ACTOR_SPRITE_SOURCES = frozenset(("npc", "pc"))
 TREASURE_CONTENT_TYPES = frozenset(("gold", "item"))
 MAP_EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
@@ -97,6 +98,8 @@ class MapActor:
     sprite_index: int
     facing: str | None = None
     contents: MapTreasureContents | None = None
+    sprite_source: str = "npc"
+    floating: bool = False
 
 
 @dataclass(frozen=True)
@@ -732,6 +735,8 @@ class MapResources:
                     ),
                     facing=cls._actor_facing(record, path),
                     contents=cls._treasure_contents(record, path),
+                    sprite_source=cls._actor_sprite_source(record, path),
+                    floating=cls._actor_floating(record, path),
                 )
             )
         return tuple(loaded)
@@ -753,6 +758,37 @@ class MapResources:
                 )
             return None
         return cls._facing(record.get("facing"), f"{path}.facing")
+
+    @staticmethod
+    def _actor_sprite_source(record: Mapping[str, object], path: str) -> str:
+        kind = record.get("kind")
+        if kind in ("prop", "treasure"):
+            if "sprite_source" in record:
+                raise MapResourceError(
+                    f"マップJSONの{path}.sprite_sourceは人物actorだけに指定できます。"
+                )
+            return "npc"
+        source = record.get("sprite_source", "npc")
+        if source not in MAP_ACTOR_SPRITE_SOURCES:
+            raise MapResourceError(
+                f"マップJSONの{path}.sprite_sourceはnpcまたはpcである必要があります。"
+            )
+        return source
+
+    @staticmethod
+    def _actor_floating(record: Mapping[str, object], path: str) -> bool:
+        if record.get("kind") in ("prop", "treasure"):
+            if "floating" in record:
+                raise MapResourceError(
+                    f"マップJSONの{path}.floatingは人物actorだけに指定できます。"
+                )
+            return False
+        floating = record.get("floating", False)
+        if not isinstance(floating, bool):
+            raise MapResourceError(
+                f"マップJSONの{path}.floatingは真偽値である必要があります。"
+            )
+        return floating
 
     @classmethod
     def _treasure_contents(

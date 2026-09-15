@@ -12,6 +12,9 @@ from app.field import (
 )
 from app.input import Direction
 from app.rendering.field import (
+    FIELD_ACTOR_CHARACTER_ANIMATION_INTERVAL,
+    FIELD_ACTOR_CHARACTER_SET_HEIGHT,
+    FIELD_ACTOR_CHARACTER_SET_WIDTH,
     FIELD_CHARACTER_ANIMATION_INTERVAL,
     FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL,
     FIELD_PLAYER_CHARACTER_SET_HEIGHT,
@@ -498,6 +501,30 @@ class FieldRendererTest(unittest.TestCase):
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
         )
 
+    def test_floating_player_only_offsets_the_draw_position(self) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="town")
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        walking_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=48)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            player_character_image=walking_image,
+            player_floating=True,
+        )
+
+        self.assertEqual(field.position, FieldPosition(1, 1))
+        self.assertEqual(
+            pyxel.blt.call_args_list[-1],
+            call(8, -10, walking_image, 16, 0, 16, 32, 1),
+        )
+
     def test_draws_actor_common_sheets_and_player_character_bank(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
         object.__setattr__(
@@ -512,7 +539,7 @@ class FieldRendererTest(unittest.TestCase):
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
         actors = FieldActors(map_data)
         prop_image = Mock(width=32, height=16)
-        character_image = Mock(width=128, height=64)
+        character_image = Mock(width=192, height=128)
         pyxel = Mock(frame_count=0)
         renderer = FieldRenderer(
             map_data,
@@ -535,16 +562,191 @@ class FieldRendererTest(unittest.TestCase):
         )
         self.assertEqual(
             character_calls[1],
-            call(16, 0, character_image, 64, 32, 16, 16, 1),
+            call(16, -16, character_image, 112, 0, 16, 32, 1),
         )
         self.assertEqual(
             character_calls[2],
-            call(32, 0, character_image, 96, 48, 16, 16, 1),
+            call(32, -16, character_image, 160, 64, 16, 32, 1),
         )
         self.assertEqual(
             character_calls[3],
             call(16, 16, 0, 0, 96, 16, 16, 1),
         )
+
+    def test_actor_character_uses_pc_format_rows_and_walking_frames(self) -> None:
+        map_data = compiled_map(("0000", "0000", "0000"), profile="town")
+        movement = FieldMovement(
+            map_data,
+            start=FieldPosition(1, 1),
+            facing=Direction.DOWN,
+        )
+        character_image = Mock(
+            width=FIELD_ACTOR_CHARACTER_SET_WIDTH * 2,
+            height=FIELD_ACTOR_CHARACTER_SET_HEIGHT,
+        )
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=64,
+            screen_height=48,
+            pyxel_api=pyxel,
+        )
+
+        for direction, source_y in (
+            (Direction.DOWN, 0),
+            (Direction.UP, 32),
+            (Direction.LEFT, 64),
+            (Direction.RIGHT, 96),
+        ):
+            with self.subTest(direction=direction):
+                movement.facing = direction
+                pyxel.blt.reset_mock()
+                renderer._draw_character(
+                    movement,
+                    0,
+                    0,
+                    0,
+                    image=character_image,
+                    sprite_index=1,
+                )
+                pyxel.blt.assert_called_once_with(
+                    16,
+                    0,
+                    character_image,
+                    FIELD_ACTOR_CHARACTER_SET_WIDTH + 16,
+                    source_y,
+                    16,
+                    32,
+                    1,
+                )
+
+        movement.stop()
+        expected_frames = (32,) * 4 + (16,) * 4 + (0,) * 4 + (16,) * 4
+        self.assertEqual(FIELD_ACTOR_CHARACTER_ANIMATION_INTERVAL, 4)
+        for source_offset in expected_frames:
+            movement.update(Direction.RIGHT)
+            pyxel.blt.reset_mock()
+            renderer._draw_character(
+                movement,
+                0,
+                0,
+                0,
+                image=character_image,
+                sprite_index=1,
+            )
+            self.assertEqual(
+                pyxel.blt.call_args.args[3],
+                FIELD_ACTOR_CHARACTER_SET_WIDTH + source_offset,
+            )
+
+        movement.update(None)
+        pyxel.blt.reset_mock()
+        renderer._draw_character(
+            movement,
+            0,
+            0,
+            0,
+            image=character_image,
+            sprite_index=1,
+        )
+        self.assertEqual(
+            pyxel.blt.call_args.args[3],
+            FIELD_ACTOR_CHARACTER_SET_WIDTH + 16,
+        )
+
+    def test_actor_character_selects_pc_walking_sheet(self) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="town")
+        object.__setattr__(
+            map_data,
+            "actors",
+            (
+                MapActor(
+                    "alvan",
+                    MapCell(1, 0),
+                    "stationary",
+                    1,
+                    "down",
+                    sprite_source="pc",
+                ),
+            ),
+        )
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        actors = FieldActors(map_data)
+        npc_image = Mock(width=96, height=128)
+        pc_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=48,
+            screen_height=48,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            actors=actors,
+            actor_character_image=npc_image,
+            actor_pc_character_image=pc_image,
+        )
+
+        pyxel.blt.assert_any_call(
+            16,
+            -16,
+            pc_image,
+            FIELD_ACTOR_CHARACTER_SET_WIDTH + 16,
+            0,
+            16,
+            32,
+            1,
+        )
+
+    def test_actor_floating_is_independent_of_pc_sprite_source(self) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="town")
+        object.__setattr__(
+            map_data,
+            "actors",
+            (
+                MapActor(
+                    "fairy",
+                    MapCell(1, 0),
+                    "stationary",
+                    0,
+                    "down",
+                    sprite_source="npc",
+                    floating=True,
+                ),
+                MapActor(
+                    "bed_fairy",
+                    MapCell(2, 0),
+                    "stationary",
+                    1,
+                    "down",
+                    sprite_source="pc",
+                    floating=False,
+                ),
+            ),
+        )
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        actors = FieldActors(map_data)
+        npc_image = Mock(width=96, height=128)
+        pc_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=48)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=48,
+            screen_height=48,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            actors=actors,
+            actor_character_image=npc_image,
+            actor_pc_character_image=pc_image,
+        )
+
+        pyxel.blt.assert_any_call(16, -18, npc_image, 16, 0, 16, 32, 1)
+        pyxel.blt.assert_any_call(32, -16, pc_image, 64, 0, 16, 32, 1)
 
     def test_draws_the_current_treasure_animation_frame(self) -> None:
         map_data = compiled_map(("000", "000", "000"))

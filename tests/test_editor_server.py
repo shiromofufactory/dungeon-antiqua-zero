@@ -52,9 +52,12 @@ class EditorServerTest(unittest.TestCase):
         Image.new("RGB", (48, 16), (255, 0, 128)).save(
             actor_image_root / "props.png"
         )
-        Image.new("RGB", (64, 64), (255, 0, 128)).save(
-            actor_image_root / "characters.png"
+        Image.new("P", (96, 128), 1).save(
+            actor_image_root / "characters.gif"
         )
+        pc_image_root = self.content_root / "images" / "characters"
+        pc_image_root.mkdir(parents=True)
+        Image.new("P", (384, 384), 1).save(pc_image_root / "ch_walk.gif")
         save_tileset(
             self.content_root / "maps" / "tilesets" / "worldmap.json",
             initial_worldmap_tileset(),
@@ -251,11 +254,18 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn('$("namespace-form").addEventListener("submit"', event_script)
 
         with urlopen(
+            f"{self.base_url}/map/api/actor-image?asset=pc_character&token=shared-token",
+            timeout=3,
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/gif")
+            self.assertTrue(response.read().startswith(b"GIF"))
+
+        with urlopen(
             f"{self.base_url}/map/api/actor-image?asset=character&token=shared-token",
             timeout=3,
         ) as response:
-            self.assertEqual(response.headers.get_content_type(), "image/png")
-            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
+            self.assertEqual(response.headers.get_content_type(), "image/gif")
+            self.assertTrue(response.read().startswith(b"GIF"))
 
     def test_root_redirects_to_the_map_editor(self) -> None:
         with urlopen(

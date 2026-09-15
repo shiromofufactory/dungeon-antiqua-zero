@@ -89,8 +89,8 @@ code { padding: .08rem .3rem; border-radius: 4px; background: rgba(0,0,0,.26); c
 .field label { color: var(--muted); font-size: 11px; }
 .field-note { color: var(--muted); font: 10px ui-monospace,SFMono-Regular,Menlo,monospace; line-height: 1.35; }
 input[type="number"], input[type="text"], select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: #141713; color: var(--text); }
-.actor-sprite-select { width: 100%; min-height: 58px; padding: 7px 9px; display: flex; align-items: center; gap: 10px; text-align: left; }
-.actor-sprite-select canvas { width: 42px; height: 42px; flex: none; border: 1px solid var(--line); border-radius: 5px; background-color: #141713; background-image: linear-gradient(45deg,#272c24 25%,transparent 25%),linear-gradient(-45deg,#272c24 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#272c24 75%),linear-gradient(-45deg,transparent 75%,#272c24 75%); background-size: 10px 10px; background-position: 0 0,0 5px,5px -5px,-5px 0; image-rendering: pixelated; }
+.actor-sprite-select { width: 100%; min-height: 72px; padding: 7px 9px; display: flex; align-items: center; gap: 10px; text-align: left; }
+.actor-sprite-select canvas { width: 42px; height: 63px; flex: none; border: 1px solid var(--line); border-radius: 5px; background-color: #141713; background-image: linear-gradient(45deg,#272c24 25%,transparent 25%),linear-gradient(-45deg,#272c24 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#272c24 75%),linear-gradient(-45deg,transparent 75%,#272c24 75%); background-size: 10px 10px; background-position: 0 0,0 5px,5px -5px,-5px 0; image-rendering: pixelated; }
 .actor-sprite-select-copy { display: grid; gap: 2px; }
 .actor-sprite-select-copy strong { color: var(--accent); }
 .actor-sprite-select-copy span { color: var(--muted); font-size: 11px; }
@@ -121,10 +121,10 @@ input[type="number"], input[type="text"], select { width: 100%; min-width: 0; pa
 .actor-sprite-dialog-heading h2 { font-size: 15px; }
 .actor-sprite-dialog-heading p { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .actor-sprite-options { min-height: 180px; padding: 14px 18px; display: grid; grid-template-columns: repeat(auto-fill,minmax(82px,1fr)); align-content: start; gap: 8px; overflow: auto; }
-.actor-sprite-option { min-height: 82px; padding: 8px; display: grid; justify-items: center; align-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 7px; background: #141713; color: var(--muted); cursor: pointer; }
+.actor-sprite-option { min-height: 98px; padding: 8px; display: grid; justify-items: center; align-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 7px; background: #141713; color: var(--muted); cursor: pointer; }
 .actor-sprite-option:hover, .actor-sprite-option:focus-visible { border-color: var(--accent); background: #2d3328; outline: none; }
 .actor-sprite-option.selected { border-color: var(--pink); color: var(--text); box-shadow: inset 0 0 0 1px var(--pink); }
-.actor-sprite-option canvas { width: 48px; height: 48px; border-radius: 4px; background-color: #11130f; background-image: linear-gradient(45deg,#272c24 25%,transparent 25%),linear-gradient(-45deg,#272c24 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#272c24 75%),linear-gradient(-45deg,transparent 75%,#272c24 75%); background-size: 12px 12px; background-position: 0 0,0 6px,6px -6px,-6px 0; image-rendering: pixelated; }
+.actor-sprite-option canvas { width: 48px; height: 64px; border-radius: 4px; background-color: #11130f; background-image: linear-gradient(45deg,#272c24 25%,transparent 25%),linear-gradient(-45deg,#272c24 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#272c24 75%),linear-gradient(-45deg,transparent 75%,#272c24 75%); background-size: 12px 12px; background-position: 0 0,0 6px,6px -6px,-6px 0; image-rendering: pixelated; }
 .actor-sprite-option span { font: 11px ui-monospace,SFMono-Regular,Menlo,monospace; }
 .actor-sprite-dialog-actions { padding: 11px 18px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--line); }
 .resource-dialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(#252b22, #191d17); color: var(--text); box-shadow: 0 18px 60px #000a; }

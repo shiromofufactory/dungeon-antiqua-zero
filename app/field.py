@@ -197,6 +197,8 @@ class FieldActor:
     id: str
     kind: str
     sprite_index: int
+    sprite_source: str
+    floating: bool
     movement: FieldMovement
     roam_wait_frames: int = 0
     treasure_frame: int = 0
@@ -226,6 +228,8 @@ class FieldActors:
                 actor.id,
                 actor.kind,
                 actor.sprite_index,
+                actor.sprite_source,
+                actor.floating,
                 FieldMovement(
                     map_data,
                     start=FieldPosition(actor.position.x, actor.position.y),

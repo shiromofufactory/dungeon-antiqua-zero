@@ -37,9 +37,12 @@ class MapEditorServerTest(unittest.TestCase):
         Image.new("RGB", (48, 16), (255, 0, 128)).save(
             actor_image_root / "props.png"
         )
-        Image.new("RGB", (64, 64), (255, 0, 128)).save(
-            actor_image_root / "characters.png"
+        Image.new("P", (96, 128), 1).save(
+            actor_image_root / "characters.gif"
         )
+        pc_image_root = content_root / "images" / "characters"
+        pc_image_root.mkdir(parents=True)
+        Image.new("P", (384, 384), 1).save(pc_image_root / "ch_walk.gif")
         Image.new("RGB", (48, 16), (255, 0, 128)).save(
             actor_image_root / "treasure.png"
         )
@@ -156,7 +159,10 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertEqual(payload["site_options"], [])
         self.assertEqual(payload["actor_assets"]["prop"]["sprite_size"], [16, 16])
         self.assertEqual(
-            payload["actor_assets"]["character"]["sprite_size"], [32, 64]
+            payload["actor_assets"]["character"]["sprite_size"], [48, 128]
+        )
+        self.assertEqual(
+            payload["actor_assets"]["pc_character"]["sprite_size"], [48, 128]
         )
         self.assertEqual(
             payload["actor_assets"]["treasure"]["sprite_size"], [48, 16]
@@ -173,6 +179,18 @@ class MapEditorServerTest(unittest.TestCase):
 
     def test_serves_actor_images_and_sprite_picker_ui(self) -> None:
         with urlopen(
+            f"{self.base_url}/api/actor-image?asset=character&token=test-token",
+            timeout=2,
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/gif")
+            self.assertTrue(response.read().startswith(b"GIF"))
+        with urlopen(
+            f"{self.base_url}/api/actor-image?asset=pc_character&token=test-token",
+            timeout=2,
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/gif")
+            self.assertTrue(response.read().startswith(b"GIF"))
+        with urlopen(
             f"{self.base_url}/api/actor-image?asset=prop&token=test-token",
             timeout=2,
         ) as response:
@@ -184,8 +202,13 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('id="actor-sprite-dialog"', page)
         self.assertIn('data-action="open-actor-sprite-dialog"', script)
         self.assertIn('data-action="select-actor-sprite"', script)
-        self.assertIn("function drawActorOnMap(context, actor, scale)", script)
-        self.assertIn("const rendered = drawActorOnMap(context, actor, scale)", script)
+        self.assertIn('["character", "pc_character"]', script)
+        self.assertIn("pc_character: { image: new Image()", script)
+        self.assertIn('actor.sprite_source === "pc"', script)
+        self.assertIn("function drawActorOnMap(context, actor, scale, now)", script)
+        self.assertIn("const rendered = drawActorOnMap(context, actor, scale, now)", script)
+        self.assertIn('data-actor-field="floating"', script)
+        self.assertIn("const FLOATING_OFFSETS = [0, 0, 0, 1, 2, 2, 2, 1]", script)
         self.assertNotIn('data-actor-field="sprite_index"', script)
         self.assertIn('id="map-select"', page)
         self.assertIn('id="new-map-dialog"', page)
@@ -568,6 +591,7 @@ class MapEditorServerTest(unittest.TestCase):
                 "position": [2, 2],
                 "kind": "stationary",
                 "sprite_index": 0,
+                "sprite_source": "pc",
                 "facing": "down",
             }
         ]
@@ -587,6 +611,7 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertTrue(result["saved"])
         runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
         self.assertEqual(runtime["actors"][0]["id"], "elder")
+        self.assertEqual(runtime["actors"][0]["sprite_source"], "pc")
         self.assertEqual(
             runtime["event_triggers"][0]["target"],
             {"kind": "actor", "actor_id": "elder", "offsets": [[0, 0]]},

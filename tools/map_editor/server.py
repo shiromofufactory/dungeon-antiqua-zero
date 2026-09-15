@@ -48,8 +48,12 @@ ACTOR_ASSETS = {
         "sprite_size": [16, 16],
     },
     "character": {
-        "path": Path("actors/characters.png"),
-        "sprite_size": [32, 64],
+        "path": Path("actors/characters.gif"),
+        "sprite_size": [48, 128],
+    },
+    "pc_character": {
+        "path": Path("characters/ch_walk.gif"),
+        "sprite_size": [48, 128],
     },
     "treasure": {
         "path": Path("actors/treasure.png"),

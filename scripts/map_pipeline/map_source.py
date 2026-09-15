@@ -34,6 +34,7 @@ TRANSPARENT_INDEX = 1
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 CARDINAL_FACINGS = frozenset(("up", "right", "down", "left"))
 ACTOR_KINDS = frozenset(("prop", "stationary", "roaming", "treasure"))
+ACTOR_SPRITE_SOURCES = frozenset(("npc", "pc"))
 TREASURE_CONTENT_TYPES = frozenset(("gold", "item"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
@@ -498,6 +499,44 @@ def _validate_actors(
                 "invalid_actor_sprite_index",
                 f"{path}.sprite_index",
                 "sprite_indexは0以上の整数で指定してください。",
+            )
+        sprite_source = actor.get("sprite_source", "npc")
+        if kind in ("prop", "treasure") and "sprite_source" in actor:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "actor_sprite_source_requires_character",
+                f"{path}.sprite_source",
+                "sprite_sourceはstationaryとroaming actorだけに指定できます。",
+            )
+        elif kind in ("stationary", "roaming") and (
+            sprite_source not in ACTOR_SPRITE_SOURCES
+        ):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_actor_sprite_source",
+                f"{path}.sprite_source",
+                "sprite_sourceはnpcまたはpcで指定してください。",
+            )
+        floating = actor.get("floating", False)
+        if kind in ("prop", "treasure") and "floating" in actor:
+            _diagnostic(
+                diagnostics,
+                "error",
+                "actor_floating_requires_character",
+                f"{path}.floating",
+                "floatingはstationaryとroaming actorだけに指定できます。",
+            )
+        elif kind in ("stationary", "roaming") and not isinstance(
+            floating, bool
+        ):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_actor_floating",
+                f"{path}.floating",
+                "floatingは真偽値で指定してください。",
             )
         contents = actor.get("contents")
         if kind == "treasure":

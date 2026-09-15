@@ -2,6 +2,8 @@
 
 const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
+const FLOATING_OFFSETS = [0, 0, 0, 1, 2, 2, 2, 1];
+const FLOATING_PHASE_FRAMES = 12;
 const MIN_MAP_WIDTH = 16;
 const MIN_MAP_HEIGHT = 15;
 const LAST_MAP_STORAGE_KEY = "da0.map-editor.last-map.v1";
@@ -62,6 +64,7 @@ const sourceImage = document.createElement("canvas");
 const actorSheets = {
   prop: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
   character: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
+  pc_character: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
   treasure: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
 };
 const byId = (id) => document.getElementById(id);
@@ -495,9 +498,15 @@ function prepareSourceImage() {
   drawMap(performance.now());
 }
 
-function actorAssetId(kind) {
-  if (kind === "treasure") return "treasure";
-  return kind === "prop" ? "prop" : "character";
+function actorAssetId(actor) {
+  if (actor.kind === "treasure") return "treasure";
+  if (actor.kind === "prop") return "prop";
+  return actor.sprite_source === "pc" ? "pc_character" : "character";
+}
+
+function actorSpriteLabel(actor) {
+  if (actor.kind === "prop") return `固定物 #${actor.sprite_index}`;
+  return `${actor.sprite_source === "pc" ? "PC" : "NPC"} #${actor.sprite_index}`;
 }
 
 function prepareActorSheet(assetId) {
@@ -547,49 +556,69 @@ function actorSpriteSource(assetId, spriteIndex, facing = "down") {
   if (columns < 1 || spriteIndex < 0 || spriteIndex >= actorSpriteCapacity(assetId)) return null;
   let sourceX = (spriteIndex % columns) * size[0];
   let sourceY = Math.floor(spriteIndex / columns) * size[1];
-  if (assetId === "character") {
-    const facingRow = { up: 0, right: 1, down: 2, left: 3 }[facing] ?? 2;
-    sourceY += facingRow * CELL_SIZE;
+  let sourceWidth = CELL_SIZE;
+  let sourceHeight = CELL_SIZE;
+  if (assetId === "character" || assetId === "pc_character") {
+    const facingRow = { down: 0, up: 1, left: 2, right: 3 }[facing] ?? 0;
+    sourceX += CELL_SIZE;
+    sourceY += facingRow * CELL_SIZE * 2;
+    sourceHeight = CELL_SIZE * 2;
   }
-  return { sheet, sourceX, sourceY };
+  return { sheet, sourceX, sourceY, sourceWidth, sourceHeight };
 }
 
-function drawActorSprite(canvas, assetId, spriteIndex, facing = "down") {
+function floatingOffset(now) {
+  if (state.paused) return 0;
+  const frame = Math.floor((now - state.animationStartedAt) / (1000 / 60));
+  const phase = Math.floor(frame / FLOATING_PHASE_FRAMES) % FLOATING_OFFSETS.length;
+  return FLOATING_OFFSETS[phase];
+}
+
+function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating = false, now = performance.now()) {
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
   const source = actorSpriteSource(assetId, spriteIndex, facing);
   if (!source) return;
-  const scale = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / CELL_SIZE));
-  const drawSize = CELL_SIZE * scale;
-  const drawX = Math.floor((canvas.width - drawSize) / 2);
-  const drawY = Math.floor((canvas.height - drawSize) / 2);
+  const scale = Math.max(1, Math.floor(Math.min(canvas.width / source.sourceWidth, canvas.height / source.sourceHeight)));
+  const drawWidth = source.sourceWidth * scale;
+  const drawHeight = source.sourceHeight * scale;
+  const drawX = Math.floor((canvas.width - drawWidth) / 2);
+  const drawY = Math.floor((canvas.height - drawHeight) / 2) - (floating ? floatingOffset(now) * scale : 0);
   context.imageSmoothingEnabled = false;
-  context.drawImage(source.sheet.canvas, source.sourceX, source.sourceY, CELL_SIZE, CELL_SIZE, drawX, drawY, drawSize, drawSize);
+  context.drawImage(source.sheet.canvas, source.sourceX, source.sourceY, source.sourceWidth, source.sourceHeight, drawX, drawY, drawWidth, drawHeight);
 }
 
-function drawActorOnMap(context, actor, scale) {
-  const source = actorSpriteSource(actorAssetId(actor.kind), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing);
+function drawActorOnMap(context, actor, scale, now) {
+  const source = actorSpriteSource(actorAssetId(actor), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing);
   if (!source) return false;
   context.imageSmoothingEnabled = false;
   context.drawImage(
     source.sheet.canvas,
     source.sourceX,
     source.sourceY,
-    CELL_SIZE,
-    CELL_SIZE,
+    source.sourceWidth,
+    source.sourceHeight,
     actor.position[0] * scale,
-    actor.position[1] * scale,
+    actor.position[1] * scale - (source.sourceHeight / CELL_SIZE - 1) * scale
+      - (actor.floating ? floatingOffset(now) * scale / CELL_SIZE : 0),
     scale,
-    scale,
+    source.sourceHeight / CELL_SIZE * scale,
   );
   return true;
 }
 
-function drawSelectedActorSprite() {
+function drawSelectedActorSprite(now = performance.now()) {
   const actor = currentActor();
   const canvas = document.querySelector("[data-selected-actor-sprite]");
   if (!actor || !canvas) return;
-  drawActorSprite(canvas, actorAssetId(actor.kind), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing);
+  drawActorSprite(
+    canvas,
+    actorAssetId(actor),
+    actor.kind === "treasure" ? 0 : actor.sprite_index,
+    actor.facing,
+    Boolean(actor.floating),
+    now,
+  );
 }
 
 function renderActorSpriteDialog() {
@@ -599,17 +628,32 @@ function renderActorSpriteDialog() {
     options.innerHTML = `<div class="empty-state">actorが選択されていません。</div>`;
     return;
   }
-  const assetId = actorAssetId(actor.kind);
-  const capacity = actorSpriteCapacity(assetId);
+  const assetIds = actor.kind === "prop"
+    ? ["prop"]
+    : ["character", "pc_character"];
+  const capacities = Object.fromEntries(
+    assetIds.map((assetId) => [assetId, actorSpriteCapacity(assetId)]),
+  );
+  const ready = assetIds.every((assetId) => capacities[assetId] > 0);
+  const selectedAssetId = actorAssetId(actor);
   byId("actor-sprite-dialog-title").textContent = actor.kind === "prop" ? "固定物のスプライトを選択" : "キャラクターのスプライトを選択";
-  byId("actor-sprite-dialog-summary").textContent = capacity
-    ? `${capacity}件${assetId === "character" ? "・下向きの画像で表示" : ""}`
+  byId("actor-sprite-dialog-summary").textContent = ready
+    ? (actor.kind === "prop"
+      ? `${capacities.prop}件`
+      : `NPC ${capacities.character}件・PC ${capacities.pc_character}件・下向きの画像で表示`)
     : "画像を読み込んでいます…";
-  options.innerHTML = capacity
-    ? Array.from({ length: capacity }, (_, index) => `<button class="actor-sprite-option ${index === actor.sprite_index ? "selected" : ""}" type="button" role="option" aria-selected="${index === actor.sprite_index}" data-action="select-actor-sprite" data-sprite-index="${index}"><canvas width="48" height="48" data-actor-sprite-option="${index}"></canvas><span>#${index}</span></button>`).join("")
+  options.innerHTML = ready
+    ? assetIds.flatMap((assetId) => Array.from(
+      { length: capacities[assetId] },
+      (_, index) => {
+        const selected = assetId === selectedAssetId && index === actor.sprite_index;
+        const label = assetId === "pc_character" ? `PC #${index}` : assetId === "character" ? `NPC #${index}` : `#${index}`;
+        return `<button class="actor-sprite-option ${selected ? "selected" : ""}" type="button" role="option" aria-selected="${selected}" data-action="select-actor-sprite" data-asset-id="${assetId}" data-sprite-index="${index}"><canvas width="48" height="64" data-actor-sprite-option="${index}" data-asset-id="${assetId}"></canvas><span>${label}</span></button>`;
+      },
+    )).join("")
     : `<div class="empty-state">スプライト画像を表示できません。</div>`;
   options.querySelectorAll("[data-actor-sprite-option]").forEach((canvas) => {
-    drawActorSprite(canvas, assetId, Number(canvas.dataset.actorSpriteOption));
+    drawActorSprite(canvas, canvas.dataset.assetId, Number(canvas.dataset.actorSpriteOption));
   });
 }
 
@@ -626,11 +670,18 @@ function closeActorSpriteDialog() {
   if (dialog.open) dialog.close();
 }
 
-function selectActorSprite(spriteIndex) {
+function selectActorSprite(assetId, spriteIndex) {
   const actor = state.data?.actors?.find((item) => item.id === state.spritePickerActorId);
-  const assetId = actor ? actorAssetId(actor.kind) : null;
-  if (!actor || !Number.isInteger(spriteIndex) || spriteIndex < 0 || spriteIndex >= actorSpriteCapacity(assetId)) return;
-  if (actor.sprite_index !== spriteIndex) commit(() => { actor.sprite_index = spriteIndex; });
+  const permittedAssetIds = actor?.kind === "prop"
+    ? ["prop"]
+    : ["character", "pc_character"];
+  if (!actor || !permittedAssetIds.includes(assetId) || !Number.isInteger(spriteIndex) || spriteIndex < 0 || spriteIndex >= actorSpriteCapacity(assetId)) return;
+  const spriteSource = assetId === "pc_character" ? "pc" : "npc";
+  if (actor.sprite_index !== spriteIndex || (actor.sprite_source || "npc") !== spriteSource) commit(() => {
+    actor.sprite_index = spriteIndex;
+    if (actor.kind === "prop") delete actor.sprite_source;
+    else actor.sprite_source = spriteSource;
+  });
   closeActorSpriteDialog();
 }
 
@@ -685,7 +736,7 @@ function renderPalette() {
       <div class="section">
         <div class="section-title"><h2>actor</h2><span class="subtle">${state.data.actors.length}件</span></div>
         <div class="travel-list">${state.data.actors.map((actor) => `
-          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.kind)}${actor.kind === "treasure" ? "" : ` #${actor.sprite_index}`}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
+          <button class="travel-item ${actor.id === state.selectedActorId ? "active" : ""}" type="button" data-action="select-actor" data-id="${escapeHtml(actor.id)}"><strong>${escapeHtml(actor.id)}</strong>${actor.position.join(", ")} / ${escapeHtml(actor.kind)}${actor.kind === "treasure" ? "" : ` / ${actorSpriteLabel(actor)}`}</button>`).join("") || `<div class="empty-state">actorがありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-actor">actorを配置</button></div>
       </div>
       <div class="section">
@@ -908,8 +959,8 @@ function renderInspector() {
                ${actor.contents?.type === "gold"
                  ? `<div class="field full"><label>金額</label><input type="number" min="1" max="999999" value="${actor.contents.amount}" data-treasure-field="amount"></div>`
                  : `<div class="field full"><label>アイテム</label><select data-treasure-field="item_key">${treasureItemOptions(actor.contents?.item_key)}</select></div>`}`
-            : `<div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="48" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>番号 #${actor.sprite_index}</strong><span>画像から選択</span></span></button></div>
-               ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div>`}
+            : `<div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="72" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>${actorSpriteLabel(actor)}</strong><span>NPC・PC画像から選択</span></span></button></div>
+               ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div><div class="field full"><label><input type="checkbox" data-actor-field="floating" ${actor.floating ? "checked" : ""}> 浮遊</label></div>`}
                <div class="field full"><label>イベント</label><select data-actor-event-id="true">${eventIdOptions(linkedActorTrigger?.event_id || "")}</select><div class="field-note">touch・interactで自動的に起動します。</div></div>`}
         </div><div class="row between" style="margin-top:9px"><div class="row">${actor.kind !== "treasure" && editorRoute ? `<button class="button secondary small" data-action="add-actor-event">イベントを追加</button>` : ""}${actor.kind !== "treasure" && editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
     </div>
@@ -1094,10 +1145,10 @@ function drawEventMarkers(context, scale) {
   }
 }
 
-function drawActors(context, scale) {
+function drawActors(context, scale, now) {
   for (const actor of state.data.actors) {
     const selected = actor.id === state.selectedActorId || isBulkSelected("actor", actor.id);
-    const rendered = drawActorOnMap(context, actor, scale);
+    const rendered = drawActorOnMap(context, actor, scale, now);
     if (!rendered) {
       const centerX = (actor.position[0] + .5) * scale;
       const centerY = (actor.position[1] + .5) * scale;
@@ -1229,7 +1280,7 @@ function drawMap(now) {
       });
     }
   }
-  if (!groundOnly) drawActors(context, scale);
+  if (!groundOnly) drawActors(context, scale, now);
   if (state.resolved && !groundOnly) {
     for (const cell of state.resolved.object_cells) {
       if (cell.draw_group !== "object_foreground") continue;
@@ -1260,6 +1311,7 @@ function drawMap(now) {
   }
   drawGroundPaintPreview(context, scale);
   drawObjectPlacementPreview(context, scale);
+  drawSelectedActorSprite(now);
 }
 
 function animationLoop(now) {
@@ -1810,7 +1862,7 @@ function defaultTrigger(anchor) {
 function createActor(position) {
   const id = uniqueRecordId("actor_1", state.data.actors);
   commit(() => {
-    const actor = { id, position: [...position], kind: "stationary", sprite_index: 0, facing: "down" };
+    const actor = { id, position: [...position], kind: "stationary", sprite_index: 0, sprite_source: "npc", facing: "down", floating: false };
     state.data.actors.push(actor);
     ensureActorTrigger(actor);
     state.selectedActorId = id;
@@ -2350,12 +2402,21 @@ function updateActorField(path, value) {
       if (value === "treasure") {
         delete actor.facing;
         delete actor.sprite_index;
+        delete actor.sprite_source;
+        delete actor.floating;
         actor.contents = { type: "gold", amount: 1 };
       } else {
         delete actor.contents;
         actor.sprite_index = 0;
-        if (value === "prop") delete actor.facing;
-        else actor.facing = "down";
+        if (value === "prop") {
+          delete actor.facing;
+          delete actor.sprite_source;
+          delete actor.floating;
+        } else {
+          actor.sprite_source = "npc";
+          actor.facing = "down";
+          actor.floating = false;
+        }
         ensureActorTrigger(actor);
       }
     } else if (path === "sprite_index") actor.sprite_index = Number(value);
@@ -2597,7 +2658,7 @@ byId("inspector-content").addEventListener("change", (event) => {
   }
   else if (event.target.dataset.siteField) updateSiteField(event.target.dataset.siteField, event.target.value);
   else if (event.target.dataset.arrivalField) updateArrivalField(event.target.dataset.arrivalField, event.target.type === "checkbox" ? event.target.checked : event.target.value);
-  else if (event.target.dataset.actorField) updateActorField(event.target.dataset.actorField, event.target.value);
+  else if (event.target.dataset.actorField) updateActorField(event.target.dataset.actorField, event.target.type === "checkbox" ? event.target.checked : event.target.value);
   else if (event.target.dataset.treasureField) updateTreasureField(event.target.dataset.treasureField, event.target.value);
   else if (event.target.dataset.actorEventId) updateActorEventId(event.target.value);
   else if (event.target.dataset.triggerField) updateTriggerField(event.target.dataset.triggerField, event.target.value);
@@ -2613,7 +2674,7 @@ byId("actor-sprite-dialog").addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
   if (target.dataset.action === "close-actor-sprite-dialog") closeActorSpriteDialog();
-  else if (target.dataset.action === "select-actor-sprite") selectActorSprite(Number(target.dataset.spriteIndex));
+  else if (target.dataset.action === "select-actor-sprite") selectActorSprite(target.dataset.assetId, Number(target.dataset.spriteIndex));
 });
 byId("actor-sprite-dialog").addEventListener("close", () => { state.spritePickerActorId = null; });
 byId("undo-button").addEventListener("click", undo);

@@ -10,6 +10,19 @@ import pyxel
 
 from .tagged_text import TextFontSpan, draw_tagged_text
 
+if __package__ == "ui":
+    from rendering.floating import (
+        FLOATING_OFFSETS,
+        FLOATING_PHASE_FRAMES,
+        floating_offset,
+    )
+else:
+    from ..rendering.floating import (
+        FLOATING_OFFSETS,
+        FLOATING_PHASE_FRAMES,
+        floating_offset,
+    )
+
 TEXT_GRID_X = 4
 TEXT_GRID_Y = 4
 
@@ -37,8 +50,8 @@ CURSOR_Y = 0
 CURSOR_SIZE = 16
 CURSOR_COLKEY = 1
 CURSOR_TEXT_OFFSET_X = -8
-CURSOR_FLOAT_OFFSETS = (0, 0, 0, 1, 2, 2, 2, 1)
-CURSOR_FLOAT_PHASE_FRAMES = 12
+CURSOR_FLOAT_OFFSETS = FLOATING_OFFSETS
+CURSOR_FLOAT_PHASE_FRAMES = FLOATING_PHASE_FRAMES
 
 HORIZONTAL_NAVIGATION_BANK = 0
 HORIZONTAL_NAVIGATION_X = 96
@@ -909,10 +922,7 @@ class WindowCursor:
         y = self._window.pixel_y + target.y * TEXT_GRID_Y
         float_offset = 0
         if self.active:
-            phase = (self._animation_frame // CURSOR_FLOAT_PHASE_FRAMES) % len(
-                CURSOR_FLOAT_OFFSETS
-            )
-            float_offset = CURSOR_FLOAT_OFFSETS[phase]
+            float_offset = floating_offset(self._animation_frame)
 
         if self.draw_shadow:
             pyxel.blt(

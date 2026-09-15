@@ -387,7 +387,8 @@ npm run events:build
 ### 制作用形式
 
 actor種別と共通スプライトシート参照はversion 4で追加され、現在の制作用マップの
-`format_version` は宝箱actorを追加した6とする。version 3のactorは `appearance_id` を
+`format_version` は宝箱actorを追加した6とする。`sprite_source` と `floating` は省略時の
+既定値を持つ後方互換な属性としてversion 6へ追加する。version 3のactorは `appearance_id` を
 廃止し、用途に応じた `kind` と共通シート内の
 `sprite_index` へ明示的に移行する。actorのないversion 3マップはversion番号だけを更新できる。
 既存の `sites`、`arrival_points`、`event_triggers` はそのまま維持する。
@@ -401,6 +402,8 @@ actor種別と共通スプライトシート参照はversion 4で追加され、
       "position": [12, 8],
       "kind": "stationary",
       "sprite_index": 3,
+      "sprite_source": "pc",
+      "floating": true,
       "facing": "down"
     },
     {
@@ -448,7 +451,12 @@ actorは次の4種類とする。
 | `treasure` | 報酬と開封状態を持つ宝箱 | なし。`facing` は指定しない | 移動しない |
 
 宝箱以外の `sprite_index` は0以上の整数とし、マップ固有画像ではなく後述の共通シートを
-左上から右、次に下へ読む番号とする。`prop` は下地が通行可能なセルに置くが、
+左上から右、次に下へ読む番号とする。人物actorの `sprite_source` は `npc` または `pc` とし、
+省略時は既存マップとの互換性のため `npc` とする。人物actorの任意boolean `floating` は、
+その配置で浮遊表示するかを指定し、省略時は `false` とする。種族、`sprite_source`、
+`sprite_index` から自動設定しない。同じ妖精の画像でも通常配置は `true`、ベッドや倒れ姿など
+上下動させない配置は `false` または省略とする。`floating` は `stationary` / `roaming` だけに指定でき、
+`prop` / `treasure` に指定した場合は生成エラーとする。`prop` は下地が通行可能なセルに置くが、
 すべてのactor自身がpartyと他actorの進入を防ぐ。`stationary` と `roaming` はactorをアンカーとする
 `touch` または `interact` で起動される際、未完了の自律歩行を初期セルへ戻してpartyの方を向く。`prop` は
 会話や調査でも向きを変えない。宝箱の中身、入力、演出、保存規則は
@@ -459,20 +467,28 @@ actorの配置、現在位置、向き、待機タイマーはFieldの一時状�
 イベント中と通常メニュー中は更新を止める。`move_actor` は向きと歩行を持つ
 `stationary` / `roaming` に使用できるが、`prop` と `treasure` の参照は生成エラーとする。
 
+`floating=true` の人物actorは、停止中と移動中の両方で16×32px画像全体を上下させる。
+パターン、速度、適用する描画オフセットは [`field.md`](./field.md) のPC浮遊と共通とする。
+浮遊で変わるのは描画Y座標だけとし、actorの現在セル、移動先、衝突、トリガー座標、
+足元Yによる描画順は変えない。イベントやメニューで自律移動を停止している間も、フィールド上に
+表示されていれば浮遊は継続する。PC用画像を選んだactorも `floating` の明示値だけに従う。
+
 ### actor共通アセット
 
-マップによらず使える次の3ファイルを正本とし、`npm run images:build` で通常の
+マップによらず使える次の画像ファイルを正本とし、`npm run images:build` で通常の
 画像bundleへ収録する。
 
 | actor | 正本パス | 画像ID | 配置 |
 |---|---|---|---|
 | `prop` | `content/images/actors/props.png` | `actors/props` | 16×16pxの単一チップを行優先で並べる |
-| `stationary` / `roaming` | `content/images/actors/characters.png` | `actors/characters` | 1キャラ32×64pxのブロックを行優先で並べる |
+| `stationary` / `roaming` | `content/images/actors/characters.gif` | `actors/characters` | 1キャラ48×128pxのブロックを行優先で並べる |
+| `stationary` / `roaming`（`sprite_source=pc`） | `content/images/characters/ch_walk.gif` | `characters/ch_walk` | PCの`battle_sprite`と同じ番号の48×128pxブロックを使う |
 | `treasure` | `content/images/actors/treasure.png` | `actors/treasure` | 閉・途中・開の16×16pxを横3コマに並べる |
 
-`props.png` の幅と高さは16pxの倍数とする。`characters.png` の幅は32pxの倍数、高さは
-64pxの倍数とする。1キャラブロック内は、列が歩行パターン0・1、行が上・右・下・左の順で、
-各1チップは16×16pxとする。透過色は他のZERO画像と同じパレット番号1
+`props.png` の幅と高さは16pxの倍数とする。`characters.gif` と `ch_walk.gif` の幅は
+48pxの倍数、高さは128pxの倍数とする。1キャラブロック内は、16×32pxの画像を横3列、縦4行に並べ、
+列は左足・立ち・右足、行は下・上・左・右の順とする。停止中は立ちコマを表示し、
+移動中だけ右足・立ち・左足・立ちを各4フレームで循環する。透過色は他のZERO画像と同じパレット番号1
 `#FF0080` を使う。シート不在、寸法不正、範囲外の `sprite_index` は、代替画像を出さず
 実行時リソースエラーとする。
 
@@ -791,6 +807,8 @@ Runnerとマップトリガーを一度に作り込みすぎない。
 - step、touch、interactが定めた入力エッジで1回だけ発火し、初期配置やイベント移動では発火しない。
 - 宝箱以外のactorを作成・選択するとtouch・interactの固定トリガーが1件自動設定され、
   interactを単独トリガーとして選択できない。
+- 人物actorは配置ごとの `floating` を保存でき、`true` の配置だけが停止・移動中とも浮遊する。
+  同じ妖精画像でも `false` の配置は動かず、prop／treasureの `floating` は生成時に拒否される。
 - ニューゲームでは初期フィールドの適用後に `worldmap.prologue` が起動し、ロードでは起動しない。
 - フラグ、パーティ、インベントリへの操作が既存の上限・隊列・セーブ規則を迂回しない。
 - flag、メンバー、アイテムとall/any/notを組み合わせ、then/elseの片方だけを実行できる。

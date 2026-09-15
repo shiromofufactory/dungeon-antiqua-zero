@@ -62,10 +62,10 @@ from game import (
     TRANSPARENT_INDEX,
     localized_menu_texts,
 )
-from field import FieldPosition
+from field import FieldActors, FieldPosition
 from input import Direction, InputButton, InputState
 from localization import Localizer
-from member import BATTLE_PARTY_MEMBER_COUNT, FormationRow
+from member import BATTLE_PARTY_MEMBER_COUNT, FormationRow, Race
 from resources import (
     FontRole,
     MapCell,
@@ -97,6 +97,33 @@ from world_sites import WorldSiteCatalog
 
 
 class GameTest(unittest.TestCase):
+    def test_field_player_floating_is_derived_from_fairy_race(self) -> None:
+        game = Game.__new__(Game)
+        game.field_actors = object.__new__(FieldActors)
+        game.field_renderer = Mock()
+        game.field = object()
+        game.field_prop_image = object()
+        game.field_actor_character_image = object()
+        game.field_actor_pc_character_image = object()
+        game.field_player_character_image = object()
+        game.field_treasure_image = object()
+        game._draw_site_name = Mock()
+        member = Mock()
+        member.definition.battle_sprite = 3
+        game._field_player_member = Mock(return_value=member)
+
+        for race, expected in ((Race.FAIRY, True), (Race.HUMAN, False)):
+            with self.subTest(race=race):
+                member.definition.race = race
+                game.field_renderer.draw.reset_mock()
+
+                game._draw_field_screen()
+
+                self.assertIs(
+                    game.field_renderer.draw.call_args.kwargs["player_floating"],
+                    expected,
+                )
+
     @patch("game.StartMenuOverlay")
     @patch("game.BgmPlayer")
     @patch("game.create_game_input_reader")

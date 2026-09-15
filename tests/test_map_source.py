@@ -118,7 +118,9 @@ class MapSourceTest(unittest.TestCase):
                 "position": [2, 2],
                 "kind": "stationary",
                 "sprite_index": 0,
+                "sprite_source": "pc",
                 "facing": "down",
+                "floating": True,
             }
         ]
         source["event_triggers"] = [
@@ -157,6 +159,52 @@ class MapSourceTest(unittest.TestCase):
             {"kind": "actor", "actor_id": "elder", "offsets": [[0, 0]]},
         )
         self.assertEqual(compiled.runtime["actors"], source["actors"])
+
+    def test_rejects_invalid_actor_sprite_sources(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["grounds"][2][2] = "plain"
+        source["actors"] = [
+            {
+                "id": "elder",
+                "position": [2, 2],
+                "kind": "stationary",
+                "sprite_index": 0,
+                "sprite_source": "unknown",
+                "facing": "down",
+            }
+        ]
+
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("invalid_actor_sprite_source", codes)
+
+        source["actors"][0].update(
+            {"kind": "prop", "sprite_source": "pc"}
+        )
+        source["actors"][0].pop("facing")
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("actor_sprite_source_requires_character", codes)
+
+    def test_rejects_invalid_or_non_character_floating(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["grounds"][2][2] = "plain"
+        source["actors"] = [
+            {
+                "id": "elder",
+                "position": [2, 2],
+                "kind": "stationary",
+                "sprite_index": 0,
+                "facing": "down",
+                "floating": "yes",
+            }
+        ]
+
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("invalid_actor_floating", codes)
+
+        source["actors"][0].update({"kind": "prop", "floating": False})
+        source["actors"][0].pop("facing")
+        codes = {item.code for item in validate_map_source(source, self.tileset)}
+        self.assertIn("actor_floating_requires_character", codes)
 
     def test_validates_and_compiles_map_bgm(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)

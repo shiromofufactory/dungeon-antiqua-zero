@@ -9,11 +9,13 @@ import pyxel
 if __package__ == "rendering":
     from field import FieldActors, FieldMovement
     from input import Direction
+    from rendering.floating import floating_offset
     from resources.maps import CompiledMap
 else:
     from ..field import FieldActors, FieldMovement
     from ..input import Direction
     from ..resources.maps import CompiledMap
+    from .floating import floating_offset
 
 
 FIELD_CHARACTER_BANK = 0
@@ -31,6 +33,21 @@ FIELD_CHARACTER_FACING_ROWS = {
     Direction.RIGHT: 1,
     Direction.DOWN: 2,
     Direction.LEFT: 3,
+}
+FIELD_ACTOR_CHARACTER_FRAME_COUNT = 3
+FIELD_ACTOR_CHARACTER_HEIGHT = 32
+FIELD_ACTOR_CHARACTER_SET_WIDTH = (
+    FIELD_CHARACTER_SIZE * FIELD_ACTOR_CHARACTER_FRAME_COUNT
+)
+FIELD_ACTOR_CHARACTER_SET_HEIGHT = FIELD_ACTOR_CHARACTER_HEIGHT * 4
+FIELD_ACTOR_CHARACTER_STANDING_FRAME = 1
+FIELD_ACTOR_CHARACTER_ANIMATION_INTERVAL = 4
+FIELD_ACTOR_CHARACTER_WALKING_FRAMES = (2, 1, 0, 1)
+FIELD_ACTOR_CHARACTER_FACING_ROWS = {
+    Direction.DOWN: 0,
+    Direction.UP: 1,
+    Direction.LEFT: 2,
+    Direction.RIGHT: 3,
 }
 FIELD_PLAYER_CHARACTER_FRAME_COUNT = 3
 FIELD_PLAYER_CHARACTER_HEIGHT = 32
@@ -81,8 +98,10 @@ class FieldRenderer:
         actors: FieldActors | None = None,
         prop_image: Any | None = None,
         actor_character_image: Any | None = None,
+        actor_pc_character_image: Any | None = None,
         player_character_image: Any | None = None,
         player_sprite_index: int = 0,
+        player_floating: bool = False,
         treasure_image: Any | None = None,
         frame_count: int | None = None,
         draw_player: bool = True,
@@ -97,6 +116,8 @@ class FieldRenderer:
             raise TypeError("field renderer frame count must be an integer")
         if not isinstance(draw_player, bool):
             raise TypeError("field renderer draw_player must be a boolean")
+        if not isinstance(player_floating, bool):
+            raise TypeError("field renderer player_floating must be a boolean")
 
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
@@ -106,7 +127,9 @@ class FieldRenderer:
             frame_count,
             draw_groups=("object", "object_overlay"),
         )
-        characters: list[tuple[int, FieldMovement, str, int, Any | None]] = []
+        characters: list[
+            tuple[int, FieldMovement, str, int, Any | None, bool]
+        ] = []
         if draw_player:
             characters.append(
                 (
@@ -115,6 +138,7 @@ class FieldRenderer:
                     "player",
                     player_sprite_index,
                     player_character_image,
+                    player_floating,
                 )
             )
         if actors is not None:
@@ -125,6 +149,8 @@ class FieldRenderer:
                     image = prop_image
                 elif actor.kind == "treasure":
                     image = treasure_image
+                elif actor.sprite_source == "pc":
+                    image = actor_pc_character_image
                 else:
                     image = actor_character_image
                 characters.append(
@@ -134,9 +160,10 @@ class FieldRenderer:
                         actor.kind,
                         actor.sprite_index,
                         image,
+                        actor.floating,
                     )
                 )
-        for _world_y, movement, kind, sprite_index, image in sorted(
+        for _world_y, movement, kind, sprite_index, image, floating in sorted(
             characters, key=lambda item: item[0]
         ):
             if kind == "player":
@@ -147,6 +174,7 @@ class FieldRenderer:
                     frame_count,
                     image=image,
                     sprite_index=sprite_index,
+                    floating=floating,
                 )
             elif kind == "prop":
                 self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
@@ -172,6 +200,7 @@ class FieldRenderer:
                     frame_count,
                     image=image,
                     sprite_index=sprite_index,
+                    floating=floating,
                 )
         self._draw_objects(
             camera_x,
@@ -279,34 +308,71 @@ class FieldRenderer:
         *,
         image: Any | None = None,
         sprite_index: int = 0,
+        floating: bool = False,
     ) -> None:
-        frame = (frame_count // FIELD_CHARACTER_ANIMATION_INTERVAL) % 2
-        row = FIELD_CHARACTER_FACING_ROWS[field.facing]
+        if not isinstance(floating, bool):
+            raise TypeError("actor character floating must be a boolean")
         if image is None:
+            frame = (frame_count // FIELD_CHARACTER_ANIMATION_INTERVAL) % 2
+            row = FIELD_CHARACTER_FACING_ROWS[field.facing]
             source_x = FIELD_CHARACTER_SOURCE_X + frame * FIELD_CHARACTER_SIZE
             source_y = FIELD_CHARACTER_SOURCE_Y + row * FIELD_CHARACTER_SIZE
             source_image = FIELD_CHARACTER_BANK
+            draw_y = field.world_y - camera_y
+            draw_height = FIELD_CHARACTER_SIZE
         else:
-            columns = image.width // (FIELD_CHARACTER_SIZE * 2)
+            if isinstance(sprite_index, bool) or not isinstance(
+                sprite_index, int
+            ):
+                raise TypeError("actor character sprite_index must be an integer")
+            if sprite_index < 0:
+                raise ValueError("actor character sprite_index must not be negative")
+            columns = image.width // FIELD_ACTOR_CHARACTER_SET_WIDTH
             if columns <= 0:
                 raise ValueError(
-                    "actor character sheet must be at least 32 pixels wide"
+                    "actor character sheet must be at least 48 pixels wide"
                 )
-            block_x = (sprite_index % columns) * FIELD_CHARACTER_SIZE * 2
-            block_y = (sprite_index // columns) * FIELD_CHARACTER_SIZE * 4
-            if block_y + FIELD_CHARACTER_SIZE * 4 > image.height:
+            block_x = (
+                sprite_index % columns
+            ) * FIELD_ACTOR_CHARACTER_SET_WIDTH
+            block_y = (
+                sprite_index // columns
+            ) * FIELD_ACTOR_CHARACTER_SET_HEIGHT
+            if (
+                block_x + FIELD_ACTOR_CHARACTER_SET_WIDTH > image.width
+                or block_y + FIELD_ACTOR_CHARACTER_SET_HEIGHT > image.height
+            ):
                 raise ValueError("actor character sprite_index is outside the sheet")
+            frame = FIELD_ACTOR_CHARACTER_STANDING_FRAME
+            if field.is_moving or field.is_walking:
+                phase = (
+                    (field.walking_frame_count - 1)
+                    // FIELD_ACTOR_CHARACTER_ANIMATION_INTERVAL
+                    % len(FIELD_ACTOR_CHARACTER_WALKING_FRAMES)
+                )
+                frame = FIELD_ACTOR_CHARACTER_WALKING_FRAMES[phase]
             source_x = block_x + frame * FIELD_CHARACTER_SIZE
-            source_y = block_y + row * FIELD_CHARACTER_SIZE
+            source_y = (
+                block_y
+                + FIELD_ACTOR_CHARACTER_FACING_ROWS[field.facing]
+                * FIELD_ACTOR_CHARACTER_HEIGHT
+            )
             source_image = image
+            draw_y = (
+                field.world_y
+                - camera_y
+                - FIELD_CHARACTER_SIZE
+                - (floating_offset(frame_count) if floating else 0)
+            )
+            draw_height = FIELD_ACTOR_CHARACTER_HEIGHT
         self._pyxel.blt(
             field.world_x - camera_x,
-            field.world_y - camera_y,
+            draw_y,
             source_image,
             source_x,
             source_y,
             FIELD_CHARACTER_SIZE,
-            FIELD_CHARACTER_SIZE,
+            draw_height,
             FIELD_CHARACTER_COLKEY,
         )
 
@@ -319,7 +385,10 @@ class FieldRenderer:
         *,
         image: Any | None,
         sprite_index: int,
+        floating: bool = False,
     ) -> None:
+        if not isinstance(floating, bool):
+            raise TypeError("player floating must be a boolean")
         if image is None:
             self._draw_character(
                 field,
@@ -361,7 +430,12 @@ class FieldRenderer:
         )
         self._pyxel.blt(
             field.world_x - camera_x,
-            field.world_y - camera_y - FIELD_CHARACTER_SIZE,
+            (
+                field.world_y
+                - camera_y
+                - FIELD_CHARACTER_SIZE
+                - (floating_offset(frame_count) if floating else 0)
+            ),
             image,
             source_x,
             source_y,
@@ -425,6 +499,14 @@ class FieldRenderer:
 
 
 __all__ = [
+    "FIELD_ACTOR_CHARACTER_ANIMATION_INTERVAL",
+    "FIELD_ACTOR_CHARACTER_FACING_ROWS",
+    "FIELD_ACTOR_CHARACTER_FRAME_COUNT",
+    "FIELD_ACTOR_CHARACTER_HEIGHT",
+    "FIELD_ACTOR_CHARACTER_SET_HEIGHT",
+    "FIELD_ACTOR_CHARACTER_SET_WIDTH",
+    "FIELD_ACTOR_CHARACTER_STANDING_FRAME",
+    "FIELD_ACTOR_CHARACTER_WALKING_FRAMES",
     "FIELD_CHARACTER_ANIMATION_INTERVAL",
     "FIELD_CHARACTER_BANK",
     "FIELD_CHARACTER_COLKEY",
