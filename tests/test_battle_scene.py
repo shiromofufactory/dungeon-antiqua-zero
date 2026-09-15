@@ -12,6 +12,8 @@ from field import FieldPosition
 from game import (
     ENCOUNTER_JINGLE_ID,
     RANDOM_BATTLE_ENCOUNTER,
+    TELEPORT_SOUND_CHANNEL,
+    TELEPORT_SOUND_ID,
     Game,
 )
 from input import Direction, InputButton, InputState
@@ -716,6 +718,43 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game._reset_field_actors.assert_called_once_with()
         game.bgm.transition_to.assert_called_once_with("da3-forest")
 
+    @patch("game.pyxel.play_pos", return_value=None)
+    def test_field_defeat_restarts_bgm_after_teleport_sound(
+        self,
+        play_pos: Mock,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.battle_return_result = BattleResult.DEFEAT
+        game.battle_scene = None
+        game.current_map = Mock(bgm_id="da3-forest")
+        game.field = Mock(position=FieldPosition(20, 20))
+        game.encounter_system = Mock()
+        game.encounter_system.defeat_return.return_value = None
+        game.party = (
+            Mock(hp=10, paralyzed=False, is_front_row=True),
+        )
+        game.bgm = Mock()
+
+        game._apply_battle_return()
+
+        game.bgm.stop.assert_called_once_with()
+        game.bgm.play.assert_not_called()
+        game.bgm.transition_to.assert_not_called()
+        self.assertTrue(game.defeat_return_bgm_restart_pending)
+
+        game.battle_return_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        game.battle_return_fade.start_fade_in()
+        game.defeat_return_message = None
+        game.defeat_return_sound_waiting = True
+        game.palette_shifter = Mock(base_colors=(0,))
+
+        game._update_battle_return(InputState())
+
+        play_pos.assert_called_once_with(TELEPORT_SOUND_CHANNEL)
+        game.bgm.play.assert_called_once_with("da3-forest")
+        self.assertFalse(game.defeat_return_bgm_restart_pending)
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 1)
+
     def test_victory_return_counts_the_completed_battle(self) -> None:
         game = Game.__new__(Game)
         game.battle_return_result = BattleResult.VICTORY
@@ -773,6 +812,97 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game._apply_battle_return.assert_called_once_with()
         self.assertIs(game.battle_return_result, BattleResult.ESCAPED)
         self.assertIs(game.battle_return_fade.phase, FadePhase.FADING_IN)
+
+    @patch("game.pyxel.play_pos")
+    @patch("game.pyxel.play")
+    @patch("game.MessageOverlay")
+    def test_defeat_return_waits_at_black_for_rescue_message(
+        self,
+        message_overlay: Mock,
+        play: Mock,
+        play_pos: Mock,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.settings = Settings(language=Language.JAPANESE)
+        game.texts = Mock()
+        game.texts.lines.return_value = (
+            "line 1",
+            "line 2",
+            "line 3",
+            "line 4",
+        )
+        game.fonts = object()
+        game.faces = object()
+        game.palette_shifter = Mock(base_colors=(0,))
+        game.bgm = Mock()
+        game._apply_battle_return = Mock()
+        message_overlay.return_value.update.return_value = False
+
+        game._begin_battle_return(BattleResult.DEFEAT)
+        for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+            game._update_battle_return(InputState())
+
+        self.assertIs(
+            game.defeat_return_message,
+            message_overlay.return_value,
+        )
+        self.assertIs(game.battle_return_fade.phase, FadePhase.FADING_IN)
+        game._apply_battle_return.assert_not_called()
+        self.assertEqual(
+            message_overlay.call_args.kwargs["lines"],
+            game.texts.lines.return_value,
+        )
+        text_key, localizer = game.texts.lines.call_args.args
+        self.assertEqual(text_key, "defeat.return.message")
+        self.assertIs(localizer.language, Language.JAPANESE)
+        face = message_overlay.call_args.kwargs["face_position"]
+        self.assertEqual((face.x, face.y), (0, 224))
+        play.assert_not_called()
+
+        message_overlay.return_value.update.return_value = True
+        game._update_battle_return(InputState())
+
+        self.assertIsNone(game.defeat_return_message)
+        game._apply_battle_return.assert_called_once_with()
+        self.assertEqual(
+            game.palette_shifter.set_global_mix.call_args.kwargs["base_rate"],
+            0.0,
+        )
+        play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+        self.assertTrue(game.defeat_return_sound_waiting)
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
+
+        play_pos.return_value = (TELEPORT_SOUND_ID, 0)
+        game._update_battle_return(InputState())
+
+        play_pos.assert_called_once_with(TELEPORT_SOUND_CHANNEL)
+        self.assertTrue(game.defeat_return_sound_waiting)
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
+
+        play_pos.return_value = None
+        game._update_battle_return(InputState())
+
+        self.assertFalse(game.defeat_return_sound_waiting)
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 1)
+
+    @patch("game.pyxel.camera")
+    @patch("game.pyxel.cls")
+    def test_defeat_return_message_draws_over_black_instead_of_battle(
+        self,
+        clear: Mock,
+        camera: Mock,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.alert = Mock(camera_x=0)
+        game.encounter_transition = None
+        game.defeat_return_message = Mock()
+        game.battle_scene = Mock()
+
+        game.draw()
+
+        clear.assert_called_once_with(0)
+        game.defeat_return_message.draw.assert_called_once_with()
+        game.battle_scene.draw.assert_not_called()
 
 
 if __name__ == "__main__":

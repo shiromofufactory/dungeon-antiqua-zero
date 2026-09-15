@@ -58,6 +58,7 @@ from localization import Localizer, format_number
 from member import (
     BATTLE_PARTY_MEMBER_COUNT,
     CharacterDefinition,
+    FacePosition,
     FormationRow,
     Member,
     MemberDataError,
@@ -213,6 +214,8 @@ FIELD_POISON_SE_CHANNEL = 3
 FIELD_MEMBER_DEAD_TEXT_KEY = "field.member.dead"
 FIELD_MEMBER_ADVANCED_TEXT_KEY = "field.member.advanced"
 FIELD_PARTY_ANNIHILATED_TEXT_KEY = "field.party.annihilated"
+DEFEAT_RETURN_MESSAGE_TEXT_KEY = "defeat.return.message"
+DEFEAT_RETURN_FACE_POSITION = FacePosition(0, 224)
 MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
@@ -553,6 +556,9 @@ class Game:
         self.encounter_snapshot = None
         self.battle_return_fade: FadeThroughBlack | None = None
         self.battle_return_result: BattleResult | None = None
+        self.defeat_return_message: MessageOverlay | None = None
+        self.defeat_return_sound_waiting = False
+        self.defeat_return_bgm_restart_pending = False
         self.item_screen: ItemMenuOverlay | None = None
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
@@ -781,6 +787,9 @@ class Game:
         if not isinstance(result, BattleResult):
             raise TypeError("battle return result must be a BattleResult")
         self.battle_return_result = result
+        self.defeat_return_message = None
+        self.defeat_return_sound_waiting = False
+        self.defeat_return_bgm_restart_pending = False
         self.battle_return_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         if result is BattleResult.ESCAPED:
             self._apply_battle_return()
@@ -792,12 +801,31 @@ class Game:
             return
         self.battle_return_fade.start()
 
-    def _update_battle_return(self) -> None:
-        """Apply the battle-to-field replacement at the fade midpoint."""
+    def _update_battle_return(self, input_state: InputState) -> None:
+        """Pause defeat at black for its message, then return to the field."""
 
         fade = self.battle_return_fade
         if fade is None:
             return
+        message = getattr(self, "defeat_return_message", None)
+        if message is not None:
+            if message.update(input_state):
+                self.defeat_return_message = None
+                self.palette_shifter.set_global_mix(
+                    base_rate=0.0,
+                    target_color=self.palette_shifter.base_colors[0],
+                )
+                self._apply_battle_return()
+                pyxel.play(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+                self.defeat_return_sound_waiting = True
+            return
+        if getattr(self, "defeat_return_sound_waiting", False):
+            if pyxel.play_pos(TELEPORT_SOUND_CHANNEL) is not None:
+                return
+            self.defeat_return_sound_waiting = False
+            if getattr(self, "defeat_return_bgm_restart_pending", False):
+                self.bgm.play(self.current_map.bgm_id)
+                self.defeat_return_bgm_restart_pending = False
         event = fade.update()
         self.palette_shifter.set_global_mix(
             base_rate=fade.visible_rate,
@@ -805,11 +833,32 @@ class Game:
         )
         self.bgm.set_fade_rate(fade.visible_rate)
         if event is FadeEvent.COVERED:
-            self._apply_battle_return()
+            if self.battle_return_result is BattleResult.DEFEAT:
+                self._begin_defeat_return_message()
+                self.palette_shifter.set_global_mix(
+                    base_rate=1.0,
+                    target_color=self.palette_shifter.base_colors[0],
+                )
+            else:
+                self._apply_battle_return()
         if event is FadeEvent.FINISHED:
             self.bgm.set_fade_rate(1.0)
             self.battle_return_fade = None
             self.battle_return_result = None
+            self.defeat_return_sound_waiting = False
+            self.defeat_return_bgm_restart_pending = False
+
+    def _begin_defeat_return_message(self) -> None:
+        """Show the fixed rescue message over the fully black screen."""
+
+        localizer = Localizer(self.settings.language)
+        self.defeat_return_message = MessageOverlay(
+            lines=self.texts.lines(DEFEAT_RETURN_MESSAGE_TEXT_KEY, localizer),
+            settings=self.settings,
+            fonts=self.fonts,
+            faces=self.faces,
+            face_position=DEFEAT_RETURN_FACE_POSITION,
+        )
 
     def _apply_battle_return(self) -> None:
         """Commit battle result changes while the screen is fully black."""
@@ -818,6 +867,7 @@ class Game:
         if result is None:
             raise RuntimeError("battle return has no result")
         battle_scene = getattr(self, "battle_scene", None)
+        field_defeat = result is BattleResult.DEFEAT and battle_scene is None
         if battle_scene is not None:
             battle_scene.clear_temporary_member_conditions()
         if result is BattleResult.VICTORY:
@@ -840,7 +890,11 @@ class Game:
             self._promote_first_recoverable_member()
         self.battle_scene = None
         self.bgm.set_fade_rate(0.0)
-        self.bgm.transition_to(self.current_map.bgm_id)
+        if field_defeat:
+            self.bgm.stop()
+            self.defeat_return_bgm_restart_pending = True
+        else:
+            self.bgm.transition_to(self.current_map.bgm_id)
 
     @staticmethod
     def _select_cursor_key(cursor: WindowCursor, key: object) -> None:
@@ -2820,7 +2874,7 @@ class Game:
             self._update_encounter_transition()
             return
         if getattr(self, "battle_return_fade", None) is not None:
-            self._update_battle_return()
+            self._update_battle_return(input_state)
             return
         battle_scene = getattr(self, "battle_scene", None)
         if battle_scene is not None:
@@ -3015,6 +3069,14 @@ class Game:
         try:
             if getattr(self, "encounter_transition", None) is not None:
                 self._draw_encounter_transition()
+                return
+            defeat_return_message = getattr(
+                self,
+                "defeat_return_message",
+                None,
+            )
+            if defeat_return_message is not None:
+                defeat_return_message.draw()
                 return
             battle_scene = getattr(self, "battle_scene", None)
             if battle_scene is not None:
