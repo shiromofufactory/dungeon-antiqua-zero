@@ -67,6 +67,7 @@ const actorSheets = {
   pc_character: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
   treasure: { image: new Image(), canvas: document.createElement("canvas"), ready: false },
 };
+const floatingPhaseCache = new Map();
 const byId = (id) => document.getElementById(id);
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const escapeHtml = (value) => String(value)
@@ -567,14 +568,32 @@ function actorSpriteSource(assetId, spriteIndex, facing = "down") {
   return { sheet, sourceX, sourceY, sourceWidth, sourceHeight };
 }
 
-function floatingOffset(now) {
+function stableFloatingPhase(identity) {
+  if (floatingPhaseCache.has(identity)) return floatingPhaseCache.get(identity);
+  let checksum = 0xffffffff;
+  for (const byte of new TextEncoder().encode(identity)) {
+    checksum ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      checksum = (checksum >>> 1) ^ (0xedb88320 & -(checksum & 1));
+    }
+  }
+  const phase = ((checksum ^ 0xffffffff) >>> 0) % (FLOATING_OFFSETS.length * FLOATING_PHASE_FRAMES);
+  floatingPhaseCache.set(identity, phase);
+  return phase;
+}
+
+function actorFloatingPhase(actor) {
+  return stableFloatingPhase(`actor:${state.data.map_id}:${actor.id}`);
+}
+
+function floatingOffset(now, phaseOffset = 0) {
   if (state.paused) return 0;
-  const frame = Math.floor((now - state.animationStartedAt) / (1000 / 60));
+  const frame = Math.floor((now - state.animationStartedAt) / (1000 / 60)) + phaseOffset;
   const phase = Math.floor(frame / FLOATING_PHASE_FRAMES) % FLOATING_OFFSETS.length;
   return FLOATING_OFFSETS[phase];
 }
 
-function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating = false, now = performance.now()) {
+function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating = false, now = performance.now(), floatingPhase = 0) {
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
   const source = actorSpriteSource(assetId, spriteIndex, facing);
@@ -583,7 +602,7 @@ function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating
   const drawWidth = source.sourceWidth * scale;
   const drawHeight = source.sourceHeight * scale;
   const drawX = Math.floor((canvas.width - drawWidth) / 2);
-  const drawY = Math.floor((canvas.height - drawHeight) / 2) - (floating ? floatingOffset(now) * scale : 0);
+  const drawY = Math.floor((canvas.height - drawHeight) / 2) - (floating ? floatingOffset(now, floatingPhase) * scale : 0);
   context.imageSmoothingEnabled = false;
   context.drawImage(source.sheet.canvas, source.sourceX, source.sourceY, source.sourceWidth, source.sourceHeight, drawX, drawY, drawWidth, drawHeight);
 }
@@ -600,7 +619,7 @@ function drawActorOnMap(context, actor, scale, now) {
     source.sourceHeight,
     actor.position[0] * scale,
     actor.position[1] * scale - (source.sourceHeight / CELL_SIZE - 1) * scale
-      - (actor.floating ? floatingOffset(now) * scale / CELL_SIZE : 0),
+      - (actor.floating ? floatingOffset(now, actorFloatingPhase(actor)) * scale / CELL_SIZE : 0),
     scale,
     source.sourceHeight / CELL_SIZE * scale,
   );
@@ -618,6 +637,7 @@ function drawSelectedActorSprite(now = performance.now()) {
     actor.facing,
     Boolean(actor.floating),
     now,
+    actorFloatingPhase(actor),
   );
 }
 

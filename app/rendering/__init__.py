@@ -53,6 +53,7 @@ from .floating import (
     FLOATING_OFFSETS,
     FLOATING_PHASE_FRAMES,
     floating_offset,
+    floating_phase_offset,
 )
 from .monster_death import (
     MONSTER_DEATH_BRIGHT_COLOR,
@@ -140,4 +141,5 @@ __all__ = [
     "grayscale_color",
     "mix_color",
     "floating_offset",
+    "floating_phase_offset",
 ]

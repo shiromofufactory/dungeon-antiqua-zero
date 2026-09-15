@@ -112,9 +112,13 @@ class GameTest(unittest.TestCase):
         member.definition.battle_sprite = 3
         game._field_player_member = Mock(return_value=member)
 
-        for race, expected in ((Race.FAIRY, True), (Race.HUMAN, False)):
+        for race, key, expected, phase in (
+            (Race.FAIRY, "Fiora", True, 77),
+            (Race.HUMAN, "Bandana", False, 29),
+        ):
             with self.subTest(race=race):
                 member.definition.race = race
+                member.definition.key = key
                 game.field_renderer.draw.reset_mock()
 
                 game._draw_field_screen()
@@ -122,6 +126,12 @@ class GameTest(unittest.TestCase):
                 self.assertIs(
                     game.field_renderer.draw.call_args.kwargs["player_floating"],
                     expected,
+                )
+                self.assertEqual(
+                    game.field_renderer.draw.call_args.kwargs[
+                        "player_floating_phase"
+                    ],
+                    phase,
                 )
 
     @patch("game.StartMenuOverlay")

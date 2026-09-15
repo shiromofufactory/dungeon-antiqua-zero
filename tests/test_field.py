@@ -700,7 +700,7 @@ class FieldRendererTest(unittest.TestCase):
             1,
         )
 
-    def test_actor_floating_is_independent_of_pc_sprite_source(self) -> None:
+    def test_actor_floating_phase_varies_by_stable_actor_identity(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="town")
         object.__setattr__(
             map_data,
@@ -722,7 +722,7 @@ class FieldRendererTest(unittest.TestCase):
                     1,
                     "down",
                     sprite_source="pc",
-                    floating=False,
+                    floating=True,
                 ),
             ),
         )
@@ -730,7 +730,7 @@ class FieldRendererTest(unittest.TestCase):
         actors = FieldActors(map_data)
         npc_image = Mock(width=96, height=128)
         pc_image = Mock(width=384, height=384)
-        pyxel = Mock(frame_count=48)
+        pyxel = Mock(frame_count=0)
         renderer = FieldRenderer(
             map_data,
             screen_width=48,

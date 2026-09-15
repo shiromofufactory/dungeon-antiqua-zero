@@ -209,6 +209,8 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("const rendered = drawActorOnMap(context, actor, scale, now)", script)
         self.assertIn('data-actor-field="floating"', script)
         self.assertIn("const FLOATING_OFFSETS = [0, 0, 0, 1, 2, 2, 2, 1]", script)
+        self.assertIn("function stableFloatingPhase(identity)", script)
+        self.assertIn('`actor:${state.data.map_id}:${actor.id}`', script)
         self.assertNotIn('data-actor-field="sprite_index"', script)
         self.assertIn('id="map-select"', page)
         self.assertIn('id="new-map-dialog"', page)

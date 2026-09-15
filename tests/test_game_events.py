@@ -275,8 +275,11 @@ class GameEventTriggerTest(unittest.TestCase):
             game.field_actors.actor("elder").movement.facing,
             Direction.LEFT,
         )
+        self.assertIs(game.field.facing, Direction.RIGHT)
 
-    def test_touching_character_actor_also_turns_it_toward_the_party(self) -> None:
+    def test_touching_character_actor_turns_both_characters_toward_each_other(
+        self,
+    ) -> None:
         actor = MapActor("elder", MapCell(2, 1), "stationary", 0, "up")
         trigger = MapEventTrigger(
             "elder_touch",
@@ -286,9 +289,11 @@ class GameEventTriggerTest(unittest.TestCase):
             offsets=(MapCell(0, 0),),
         )
         game = game_for(trigger, actors=(actor,))
+        game.field.facing = Direction.UP
 
         game._update_field(InputState(held_direction=Direction.RIGHT))
 
+        self.assertIs(game.field.facing, Direction.RIGHT)
         self.assertIs(
             game.field_actors.actor("elder").movement.facing,
             Direction.LEFT,

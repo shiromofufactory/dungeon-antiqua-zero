@@ -102,6 +102,7 @@ from rendering import (
     FIELD_PLAYER_CHARACTER_SETS_PER_ROW,
     FIELD_PROP_ASSET_ID,
     FIELD_TREASURE_ASSET_ID,
+    floating_phase_offset,
     FieldRenderer,
     PaletteShifter,
 )
@@ -2630,6 +2631,16 @@ class Game:
             return False
         if trigger.actor_id is not None and self.field_actors is not None:
             if activation in ("touch", "interact"):
+                actor = self.field_actors.actor(trigger.actor_id)
+                if actor.kind in ("stationary", "roaming"):
+                    dx = actor.movement.position.x - self.field.position.x
+                    dy = actor.movement.position.y - self.field.position.y
+                    if abs(dx) + abs(dy) == 1:
+                        self.field.facing = next(
+                            direction
+                            for direction in Direction
+                            if (direction.dx, direction.dy) == (dx, dy)
+                        )
                 self.field_actors.face_toward(
                     trigger.actor_id,
                     self.field.position,
@@ -3083,6 +3094,9 @@ class Game:
                 "player_character_image": self.field_player_character_image,
                 "player_sprite_index": player_member.definition.battle_sprite,
                 "player_floating": player_member.definition.race is Race.FAIRY,
+                "player_floating_phase": floating_phase_offset(
+                    f"pc:{player_member.definition.key}"
+                ),
                 "treasure_image": self.field_treasure_image,
             }
             if not draw_player:

@@ -9,13 +9,13 @@ import pyxel
 if __package__ == "rendering":
     from field import FieldActors, FieldMovement
     from input import Direction
-    from rendering.floating import floating_offset
+    from rendering.floating import floating_offset, floating_phase_offset
     from resources.maps import CompiledMap
 else:
     from ..field import FieldActors, FieldMovement
     from ..input import Direction
     from ..resources.maps import CompiledMap
-    from .floating import floating_offset
+    from .floating import floating_offset, floating_phase_offset
 
 
 FIELD_CHARACTER_BANK = 0
@@ -102,6 +102,7 @@ class FieldRenderer:
         player_character_image: Any | None = None,
         player_sprite_index: int = 0,
         player_floating: bool = False,
+        player_floating_phase: int = 0,
         treasure_image: Any | None = None,
         frame_count: int | None = None,
         draw_player: bool = True,
@@ -118,6 +119,10 @@ class FieldRenderer:
             raise TypeError("field renderer draw_player must be a boolean")
         if not isinstance(player_floating, bool):
             raise TypeError("field renderer player_floating must be a boolean")
+        if isinstance(player_floating_phase, bool) or not isinstance(
+            player_floating_phase, int
+        ):
+            raise TypeError("field renderer player_floating_phase must be an integer")
 
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
@@ -128,7 +133,7 @@ class FieldRenderer:
             draw_groups=("object", "object_overlay"),
         )
         characters: list[
-            tuple[int, FieldMovement, str, int, Any | None, bool]
+            tuple[int, FieldMovement, str, int, Any | None, bool, int]
         ] = []
         if draw_player:
             characters.append(
@@ -139,6 +144,7 @@ class FieldRenderer:
                     player_sprite_index,
                     player_character_image,
                     player_floating,
+                    player_floating_phase,
                 )
             )
         if actors is not None:
@@ -161,9 +167,20 @@ class FieldRenderer:
                         actor.sprite_index,
                         image,
                         actor.floating,
+                        floating_phase_offset(
+                            f"actor:{self.map_data.map_id}:{actor.id}"
+                        ),
                     )
                 )
-        for _world_y, movement, kind, sprite_index, image, floating in sorted(
+        for (
+            _world_y,
+            movement,
+            kind,
+            sprite_index,
+            image,
+            floating,
+            floating_phase,
+        ) in sorted(
             characters, key=lambda item: item[0]
         ):
             if kind == "player":
@@ -175,6 +192,7 @@ class FieldRenderer:
                     image=image,
                     sprite_index=sprite_index,
                     floating=floating,
+                    floating_phase=floating_phase,
                 )
             elif kind == "prop":
                 self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
@@ -201,6 +219,7 @@ class FieldRenderer:
                     image=image,
                     sprite_index=sprite_index,
                     floating=floating,
+                    floating_phase=floating_phase,
                 )
         self._draw_objects(
             camera_x,
@@ -309,6 +328,7 @@ class FieldRenderer:
         image: Any | None = None,
         sprite_index: int = 0,
         floating: bool = False,
+        floating_phase: int = 0,
     ) -> None:
         if not isinstance(floating, bool):
             raise TypeError("actor character floating must be a boolean")
@@ -362,7 +382,11 @@ class FieldRenderer:
                 field.world_y
                 - camera_y
                 - FIELD_CHARACTER_SIZE
-                - (floating_offset(frame_count) if floating else 0)
+                - (
+                    floating_offset(frame_count, phase_offset=floating_phase)
+                    if floating
+                    else 0
+                )
             )
             draw_height = FIELD_ACTOR_CHARACTER_HEIGHT
         self._pyxel.blt(
@@ -386,6 +410,7 @@ class FieldRenderer:
         image: Any | None,
         sprite_index: int,
         floating: bool = False,
+        floating_phase: int = 0,
     ) -> None:
         if not isinstance(floating, bool):
             raise TypeError("player floating must be a boolean")
@@ -434,7 +459,11 @@ class FieldRenderer:
                 field.world_y
                 - camera_y
                 - FIELD_CHARACTER_SIZE
-                - (floating_offset(frame_count) if floating else 0)
+                - (
+                    floating_offset(frame_count, phase_offset=floating_phase)
+                    if floating
+                    else 0
+                )
             ),
             image,
             source_x,
