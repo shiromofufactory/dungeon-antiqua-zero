@@ -243,7 +243,7 @@ class MapSourceTest(unittest.TestCase):
             },
         )
 
-    def test_rejects_invalid_actor_and_overlapping_actor_triggers(self) -> None:
+    def test_allows_actor_on_blocked_cell_and_rejects_overlapping_actor_triggers(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["actors"] = [
             {
@@ -267,7 +267,7 @@ class MapSourceTest(unittest.TestCase):
 
         codes = {item.code for item in validate_map_source(source, self.tileset)}
 
-        self.assertIn("actor_on_blocked_cell", codes)
+        self.assertNotIn("actor_on_blocked_cell", codes)
         self.assertIn("overlapping_event_trigger", codes)
 
     def test_prop_actor_uses_a_sheet_index_and_rejects_facing_or_legacy_appearance(self) -> None:
@@ -881,6 +881,26 @@ class MapSourceTest(unittest.TestCase):
         self.assertTrue(resolved["collision"][2 * 16 + 2])
         self.assertTrue(resolved["collision"][2 * 16 + 3])
         self.assertFalse(resolved["collision"][2 * 16 + 4])
+
+    def test_compiles_object_interaction_through_cells(self) -> None:
+        tileset = deepcopy(self.tileset)
+        tileset["objects"][0]["interact_through"] = True
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
+        source["objects"] = [
+            {
+                "id": "counter_1",
+                "definition_id": "rock",
+                "origin": [2, 2],
+                "order": 0,
+            }
+        ]
+
+        resolved = resolve_map(source, tileset)
+        compiled = compile_map(source, tileset, self.image_path, self.palette_path)
+
+        self.assertTrue(resolved["interact_through"][2 * 16 + 2])
+        self.assertEqual(compiled.runtime["interact_through_rows"][2][2], "1")
+        self.assertEqual(compiled.runtime["interact_through_rows"][1][2], "0")
 
     def test_object_cells_share_one_weighted_visual_choice(self) -> None:
         tileset = deepcopy(self.tileset)

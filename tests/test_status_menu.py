@@ -65,7 +65,7 @@ def input_state(
 
 
 class StatusMenuTest(unittest.TestCase):
-    def test_character_face_coordinates_match_faces_pc_sheet(self) -> None:
+    def test_character_face_coordinates_match_faces_sheet(self) -> None:
         expected = {
             "フィオラ": (0, 0),
             "セリオン": (32, 0),

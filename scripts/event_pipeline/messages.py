@@ -14,8 +14,19 @@ from .events import EventDiagnostic, EventSourceError
 MESSAGE_ID_PATTERN = re.compile(
     r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
 )
+FACE_SIZE = 32
+FACE_SHEET_WIDTH = 128
+FACE_SHEET_HEIGHT = 256
 MESSAGE_FIELDS = frozenset(
-    ("message_id", "portrait_character_key", "text_ja", "text_en", "text_zhcn")
+    (
+        "message_id",
+        "portrait_character_key",
+        "portrait_x",
+        "portrait_y",
+        "text_ja",
+        "text_en",
+        "text_zhcn",
+    )
 )
 LOCALIZED_FIELDS = ("text_ja", "text_en", "text_zhcn")
 
@@ -117,6 +128,53 @@ def validate_event_messages(
                     f"存在しない顔キャラクターです: {portrait}",
                 )
             )
+        has_portrait_x = "portrait_x" in record
+        has_portrait_y = "portrait_y" in record
+        if portrait is not None and (has_portrait_x or has_portrait_y):
+            diagnostics.append(
+                EventDiagnostic(
+                    "error",
+                    "conflicting_portrait",
+                    path,
+                    (
+                        "portrait_character_keyとportrait_x/portrait_yは"
+                        "同時に指定できません。"
+                    ),
+                )
+            )
+        if has_portrait_x != has_portrait_y:
+            diagnostics.append(
+                EventDiagnostic(
+                    "error",
+                    "incomplete_portrait_position",
+                    path,
+                    "portrait_xとportrait_yは必ずペアで指定してください。",
+                )
+            )
+        elif has_portrait_x:
+            for field, limit in (
+                ("portrait_x", FACE_SHEET_WIDTH),
+                ("portrait_y", FACE_SHEET_HEIGHT),
+            ):
+                coordinate = record.get(field)
+                if (
+                    not isinstance(coordinate, int)
+                    or isinstance(coordinate, bool)
+                    or coordinate < 0
+                    or coordinate % FACE_SIZE != 0
+                    or coordinate + FACE_SIZE > limit
+                ):
+                    diagnostics.append(
+                        EventDiagnostic(
+                            "error",
+                            "invalid_portrait_position",
+                            f"{path}.{field}",
+                            (
+                                f"{field}はfaces.png内の{FACE_SIZE}px単位の"
+                                "座標で指定してください。"
+                            ),
+                        )
+                    )
         for field in LOCALIZED_FIELDS:
             lines = record.get(field)
             valid_lines = isinstance(lines, list) and all(
@@ -171,6 +229,14 @@ def compile_event_messages(
                     if "portrait_character_key" in record
                     else {}
                 ),
+                **(
+                    {
+                        "portrait_x": record["portrait_x"],
+                        "portrait_y": record["portrait_y"],
+                    }
+                    if "portrait_x" in record and "portrait_y" in record
+                    else {}
+                ),
                 **{field: list(record[field]) for field in LOCALIZED_FIELDS},
             }
         )
@@ -205,6 +271,9 @@ def save_event_messages(path: Path, value: object) -> None:
 
 
 __all__ = [
+    "FACE_SIZE",
+    "FACE_SHEET_HEIGHT",
+    "FACE_SHEET_WIDTH",
     "LOCALIZED_FIELDS",
     "MESSAGE_ID_PATTERN",
     "compile_event_messages",

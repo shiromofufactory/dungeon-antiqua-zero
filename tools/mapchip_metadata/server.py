@@ -294,13 +294,14 @@ class MetadataApplication:
         )
         return self._document_payload(data, is_new=True)
 
-    def _prepare_map_object_updates(
+    def _prepare_map_updates(
         self,
         data: Mapping[str, Any],
         object_id_renames: object,
     ) -> tuple[
         list[tuple[Path, dict[str, Any], dict[str, Any]]],
         list[dict[str, str]],
+        int,
         int,
     ]:
         diagnostics: list[dict[str, str]] = []
@@ -317,7 +318,7 @@ class MetadataApplication:
                     "オブジェクトIDの変更情報が不正です。",
                 ).as_dict()
             )
-            return [], diagnostics, 0
+            return [], diagnostics, 0, 0
 
         tileset_id = data.get("tileset_id")
         metadata_path = (
@@ -325,11 +326,18 @@ class MetadataApplication:
             if isinstance(tileset_id, str)
             else None
         )
-        previous_ids: set[str] = set()
+        previous_object_ids: set[str] = set()
+        previous_ground_ids: set[str] = set()
         if metadata_path is not None and metadata_path.is_file():
-            previous_ids = {
+            existing = load_tileset(metadata_path)
+            previous_object_ids = {
                 item.get("id")
-                for item in load_tileset(metadata_path).get("objects", [])
+                for item in existing.get("objects", [])
+                if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+            }
+            previous_ground_ids = {
+                item.get("id")
+                for item in existing.get("grounds", [])
                 if isinstance(item, Mapping) and isinstance(item.get("id"), str)
             }
         object_definitions = data.get("objects")
@@ -341,11 +349,30 @@ class MetadataApplication:
                 for item in object_definitions
             )
         )
-        current_ids = {
+        current_object_ids = {
             item.get("id")
             for item in object_definitions
             if isinstance(item, Mapping) and isinstance(item.get("id"), str)
         } if has_object_definition_list else set()
+        ground_definitions = data.get("grounds")
+        can_reconcile_ground_definitions = (
+            isinstance(ground_definitions, list)
+            and bool(ground_definitions)
+            and all(
+                isinstance(item, Mapping) and isinstance(item.get("id"), str)
+                for item in ground_definitions
+            )
+        )
+        current_ground_ids = {
+            item.get("id")
+            for item in ground_definitions
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        } if isinstance(ground_definitions, list) else set()
+        base_ground_id = (
+            ground_definitions[0].get("id")
+            if can_reconcile_ground_definitions
+            else None
+        )
         normalized_renames: dict[str, str] = {}
         for old_id, new_id in renames.items():
             if not isinstance(old_id, str) or not isinstance(new_id, str):
@@ -360,7 +387,7 @@ class MetadataApplication:
                 continue
             if old_id == new_id:
                 continue
-            if old_id not in previous_ids or new_id not in current_ids:
+            if old_id not in previous_object_ids or new_id not in current_object_ids:
                 diagnostics.append(
                     Diagnostic(
                         "error",
@@ -372,44 +399,64 @@ class MetadataApplication:
                 continue
             normalized_renames[old_id] = new_id
         if diagnostics or not isinstance(tileset_id, str):
-            return [], diagnostics, 0
+            return [], diagnostics, 0, 0
 
-        removed_definition_ids = (
-            previous_ids - current_ids if can_reconcile_object_definitions else set()
+        removed_object_ids = (
+            previous_object_ids - current_object_ids
+            if can_reconcile_object_definitions
+            else set()
+        )
+        removed_ground_ids = (
+            previous_ground_ids - current_ground_ids
+            if can_reconcile_ground_definitions
+            else set()
         )
         updates: list[tuple[Path, dict[str, Any], dict[str, Any]]] = []
         removed_instance_count = 0
+        replaced_ground_count = 0
         source_root = self.content_root / "maps" / "sources"
         if not source_root.is_dir():
-            return updates, diagnostics, removed_instance_count
+            return updates, diagnostics, removed_instance_count, replaced_ground_count
         for path in sorted(source_root.glob("*.json")):
             original = load_map_source(path)
             if original.get("tileset_id") != tileset_id:
                 continue
             updated = json.loads(json.dumps(original))
             changed = False
+            rows = updated.get("grounds")
+            if isinstance(rows, list) and isinstance(base_ground_id, str):
+                for row in rows:
+                    if not isinstance(row, list):
+                        continue
+                    for x, ground_id in enumerate(row):
+                        if (
+                            isinstance(ground_id, str)
+                            and ground_id in removed_ground_ids
+                        ):
+                            row[x] = base_ground_id
+                            replaced_ground_count += 1
+                            changed = True
             instances = updated.get("objects")
-            if not isinstance(instances, list):
-                continue
             retained_instances = []
-            for instance in instances:
-                if not isinstance(instance, dict):
+            if isinstance(instances, list):
+                for instance in instances:
+                    if not isinstance(instance, dict):
+                        retained_instances.append(instance)
+                        continue
+                    definition_id = instance.get("definition_id")
+                    if definition_id in normalized_renames:
+                        instance["definition_id"] = normalized_renames[definition_id]
+                        definition_id = instance["definition_id"]
+                        changed = True
+                    if definition_id in removed_object_ids:
+                        removed_instance_count += 1
+                        changed = True
+                        continue
                     retained_instances.append(instance)
-                    continue
-                definition_id = instance.get("definition_id")
-                if definition_id in normalized_renames:
-                    instance["definition_id"] = normalized_renames[definition_id]
-                    definition_id = instance["definition_id"]
-                    changed = True
-                if definition_id in removed_definition_ids:
-                    removed_instance_count += 1
-                    changed = True
-                    continue
-                retained_instances.append(instance)
-            updated["objects"] = retained_instances
+                updated["objects"] = retained_instances
             if changed:
                 updates.append((path, original, updated))
-        return updates, diagnostics, removed_instance_count
+        return updates, diagnostics, removed_instance_count, replaced_ground_count
 
     def _compile_referencing_maps(
         self,
@@ -465,6 +512,7 @@ class MetadataApplication:
                 "image_info": image_info,
                 "updated_map_ids": [],
                 "removed_map_object_count": 0,
+                "replaced_map_ground_count": 0,
             }
         try:
             metadata_path = self.metadata_path_for(data.get("tileset_id"))
@@ -475,12 +523,16 @@ class MetadataApplication:
                 "image_info": image_info,
                 "updated_map_ids": [],
                 "removed_map_object_count": 0,
+                "replaced_map_ground_count": 0,
             }
 
         map_updates: list[tuple[Path, dict[str, Any], dict[str, Any]]] = []
-        map_updates, update_diagnostics, removed_instance_count = (
-            self._prepare_map_object_updates(data, object_id_renames)
-        )
+        (
+            map_updates,
+            update_diagnostics,
+            removed_instance_count,
+            replaced_ground_count,
+        ) = self._prepare_map_updates(data, object_id_renames)
         diagnostics.extend(update_diagnostics)
         compiled_maps = self._compile_referencing_maps(
             data,
@@ -510,6 +562,7 @@ class MetadataApplication:
             ],
             "generated_map_ids": [map_id for map_id, _compiled in compiled_maps],
             "removed_map_object_count": removed_instance_count,
+            "replaced_map_ground_count": replaced_ground_count,
         }
 
     def delete_tileset(self, tileset_id: str) -> dict[str, Any]:

@@ -963,6 +963,7 @@ function renderObjectEditor() {
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
         <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常オブジェクトより手前）</option><option value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>キャラクター前景（屋根など）</option></select></div>
+        <label class="object-interact-toggle"><input type="checkbox" data-change="object-interact-through" ${object.interact_through === true ? "checked" : ""}>このオブジェクト越しに1セル先を調べる</label>
       </div>
       <div class="row between" style="margin-top:10px">
         <button type="button" class="button secondary small" data-action="object-from-selection">選択矩形で置換</button>
@@ -1234,11 +1235,15 @@ async function save() {
       const updatedCount = result.updated_map_ids?.length || 0;
       const generatedCount = result.generated_map_ids?.length || 0;
       const removedCount = result.removed_map_object_count || 0;
+      const replacedGroundCount = result.replaced_map_ground_count || 0;
       const errorCount = state.diagnostics.filter((item) => item.severity === "error").length;
       const details = [];
       if (updatedCount) details.push(`${updatedCount}件のマップを更新`);
       if (generatedCount) details.push(`${generatedCount}件のゲーム用マップを再生成`);
       if (removedCount) details.push(`配置済みオブジェクト${removedCount}件を削除`);
+      if (replacedGroundCount) {
+        details.push(`配置済み地面${replacedGroundCount}セルをベース地面へ置換`);
+      }
       if (errorCount) details.push(`エラー${errorCount}件を保持`);
       showToast(details.length
         ? `メタデータを保存しました（${details.join("、")}）。`
@@ -1440,7 +1445,7 @@ function handleAction(element) {
     renderAll();
   } else if (action === "add-object") {
     commit(() => {
-      objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
+      objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", interact_through: false, cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
       state.objectOrigins.push(null);
       state.objectIndex = objects.length - 1;
       state.choiceIndex = 0;
@@ -1450,7 +1455,7 @@ function handleAction(element) {
     commit(() => {
       let object = currentObject();
       if (!object) {
-        object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", cells: [] };
+        object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", interact_through: false, cells: [] };
         objects.push(object);
         state.objectOrigins.push(null);
         state.objectIndex = objects.length - 1;
@@ -1525,6 +1530,7 @@ function handleChange(element) {
   else if (action === "object-width") commit(() => { object.size[0] = Number(value); });
   else if (action === "object-height") commit(() => { object.size[1] = Number(value); });
   else if (action === "object-group") commit(() => { object.default_draw_group = value; });
+  else if (action === "object-interact-through") commit(() => { object.interact_through = element.checked; });
 }
 
 async function initialize() {

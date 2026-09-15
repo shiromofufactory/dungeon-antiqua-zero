@@ -49,7 +49,7 @@ from ui import (
     pad,
 )
 
-FACES_IMAGE_ID = "faces/faces_pc"
+FACES_IMAGE_ID = "faces/faces"
 MEMBER_WINDOW_GRID = (0, 0, 28, 12)
 GUIDE_WINDOW_GRID = (28, 0, 36, 12)
 SPELL_WINDOW_GRID = (0, 12, 64, 33)

@@ -491,6 +491,10 @@ class MapEditorApplication:
         is_new: bool,
     ) -> dict[str, Any]:
         tileset = self.load_tileset(data["tileset_id"])
+        repaired_unknown_ground_count = self._replace_unknown_grounds_with_base(
+            data,
+            tileset,
+        )
         site_names_ja = self.site_names_ja(data)
         diagnostics, image_info, resolved = self.validate(data, site_names_ja)
         return {
@@ -510,9 +514,43 @@ class MapEditorApplication:
             ),
             "actor_assets": self.actor_assets_payload(),
             "is_new": is_new,
+            "dirty": repaired_unknown_ground_count > 0,
+            "repaired_unknown_ground_count": repaired_unknown_ground_count,
             "source_path": self._display_path(self.source_path_for(data["map_id"])),
             "runtime_path": self._display_path(self.runtime_path_for(data["map_id"])),
         }
+
+    @staticmethod
+    def _replace_unknown_grounds_with_base(
+        data: dict[str, Any],
+        tileset: Mapping[str, Any],
+    ) -> int:
+        definitions = tileset.get("grounds")
+        if not isinstance(definitions, list) or not definitions:
+            return 0
+        first = definitions[0]
+        if not isinstance(first, Mapping) or not isinstance(first.get("id"), str):
+            return 0
+        base_ground_id = first["id"]
+        ground_ids = {
+            definition.get("id")
+            for definition in definitions
+            if isinstance(definition, Mapping)
+            and isinstance(definition.get("id"), str)
+        }
+        rows = data.get("grounds")
+        if not isinstance(rows, list):
+            return 0
+
+        repaired = 0
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            for x, ground_id in enumerate(row):
+                if isinstance(ground_id, str) and ground_id not in ground_ids:
+                    row[x] = base_ground_id
+                    repaired += 1
+        return repaired
 
     def document_payload(self, map_id: str | None = None) -> dict[str, Any]:
         data, is_new = (

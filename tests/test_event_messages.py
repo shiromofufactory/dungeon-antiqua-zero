@@ -23,12 +23,21 @@ def message_record(
     message_id: str = "sample.greeting",
     *,
     portrait: str | None = None,
+    portrait_position: tuple[int, int] | None = None,
 ) -> dict[str, object]:
     return {
         "message_id": message_id,
         **(
             {"portrait_character_key": portrait}
             if portrait is not None
+            else {}
+        ),
+        **(
+            {
+                "portrait_x": portrait_position[0],
+                "portrait_y": portrait_position[1],
+            }
+            if portrait_position is not None
             else {}
         ),
         "text_ja": ["こんにちは", "ようこそ"],
@@ -76,6 +85,27 @@ class EventMessagePipelineTest(unittest.TestCase):
                 )
             },
         )
+
+    def test_compiles_sheet_portrait_and_rejects_invalid_coordinates(self) -> None:
+        source = [message_record(portrait_position=(96, 224))]
+
+        self.assertEqual(validate_event_messages(source), [])
+        self.assertEqual(compile_event_messages(source), source)
+
+        invalid = [
+            {**message_record(), "portrait_x": 1, "portrait_y": 0},
+            {**message_record("sample.missing_y"), "portrait_x": 0},
+            {
+                **message_record("sample.conflict", portrait="Alvan"),
+                "portrait_x": 0,
+                "portrait_y": 0,
+            },
+        ]
+        codes = {item.code for item in validate_event_messages(invalid)}
+
+        self.assertIn("invalid_portrait_position", codes)
+        self.assertIn("incomplete_portrait_position", codes)
+        self.assertIn("conflicting_portrait", codes)
 
     def test_rejects_duplicate_invalid_and_empty_messages(self) -> None:
         source = [
@@ -144,6 +174,18 @@ class EventMessageCatalogTest(unittest.TestCase):
         self.assertEqual(
             catalog.portrait_character_key("sample.greeting"),
             "Alvan",
+        )
+        self.assertIsNone(catalog.portrait_position("sample.greeting"))
+
+    def test_resolves_optional_sheet_portrait_from_message(self) -> None:
+        catalog = EventMessageCatalog.from_records(
+            [message_record(portrait_position=(96, 224))]
+        )
+
+        self.assertIsNone(catalog.portrait_character_key("sample.greeting"))
+        self.assertEqual(
+            catalog.portrait_position("sample.greeting"),
+            (96, 224),
         )
 
     def test_formats_logged_message_arguments(self) -> None:

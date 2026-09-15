@@ -43,7 +43,7 @@ from ui import (
     tagged_text_width,
 )
 
-FACES_IMAGE_ID = "faces/faces_pc"
+FACES_IMAGE_ID = "faces/faces"
 STATUS_TEXT_KEYS = {
     "label.condition": "status.condition",
     "label.strength": "status.strength",

@@ -287,7 +287,7 @@ LANGUAGE_SEQUENCE = (
 )
 DISPLAY_SEQUENCE = (DisplayMode.PIXEL, DisplayMode.SMOOTH)
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
-FACES_IMAGE_ID = "faces/faces_pc"
+FACES_IMAGE_ID = "faces/faces"
 WORLD_MAP_ID = "worldmap"
 WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
 NEW_GAME_EVENT_ID = "worldmap.prologue"
@@ -2751,6 +2751,18 @@ class Game:
                 return
             if self._try_field_trigger("interact", x, y, release_confirm=True):
                 return
+            if self.current_map.allows_interaction_through(x, y):
+                x += self.field.facing.dx
+                y += self.field.facing.dy
+                if self._try_open_treasure(x, y, release_confirm=True):
+                    return
+                if self._try_field_trigger(
+                    "interact",
+                    x,
+                    y,
+                    release_confirm=True,
+                ):
+                    return
         direction = input_state.held_direction
         if not self.field.is_moving and direction is not None:
             x = self.field.position.x + direction.dx

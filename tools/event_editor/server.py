@@ -15,6 +15,9 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from scripts.event_pipeline import (
+    FACE_SIZE,
+    FACE_SHEET_HEIGHT,
+    FACE_SHEET_WIDTH,
     compile_event_flags,
     compile_event_messages,
     compile_event_sources,
@@ -48,6 +51,7 @@ MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".png": "image/png",
 }
 
 
@@ -96,6 +100,30 @@ class EventEditorApplication:
         self.token = token or secrets.token_urlsafe(24)
         self.app_root = (app_root or PROJECT_ROOT / "app").resolve()
         self.source_path = self.source_path_for(namespace)
+
+    @property
+    def face_sheet_path(self) -> Path:
+        return self.content_root / "images" / "faces" / "faces.png"
+
+    def character_faces(self) -> list[dict[str, object]]:
+        path = self.content_root / "data" / "characters.json"
+        records = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            raise ValueError(f"{path}のルートは配列である必要があります。")
+        return [
+            {
+                "character_key": record["name_en"],
+                "x": record["face_x"],
+                "y": record["face_y"],
+            }
+            for record in records
+            if isinstance(record, dict)
+            and isinstance(record.get("name_en"), str)
+            and isinstance(record.get("face_x"), int)
+            and not isinstance(record["face_x"], bool)
+            and isinstance(record.get("face_y"), int)
+            and not isinstance(record["face_y"], bool)
+        ]
 
     def source_path_for(self, namespace: str) -> Path:
         if not _valid_id(namespace):
@@ -216,6 +244,12 @@ class EventEditorApplication:
             "catalogs": {
                 key: sorted(values) for key, values in catalogs.items()
             },
+            "face_sheet": {
+                "width": FACE_SHEET_WIDTH,
+                "height": FACE_SHEET_HEIGHT,
+                "face_size": FACE_SIZE,
+                "character_faces": self.character_faces(),
+            },
             "event_ids": event_ids,
             "flag_ids": sorted(catalogs["flag_ids"]),
             "diagnostics": self.validate(selected, data, flags, messages),
@@ -334,6 +368,18 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
                     self._send_json(application.document_payload(namespace))
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+                return
+            if parsed.path == "/api/face-sheet":
+                if not self._authorized(parsed):
+                    self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
+                    return
+                try:
+                    self._send_bytes(
+                        application.face_sheet_path.read_bytes(),
+                        "image/png",
+                    )
+                except OSError as error:
+                    self._error(HTTPStatus.NOT_FOUND, str(error))
                 return
             relative = "index.html" if parsed.path in ("", "/") else parsed.path.lstrip("/")
             static_path = (STATIC_ROOT / relative).resolve()

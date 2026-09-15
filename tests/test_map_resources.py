@@ -74,6 +74,7 @@ class MapResourcesTest(unittest.TestCase):
                 }
             ],
             "collision_rows": ["10", "01"],
+            "interact_through_rows": ["00", "10"],
             "sites": [
                 {
                     "id": "sample_town",
@@ -158,6 +159,9 @@ class MapResourcesTest(unittest.TestCase):
         self.assertTrue(map_data.is_blocked(0, 0))
         self.assertFalse(map_data.is_blocked(1, 0))
         self.assertTrue(map_data.is_blocked(-1, 0))
+        self.assertFalse(map_data.allows_interaction_through(0, 0))
+        self.assertTrue(map_data.allows_interaction_through(0, 1))
+        self.assertFalse(map_data.allows_interaction_through(-1, 1))
         self.assertEqual(map_data.sites[0].id, "sample_town")
         self.assertEqual(map_data.sites[0].entrance_cells, (MapCell(1, 0),))
         self.assertEqual(map_data.sites[0].destination.arrival_id, "from_world")
@@ -211,6 +215,12 @@ class MapResourcesTest(unittest.TestCase):
         self.runtime["collision_rows"] = ["10"]
         self._write_runtime()
         with self.assertRaisesRegex(MapResourceError, "collision_rows"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+        self.runtime["collision_rows"] = ["10", "01"]
+        self.runtime["interact_through_rows"] = ["00"]
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "interact_through_rows"):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
     def test_accepts_foreground_and_rejects_unknown_object_draw_group(self) -> None:

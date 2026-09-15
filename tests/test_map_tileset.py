@@ -193,6 +193,7 @@ class MapTilesetTest(unittest.TestCase):
                 "id": "entrance",
                 "size": [1, 1],
                 "default_draw_group": "object_overlay",
+                "interact_through": True,
                 "cells": [{"offset": [0, 0], "collision": "passable_override", "tile": [0, 0]}],
             }
         ]
@@ -200,6 +201,7 @@ class MapTilesetTest(unittest.TestCase):
         diagnostics, _ = validate_tileset(data, image_path=self.image_path)
         self.assertNotIn("invalid_collision", {item.code for item in diagnostics if item.severity == "error"})
         self.assertNotIn("invalid_object_draw_group", {item.code for item in diagnostics if item.severity == "error"})
+        self.assertNotIn("invalid_object_interact_through", {item.code for item in diagnostics if item.severity == "error"})
 
         data["objects"][0]["default_draw_group"] = "object_foreground"
         diagnostics, _ = validate_tileset(data, image_path=self.image_path)
@@ -210,10 +212,12 @@ class MapTilesetTest(unittest.TestCase):
 
         data["grounds"][0]["collision"] = "passable_override"
         data["objects"][0]["default_draw_group"] = "unknown_group"
+        data["objects"][0]["interact_through"] = "yes"
         diagnostics, _ = validate_tileset(data, image_path=self.image_path)
         codes = {item.code for item in diagnostics if item.severity == "error"}
         self.assertIn("invalid_collision", codes)
         self.assertIn("invalid_object_draw_group", codes)
+        self.assertIn("invalid_object_interact_through", codes)
 
     def test_object_visual_choices_must_be_synchronized_across_cells(self) -> None:
         data = initial_worldmap_tileset()

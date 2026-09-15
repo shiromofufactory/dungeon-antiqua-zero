@@ -21,6 +21,7 @@ from app.rendering.field import (
     FIELD_PLAYER_CHARACTER_SET_WIDTH,
     FieldRenderer,
 )
+from app.rendering.floating import FLOATING_CHARACTER_FRAME_INTERVAL
 from app.resources.maps import (
     CompiledMap,
     MapActor,
@@ -204,6 +205,19 @@ class FieldMovementTest(unittest.TestCase):
         actors.face_toward("elder", FieldPosition(2, 1))
 
         self.assertIs(actors.actor("elder").movement.facing, Direction.RIGHT)
+
+    def test_stationary_actor_faces_party_across_a_counter(self) -> None:
+        map_data = compiled_map(("0000", "0000", "0000"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("keeper", MapCell(3, 1), "stationary", 0, "up"),),
+        )
+        actors = FieldActors(map_data)
+
+        actors.face_toward("keeper", FieldPosition(1, 1))
+
+        self.assertIs(actors.actor("keeper").movement.facing, Direction.LEFT)
 
     def test_prop_actor_has_no_facing_or_movement(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
@@ -501,11 +515,11 @@ class FieldRendererTest(unittest.TestCase):
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
         )
 
-    def test_floating_player_only_offsets_the_draw_position(self) -> None:
+    def test_floating_player_animates_while_idle_and_only_offsets_draw_y(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="town")
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
         walking_image = Mock(width=384, height=384)
-        pyxel = Mock(frame_count=48)
+        pyxel = Mock(frame_count=0)
         renderer = FieldRenderer(
             map_data,
             screen_width=32,
@@ -513,17 +527,28 @@ class FieldRendererTest(unittest.TestCase):
             pyxel_api=pyxel,
         )
 
-        renderer.draw(
-            field,
-            player_character_image=walking_image,
-            player_floating=True,
+        expected = (
+            (0, 32, -8),
+            (FLOATING_CHARACTER_FRAME_INTERVAL, 16, -8),
+            (FLOATING_CHARACTER_FRAME_INTERVAL * 2, 0, -10),
+            (FLOATING_CHARACTER_FRAME_INTERVAL * 3, 16, -10),
+            (FLOATING_CHARACTER_FRAME_INTERVAL * 4, 32, -8),
         )
+        for frame_count, source_x, draw_y in expected:
+            with self.subTest(frame_count=frame_count):
+                pyxel.blt.reset_mock()
+                renderer.draw(
+                    field,
+                    player_character_image=walking_image,
+                    player_floating=True,
+                    frame_count=frame_count,
+                )
+                self.assertEqual(
+                    pyxel.blt.call_args_list[-1],
+                    call(8, draw_y, walking_image, source_x, 0, 16, 32, 1),
+                )
 
         self.assertEqual(field.position, FieldPosition(1, 1))
-        self.assertEqual(
-            pyxel.blt.call_args_list[-1],
-            call(8, -10, walking_image, 16, 0, 16, 32, 1),
-        )
 
     def test_draws_actor_common_sheets_and_player_character_bank(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
@@ -745,8 +770,8 @@ class FieldRendererTest(unittest.TestCase):
             actor_pc_character_image=pc_image,
         )
 
-        pyxel.blt.assert_any_call(16, -18, npc_image, 16, 0, 16, 32, 1)
-        pyxel.blt.assert_any_call(32, -16, pc_image, 64, 0, 16, 32, 1)
+        pyxel.blt.assert_any_call(16, -18, npc_image, 0, 0, 16, 32, 1)
+        pyxel.blt.assert_any_call(32, -16, pc_image, 80, 0, 16, 32, 1)
 
     def test_draws_the_current_treasure_animation_frame(self) -> None:
         map_data = compiled_map(("000", "000", "000"))

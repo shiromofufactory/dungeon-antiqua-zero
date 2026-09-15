@@ -3,9 +3,13 @@ from __future__ import annotations
 import unittest
 
 from app.rendering.floating import (
+    FLOATING_CHARACTER_CYCLE_FRAMES,
+    FLOATING_CHARACTER_FRAME_INTERVAL,
+    FLOATING_CHARACTER_FRAMES,
     FLOATING_CYCLE_FRAMES,
     FLOATING_OFFSETS,
     FLOATING_PHASE_FRAMES,
+    floating_character_frame,
     floating_offset,
     floating_phase_offset,
 )
@@ -27,6 +31,30 @@ class FloatingAnimationTest(unittest.TestCase):
                 floating_offset(value)  # type: ignore[arg-type]
         with self.assertRaises(ValueError):
             floating_offset(-1)
+
+    def test_floating_character_cycles_more_slowly_than_world_map_player(self) -> None:
+        self.assertEqual(FLOATING_CHARACTER_FRAMES, (2, 1, 0, 1))
+        self.assertEqual(FLOATING_CHARACTER_FRAME_INTERVAL, 24)
+        self.assertEqual(FLOATING_CHARACTER_CYCLE_FRAMES, 96)
+        self.assertEqual(
+            [floating_character_frame(frame) for frame in range(0, 121, 24)],
+            [2, 1, 0, 1, 2, 1],
+        )
+
+    def test_floating_character_frame_uses_the_entity_phase(self) -> None:
+        phase = floating_phase_offset("pc:Fiora")
+
+        self.assertEqual(floating_character_frame(0, phase_offset=phase), 1)
+
+    def test_rejects_invalid_floating_character_frames(self) -> None:
+        for value in (True, 1.5, "1"):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                floating_character_frame(value)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            floating_character_frame(-1)
+        for value in (None, 1.5, True):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                floating_character_frame(0, phase_offset=value)  # type: ignore[arg-type]
 
     def test_derives_stable_full_cycle_phases_from_entity_identity(self) -> None:
         self.assertEqual(floating_phase_offset("pc:Fiora"), 77)

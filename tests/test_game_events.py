@@ -29,6 +29,8 @@ def compiled_map(
     trigger: MapEventTrigger | None,
     *,
     actors: tuple[MapActor, ...] = (),
+    width: int = 3,
+    interact_through_rows: tuple[str, ...] = (),
 ) -> CompiledMap:
     static = {activation: {} for activation in ("step", "touch", "interact")}
     if trigger is not None:
@@ -40,14 +42,14 @@ def compiled_map(
         profile="town",
         tileset_id="worldmap",
         tile_size=16,
-        width=3,
+        width=width,
         height=3,
         atlas=object(),
         atlas_columns=1,
         atlas_tile_count=1,
-        ground_tiles=(0,) * 9,
+        ground_tiles=(0,) * (width * 3),
         object_tiles=(),
-        collision_rows=("000", "000", "000"),
+        collision_rows=("0" * width, "0" * width, "0" * width),
         ground_animations=MappingProxyType({}),
         object_animations=MappingProxyType({}),
         actors=actors,
@@ -60,6 +62,7 @@ def compiled_map(
             if trigger is None or trigger.actor_id is None
             else {trigger.actor_id: (trigger,)}
         ),
+        interact_through_rows=interact_through_rows,
     )
 
 
@@ -67,9 +70,16 @@ def game_for(
     trigger: MapEventTrigger,
     *,
     actors: tuple[MapActor, ...] = (),
+    width: int = 3,
+    interact_through_rows: tuple[str, ...] = (),
 ) -> Game:
     game = Game.__new__(Game)
-    game.current_map = compiled_map(trigger, actors=actors)
+    game.current_map = compiled_map(
+        trigger,
+        actors=actors,
+        width=width,
+        interact_through_rows=interact_through_rows,
+    )
     game.field = FieldMovement(
         game.current_map,
         start=FieldPosition(1, 1),
@@ -254,6 +264,46 @@ class GameEventTriggerTest(unittest.TestCase):
             "sample.sign",
             release_direction=None,
             release_confirm=True,
+        )
+
+    def test_interact_reaches_actor_one_cell_beyond_enabled_object(self) -> None:
+        actor = MapActor("shopkeeper", MapCell(3, 1), "stationary", 0, "up")
+        trigger = MapEventTrigger(
+            "shopkeeper_talk",
+            "sample.shop",
+            frozenset(("touch", "interact")),
+            actor_id="shopkeeper",
+            offsets=(MapCell(0, 0),),
+        )
+        without_enabled_object = game_for(
+            trigger,
+            actors=(actor,),
+            width=4,
+        )
+        without_enabled_object._update_field(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+        without_enabled_object._start_field_event.assert_not_called()
+
+        game = game_for(
+            trigger,
+            actors=(actor,),
+            width=4,
+            interact_through_rows=("0000", "0010", "0000"),
+        )
+
+        game._update_field(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        game._start_field_event.assert_called_once_with(
+            "sample.shop",
+            release_direction=None,
+            release_confirm=True,
+        )
+        self.assertIs(
+            game.field_actors.actor("shopkeeper").movement.facing,
+            Direction.LEFT,
         )
 
     def test_interacting_with_character_actor_turns_it_toward_the_party(self) -> None:

@@ -209,7 +209,10 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("const rendered = drawActorOnMap(context, actor, scale, now)", script)
         self.assertIn('data-actor-field="floating"', script)
         self.assertIn("const FLOATING_OFFSETS = [0, 0, 0, 1, 2, 2, 2, 1]", script)
+        self.assertIn("const FLOATING_CHARACTER_FRAMES = [2, 1, 0, 1]", script)
+        self.assertIn("const FLOATING_CHARACTER_FRAME_INTERVAL = 24", script)
         self.assertIn("function stableFloatingPhase(identity)", script)
+        self.assertIn("function floatingCharacterFrame(now, phaseOffset = 0)", script)
         self.assertIn('`actor:${state.data.map_id}:${actor.id}`', script)
         self.assertNotIn('data-actor-field="sprite_index"', script)
         self.assertIn('id="map-select"', page)
@@ -316,6 +319,38 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertFalse(self.application.source_path_for("sample_village").exists())
         self.assertFalse((self.application.runtime_root / "sample_village.json").exists())
         self.assertFalse((self.application.runtime_root / "sample_village.bin").exists())
+
+    def test_replaces_removed_ground_ids_with_base_ground_on_open(self) -> None:
+        tileset = self.application.load_tileset("village")
+        source = initial_map_source(
+            "broken_village",
+            tileset,
+            "town",
+            16,
+            15,
+        )
+        source["grounds"][5][10] = "removed_ground"
+        source_path = self.application.source_path_for("broken_village")
+        save_map_source(source_path, source)
+
+        payload = self.get_json(
+            "/api/document?map=broken_village&token=test-token"
+        )
+
+        self.assertTrue(payload["dirty"])
+        self.assertEqual(payload["repaired_unknown_ground_count"], 1)
+        self.assertEqual(payload["data"]["grounds"][5][10], "grass")
+        self.assertFalse(
+            any(issue["code"] == "unknown_ground" for issue in payload["diagnostics"])
+        )
+        self.assertIsNotNone(payload["resolved"])
+        self.assertEqual(
+            load_map_source(source_path)["grounds"][5][10],
+            "removed_ground",
+        )
+
+        self.assertTrue(self.post_json("/api/save", payload["data"])["saved"])
+        self.assertEqual(load_map_source(source_path)["grounds"][5][10], "grass")
 
     def test_actor_trigger_is_automatic_and_interact_is_not_selectable(self) -> None:
         script = self.get_text("/app.js")

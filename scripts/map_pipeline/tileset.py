@@ -468,6 +468,15 @@ def _validate_object(
             f"{path}.default_draw_group",
             "描画グループはobject、object_overlay、object_foregroundのいずれかで指定してください。",
         )
+    interact_through = object_value.get("interact_through", False)
+    if not isinstance(interact_through, bool):
+        _diag(
+            diagnostics,
+            "error",
+            "invalid_object_interact_through",
+            f"{path}.interact_through",
+            "オブジェクト越しの決定操作はtrueまたはfalseで指定してください。",
+        )
     cells = object_value.get("cells")
     if not isinstance(cells, list) or not cells:
         _diag(

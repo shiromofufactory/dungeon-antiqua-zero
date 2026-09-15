@@ -201,6 +201,9 @@ npm run events:build
 - `portrait_character_key` は任意で、指定時は `characters.json` の `name_en` と顔座標を使う。
   現在パーティにいないキャラクターも表示できる。同じメッセージを参照するすべての箇所で
   顔の有無と種類は共通とし、イベントのmessageコマンド側には顔情報を持たせない。
+- PC以外の顔は `portrait_x` と `portrait_y` に `faces/faces.png` 内の左上座標を
+  32px単位で保持する。両属性は必ずペアで指定し、`portrait_character_key` とは
+  同時に指定しない。PCは座標の移動に追従できる `portrait_character_key` を優先する。
 - 各 `text_*` は1表示行ごとの文字列配列とする。`text_ja` は1行以上必須、未翻訳の
   `text_en` と `text_zhcn` は空配列を許可し、その場合は既存の言語フォールバックを使う。
 - 通常UI、用語、ショップなどで使う `content/data/texts.json` とは相互参照しない。
@@ -300,8 +303,8 @@ npm run events:build
 
 - `message_id` は `content/events/messages.json` の既存IDを参照する。翻訳後文字列をイベント定義へ
   複製しない。
-- 顔グラフィックは参照先のメッセージレコードが持つ任意の `portrait_character_key` から解決する。
-  初期仕様で任意画像座標は指定しない。
+- 顔グラフィックは参照先のメッセージレコードが持つ任意の
+  `portrait_character_key` または `portrait_x` / `portrait_y` から解決する。
 - 顔なしでは本文領域をWindow全幅にし、顔ありでは32×32pxの顔領域を確保する。左右配置、話者名、
   自動送りは画面仕様が必要になった時点で追加する。
 - 本文は拠点名表示と同じ大きい表示文字用フォントを使う。日本語では `umplus_j12r.bdf` を使用する。
@@ -456,8 +459,9 @@ actorは次の4種類とする。
 その配置で浮遊表示するかを指定し、省略時は `false` とする。種族、`sprite_source`、
 `sprite_index` から自動設定しない。同じ妖精の画像でも通常配置は `true`、ベッドや倒れ姿など
 上下動させない配置は `false` または省略とする。`floating` は `stationary` / `roaming` だけに指定でき、
-`prop` / `treasure` に指定した場合は生成エラーとする。`prop` は下地が通行可能なセルに置くが、
-すべてのactor自身がpartyと他actorの進入を防ぐ。`stationary` と `roaming` はactorをアンカーとする
+`prop` / `treasure` に指定した場合は生成エラーとする。actorは演出や地形表現のため、
+下地が通行不可のセルにも配置できる。すべてのactor自身がpartyと他actorの進入を防ぐ。
+`stationary` と `roaming` はactorをアンカーとする
 `touch` または `interact` で起動される際、未完了の自律歩行を初期セルへ戻し、partyの先頭と
 actorを互いの方へ向ける。`prop` は会話や調査でも向きを変えない。宝箱の中身、入力、演出、保存規則は
 [`treasures.md`](./treasures.md) を正本とする。
@@ -469,6 +473,8 @@ actorの配置、現在位置、向き、待機タイマーはFieldの一時状�
 
 `floating=true` の人物actorは、停止中と移動中の両方で16×32px画像全体を上下させる。
 パターン、速度、適用する描画オフセットは [`field.md`](./field.md) のPC浮遊と共通とする。
+停止中は右足、立ち、左足、立ちの画像パターンも各24フレームで切り替え、移動中は通常の
+歩行パターンと速度を優先する。
 開始位相は `map_id` とactorの安定IDから自動決定し、同じ画面内の浮遊actorが同期しにくい
 ようにする。位置や画像を変更しても位相は維持し、actor IDまたはmap IDを変更した場合だけ変化する。
 浮遊で変わるのは描画Y座標だけとし、actorの現在セル、移動先、衝突、トリガー座標、
@@ -533,6 +539,12 @@ cell / objectアンカーの単独トリガーで選択できるactivationは `s
 起動し、`step` は評価しない。`touch` がなければ通常の通行判定と歩行を行い、歩行完了後に
 `step` を調べる。決定入力では `interact` だけを調べる。この順序により、1回の操作から複数の
 イベントを起動しない。
+
+停止中の決定入力では、まず従来どおり向いている隣接セルの宝箱、`interact` の順に調べる。
+どちらもなく、その隣接セルが `interact_through` を有効にしたオブジェクトの構成セルなら、
+同じ方向のさらに1セル先について宝箱、`interact` の順に調べる。通過は1セルだけとし、複数の
+対象オブジェクトを連鎖して越えない。`step`、`touch`、移動時の通行判定には影響させない。
+奥の人物actorを起動した場合も、partyとactorはカウンターを挟んで互いの方向を向く。
 
 ### ゲーム用形式
 
@@ -680,7 +692,8 @@ validatorを使う。
 | 入力 | 選択元 |
 |---|---|
 | `flag_id` | `content/events/flags.json` の宣言済みグローバルフラグ |
-| `character_key` / 顔 | `content/data/characters.json` |
+| `character_key` | `content/data/characters.json` |
+| 顔 | `content/images/faces/faces.png` の32×32px一覧 |
 | `item_key` | `content/data/items.json` |
 | `message_id` | `content/events/messages.json` |
 | `bgm_id` | 本番BGMカタログ／生成元 |
@@ -690,6 +703,12 @@ validatorを使う。
 メッセージは左の一覧から新規作成・選択し、中央で `message_id`、任意の顔、日本語、英語、
 簡体字中国語を編集する。新規IDは `<現在のnamespace>.message_<連番>` を既定値にするが、
 別の名前へ変更できる。イベントのmessageコマンドはこの一覧からIDを選択し、顔は指定しない。
+顔の編集欄は顔が設定されているときだけ選択中の顔を2倍表示し、顔なしでは表示しない。
+「顔を選択」を押したときだけダイアログを開く。
+ダイアログでは `faces.png` を2倍表示した一覧から画像自体を選択する。選択したセルが
+`characters.json` の顔座標と一致する場合は `portrait_character_key`、それ以外は
+`portrait_x` / `portrait_y` を保存する。顔または「顔なし」を選ぶとダイアログを閉じ、
+「顔なし」では顔指定の属性を削除する。
 messageコマンドでは、選択中のメッセージの日本語をゲーム内と同じ1行単位でプレビューする。
 日本語が未入力、または参照先IDが存在しない場合は、その状態をプレビュー欄に表示する。
 
@@ -809,9 +828,10 @@ Runnerとマップトリガーを一度に作り込みすぎない。
 - step、touch、interactが定めた入力エッジで1回だけ発火し、初期配置やイベント移動では発火しない。
 - 宝箱以外のactorを作成・選択するとtouch・interactの固定トリガーが1件自動設定され、
   interactを単独トリガーとして選択できない。
+- `interact_through` を有効にしたオブジェクト越しに、1セル奥のactorイベントを決定入力で起動できる。
 - 人物actorのtouch・interact起動時は、partyの先頭とactorが互いの方を向いてからイベントを開始する。
 - 人物actorは配置ごとの `floating` を保存でき、`true` の配置だけが停止・移動中とも、
-  `map_id` とactor IDから決まる安定した開始位相で浮遊する。
+  `map_id` とactor IDから決まる安定した開始位相で浮遊し、停止中も画像パターンが切り替わる。
   同じ妖精画像でも `false` の配置は動かず、prop／treasureの `floating` は生成時に拒否される。
 - ニューゲームでは初期フィールドの適用後に `worldmap.prologue` が起動し、ロードでは起動しない。
 - フラグ、パーティ、インベントリへの操作が既存の上限・隊列・セーブ規則を迂回しない。

@@ -241,10 +241,15 @@ class EventMessageOverlay(MessageOverlay):
         self.message_id = message_id
         portrait_character_key = messages.portrait_character_key(message_id)
         self.portrait_character_key = portrait_character_key
+        portrait_position = messages.portrait_position(message_id)
         face_position = (
-            None
-            if portrait_character_key is None
-            else face_positions.get(portrait_character_key)
+            FacePosition(*portrait_position)
+            if portrait_position is not None
+            else (
+                None
+                if portrait_character_key is None
+                else face_positions.get(portrait_character_key)
+            )
         )
         if portrait_character_key is not None and face_position is None:
             raise EventMessageDataError(

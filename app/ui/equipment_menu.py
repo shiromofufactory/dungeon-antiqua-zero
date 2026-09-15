@@ -47,7 +47,7 @@ from ui.tagged_text import (
     ICON_Y_OFFSET,
 )
 
-FACES_IMAGE_ID = "faces/faces_pc"
+FACES_IMAGE_ID = "faces/faces"
 
 MAIN_WINDOW_GRID = (0, 0, 33, 60)
 ITEM_LIST_WINDOW_GRID = (33, 0, 31, 24)

@@ -21,6 +21,9 @@ MESSAGE_ID_PATTERN = re.compile(
     r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
 )
 LOCALIZED_FIELDS = ("text_ja", "text_en", "text_zhcn")
+FACE_SIZE = 32
+FACE_SHEET_WIDTH = 128
+FACE_SHEET_HEIGHT = 256
 
 
 class EventMessageResourceError(RuntimeError):
@@ -32,6 +35,7 @@ class EventMessageCatalog:
     _texts: TextCatalog
     _ids: tuple[str, ...]
     _portrait_character_keys: Mapping[str, str | None]
+    _portrait_positions: Mapping[str, tuple[int, int] | None]
 
     @classmethod
     def from_records(
@@ -42,6 +46,7 @@ class EventMessageCatalog:
         converted = []
         ids: list[str] = []
         portrait_character_keys: dict[str, str | None] = {}
+        portrait_positions: dict[str, tuple[int, int] | None] = {}
         try:
             iterator = iter(records)
         except TypeError as error:
@@ -54,6 +59,8 @@ class EventMessageCatalog:
             if not set(record) <= {
                 "message_id",
                 "portrait_character_key",
+                "portrait_x",
+                "portrait_y",
                 *LOCALIZED_FIELDS,
             } or not {"message_id", *LOCALIZED_FIELDS} <= set(record):
                 raise EventMessageResourceError(
@@ -74,8 +81,40 @@ class EventMessageCatalog:
                 raise EventMessageResourceError(
                     f"messages[{index}].portrait_character_keyが不正です。"
                 )
+            has_portrait_x = "portrait_x" in record
+            has_portrait_y = "portrait_y" in record
+            if portrait is not None and (has_portrait_x or has_portrait_y):
+                raise EventMessageResourceError(
+                    f"messages[{index}]の顔指定が重複しています。"
+                )
+            if has_portrait_x != has_portrait_y:
+                raise EventMessageResourceError(
+                    f"messages[{index}]の顔座標が不正です。"
+                )
+            portrait_position: tuple[int, int] | None = None
+            if has_portrait_x:
+                coordinates = (
+                    ("portrait_x", record.get("portrait_x"), FACE_SHEET_WIDTH),
+                    ("portrait_y", record.get("portrait_y"), FACE_SHEET_HEIGHT),
+                )
+                if any(
+                    not isinstance(coordinate, int)
+                    or isinstance(coordinate, bool)
+                    or coordinate < 0
+                    or coordinate % FACE_SIZE != 0
+                    or coordinate + FACE_SIZE > limit
+                    for _field, coordinate, limit in coordinates
+                ):
+                    raise EventMessageResourceError(
+                        f"messages[{index}]の顔座標が不正です。"
+                    )
+                portrait_position = (
+                    record["portrait_x"],
+                    record["portrait_y"],
+                )
             ids.append(message_id)
             portrait_character_keys[message_id] = portrait
+            portrait_positions[message_id] = portrait_position
             converted.append(
                 {
                     "text_key": message_id,
@@ -90,6 +129,7 @@ class EventMessageCatalog:
             texts,
             tuple(ids),
             MappingProxyType(portrait_character_keys),
+            MappingProxyType(portrait_positions),
         )
 
     @classmethod
@@ -128,6 +168,12 @@ class EventMessageCatalog:
     def portrait_character_key(self, message_id: str) -> str | None:
         try:
             return self._portrait_character_keys[message_id]
+        except KeyError as error:
+            raise KeyError(f"unknown event message: {message_id}") from error
+
+    def portrait_position(self, message_id: str) -> tuple[int, int] | None:
+        try:
+            return self._portrait_positions[message_id]
         except KeyError as error:
             raise KeyError(f"unknown event message: {message_id}") from error
 

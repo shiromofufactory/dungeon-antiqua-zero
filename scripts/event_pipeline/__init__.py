@@ -23,6 +23,9 @@ from .flags import (
     validate_event_flags,
 )
 from .messages import (
+    FACE_SIZE,
+    FACE_SHEET_HEIGHT,
+    FACE_SHEET_WIDTH,
     compile_event_messages,
     event_message_ids,
     event_messages_path,
@@ -50,6 +53,9 @@ __all__ = (
     "load_event_flags",
     "save_event_flags",
     "validate_event_flags",
+    "FACE_SIZE",
+    "FACE_SHEET_HEIGHT",
+    "FACE_SHEET_WIDTH",
     "compile_event_messages",
     "event_message_ids",
     "event_messages_path",

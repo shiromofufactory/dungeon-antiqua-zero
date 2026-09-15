@@ -9,13 +9,21 @@ import pyxel
 if __package__ == "rendering":
     from field import FieldActors, FieldMovement
     from input import Direction
-    from rendering.floating import floating_offset, floating_phase_offset
+    from rendering.floating import (
+        floating_character_frame,
+        floating_offset,
+        floating_phase_offset,
+    )
     from resources.maps import CompiledMap
 else:
     from ..field import FieldActors, FieldMovement
     from ..input import Direction
     from ..resources.maps import CompiledMap
-    from .floating import floating_offset, floating_phase_offset
+    from .floating import (
+        floating_character_frame,
+        floating_offset,
+        floating_phase_offset,
+    )
 
 
 FIELD_CHARACTER_BANK = 0
@@ -371,6 +379,11 @@ class FieldRenderer:
                     % len(FIELD_ACTOR_CHARACTER_WALKING_FRAMES)
                 )
                 frame = FIELD_ACTOR_CHARACTER_WALKING_FRAMES[phase]
+            elif floating:
+                frame = floating_character_frame(
+                    frame_count,
+                    phase_offset=floating_phase,
+                )
             source_x = block_x + frame * FIELD_CHARACTER_SIZE
             source_y = (
                 block_y
@@ -447,6 +460,11 @@ class FieldRenderer:
                 % len(FIELD_PLAYER_CHARACTER_WALKING_FRAMES)
             )
             frame = FIELD_PLAYER_CHARACTER_WALKING_FRAMES[phase]
+        elif floating:
+            frame = floating_character_frame(
+                frame_count,
+                phase_offset=floating_phase,
+            )
         source_x = block_x + frame * FIELD_CHARACTER_SIZE
         source_y = (
             block_y

@@ -25,6 +25,7 @@ class EventMessageOverlayTest(unittest.TestCase):
         self,
         *,
         portrait: str | None = None,
+        portrait_position: tuple[int, int] | None = None,
         language: Language = Language.JAPANESE,
     ) -> EventMessageOverlay:
         messages = EventMessageCatalog.from_records(
@@ -34,6 +35,14 @@ class EventMessageOverlayTest(unittest.TestCase):
                     **(
                         {"portrait_character_key": portrait}
                         if portrait is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "portrait_x": portrait_position[0],
+                            "portrait_y": portrait_position[1],
+                        }
+                        if portrait_position is not None
                         else {}
                     ),
                     "text_ja": ["こんにちは", "ようこそ"],
@@ -234,6 +243,19 @@ class EventMessageOverlayTest(unittest.TestCase):
 
         self.assertIn(
             ((8, 8, self.faces, 32, 64, 32, 32, 1), {}),
+            [(call.args, call.kwargs) for call in pyxel.blt.call_args_list],
+        )
+
+    @patch("app.ui.event_message.pyxel")
+    def test_draws_optional_sheet_face(self, pyxel: Mock) -> None:
+        overlay = self.overlay(portrait_position=(96, 224))
+        overlay.window.draw = Mock()
+
+        self.finish_opening(overlay)
+        overlay.draw()
+
+        self.assertIn(
+            ((8, 8, self.faces, 96, 224, 32, 32, 1), {}),
             [(call.args, call.kwargs) for call in pyxel.blt.call_args_list],
         )
 

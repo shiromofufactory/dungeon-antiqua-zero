@@ -298,6 +298,16 @@ h1, h2, h3, p { margin: 0; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field.full { grid-column: 1 / -1; }
 .field label { color: var(--muted); font-size: 11px; }
+.object-interact-toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.object-interact-toggle input { accent-color: var(--accent); }
 input[type="text"], input[type="number"], select {
   width: 100%;
   min-height: 34px;

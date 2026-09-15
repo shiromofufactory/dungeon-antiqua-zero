@@ -1,4 +1,4 @@
-"""Shared vertical floating animation used by cursors and field actors."""
+"""Shared floating offsets, phases, and field-character idle frames."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ from zlib import crc32
 FLOATING_OFFSETS = (0, 0, 0, 1, 2, 2, 2, 1)
 FLOATING_PHASE_FRAMES = 12
 FLOATING_CYCLE_FRAMES = len(FLOATING_OFFSETS) * FLOATING_PHASE_FRAMES
+FLOATING_CHARACTER_FRAMES = (2, 1, 0, 1)
+FLOATING_CHARACTER_FRAME_INTERVAL = 24
+FLOATING_CHARACTER_CYCLE_FRAMES = (
+    len(FLOATING_CHARACTER_FRAMES) * FLOATING_CHARACTER_FRAME_INTERVAL
+)
 
 
 def floating_phase_offset(identity: str) -> int:
@@ -35,10 +40,29 @@ def floating_offset(frame_count: int, *, phase_offset: int = 0) -> int:
     return FLOATING_OFFSETS[phase]
 
 
+def floating_character_frame(frame_count: int, *, phase_offset: int = 0) -> int:
+    """Return the idle sprite frame for a floating three-frame character."""
+
+    if isinstance(frame_count, bool) or not isinstance(frame_count, int):
+        raise TypeError("floating character frame count must be an integer")
+    if frame_count < 0:
+        raise ValueError("floating character frame count must not be negative")
+    if isinstance(phase_offset, bool) or not isinstance(phase_offset, int):
+        raise TypeError("floating character phase offset must be an integer")
+    phase = (
+        (frame_count + phase_offset) // FLOATING_CHARACTER_FRAME_INTERVAL
+    ) % len(FLOATING_CHARACTER_FRAMES)
+    return FLOATING_CHARACTER_FRAMES[phase]
+
+
 __all__ = [
+    "FLOATING_CHARACTER_CYCLE_FRAMES",
+    "FLOATING_CHARACTER_FRAME_INTERVAL",
+    "FLOATING_CHARACTER_FRAMES",
     "FLOATING_CYCLE_FRAMES",
     "FLOATING_OFFSETS",
     "FLOATING_PHASE_FRAMES",
+    "floating_character_frame",
     "floating_offset",
     "floating_phase_offset",
 ]

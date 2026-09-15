@@ -29,7 +29,7 @@ from ui import (
 from ui.party_status import PartyStatusPanel
 from ui.text_layout import right_aligned_grid_x
 
-FACES_IMAGE_ID = "faces/faces_pc"
+FACES_IMAGE_ID = "faces/faces"
 CATEGORY_WINDOW_GRID = (6, 0, 52, 5)
 ITEM_LIST_WINDOW_GRID = (0, 5, 32, 39)
 ITEM_INFO_WINDOW_GRID = (31, 5, 33, 39)

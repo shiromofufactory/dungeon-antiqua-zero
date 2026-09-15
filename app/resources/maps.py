@@ -151,6 +151,7 @@ class CompiledMap:
     event_trigger_index: Mapping[str, Mapping[tuple[int, int], MapEventTrigger]] = MappingProxyType({})
     actor_event_triggers: Mapping[str, tuple[MapEventTrigger, ...]] = MappingProxyType({})
     bgm_id: str = "da3-field"
+    interact_through_rows: tuple[str, ...] = ()
 
     def is_blocked(self, x: int, y: int) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
@@ -160,6 +161,17 @@ class CompiledMap:
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return True
         return self.collision_rows[y][x] == "1"
+
+    def allows_interaction_through(self, x: int, y: int) -> bool:
+        if not isinstance(x, int) or isinstance(x, bool):
+            raise TypeError("map x must be an integer")
+        if not isinstance(y, int) or isinstance(y, bool):
+            raise TypeError("map y must be an integer")
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return False
+        if not self.interact_through_rows:
+            return False
+        return self.interact_through_rows[y][x] == "1"
 
     def ground_tile_at(self, index: int, frame_count: int) -> int:
         animation = self.ground_animations.get(index)
@@ -335,6 +347,12 @@ class MapResources:
             width,
             height,
         )
+        interact_through_rows = self._binary_rows(
+            runtime.get("interact_through_rows", ["0" * width] * height),
+            width,
+            height,
+            "interact_through_rows",
+        )
         ground_animations, object_animations = self._animations(
             runtime.get("animations"),
             cell_count,
@@ -404,6 +422,7 @@ class MapResources:
                 {actor_id: tuple(items) for actor_id, items in actor_index.items()}
             ),
             bgm_id=bgm_id,
+            interact_through_rows=interact_through_rows,
         )
 
     @staticmethod
@@ -562,6 +581,15 @@ class MapResources:
         width: int,
         height: int,
     ) -> tuple[str, ...]:
+        return MapResources._binary_rows(value, width, height, "collision_rows")
+
+    @staticmethod
+    def _binary_rows(
+        value: object,
+        width: int,
+        height: int,
+        label: str,
+    ) -> tuple[str, ...]:
         if (
             not isinstance(value, list)
             or len(value) != height
@@ -572,7 +600,7 @@ class MapResources:
                 for row in value
             )
         ):
-            raise MapResourceError("マップJSONのcollision_rowsが不正です。")
+            raise MapResourceError(f"マップJSONの{label}が不正です。")
         return tuple(value)
 
     @classmethod

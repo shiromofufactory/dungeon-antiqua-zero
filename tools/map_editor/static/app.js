@@ -4,6 +4,8 @@ const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
 const FLOATING_OFFSETS = [0, 0, 0, 1, 2, 2, 2, 1];
 const FLOATING_PHASE_FRAMES = 12;
+const FLOATING_CHARACTER_FRAMES = [2, 1, 0, 1];
+const FLOATING_CHARACTER_FRAME_INTERVAL = 24;
 const MIN_MAP_WIDTH = 16;
 const MIN_MAP_HEIGHT = 15;
 const LAST_MAP_STORAGE_KEY = "da0.map-editor.last-map.v1";
@@ -273,6 +275,11 @@ function applyDocumentPayload(payload) {
   renderMapSelector();
   configureEditorNavigation();
   renderAll();
+  if (payload.repaired_unknown_ground_count > 0) {
+    showToast(
+      `未定義の地面${payload.repaired_unknown_ground_count}セルをベース地面へ置き換えました。保存してください。`,
+    );
+  }
 }
 
 async function loadMapDocument(mapId) {
@@ -549,7 +556,7 @@ function actorSpriteCapacity(assetId) {
   return Math.floor(sheet.canvas.width / size[0]) * Math.floor(sheet.canvas.height / size[1]);
 }
 
-function actorSpriteSource(assetId, spriteIndex, facing = "down") {
+function actorSpriteSource(assetId, spriteIndex, facing = "down", frame = 1) {
   const sheet = actorSheets[assetId];
   const size = state.actorAssets[assetId]?.sprite_size;
   if (!sheet?.ready || !Array.isArray(size) || !Number.isInteger(spriteIndex)) return null;
@@ -561,7 +568,7 @@ function actorSpriteSource(assetId, spriteIndex, facing = "down") {
   let sourceHeight = CELL_SIZE;
   if (assetId === "character" || assetId === "pc_character") {
     const facingRow = { down: 0, up: 1, left: 2, right: 3 }[facing] ?? 0;
-    sourceX += CELL_SIZE;
+    sourceX += frame * CELL_SIZE;
     sourceY += facingRow * CELL_SIZE * 2;
     sourceHeight = CELL_SIZE * 2;
   }
@@ -593,10 +600,18 @@ function floatingOffset(now, phaseOffset = 0) {
   return FLOATING_OFFSETS[phase];
 }
 
+function floatingCharacterFrame(now, phaseOffset = 0) {
+  if (state.paused) return 1;
+  const frame = Math.floor((now - state.animationStartedAt) / (1000 / 60)) + phaseOffset;
+  const phase = Math.floor(frame / FLOATING_CHARACTER_FRAME_INTERVAL) % FLOATING_CHARACTER_FRAMES.length;
+  return FLOATING_CHARACTER_FRAMES[phase];
+}
+
 function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating = false, now = performance.now(), floatingPhase = 0) {
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
-  const source = actorSpriteSource(assetId, spriteIndex, facing);
+  const frame = floating ? floatingCharacterFrame(now, floatingPhase) : 1;
+  const source = actorSpriteSource(assetId, spriteIndex, facing, frame);
   if (!source) return;
   const scale = Math.max(1, Math.floor(Math.min(canvas.width / source.sourceWidth, canvas.height / source.sourceHeight)));
   const drawWidth = source.sourceWidth * scale;
@@ -608,7 +623,9 @@ function drawActorSprite(canvas, assetId, spriteIndex, facing = "down", floating
 }
 
 function drawActorOnMap(context, actor, scale, now) {
-  const source = actorSpriteSource(actorAssetId(actor), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing);
+  const floatingPhase = actor.floating ? actorFloatingPhase(actor) : 0;
+  const frame = actor.floating ? floatingCharacterFrame(now, floatingPhase) : 1;
+  const source = actorSpriteSource(actorAssetId(actor), actor.kind === "treasure" ? 0 : actor.sprite_index, actor.facing, frame);
   if (!source) return false;
   context.imageSmoothingEnabled = false;
   context.drawImage(
@@ -619,7 +636,7 @@ function drawActorOnMap(context, actor, scale, now) {
     source.sourceHeight,
     actor.position[0] * scale,
     actor.position[1] * scale - (source.sourceHeight / CELL_SIZE - 1) * scale
-      - (actor.floating ? floatingOffset(now, actorFloatingPhase(actor)) * scale / CELL_SIZE : 0),
+      - (actor.floating ? floatingOffset(now, floatingPhase) * scale / CELL_SIZE : 0),
     scale,
     source.sourceHeight / CELL_SIZE * scale,
   );

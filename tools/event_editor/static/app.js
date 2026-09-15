@@ -27,6 +27,7 @@ const state = {
   flags: [],
   messages: [],
   catalogs: {},
+  faceSheet: null,
   diagnostics: [],
   namespaceOptions: [],
   selectedEvent: 0,
@@ -83,6 +84,12 @@ function editorUrl(editor, parameters = {}) {
   for (const [key, value] of Object.entries(parameters)) {
     if (value) url.searchParams.set(key, value);
   }
+  return url.href;
+}
+
+function faceSheetUrl() {
+  const url = new URL(editorApiPath("/api/face-sheet"), location.origin);
+  url.searchParams.set("token", token);
   return url.href;
 }
 
@@ -354,6 +361,59 @@ function renderMessagePreview(messageId) {
     "日本語プレビュー",
     `<div class="message-preview${modifier}" data-message-preview aria-live="polite">${content}</div>`,
   );
+}
+
+function messagePortraitPosition(message) {
+  if (Number.isInteger(message.portrait_x) && Number.isInteger(message.portrait_y)) {
+    return {x: message.portrait_x, y: message.portrait_y, characterKey: null};
+  }
+  const characterKey = message.portrait_character_key;
+  const face = state.faceSheet?.character_faces?.find(
+    (item) => item.character_key === characterKey,
+  );
+  return face ? {x: face.x, y: face.y, characterKey} : null;
+}
+
+function renderFacePicker(message) {
+  const sheet = state.faceSheet;
+  if (!sheet || !sheet.width || !sheet.height || !sheet.face_size) {
+    return '<div class="empty">顔画像を読み込めません。</div>';
+  }
+  const selected = messagePortraitPosition(message);
+  const columns = Math.floor(sheet.width / sheet.face_size);
+  const rows = Math.floor(sheet.height / sheet.face_size);
+  const cells = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const x = column * sheet.face_size;
+      const y = row * sheet.face_size;
+      const character = sheet.character_faces?.find(
+        (item) => item.x === x && item.y === y,
+      );
+      const isSelected = selected?.x === x && selected?.y === y;
+      const label = character
+        ? `${character.character_key}（${x}, ${y}）`
+        : `顔（${x}, ${y}）`;
+      cells.push(`<button type="button" class="face-cell${isSelected ? " selected" : ""}" data-action="select-message-face" data-face-x="${x}" data-face-y="${y}" aria-label="${esc(label)}" title="${esc(label)}" aria-pressed="${isSelected}"></button>`);
+    }
+  }
+  const scale = 2;
+  return `<div class="face-picker">
+    <div class="face-picker-toolbar"><button type="button" class="${selected ? "" : "selected"}" data-action="select-message-face" data-face-none="true" aria-pressed="${!selected}">顔なし</button></div>
+    <div class="face-sheet" style="width:${sheet.width * scale}px;height:${sheet.height * scale}px;--face-columns:${columns};--face-rows:${rows};--face-cell:${sheet.face_size * scale}px">
+      <img src="${esc(faceSheetUrl())}" width="${sheet.width * scale}" height="${sheet.height * scale}" alt="faces.png 顔一覧">
+      <div class="face-grid">${cells.join("")}</div>
+    </div>
+  </div>`;
+}
+
+function renderFacePickerControl(message) {
+  const selected = messagePortraitPosition(message);
+  const scale = 2;
+  const preview = selected
+    ? `<span class="selected-face-preview" role="img" aria-label="選択中の顔" style="background-image:url('${esc(faceSheetUrl())}');background-position:-${selected.x * scale}px -${selected.y * scale}px;background-size:${state.faceSheet.width * scale}px ${state.faceSheet.height * scale}px"></span>`
+    : "";
+  return `<div class="face-picker-control"><button type="button" data-action="open-face-picker">顔を選択</button>${preview}</div>`;
 }
 
 function options(values, selected, empty = "選択してください") {
@@ -631,7 +691,7 @@ function renderMessageEditor() {
     <div class="heading"><h2>メッセージ編集</h2><button class="danger" data-action="delete-message">メッセージを削除</button></div>
     <div class="message-form">
       ${field("メッセージID", `<input data-message-field="message_id" value="${esc(message.message_id)}">`, true)}
-      ${field("顔（任意）", `<select data-message-field="portrait_character_key">${options(state.catalogs.character_keys || [], message.portrait_character_key, "顔なし")}</select>`)}
+      ${field("顔（任意）", renderFacePickerControl(message), true)}
       ${field("日本語（1行ごとにゲーム内の1行）", `<textarea rows="6" data-message-field="text_ja">${esc((message.text_ja || []).join("\n"))}</textarea>`, true)}
       ${field("英語（未翻訳なら空欄）", `<textarea rows="6" data-message-field="text_en">${esc((message.text_en || []).join("\n"))}</textarea>`, true)}
       ${field("簡体字中国語（未翻訳なら空欄）", `<textarea rows="6" data-message-field="text_zhcn">${esc((message.text_zhcn || []).join("\n"))}</textarea>`, true)}
@@ -772,6 +832,7 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.flags = payload.flags;
   state.messages = payload.messages;
   state.catalogs = payload.catalogs;
+  state.faceSheet = payload.face_sheet;
   state.diagnostics = payload.diagnostics;
   state.namespaceOptions = payload.namespace_options || [];
   const requestedEventIndex = selectedEventId === null
@@ -869,6 +930,32 @@ document.body.addEventListener("click", (event) => {
     render();
   } else if (action === "delete-message") {
     commit(() => state.messages.splice(state.selectedMessage, 1));
+  } else if (action === "open-face-picker") {
+    $("face-picker-dialog-content").innerHTML = renderFacePicker(currentMessage());
+    $("face-picker-dialog").showModal();
+  } else if (action === "close-face-picker") {
+    $("face-picker-dialog").close();
+  } else if (action === "select-message-face") {
+    commit(() => {
+      const message = currentMessage();
+      delete message.portrait_character_key;
+      delete message.portrait_x;
+      delete message.portrait_y;
+      if (!target.dataset.faceNone) {
+        const x = Number(target.dataset.faceX);
+        const y = Number(target.dataset.faceY);
+        const character = state.faceSheet?.character_faces?.find(
+          (item) => item.x === x && item.y === y,
+        );
+        if (character) {
+          message.portrait_character_key = character.character_key;
+        } else {
+          message.portrait_x = x;
+          message.portrait_y = y;
+        }
+      }
+    });
+    $("face-picker-dialog").close();
   } else if (action === "add-command") {
     const path = target.dataset.listPath;
     const selector = `select[data-new-command="${CSS.escape(path)}"]`;
@@ -905,13 +992,9 @@ $("event-editor").addEventListener("change", (event) => {
   } else if (target.dataset.messageField) {
     commit(() => {
       const fieldName = target.dataset.messageField;
-      if (fieldName === "portrait_character_key" && !target.value) {
-        delete currentMessage()[fieldName];
-      } else {
-        currentMessage()[fieldName] = fieldName.startsWith("text_")
-          ? linesFromTextarea(target.value)
-          : target.value;
-      }
+      currentMessage()[fieldName] = fieldName.startsWith("text_")
+        ? linesFromTextarea(target.value)
+        : target.value;
     });
   } else if (target.dataset.commandField) {
     commit(() => {

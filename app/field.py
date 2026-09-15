@@ -300,12 +300,14 @@ class FieldActors:
         actor.movement.stop()
         dx = target.x - actor.movement.position.x
         dy = target.y - actor.movement.position.y
-        if abs(dx) + abs(dy) != 1:
+        if (dx == 0) == (dy == 0):
             return
+        step_x = 0 if dx == 0 else (1 if dx > 0 else -1)
+        step_y = 0 if dy == 0 else (1 if dy > 0 else -1)
         actor.movement.facing = next(
             direction
             for direction in Direction
-            if (direction.dx, direction.dy) == (dx, dy)
+            if (direction.dx, direction.dy) == (step_x, step_y)
         )
 
     def update(

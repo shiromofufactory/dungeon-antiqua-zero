@@ -49,9 +49,13 @@ from .field import (
     FieldRenderer,
 )
 from .floating import (
+    FLOATING_CHARACTER_CYCLE_FRAMES,
+    FLOATING_CHARACTER_FRAME_INTERVAL,
+    FLOATING_CHARACTER_FRAMES,
     FLOATING_CYCLE_FRAMES,
     FLOATING_OFFSETS,
     FLOATING_PHASE_FRAMES,
+    floating_character_frame,
     floating_offset,
     floating_phase_offset,
 )
@@ -122,6 +126,9 @@ __all__ = [
     "FIELD_PROP_ASSET_ID",
     "FIELD_TREASURE_ASSET_ID",
     "FieldRenderer",
+    "FLOATING_CHARACTER_CYCLE_FRAMES",
+    "FLOATING_CHARACTER_FRAME_INTERVAL",
+    "FLOATING_CHARACTER_FRAMES",
     "FLOATING_CYCLE_FRAMES",
     "FLOATING_OFFSETS",
     "FLOATING_PHASE_FRAMES",
@@ -140,6 +147,7 @@ __all__ = [
     "create_default_palette_shifter",
     "grayscale_color",
     "mix_color",
+    "floating_character_frame",
     "floating_offset",
     "floating_phase_offset",
 ]

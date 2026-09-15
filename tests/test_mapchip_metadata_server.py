@@ -110,6 +110,8 @@ class MapchipMetadataServerTest(unittest.TestCase):
         self.assertIn('addEventListener("pointerdown", handleDefinitionPointerDown)', script)
         self.assertIn('addEventListener("pointermove", handleDefinitionPointerMove)', script)
         self.assertIn("finishDefinitionPointerDrag(event)", script)
+        self.assertIn('data-change="object-interact-through"', script)
+        self.assertIn("object.interact_through = element.checked", script)
 
     def test_renews_session_token_only_for_browser_ui(self) -> None:
         with self.assertRaises(HTTPError) as context:
@@ -342,6 +344,29 @@ class MapchipMetadataServerTest(unittest.TestCase):
             ],
         )
         self.assertEqual(load_tileset(self.application.metadata_path)["objects"], [])
+
+    def test_replaces_placed_grounds_when_their_definition_is_removed(self) -> None:
+        tileset = initial_worldmap_tileset()
+        removable = json.loads(json.dumps(tileset["grounds"][0]))
+        removable["id"] = "removable"
+        removable["parent_id"] = "sea"
+        removable["collision"] = "blocked"
+        tileset["grounds"].append(removable)
+        save_tileset(self.application.metadata_path, tileset)
+        source = initial_map_source("forest", tileset, "world", 16, 15)
+        source["grounds"][5][10] = "removable"
+        source_path = self.content_root / "maps" / "sources" / "forest.json"
+        save_map_source(source_path, source)
+
+        changed = json.loads(json.dumps(tileset))
+        changed["grounds"].pop()
+        result = self.post_json("/api/save", {"data": changed})
+
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["updated_map_ids"], ["forest"])
+        self.assertEqual(result["replaced_map_ground_count"], 1)
+        self.assertEqual(load_map_source(source_path)["grounds"][5][10], "sea")
+        self.assertEqual(result["generated_map_ids"], ["forest"])
 
     def test_deletes_only_unreferenced_non_world_tileset(self) -> None:
         created = self.post_json(

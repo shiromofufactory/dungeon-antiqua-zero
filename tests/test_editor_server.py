@@ -58,6 +58,9 @@ class EditorServerTest(unittest.TestCase):
         pc_image_root = self.content_root / "images" / "characters"
         pc_image_root.mkdir(parents=True)
         Image.new("P", (384, 384), 1).save(pc_image_root / "ch_walk.gif")
+        face_image_root = self.content_root / "images" / "faces"
+        face_image_root.mkdir(parents=True)
+        Image.new("P", (128, 256), 1).save(face_image_root / "faces.png")
         save_tileset(
             self.content_root / "maps" / "tilesets" / "worldmap.json",
             initial_worldmap_tileset(),
@@ -170,6 +173,7 @@ class EditorServerTest(unittest.TestCase):
         self.assertNotIn("event-context-bar", event_page)
         self.assertIn('id="namespace-dialog"', event_page)
         self.assertIn('id="namespace-form"', event_page)
+        self.assertIn('id="face-picker-dialog"', event_page)
         for page in (map_page, event_page, tileset_page):
             self.assertIn('id="unsaved-navigation-dialog"', page)
             self.assertIn('data-navigation-choice="save"', page)
@@ -266,6 +270,13 @@ class EditorServerTest(unittest.TestCase):
         ) as response:
             self.assertEqual(response.headers.get_content_type(), "image/gif")
             self.assertTrue(response.read().startswith(b"GIF"))
+
+        with urlopen(
+            f"{self.base_url}/event/api/face-sheet?token=shared-token",
+            timeout=3,
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_root_redirects_to_the_map_editor(self) -> None:
         with urlopen(

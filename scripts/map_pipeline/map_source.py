@@ -397,7 +397,6 @@ def validate_map_source(
         diagnostics,
         width,
         height,
-        collision,
         None if item_keys is None else frozenset(item_keys),
     )
     actor_kinds = {
@@ -423,7 +422,6 @@ def _validate_actors(
     diagnostics: list[Diagnostic],
     width: int,
     height: int,
-    collision: Sequence[bool] | None,
     item_keys: frozenset[str] | None,
 ) -> dict[str, tuple[int, int]]:
     if not isinstance(value, list):
@@ -452,8 +450,6 @@ def _validate_actors(
             valid_position = False
         else:
             point = (position[0], position[1])
-            if collision is not None and collision[position[1] * width + position[0]]:
-                _diagnostic(diagnostics, "error", "actor_on_blocked_cell", f"{path}.position", "actorは通行可能セルに置いてください。")
             if point in occupied:
                 _diagnostic(diagnostics, "error", "overlapping_actors", f"{path}.position", "同じセルに複数のactorを配置できません。")
             occupied.add(point)
@@ -1531,6 +1527,7 @@ def resolve_map(
     )
     object_cells: list[dict[str, Any]] = []
     collision = [grounds_by_id[data["grounds"][y][x]]["collision"] == "blocked" for y in range(height) for x in range(width)]
+    interact_through = [False] * (width * height)
     for instance in sorted_instances:
         definition = definitions[instance["definition_id"]]
         for cell in definition.get("cells", []):
@@ -1555,6 +1552,8 @@ def resolve_map(
             else:
                 resolved_cell.update({"choice_id": None, "frame_interval": 1, "frames": []})
             object_cells.append(resolved_cell)
+            if definition.get("interact_through") is True:
+                interact_through[y * width + x] = True
             if cell["collision"] == "blocked":
                 collision[y * width + x] = True
             elif cell["collision"] == "passable_override":
@@ -1578,6 +1577,7 @@ def resolve_map(
         "ground_cells": ground_cells,
         "object_cells": object_cells,
         "collision": collision,
+        "interact_through": interact_through,
         "sites": resolved_sites,
         "arrival_points": [
             dict(arrival) for arrival in data["arrival_points"]
@@ -1748,6 +1748,13 @@ def compile_map(
         "animations": animations,
         "collision_rows": [
             "".join("1" if resolved["collision"][y * width + x] else "0" for x in range(width))
+            for y in range(height)
+        ],
+        "interact_through_rows": [
+            "".join(
+                "1" if resolved["interact_through"][y * width + x] else "0"
+                for x in range(width)
+            )
             for y in range(height)
         ],
         "sites": resolved["sites"],

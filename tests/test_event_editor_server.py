@@ -8,6 +8,8 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from PIL import Image
+
 from tools.event_editor.server import EventEditorApplication, create_server
 
 
@@ -19,7 +21,8 @@ class EventEditorServerTest(unittest.TestCase):
         data_root = self.content_root / "data"
         data_root.mkdir(parents=True)
         (data_root / "characters.json").write_text(
-            json.dumps([{"name_en": "Fiora"}]), encoding="utf-8"
+            json.dumps([{"name_en": "Fiora", "face_x": 0, "face_y": 0}]),
+            encoding="utf-8",
         )
         (data_root / "items.json").write_text(
             json.dumps([{"name_en": "POTION"}]), encoding="utf-8"
@@ -51,6 +54,9 @@ class EventEditorServerTest(unittest.TestCase):
         (maps_root / "field.json").write_text(
             json.dumps({"actors": [{"id": "elder"}]}), encoding="utf-8"
         )
+        face_path = self.content_root / "images" / "faces" / "faces.png"
+        face_path.parent.mkdir(parents=True)
+        Image.new("RGB", (128, 256), (255, 0, 128)).save(face_path)
         app_root = self.root / "app"
         (app_root / "audio").mkdir(parents=True)
         (app_root / "audio" / "field.ogg").write_bytes(b"")
@@ -137,10 +143,42 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertEqual(payload["catalogs"]["bgm_ids"], ["field"])
         self.assertEqual(payload["catalogs"]["se_ids"], ["confirm"])
         self.assertEqual(payload["catalogs"]["actor_ids"], ["elder"])
+        self.assertEqual(
+            payload["face_sheet"],
+            {
+                "width": 128,
+                "height": 256,
+                "face_size": 32,
+                "character_faces": [
+                    {"character_key": "Fiora", "x": 0, "y": 0}
+                ],
+            },
+        )
 
         with self.assertRaises(HTTPError) as context:
             self.get_json("/api/document")
         self.assertEqual(context.exception.code, 403)
+
+    def test_serves_face_sheet_and_visual_picker(self) -> None:
+        with urlopen(
+            f"{self.base_url}/api/face-sheet?token=test-token", timeout=2
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG\r\n\x1a\n"))
+        with urlopen(f"{self.base_url}/app.js", timeout=2) as response:
+            script = response.read().decode("utf-8")
+        with urlopen(f"{self.base_url}/?token=test-token", timeout=2) as response:
+            page = response.read().decode("utf-8")
+
+        self.assertIn("function renderFacePicker(message)", script)
+        self.assertIn("function renderFacePickerControl(message)", script)
+        self.assertIn('class="selected-face-preview"', script)
+        self.assertIn('aria-label="選択中の顔"', script)
+        self.assertIn('data-action="open-face-picker"', script)
+        self.assertIn('data-action="select-message-face"', script)
+        self.assertNotIn('data-message-field="portrait_character_key"', script)
+        self.assertIn('id="face-picker-dialog"', page)
+        self.assertIn('id="face-picker-dialog-content"', page)
 
     def test_save_button_is_disabled_only_without_unsaved_changes(self) -> None:
         with urlopen(f"{self.base_url}/?token=test-token", timeout=2) as response:

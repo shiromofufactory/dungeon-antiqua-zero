@@ -253,6 +253,18 @@ def make_handler(
                 except (OSError, ValueError) as error:
                     self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
                 return
+            if editor == "event" and path == "/api/face-sheet":
+                if not self._authorized(editor, parsed):
+                    self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
+                    return
+                try:
+                    self._send_bytes(
+                        event_application.face_sheet_path.read_bytes(),
+                        "image/png",
+                    )
+                except OSError as error:
+                    self._error(HTTPStatus.NOT_FOUND, str(error))
+                return
             if path == "/api/catalog" and editor in {"map", "tileset"}:
                 if not self._authorized(editor, parsed):
                     self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")

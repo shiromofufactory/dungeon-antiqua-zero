@@ -94,7 +94,7 @@ RARE_CHOICE_X = 4
 RARE_CURSOR_X = 2
 RARE_YES_Y = 2
 RARE_NO_Y = 5
-FACES_IMAGE_ID = "faces/faces_pc"
+FACES_IMAGE_ID = "faces/faces"
 
 
 class ShopMode(StrEnum):
