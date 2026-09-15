@@ -254,6 +254,19 @@ class MapResourcesTest(unittest.TestCase):
         with self.assertRaisesRegex(MapResourceError, "floating"):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
+    def test_allows_actor_on_blocked_cell_and_rejects_overlapping_actors(self) -> None:
+        self.runtime["actors"][0]["position"] = [0, 0]
+        self._write_runtime()
+
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+        self.assertEqual(loaded.actors[0].position, MapCell(0, 0))
+
+        self.runtime["actors"][1]["position"] = [0, 0]
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "actorが重複"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
     def test_requires_exact_actor_trigger_and_rejects_standalone_interact(self) -> None:
         self.runtime["event_triggers"] = self.runtime["event_triggers"][:1]
         self._write_runtime()

@@ -371,9 +371,7 @@ class MapResources:
             height,
             collision_rows,
         )
-        actors = self._actors(
-            runtime.get("actors"), width, height, collision_rows
-        )
+        actors = self._actors(runtime.get("actors"), width, height)
         event_triggers = self._event_triggers(
             runtime.get("event_triggers"), width, height, actors
         )
@@ -726,7 +724,6 @@ class MapResources:
         value: object,
         width: int,
         height: int,
-        collision_rows: tuple[str, ...],
     ) -> tuple[MapActor, ...]:
         if not isinstance(value, list):
             raise MapResourceError("マップJSONのactorsは配列である必要があります。")
@@ -744,8 +741,8 @@ class MapResources:
                 record.get("position"), width, height, f"{path}.position"
             )
             point = (position.x, position.y)
-            if point in positions or collision_rows[position.y][position.x] == "1":
-                raise MapResourceError(f"{path}.positionが配置できないセルです。")
+            if point in positions:
+                raise MapResourceError(f"{path}.positionでactorが重複しています。")
             ids.add(actor_id)
             positions.add(point)
             kind = cls._actor_kind(record.get("kind"), f"{path}.kind")

@@ -238,6 +238,7 @@ class FieldActors:
                         if actor.facing is None
                         else Direction[actor.facing.upper()]
                     ),
+                    allow_blocked_start=True,
                 ),
                 self._next_roam_wait() if actor.kind == "roaming" else 0,
                 2 if actor.kind == "treasure" and actor.id in opened_ids else 0,

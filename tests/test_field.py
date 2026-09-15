@@ -193,6 +193,21 @@ class FieldMovementTest(unittest.TestCase):
         )
         self.assertEqual(actors.actor("elder").movement.position, FieldPosition(1, 1))
 
+    def test_field_actor_can_start_on_a_blocked_map_cell(self) -> None:
+        map_data = compiled_map(("111", "101", "111"))
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("keeper", MapCell(0, 1), "stationary", 0, "down"),),
+        )
+
+        actors = FieldActors(map_data)
+
+        self.assertEqual(
+            actors.actor("keeper").movement.position,
+            FieldPosition(0, 1),
+        )
+
     def test_stationary_actor_faces_the_adjacent_party_when_spoken_to(self) -> None:
         map_data = compiled_map(("000", "000", "000"))
         object.__setattr__(
