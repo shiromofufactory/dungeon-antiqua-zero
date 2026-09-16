@@ -1,5 +1,7 @@
 "use strict";
 
+document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
 const DIRECTIONS = ["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"];
 const NEIGHBOR_CYCLE = ["any", "same", "different"];
 const OBJECT_COLLISION_STATES = ["blocked", "passable", "passable_override"];
@@ -14,6 +16,12 @@ const OBJECT_LAYER_CLASSES = {
   object_foreground: "map-layer-front",
   object_overlay: "map-layer-top",
 };
+const OBJECT_LAYERS = [["object", "背面"], ["object_y_sorted", "通常"], ["object_foreground", "前面"], ["object_overlay", "最前面"]];
+const SOURCE_USAGE_COLORS = [
+  ["ground", "--ground-color"], ["boundary", "--boundary-color"],
+  ["object", "--layer-back-color"], ["object_y_sorted", "--layer-normal-color"],
+  ["object_foreground", "--layer-front-color"], ["object_overlay", "--layer-top-color"],
+];
 const SESSION_CLIENT_HEADER = "mapchip-metadata-ui";
 const PREVIEW_SETTINGS_VERSION = 1;
 const LAST_TILESET_STORAGE_KEY = "da0.mapchip-metadata.last-tileset.v1";
@@ -35,6 +43,7 @@ const state = {
   groundIndex: 0,
   boundaryIndex: 0,
   objectIndex: 0,
+  objectLayer: "object_y_sorted",
   choiceIndex: 0,
   frameIndex: 0,
   selection: { x: 0, y: 0, width: 1, height: 1 },
@@ -49,6 +58,8 @@ const state = {
   validateTimer: null,
 };
 let pendingEditorNavigationUrl = null;
+let pendingTilesetNavigationId = null;
+let navigationBusy = false;
 
 const rawImage = new Image();
 const processedImage = document.createElement("canvas");
@@ -122,36 +133,77 @@ function configureEditorNavigation() {
 }
 
 function navigateToEditor(url) {
-  if (!url) return;
+  if (!url || navigationBusy) return;
   if (!state.dirty) {
     window.location.assign(url);
     return;
   }
   pendingEditorNavigationUrl = url;
+  pendingTilesetNavigationId = null;
+  byId("unsaved-navigation-message").textContent = "変更を保存してからエディタを切り替えますか？";
   byId("unsaved-navigation-dialog").showModal();
+  byId("unsaved-navigation-dialog").querySelector('[data-navigation-choice="save"]').focus();
+}
+
+async function switchTilesetDocument(tilesetId) {
+  try {
+    await loadTilesetDocument(tilesetId);
+    return true;
+  } catch (error) {
+    showToast(error.message, true);
+    renderTilesetSelector();
+    return false;
+  }
+}
+
+async function requestTilesetSwitch(tilesetId) {
+  if (navigationBusy || tilesetId === state.data?.tileset_id) {
+    renderTilesetSelector();
+    return;
+  }
+  if (!state.dirty) {
+    await switchTilesetDocument(tilesetId);
+    return;
+  }
+  pendingEditorNavigationUrl = null;
+  pendingTilesetNavigationId = tilesetId;
+  renderTilesetSelector();
+  byId("unsaved-navigation-message").textContent = "変更を保存してからタイルセットを切り替えますか？";
+  byId("unsaved-navigation-dialog").showModal();
+  byId("unsaved-navigation-dialog").querySelector('[data-navigation-choice="save"]').focus();
 }
 
 function closeNavigationDialog() {
   pendingEditorNavigationUrl = null;
+  pendingTilesetNavigationId = null;
   byId("unsaved-navigation-dialog").close();
 }
 
 async function handleNavigationChoice(choice) {
+  if (navigationBusy) return;
   const url = pendingEditorNavigationUrl;
-  if (!url || choice === "cancel") {
+  const tilesetId = pendingTilesetNavigationId;
+  if ((!url && !tilesetId) || choice === "cancel") {
     closeNavigationDialog();
     return;
   }
-  if (choice === "discard") {
-    state.dirty = false;
-    window.location.assign(url);
-    return;
-  }
+  if (choice !== "save" && choice !== "discard") return;
   const buttons = byId("unsaved-navigation-dialog").querySelectorAll("button");
+  navigationBusy = true;
   buttons.forEach((button) => { button.disabled = true; });
-  const saved = await save();
-  buttons.forEach((button) => { button.disabled = false; });
-  if (saved) window.location.assign(url);
+  try {
+    if (choice === "save" && !await save()) return;
+    if (url !== pendingEditorNavigationUrl || tilesetId !== pendingTilesetNavigationId) return;
+    if (tilesetId) {
+      if (await switchTilesetDocument(tilesetId)) closeNavigationDialog();
+    } else {
+      state.dirty = false;
+      window.location.assign(url);
+    }
+  } finally {
+    navigationBusy = false;
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 function syncPreviewControls() {
@@ -254,7 +306,6 @@ function applyDocumentPayload(payload) {
   state.history = [];
   state.future = [];
   state.objectOrigins = (state.data.objects || []).map((object) => payload.is_new ? null : object.id);
-  state.tab = "ground";
   state.groundIndex = 0;
   state.boundaryIndex = 0;
   state.objectIndex = 0;
@@ -365,7 +416,15 @@ function normalizeSelectionIndexes() {
   state.groundIndex = Math.max(0, Math.min(state.groundIndex, grounds.length - 1));
   const boundaries = grounds[state.groundIndex]?.boundaries || [];
   state.boundaryIndex = Math.max(0, Math.min(state.boundaryIndex, boundaries.length - 1));
-  state.objectIndex = Math.max(0, Math.min(state.objectIndex, objects.length - 1));
+  const objectIndex = objects[state.objectIndex]?.default_draw_group === state.objectLayer
+    ? state.objectIndex : objects.findIndex((object) => object.default_draw_group === state.objectLayer);
+  if (state.objectIndex !== objectIndex) {
+    state.objectIndex = objectIndex;
+    if (state.tab === "object") {
+      state.choiceIndex = 0;
+      state.frameIndex = 0;
+    }
+  }
   const visual = activeVisual();
   state.choiceIndex = Math.max(0, Math.min(state.choiceIndex, (visual?.choices?.length || 1) - 1));
   const frames = visual?.choices?.[state.choiceIndex]?.frames || [];
@@ -487,13 +546,14 @@ function sourceTileUsage() {
     for (const boundary of ground.boundaries || []) addVisualUsage(usage, boundary.visual, "boundary");
   }
   for (const object of state.data?.objects || []) {
+    const layer = OBJECT_LAYER_CLASSES[object.default_draw_group] ? object.default_draw_group : "object_y_sorted";
     for (const cell of object.cells || []) {
       if (Array.isArray(cell.tile)) {
         const key = cell.tile.join(",");
         if (!usage.has(key)) usage.set(key, new Set());
-        usage.get(key).add("object");
+        usage.get(key).add(layer);
       }
-      addVisualUsage(usage, cell.visual, "object");
+      addVisualUsage(usage, cell.visual, layer);
     }
   }
   return usage;
@@ -501,11 +561,8 @@ function sourceTileUsage() {
 
 function drawSourceUsage(context, zoom) {
   const usage = sourceTileUsage();
-  const categories = [
-    ["ground", "#72b777"],
-    ["boundary", "#61b9e8"],
-    ["object", "#e89b61"],
-  ];
+  const styles = getComputedStyle(document.documentElement);
+  const categories = SOURCE_USAGE_COLORS.map(([category, variable]) => [category, styles.getPropertyValue(variable).trim()]);
   let usedCount = 0;
   for (let row = 0; row < state.imageInfo.rows; row += 1) {
     for (let column = 0; column < state.imageInfo.columns; column += 1) {
@@ -524,7 +581,7 @@ function drawSourceUsage(context, zoom) {
       for (const [category, color] of categories) {
         if (!categoriesUsed.has(category)) continue;
         context.fillStyle = color;
-        context.fillRect(x + markerIndex * 4 * zoom + zoom, y + zoom, 3 * zoom, 3 * zoom);
+        context.fillRect(x + (markerIndex % 3) * 4 * zoom + zoom, y + Math.floor(markerIndex / 3) * 4 * zoom + zoom, 3 * zoom, 3 * zoom);
         markerIndex += 1;
       }
     }
@@ -687,6 +744,7 @@ function objectLayerClass(object) {
 
 function renderDefinitionList(items, activeIndex, action, addAction, addLabel, reorderKind, baseIndex = null) {
   const chips = items.map((item, index) => {
+    if (reorderKind === "object" && item.default_draw_group !== state.objectLayer) return "";
     const layerClass = reorderKind === "object" ? `map-layer ${objectLayerClass(item)}` : "";
     return `
     <button type="button" class="definition-chip ${layerClass} ${index === activeIndex ? "active" : ""} ${index === baseIndex ? "" : "reorderable"}"
@@ -938,14 +996,27 @@ function renderObjectVisualEditor(object) {
     </div>`;
 }
 
+function renderObjectLayerSelect() {
+  const layer = state.objectLayer;
+  return `<fieldset class="object-layer-options"><legend>レイヤー</legend>
+    ${OBJECT_LAYERS.map(([value, text]) => `<label class="layer-option map-layer ${OBJECT_LAYER_CLASSES[value]} ${value === layer ? "selected" : ""}">
+      <input type="radio" name="object-layer" data-change="object-layer" value="${value}" ${value === layer ? "checked" : ""}>${text}
+    </label>`).join("")}
+  </fieldset>`;
+}
+
 function renderObjectEditor() {
   const objects = state.data.objects || [];
   const object = currentObject();
+  const layerToolbar = `<div class="object-layer-toolbar">
+    ${renderObjectLayerSelect()}
+  </div>`;
   if (!object) return `
     <div class="section">
       <div class="section-title"><h3>オブジェクト定義</h3></div>
-      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "空オブジェクト", "object")}
-      <div class="empty-state" style="margin-top:10px">空オブジェクトを追加するか、ソース画像を矩形選択して生成してください。</div>
+      ${layerToolbar}
+      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "オブジェクト", "object")}
+      <div class="empty-state" style="margin-top:10px">このレイヤーのオブジェクト定義がありません。ソース画像を矩形選択してオブジェクトを追加してください。</div>
       <div class="row end" style="margin-top:10px"><button type="button" class="button primary" data-action="object-from-selection">選択矩形から生成</button></div>
     </div>`;
 
@@ -968,16 +1039,16 @@ function renderObjectEditor() {
   }
   return `
     <div class="section">
-      <div class="section-title"><h3>オブジェクト定義</h3><span class="subtle">起点は左上</span></div>
-      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "空オブジェクト", "object")}
+      <div class="section-title"><h3>オブジェクト定義</h3></div>
+      ${layerToolbar}
+      ${renderDefinitionList(objects, state.objectIndex, "select-object", "add-object", "オブジェクト", "object")}
       <div class="divider"></div>
-      <div class="form-grid">
-        <div class="field full"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
+      <div class="object-identity-grid">
+        <div class="field"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
-        <div class="field full"><label>レイヤー</label><select class="map-layer ${objectLayerClass(object)}" data-change="object-group"><option class="map-layer map-layer-back" value="object" ${object.default_draw_group === "object" ? "selected" : ""}>背面</option><option class="map-layer map-layer-normal" value="object_y_sorted" ${object.default_draw_group === "object_y_sorted" ? "selected" : ""}>通常</option><option class="map-layer map-layer-front" value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>前面</option><option class="map-layer map-layer-top" value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>最前面</option></select></div>
-        <label class="object-interact-toggle"><input type="checkbox" data-change="object-interact-through" ${object.interact_through === true ? "checked" : ""}>このオブジェクト越しに1セル先を調べる</label>
       </div>
+      <label class="object-interact-toggle"><input type="checkbox" data-change="object-interact-through" ${object.interact_through === true ? "checked" : ""}>このオブジェクト越しに1セル先を調べる</label>
       <div class="row between" style="margin-top:10px">
         <button type="button" class="button secondary small" data-action="object-from-selection">選択矩形で置換</button>
         <button type="button" class="button danger small" data-action="delete-object">削除</button>
@@ -1452,23 +1523,16 @@ function handleAction(element) {
       neighbors[direction] = NEIGHBOR_CYCLE[(NEIGHBOR_CYCLE.indexOf(neighbors[direction]) + 1) % NEIGHBOR_CYCLE.length];
     });
   } else if (action === "select-object") {
+    if (objects[Number(element.dataset.index)]?.default_draw_group !== state.objectLayer) return;
     state.objectIndex = Number(element.dataset.index);
     state.choiceIndex = 0;
     state.frameIndex = 0;
     renderAll();
-  } else if (action === "add-object") {
+  } else if (action === "add-object" || action === "object-from-selection") {
     commit(() => {
-      objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object_y_sorted", interact_through: false, cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
-      state.objectOrigins.push(null);
-      state.objectIndex = objects.length - 1;
-      state.choiceIndex = 0;
-      state.frameIndex = 0;
-    });
-  } else if (action === "object-from-selection") {
-    commit(() => {
-      let object = currentObject();
+      let object = action === "add-object" ? null : currentObject();
       if (!object) {
-        object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object_y_sorted", interact_through: false, cells: [] };
+        object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: state.objectLayer, interact_through: false, cells: [] };
         objects.push(object);
         state.objectOrigins.push(null);
         state.objectIndex = objects.length - 1;
@@ -1519,7 +1583,14 @@ function handleChange(element) {
   const object = currentObject();
   const visual = currentVisual();
 
-  if (action === "ground-id") {
+  if (action === "object-layer") {
+    if (!OBJECT_LAYERS.some(([layer]) => layer === value)) return;
+    state.objectLayer = value;
+    state.choiceIndex = 0;
+    state.frameIndex = 0;
+    renderAll();
+    byId("editor-content").querySelector('input[name="object-layer"]:checked')?.focus();
+  } else if (action === "ground-id") {
     const oldId = ground.id;
     commit(() => {
       ground.id = value;
@@ -1542,7 +1613,6 @@ function handleChange(element) {
   else if (action === "object-id") commit(() => { object.id = value; });
   else if (action === "object-width") commit(() => { object.size[0] = Number(value); });
   else if (action === "object-height") commit(() => { object.size[1] = Number(value); });
-  else if (action === "object-group") commit(() => { object.default_draw_group = value; });
   else if (action === "object-interact-through") commit(() => { object.interact_through = element.checked; });
 }
 
@@ -1568,19 +1638,8 @@ async function initialize() {
   }
 }
 
-byId("tileset-select").addEventListener("change", async (event) => {
-  const tilesetId = event.target.value;
-  if (tilesetId === state.data?.tileset_id) return;
-  if (state.dirty && !window.confirm("未保存の変更を破棄してタイルセットを切り替えますか？")) {
-    renderTilesetSelector();
-    return;
-  }
-  try {
-    await loadTilesetDocument(tilesetId);
-  } catch (error) {
-    showToast(error.message, true);
-    renderTilesetSelector();
-  }
+byId("tileset-select").addEventListener("change", (event) => {
+  requestTilesetSwitch(event.target.value);
 });
 byId("editor-switch").addEventListener("click", (event) => {
   const link = event.target.closest("a");
@@ -1594,6 +1653,7 @@ byId("unsaved-navigation-dialog").addEventListener("click", (event) => {
 });
 byId("unsaved-navigation-dialog").addEventListener("close", () => {
   pendingEditorNavigationUrl = null;
+  pendingTilesetNavigationId = null;
 });
 byId("new-tileset-button").addEventListener("click", () => {
   if (state.dirty && !window.confirm("未保存の変更を破棄して新規タイルセットを作成しますか？")) return;

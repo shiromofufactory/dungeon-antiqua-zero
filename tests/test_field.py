@@ -341,7 +341,7 @@ class FieldRendererTest(unittest.TestCase):
         renderer.draw(field, draw_player=False)
 
         renderer._draw_ground.assert_called_once()
-        self.assertEqual(renderer._draw_objects.call_count, 3)
+        self.assertEqual(renderer._draw_objects.call_count, 2)
         renderer._draw_player_character.assert_not_called()
 
     def test_draws_ground_objects_then_the_requested_character_frame(self) -> None:
@@ -502,7 +502,7 @@ class FieldRendererTest(unittest.TestCase):
         self.assertEqual(field.walking_frame_count, 0)
         self.assertEqual(pyxel.blt.call_args_list[-1].args[3], 16)
 
-    def test_draws_foreground_objects_after_player(self) -> None:
+    def test_draws_foreground_objects_after_player_on_the_same_row(self) -> None:
         objects = (
             MapObjectTile("floor_1", "floor", 1, 1, "object", 0, 0, 1),
             MapObjectTile(
@@ -535,6 +535,75 @@ class FieldRendererTest(unittest.TestCase):
         self.assertEqual(
             pyxel.blt.call_args_list[-1],
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
+        )
+
+    def test_foreground_depth_compares_bottom_y_with_player_and_actor(self) -> None:
+        for character_kind in ("player", "actor"):
+            for character_y in (0, 1, 2):
+                with self.subTest(kind=character_kind, y=character_y):
+                    # The upper tile must follow the whole instance's bottom Y.
+                    objects = (
+                        MapObjectTile("tree_1", "tree", 1, 0, "object_foreground", 0, 0, 1),
+                        MapObjectTile("tree_1", "tree", 1, 1, "object_foreground", 0, 0, 1),
+                    )
+                    map_data = compiled_map(("000", "000", "000"), objects=objects)
+                    field = FieldMovement(map_data, start=FieldPosition(1, character_y))
+                    object.__setattr__(
+                        map_data,
+                        "actors",
+                        (MapActor("elder", MapCell(1, character_y), "stationary", 0, "down"),),
+                    )
+                    renderer = FieldRenderer(
+                        map_data,
+                        screen_width=48,
+                        screen_height=48,
+                        pyxel_api=Mock(frame_count=0),
+                    )
+                    draws = Mock()
+                    draws.attach_mock(Mock(), "object")
+                    draws.attach_mock(Mock(), "character")
+                    renderer._draw_object_tile = draws.object
+                    renderer._draw_player_character = draws.character
+                    renderer._draw_character = draws.character
+
+                    renderer.draw(
+                        field,
+                        actors=FieldActors(map_data) if character_kind == "actor" else None,
+                        draw_player=character_kind == "player",
+                    )
+
+                    expected = (
+                        ["object", "object", "character"]
+                        if character_y > 1
+                        else ["character", "object", "object"]
+                    )
+                    self.assertEqual([item[0] for item in draws.mock_calls], expected)
+
+    def test_same_row_draws_normal_character_foreground_then_overlay(self) -> None:
+        groups = ("object_foreground", "object_overlay", "object_y_sorted")
+        objects = tuple(
+            MapObjectTile(f"part_{index}", "part", 1, 1, group, 100 - index, 0, 1)
+            for index, group in enumerate(groups)
+        )
+        map_data = compiled_map(("000", "000", "000"), objects=objects)
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=Mock(frame_count=0),
+        )
+        draws = Mock()
+        draws.attach_mock(Mock(), "object")
+        draws.attach_mock(Mock(), "character")
+        renderer._draw_object_tile = draws.object
+        renderer._draw_player_character = draws.character
+
+        renderer.draw(field)
+
+        self.assertEqual(
+            [item.args[1].draw_group if item[0] == "object" else "character" for item in draws.mock_calls],
+            ["object_y_sorted", "character", "object_foreground", "object_overlay"],
         )
 
     def test_draws_overlay_objects_after_foreground_objects(self) -> None:

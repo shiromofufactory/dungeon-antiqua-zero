@@ -100,7 +100,7 @@ class FieldRenderer:
         self._pyxel = pyxel_api
         y_sorted_instances: dict[str, list[tuple[int, MapObjectTile]]] = {}
         for index, object_tile in enumerate(map_data.object_tiles):
-            if object_tile.draw_group != "object_y_sorted":
+            if object_tile.draw_group not in ("object_y_sorted", "object_foreground"):
                 continue
             y_sorted_instances.setdefault(object_tile.instance_id, []).append(
                 (index, object_tile)
@@ -201,7 +201,7 @@ class FieldRenderer:
             depth_items.append(
                 (
                     first_tile.sort_y * tile_size,
-                    0,
+                    2 if first_tile.draw_group == "object_foreground" else 0,
                     first_tile.order,
                     f"object:{first_index}:{first_tile.instance_id}",
                     indexed_tiles,
@@ -209,7 +209,7 @@ class FieldRenderer:
             )
 
         for _depth_y, item_kind, _order, _identity, payload in sorted(depth_items):
-            if item_kind == 0:
+            if item_kind != 1:
                 for object_index, object_tile in payload:
                     self._draw_object_tile(
                         object_index,
@@ -267,12 +267,6 @@ class FieldRenderer:
                     floating=floating,
                     floating_phase=floating_phase,
                 )
-        self._draw_objects(
-            camera_x,
-            camera_y,
-            frame_count,
-            draw_groups=("object_foreground",),
-        )
         self._draw_objects(
             camera_x,
             camera_y,

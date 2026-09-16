@@ -1,5 +1,7 @@
 "use strict";
 
+document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
 const SESSION_CLIENT_HEADER = "map-editor-ui";
 const CELL_SIZE = 16;
 const FLOATING_PHASE_CYCLE_FRAMES = 96;
@@ -8,6 +10,13 @@ const FLOATING_CHARACTER_FRAME_INTERVAL = 20;
 const MIN_MAP_WIDTH = 16;
 const MIN_MAP_HEIGHT = 15;
 const LAST_MAP_STORAGE_KEY = "da0.map-editor.last-map.v1";
+const OBJECT_LAYERS = [
+  ["object", "背面"],
+  ["object_y_sorted", "通常"],
+  ["object_foreground", "前面"],
+  ["object_overlay", "最前面"],
+  ["all", "全て"],
+];
 let token = new URLSearchParams(window.location.search).get("token") || "";
 const editorRoute = window.location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
 
@@ -32,6 +41,7 @@ const state = {
   groundId: null,
   groundTool: "brush",
   objectId: null,
+  objectLayer: "object_y_sorted",
   selectedInstanceId: null,
   selectedSiteId: null,
   selectedArrivalId: null,
@@ -59,6 +69,8 @@ const state = {
   spritePickerActorId: null,
 };
 let pendingEditorNavigationUrl = null;
+let pendingMapNavigationId = null;
+let navigationBusy = false;
 
 const rawImage = new Image();
 const sourceImage = document.createElement("canvas");
@@ -110,7 +122,38 @@ function navigateToEditor(url) {
     return;
   }
   pendingEditorNavigationUrl = url;
+  pendingMapNavigationId = null;
+  byId("unsaved-navigation-message").textContent = "変更を保存してからエディタを切り替えますか？";
   byId("unsaved-navigation-dialog").showModal();
+  byId("unsaved-navigation-dialog").querySelector('[data-navigation-choice="save"]').focus();
+}
+
+async function switchMapDocument(mapId) {
+  try {
+    await loadMapDocument(mapId);
+    return true;
+  } catch (error) {
+    showToast(error.message, true);
+    renderMapSelector();
+    return false;
+  }
+}
+
+async function requestMapSwitch(mapId) {
+  if (navigationBusy || mapId === state.data?.map_id) {
+    renderMapSelector();
+    return;
+  }
+  if (!state.dirty) {
+    await switchMapDocument(mapId);
+    return;
+  }
+  pendingEditorNavigationUrl = null;
+  pendingMapNavigationId = mapId;
+  renderMapSelector();
+  byId("unsaved-navigation-message").textContent = "変更を保存してからマップを切り替えますか？";
+  byId("unsaved-navigation-dialog").showModal();
+  byId("unsaved-navigation-dialog").querySelector('[data-navigation-choice="save"]').focus();
 }
 
 function openNewActorEvent() {
@@ -137,25 +180,35 @@ function openNewActorEvent() {
 
 function closeNavigationDialog() {
   pendingEditorNavigationUrl = null;
+  pendingMapNavigationId = null;
   byId("unsaved-navigation-dialog").close();
 }
 
 async function handleNavigationChoice(choice) {
+  if (navigationBusy) return;
   const url = pendingEditorNavigationUrl;
-  if (!url || choice === "cancel") {
+  const mapId = pendingMapNavigationId;
+  if ((!url && !mapId) || choice === "cancel") {
     closeNavigationDialog();
     return;
   }
-  if (choice === "discard") {
-    state.dirty = false;
-    window.location.assign(url);
-    return;
-  }
+  if (choice !== "save" && choice !== "discard") return;
   const buttons = byId("unsaved-navigation-dialog").querySelectorAll("button");
+  navigationBusy = true;
   buttons.forEach((button) => { button.disabled = true; });
-  const saved = await save();
-  buttons.forEach((button) => { button.disabled = false; });
-  if (saved) window.location.assign(url);
+  try {
+    if (choice === "save" && !await save()) return;
+    if (url !== pendingEditorNavigationUrl || mapId !== pendingMapNavigationId) return;
+    if (mapId) {
+      if (await switchMapDocument(mapId)) closeNavigationDialog();
+    } else {
+      state.dirty = false;
+      window.location.assign(url);
+    }
+  } finally {
+    navigationBusy = false;
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 async function renewSessionToken() {
@@ -416,13 +469,17 @@ function normalizeSelections() {
     if (!Array.isArray(state.data.event_triggers)) state.data.event_triggers = [];
   }
   if (!grounds.some((ground) => ground.id === state.groundId)) state.groundId = grounds[0]?.id || null;
-  if (!objects.some((object) => object.id === state.objectId)) state.objectId = objects[0]?.id || null;
+  const paletteObjects = objects.filter((object) => state.objectLayer !== "all" && object.default_draw_group === state.objectLayer);
+  if (!paletteObjects.some((object) => object.id === state.objectId)) state.objectId = paletteObjects[0]?.id || null;
   if (!state.data?.objects?.some((instance) => instance.id === state.selectedInstanceId)) state.selectedInstanceId = null;
+  if (state.tab === "object" && (state.objectLayer === "all" || !objectLayerEditable(objectDefinition(currentInstance())))) state.selectedInstanceId = null;
   if (!state.data?.sites?.some((site) => site.id === state.selectedSiteId)) state.selectedSiteId = null;
   if (!state.data?.arrival_points?.some((arrival) => arrival.id === state.selectedArrivalId)) state.selectedArrivalId = null;
   if (!state.data?.actors?.some((actor) => actor.id === state.selectedActorId)) state.selectedActorId = null;
   if (!state.data?.event_triggers?.some((trigger) => trigger.id === state.selectedTriggerId)) state.selectedTriggerId = null;
-  state.bulkSelection = (state.bulkSelection || []).filter((item) => bulkItemExists(item));
+  state.bulkSelection = (state.bulkSelection || []).filter((item) => bulkItemExists(item)
+    && (state.tab !== "object" || (item.kind === "object"
+      && objectLayerEditable(objectDefinition(state.data.objects.find((instance) => instance.id === item.id))))));
   if (!state.bulkSelection.length) state.selectionRect = null;
 }
 
@@ -731,13 +788,19 @@ function renderPalette() {
           </button>`).join("")}</div>
       </div>`;
   } else if (state.tab === "object") {
+    const allLayers = state.objectLayer === "all";
+    const paletteObjects = state.tileset.objects.filter((object) => allLayers || objectLayerEditable(object));
     container.innerHTML = `
       <div class="section">
-        <div class="section-title"><h2>オブジェクト</h2><span class="subtle">左クリックで配置・右クリック／ドラッグで選択・移動</span></div>
-        <div class="palette-list">${state.tileset.objects.map((object, index) => `
-          <button class="palette-item ${object.id === state.objectId ? "active" : ""}" type="button" data-action="select-object-definition" data-id="${escapeHtml(object.id)}">
-            <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group !== "object_y_sorted" ? `<span class="palette-meta">${escapeHtml(objectDrawGroupLabel(object))}</span>` : ""}
-          </button>`).join("") || `<div class="empty-state">オブジェクト定義がありません。</div>`}</div>
+        <div class="section-title"><h2>オブジェクト</h2></div>
+        <div class="object-layer-tabs" role="group" aria-label="編集レイヤー">
+          ${OBJECT_LAYERS.map(([layer, label]) => `<button class="button small ${layer === state.objectLayer ? "secondary" : "ghost"}" type="button" data-action="select-object-layer" data-layer="${layer}" aria-pressed="${layer === state.objectLayer}">${label}</button>`).join("")}
+        </div>
+        <p class="subtle object-layer-help">${allLayers ? "全レイヤーのグループ選択・移動・削除専用です。新規配置・単体選択はできません。" : "選択中レイヤーのみ配置・選択・移動できます。他レイヤーは半透明で表示します。"}</p>
+        <div class="palette-list">${paletteObjects.map((object) => `
+          <button class="palette-item ${object.id === state.objectId ? "active" : ""}" type="button" ${allLayers ? "disabled" : `data-action="select-object-definition"`} data-id="${escapeHtml(object.id)}">
+            <canvas data-object-thumb="${state.tileset.objects.indexOf(object)}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group !== "object_y_sorted" ? `<span class="palette-meta">${escapeHtml(objectDrawGroupLabel(object))}</span>` : ""}
+          </button>`).join("") || `<div class="empty-state">このレイヤーのオブジェクト定義がありません。</div>`}</div>
         </div>`;
   } else if (state.tab === "site") {
     const isWorld = state.data.profile === "world";
@@ -933,13 +996,12 @@ function renderInspector() {
     <div class="section">
       <div class="section-title"><h2>選択オブジェクト</h2><span class="subtle">配置数 ${state.data.objects.length}</span></div>
       ${instance ? `
-        <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / ${escapeHtml(objectDrawGroupLabel(objectDefinition(instance)))}<br>同一下端内の順序: ${instance.order}</div>
-        <div class="row between" style="margin-top:9px">
-          <div class="row"><button class="button ghost small" type="button" data-action="object-back">背面へ</button><button class="button ghost small" type="button" data-action="object-front">前面へ</button></div>
+        <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / ${escapeHtml(objectDrawGroupLabel(objectDefinition(instance)))}</div>
+        <div class="row end" style="margin-top:9px">
           <button class="button danger small" type="button" data-action="delete-instance">配置を削除</button>
         </div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="${attachedSite ? "open-attached-site" : "attach-site"}">${attachedSite ? `${siteLabel} ${escapeHtml(attachedSite.id)} を編集` : `${siteLabel}として設定`}</button></div>`
-        : `<div class="empty-state">マップ上のオブジェクトを右クリックすると選択できます。</div>`}
+        : `<div class="empty-state">${state.objectLayer === "all" ? "全てモードでは範囲選択したオブジェクトの移動・削除だけができます。" : "マップ上の選択中レイヤーのオブジェクトを右クリックすると選択できます。"}</div>`}
     </div>`;
   const siteInspector = `
     <div class="section">
@@ -1188,6 +1250,13 @@ function drawActor(context, actor, scale, now) {
   if (selected) drawCellSelectionFrame(context, actor.position, scale);
 }
 
+function drawMapObjectCell(context, cell, scale, now) {
+  context.save();
+  if (state.tab === "object" && state.objectLayer !== "all" && cell.draw_group !== state.objectLayer) context.globalAlpha *= .25;
+  drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+  context.restore();
+}
+
 function drawActorsAndYSortedObjects(context, scale, now) {
   const items = state.data.actors.map((actor, index) => ({
     kind: "actor",
@@ -1200,7 +1269,7 @@ function drawActorsAndYSortedObjects(context, scale, now) {
   }));
   const instances = new Map();
   for (const cell of state.resolved?.object_cells || []) {
-    if (cell.draw_group !== "object_y_sorted") continue;
+    if (cell.draw_group !== "object_y_sorted" && cell.draw_group !== "object_foreground") continue;
     if (!instances.has(cell.instance_id)) instances.set(cell.instance_id, []);
     instances.get(cell.instance_id).push(cell);
   }
@@ -1209,7 +1278,7 @@ function drawActorsAndYSortedObjects(context, scale, now) {
     items.push({
       kind: "object",
       sortY: first.sort_y ?? Math.max(...cells.map((cell) => cell.position[1])),
-      tieOrder: 0,
+      tieOrder: first.draw_group === "object_foreground" ? 2 : 0,
       order: first.order,
       x: Math.min(...cells.map((cell) => cell.position[0])),
       id: instanceId,
@@ -1223,12 +1292,40 @@ function drawActorsAndYSortedObjects(context, scale, now) {
     || left.id.localeCompare(right.id));
   for (const item of items) {
     if (item.kind === "actor") drawActor(context, item.actor, scale, now);
-    else for (const cell of item.cells) drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+    else for (const cell of item.cells) drawMapObjectCell(context, cell, scale, now);
   }
+}
+
+function drawObjectOutline(context, instance, scale, highlighted = false) {
+  const definition = objectDefinition(instance);
+  if (!definition) return;
+  const positions = new Set(definition.cells.map((cell) => addPoint(instance.origin, cell.offset).join(",")));
+  const selected = instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id);
+  context.save();
+  context.fillStyle = "rgba(255,79,163,.18)";
+  context.strokeStyle = selected ? "#ff67bd" : "rgba(255,103,189,.82)";
+  context.lineWidth = Math.max(2, selected ? state.zoom * 2 : state.zoom);
+  context.beginPath();
+  for (const position of positions) {
+    const [x, y] = position.split(",").map(Number);
+    if (highlighted) context.fillRect(x * scale, y * scale, scale, scale);
+    if (!positions.has(`${x},${y - 1}`)) { context.moveTo(x * scale, y * scale); context.lineTo((x + 1) * scale, y * scale); }
+    if (!positions.has(`${x + 1},${y}`)) { context.moveTo((x + 1) * scale, y * scale); context.lineTo((x + 1) * scale, (y + 1) * scale); }
+    if (!positions.has(`${x},${y + 1}`)) { context.moveTo(x * scale, (y + 1) * scale); context.lineTo((x + 1) * scale, (y + 1) * scale); }
+    if (!positions.has(`${x - 1},${y}`)) { context.moveTo(x * scale, y * scale); context.lineTo(x * scale, (y + 1) * scale); }
+  }
+  context.stroke();
+  context.restore();
 }
 
 function drawTabCellHighlights(context, scale) {
   if (state.tab !== "object" && state.tab !== "event") return;
+  if (state.tab === "object") {
+    for (const instance of state.data.objects) {
+      if (objectLayerEditable(objectDefinition(instance))) drawObjectOutline(context, instance, scale, true);
+    }
+    return;
+  }
   const positions = new Set();
   const addPosition = (position) => {
     if (!position) return;
@@ -1236,16 +1333,9 @@ function drawTabCellHighlights(context, scale) {
     if (x < 0 || y < 0 || x >= state.data.size[0] || y >= state.data.size[1]) return;
     positions.add(`${x},${y}`);
   };
-  if (state.tab === "object") {
-    for (const instance of state.data.objects) {
-      const definition = objectDefinition(instance);
-      for (const cell of definition?.cells || []) addPosition(addPoint(instance.origin, cell.offset));
-    }
-  } else {
-    for (const actor of state.data.actors) addPosition(actor.position);
-    for (const trigger of state.data.event_triggers) {
-      for (const position of triggerPositions(trigger)) addPosition(position);
-    }
+  for (const actor of state.data.actors) addPosition(actor.position);
+  for (const trigger of state.data.event_triggers) {
+    for (const position of triggerPositions(trigger)) addPosition(position);
   }
   context.save();
   context.fillStyle = "rgba(255,79,163,.18)";
@@ -1286,15 +1376,15 @@ function drawGroundPaintPreview(context, scale) {
 }
 
 function drawObjectPlacementPreview(context, scale) {
-  if (state.tab !== "object" || !state.hoveredCell || state.pointerDrag || state.bulkSelection.length) return;
+  if (state.tab !== "object" || state.objectLayer === "all" || !state.hoveredCell || state.pointerDrag || state.bulkSelection.length) return;
   const definition = state.tileset.objects.find((object) => object.id === state.objectId);
-  if (!definition) return;
+  if (!objectLayerEditable(definition)) return;
   const selected = currentInstance();
   if (selected && instanceOccupies(selected, ...state.hoveredCell)) return;
   const [x, y] = state.hoveredCell;
   const valid = x + definition.size[0] <= state.data.size[0]
     && y + definition.size[1] <= state.data.size[1]
-    && !state.data.objects.some((instance) => instance.origin[0] === x && instance.origin[1] === y);
+    && !objectPlacementConflict(definition, [x, y]);
   context.save();
   context.fillStyle = valid ? "rgba(114,183,119,.12)" : "rgba(227,119,107,.14)";
   context.setLineDash([Math.max(4, state.zoom * 3), Math.max(3, state.zoom * 2)]);
@@ -1330,7 +1420,7 @@ function drawMap(now) {
     });
     if (!groundOnly) for (const cell of state.resolved.object_cells) {
       if (cell.draw_group !== "object") continue;
-      drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+      drawMapObjectCell(context, cell, scale, now);
     }
     if (state.showCollision && !groundOnly) {
       context.fillStyle = "rgba(239,91,80,.32)";
@@ -1348,22 +1438,13 @@ function drawMap(now) {
   if (!groundOnly) drawActorsAndYSortedObjects(context, scale, now);
   if (state.resolved && !groundOnly) {
     for (const cell of state.resolved.object_cells) {
-      if (cell.draw_group !== "object_foreground") continue;
-      drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
-    }
-    for (const cell of state.resolved.object_cells) {
       if (cell.draw_group !== "object_overlay") continue;
-      drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+      drawMapObjectCell(context, cell, scale, now);
     }
   }
   if (!groundOnly) drawTabCellHighlights(context, scale);
-  if (!groundOnly) for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
-    const definition = state.tileset.objects.find((object) => object.id === selected.definition_id);
-    if (definition) {
-      context.strokeStyle = "#ff4fa3";
-      context.lineWidth = Math.max(2, state.zoom);
-      context.strokeRect(selected.origin[0] * scale + 1, selected.origin[1] * scale + 1, definition.size[0] * scale - 2, definition.size[1] * scale - 2);
-    }
+  if (!groundOnly && state.tab !== "object") for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
+    drawObjectOutline(context, selected, scale);
   }
   if (!groundOnly) {
     drawTravelMarkers(context, scale);
@@ -1393,7 +1474,9 @@ function updateToolStatus() {
   const rangeHint = "右ドラッグ: 配置要素を範囲選択";
   if (state.bulkSelection.length) byId("tool-status").textContent = `${state.bulkSelection.length}件を範囲選択中 / 選択対象を左ドラッグ: 一括移動 / Delete: 一括削除`;
   else if (state.tab === "ground") byId("tool-status").textContent = `${state.groundTool === "rectangle" ? "矩形塗り" : "地面ブラシ"}: ${state.groundId || "—"} / ${rangeHint}`;
-  else if (state.tab === "object") byId("tool-status").textContent = `左: ${state.objectId || "—"}を配置 / 右クリック: 選択 / ${rangeHint}`;
+  else if (state.tab === "object") byId("tool-status").textContent = state.objectLayer === "all"
+    ? "全て: 左／右ドラッグでオブジェクトを範囲選択 / 選択グループをドラッグ: 移動 / Delete: 削除"
+    : `左: ${state.objectId || "—"}を配置 / 右クリック: 選択中レイヤーのみ選択 / 右ドラッグ: 同レイヤーを範囲選択`;
   else if (state.tab === "site") {
     const selectedSite = currentSite();
     const labels = {
@@ -1443,10 +1526,12 @@ function rangeSelectionItems(rect) {
   const items = [];
   for (const instance of state.data.objects) {
     const definition = objectDefinition(instance);
+    if (state.tab === "object" && !objectLayerEditable(definition)) continue;
     if (definition?.cells.some((cell) => pointInCellRect(addPoint(instance.origin, cell.offset), rect))) {
       items.push({ kind: "object", id: instance.id });
     }
   }
+  if (state.tab === "object") return items;
   for (const site of state.data.sites) {
     const origin = siteAnchorPosition(site);
     if (siteEntrancePositions(site).some((position) => pointInCellRect(position, rect))
@@ -1661,12 +1746,13 @@ function validBulkDelta(delta) {
       if (trigger && trigger.offsets.some((offset) => !inBounds(addPoint(position, offset)))) return false;
     }
   }
-  const origins = new Set();
+  const placements = new Set();
   for (const instance of state.data.objects) {
     const origin = movedObjects.get(instance.id) || instance.origin;
-    const key = origin.join(",");
-    if (origins.has(key)) return false;
-    origins.add(key);
+    const key = objectPlacementSignature(objectDefinition(instance), origin);
+    if (key === null) continue;
+    if (placements.has(key)) return false;
+    placements.add(key);
   }
   for (const site of state.data.sites) {
     if (site.anchor?.kind !== "object" || !movedObjects.has(site.anchor.object_id)) continue;
@@ -1982,6 +2068,14 @@ function selectEventAt(cell) {
 function mapSelectionCandidatesAt(cell) {
   const [x, y] = cell;
   const candidates = [];
+  const objects = [...state.data.objects]
+    .filter((instance) => instanceOccupies(instance, x, y))
+    .sort((left, right) => compareObjectsBackToFront(right, left));
+  if (state.tab === "object") {
+    return state.objectLayer === "all" ? [] : objects
+      .filter((instance) => objectLayerEditable(objectDefinition(instance)))
+      .map((instance) => ({ kind: "object", id: instance.id, tab: "object" }));
+  }
   for (const actor of state.data.actors) {
     if (actor.position[0] === x && actor.position[1] === y) candidates.push({ kind: "actor", id: actor.id, tab: "event" });
   }
@@ -1997,8 +2091,7 @@ function mapSelectionCandidatesAt(cell) {
       || (site.anchor?.kind === "cell" && origin?.[0] === x && origin?.[1] === y);
     if (occupiesCell) candidates.push({ kind: "site", id: site.id, tab: "site" });
   }
-  const instance = instanceAt(x, y);
-  if (instance) candidates.push({ kind: "object", id: instance.id, tab: "object" });
+  for (const instance of objects) candidates.push({ kind: "object", id: instance.id, tab: "object" });
   return candidates;
 }
 
@@ -2037,7 +2130,10 @@ function selectAnyAt(cell) {
   else {
     const instance = state.data.objects.find((item) => item.id === candidate.id);
     state.selectedInstanceId = candidate.id;
-    if (instance) state.objectId = instance.definition_id;
+    if (instance) {
+      state.objectLayer = objectDefinition(instance)?.default_draw_group || "object_y_sorted";
+      state.objectId = instance.definition_id;
+    }
   }
   const actor = candidate.kind === "actor" ? currentActor() : null;
   if (actor && actor.kind !== "treasure" && !actorTrigger(actor.id)) commit(() => ensureActorTrigger(actor));
@@ -2072,16 +2168,17 @@ function handleEventCell(cell) {
 
 function placeObject(x, y) {
   const definition = state.tileset.objects.find((object) => object.id === state.objectId);
-  if (!definition) return;
-  if (x + definition.size[0] > state.data.size[0] || y + definition.size[1] > state.data.size[1]) {
+  if (state.objectLayer === "all" || !objectLayerEditable(definition)) return;
+  if (x < 0 || y < 0 || x + definition.size[0] > state.data.size[0] || y + definition.size[1] > state.data.size[1]) {
     showToast("オブジェクトがマップ範囲外へはみ出します。", true);
     return;
   }
-  const sameOrigin = state.data.objects.find((instance) => instance.origin[0] === x && instance.origin[1] === y);
-  if (sameOrigin) {
-    state.selectedInstanceId = sameOrigin.id;
+  const conflict = objectPlacementConflict(definition, [x, y]);
+  if (conflict) {
+    state.selectedInstanceId = conflict.id;
+    state.objectId = conflict.definition_id;
     renderAll();
-    showToast("同じ起点には配置できないため、既存の配置を選択しました。", true);
+    showToast("同じレイヤーで構成セルが完全に重なるため、既存の配置を選択しました。", true);
     return;
   }
   commit(() => {
@@ -2095,6 +2192,22 @@ function placeObject(x, y) {
 
 function objectDefinition(instance) {
   return state.tileset.objects.find((object) => object.id === instance?.definition_id) || null;
+}
+
+function objectLayerEditable(definition) {
+  return Boolean(definition && (state.objectLayer === "all" || definition.default_draw_group === state.objectLayer));
+}
+
+function objectPlacementSignature(definition, origin) {
+  if (!definition?.cells?.length) return null;
+  const positions = new Set(definition.cells.map((cell) => addPoint(origin, cell.offset).join(",")));
+  return `${definition.default_draw_group}:${JSON.stringify([...positions].sort())}`;
+}
+
+function objectPlacementConflict(definition, origin, excludedId = null) {
+  const signature = objectPlacementSignature(definition, origin);
+  return state.data.objects.find((instance) => instance.id !== excludedId
+    && signature !== null && objectPlacementSignature(objectDefinition(instance), instance.origin) === signature) || null;
 }
 
 function objectBottom(instance) {
@@ -2117,8 +2230,12 @@ function objectDrawGroupLabel(definition) {
 }
 
 function compareObjectsBackToFront(left, right) {
-  return objectDrawGroupOrder(left) - objectDrawGroupOrder(right)
+  const leftLayer = objectDrawGroupOrder(left);
+  const rightLayer = objectDrawGroupOrder(right);
+  const depthBand = (layer) => layer === 2 ? 1 : layer;
+  return depthBand(leftLayer) - depthBand(rightLayer)
     || objectBottom(left) - objectBottom(right)
+    || leftLayer - rightLayer
     || left.order - right.order
     || left.origin[0] - right.origin[0]
     || left.id.localeCompare(right.id);
@@ -2130,7 +2247,9 @@ function instanceOccupies(instance, x, y) {
 }
 
 function instanceAt(x, y) {
+  if (state.tab === "object" && state.objectLayer === "all") return null;
   return [...state.data.objects]
+    .filter((instance) => state.tab !== "object" || objectLayerEditable(objectDefinition(instance)))
     .sort((left, right) => compareObjectsBackToFront(right, left))
     .find((instance) => instanceOccupies(instance, x, y)) || null;
 }
@@ -2138,12 +2257,12 @@ function instanceAt(x, y) {
 function validObjectOrigin(instance, x, y) {
   const definition = objectDefinition(instance);
   if (!definition || x < 0 || y < 0 || x + definition.size[0] > state.data.size[0] || y + definition.size[1] > state.data.size[1]) return false;
-  return !state.data.objects.some((item) => item.id !== instance.id && item.origin[0] === x && item.origin[1] === y);
+  return !objectPlacementConflict(definition, [x, y], instance.id);
 }
 
 function beginObjectDrag(event, cell) {
   const instance = currentInstance();
-  if (!instance || !instanceOccupies(instance, ...cell)) return false;
+  if (state.objectLayer === "all" || !instance || !objectLayerEditable(objectDefinition(instance)) || !instanceOccupies(instance, ...cell)) return false;
   beginChange();
   state.pointerDrag = {
     kind: "object",
@@ -2207,8 +2326,16 @@ function dragSiteAnchorTo(cell) {
 
 function handlePaletteAction(element) {
   const action = element.dataset.action;
+  if (action === "select-object-definition" && (state.objectLayer === "all"
+    || !objectLayerEditable(state.tileset.objects.find((object) => object.id === element.dataset.id)))) return;
   clearBulkSelection();
-  if (action === "select-ground") {
+  if (action === "select-object-layer") {
+    if (!OBJECT_LAYERS.some(([layer]) => layer === element.dataset.layer)) return;
+    state.objectLayer = element.dataset.layer;
+    clearSingleSelections();
+    state.hoveredCell = null;
+    renderAll();
+  } else if (action === "select-ground") {
     state.groundId = element.dataset.id;
     renderPalette();
   } else if (action === "select-ground-tool") {
@@ -2322,6 +2449,8 @@ function resizeMap() {
 
 function handleInspectorAction(element) {
   const action = element.dataset.action;
+  if (state.tab === "object" && state.objectLayer === "all"
+    && ["delete-instance", "attach-site", "open-attached-site"].includes(action)) return;
   if (action === "resize-map") resizeMap();
   else if (action === "reroll") commit(() => { state.data.visual_seed += 1; });
   else if (action === "delete-bulk-selection") deleteBulkSelection();
@@ -2341,11 +2470,6 @@ function handleInspectorAction(element) {
     state.siteOptions = state.siteOptions.filter((siteId) => !removedSiteIds.has(siteId));
     state.data.event_triggers = state.data.event_triggers.filter((trigger) => !(trigger.anchor?.kind === "object" && trigger.anchor.object_id === objectId));
     state.selectedInstanceId = null;
-  });
-  else if (action === "object-front" || action === "object-back") commit(() => {
-    const instance = currentInstance();
-    const orders = state.data.objects.map((item) => item.order);
-    instance.order = action === "object-front" ? Math.max(...orders) + 1 : Math.min(...orders) - 1;
   });
   else if (action === "attach-site") attachSiteToObject();
   else if (action === "open-attached-site") {
@@ -2610,19 +2734,8 @@ async function initialize() {
   }
 }
 
-byId("map-select").addEventListener("change", async (event) => {
-  const mapId = event.target.value;
-  if (mapId === state.data?.map_id) return;
-  if (state.dirty && !window.confirm("未保存の変更を破棄してマップを切り替えますか？")) {
-    renderMapSelector();
-    return;
-  }
-  try {
-    await loadMapDocument(mapId);
-  } catch (error) {
-    showToast(error.message, true);
-    renderMapSelector();
-  }
+byId("map-select").addEventListener("change", (event) => {
+  requestMapSwitch(event.target.value);
 });
 byId("editor-switch").addEventListener("click", (event) => {
   const link = event.target.closest("a");
@@ -2636,6 +2749,7 @@ byId("unsaved-navigation-dialog").addEventListener("click", (event) => {
 });
 byId("unsaved-navigation-dialog").addEventListener("close", () => {
   pendingEditorNavigationUrl = null;
+  pendingMapNavigationId = null;
 });
 byId("new-map-button").addEventListener("click", () => {
   if (state.dirty && !window.confirm("未保存の変更を破棄して新規マップを作成しますか？")) return;
@@ -2783,6 +2897,10 @@ mapCanvas.addEventListener("pointerdown", (event) => {
   }
   if (event.button !== 0) return;
   if (beginBulkDrag(event, cell)) return;
+  if (state.tab === "object" && state.objectLayer === "all") {
+    beginRangeSelection(event, cell);
+    return;
+  }
   if (state.bulkSelection.length) clearBulkSelection();
   if (state.tab === "ground") {
     if (state.groundTool === "rectangle") {

@@ -57,7 +57,10 @@
       <div class="usage-legend" aria-label="ソースチップ使用状況">
         <span><i class="usage-dot ground"></i>地面</span>
         <span><i class="usage-dot boundary"></i>境界</span>
-        <span><i class="usage-dot object"></i>オブジェクト</span>
+        <span><i class="usage-dot map-layer map-layer-back"></i>背面</span>
+        <span><i class="usage-dot map-layer map-layer-normal"></i>通常</span>
+        <span><i class="usage-dot map-layer map-layer-front"></i>前面</span>
+        <span><i class="usage-dot map-layer map-layer-top"></i>最前面</span>
         <span><i class="usage-dot unused"></i>未使用</span>
         <strong id="usage-summary">—</strong>
       </div>
@@ -121,7 +124,7 @@
   <dialog id="unsaved-navigation-dialog" class="resource-dialog" aria-labelledby="unsaved-navigation-dialog-title">
     <div class="resource-dialog-content">
       <h2 id="unsaved-navigation-dialog-title">未保存の変更があります</h2>
-      <p>変更を保存してからエディタを切り替えますか？</p>
+      <p id="unsaved-navigation-message">変更を保存してからエディタを切り替えますか？</p>
       <div class="dialog-actions">
         <button class="button ghost" type="button" data-navigation-choice="cancel">キャンセル</button>
         <button class="button danger" type="button" data-navigation-choice="discard">変更を破棄して移動</button>

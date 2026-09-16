@@ -1,5 +1,7 @@
 "use strict";
 
+document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
 const CLIENT = "event-editor-ui";
 const NAMESPACE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const UI_STORAGE_KEY = "da0.event-editor.ui.v1";

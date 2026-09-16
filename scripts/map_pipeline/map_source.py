@@ -70,6 +70,24 @@ def _is_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _object_placement_key(
+    definition: Mapping[str, Any],
+    origin: Sequence[int],
+) -> tuple[str, frozenset[tuple[int, int]]] | None:
+    """Identify exact same-layer overlaps by occupied constituent cells."""
+    layer = definition.get("default_draw_group")
+    cells = definition.get("cells")
+    if not isinstance(layer, str) or not isinstance(cells, list) or not cells:
+        return None
+    positions = set()
+    for cell in cells:
+        offset = cell.get("offset") if isinstance(cell, dict) else None
+        if not isinstance(offset, list) or len(offset) != 2 or not all(_is_int(value) for value in offset):
+            return None
+        positions.add((origin[0] + offset[0], origin[1] + offset[1]))
+    return layer, frozenset(positions)
+
+
 def _diagnostic(
     diagnostics: list[Diagnostic],
     severity: str,
@@ -279,7 +297,7 @@ def validate_map_source(
         return diagnostics
 
     instance_ids: set[str] = set()
-    origins: set[tuple[int, int]] = set()
+    placements: set[tuple[str, frozenset[tuple[int, int]]]] = set()
     valid_instances: list[tuple[int, Mapping[str, Any]]] = []
     object_origins: dict[str, tuple[int, int]] = {}
     for index, instance in enumerate(instances):
@@ -307,10 +325,11 @@ def validate_map_source(
         if not valid_origin:
             _diagnostic(diagnostics, "error", "invalid_object_origin", f"{path}.origin", "起点は[x, y]の整数2要素で指定してください。")
         else:
-            point = (origin[0], origin[1])
-            if point in origins:
-                _diagnostic(diagnostics, "error", "duplicate_object_origin", f"{path}.origin", "複数のオブジェクトを同じ起点には配置できません。")
-            origins.add(point)
+            placement = _object_placement_key(definition, origin) if definition is not None else None
+            if placement is not None:
+                if placement in placements:
+                    _diagnostic(diagnostics, "error", "duplicate_object_placement", f"{path}.origin", "同じレイヤーで構成セルが完全に重なるオブジェクトは配置できません。")
+                placements.add(placement)
             if definition is not None and width > 0 and height > 0:
                 object_size = definition.get("size")
                 if isinstance(object_size, list) and len(object_size) == 2:

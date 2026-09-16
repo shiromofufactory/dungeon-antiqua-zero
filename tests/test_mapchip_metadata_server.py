@@ -87,7 +87,8 @@ class MapchipMetadataServerTest(unittest.TestCase):
         self.assertIn('id="usage-summary"', page)
         self.assertIn('class="usage-dot ground"', page)
         self.assertIn('class="usage-dot boundary"', page)
-        self.assertIn('class="usage-dot object"', page)
+        for layer in ("back", "normal", "front", "top"):
+            self.assertIn(f'class="usage-dot map-layer map-layer-{layer}"', page)
         self.assertIn('class="usage-dot unused"', page)
         self.assertIn('id="save-button" class="button primary" type="button" disabled', page)
         self.assertIn('byId("save-button").disabled = !canSave()', script)
@@ -96,7 +97,7 @@ class MapchipMetadataServerTest(unittest.TestCase):
         self.assertIn("function drawSourceUsage(context, zoom)", script)
         self.assertIn('addVisualUsage(usage, ground.base_visual, "ground")', script)
         self.assertIn('addVisualUsage(usage, boundary.visual, "boundary")', script)
-        self.assertIn('addVisualUsage(usage, cell.visual, "object")', script)
+        self.assertIn('addVisualUsage(usage, cell.visual, layer)', script)
 
     def test_ground_and_object_definitions_are_drag_reorderable(self) -> None:
         with urlopen(f"{self.base_url}/app.js", timeout=2) as response:

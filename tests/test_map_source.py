@@ -846,7 +846,7 @@ class MapSourceTest(unittest.TestCase):
             },
         )
 
-    def test_rejects_non_sea_world_edge_and_duplicate_object_origin(self) -> None:
+    def test_rejects_non_sea_world_edge_and_duplicate_object_placement(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][0][1] = "plain"
         source["objects"] = [
@@ -857,7 +857,40 @@ class MapSourceTest(unittest.TestCase):
         codes = {item.code for item in validate_map_source(source, self.tileset)}
 
         self.assertIn("map_edge_not_base_ground", codes)
-        self.assertIn("duplicate_object_origin", codes)
+        self.assertIn("duplicate_object_placement", codes)
+
+    def test_allows_same_origin_with_different_layer_or_constituent_cells(self) -> None:
+        tileset = deepcopy(self.tileset)
+        tileset["objects"].extend([
+            {"id": "front_rock", "size": [1, 1], "default_draw_group": "object_foreground",
+             "cells": [{"offset": [0, 0], "collision": "passable", "tile": [0, 0]}]},
+            {"id": "wide_rock", "size": [2, 1], "default_draw_group": "object",
+             "cells": [{"offset": [0, 0], "collision": "passable", "tile": [0, 0]},
+                       {"offset": [1, 0], "collision": "passable", "tile": [1, 0]}]},
+        ])
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
+        source["objects"] = [
+            {"id": f"{definition}_1", "definition_id": definition, "origin": [2, 2], "order": index}
+            for index, definition in enumerate(("rock", "front_rock", "wide_rock"))
+        ]
+
+        self.assertNotIn("duplicate_object_placement", {item.code for item in validate_map_source(source, tileset)})
+        self.assertEqual(len(resolve_map(source, tileset)["object_cells"]), 4)
+        self.assertEqual(len(compile_map(source, tileset, self.image_path, self.palette_path).runtime["object_tiles"]), 4)
+
+    def test_rejects_same_layer_exact_cells_even_with_different_origins_or_definitions(self) -> None:
+        tileset = deepcopy(self.tileset)
+        tileset["objects"].append({
+            "id": "offset_rock", "size": [2, 1], "default_draw_group": "object",
+            "cells": [{"offset": [1, 0], "collision": "passable", "tile": [1, 0]}],
+        })
+        source = initial_map_source("test_world", tileset, "world", 16, 15)
+        source["objects"] = [
+            {"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0},
+            {"id": "offset_rock_1", "definition_id": "offset_rock", "origin": [1, 2], "order": 1},
+        ]
+
+        self.assertIn("duplicate_object_placement", {item.code for item in validate_map_source(source, tileset)})
 
     def test_allows_object_overlap_when_origins_differ_and_combines_collision(self) -> None:
         tileset = deepcopy(self.tileset)
