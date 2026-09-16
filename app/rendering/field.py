@@ -149,7 +149,7 @@ class FieldRenderer:
             camera_x,
             camera_y,
             frame_count,
-            draw_groups=("object", "object_overlay"),
+            draw_groups=("object",),
         )
         characters: list[
             tuple[int, FieldMovement, str, int, Any | None, bool, int]
@@ -192,7 +192,7 @@ class FieldRenderer:
                     )
                 )
         depth_items: list[tuple[int, int, int, str, Any]] = [
-            (character[0], 0, index, f"character:{index}", character)
+            (character[0], 1, index, f"character:{index}", character)
             for index, character in enumerate(characters)
         ]
         tile_size = self.map_data.tile_size
@@ -201,7 +201,7 @@ class FieldRenderer:
             depth_items.append(
                 (
                     first_tile.sort_y * tile_size,
-                    1,
+                    0,
                     first_tile.order,
                     f"object:{first_index}:{first_tile.instance_id}",
                     indexed_tiles,
@@ -209,7 +209,7 @@ class FieldRenderer:
             )
 
         for _depth_y, item_kind, _order, _identity, payload in sorted(depth_items):
-            if item_kind == 1:
+            if item_kind == 0:
                 for object_index, object_tile in payload:
                     self._draw_object_tile(
                         object_index,
@@ -272,6 +272,12 @@ class FieldRenderer:
             camera_y,
             frame_count,
             draw_groups=("object_foreground",),
+        )
+        self._draw_objects(
+            camera_x,
+            camera_y,
+            frame_count,
+            draw_groups=("object_overlay",),
         )
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:

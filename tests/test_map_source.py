@@ -1017,7 +1017,7 @@ class MapSourceTest(unittest.TestCase):
                 ],
             }
             for index, draw_group in enumerate(
-                ("object", "object_overlay", "object_y_sorted", "object_foreground")
+                ("object", "object_y_sorted", "object_foreground", "object_overlay")
             )
         ]
         source = initial_map_source("test_world", tileset, "world", 16, 15)
@@ -1029,7 +1029,7 @@ class MapSourceTest(unittest.TestCase):
                 "order": 0,
             }
             for index, draw_group in enumerate(
-                ("object_foreground", "object_y_sorted", "object_overlay", "object")
+                ("object_overlay", "object_foreground", "object_y_sorted", "object")
             )
         ]
 
@@ -1037,7 +1037,7 @@ class MapSourceTest(unittest.TestCase):
 
         self.assertEqual(
             [cell["draw_group"] for cell in resolved["object_cells"]],
-            ["object", "object_overlay", "object_y_sorted", "object_foreground"],
+            ["object", "object_y_sorted", "object_foreground", "object_overlay"],
         )
 
         self.assertEqual(

@@ -8,6 +8,12 @@ const OBJECT_COLLISION_LABELS = {
   passable: "通行を妨げない",
   passable_override: "通行可で上書き",
 };
+const OBJECT_LAYER_CLASSES = {
+  object: "map-layer-back",
+  object_y_sorted: "map-layer-normal",
+  object_foreground: "map-layer-front",
+  object_overlay: "map-layer-top",
+};
 const SESSION_CLIENT_HEADER = "mapchip-metadata-ui";
 const PREVIEW_SETTINGS_VERSION = 1;
 const LAST_TILESET_STORAGE_KEY = "da0.mapchip-metadata.last-tileset.v1";
@@ -675,12 +681,19 @@ function objectFrameThumb(object, choiceIndex, frameIndex) {
   </span>`;
 }
 
+function objectLayerClass(object) {
+  return OBJECT_LAYER_CLASSES[object?.default_draw_group] || OBJECT_LAYER_CLASSES.object_y_sorted;
+}
+
 function renderDefinitionList(items, activeIndex, action, addAction, addLabel, reorderKind, baseIndex = null) {
-  const chips = items.map((item, index) => `
-    <button type="button" class="definition-chip ${index === activeIndex ? "active" : ""} ${index === baseIndex ? "" : "reorderable"}"
+  const chips = items.map((item, index) => {
+    const layerClass = reorderKind === "object" ? `map-layer ${objectLayerClass(item)}` : "";
+    return `
+    <button type="button" class="definition-chip ${layerClass} ${index === activeIndex ? "active" : ""} ${index === baseIndex ? "" : "reorderable"}"
       data-action="${action}" data-index="${index}" data-reorder-kind="${reorderKind}"
       title="${index === baseIndex ? "ベース地面は先頭固定です" : "ドラッグで表示順を変更"}">${escapeHtml(item.id || `#${index + 1}`)}${index === baseIndex ? " · ベース" : ""}</button>
-  `).join("");
+  `;
+  }).join("");
   return `<div class="definition-list">${chips}<button type="button" class="definition-chip" data-action="${addAction}">＋ ${addLabel}</button></div>`;
 }
 
@@ -962,7 +975,7 @@ function renderObjectEditor() {
         <div class="field full"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
-        <div class="field full"><label>描画グループ</label><select data-change="object-group"><option value="object" ${object.default_draw_group === "object" ? "selected" : ""}>通常オブジェクト（下端Yで整列）</option><option value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>前面パーツ（通常オブジェクトより手前）</option><option value="object_y_sorted" ${object.default_draw_group === "object_y_sorted" ? "selected" : ""}>キャラクターY整列（カウンターなど）</option><option value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>キャラクター前景（屋根など）</option></select></div>
+        <div class="field full"><label>レイヤー</label><select class="map-layer ${objectLayerClass(object)}" data-change="object-group"><option class="map-layer map-layer-back" value="object" ${object.default_draw_group === "object" ? "selected" : ""}>背面</option><option class="map-layer map-layer-normal" value="object_y_sorted" ${object.default_draw_group === "object_y_sorted" ? "selected" : ""}>通常</option><option class="map-layer map-layer-front" value="object_foreground" ${object.default_draw_group === "object_foreground" ? "selected" : ""}>前面</option><option class="map-layer map-layer-top" value="object_overlay" ${object.default_draw_group === "object_overlay" ? "selected" : ""}>最前面</option></select></div>
         <label class="object-interact-toggle"><input type="checkbox" data-change="object-interact-through" ${object.interact_through === true ? "checked" : ""}>このオブジェクト越しに1セル先を調べる</label>
       </div>
       <div class="row between" style="margin-top:10px">
@@ -1445,7 +1458,7 @@ function handleAction(element) {
     renderAll();
   } else if (action === "add-object") {
     commit(() => {
-      objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", interact_through: false, cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
+      objects.push({ id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object_y_sorted", interact_through: false, cells: [{ offset: [0, 0], collision: "blocked", tile: [state.selection.x, state.selection.y] }] });
       state.objectOrigins.push(null);
       state.objectIndex = objects.length - 1;
       state.choiceIndex = 0;
@@ -1455,7 +1468,7 @@ function handleAction(element) {
     commit(() => {
       let object = currentObject();
       if (!object) {
-        object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object", interact_through: false, cells: [] };
+        object = { id: uniqueId("object", objects), size: [1, 1], default_draw_group: "object_y_sorted", interact_through: false, cells: [] };
         objects.push(object);
         state.objectOrigins.push(null);
         state.objectIndex = objects.length - 1;

@@ -341,7 +341,7 @@ class FieldRendererTest(unittest.TestCase):
         renderer.draw(field, draw_player=False)
 
         renderer._draw_ground.assert_called_once()
-        self.assertEqual(renderer._draw_objects.call_count, 2)
+        self.assertEqual(renderer._draw_objects.call_count, 3)
         renderer._draw_player_character.assert_not_called()
 
     def test_draws_ground_objects_then_the_requested_character_frame(self) -> None:
@@ -537,7 +537,51 @@ class FieldRendererTest(unittest.TestCase):
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
         )
 
-    def test_y_sorted_object_draws_after_character_on_the_same_row(self) -> None:
+    def test_draws_overlay_objects_after_foreground_objects(self) -> None:
+        objects = (
+            MapObjectTile(
+                "roof_1",
+                "roof",
+                1,
+                1,
+                "object_foreground",
+                0,
+                0,
+                1,
+            ),
+            MapObjectTile(
+                "weather_1",
+                "weather",
+                1,
+                1,
+                "object_overlay",
+                0,
+                1,
+                1,
+            ),
+        )
+        map_data = compiled_map(("000", "000", "000"), objects=objects)
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(field)
+
+        self.assertEqual(
+            pyxel.blt.call_args_list[-2],
+            call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
+        )
+        self.assertEqual(
+            pyxel.blt.call_args_list[-1],
+            call(8, 8, map_data.atlas, 0, 16, 16, 16, 1),
+        )
+
+    def test_y_sorted_object_draws_before_character_on_the_same_row(self) -> None:
         objects = (
             MapObjectTile(
                 "counter_1",
@@ -571,7 +615,55 @@ class FieldRendererTest(unittest.TestCase):
             if draw_call.args[2] is map_data.atlas
             and len(draw_call.args) == 8
         )
-        self.assertLess(player_call, counter_call)
+        self.assertLess(counter_call, player_call)
+
+    def test_y_sorted_object_draws_before_actor_on_the_same_row(self) -> None:
+        objects = (
+            MapObjectTile(
+                "counter_1",
+                "counter",
+                1,
+                1,
+                "object_y_sorted",
+                0,
+                0,
+                sort_y=1,
+            ),
+        )
+        map_data = compiled_map(("000", "000", "000"), objects=objects)
+        object.__setattr__(
+            map_data,
+            "actors",
+            (MapActor("elder", MapCell(1, 1), "stationary", 0, "down"),),
+        )
+        field = FieldMovement(map_data, start=FieldPosition(0, 0))
+        actors = FieldActors(map_data)
+        character_image = Mock(width=48, height=128)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            actors=actors,
+            actor_character_image=character_image,
+            draw_player=False,
+        )
+
+        counter_call = next(
+            index for index, draw_call in enumerate(pyxel.blt.call_args_list)
+            if draw_call.args[2] is map_data.atlas
+            and len(draw_call.args) == 8
+        )
+        actor_call = next(
+            index for index, draw_call in enumerate(pyxel.blt.call_args_list)
+            if draw_call.args[2] is character_image
+        )
+        self.assertLess(counter_call, actor_call)
 
     def test_y_sorted_object_draws_before_character_on_a_lower_row(self) -> None:
         objects = (

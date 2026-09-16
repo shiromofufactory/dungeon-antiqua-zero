@@ -1417,10 +1417,13 @@ def _object_draw_key(
     instance: Mapping[str, Any],
     definitions: Mapping[str, Mapping[str, Any]],
 ) -> tuple[int, int, int, int, str]:
-    """Sort back-to-front by draw group, lower edge, and stable tie breakers."""
+    """Sort back-to-front by layer, lower edge, and stable tie breakers."""
     definition = definitions[instance["definition_id"]]
-    draw_group = definition.get("default_draw_group", "object")
-    group_order = OBJECT_DRAW_GROUP_ORDER.get(draw_group, 0)
+    draw_group = definition.get("default_draw_group", "object_y_sorted")
+    group_order = OBJECT_DRAW_GROUP_ORDER.get(
+        draw_group,
+        OBJECT_DRAW_GROUP_ORDER["object_y_sorted"],
+    )
     bottom_y = instance["origin"][1] + definition["size"][1] - 1
     return group_order, bottom_y, instance["order"], instance["origin"][0], instance["id"]
 
@@ -1540,7 +1543,10 @@ def resolve_map(
                 "offset": cell["offset"],
                 "order": instance["order"],
                 "sort_y": instance["origin"][1] + definition["size"][1] - 1,
-                "draw_group": definition.get("default_draw_group", "object"),
+                "draw_group": definition.get(
+                    "default_draw_group",
+                    "object_y_sorted",
+                ),
                 "collision": cell["collision"],
             }
             if "tile" in cell:

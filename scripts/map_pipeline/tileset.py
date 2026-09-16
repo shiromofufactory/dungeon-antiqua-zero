@@ -31,9 +31,9 @@ OBJECT_DRAW_GROUPS = frozenset(
 )
 OBJECT_DRAW_GROUP_ORDER = {
     "object": 0,
-    "object_overlay": 1,
-    "object_y_sorted": 2,
-    "object_foreground": 3,
+    "object_y_sorted": 1,
+    "object_foreground": 2,
+    "object_overlay": 3,
 }
 SUPPORTED_PROFILES = frozenset(("world", "dungeon", "town"))
 SUPPORTED_IMAGE_SUFFIXES = (".png", ".gif")
@@ -469,7 +469,7 @@ def _validate_object(
             "error",
             "invalid_object_draw_group",
             f"{path}.default_draw_group",
-            "描画グループはobject、object_overlay、object_y_sorted、object_foregroundのいずれかで指定してください。",
+            "レイヤーはobject、object_y_sorted、object_foreground、object_overlayのいずれかで指定してください。",
         )
     interact_through = object_value.get("interact_through", False)
     if not isinstance(interact_through, bool):

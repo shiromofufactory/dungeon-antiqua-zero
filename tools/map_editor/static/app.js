@@ -736,7 +736,7 @@ function renderPalette() {
         <div class="section-title"><h2>オブジェクト</h2><span class="subtle">左クリックで配置・右クリック／ドラッグで選択・移動</span></div>
         <div class="palette-list">${state.tileset.objects.map((object, index) => `
           <button class="palette-item ${object.id === state.objectId ? "active" : ""}" type="button" data-action="select-object-definition" data-id="${escapeHtml(object.id)}">
-            <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group !== "object" ? `<span class="palette-meta">${escapeHtml(objectDrawGroupLabel(object))}</span>` : ""}
+            <canvas data-object-thumb="${index}" width="${object.size[0] * 16}" height="${object.size[1] * 16}"></canvas><span>${escapeHtml(object.id)}</span>${object.default_draw_group !== "object_y_sorted" ? `<span class="palette-meta">${escapeHtml(objectDrawGroupLabel(object))}</span>` : ""}
           </button>`).join("") || `<div class="empty-state">オブジェクト定義がありません。</div>`}</div>
         </div>`;
   } else if (state.tab === "site") {
@@ -1192,7 +1192,7 @@ function drawActorsAndYSortedObjects(context, scale, now) {
   const items = state.data.actors.map((actor, index) => ({
     kind: "actor",
     sortY: actor.position[1],
-    tieOrder: 0,
+    tieOrder: 1,
     order: index,
     x: actor.position[0],
     id: actor.id,
@@ -1209,7 +1209,7 @@ function drawActorsAndYSortedObjects(context, scale, now) {
     items.push({
       kind: "object",
       sortY: first.sort_y ?? Math.max(...cells.map((cell) => cell.position[1])),
-      tieOrder: 1,
+      tieOrder: 0,
       order: first.order,
       x: Math.min(...cells.map((cell) => cell.position[0])),
       id: instanceId,
@@ -1329,7 +1329,7 @@ function drawMap(now) {
       for (const layer of cell.layers) drawSourceTile(context, frameTile(layer, now), x, y, scale);
     });
     if (!groundOnly) for (const cell of state.resolved.object_cells) {
-      if (cell.draw_group === "object_y_sorted" || cell.draw_group === "object_foreground") continue;
+      if (cell.draw_group !== "object") continue;
       drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
     }
     if (state.showCollision && !groundOnly) {
@@ -1349,6 +1349,10 @@ function drawMap(now) {
   if (state.resolved && !groundOnly) {
     for (const cell of state.resolved.object_cells) {
       if (cell.draw_group !== "object_foreground") continue;
+      drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
+    }
+    for (const cell of state.resolved.object_cells) {
+      if (cell.draw_group !== "object_overlay") continue;
       drawSourceTile(context, frameTile(cell, now), cell.position[0] * scale, cell.position[1] * scale, scale);
     }
   }
@@ -2100,16 +2104,16 @@ function objectBottom(instance) {
 
 function objectDrawGroupOrder(instance) {
   const drawGroup = objectDefinition(instance)?.default_draw_group;
-  return { object: 0, object_overlay: 1, object_y_sorted: 2, object_foreground: 3 }[drawGroup] ?? 0;
+  return { object: 0, object_y_sorted: 1, object_foreground: 2, object_overlay: 3 }[drawGroup] ?? 1;
 }
 
 function objectDrawGroupLabel(definition) {
   return {
-    object: "通常オブジェクト",
-    object_overlay: "前面パーツ",
-    object_y_sorted: "キャラクターY整列",
-    object_foreground: "キャラクター前景",
-  }[definition?.default_draw_group] || "通常オブジェクト";
+    object: "背面",
+    object_y_sorted: "通常",
+    object_foreground: "前面",
+    object_overlay: "最前面",
+  }[definition?.default_draw_group] || "通常";
 }
 
 function compareObjectsBackToFront(left, right) {
