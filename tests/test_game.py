@@ -146,6 +146,7 @@ class GameTest(unittest.TestCase):
         game = Game.__new__(Game)
         game.alert = Mock()
         game.input_reader = Mock()
+        game.input_reader.poll.return_value = InputState()
         game._update_fade = Mock(return_value=False)
         game.showing_field = True
         game.field = Mock(world_x=120, world_y=112)

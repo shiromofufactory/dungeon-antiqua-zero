@@ -45,6 +45,7 @@ class ScreenMockRuntimeTest(unittest.TestCase):
 
         self.assertIn(pyxel.KEY_Q, reader.bindings.cancel)
         self.assertIn(pyxel.KEY_ESCAPE, reader.bindings.cancel)
+        self.assertEqual(reader.bindings.interruption, ())
 
     def test_display_scale_is_forwarded_when_requested(self) -> None:
         with (

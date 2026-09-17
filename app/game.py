@@ -23,6 +23,7 @@ from game_data import (
 )
 from ui.debug_menu import DebugMenuOverlay, DebugShopTarget, DebugTeleportTarget
 from ui.debug_text import DEBUG_TEXT
+from ui.game_menu import GameMenuAction, GameMenuOverlay
 from ui.equipment_menu import (
     EquipmentMenuDataError,
     EquipmentMenuOverlay,
@@ -456,6 +457,9 @@ class Game:
         self.palette_shifter = palette_shifter
         self.input_reader = create_game_input_reader()
         self.alert = MenuAlertEffect()
+        self.game_menu: GameMenuOverlay | None = None
+        self._game_menu_resume_waiting = False
+        self._game_menu_return_waiting = False
 
         self._apply_se_volume()
         self.bgm = BgmPlayer(volume=self.settings.bgm_volume)
@@ -2418,6 +2422,7 @@ class Game:
                 input_state.menu,
                 input_state.previous_page,
                 input_state.next_page,
+                input_state.interruption,
             )
         )
 
@@ -2872,12 +2877,54 @@ class Game:
         if field_actors is not None:
             field_actors.update_roaming(party_position=self.field.position)
 
+    def _update_game_menu(self, input_state: InputState) -> bool:
+        """Handle global interruption before any underlying screen advances."""
+
+        if getattr(self, "_game_menu_resume_waiting", False):
+            if not self._has_held_action_input(input_state):
+                self._game_menu_resume_waiting = False
+                self.bgm.resume()
+            return True
+        menu = getattr(self, "game_menu", None)
+        if menu is not None:
+            if getattr(self, "_game_menu_return_waiting", False):
+                if not self._has_held_action_input(input_state):
+                    self._return_to_start_screen()
+                return True
+            action = menu.update(input_state)
+            if action is GameMenuAction.RESUME:
+                self.game_menu = None
+                self._game_menu_resume_waiting = True
+            elif action is GameMenuAction.RETURN_TITLE:
+                self._game_menu_return_waiting = True
+            elif action is GameMenuAction.QUIT:
+                pyxel.quit()
+            return True
+        if not input_state.interruption.triggered:
+            return False
+        battle_scene = getattr(self, "battle_scene", None)
+        if (
+            getattr(self, "encounter_transition", None) is not None
+            or getattr(self, "battle_return_fade", None) is not None
+            or getattr(self, "_returning_to_start", False)
+            or getattr(getattr(self, "fade", None), "is_active", False) is True
+            or getattr(battle_scene, "is_transitioning", False) is True
+        ):
+            return False
+        self.game_menu = GameMenuOverlay(
+            settings=self.settings, texts=self.texts, fonts=self.fonts,
+        )
+        self.bgm.pause()
+        return True
+
     def update(self) -> None:
+        input_state = self.input_reader.poll()
+        if self._update_game_menu(input_state):
+            return
         bgm = getattr(self, "bgm", None)
         if bgm is not None:
             bgm.update()
         self.alert.update()
-        input_state = self.input_reader.poll()
         if getattr(self, "encounter_transition", None) is not None:
             self._update_encounter_transition()
             return
@@ -3079,6 +3126,11 @@ class Game:
 
     def draw(self) -> None:
         pyxel.cls(0)
+        menu = getattr(self, "game_menu", None)
+        if menu is not None:
+            pyxel.camera()
+            menu.draw()
+            return
         pyxel.camera(self.alert.camera_x, 0)
         try:
             if getattr(self, "encounter_transition", None) is not None:

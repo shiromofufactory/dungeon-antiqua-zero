@@ -244,11 +244,11 @@ Pyxelの物理入力
   → WindowCursorやScene固有処理
 ```
 
-`InputBindings` は論理操作ごとに複数のPyxelボタンを保持する。初期設定は矢印キーとゲームパッドの方向、Z・EnterとゲームパッドAの決定、X・Backspace・EscapeとゲームパッドBのキャンセル、S・TabとゲームパッドXのメニューとする。ページやメンバーの前後切り替えには `previous_page` / `next_page` を使い、ゲームパッドの左・右ショルダーを割り当てる。キーボードのShiftキーには割り当てない。キー設定やAB反転を実装するときは、`Settings`から `InputBindings` を生成し、Reader内部やモジュールグローバルを書き換えない。
+`InputBindings` は論理操作ごとに複数のPyxelボタンを保持する。初期設定は矢印キーとゲームパッドの方向、Z・EnterとゲームパッドAの決定、X・BackspaceとゲームパッドBのキャンセル、S・TabとゲームパッドX・Yのフィールドメニューとする。EscapeとゲームパッドStart・Guideは独立した `interruption` に割り当てる。ページやメンバーの前後切り替えには `previous_page` / `next_page` を使い、ゲームパッドの左・右ショルダーを割り当てる。キーボードのShiftキーには割り当てない。キー設定やAB反転を実装するときは、`Settings`から `InputBindings` を生成し、Reader内部やモジュールグローバルを書き換えない。
 
 `InputState.navigation` はカーソル向けの単発およびリピート込み方向、`held_direction` はフィールド移動など押下中の毎フレーム処理に使う方向を表す。方向は上下左右のいずれか1つとし、新しい方向が押された場合は保持中の以前の方向より優先する。新しい方向が離された後も別の方向が保持されていれば、その方向へ切り替える。
 
-方向リピートの状態、アナログスティックのデッドゾーン、直前フレームの押下状態は `PyxelInputReader` インスタンスが所有する。60fpsでDA2と同じ時間感覚にするため、既定の方向リピートは20フレーム後から4フレーム間隔とする。決定、キャンセル、メニュー、前後ページは標準ではリピートさせず、初回押下だけを `triggered=True` とする。押したままかどうかは別の `held` で表し、Scene遷移時の入力リリース待ちなどに利用する。
+方向リピートの状態、アナログスティックのデッドゾーン、直前フレームの押下状態は `PyxelInputReader` インスタンスが所有する。60fpsでDA2と同じ時間感覚にするため、既定の方向リピートは20フレーム後から4フレーム間隔とする。決定、キャンセル、メニュー、割り込み、前後ページは標準ではリピートさせず、初回押下だけを `triggered=True` とする。押したままかどうかは別の `held` で表し、Scene遷移時の入力リリース待ちなどに利用する。
 
 `InputState.device` は、その時点で操作案内に使う入力種別を
 `InputDevice.KEYBOARD` / `InputDevice.GAMEPAD` で表す。Readerの初期値はキーボードとし、
@@ -777,6 +777,10 @@ FieldScene
 オフセットしない。開閉中のクリップ領域は枠と同じ位置へずらす。
 
 テキスト座標はウィンドウ枠の左上を原点とし、横・縦とも4pxの相対グリッドで指定する。`(0, 0)` は枠と重なる位置であり、枠から左右8pxずつ内側に入った従来の内容領域左上は `(2, 2)` となる。行の配列として保持せず、各 `WindowText` が文字列、x、y、色、任意のフォントを所有する。同じウィンドウ内で左右の列や異なる高さへ個別に配置できる。ウィンドウまたは個々のテキストへ `pyxel.Font` を渡し、フォント幅を位置決めの単位にしない。
+
+中央寄せなどで4px未満の端数が必要な場合は `WindowText.pixel_offset_x` を使い、
+グリッド座標から水平位置だけをピクセル単位で補正する。既定値は0で既存の配置は変えない。
+文言の実描画幅を測って配置を決める責務は各Overlayに残す。
 
 通常のSceneとOverlayは、現在言語の標準フォントで初期化した `WindowFactory` からWindowを生成する。`WindowText.font=None` はWindowの標準フォントを継承し、個別のフォント指定がある場合だけそちらを優先する。解決順は「WindowText個別フォント → Window標準フォント」とし、言語状態やモジュールグローバルをWindowから参照しない。これにより通常のテキストごとに同じフォントを繰り返し指定せず、数値など例外的な表示だけを個別指定できる。
 
@@ -1478,6 +1482,7 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | SettingsとJSONの変換・永続化 | `systems/settings.py` |
 | SaveDataとJSONの変換 | `systems/save.py` |
 | 起動時のスロット選択と削除確認 | `ui/start_menu.py` |
+| 強制割り込みの選択Windowとカーソル | `ui/game_menu.py` |
 | ロードJSONからの状態再構築と検証 | `systems/save.py` |
 | Scene切り替え、フェード、BGM調停 | `SceneManager` |
 
@@ -1488,6 +1493,13 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 `Game` が `Member.recover_world_map_entry_ailments()` を呼んで行う。
 
 配置に迷った場合は「どの状態を変更するか」「その状態の所有者は誰か」を先に決める。複数箇所から呼ばれるという理由だけで `util.py` へ移動しない。
+
+ゲームメニューの割り込み入力は `InputState.interruption` とし、通常のキャンセル・
+フィールドメニュー入力から分離する。`Game` が入力を最初に調停し、割り込み中は元画面の
+更新・描画を呼ばない。Windowと選択状態は `GameMenuOverlay`、停止したBGMの再生位置と
+予約曲は `BgmPlayer` が所有する。`BattleScene.is_transitioning` は割り込みを禁止する遷移の
+有無だけを公開し、Gameが戦闘内部のタイマーを横断しない。
+詳細な入力・復帰条件は [ゲームメニュー仕様](./features/game-menu.md) を参照する。
 
 ## 実装上のルール
 

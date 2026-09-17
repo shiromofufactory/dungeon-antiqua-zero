@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pyxel
 
 from tools._bootstrap import APP_ROOT
@@ -41,10 +43,13 @@ def initialize_screen_mock(
 
 
 def create_mock_input_reader() -> PyxelInputReader:
-    """Create standalone screen-mock bindings, including Q as cancel."""
+    """Keep Q/Esc as cancel only in isolated mocks without a game menu."""
 
     return PyxelInputReader(
-        InputBindings.default().with_cancel(pyxel.KEY_Q)
+        replace(
+            InputBindings.default().with_cancel(pyxel.KEY_Q, pyxel.KEY_ESCAPE),
+            interruption=(),
+        )
     )
 
 

@@ -125,6 +125,8 @@ class BgmPlayer:
         self._queued_start_sec = 0.0
         self._volume = 0
         self._fade_rate = 1.0
+        self._paused = False
+        self._paused_sec: float | None = None
         self.set_volume(volume)
 
     @property
@@ -220,6 +222,8 @@ class BgmPlayer:
         self._loop = loop
         self._queued_id = None
         self._queued_start_sec = 0.0
+        self._paused = False
+        self._paused_sec = None
         return True
 
     def play_once_then(self, bgm_id: str, next_bgm_id: str) -> bool:
@@ -247,6 +251,8 @@ class BgmPlayer:
     def update(self) -> bool:
         """Finish one-shot state and start its queued BGM when present."""
 
+        if self._paused:
+            return False
         if self._queued_id is None:
             if self._current_id is None or self._loop:
                 return False
@@ -263,6 +269,35 @@ class BgmPlayer:
         self._queued_start_sec = 0.0
         return self.play(next_bgm_id, start_sec=start_sec)
 
+    def pause(self) -> None:
+        """Suspend playback without losing the decoded track or queued successor."""
+
+        if self._paused:
+            return
+        self._paused_sec = self._playback_position_sec()
+        self._paused = True
+        self._pyxel.stop(self.channel)
+
+    def resume(self) -> None:
+        """Continue a suspended track at its saved playback position."""
+
+        if not self._paused:
+            return
+        if self._active_sound is not None and self._paused_sec is not None:
+            try:
+                self._pyxel.play(
+                    self.channel, self._active_sound,
+                    sec=self._paused_sec, loop=self._loop,
+                )
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as error:
+                raise AudioResourceError(
+                    f"BGMを再開できません: {self._current_id}: {error}"
+                ) from error
+        self._paused = False
+        self._paused_sec = None
+
     def stop(self) -> bool:
         was_playing = self.is_playing
         self._pyxel.stop(self.channel)
@@ -270,6 +305,8 @@ class BgmPlayer:
         self._current_id = None
         self._queued_id = None
         self._queued_start_sec = 0.0
+        self._paused = False
+        self._paused_sec = None
         return was_playing
 
     def _playback_position_sec(self) -> float | None:

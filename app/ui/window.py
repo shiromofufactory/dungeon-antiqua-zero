@@ -116,6 +116,7 @@ class WindowText:
     """Text placed relative to a window's frame origin.
 
     ``x`` and ``y`` both advance in 4-pixel units.
+    ``pixel_offset_x`` supplies finer horizontal alignment within that grid.
     A font can be assigned per text; ``None`` uses the window's default font.
     """
 
@@ -127,6 +128,7 @@ class WindowText:
     shadow_color: int | None = DEFAULT_TEXT_SHADOW_COLOR
     baseline_offset: int = 0
     font_spans: tuple[TextFontSpan, ...] = ()
+    pixel_offset_x: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
@@ -143,6 +145,8 @@ class WindowText:
             )
         if not isinstance(self.baseline_offset, int):
             raise TypeError("text baseline offset must be an integer")
+        if not isinstance(self.pixel_offset_x, int):
+            raise TypeError("text horizontal pixel offset must be an integer")
         if not isinstance(self.font_spans, tuple) or not all(
             isinstance(span, TextFontSpan) for span in self.font_spans
         ):
@@ -404,7 +408,7 @@ class Window:
 
         self._validate_text_position(text)
         return (
-            self.pixel_x + text.x * TEXT_GRID_X,
+            self.pixel_x + text.x * TEXT_GRID_X + text.pixel_offset_x,
             self.pixel_y + text.y * TEXT_GRID_Y,
         )
 
@@ -460,9 +464,9 @@ class Window:
     def _validate_text_position(self, text: WindowText) -> None:
         if not isinstance(text, WindowText):
             raise TypeError("texts must contain WindowText instances")
-        pixel_x = text.x * TEXT_GRID_X
+        pixel_x = text.x * TEXT_GRID_X + text.pixel_offset_x
         pixel_y = text.y * TEXT_GRID_Y
-        if pixel_x >= self.pixel_width or pixel_y >= self.pixel_height:
+        if pixel_x < 0 or pixel_x >= self.pixel_width or pixel_y >= self.pixel_height:
             raise ValueError("text origin must be inside the window area")
 
     def _draw_gradient(self) -> None:

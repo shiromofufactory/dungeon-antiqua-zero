@@ -83,6 +83,7 @@ class InputState:
     previous_page: InputButton = InputButton()
     next_page: InputButton = InputButton()
     device: InputDevice = InputDevice.KEYBOARD
+    interruption: InputButton = InputButton()
 
     def __post_init__(self) -> None:
         if self.navigation is not None and not isinstance(
@@ -99,6 +100,7 @@ class InputState:
             "menu",
             "previous_page",
             "next_page",
+            "interruption",
         ):
             if not isinstance(getattr(self, name), InputButton):
                 raise TypeError(f"{name} must be an InputButton")
@@ -119,6 +121,7 @@ class InputBindings:
     menu: tuple[int, ...] = ()
     previous_page: tuple[int, ...] = ()
     next_page: tuple[int, ...] = ()
+    interruption: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         for binding in fields(self):
@@ -141,7 +144,6 @@ class InputBindings:
             cancel=(
                 pyxel.KEY_X,
                 pyxel.KEY_BACKSPACE,
-                pyxel.KEY_ESCAPE,
                 pyxel.GAMEPAD1_BUTTON_B,
             ),
             menu=(
@@ -152,6 +154,11 @@ class InputBindings:
             ),
             previous_page=(pyxel.GAMEPAD1_BUTTON_LEFTSHOULDER,),
             next_page=(pyxel.GAMEPAD1_BUTTON_RIGHTSHOULDER,),
+            interruption=(
+                pyxel.KEY_ESCAPE,
+                pyxel.GAMEPAD1_BUTTON_START,
+                pyxel.GAMEPAD1_BUTTON_GUIDE,
+            ),
         )
 
     def with_cancel(self, *buttons: int) -> InputBindings:
@@ -205,6 +212,7 @@ class PyxelInputReader:
             "menu": False,
             "previous_page": False,
             "next_page": False,
+            "interruption": False,
         }
         self._active_device = InputDevice.KEYBOARD
         self._bound_buttons = tuple(
@@ -225,6 +233,7 @@ class PyxelInputReader:
         menu = self._read_action_button("menu")
         previous_page = self._read_action_button("previous_page")
         next_page = self._read_action_button("next_page")
+        interruption = self._read_action_button("interruption")
         device = self._detect_input_device()
         self._previous_directions = held_directions
 
@@ -237,6 +246,7 @@ class PyxelInputReader:
             previous_page=previous_page,
             next_page=next_page,
             device=device,
+            interruption=interruption,
         )
 
     @property

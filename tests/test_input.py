@@ -142,6 +142,23 @@ class PyxelInputReaderTest(unittest.TestCase):
         self.assertIn(pyxel.GAMEPAD1_BUTTON_X, bindings.menu)
         self.assertIn(pyxel.GAMEPAD1_BUTTON_Y, bindings.menu)
 
+    def test_game_menu_buttons_are_separate_from_cancel_and_field_menu(self) -> None:
+        bindings = InputBindings.default()
+        backend = FakePyxelInput()
+        reader = PyxelInputReader(bindings, backend=backend)
+        for button in (pyxel.KEY_ESCAPE, pyxel.GAMEPAD1_BUTTON_START,
+                       pyxel.GAMEPAD1_BUTTON_GUIDE):
+            with self.subTest(button=button):
+                backend.held = {button}
+                first = reader.poll()
+                self.assertTrue(first.interruption.triggered)
+                self.assertTrue(first.interruption.held)
+                self.assertFalse(first.cancel.held)
+                self.assertFalse(first.menu.held)
+                self.assertFalse(reader.poll().interruption.triggered)
+                backend.held.clear()
+                self.assertFalse(reader.poll().interruption.held)
+
     def test_analog_axis_uses_deadzone_and_logical_repeat(self) -> None:
         backend = FakePyxelInput()
         reader = PyxelInputReader(

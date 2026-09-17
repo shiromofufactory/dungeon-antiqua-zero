@@ -111,6 +111,7 @@
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。
 - ゲームルールは可能な範囲でPyxel非依存のテストを用意する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。
+- 強制割り込みゲームメニューは `python3 -B -m unittest tests.test_game_menu tests.test_input tests.test_audio_resources` で停止・復帰・BGM保持を回帰検証する。
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。

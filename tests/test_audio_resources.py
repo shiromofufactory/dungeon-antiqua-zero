@@ -66,6 +66,56 @@ class FakePyxel:
 
 
 class BgmPlayerTest(unittest.TestCase):
+    def test_pause_resume_preserves_position_sound_loop_and_volume(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field")
+        sound = self.pyxel.created_sounds[-1]
+        self.pyxel.play_position = (0, 12.5)
+        player.set_fade_rate(0.5)
+        player.pause()
+        player.pause()
+        self.assertIsNone(self.pyxel.play_position)
+        self.assertEqual(player.current_id, "da3-field")
+        self.assertFalse(player.update())
+        player.resume()
+        player.resume()
+        self.assertEqual(self.pyxel.play_calls[-1], (2, sound, 12.5, True))
+        self.assertEqual(len(self.pyxel.play_calls), 2)
+        self.assertEqual(len(self.pyxel.created_sounds), 1)
+        self.assertAlmostEqual(self.pyxel.channels[2].gain, 0.3)
+
+    def test_paused_one_shot_keeps_queued_bgm_until_resumed_and_finished(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play_once_then("da3-welcome", "da3-field")
+        self.pyxel.play_position = (0, 1.25)
+        player.pause()
+        self.assertFalse(player.update())
+        player.resume()
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (1.25, False))
+        self.assertFalse(player.update())
+        self.pyxel.play_position = None
+        self.assertTrue(player.update())
+        self.assertEqual(player.current_id, "da3-field")
+
+    def test_pause_after_one_shot_finishes_does_not_restart_it(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play_once_then("da3-welcome", "da3-field")
+        self.pyxel.play_position = None
+        player.pause()
+        player.resume()
+        self.assertEqual(len(self.pyxel.play_calls), 1)
+        self.assertTrue(player.update())
+        self.assertEqual(player.current_id, "da3-field")
+
+    def test_stop_while_paused_discards_suspended_track(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field")
+        player.pause()
+        player.stop()
+        player.resume()
+        self.assertEqual(len(self.pyxel.play_calls), 1)
+        self.assertIsNone(player.current_id)
+
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()
         self.audio_dir = Path(self.temporary.name)

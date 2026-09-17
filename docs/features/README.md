@@ -35,6 +35,7 @@
 - [スタート・ロード画面](./start-load.md)
 - [セーブデータ形式](./save-data.md)
 - [フィールド・メニュー](./field.md)
+- [ゲームメニュー（強制割り込み）](./game-menu.md)
 - [情報メニュー・モンスター図鑑](./information-menu.md)
 - [エンカウントと戦闘復帰](./encounters.md)
 - [戦闘表示データ](./battle.md)

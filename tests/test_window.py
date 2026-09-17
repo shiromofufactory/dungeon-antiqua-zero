@@ -92,6 +92,15 @@ class WindowTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             window.add_text("outside", 0, 6)
 
+    def test_horizontal_pixel_offset_supports_fine_text_alignment(self) -> None:
+        text = WindowText("centered", 3, 2, pixel_offset_x=2)
+        window = Window(2, 5, 20, 10, (text,), transparent=True)
+        self.assertEqual(window.text_position(text), (22, 28))
+        with self.assertRaises(TypeError):
+            WindowText("bad", 0, 0, pixel_offset_x=0.5)
+        with self.assertRaises(ValueError):
+            Window(0, 0, 8, 6, (WindowText("bad", 0, 0, pixel_offset_x=-1),))
+
     def test_texts_can_use_window_default_and_per_text_fonts(self) -> None:
         default_font = object()
         override_font = object()

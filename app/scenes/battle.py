@@ -2008,6 +2008,17 @@ class BattleScene:
 
         self._restart_battle()
 
+    @property
+    def is_transitioning(self) -> bool:
+        """Expose transition blocking without leaking battle timers to Game."""
+
+        return any(
+            fade.is_active
+            for fade in (
+                self.entrance_fade, self.escape_fade, self.result_transition_fade,
+            )
+        )
+
     def update(self, input_state: InputState) -> None:
         """Advance the battle by one frame from an immutable input snapshot."""
 
