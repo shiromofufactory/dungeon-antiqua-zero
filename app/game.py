@@ -247,6 +247,8 @@ SETTINGS_TEXT_KEYS = (
     "settings.confirm.quit",
     "settings.yes",
     "settings.no",
+    "settings.on",
+    "settings.off",
 )
 SETTINGS_ROWS = (
     ("language", 2),
@@ -1599,7 +1601,7 @@ class Game:
             value = "normal" if self.settings.screen_flash_enabled else "reduced"
             return self.localized[f"settings.screen_flash.{value}"]
         if key == "in_game_hints":
-            value = "yes" if self.settings.in_game_hints_enabled else "no"
+            value = "on" if self.settings.in_game_hints_enabled else "off"
             return self.localized[f"settings.{value}"]
         raise ValueError(f"settings key has no value: {key}")
 

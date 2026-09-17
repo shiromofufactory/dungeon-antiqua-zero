@@ -2,7 +2,7 @@
 
 ## 設定と表示条件
 
-- 設定の `settings.in_game_hints.label` は `settings.yes` / `settings.no` の2択とし、
+- 設定の `settings.in_game_hints.label` は `settings.on` / `settings.off` の2択とし、
   左右入力で切り替える。初期値は有効。
 - `Settings.in_game_hints_enabled` として端末設定へ即時保存する。古い設定にこの項目が
   ない場合も有効とする。ゲーム進行のセーブデータには含めない。

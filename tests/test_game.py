@@ -577,7 +577,7 @@ class GameTest(unittest.TestCase):
             placements[(SETTINGS_LABEL_X, 20)],
             mock.localized["settings.in_game_hints.label"],
         )
-        self.assertEqual(placements[(SETTINGS_VALUE_X, 20)], "はい")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 20)], "オン")
         self.assertEqual(
             placements[(SETTINGS_LABEL_X, 26)],
             "タイトルがめんへ　もどる",
@@ -3415,15 +3415,21 @@ class GameTest(unittest.TestCase):
     def test_in_game_hints_setting_toggles_and_is_persisted(self) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings()
+        mock.localized = localized_menu_texts(
+            TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
+            Language.JAPANESE,
+        )
         mock.settings_repository = Mock()
         mock.settings_cursor = Mock(selected_key="in_game_hints")
         mock._refresh_settings_window = Mock()
 
         mock._change_setting(1)
         self.assertFalse(mock.settings.in_game_hints_enabled)
+        self.assertEqual(mock._settings_value("in_game_hints"), "オフ")
         mock.settings_repository.save.assert_called_with(mock.settings)
         mock._change_setting(-1)
         self.assertTrue(mock.settings.in_game_hints_enabled)
+        self.assertEqual(mock._settings_value("in_game_hints"), "オン")
         mock.settings_repository.save.assert_called_with(mock.settings)
 
     def test_screen_flash_setting_toggles_and_is_persisted(self) -> None:
