@@ -352,7 +352,7 @@ h1, h2, h3, p { margin: 0; }
 .layer-option input { margin: 0; accent-color: var(--map-layer-text); }
 .layer-option.selected { font-weight: 700; box-shadow: 0 0 0 1px var(--map-layer-border), inset 0 0 0 1px rgba(255,255,255,.2); }
 .layer-option:focus-within { outline: 2px solid var(--map-layer-text); outline-offset: 3px; }
-.object-identity-grid { display: grid; width: min(100%, 380px); grid-template-columns: minmax(0, 1fr) minmax(0, 64px) minmax(0, 64px); gap: 9px; }
+.object-identity-grid { display: grid; width: min(100%, 520px); grid-template-columns: minmax(0, 1fr) minmax(0, 64px) minmax(0, 64px) minmax(0, 104px); gap: 9px; }
 .object-identity-grid + .object-interact-toggle { margin-top: 12px; }
 .resource-dialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(#252b22, #191d17); color: var(--text); box-shadow: 0 18px 60px #000a; }
 .resource-dialog::backdrop { background: #050704b8; backdrop-filter: blur(3px); }

@@ -386,10 +386,12 @@ function commit(mutator) {
 
 function undo() {
   if (!state.history.length) return;
+  const selectedObject = currentObject();
   state.future.push(JSON.stringify({ data: state.data, objectOrigins: state.objectOrigins }));
   const previous = JSON.parse(state.history.pop());
   state.data = previous.data;
   state.objectOrigins = previous.objectOrigins;
+  syncRestoredObjectLayer(selectedObject);
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
@@ -399,15 +401,25 @@ function undo() {
 
 function redo() {
   if (!state.future.length) return;
+  const selectedObject = currentObject();
   state.history.push(JSON.stringify({ data: state.data, objectOrigins: state.objectOrigins }));
   const next = JSON.parse(state.future.pop());
   state.data = next.data;
   state.objectOrigins = next.objectOrigins;
+  syncRestoredObjectLayer(selectedObject);
   state.dirty = true;
   normalizeSelectionIndexes();
   renderAll();
   savePreviewSettings();
   scheduleValidation();
+}
+
+function syncRestoredObjectLayer(selectedObject) {
+  const restoredObject = state.data.objects?.[state.objectIndex];
+  if (selectedObject && restoredObject?.id === selectedObject.id
+      && restoredObject.default_draw_group !== selectedObject.default_draw_group) {
+    state.objectLayer = restoredObject.default_draw_group;
+  }
 }
 
 function normalizeSelectionIndexes() {
@@ -1047,6 +1059,7 @@ function renderObjectEditor() {
         <div class="field"><label>オブジェクトID</label><input type="text" value="${escapeHtml(object.id)}" data-change="object-id"></div>
         <div class="field"><label>幅</label><input type="number" min="1" value="${width}" data-change="object-width"></div>
         <div class="field"><label>高さ</label><input type="number" min="1" value="${height}" data-change="object-height"></div>
+        <div class="field"><label for="object-group">レイヤー変更</label><select id="object-group" data-change="object-group">${OBJECT_LAYERS.map(([value, label]) => `<option value="${value}" ${object.default_draw_group === value ? "selected" : ""}>${label}</option>`).join("")}</select></div>
       </div>
       <label class="object-interact-toggle"><input type="checkbox" data-change="object-interact-through" ${object.interact_through === true ? "checked" : ""}>このオブジェクト越しに1セル先を調べる</label>
       <div class="row between" style="margin-top:10px">
@@ -1613,6 +1626,13 @@ function handleChange(element) {
   else if (action === "object-id") commit(() => { object.id = value; });
   else if (action === "object-width") commit(() => { object.size[0] = Number(value); });
   else if (action === "object-height") commit(() => { object.size[1] = Number(value); });
+  else if (action === "object-group") {
+    if (!object || object.default_draw_group === value || !OBJECT_LAYERS.some(([layer]) => layer === value)) return;
+    commit(() => {
+      object.default_draw_group = value;
+      state.objectLayer = value;
+    });
+  }
   else if (action === "object-interact-through") commit(() => { object.interact_through = element.checked; });
 }
 

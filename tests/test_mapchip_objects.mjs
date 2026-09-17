@@ -37,7 +37,7 @@ function editor() {
   vm.runInContext(source.slice(colorStart, source.indexOf(";", colorStart) + 1), context);
   for (const name of ["currentGround", "currentBoundary", "currentObject", "currentVisual", "normalizeSelectionIndexes",
     "objectLayerClass", "renderDefinitionList", "renderObjectLayerSelect", "renderObjectEditor", "handleChange",
-    "handleAction", "commit", "undo", "redo", "reorderDefinitions", "addVisualUsage", "sourceTileUsage", "drawSourceUsage"]) {
+    "handleAction", "commit", "undo", "redo", "syncRestoredObjectLayer", "reorderDefinitions", "addVisualUsage", "sourceTileUsage", "drawSourceUsage"]) {
     const start = source.indexOf(`function ${name}(`);
     assert.notEqual(start, -1, name);
     const next = source.slice(start + 1).search(/\n(?:async )?function /);
@@ -56,8 +56,10 @@ test("layer controls precede filtered object list and ID/width/height share a co
   assert.match(html, /data-action="select-object" data-index="4"/);
   assert.doesNotMatch(html, /data-action="select-object" data-index="[023]"/);
   const identity = html.match(/<div class="object-identity-grid">([\s\S]*?)<\/div>\s*<label class="object-interact-toggle">/)[1];
-  for (const field of ["object-id", "object-width", "object-height"]) assert.ok(identity.includes(`data-change="${field}"`));
-  assert.doesNotMatch(identity, /field full|object-group/);
+  for (const field of ["object-id", "object-width", "object-height", "object-group"]) assert.ok(identity.includes(`data-change="${field}"`));
+  assert.ok(identity.indexOf('data-change="object-height"') < identity.indexOf('data-change="object-group"'));
+  assert.match(identity, /<label for="object-group">レイヤー変更<\/label><select id="object-group" data-change="object-group">/);
+  assert.doesNotMatch(identity, /field full|class="map-layer/);
 });
 
 test("filtering selects matching original index without changing metadata or creating undo history", () => {
@@ -174,7 +176,7 @@ test("rectangle replacement keeps object identity, layer and interaction setting
   assert.ok(context.currentObject().cells.every((cell) => cell.collision === "blocked" && !cell.visual));
 });
 
-test("one unified layer selector keeps displayed and selected object layers identical", () => {
+test("display radios and layer editing list reflect the same selected object layer", () => {
   const { context, state } = editor();
   for (const [layer] of layers) {
     context.handleChange({ dataset: { change: "object-layer" }, value: layer });
@@ -184,9 +186,52 @@ test("one unified layer selector keeps displayed and selected object layers iden
     assert.equal((html.match(/type="radio" name="object-layer"/g) || []).length, 4);
     assert.equal((html.match(/ checked/g) || []).length, 1);
     assert.match(html, /<legend>レイヤー<\/legend>/);
-    assert.doesNotMatch(html, /<select/);
-    assert.doesNotMatch(html, /表示レイヤー|選択オブジェクトのレイヤー|data-change="object-group"/);
+    assert.equal((html.match(/data-change="object-group"/g) || []).length, 1);
+    assert.ok(html.includes(`<option value="${layer}" selected>`));
   }
+  assert.equal(state.history.length, 0);
+});
+
+test("changing an object layer preserves identity and data, follows the display filter and supports undo/redo", () => {
+  for (const [layer] of layers) {
+    if (layer === "object_y_sorted") continue;
+    const { context, state } = editor();
+    const before = JSON.stringify(state.data);
+    const origins = JSON.stringify(state.objectOrigins);
+    const original = JSON.parse(JSON.stringify(context.currentObject()));
+    context.handleChange({ dataset: { change: "object-group" }, value: layer });
+    assert.deepEqual(JSON.parse(JSON.stringify(context.currentObject())), { ...original, default_draw_group: layer });
+    assert.equal(state.objectIndex, 1);
+    assert.equal(state.objectLayer, layer);
+    assert.equal(state.dirty, true);
+    assert.equal(state.history.length, 1);
+    assert.equal(JSON.stringify(state.objectOrigins), origins);
+    const changed = JSON.stringify(state.data);
+    const html = context.renderObjectEditor();
+    assert.ok(html.includes(`<option value="${layer}" selected>`));
+    assert.match(html, /data-action="select-object" data-index="1"/);
+    context.undo();
+    assert.equal(JSON.stringify(state.data), before);
+    assert.equal(state.objectIndex, 1);
+    assert.equal(state.objectLayer, "object_y_sorted");
+    assert.equal(context.currentObject().id, original.id);
+    context.redo();
+    assert.equal(JSON.stringify(state.data), changed);
+    assert.equal(state.objectIndex, 1);
+    assert.equal(state.objectLayer, layer);
+    assert.equal(context.currentObject().id, original.id);
+  }
+});
+
+test("invalid, unchanged and missing-object layer changes do not alter metadata or history", () => {
+  const { context, state } = editor();
+  const before = JSON.stringify(state.data);
+  for (const value of ["invalid", "object_y_sorted"]) context.handleChange({ dataset: { change: "object-group" }, value });
+  assert.equal(JSON.stringify(state.data), before);
+  assert.equal(state.history.length, 0);
+  state.objectIndex = -1;
+  context.handleChange({ dataset: { change: "object-group" }, value: "object_foreground" });
+  assert.equal(JSON.stringify(state.data), before);
   assert.equal(state.history.length, 0);
 });
 
