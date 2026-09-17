@@ -238,25 +238,11 @@ SETTINGS_TEXT_KEYS = (
     "settings.display.pixel",
     "settings.display.smooth",
     "settings.in_game_hints.label",
-    "settings.guide.in_game_hints.0",
-    "settings.guide.in_game_hints.1",
     "settings.screen_flash.label",
     "settings.screen_flash.normal",
     "settings.screen_flash.reduced",
     "settings.return_title",
     "settings.quit",
-    "settings.guide.language.0",
-    "settings.guide.language.1",
-    "settings.guide.bgm.0",
-    "settings.guide.bgm.1",
-    "settings.guide.se.0",
-    "settings.guide.se.1",
-    "settings.guide.screen_size.0",
-    "settings.guide.screen_size.1",
-    "settings.guide.display.0",
-    "settings.guide.display.1",
-    "settings.guide.screen_flash.0",
-    "settings.guide.screen_flash.1",
     "settings.confirm.return_title",
     "settings.confirm.quit",
     "settings.yes",
@@ -275,25 +261,13 @@ SETTINGS_ROWS = (
     ("quit", 29),
 )
 SETTINGS_GUIDE_KEYS = {
-    "in_game_hints": (
-        "settings.guide.in_game_hints.0",
-        "settings.guide.in_game_hints.1",
-    ),
-    "language": (
-        "settings.guide.language.0",
-        "settings.guide.language.1",
-    ),
-    "bgm": ("settings.guide.bgm.0", "settings.guide.bgm.1"),
-    "se": ("settings.guide.se.0", "settings.guide.se.1"),
-    "screen_size": (
-        "settings.guide.screen_size.0",
-        "settings.guide.screen_size.1",
-    ),
-    "display": ("settings.guide.display.0", "settings.guide.display.1"),
-    "screen_flash": (
-        "settings.guide.screen_flash.0",
-        "settings.guide.screen_flash.1",
-    ),
+    "in_game_hints": "settings.guide.in_game_hints",
+    "language": "settings.guide.language",
+    "bgm": "settings.guide.bgm",
+    "se": "settings.guide.se",
+    "screen_size": "settings.guide.screen_size",
+    "display": "settings.guide.display",
+    "screen_flash": "settings.guide.screen_flash",
 }
 LANGUAGE_SEQUENCE = (
     Language.JAPANESE,
@@ -440,6 +414,10 @@ def localized_menu_texts(
         if not text:
             raise GameDataError(f"ゲーム用テキストが見つかりません: {key}")
         localized[key] = text
+
+    for key in SETTINGS_GUIDE_KEYS.values():
+        if not any(catalog.lines(key, localizer)):
+            raise GameDataError(f"ゲーム用テキストが見つかりません: {key}")
 
     close_guide = localized[MENU_CLOSE_GUIDE_TEXT_KEY]
     if close_guide.count("%CANCEL%") != 1:
@@ -1679,21 +1657,24 @@ class Game:
                         ),
                     )
                 )
-        guide_keys = SETTINGS_GUIDE_KEYS.get(selected_key, ())
-        if selected_key == "language" and self.settings.language is Language.ENGLISH:
-            guide_keys = guide_keys[:1]
-        for index, text_key in enumerate(guide_keys):
+        guide_key = SETTINGS_GUIDE_KEYS.get(selected_key)
+        guide_lines = (
+            self.texts.lines(guide_key, Localizer(self.settings.language))
+            if guide_key is not None
+            else ()
+        )
+        for index, line in enumerate(guide_lines):
             text_factory = (
                 LocalizedWindowTextFactory.from_language(
                     self.fonts,
                     Language.ENGLISH,
                 )
-                if text_key == "settings.guide.language.1"
+                if selected_key == "language" and index == 1
                 else self.localized_texts
             )
             texts.append(
                 text_factory.create(
-                    self.localized[text_key],
+                    line,
                     SETTINGS_GUIDE_X,
                     SETTINGS_GUIDE_Y + index * SETTINGS_GUIDE_ROW_HEIGHT,
                 )

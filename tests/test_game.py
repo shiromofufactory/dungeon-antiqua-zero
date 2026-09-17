@@ -478,7 +478,9 @@ class GameTest(unittest.TestCase):
         self.assertEqual(japanese["settings.bgm.label"], "ＢＧＭおんりょう")
         self.assertEqual(japanese["settings.se.label"], "ＳＥおんりょう")
         self.assertEqual(
-            japanese["settings.guide.language.1"].narrow_spans,
+            catalog.lines(
+                "settings.guide.language", Localizer(Language.JAPANESE)
+            )[1].narrow_spans,
             (),
         )
         self.assertEqual(english["settings.display.smooth"], "Ｓｍｏｏｔｈｅｄ")
@@ -605,6 +607,50 @@ class GameTest(unittest.TestCase):
         )
         self.assertIs(language_switching.font, english_font)
         self.assertEqual(language_switching.baseline_offset, 3)
+
+    def test_settings_guides_display_all_authored_lines_in_each_language(self) -> None:
+        records = json.loads((APP_ROOT / "data" / "texts.json").read_text())
+        for record in records:
+            if record["text_key"] == "settings.guide.screen_flash":
+                for field in ("text_ja", "text_en", "text_zhcn"):
+                    record[field].append("SMASH")
+        catalog = TextCatalog.from_records(records)
+        game = Game.__new__(Game)
+        game.texts = catalog
+        game.fonts = Mock()
+        game.fonts.baseline_offset_for.return_value = 3
+        game.localized_texts = Mock()
+        game.localized_texts.create.side_effect = (
+            lambda text, x, y, **_kwargs: Mock(text=text, x=x, y=y)
+        )
+        game.debug_texts = game.localized_texts
+        for language in Language:
+            game.settings = Settings(language=language)
+            game.localized = localized_menu_texts(catalog, language)
+            for selected_key in (
+                "language", "bgm", "se", "screen_size", "display",
+                "screen_flash", "in_game_hints", "quit",
+            ):
+                with self.subTest(language=language, selected_key=selected_key):
+                    texts = game._settings_window_texts(selected_key)
+                    guide = [text for text in texts if text.y >= SETTINGS_GUIDE_Y]
+                    expected = (
+                        catalog.lines(
+                            f"settings.guide.{selected_key}", Localizer(language)
+                        )
+                        if selected_key != "quit" else ()
+                    )
+                    self.assertEqual(
+                        [(text.text, text.y) for text in guide],
+                        [
+                            (line, SETTINGS_GUIDE_Y + i * SETTINGS_GUIDE_ROW_HEIGHT)
+                            for i, line in enumerate(expected)
+                        ],
+                    )
+                    if selected_key == "language":
+                        self.assertEqual(len(guide), 1 if language is Language.ENGLISH else 2)
+                    if selected_key == "screen_flash":
+                        self.assertEqual(len(guide), 3)
 
     @patch("game.WindowFactory")
     def test_english_return_confirmation_fits_widened_window_on_one_line(
