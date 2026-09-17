@@ -905,8 +905,13 @@ guide.draw()
 ゲーム進行とは別に `~/.config/.pyxel/dungeon-antiqua-zero/settings.json` へ保存する。
 設定変更時は一時ファイルからの置換で即時保存し、起動時に読み込む。設定ファイルがない場合や
 内容を安全に復元できない場合は初期値を使う。現段階の`Settings`は言語、BGM音量0〜4、SE音量0〜4、
-画面倍率1〜5、`DisplayMode.PIXEL` / `DisplayMode.SMOOTH`、画面フラッシュの有無を保持し、
-BGM・SE・画面倍率はDA2と同じ初期値3・3・3、表示方式はピクセル表示、画面フラッシュは有効を使う。
+画面倍率1〜5、`DisplayMode.PIXEL` / `DisplayMode.SMOOTH`、画面フラッシュとゲーム内ヒントの有無を保持し、
+BGM・SE・画面倍率はDA2と同じ初期値3・3・3、表示方式はピクセル表示、画面フラッシュとゲーム内ヒントは有効を使う。
+
+ゲーム内ヒントのWindow、入力解放待ち、開閉状態は `ui/hint.py` の `HintOverlay` が所有する。
+Gameはロード成立時にOverlayを生成し、最上位のゲームメニュー・画面遷移に続いて入力を渡す。
+表示中はフィールド更新へ進まず、終了後にOverlayを破棄する。表示仕様は
+[ゲーム内ヒント](./features/game-hints.md) を参照する。
 
 言語は `Language` で表し、保存値と共有JSONの接尾辞には `ja`、`en`、`zhcn` を使う。初期値は `ja` とする。フォントファイル名に含まれる `zh_hans` はアセット名であり、保存値やデータキーには使用しない。
 

@@ -25,6 +25,7 @@ from ui.debug_menu import DebugMenuOverlay, DebugShopTarget, DebugTeleportTarget
 from ui.debug_text import DEBUG_TEXT
 from ui.game_menu import GameMenuAction, GameMenuOverlay
 from ui.field_menu_guide import FieldMenuGuide
+from ui.hint import HintOverlay
 from ui.equipment_menu import (
     EquipmentMenuDataError,
     EquipmentMenuOverlay,
@@ -236,6 +237,9 @@ SETTINGS_TEXT_KEYS = (
     "settings.display.label",
     "settings.display.pixel",
     "settings.display.smooth",
+    "settings.in_game_hints.label",
+    "settings.guide.in_game_hints.0",
+    "settings.guide.in_game_hints.1",
     "settings.screen_flash.label",
     "settings.screen_flash.normal",
     "settings.screen_flash.reduced",
@@ -265,11 +269,16 @@ SETTINGS_ROWS = (
     ("screen_size", 11),
     ("display", 14),
     ("screen_flash", 17),
-    ("debug", 20),
-    ("return_title", 23),
-    ("quit", 26),
+    ("in_game_hints", 20),
+    ("debug", 23),
+    ("return_title", 26),
+    ("quit", 29),
 )
 SETTINGS_GUIDE_KEYS = {
+    "in_game_hints": (
+        "settings.guide.in_game_hints.0",
+        "settings.guide.in_game_hints.1",
+    ),
     "language": (
         "settings.guide.language.0",
         "settings.guide.language.1",
@@ -335,12 +344,12 @@ SE_CHANNELS = (
 )
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
-SETTINGS_WINDOW_GRID = (4, 12, 56, 39)
+SETTINGS_WINDOW_GRID = (4, 9, 56, 42)
 SETTINGS_LABEL_X = 4
 SETTINGS_VALUE_X = 30
 SETTINGS_CURSOR_X = 2
 SETTINGS_GUIDE_X = 4
-SETTINGS_GUIDE_Y = 32
+SETTINGS_GUIDE_Y = 35
 SETTINGS_GUIDE_ROW_HEIGHT = 3
 CONFIRMATION_WINDOW_GRID = (8, 22, 48, 16)
 CONFIRMATION_CURSOR_X = 4
@@ -570,6 +579,7 @@ class Game:
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
         self.information_screen: InformationMenuOverlay | None = None
+        self.hint_overlay: HintOverlay | None = None
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
@@ -1610,6 +1620,9 @@ class Game:
         if key == "screen_flash":
             value = "normal" if self.settings.screen_flash_enabled else "reduced"
             return self.localized[f"settings.screen_flash.{value}"]
+        if key == "in_game_hints":
+            value = "yes" if self.settings.in_game_hints_enabled else "no"
+            return self.localized[f"settings.{value}"]
         raise ValueError(f"settings key has no value: {key}")
 
     def _settings_window_texts(
@@ -1624,6 +1637,7 @@ class Game:
             "screen_size": "settings.screen_size.label",
             "display": "settings.display.label",
             "screen_flash": "settings.screen_flash.label",
+            "in_game_hints": "settings.in_game_hints.label",
         }
         action_keys = {
             "return_title": "settings.return_title",
@@ -2243,6 +2257,11 @@ class Game:
         self.bgm.play(self.current_map.bgm_id)
         if is_new_game:
             self._start_field_event(NEW_GAME_EVENT_ID)
+        elif self.settings.in_game_hints_enabled:
+            self.hint_overlay = HintOverlay(
+                text_key="hint.load.mission",
+                settings=self.settings, texts=self.texts, fonts=self.fonts,
+            )
 
     def _finish_spell(self) -> None:
         if self.spell_screen is None:
@@ -2308,6 +2327,10 @@ class Game:
             index = DISPLAY_SEQUENCE.index(self.settings.display_mode)
             mode = DISPLAY_SEQUENCE[(index + distance) % len(DISPLAY_SEQUENCE)]
             updated_settings = self.settings.with_display_mode(mode)
+        elif key == "in_game_hints":
+            updated_settings = self.settings.with_in_game_hints_enabled(
+                not self.settings.in_game_hints_enabled
+            )
         elif key == "screen_flash":
             updated_settings = self.settings.with_screen_flash_enabled(
                 not self.settings.screen_flash_enabled
@@ -2896,6 +2919,7 @@ class Game:
                     "start_screen", "shop_screen", "battle_scene", "game_menu",
                     "encounter_transition", "battle_return_fade", "pending_screen_change",
                     "event_runner", "event_message", "treasure_message", "field_condition_message",
+                    "hint_overlay",
                 )
             )
         )
@@ -2984,6 +3008,11 @@ class Game:
             self._update_return_to_start(input_state)
             return
         if self._update_fade():
+            return
+        hint_overlay = getattr(self, "hint_overlay", None)
+        if hint_overlay is not None:
+            if hint_overlay.update(input_state):
+                self.hint_overlay = None
             return
         start_screen = getattr(self, "start_screen", None)
         if start_screen is not None:
@@ -3307,6 +3336,9 @@ class Game:
         field_condition_message = getattr(self, "field_condition_message", None)
         if field_condition_message is not None:
             field_condition_message.draw()
+        hint_overlay = getattr(self, "hint_overlay", None)
+        if hint_overlay is not None:
+            hint_overlay.draw()
 
     def _draw_encounter_transition(self) -> None:
         """Capture the field once, then transform that immutable framebuffer."""

@@ -106,6 +106,7 @@ MONSTER_BOOK_ICON_TYPES = (
 )
 
 INFORMATION_TEXT_KEYS = (
+    "information.mission",
     "information.conversation_log",
     "information.monster_book",
     "monster_book.number",
@@ -384,6 +385,7 @@ class InformationMenuOverlay:
                 )
                 for index, key in enumerate(
                     (
+                        "information.mission",
                         "information.conversation_log",
                         "information.monster_book",
                     )
@@ -391,17 +393,15 @@ class InformationMenuOverlay:
             ),
         )
         self.header_cursor = self.header_window.set_cursor(
-            (
+            tuple(
                 CursorTarget(
                     INFORMATION_CURSOR_X,
-                    INFORMATION_TEXT_Y,
-                    key="conversation_log",
-                ),
-                CursorTarget(
-                    INFORMATION_CURSOR_X,
-                    INFORMATION_TEXT_Y + INFORMATION_CATEGORY_ROW_HEIGHT,
-                    key="monster_book",
-                ),
+                    INFORMATION_TEXT_Y + index * INFORMATION_CATEGORY_ROW_HEIGHT,
+                    key=key,
+                )
+                for index, key in enumerate(
+                    ("mission", "conversation_log", "monster_book")
+                )
             )
         )
         self.main_window = self.window_factory.create(*INFORMATION_MAIN_WINDOW_GRID)
@@ -718,7 +718,7 @@ class InformationMenuOverlay:
             if input_state.confirm.triggered:
                 if self.header_cursor.selected_key == "conversation_log":
                     self._open_conversation_log()
-                else:
+                elif self.header_cursor.selected_key == "monster_book":
                     self._open_monster_book()
                 return False
             if self.header_window.update(input_state.navigation):

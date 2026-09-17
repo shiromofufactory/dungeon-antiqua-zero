@@ -552,8 +552,8 @@ class GameTest(unittest.TestCase):
 
         mock._build_settings_window()
 
-        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 12, 56, 39))
-        self.assertEqual(SETTINGS_GUIDE_Y, 32)
+        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 9, 56, 42))
+        self.assertEqual(SETTINGS_GUIDE_Y, 35)
         self.assertEqual(factory.create.call_args.args[:4], SETTINGS_WINDOW_GRID)
         self.assertFalse(factory.create.call_args.kwargs["opened"])
         window.open.assert_called_once_with()
@@ -572,11 +572,16 @@ class GameTest(unittest.TestCase):
         self.assertEqual(placements[(SETTINGS_LABEL_X, 17)], "がめんフラッシュ")
         self.assertEqual(placements[(SETTINGS_VALUE_X, 17)], "つうじょう")
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 23)],
+            placements[(SETTINGS_LABEL_X, 20)],
+            mock.localized["settings.in_game_hints.label"],
+        )
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 20)], "はい")
+        self.assertEqual(
+            placements[(SETTINGS_LABEL_X, 26)],
             "タイトルがめんへ　もどる",
         )
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 26)],
+            placements[(SETTINGS_LABEL_X, 29)],
             "ゲームを　しゅうりょうする",
         )
         debug_text_call = next(
@@ -2396,6 +2401,7 @@ class GameTest(unittest.TestCase):
         loaded.active_party = (Mock(), Mock())
         loaded.character_states = {"Fiora": loaded.active_party[0]}
         loaded.inventory = InventorySystem({})
+        mock.settings = Settings(in_game_hints_enabled=False)
         mock.pending_loaded_state = loaded
         mock.pending_loaded_map = Mock(sites=(), bgm_id="dungeon/ruins")
         mock.pending_loaded_field = Mock()
@@ -2427,6 +2433,57 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.showing_field)
         mock.bgm.play.assert_called_once_with("dungeon/ruins")
         mock._start_field_event.assert_not_called()
+
+    @patch("game.ShopSystem")
+    @patch("game.HintOverlay")
+    def test_loaded_game_creates_mission_hint_when_enabled(
+        self, hint_class: Mock, _shop_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.pending_loaded_state = Mock(
+            save_data=SaveData(), active_party=(), character_states={},
+            inventory=InventorySystem({}),
+        )
+        mock.pending_loaded_map = Mock(sites=(), bgm_id="da3-field")
+        mock.pending_loaded_field = Mock()
+        mock.pending_loaded_renderer = Mock()
+        mock.pending_load_slot = 1
+        mock.shops = ()
+        mock._build_main_windows = Mock()
+        mock._refresh_site_name_label = Mock()
+        mock._reset_field_actors = Mock()
+        mock.bgm = Mock()
+
+        mock._apply_start_game()
+
+        hint_class.assert_called_once_with(
+            text_key="hint.load.mission", settings=mock.settings,
+            texts=mock.texts, fonts=mock.fonts,
+        )
+        self.assertIs(mock.hint_overlay, hint_class.return_value)
+
+    def test_hint_consumes_input_and_finishes_without_updating_field(self) -> None:
+        mock = Game.__new__(Game)
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(navigation=Direction.RIGHT)
+        mock._update_game_menu = Mock(return_value=False)
+        mock._update_field_menu_guide = Mock()
+        mock.alert = Mock()
+        mock._update_fade = Mock(return_value=False)
+        mock.hint_overlay = Mock()
+        mock.hint_overlay.update.return_value = False
+        mock._update_field = Mock()
+
+        mock.update()
+
+        mock._update_field.assert_not_called()
+        mock.hint_overlay.update.return_value = True
+        mock.update()
+        self.assertIsNone(mock.hint_overlay)
+        mock._update_field.assert_not_called()
 
     def test_start_game_starts_prologue_only_for_new_game(self) -> None:
         mock = Game.__new__(Game)
@@ -3210,7 +3267,8 @@ class GameTest(unittest.TestCase):
 
     def test_debug_settings_row_is_available_in_current_game(self) -> None:
         self.assertIn(("screen_flash", 17), SETTINGS_ROWS)
-        self.assertIn(("debug", 20), SETTINGS_ROWS)
+        self.assertIn(("in_game_hints", 20), SETTINGS_ROWS)
+        self.assertIn(("debug", 23), SETTINGS_ROWS)
 
     def test_confirming_debug_setting_opens_debug_menu(self) -> None:
         mock = Game.__new__(Game)
@@ -3307,6 +3365,20 @@ class GameTest(unittest.TestCase):
 
         self.assertIs(mock.settings.display_mode, DisplayMode.SMOOTH)
         mock._apply_display_mode.assert_called_once_with()
+
+    def test_in_game_hints_setting_toggles_and_is_persisted(self) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings()
+        mock.settings_repository = Mock()
+        mock.settings_cursor = Mock(selected_key="in_game_hints")
+        mock._refresh_settings_window = Mock()
+
+        mock._change_setting(1)
+        self.assertFalse(mock.settings.in_game_hints_enabled)
+        mock.settings_repository.save.assert_called_with(mock.settings)
+        mock._change_setting(-1)
+        self.assertTrue(mock.settings.in_game_hints_enabled)
+        mock.settings_repository.save.assert_called_with(mock.settings)
 
     def test_screen_flash_setting_toggles_and_is_persisted(self) -> None:
         mock = Game.__new__(Game)

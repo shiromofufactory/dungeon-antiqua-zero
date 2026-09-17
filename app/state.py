@@ -50,6 +50,7 @@ class Settings:
     screen_scale: int = 3
     display_mode: DisplayMode = DisplayMode.PIXEL
     screen_flash_enabled: bool = True
+    in_game_hints_enabled: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.language, Language):
@@ -80,6 +81,9 @@ class Settings:
         if not isinstance(self.screen_flash_enabled, bool):
             raise TypeError("screen_flash_enabled must be a boolean")
 
+        if not isinstance(self.in_game_hints_enabled, bool):
+            raise TypeError("in_game_hints_enabled must be a boolean")
+
     def to_dict(self) -> dict[str, object]:
         """Return the JSON-compatible representation of these settings."""
 
@@ -90,6 +94,7 @@ class Settings:
             "screen_scale": self.screen_scale,
             "display_mode": self.display_mode.value,
             "screen_flash_enabled": self.screen_flash_enabled,
+            "in_game_hints_enabled": self.in_game_hints_enabled,
         }
 
     def with_language(self, language: Language) -> Settings:
@@ -128,6 +133,11 @@ class Settings:
             raise TypeError("enabled must be a boolean")
         return replace(self, screen_flash_enabled=enabled)
 
+    def with_in_game_hints_enabled(self, enabled: bool) -> Settings:
+        """Return updated preferences for blocking gameplay hints."""
+
+        return replace(self, in_game_hints_enabled=enabled)
+
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Settings:
         """Build settings from persisted data with DA2-compatible defaults."""
@@ -162,6 +172,7 @@ class Settings:
                 screen_scale=data.get("screen_scale", 3),
                 display_mode=display_mode,
                 screen_flash_enabled=data.get("screen_flash_enabled", True),
+                in_game_hints_enabled=data.get("in_game_hints_enabled", True),
             )
         except (TypeError, ValueError) as error:
             raise SettingsDataError(str(error)) from error

@@ -26,6 +26,7 @@ class SettingsRepositoryTest(unittest.TestCase):
             screen_scale=4,
             display_mode=DisplayMode.SMOOTH,
             screen_flash_enabled=False,
+            in_game_hints_enabled=False,
         )
         with tempfile.TemporaryDirectory() as directory:
             repository = SettingsRepository(Path(directory) / "settings.json")

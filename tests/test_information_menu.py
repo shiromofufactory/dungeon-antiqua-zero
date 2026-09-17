@@ -59,6 +59,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         logs: list[dict[str, object]] | None = None,
         event_messages: EventMessageCatalog | None = None,
         language: Language = Language.JAPANESE,
+        category: str = "conversation_log",
     ) -> InformationMenuOverlay:
         fonts = Mock()
         font_map = {
@@ -76,7 +77,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         fonts.baseline_offset_for.return_value = 0
         images = Mock()
         images.image.return_value = object()
-        return InformationMenuOverlay(
+        overlay = InformationMenuOverlay(
             monsters=load_monsters(),
             monster_records={} if records is None else records,
             items=load_items(),
@@ -93,16 +94,20 @@ class InformationMenuOverlayTest(unittest.TestCase):
             on_invalid_action=invalid_action,
         )
 
+        while overlay.header_cursor.selected_key != category:
+            overlay.update(input_state(navigation=Direction.DOWN))
+        return overlay
+
     @staticmethod
     def open_monster_book(overlay: InformationMenuOverlay) -> None:
         overlay.update(input_state(navigation=Direction.DOWN))
         overlay.update(input_state(confirm=True))
 
-    def test_starts_at_conversation_log_then_lists_monster_book(self) -> None:
-        overlay = self.create_overlay()
+    def test_starts_at_mission_then_lists_log_and_monster_book(self) -> None:
+        overlay = self.create_overlay(category="mission")
 
         self.assertIs(overlay.phase, InformationPhase.MENU)
-        self.assertEqual(overlay.header_cursor.selected_key, "conversation_log")
+        self.assertEqual(overlay.header_cursor.selected_key, "mission")
         self.assertEqual(
             (
                 overlay.header_window.x,
@@ -123,8 +128,16 @@ class InformationMenuOverlayTest(unittest.TestCase):
         )
         self.assertEqual(
             [text.text for text in overlay.header_window.texts],
-            ["かいわログ", "モンスターずかん"],
+            ["ミッション", "かいわログ", "モンスターずかん"],
         )
+
+    def test_empty_mission_accepts_confirm_and_cancels_to_main_menu(self) -> None:
+        invalid_action = Mock()
+        overlay = self.create_overlay(category="mission", invalid_action=invalid_action)
+        self.assertEqual(overlay.main_window.texts, ())
+        self.assertFalse(overlay.update(input_state(confirm=True)))
+        invalid_action.assert_not_called()
+        self.assertTrue(overlay.update(input_state(cancel=True)))
 
     def test_empty_conversation_log_alerts_and_stays_in_submenu(self) -> None:
         invalid_action = Mock()

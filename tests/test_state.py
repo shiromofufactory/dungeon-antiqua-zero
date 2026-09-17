@@ -29,9 +29,17 @@ class SettingsTest(unittest.TestCase):
                 "screen_scale": 3,
                 "display_mode": "pixel",
                 "screen_flash_enabled": True,
+                "in_game_hints_enabled": True,
             },
         )
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
+
+    def test_old_settings_enable_hints_and_invalid_hint_values_are_rejected(self) -> None:
+        self.assertTrue(Settings.from_dict({"language": "ja"}).in_game_hints_enabled)
+        disabled = Settings().with_in_game_hints_enabled(False)
+        self.assertEqual(Settings.from_dict(disabled.to_dict()), disabled)
+        with self.assertRaises(SettingsDataError):
+            Settings.from_dict({"in_game_hints_enabled": 1})
 
     def test_language_change_returns_a_new_settings_snapshot(self) -> None:
         original = Settings()
