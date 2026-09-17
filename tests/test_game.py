@@ -67,6 +67,7 @@ from input import Direction, InputButton, InputState
 from localization import Localizer
 from member import BATTLE_PARTY_MEMBER_COUNT, FormationRow, Race
 from resources import (
+    CompiledMap,
     FontRole,
     MapCell,
     MapResourceError,
@@ -97,6 +98,70 @@ from world_sites import WorldSiteCatalog
 
 
 class GameTest(unittest.TestCase):
+    def test_birds_draw_above_field_and_below_field_overlays(self) -> None:
+        game = Game.__new__(Game)
+        game.field = Mock()
+        game.field_renderer = Mock()
+        game.field_renderer.camera_position.return_value = (32, 48)
+        game.field_birds = Mock()
+        game._draw_site_name = Mock()
+        game.event_message = Mock()
+        drawing = Mock()
+        drawing.attach_mock(game.field_renderer.draw, "field")
+        drawing.attach_mock(game.field_birds.draw, "birds")
+        drawing.attach_mock(game._draw_site_name, "site")
+        drawing.attach_mock(game.event_message.draw, "message")
+
+        game._draw_field_screen()
+
+        self.assertEqual([entry[0] for entry in drawing.mock_calls],
+                         ["field", "birds", "site", "message"])
+        self.assertEqual(game.field_birds.draw.call_args.kwargs["camera"], (32, 48))
+
+    @patch("game.FieldActors")
+    def test_birds_are_reset_on_map_change_and_only_created_for_worldmap(
+        self, actors_class: Mock,
+    ) -> None:
+        game = Game.__new__(Game)
+        game.save_data = SaveData()
+        game.images = Mock()
+        game.images.entry.return_value = Mock(width=384, height=384)
+        game.party = (Mock(definition=Mock(battle_sprite=0)),)
+        actors_class.return_value.actors = ()
+        game.current_map = Mock(spec=CompiledMap, map_id="worldmap", profile="world")
+
+        game._reset_field_actors()
+        first_flock = game.field_birds
+        self.assertIsNotNone(first_flock)
+        game._reset_field_actors()
+        self.assertIsNot(game.field_birds, first_flock)
+
+        for map_id, profile in (("town", "town"), ("cave", "dungeon"),
+                                ("other_world", "world")):
+            game.current_map = Mock(spec=CompiledMap, map_id=map_id, profile=profile)
+            game._reset_field_actors()
+            self.assertIsNone(game.field_birds)
+
+    def test_bird_flight_continues_during_messages_and_pauses_during_fades(self) -> None:
+        game = Game.__new__(Game)
+        game.alert = Mock()
+        game.input_reader = Mock()
+        game._update_fade = Mock(return_value=False)
+        game.showing_field = True
+        game.field = Mock(world_x=120, world_y=112)
+        game.field_renderer = Mock()
+        game.field_renderer.camera_position.return_value = (0, 0)
+        game.field_birds = Mock()
+        game.treasure_message = Mock()
+        game.treasure_message.update.return_value = False
+
+        game.update()
+        game.field_birds.update.assert_called_once_with(camera=(0, 0), player=(120, 112))
+        game.field_birds.update.reset_mock()
+        game._update_fade.return_value = True
+        game.update()
+        game.field_birds.update.assert_not_called()
+
     def test_field_player_floating_is_derived_from_fairy_race(self) -> None:
         game = Game.__new__(Game)
         game.field_actors = object.__new__(FieldActors)

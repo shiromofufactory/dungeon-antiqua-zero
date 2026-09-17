@@ -45,6 +45,7 @@ from ui.spell_menu import (
 )
 from ui.shop import ShopOverlay, ShopUiDataError
 from field import FieldActors, FieldMovement, FieldPosition
+from field_birds import WorldMapBirds
 from input import (
     Direction,
     InputAction,
@@ -1054,8 +1055,15 @@ class Game:
         )
 
     def _reset_field_actors(self) -> None:
-        """Recreate transient actor movement whenever the active map changes."""
+        """Recreate transient actors and ambient birds when the active map changes."""
 
+        self.field_birds = (
+            WorldMapBirds(SCREEN_WIDTH, SCREEN_HEIGHT)
+            if isinstance(getattr(self, "current_map", None), CompiledMap)
+            and self.current_map.map_id == WORLD_MAP_ID
+            and self.current_map.profile == "world"
+            else None
+        )
         if not isinstance(getattr(self, "current_map", None), CompiledMap):
             self.field_actors = None
             self.field_prop_image = None
@@ -2898,6 +2906,12 @@ class Game:
                 self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
+            field_birds = getattr(self, "field_birds", None)
+            if field_birds is not None:
+                field_birds.update(
+                    camera=self.field_renderer.camera_position(self.field),
+                    player=(self.field.world_x, self.field.world_y),
+                )
             field_actors = getattr(self, "field_actors", None)
             if field_actors is not None:
                 field_actors.update_treasure_animations()
@@ -3180,6 +3194,12 @@ class Game:
             self.field_renderer.draw(self.field)
         else:
             self.field_renderer.draw(self.field, draw_player=False)
+        field_birds = getattr(self, "field_birds", None)
+        if field_birds is not None:
+            field_birds.draw(
+                camera=self.field_renderer.camera_position(self.field),
+                pyxel_api=pyxel,
+            )
         self._draw_site_name()
         event_message = getattr(self, "event_message", None)
         if event_message is not None:

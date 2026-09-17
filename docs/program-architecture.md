@@ -1396,6 +1396,12 @@ SaveDataが所有する。難易度の保存値には表示文言から独立し
 
 フィールドガイドのタイマーは `FieldScene`、戦闘コマンド選択は `BattleScene`、店のカーソルはShop Overlayが所有する。Scene固有状態を巨大な共有RuntimeStateへ集めない。
 
+ワールドマップの鳥は `field_birds.py` の `WorldMapBirds` が出現待ち、飛行座標、速度、
+羽ばたきのフレームと描画を所有する。現在は `Game` が現在マップに応じて生成し、
+フィールド表示時の更新と `FieldRenderer` の後の描画を接続する。PC座標とカメラ座標だけを
+明示的に渡し、鳥からGameや移動状態を参照しない。演出専用の乱数を使い、セーブや
+衝突判定には含めない。詳細は [`features/field.md`](./features/field.md) を参照する。
+
 ### SystemとDomain Model
 
 Member、Item、Spellなど、データとそのデータに密接なルールはDomain Modelへ置く。複数のModelやSaveDataをまたぐ操作はSystemへ置く。
