@@ -24,6 +24,7 @@ from game_data import (
 from ui.debug_menu import DebugMenuOverlay, DebugShopTarget, DebugTeleportTarget
 from ui.debug_text import DEBUG_TEXT
 from ui.game_menu import GameMenuAction, GameMenuOverlay
+from ui.field_menu_guide import FieldMenuGuide
 from ui.equipment_menu import (
     EquipmentMenuDataError,
     EquipmentMenuOverlay,
@@ -507,6 +508,7 @@ class Game:
         self.current_save_slot: int | None = None
         self.texts = TextCatalog.from_json(RUNTIME_TEXTS_PATH)
         self.fonts = FontResources()
+        self.field_menu_guide = FieldMenuGuide(texts=self.texts, fonts=self.fonts)
         self.images = ImageResources()
         self.faces = self.images.image(FACES_IMAGE_ID)
         self.event_catalog = EventCatalog.from_json()
@@ -1061,6 +1063,9 @@ class Game:
     def _reset_field_actors(self) -> None:
         """Recreate transient actors and ambient birds when the active map changes."""
 
+        guide = getattr(self, "field_menu_guide", None)
+        if guide is not None:
+            guide.reset()
         self.field_birds = (
             WorldMapBirds(SCREEN_WIDTH, SCREEN_HEIGHT)
             if isinstance(getattr(self, "current_map", None), CompiledMap)
@@ -2877,6 +2882,39 @@ class Game:
         if field_actors is not None:
             field_actors.update_roaming(party_position=self.field.position)
 
+    def _field_menu_guide_available(self) -> bool:
+        """Limit the idle hint to ordinary field play, excluding modal flows."""
+
+        return (
+            getattr(self, "showing_field", False) is True
+            and not getattr(getattr(self, "fade", None), "is_active", False)
+            and not getattr(self, "_returning_to_start", False)
+            and not getattr(self, "_game_menu_resume_waiting", False)
+            and all(
+                getattr(self, attribute, None) is None
+                for attribute in (
+                    "start_screen", "shop_screen", "battle_scene", "game_menu",
+                    "encounter_transition", "battle_return_fade", "pending_screen_change",
+                    "event_runner", "event_message", "treasure_message", "field_condition_message",
+                )
+            )
+        )
+
+    def _update_field_menu_guide(self, input_state: InputState) -> None:
+        guide = getattr(self, "field_menu_guide", None)
+        if guide is None:
+            return
+        field = getattr(self, "field", None)
+        guide.update(
+            input_state,
+            idle=(
+                self._field_menu_guide_available()
+                and not getattr(field, "is_moving", False)
+                and not getattr(field, "is_walking", False)
+            ),
+            language=self.settings.language,
+        )
+
     def _update_game_menu(self, input_state: InputState) -> bool:
         """Handle global interruption before any underlying screen advances."""
 
@@ -2920,7 +2958,11 @@ class Game:
     def update(self) -> None:
         input_state = self.input_reader.poll()
         if self._update_game_menu(input_state):
+            guide = getattr(self, "field_menu_guide", None)
+            if guide is not None:
+                guide.reset()
             return
+        self._update_field_menu_guide(input_state)
         bgm = getattr(self, "bgm", None)
         if bgm is not None:
             bgm.update()
@@ -3253,6 +3295,9 @@ class Game:
                 pyxel_api=pyxel,
             )
         self._draw_site_name()
+        guide = getattr(self, "field_menu_guide", None)
+        if guide is not None and self._field_menu_guide_available():
+            guide.draw()
         event_message = getattr(self, "event_message", None)
         if event_message is not None:
             event_message.draw()

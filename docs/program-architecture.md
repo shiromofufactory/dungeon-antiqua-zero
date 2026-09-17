@@ -1398,6 +1398,11 @@ SaveDataが所有する。難易度の保存値には表示文言から独立し
 
 ### Scene固有状態
 
+フィールド待機時のメニュー操作ナビは `ui/field_menu_guide.py` の `FieldMenuGuide` が
+待機タイマーと非対話Windowを所有する。現在のComposition RootではGameが通常フィールドの
+操作可否を渡し、入力・移動・Modal・遷移で表示と待機時間をリセットする。ナビからGameや
+Fieldを逆参照しない。表示条件は [フィールド仕様](./features/field.md) を参照する。
+
 フィールドガイドのタイマーは `FieldScene`、戦闘コマンド選択は `BattleScene`、店のカーソルはShop Overlayが所有する。Scene固有状態を巨大な共有RuntimeStateへ集めない。
 
 ワールドマップの鳥は `field_birds.py` の `WorldMapBirds` が出現待ち、飛行座標、速度、
