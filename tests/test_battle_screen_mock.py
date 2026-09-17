@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
@@ -4061,6 +4062,7 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_item_list_uses_its_own_wider_window_with_three_candidates(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.spells = load_mock_spells()
         mock.item_candidates = tuple(
             BattleItemCandidate(items[key])
             for key in ("POTION", "REMEDY", "MANA DROP", "PANACEA")
@@ -4341,6 +4343,85 @@ class BattleScreenMockTest(unittest.TestCase):
             mock.pending_spell,
         )
         mock._complete_current_turn.assert_not_called()
+
+    def test_spell_and_item_delay_reaches_timeline_with_current_school_level(self) -> None:
+        items = load_mock_items()
+        spells = load_mock_spells()
+        cases = (
+            ("FIRE1", None, ProficiencyKind.MYSTIC, 1, False, 16),
+            ("FIRE1", None, ProficiencyKind.MYSTIC, 9, False, 8),
+            ("FIRE1", None, ProficiencyKind.MYSTIC, 1, True, 8),
+            ("FIRE1", None, ProficiencyKind.MYSTIC, 9, True, 0),
+            ("SLOW", None, ProficiencyKind.MYSTIC, 1, False, 16),
+            ("PROTECTION", None, ProficiencyKind.SACRED, 5, False, 12),
+            ("SLEEP", None, ProficiencyKind.NETHER, 3, False, 14),
+            ("FIRE1", "FLAME RING", ProficiencyKind.MYSTIC, 1, False, 16),
+            ("FIRE1", "FLAME RING", ProficiencyKind.MYSTIC, 9, True, 0),
+            ("FIRE2", "WAND of FIRE", ProficiencyKind.MYSTIC, 1, True, 8),
+            ("POTION", "POTION", ProficiencyKind.MYSTIC, 1, True, 0),
+            ("FIRE1", "POTION", ProficiencyKind.MYSTIC, 1, True, 0),
+        )
+        for key, item_key, school, level, reduced, delay in cases:
+            with self.subTest(spell=key, item=item_key, level=level, reduced=reduced):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                member = load_mock_party(items, load_mock_skills())[0]
+                member.proficiency(school).level = level
+                member.mp = 100
+                member.equipment = member.equipment.replaced(
+                    {slot: None for slot in EquipmentSlot}
+                )
+                if reduced:
+                    member.equipment = member.equipment.replaced(
+                        {EquipmentSlot.RIGHT: items["WAND of FIRE"]}
+                    )
+                    if level == 9:
+                        member.equipment = member.equipment.replaced(
+                            {EquipmentSlot.LEFT: items["WAND of FIRE"]}
+                        )
+                mock.party = (member,)
+                mock.active_party_index = 0
+                mock.spells = spells
+                mock.pending_spell = spells[key] if item_key is None else None
+                mock.pending_item_candidate = None
+                if item_key is not None:
+                    item = replace(items[item_key], use_spell_key=key)
+                    if item_key == "WAND of FIRE":
+                        # Capture the equipment benefit before the used gear breaks.
+                        item = replace(item, breaks_on_use=True)
+                        mock.pending_item_candidate = BattleItemCandidate(
+                            item, EquipmentSlot.RIGHT
+                        )
+                    else:
+                        mock.pending_item_candidate = BattleItemCandidate(item)
+                        mock._commit_item_use = Mock(return_value=True)
+                mock._show_item_use_message = Mock()
+                mock._show_spell_cast_message = Mock()
+                mock._record_action_target_information = Mock()
+                mock._begin_action_presentation = Mock(return_value=True)
+                self.assertTrue(mock._confirm_action_target_selection())
+                self.assertEqual(mock.action_gauge_adjustment, -delay)
+
+                actor = SimpleNamespace(agility=10, effective_agility=7)
+                other = SimpleNamespace(agility=5)
+                mock._timeline_order = TimelineOrder(
+                    (TimelineEntry(actor, 10, 64), TimelineEntry(other, 5, 40))
+                )
+                mock.command_cursor = SimpleNamespace(active=True)
+                mock.command_window = Mock()
+                mock._refresh_party_text_colors = Mock()
+                mock._start_timeline_animation()
+                self.assertEqual(mock.timeline_advance.after.entries[1].gauge, 7 - delay)
+                self.assertEqual(mock.action_gauge_adjustment, 0)
+
+    def test_unconfirmed_spell_does_not_set_delay(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (SimpleNamespace(mp=0),)
+        mock.active_party_index = 0
+        mock.pending_item_candidate = None
+        mock.pending_spell = load_mock_spells()["FIRE1"]
+        mock.action_gauge_adjustment = 0
+        self.assertFalse(mock._confirm_action_target_selection())
+        self.assertEqual(mock.action_gauge_adjustment, 0)
 
     def test_registered_spell_effect_plays_before_the_turn_completes(self) -> None:
         items = load_mock_items()

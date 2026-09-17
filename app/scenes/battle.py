@@ -37,6 +37,7 @@ from battle_magic import (
     resolve_healing,
     resolve_spell_damage,
     resolve_status_spell,
+    spell_cast_delay,
 )
 from monster_ai import (
     MonsterAction,
@@ -3404,6 +3405,11 @@ class BattleScene:
                 prefix + item.localized_name(self.localizer),
                 ITEM_TEXT_X,
                 y,
+                color=(
+                    DEFAULT_TEXT_COLOR
+                    if self._item_is_usable_in_battle(item)
+                    else DISABLED_COLOR
+                ),
             )
             if not candidate.is_equipped:
                 self.item_window.add_text(
@@ -3998,16 +4004,19 @@ class BattleScene:
         item_candidate = self.pending_item_candidate
         spell = self.pending_spell
         effect_spell = spell
+        gauge_adjustment = 0.0
         if item_candidate is not None:
-            if not self._commit_item_use(item_candidate):
-                return False
-            self._show_item_use_message(item_candidate.item)
             use_spell_key = item_candidate.item.use_spell_key
             effect_spell = (
                 getattr(self, "spells", {}).get(use_spell_key)
                 if use_spell_key
                 else None
             )
+            if item_candidate.item.equip_type is not ItemEquipType.ITEM:
+                gauge_adjustment = self._spell_gauge_adjustment(effect_spell)
+            if not self._commit_item_use(item_candidate):
+                return False
+            self._show_item_use_message(item_candidate.item)
             if (
                 item_candidate.item.is_weapon
                 and self.active_party_index is not None
@@ -4027,6 +4036,7 @@ class BattleScene:
             member = self.party[self.active_party_index]
             if member.mp < spell.mp:
                 return False
+            gauge_adjustment = self._spell_gauge_adjustment(spell)
             member.mp -= spell.mp
             self._show_spell_cast_message(spell)
             if spell.type is not SpellType.ITEM and hasattr(self, "progression"):
@@ -4038,6 +4048,7 @@ class BattleScene:
                 )
         else:
             return False
+        self.action_gauge_adjustment = gauge_adjustment
         if self.active_party_index is not None:
             getattr(self, "hidden_party_indexes", set()).discard(
                 self.active_party_index
@@ -4053,6 +4064,26 @@ class BattleScene:
             return True
         self._complete_current_turn()
         return True
+
+    def _spell_gauge_adjustment(self, spell: Spell | None) -> float:
+        """Capture the caster's delay before costs can remove equipped gear."""
+
+        if spell is None or spell.type is SpellType.ITEM:
+            return 0.0
+        if self.active_party_index is None:
+            raise RuntimeError("spell casting requires an active party member")
+        member = self.party[self.active_party_index]
+        return -float(
+            spell_cast_delay(
+                spell_level=member.proficiency(
+                    SPELL_PROFICIENCY_BY_TYPE[spell.type]
+                ).level,
+                reduced_wait=any(
+                    item.special is ItemSpecial.SPL_REDUCE_WT
+                    for item in member.equipment.equipped_items()
+                ),
+            )
+        )
 
     def _record_action_target_information(self, spell: Spell) -> None:
         """Reveal enemy profiles and tested attributes after confirmation."""

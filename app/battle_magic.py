@@ -87,6 +87,13 @@ def member_spell_modifier(
     return magic * (7 + spell_level + internal_level / 25) / 16
 
 
+def spell_cast_delay(*, spell_level: int, reduced_wait: bool = False) -> int:
+    """Return the post-action gauge cost for the caster's spell school."""
+
+    spell_level = _nonnegative_integer(spell_level, "spell_level")
+    return 17 - spell_level - (8 if reduced_wait else 0)
+
+
 def resolve_spell_damage(
     *,
     intensity: int,
@@ -302,4 +309,5 @@ __all__ = [
     "resolve_healing",
     "resolve_spell_damage",
     "resolve_status_spell",
+    "spell_cast_delay",
 ]

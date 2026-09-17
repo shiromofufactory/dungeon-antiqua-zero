@@ -12,6 +12,7 @@ from app.battle_magic import (
     resolve_healing,
     resolve_spell_damage,
     resolve_status_spell,
+    spell_cast_delay,
 )
 from app.resistance import ResistanceType
 
@@ -34,6 +35,17 @@ class MemberSpellModifierTest(unittest.TestCase):
             ),
             34,
         )
+
+
+class SpellCastDelayTest(unittest.TestCase):
+    def test_school_level_and_equipment_reduce_delay(self) -> None:
+        for level, normal, reduced in ((0, 17, 9), (1, 16, 8), (9, 8, 0)):
+            with self.subTest(level=level):
+                self.assertEqual(spell_cast_delay(spell_level=level), normal)
+                self.assertEqual(
+                    spell_cast_delay(spell_level=level, reduced_wait=True),
+                    reduced,
+                )
 
 
 class ResolveSpellDamageTest(unittest.TestCase):
