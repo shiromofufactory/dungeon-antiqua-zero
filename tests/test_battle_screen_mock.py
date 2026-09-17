@@ -17,6 +17,8 @@ from tools.screen_mocks.battle import (
     DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT,
     ATTACK_LANDING_GUARD_FRAME_COUNT,
     ATTACK_RETURN_JUMP_FRAME_COUNT,
+    JUMP_ATTACK_RETURN_WAIT_FRAME_COUNT,
+    FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT,
     ATTACK_BLUNT_SE_ID,
     ATTACK_SE_ID_BY_SUBTYPE,
     ATTACK_SLASH_SE_ID,
@@ -1620,6 +1622,103 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.action_party_index)
         self.assertEqual(mock._party_draw_position(0), (156, 64))
 
+    def test_auto_attack_jumps_forward_then_walks_back(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (
+            SimpleNamespace(member=SimpleNamespace(formation_row=FormationRow.FRONT)),
+        )
+        mock.phase = BattleMockPhase.TARGET
+        mock.active_party_index = 0
+        mock.action_offset_x = 0
+        mock.action_motion_frame = 0
+        mock._begin_action_motion(use_cast_pose=False, jump=True)
+
+        for _frame in range(4):
+            mock._update_action_motion()
+        self.assertEqual(mock._party_draw_position(0), (148, 56))
+        self.assertEqual(mock._party_sprite_source_x(0), 0)
+        for _frame in range(4):
+            mock._update_action_motion()
+        self.assertEqual(mock._party_draw_position(0), (140, 64))
+
+        mock._begin_action_return()
+        for frame in range(1, 9):
+            mock._update_action_motion()
+            self.assertEqual(mock._party_draw_position(0), (140 + frame * 2, 64))
+            if frame < 8:
+                self.assertEqual(
+                    mock._party_sprite_source_x(0),
+                    ((8 + frame) // FORMATION_WALK_PATTERN_FRAME_COUNT) % 2
+                    * FORMATION_SPRITE_STEP_X,
+                )
+        self.assertIsNone(mock.action_party_index)
+        self.assertFalse(mock.action_forward_jump)
+        self.assertEqual(mock.action_landing_guard_frames_remaining, 0)
+
+    def test_jump_attack_wait_and_walk_return_survive_cancelling_auto(self) -> None:
+        cases = (
+            (auto_active, strike_count, is_focused)
+            for auto_active in (True, False)
+            for strike_count in (1, 2)
+            for is_focused in (True, False)
+        )
+        for auto_active, strike_count, is_focused in cases:
+            with self.subTest(
+                auto_active=auto_active, strike_count=strike_count, is_focused=is_focused
+            ):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.auto_battle_active = auto_active
+                mock.action_forward_jump = True
+                mock.action_returning = False
+                mock.action_offset_x = ACTION_MOVE_DISTANCE
+                mock.monsters = (_damage_test_monster(),)
+                mock.attack_presentation = _attack_presentation(
+                    target_index=0,
+                    damage=0,
+                    poses=(),
+                    effect_row=None,
+                    is_hit=False,
+                    damage_applied=True,
+                    is_focused=is_focused,
+                    elapsed_frame=ATTACK_MOTION_FRAME_COUNT - 1,
+                )
+                mock.attack_presentation.progression_recorded = True
+                if strike_count == 2:
+                    start_frame = (
+                        mock.attack_presentation.motion_frame_count
+                        + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT
+                    )
+                    mock.attack_presentation.strikes += (
+                        BattleAttackStrike(
+                            damage=0,
+                            poses=(),
+                            effect_row=None,
+                            motion_start_frame=start_frame,
+                            hit_start_frame=start_frame + ATTACK_POSE_RAISE_FRAME_COUNT,
+                            is_hit=False,
+                            damage_applied=True,
+                        ),
+                    )
+                mock.attack_presentation.elapsed_frame = (
+                    mock.attack_presentation.motion_frame_count - 1
+                )
+                mock._begin_action_return = Mock()
+
+                expected_wait_frames = 12 if is_focused else 6
+                self.assertEqual(
+                    FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT
+                    if is_focused else JUMP_ATTACK_RETURN_WAIT_FRAME_COUNT,
+                    expected_wait_frames,
+                )
+                for _frame in range(expected_wait_frames):
+                    mock._update_attack_presentation()
+                    mock._begin_action_return.assert_not_called()
+                    self.assertFalse(mock.attack_presentation.return_started)
+                    self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
+                mock._update_attack_presentation()
+
+                mock._begin_action_return.assert_called_once_with(jump=False)
+
     def test_attack_damage_popup_starts_ten_frames_after_hit_effect(self) -> None:
         monster = BattleMockMonster(
             key="monster",
@@ -2099,6 +2198,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.target_cursor.active)
         self.assertEqual(mock.action_party_index, 0)
         self.assertFalse(mock.action_returning)
+        self.assertFalse(mock.action_forward_jump)
         mock.target_cursor.select_key.assert_called_once_with(4)
         mock._refresh_monster_name_colors.assert_called_once_with()
         mock.command_window.close_immediately.assert_not_called()
@@ -2867,10 +2967,60 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIs(mock.selected_command, BattleCommand.FOCUS)
         self.assertIs(mock.phase, BattleMockPhase.ATTACK_PRESENTATION)
         self.assertTrue(mock.attack_presentation.is_focused)
+        mock._begin_action_motion.assert_called_once_with(
+            use_cast_pose=False, jump=True
+        )
         self.assertEqual(
             resolve.call_args.kwargs["attack"],
             21 * FOCUS_ATTACK_MULTIPLIER,
         )
+
+    def test_focused_attack_lands_before_attacking_and_walks_back(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.party_visuals = (SimpleNamespace(member=mock.party[0]),)
+        mock.active_party_index = 0
+        mock.monsters = (_damage_test_monster(),)
+        mock.attack_poses = {}
+        mock.focused_target_by_party_index = {0: 0}
+        mock.target_cursor = Mock()
+        mock.command_window = Mock()
+        mock.action_offset_x = 0
+        mock.action_motion_frame = 0
+        mock._refresh_monster_name_colors = Mock()
+        mock._record_equipped_weapon_action = Mock()
+        mock._complete_current_turn = Mock()
+        mock._active_member_attack_targets = Mock(return_value=(0,))
+
+        with (
+            patch('scenes.battle.resolve_physical_attack',
+                  return_value=SimpleNamespace(hit=True, damage=12)),
+            patch('scenes.battle.play_se'),
+        ):
+            self.assertTrue(mock._begin_focused_attack())
+            for _frame in range(7):
+                mock._update_action_motion()
+                mock._update_attack_presentation()
+                self.assertEqual(mock.attack_presentation.elapsed_frame, 0)
+                self.assertEqual(mock.monsters[0].state.hp, 10_000)
+                self.assertLess(mock._party_draw_position(0)[1], PARTY_SPRITE_Y[0])
+            mock._update_action_motion()
+            self.assertEqual(mock._party_draw_position(0), (140, 64))
+            mock._update_attack_presentation()
+            self.assertEqual(mock.attack_presentation.elapsed_frame, 1)
+            while not mock.attack_presentation.return_started:
+                mock._update_attack_presentation()
+
+        self.assertTrue(mock.action_returning)
+        self.assertFalse(mock.action_return_jump)
+        mock._update_action_motion()
+        self.assertEqual(mock._party_draw_position(0), (142, 64))
+        self.assertEqual(mock.action_landing_guard_frames_remaining, 0)
 
     def test_incapacitation_cancels_focus_state(self) -> None:
         for field, value in (
@@ -7613,14 +7763,39 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock._begin_defense.assert_not_called()
 
+    def test_auto_attack_target_selection_starts_a_forward_jump(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.auto_battle_active = True
+        mock.active_party_index = 0
+        mock._active_member_attack_targets = Mock(return_value=(0,))
+        mock.command_cursor = Mock()
+        mock.target_cursor = Mock()
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(mock._begin_attack_target_selection())
+
+        self.assertTrue(mock.action_forward_jump)
+        self.assertFalse(mock.action_returning)
+
     def test_auto_target_selection_confirms_the_default_target(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.auto_battle_active = True
+        mock.action_offset_x = ACTION_MOVE_DISTANCE
         mock._begin_attack_presentation = Mock()
 
         mock._update_target_selection(InputState())
 
         mock._begin_attack_presentation.assert_called_once_with()
+
+    def test_auto_target_selection_waits_until_forward_jump_lands(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.auto_battle_active = True
+        mock.action_offset_x = ACTION_MOVE_DISTANCE - ACTION_MOVE_SPEED
+        mock._begin_attack_presentation = Mock()
+
+        mock._update_target_selection(InputState())
+
+        mock._begin_attack_presentation.assert_not_called()
 
     def test_cancel_during_auto_targeting_returns_to_member_commands(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -8461,8 +8636,80 @@ class BattleScreenMockTest(unittest.TestCase):
 
                 self.assertEqual(applied, (effect,))
                 self.assertTrue(getattr(member, state_field))
-                self.assertEqual(mock.focused_target_by_party_index, {})
+                expected_focus = (
+                    {0: 0}
+                    if effect in (AdditionalEffect.POISON, AdditionalEffect.DEFENSE_DOWN)
+                    else {}
+                )
+                self.assertEqual(mock.focused_target_by_party_index, expected_focus)
                 mock._show_battle_popup.assert_not_called()
+
+    def test_poisoned_focused_member_attacks_after_next_turn_poison_damage(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.timeline = (visual,)
+        mock.escape_requested = False
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.defending_party_indexes = set()
+        mock.focused_target_by_party_index = {0: 0}
+        mock.monsters = (_damage_test_monster(),)
+        mock.attack_poses = {}
+        mock.action_offset_x = 0
+        mock.action_motion_frame = 0
+        mock.command_window = Mock()
+        mock.target_cursor = Mock()
+        mock._party_draw_position = Mock(return_value=(156, 64))
+        mock._refresh_party_hp_text = Mock()
+        mock._refresh_party_text_colors = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._active_member_attack_targets = Mock(return_value=(0,))
+
+        mock._apply_additional_effects_to_member(0, (AdditionalEffect.POISON,))
+        mock._clear_interrupted_focus_states()
+        self.assertTrue(member.poisoned)
+        self.assertEqual(mock.focused_target_by_party_index, {0: 0})
+        starting_hp = member.hp
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(member.hp, starting_hp - (member.max_hp + 15) // 16)
+        self.assertIs(mock.phase, BattleMockPhase.ATTACK_PRESENTATION)
+        self.assertTrue(mock.attack_presentation.is_focused)
+        self.assertTrue(mock.action_forward_jump)
+        self.assertEqual(mock.focused_target_by_party_index, {})
+        mock.command_window.open.assert_not_called()
+
+    def test_poison_with_incapacitation_still_cancels_focus(self) -> None:
+        for effect in (
+            AdditionalEffect.SLEEP,
+            AdditionalEffect.PARALIZE,
+            AdditionalEffect.STUN,
+            AdditionalEffect.DEATH,
+        ):
+            with self.subTest(effect=effect):
+                member = load_mock_party(
+                    load_mock_items(),
+                    load_mock_skills(),
+                    character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+                )[0]
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = (member,)
+                mock.focused_target_by_party_index = {0: 0}
+                mock._refresh_party_hp_text = Mock()
+
+                mock._apply_additional_effects_to_member(
+                    0, (AdditionalEffect.POISON, effect)
+                )
+
+                self.assertEqual(mock.focused_target_by_party_index, {})
 
     def test_stun_skips_the_next_timeline_head_once(self) -> None:
         member = load_mock_party(
