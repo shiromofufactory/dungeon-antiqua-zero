@@ -30,6 +30,14 @@ class DisplayMode(StrEnum):
     SMOOTH = "smooth"
 
 
+class SpellMode(StrEnum):
+    """Spell usage in automatic battles, persisted by stable preference keys."""
+
+    USE = "use"
+    RECOVERY_ONLY = "recovery_only"
+    NEVER = "never"
+
+
 class SettingsDataError(ValueError):
     """Raised when persisted settings cannot be interpreted safely."""
 
@@ -51,6 +59,8 @@ class Settings:
     display_mode: DisplayMode = DisplayMode.PIXEL
     screen_flash_enabled: bool = True
     in_game_hints_enabled: bool = True
+    auto_battle_spell_mode: SpellMode = SpellMode.USE
+    remember_battle_commands: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.language, Language):
@@ -83,6 +93,10 @@ class Settings:
 
         if not isinstance(self.in_game_hints_enabled, bool):
             raise TypeError("in_game_hints_enabled must be a boolean")
+        if not isinstance(self.auto_battle_spell_mode, SpellMode):
+            raise TypeError("auto_battle_spell_mode must be a SpellMode")
+        if not isinstance(self.remember_battle_commands, bool):
+            raise TypeError("remember_battle_commands must be a boolean")
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON-compatible representation of these settings."""
@@ -95,6 +109,8 @@ class Settings:
             "display_mode": self.display_mode.value,
             "screen_flash_enabled": self.screen_flash_enabled,
             "in_game_hints_enabled": self.in_game_hints_enabled,
+            "auto_battle_spell_mode": self.auto_battle_spell_mode.value,
+            "remember_battle_commands": self.remember_battle_commands,
         }
 
     def with_language(self, language: Language) -> Settings:
@@ -138,6 +154,16 @@ class Settings:
 
         return replace(self, in_game_hints_enabled=enabled)
 
+    def with_auto_battle_spell_mode(self, mode: SpellMode) -> Settings:
+        """Return updated preferences for automatic battle spell usage."""
+
+        return replace(self, auto_battle_spell_mode=mode)
+
+    def with_remember_battle_commands(self, enabled: bool) -> Settings:
+        """Return updated preferences for battle cursor restoration."""
+
+        return replace(self, remember_battle_commands=enabled)
+
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Settings:
         """Build settings from persisted data with DA2-compatible defaults."""
@@ -164,6 +190,15 @@ class Settings:
             raise SettingsDataError(
                 f"unsupported display mode: {display_value}"
             ) from error
+        spell_value = data.get("auto_battle_spell_mode", SpellMode.USE.value)
+        if not isinstance(spell_value, str):
+            raise SettingsDataError("settings.auto_battle_spell_mode must be a string")
+        try:
+            spell_mode = SpellMode(spell_value)
+        except ValueError as error:
+            raise SettingsDataError(
+                f"unsupported auto battle spell mode: {spell_value}"
+            ) from error
         try:
             return cls(
                 language=language,
@@ -173,6 +208,8 @@ class Settings:
                 display_mode=display_mode,
                 screen_flash_enabled=data.get("screen_flash_enabled", True),
                 in_game_hints_enabled=data.get("in_game_hints_enabled", True),
+                auto_battle_spell_mode=spell_mode,
+                remember_battle_commands=data.get("remember_battle_commands", True),
             )
         except (TypeError, ValueError) as error:
             raise SettingsDataError(str(error)) from error

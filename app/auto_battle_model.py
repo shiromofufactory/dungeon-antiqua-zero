@@ -21,6 +21,7 @@ if __package__:
     from .monster import MonsterSpecialAction
     from .resistance import ResistanceType
     from .spell import Spell
+    from .state import SpellMode
 else:
     from battle_commands import BattleCommand
     from battle_physical import member_physical_attack
@@ -35,18 +36,13 @@ else:
     from monster import MonsterSpecialAction
     from resistance import ResistanceType
     from spell import Spell
+    from state import SpellMode
 
 
 CASE_COUNT = 8
 FORECAST_TURNS = 16
 DISCOUNT = 0.95
 EFFECT_VERSION = 2
-
-
-class SpellMode(StrEnum):
-    USE = "use"
-    RECOVERY_ONLY = "recovery_only"
-    NEVER = "never"
 
 
 class ItemMode(StrEnum):

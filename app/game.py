@@ -11,6 +11,7 @@ from pathlib import Path
 import pyxel
 
 from attack_pose import AttackPoseDataError
+from battle_command_memory import BattleCommandMemory
 from game_data import (
     GameDataError,
     create_party,
@@ -117,7 +118,7 @@ from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
 from spell_effect import SpellEffectDataError
-from state import DisplayMode, Difficulty, Language, SaveData, Settings
+from state import DisplayMode, Difficulty, Language, SaveData, Settings, SpellMode
 from systems import (
     ChangeBgmEffect,
     DebugPartyEditor,
@@ -242,6 +243,11 @@ SETTINGS_TEXT_KEYS = (
     "settings.screen_flash.label",
     "settings.screen_flash.normal",
     "settings.screen_flash.reduced",
+    "settings.command_memory.label",
+    "settings.auto_spells.label",
+    "settings.auto_spells.use",
+    "settings.auto_spells.recovery_only",
+    "settings.auto_spells.never",
     "settings.return_title",
     "settings.quit",
     "settings.confirm.return_title",
@@ -259,9 +265,11 @@ SETTINGS_ROWS = (
     ("display", 14),
     ("screen_flash", 17),
     ("in_game_hints", 20),
-    ("debug", 23),
-    ("return_title", 26),
-    ("quit", 29),
+    ("command_memory", 23),
+    ("auto_spells", 26),
+    ("debug", 29),
+    ("return_title", 32),
+    ("quit", 35),
 )
 SETTINGS_GUIDE_KEYS = {
     "in_game_hints": "settings.guide.in_game_hints",
@@ -271,6 +279,8 @@ SETTINGS_GUIDE_KEYS = {
     "screen_size": "settings.guide.screen_size",
     "display": "settings.guide.display",
     "screen_flash": "settings.guide.screen_flash",
+    "command_memory": "settings.guide.command_memory",
+    "auto_spells": "settings.guide.auto_spells",
 }
 LANGUAGE_SEQUENCE = (
     Language.JAPANESE,
@@ -321,12 +331,12 @@ SE_CHANNELS = (
 )
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
-SETTINGS_WINDOW_GRID = (4, 9, 56, 42)
+SETTINGS_WINDOW_GRID = (4, 4, 56, 52)
 SETTINGS_LABEL_X = 4
 SETTINGS_VALUE_X = 30
 SETTINGS_CURSOR_X = 2
 SETTINGS_GUIDE_X = 4
-SETTINGS_GUIDE_Y = 35
+SETTINGS_GUIDE_Y = 41
 SETTINGS_GUIDE_ROW_HEIGHT = 3
 CONFIRMATION_WINDOW_GRID = (8, 22, 48, 16)
 CONFIRMATION_CURSOR_X = 4
@@ -441,6 +451,7 @@ class Game:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
         self.settings = settings
+        self.battle_command_memory = BattleCommandMemory()
         self.settings_repository = (
             SettingsRepository() if settings_repository is None else settings_repository
         )
@@ -618,6 +629,9 @@ class Game:
     def _build_battle_scene(self, encounter: BattleEncounter) -> BattleScene:
         """Create a battle from current session state without choosing when it starts."""
 
+        memory = getattr(self, "battle_command_memory", None)
+        if memory is None:
+            memory = self.battle_command_memory = BattleCommandMemory()
         return BattleScene.create(
             settings=self.settings,
             palette_shifter=self.palette_shifter,
@@ -634,6 +648,7 @@ class Game:
             save_data=self.save_data,
             return_bgm_id=self.current_map.bgm_id,
             encounter=encounter,
+            command_memory=memory,
         )
 
     def _advance_random_encounter(self) -> bool:
@@ -1604,6 +1619,12 @@ class Game:
         if key == "in_game_hints":
             value = "on" if self.settings.in_game_hints_enabled else "off"
             return self.localized[f"settings.{value}"]
+        if key == "command_memory":
+            value = "on" if self.settings.remember_battle_commands else "off"
+            return self.localized[f"settings.{value}"]
+        if key == "auto_spells":
+            mode = self.settings.auto_battle_spell_mode.value
+            return self.localized[f"settings.auto_spells.{mode}"]
         raise ValueError(f"settings key has no value: {key}")
 
     def _settings_window_texts(
@@ -1619,6 +1640,8 @@ class Game:
             "display": "settings.display.label",
             "screen_flash": "settings.screen_flash.label",
             "in_game_hints": "settings.in_game_hints.label",
+            "command_memory": "settings.command_memory.label",
+            "auto_spells": "settings.auto_spells.label",
         }
         action_keys = {
             "return_title": "settings.return_title",
@@ -2140,6 +2163,7 @@ class Game:
                 map_id=self.current_map.map_id,
                 position=self.field.position,
                 facing=self.field.facing,
+                battle_command_memory=getattr(self, "battle_command_memory", None),
             )
             summary = self.save_repository.save(slot, document)
         except (SaveSystemError, TypeError, ValueError):
@@ -2237,6 +2261,13 @@ class Game:
             self._reset_field_actors()
             self.selected_member_index = 0
             self._build_main_windows(animate=False)
+        self.battle_command_memory = (
+            loaded.battle_command_memory
+            if loaded is not None
+            else BattleCommandMemory()
+        )
+        if not self.settings.remember_battle_commands:
+            self.battle_command_memory.clear()
         self.pending_loaded_state = None
         self.pending_loaded_map = None
         self.pending_loaded_field = None
@@ -2326,6 +2357,16 @@ class Game:
             updated_settings = self.settings.with_screen_flash_enabled(
                 not self.settings.screen_flash_enabled
             )
+        elif key == "command_memory":
+            updated_settings = self.settings.with_remember_battle_commands(
+                not self.settings.remember_battle_commands
+            )
+        elif key == "auto_spells":
+            sequence = tuple(SpellMode)
+            index = sequence.index(self.settings.auto_battle_spell_mode)
+            updated_settings = self.settings.with_auto_battle_spell_mode(
+                sequence[(index + distance) % len(sequence)]
+            )
         else:
             return
 
@@ -2335,6 +2376,10 @@ class Game:
             self.alert.start()
             return
         self.settings = updated_settings
+        if key == "command_memory" and not updated_settings.remember_battle_commands:
+            memory = getattr(self, "battle_command_memory", None)
+            if memory is not None:
+                memory.clear()
 
         if key == "language":
             self._build_main_windows(

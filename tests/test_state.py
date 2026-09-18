@@ -9,6 +9,7 @@ from app.state import (
     SaveData,
     Settings,
     SettingsDataError,
+    SpellMode,
 )
 
 
@@ -30,6 +31,8 @@ class SettingsTest(unittest.TestCase):
                 "display_mode": "pixel",
                 "screen_flash_enabled": True,
                 "in_game_hints_enabled": True,
+                "auto_battle_spell_mode": "use",
+                "remember_battle_commands": True,
             },
         )
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
@@ -40,6 +43,29 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(Settings.from_dict(disabled.to_dict()), disabled)
         with self.assertRaises(SettingsDataError):
             Settings.from_dict({"in_game_hints_enabled": 1})
+
+    def test_battle_preferences_restore_old_settings_and_validate_new_values(
+        self,
+    ) -> None:
+        old = Settings.from_dict({"language": "ja"})
+        self.assertIs(old.auto_battle_spell_mode, SpellMode.USE)
+        self.assertTrue(old.remember_battle_commands)
+        for mode in SpellMode:
+            changed = old.with_auto_battle_spell_mode(
+                mode
+            ).with_remember_battle_commands(False)
+            self.assertEqual(Settings.from_dict(changed.to_dict()), changed)
+        for document in (
+            {"auto_battle_spell_mode": "invalid"},
+            {"auto_battle_spell_mode": 0},
+            {"remember_battle_commands": 1},
+        ):
+            with self.assertRaises(SettingsDataError):
+                Settings.from_dict(document)
+        with self.assertRaises(TypeError):
+            old.with_auto_battle_spell_mode("use")
+        with self.assertRaises(TypeError):
+            old.with_remember_battle_commands(1)
 
     def test_language_change_returns_a_new_settings_snapshot(self) -> None:
         original = Settings()

@@ -6,7 +6,9 @@
 通常攻撃・奇襲と防御だけを選ぶ旧実装を置き換える。ここで定める係数は初期採用値であり、
 実装後の戦闘検証によって変更する場合も、コードと本書を同時に更新する。
 判断器は `app/auto_battle.py`、読み取り専用入力は `app/auto_battle_model.py`、
-予測器は `app/auto_battle_simulation.py` に実装する。Settings、セーブ形式、共有JSONは変更しない。
+予測器は `app/auto_battle_simulation.py` に実装する。呪文使用方針はSettingsへ保存し、
+設定メニューの表示文言は共有JSONを参照する。コマンド記憶の保存形式は
+[セーブデータ](./save-data.md) に定める。
 
 参照する正本は次のとおり。
 
@@ -56,6 +58,9 @@ DA2の `app/battle.py` の `auto_prepare`、`auto_main`、`auto_conclude` を参
 Sceneは `AUTO_THINKING` で1フレームにつき8msを目安に計算し、予測1手番の境界で中断する。
 キャンセル時に未確定の判断結果を捨て、同じ行動者のコマンド選択へ戻す。
 使用確定後のキャンセルはオート継続だけを解除し、実行中の行動を取り消さない。
+オートを中断した時点で、コマンド記憶が有効なら全体コマンドの記憶を「たたかう」へ更新する。
+計算中・対象選択中・効果や攻撃の演出中・敵の行動中のいずれにも適用し、
+次の全体コマンド表示と次の戦闘開始へ反映する。個別コマンド・呪文・アイテムの記憶は維持する。
 割り込みゲームメニューからの復帰は、確定済み行動・計算途中の位置を維持する。
 
 しきべつの結果Windowは、オートが継続している場合に限り、完全に開いてから60フレームで自動的に閉じる。
@@ -67,8 +72,12 @@ Sceneは `AUTO_THINKING` で1フレームにつき8msを目安に計算し、予
 
 ### 方針パラメータ
 
-判断器は次の方針を受け取る。設定画面、表示文言キー、Settingsへの保存は別の実装作業で定める。
-設定入口がない段階の既定値は `spell_mode=use`、`item_mode=reusable_equipment` とする。
+判断器は次の方針を受け取る。設定メニューの `settings.auto_spells.label` で
+`settings.auto_spells.use` / `settings.auto_spells.recovery_only` / `settings.auto_spells.never`
+を左右入力で循環変更し、Settingsの `auto_battle_spell_mode` へ保存する。
+既定値は `spell_mode=use`、`item_mode=reusable_equipment` とする。
+各BattleSceneの生成時に設定を判断器へ渡し、予測中の味方の行動にも同じ制限を適用する。
+手動で選ぶ呪文と敵の呪文には適用しない。設定メニューの詳細は [フィールド](./field.md) を参照する。
 
 | パラメータ | 値 | 候補の制限 |
 | --- | --- | --- |

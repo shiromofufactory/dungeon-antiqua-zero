@@ -7,10 +7,12 @@ import tempfile
 import unittest
 
 from tools._bootstrap import APP_ROOT
+from battle_command_memory import BattleCommandMemory
+from battle_commands import BattleCommand
 from field import FieldPosition
 from input import Direction
 from state import Difficulty, SaveData
-from member import internal_level_for_experience, required_experience_for_level
+from member import EquipmentSlot, internal_level_for_experience, required_experience_for_level
 from systems import (
     SAVE_FORMAT_VERSION,
     SAVE_SLOT_COUNT,
@@ -35,7 +37,7 @@ class SaveSystemTest(unittest.TestCase):
         cls.skills = load_mock_skills()
         cls.all_members = load_mock_party(cls.items, cls.skills)
 
-    def save_document(self) -> dict[str, object]:
+    def save_document(self, memory=None) -> dict[str, object]:
         inventory = InventorySystem(self.items)
         party = self.all_members[:2]
         character_states = {
@@ -78,6 +80,7 @@ class SaveSystemTest(unittest.TestCase):
             map_id="worldmap",
             position=FieldPosition(17, 39),
             facing=Direction.LEFT,
+            battle_command_memory=memory,
             saved_at=datetime(
                 2026,
                 9,
@@ -88,6 +91,120 @@ class SaveSystemTest(unittest.TestCase):
                 tzinfo=timezone(timedelta(hours=9)),
             ),
         )
+
+    def test_battle_memory_round_trip_uses_keys_and_preserves_independent_choices(self):
+        for command in ("fight", "escape", "auto"):
+            with self.subTest(command=command):
+                memory = BattleCommandMemory(
+                    global_command=command,
+                    commands={
+                        "Fiora": BattleCommand.SPELL,
+                        "Alvan": BattleCommand.HIDE,
+                    },
+                    spells={"Fiora": "HEALING1", "Alvan": "FIRE1"},
+                    items={
+                        "Fiora": ("POTION", None),
+                        "Cerion": ("MIRACLE RING", EquipmentSlot.ARM),
+                        "Alvan": ("SHORT SWORD", EquipmentSlot.RIGHT),
+                    },
+                )
+                document = json.loads(json.dumps(self.save_document(memory)))
+                restored = restore_save_document(
+                    document,
+                    character_records=load_mock_character_records(),
+                    items=self.items,
+                    skills=self.skills,
+                )
+                self.assertEqual(restored.battle_command_memory, memory)
+                serialized = document["battle_command_memory"]
+                self.assertEqual(serialized["global_command"], command)
+                self.assertEqual(serialized["commands"]["Fiora"], "spell")
+                self.assertEqual(serialized["items"]["Cerion"]["equipment_slot"], "ARM")
+                self.assertIsNone(serialized["items"]["Fiora"]["equipment_slot"])
+                self.assertEqual(
+                    set(serialized), {"global_command", "commands", "spells", "items"}
+                )
+                self.assertIsNot(restored.battle_command_memory, memory)
+                restored.battle_command_memory.clear()
+                self.assertEqual(memory.global_command, command)
+                self.assertEqual(document["battle_command_memory"], serialized)
+
+    def test_legacy_saves_without_battle_memory_restore_empty_choices(self):
+        for version in (1, 2):
+            with self.subTest(version=version):
+                document = self.save_document()
+                document["format_version"] = version
+                del document["battle_command_memory"]
+                if version == 1:
+                    for state in document["party"]["character_states"].values():
+                        del state["experience_offset"]
+                restored = restore_save_document(
+                    document,
+                    character_records=load_mock_character_records(),
+                    items=self.items,
+                    skills=self.skills,
+                )
+                self.assertEqual(restored.battle_command_memory, BattleCommandMemory())
+
+    def test_invalid_battle_memory_is_rejected_before_restoration(self):
+        for value in (
+            None,
+            [],
+            {"global_command": "unknown"},
+            {"global_command": True},
+            {"commands": []},
+            {"commands": {"": "attack"}},
+            {"commands": {"Fiora": "unknown"}},
+            {"commands": {"Fiora": 1}},
+            {"spells": {"Fiora": ""}},
+            {"spells": {"Fiora": False}},
+            {"items": {"Fiora": []}},
+            {"items": {"Fiora": {"item_key": "POTION", "equipment_slot": "FOOT"}}},
+            {"items": {"Fiora": {"item_key": "POTION", "equipment_slot": 0}}},
+            {"items": {"Fiora": {"item_key": ""}}},
+        ):
+            with self.subTest(value=value):
+                document = self.save_document()
+                document["battle_command_memory"] = value
+                with self.assertRaises(SaveSystemError):
+                    restore_save_document(
+                        document,
+                        character_records=load_mock_character_records(),
+                        items=self.items,
+                        skills=self.skills,
+                    )
+
+    def test_battle_memory_keeps_history_of_currently_unavailable_spells_and_items(
+        self,
+    ):
+        memory = BattleCommandMemory(
+            spells={"Fiora": "missing_spell"},
+            items={"Fiora": ("missing_item", EquipmentSlot.ARM)},
+        )
+        restored = restore_save_document(
+            self.save_document(memory),
+            character_records=load_mock_character_records(),
+            items=self.items,
+            skills=self.skills,
+        )
+        self.assertEqual(restored.battle_command_memory, memory)
+
+    def test_repository_persists_battle_memory_in_each_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            for slot, command in enumerate(("fight", "escape", "auto"), start=1):
+                repository.save(
+                    slot,
+                    self.save_document(BattleCommandMemory(global_command=command)),
+                )
+            for slot, command in enumerate(("fight", "escape", "auto"), start=1):
+                restored = restore_save_document(
+                    repository.load(slot),
+                    character_records=load_mock_character_records(),
+                    items=self.items,
+                    skills=self.skills,
+                )
+                self.assertEqual(restored.battle_command_memory.global_command, command)
 
     def test_creates_complete_current_version_document(self) -> None:
         document = self.save_document()

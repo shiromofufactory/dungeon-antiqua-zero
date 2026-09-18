@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 from pathlib import Path
 
 if __package__ == "systems":
+    from battle_command_memory import BattleCommandMemory
+    from battle_commands import BattleCommand
     from field import FieldPosition
     from input import Direction
     from member import (
@@ -26,6 +28,8 @@ if __package__ == "systems":
     from state import Difficulty, SaveData
     from systems.inventory import InventorySystem
 else:
+    from ..battle_command_memory import BattleCommandMemory
+    from ..battle_commands import BattleCommand
     from ..field import FieldPosition
     from ..input import Direction
     from ..member import (
@@ -112,6 +116,9 @@ class LoadedGameState:
     map_id: str
     position: FieldPosition
     facing: Direction
+    battle_command_memory: BattleCommandMemory = field(
+        default_factory=BattleCommandMemory
+    )
 
 
 def restore_save_document(
@@ -263,6 +270,9 @@ def restore_save_document(
     except KeyError as error:
         raise SaveSystemError("save facing direction is unsupported") from error
 
+    command_memory = _restore_battle_command_memory(
+        document.get("battle_command_memory", {})
+    )
     # Reuse the writer's aggregate invariants after every value has been restored.
     create_save_document(
         save_data=save_data,
@@ -273,6 +283,7 @@ def restore_save_document(
         position=position,
         facing=facing,
         saved_at=timestamp,
+        battle_command_memory=command_memory,
     )
     return LoadedGameState(
         save_data=save_data,
@@ -282,6 +293,7 @@ def restore_save_document(
         map_id=map_id,
         position=position,
         facing=facing,
+        battle_command_memory=command_memory,
     )
 
 
@@ -533,6 +545,7 @@ def create_save_document(
     position: FieldPosition,
     facing: Direction,
     saved_at: datetime | None = None,
+    battle_command_memory: BattleCommandMemory | None = None,
 ) -> dict[str, object]:
     """Create one complete current-version save document from explicit owners."""
 
@@ -646,7 +659,91 @@ def create_save_document(
         ),
         "monster_records": _serialize_monster_records(save_data.monster_records),
         "logs": _serialize_logs(save_data.logs),
+        "battle_command_memory": _serialize_battle_command_memory(
+            BattleCommandMemory()
+            if battle_command_memory is None
+            else battle_command_memory
+        ),
     }
+
+
+def _restore_battle_command_memory(value: object) -> BattleCommandMemory:
+    value = _mapping(value, "battle_command_memory")
+    global_command = value.get("global_command")
+    if global_command is not None and (
+        not isinstance(global_command, str)
+        or global_command not in ("fight", "escape", "auto")
+    ):
+        raise SaveSystemError("battle command memory has an invalid global command")
+    choices = {}
+    for name in ("commands", "spells", "items"):
+        current = _mapping(value.get(name, {}), f"battle_command_memory.{name}")
+        if not all(isinstance(key, str) and key for key in current):
+            raise SaveSystemError("battle command memory has invalid character keys")
+        choices[name] = current
+    memory = BattleCommandMemory(global_command=global_command)
+    for key, command in choices["commands"].items():
+        if not isinstance(command, str):
+            raise SaveSystemError("remembered commands must be strings")
+        try:
+            memory.commands[key] = BattleCommand(command)
+        except ValueError as error:
+            raise SaveSystemError("remembered command is unsupported") from error
+    for key, spell in choices["spells"].items():
+        if not isinstance(spell, str) or not spell:
+            raise SaveSystemError("remembered spell keys must be non-empty strings")
+        memory.spells[key] = spell
+    for key, selection in choices["items"].items():
+        selection = _mapping(selection, "remembered item")
+        item_key = _required_string(selection, "item_key", "remembered item")
+        slot = selection.get("equipment_slot")
+        if slot is not None:
+            if not isinstance(slot, str):
+                raise SaveSystemError("remembered equipment slot must be a string")
+            try:
+                slot = EquipmentSlot(slot)
+            except ValueError as error:
+                raise SaveSystemError(
+                    "remembered equipment slot is unsupported"
+                ) from error
+        memory.items[key] = (item_key, slot)
+    return memory
+
+
+def _serialize_battle_command_memory(memory: BattleCommandMemory) -> dict[str, object]:
+    if not isinstance(memory, BattleCommandMemory):
+        raise TypeError("battle_command_memory must be BattleCommandMemory")
+    if not isinstance(memory.commands, Mapping) or not all(
+        isinstance(command, BattleCommand) for command in memory.commands.values()
+    ):
+        raise TypeError("remembered commands must be BattleCommand values")
+    if not isinstance(memory.spells, Mapping) or not isinstance(memory.items, Mapping):
+        raise TypeError("remembered spells and items must be mappings")
+    items = {}
+    for key, selection in memory.items.items():
+        if (
+            not isinstance(selection, tuple)
+            or len(selection) != 2
+            or (
+                selection[1] is not None and not isinstance(selection[1], EquipmentSlot)
+            )
+        ):
+            raise TypeError(
+                "remembered items must contain an item key and equipment slot"
+            )
+        item_key, slot = selection
+        items[key] = {
+            "item_key": item_key,
+            "equipment_slot": slot.value if slot is not None else None,
+        }
+    serialized = {
+        "global_command": memory.global_command,
+        "commands": {key: command.value for key, command in memory.commands.items()},
+        "spells": dict(memory.spells),
+        "items": items,
+    }
+    _restore_battle_command_memory(serialized)
+    return serialized
 
 
 def _serialize_member(member: Member) -> dict[str, object]:

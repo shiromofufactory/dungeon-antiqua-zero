@@ -28,6 +28,7 @@ from attack_pose import (
     attack_sequence,
     load_attack_poses,
 )
+from battle_command_memory import BattleCommandMemory
 from battle_commands import (
     BattleCommand,
     BattleCommandContext,
@@ -1499,6 +1500,7 @@ class BattleScene:
         save_data: SaveData,
         result_party: tuple[Member, ...],
         return_bgm_id: str,
+        command_memory: BattleCommandMemory | None = None,
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -1528,6 +1530,7 @@ class BattleScene:
                 palette_shifter,
             ),
             spell_effects=load_spell_effects(APP_ROOT / "effects" / "spells.json"),
+            command_memory=command_memory,
         )
 
     def __init__(
@@ -1557,9 +1560,14 @@ class BattleScene:
         result_party: tuple[Member, ...] | None = None,
         return_bgm_id: str | None = None,
         fonts: FontResources | None = None,
+        command_memory: BattleCommandMemory | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
+        if command_memory is not None and not isinstance(
+            command_memory, BattleCommandMemory
+        ):
+            raise TypeError("command_memory must be BattleCommandMemory or None")
         if not isinstance(encounter, BattleEncounter):
             raise TypeError("encounter must be a BattleEncounter")
         if not party or not all(isinstance(member, Member) for member in party):
@@ -1888,7 +1896,9 @@ class BattleScene:
         self.selected_command: str | None = None
         self.escape_return_phase = BattlePhase.COMMAND
         self.auto_battle_active = False
-        self.auto_battle_policy = AutoBattlePolicy()
+        self.auto_battle_policy = AutoBattlePolicy(
+            spell_mode=settings.auto_battle_spell_mode
+        )
         self.auto_battle_planner: AutoBattlePlanner | None = None
         self.auto_battle_observations = AutoBattleObservations()
         self.auto_battle_log: list[AutoBattleLogEntry] = []
@@ -1943,6 +1953,11 @@ class BattleScene:
         self.spell_type = SpellType.MYSTIC
         self.spell_cursor: WindowCursor | None = None
         self.last_command_by_party_index: dict[int, BattleCommand] = {}
+        self.command_memory = (
+            command_memory if command_memory is not None else BattleCommandMemory()
+        )
+        self.last_global_command: BattleGlobalCommand | None = None
+        self.initial_global_command_pending = False
         self.last_spell_key_by_party_index: dict[int, str] = {}
         self.last_item_selection_by_party_index: dict[
             int, tuple[str, EquipmentSlot | None]
@@ -2231,6 +2246,12 @@ class BattleScene:
             command = self.global_command_cursor
             if command is None:
                 return
+            if (
+                isinstance(command.selected_key, BattleGlobalCommand)
+                and self._command_memory_enabled
+            ):
+                self.last_global_command = command.selected_key
+                self._sync_command_memory()
             if command.selected_key is BattleGlobalCommand.FIGHT:
                 self._open_member_command_menu()
                 return
@@ -2343,6 +2364,7 @@ class BattleScene:
         self.last_spell_key_by_party_index.clear()
         self.last_item_selection_by_party_index.clear()
         self.last_cover_target_by_party_index.clear()
+        self._restore_command_memory()
         self.selectable_party_target_indexes = ()
         self.selected_party_target_index = None
         self.action_targets_enemy = False
@@ -2622,6 +2644,9 @@ class BattleScene:
                 for row_index, command in enumerate(commands)
             )
         )
+        remembered = getattr(self, "last_global_command", None)
+        if self._command_memory_enabled and remembered is not None:
+            self.global_command_cursor.select_key(remembered)
 
     def _begin_auto_battle(self) -> None:
         """Start planning one action at a time from current battle state."""
@@ -2779,8 +2804,9 @@ class BattleScene:
                     self.party[self.active_party_index].equipment.item_at(slot), slot
                 )
                 self._remember_active_item(candidate)
-            else:
+            elif self._command_memory_enabled:
                 self.last_spell_key_by_party_index[self.active_party_index] = spell.key
+                self._sync_command_memory()
             self._begin_action_motion(use_cast_pose=command is BattleCommand.SPELL)
             self._begin_action_target_selection(spell, item_candidate=candidate)
             if not spell.to_all:
@@ -2806,6 +2832,10 @@ class BattleScene:
 
         self.auto_battle_active = False
         self.auto_battle_planner = None
+        self.initial_global_command_pending = False
+        if self._command_memory_enabled:
+            self.last_global_command = BattleGlobalCommand.FIGHT
+            self._sync_command_memory()
         if self.phase is BattlePhase.AUTO_THINKING:
             self._open_member_command_menu()
         elif self.phase is BattlePhase.ACTION_TARGET:
@@ -3236,8 +3266,10 @@ class BattleScene:
             )
             for index in selectable
         )
-        remembered = getattr(self, "last_cover_target_by_party_index", {}).get(
-            party_index
+        remembered = (
+            getattr(self, "last_cover_target_by_party_index", {}).get(party_index)
+            if self._command_memory_enabled
+            else None
         )
         selected = remembered if remembered in selectable else selectable[0]
         self.selectable_party_target_indexes = selectable
@@ -3294,7 +3326,8 @@ class BattleScene:
         if remembered is None:
             remembered = {}
             self.last_cover_target_by_party_index = remembered
-        remembered[party_index] = target_index
+        if self._command_memory_enabled:
+            remembered[party_index] = target_index
         if target_index == party_index:
             return self._begin_defense()
 
@@ -3517,7 +3550,7 @@ class BattleScene:
     def _remember_active_item(self, candidate: BattleItemCandidate) -> None:
         """Keep one member's last confirmed item by stable item and slot keys."""
 
-        if self.active_party_index is None:
+        if self.active_party_index is None or not self._command_memory_enabled:
             return
         selections = getattr(self, "last_item_selection_by_party_index", None)
         if selections is None:
@@ -3527,6 +3560,7 @@ class BattleScene:
             candidate.item.key,
             candidate.equipment_slot,
         )
+        self._sync_command_memory()
 
     def _remembered_item_index(
         self,
@@ -3534,7 +3568,7 @@ class BattleScene:
     ) -> int | None:
         """Find the active member's last item when it remains usable."""
 
-        if self.active_party_index is None:
+        if self.active_party_index is None or not self._command_memory_enabled:
             return None
         selection = getattr(self, "last_item_selection_by_party_index", {}).get(
             self.active_party_index
@@ -3760,9 +3794,15 @@ class BattleScene:
         self._begin_action_motion(use_cast_pose=True)
         self.spell_candidates = candidates
         self.spell_scroll_offset = 0
+        # A cursor from the previous menu is not a confirmed member choice.
+        self.spell_cursor = None
         member = self.party[self.active_party_index]
-        remembered_key = getattr(self, "last_spell_key_by_party_index", {}).get(
-            self.active_party_index
+        remembered_key = (
+            getattr(self, "last_spell_key_by_party_index", {}).get(
+                self.active_party_index
+            )
+            if self._command_memory_enabled
+            else None
         )
         remembered_spell = next(
             (spell for spell in candidates if spell.key == remembered_key),
@@ -4011,12 +4051,13 @@ class BattleScene:
         if spell is None or member.mp < spell.mp:
             return False
         started = self._begin_action_target_selection(spell)
-        if started:
+        if started and self._command_memory_enabled:
             selections = getattr(self, "last_spell_key_by_party_index", None)
             if selections is None:
                 selections = {}
                 self.last_spell_key_by_party_index = selections
             selections[self.active_party_index] = spell.key
+            self._sync_command_memory()
         return started
 
     def _begin_action_target_selection(
@@ -6493,13 +6534,17 @@ class BattleScene:
                 self._begin_auto_action()
                 self._refresh_party_text_colors()
                 return
-            self.phase = BattlePhase.COMMAND
-            self.command_cursor.active = True
-            self._hide_command_guide()
-            self._refresh_command_options()
-            self._select_initial_member_command()
-            self.command_window.open()
-            self._refresh_input_guide()
+            if getattr(self, "initial_global_command_pending", False):
+                self.initial_global_command_pending = False
+                self._open_global_command_menu()
+            else:
+                self.phase = BattlePhase.COMMAND
+                self.command_cursor.active = True
+                self._hide_command_guide()
+                self._refresh_command_options()
+                self._select_initial_member_command()
+                self.command_window.open()
+                self._refresh_input_guide()
         else:
             self.active_party_index = None
             self.command_cursor.active = False
@@ -6771,14 +6816,63 @@ class BattleScene:
         )
         return options
 
+    @property
+    def _command_memory_enabled(self) -> bool:
+        return getattr(getattr(self, "settings", None), "remember_battle_commands", True)
+
+    def _restore_command_memory(self) -> None:
+        self.initial_global_command_pending = False
+        memory = getattr(self, "command_memory", None)
+        if memory is None:
+            return
+        self.last_global_command = None
+        if not self._command_memory_enabled:
+            memory.clear()
+            return
+        if memory.global_command is not None:
+            self.last_global_command = BattleGlobalCommand(memory.global_command)
+            self.initial_global_command_pending = self.last_global_command in (
+                BattleGlobalCommand.AUTO,
+                BattleGlobalCommand.ESCAPE,
+            )
+        for index, member in enumerate(self.party):
+            key = member.definition.key
+            for source, target in (
+                (memory.commands, self.last_command_by_party_index),
+                (memory.spells, self.last_spell_key_by_party_index),
+                (memory.items, self.last_item_selection_by_party_index),
+            ):
+                if key in source:
+                    target[index] = source[key]
+
+    def _sync_command_memory(self) -> None:
+        memory = getattr(self, "command_memory", None)
+        if memory is None or not self._command_memory_enabled:
+            return
+        command = getattr(self, "last_global_command", None)
+        memory.global_command = command.value if command is not None else None
+        for index, member in enumerate(self.party):
+            key = member.definition.key
+            for source, target in (
+                (self.last_command_by_party_index, memory.commands),
+                (self.last_spell_key_by_party_index, memory.spells),
+                (self.last_item_selection_by_party_index, memory.items),
+            ):
+                if index in source:
+                    target[key] = source[index]
+                else:
+                    target.pop(key, None)
+
     def _select_initial_member_command(self) -> None:
         """Restore one member's last command, or use the normal initial choice."""
 
         if not hasattr(self, "party"):
             return
         active_index = getattr(self, "active_party_index", None)
-        remembered_command = getattr(self, "last_command_by_party_index", {}).get(
-            active_index
+        remembered_command = (
+            getattr(self, "last_command_by_party_index", {}).get(active_index)
+            if self._command_memory_enabled
+            else None
         )
         if remembered_command is not None:
             try:
@@ -6805,7 +6899,7 @@ class BattleScene:
         """Keep a confirmed command for its member, except formation movement."""
 
         active_index = getattr(self, "active_party_index", None)
-        if active_index is None:
+        if active_index is None or not self._command_memory_enabled:
             return
         commands = getattr(self, "last_command_by_party_index", None)
         if commands is None:
@@ -6815,10 +6909,12 @@ class BattleScene:
             # Retreat and advance must open at the normal initial position on
             # the member's next turn, rather than restoring an older command.
             commands.pop(active_index, None)
+            self._sync_command_memory()
             return
         commands[active_index] = (
             BattleCommand.HIDE if command is BattleCommand.AMBUSH else command
         )
+        self._sync_command_memory()
 
     def _command_label(self, command: BattleCommand) -> str:
         """Resolve one command's localized display label from the text catalog."""

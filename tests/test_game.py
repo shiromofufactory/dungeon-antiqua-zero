@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
+from battle_command_memory import BattleCommandMemory
 from ui.debug_menu import DebugShopTarget, DebugTeleportTarget
 from game import (
     ALERT_CHANNEL,
@@ -554,8 +555,8 @@ class GameTest(unittest.TestCase):
 
         mock._build_settings_window()
 
-        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 9, 56, 42))
-        self.assertEqual(SETTINGS_GUIDE_Y, 35)
+        self.assertEqual(SETTINGS_WINDOW_GRID, (4, 4, 56, 52))
+        self.assertEqual(SETTINGS_GUIDE_Y, 41)
         self.assertEqual(factory.create.call_args.args[:4], SETTINGS_WINDOW_GRID)
         self.assertFalse(factory.create.call_args.kwargs["opened"])
         window.open.assert_called_once_with()
@@ -578,12 +579,16 @@ class GameTest(unittest.TestCase):
             mock.localized["settings.in_game_hints.label"],
         )
         self.assertEqual(placements[(SETTINGS_VALUE_X, 20)], "オン")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 23)], "コマンドきおく")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 23)], "オン")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 26)], "オートのじゅもん")
+        self.assertEqual(placements[(SETTINGS_VALUE_X, 26)], "つかう")
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 26)],
+            placements[(SETTINGS_LABEL_X, 32)],
             "タイトルがめんへ　もどる",
         )
         self.assertEqual(
-            placements[(SETTINGS_LABEL_X, 29)],
+            placements[(SETTINGS_LABEL_X, 35)],
             "ゲームを　しゅうりょうする",
         )
         debug_text_call = next(
@@ -2366,6 +2371,7 @@ class GameTest(unittest.TestCase):
         mock.save_repository = Mock()
         mock.save_repository.save.return_value = summary
         mock.current_save_slot = None
+        mock.battle_command_memory = BattleCommandMemory(global_command="auto")
         document = {"format_version": 1}
         create_document.return_value = document
 
@@ -2379,6 +2385,7 @@ class GameTest(unittest.TestCase):
             map_id="worldmap",
             position=FieldPosition(17, 39),
             facing=Direction.LEFT,
+            battle_command_memory=mock.battle_command_memory,
         )
         mock.save_repository.save.assert_called_once_with(3, document)
         self.assertIs(result, summary)
@@ -2449,6 +2456,7 @@ class GameTest(unittest.TestCase):
         loaded.active_party = (Mock(), Mock())
         loaded.character_states = {"Fiora": loaded.active_party[0]}
         loaded.inventory = InventorySystem({})
+        loaded.battle_command_memory = BattleCommandMemory(global_command="escape")
         mock.settings = Settings(in_game_hints_enabled=False)
         mock.pending_loaded_state = loaded
         mock.pending_loaded_map = Mock(sites=(), bgm_id="dungeon/ruins")
@@ -2469,6 +2477,7 @@ class GameTest(unittest.TestCase):
         self.assertIs(mock.party, loaded.active_party)
         self.assertIs(mock.character_states, loaded.character_states)
         self.assertIs(mock.inventory_system, loaded.inventory)
+        self.assertIs(mock.battle_command_memory, loaded.battle_command_memory)
         self.assertEqual(mock.current_save_slot, 4)
         shop_system_class.assert_called_once_with(
             shops=mock.shops,
@@ -2536,6 +2545,8 @@ class GameTest(unittest.TestCase):
     def test_start_game_starts_prologue_only_for_new_game(self) -> None:
         mock = Game.__new__(Game)
         calls = []
+        mock.settings = Settings()
+        mock.battle_command_memory = BattleCommandMemory(global_command="auto")
         mock.pending_loaded_state = None
         mock.pending_loaded_map = None
         mock.pending_loaded_field = None
@@ -2558,6 +2569,7 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.showing_field)
         mock.bgm.play.assert_called_once_with("da3-field")
         mock._start_field_event.assert_called_once_with(NEW_GAME_EVENT_ID)
+        self.assertEqual(mock.battle_command_memory, BattleCommandMemory())
         self.assertEqual(calls, ["bgm", "event"])
 
     def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
@@ -3316,7 +3328,9 @@ class GameTest(unittest.TestCase):
     def test_debug_settings_row_is_available_in_current_game(self) -> None:
         self.assertIn(("screen_flash", 17), SETTINGS_ROWS)
         self.assertIn(("in_game_hints", 20), SETTINGS_ROWS)
-        self.assertIn(("debug", 23), SETTINGS_ROWS)
+        self.assertIn(("command_memory", 23), SETTINGS_ROWS)
+        self.assertIn(("auto_spells", 26), SETTINGS_ROWS)
+        self.assertIn(("debug", 29), SETTINGS_ROWS)
 
     def test_confirming_debug_setting_opens_debug_menu(self) -> None:
         mock = Game.__new__(Game)
