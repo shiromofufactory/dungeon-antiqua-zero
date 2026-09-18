@@ -113,6 +113,7 @@ class SpellMenuHarness(SpellMenuOverlay):
         texts: TextCatalog | None = None,
         fonts: FontResources | None = None,
         faces: object | None = None,
+        palette_shifter: PaletteShifter | None = None,
         member_index: int = 0,
         event_spell_keys: Collection[str] = (),
     ) -> None:
@@ -133,6 +134,7 @@ class SpellMenuHarness(SpellMenuOverlay):
                 ImageResources().image(FACES_IMAGE_ID) if faces is None else faces
             ),
             member_index=member_index,
+            palette_shifter=palette_shifter,
             event_spell_keys=event_spell_keys,
         )
 

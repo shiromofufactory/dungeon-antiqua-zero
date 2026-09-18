@@ -2717,6 +2717,7 @@ class GameTest(unittest.TestCase):
             texts=mock.texts,
             fonts=mock.fonts,
             faces=mock.faces,
+            palette_shifter=mock.palette_shifter,
             member_index=2,
             on_invalid_action=mock.alert.start,
         )

@@ -24,6 +24,7 @@ from ui.party_status import (
 from input import InputState
 from localization import Localizer
 from member import Member
+from rendering import PaletteShifter
 from resources import TRANSPARENT_INDEX, FontResources, play_se
 from spell import (
     SPELL_PROFICIENCY_BY_TYPE,
@@ -73,7 +74,7 @@ SPELL_CURSOR_X = (2, 22, 42)
 SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
 HEALING_SE_ID = "spell_healing1"
-PROFICIENCY_ANIMATION_FRAME_COUNT = 15
+PROFICIENCY_ANIMATION_FRAME_COUNT = 6
 PROFICIENCY_WINDOW_GRID = (50, 38, 14, 7)
 PROFICIENCY_TEXT_X = 2
 PROFICIENCY_TEXT_Y = 2
@@ -109,6 +110,7 @@ class SpellMenuOverlay:
         texts: TextCatalog,
         fonts: FontResources,
         faces: object,
+        palette_shifter: PaletteShifter | None = None,
         member_index: int = 0,
         event_spell_keys: Collection[str] = (),
         on_invalid_action: Callable[[], None] | None = None,
@@ -142,6 +144,7 @@ class SpellMenuOverlay:
         self.texts = texts
         self.fonts = fonts
         self.faces = faces
+        self.palette_shifter = palette_shifter
         self.member_index = member_index
         self.event_spell_keys = frozenset(event_spell_keys)
         self.on_invalid_action = on_invalid_action
@@ -162,6 +165,16 @@ class SpellMenuOverlay:
 
         key = self.spell_cursor.selected_key
         return self.spells.get(key) if isinstance(key, str) else None
+
+    @property
+    def dimmed_member_indexes(self) -> frozenset[int]:
+        """Return party positions unable to receive the selected menu spell."""
+
+        if self.phase is not SpellSelectionPhase.TARGET:
+            return frozenset()
+        spell = self.selected_spell
+        usable = self._usable_target_indexes(spell) if spell is not None else ()
+        return frozenset(range(len(self.party_panel.party))).difference(usable)
 
     def _index_spells(self) -> dict[tuple[SpellType, int], Spell]:
         indexed: dict[tuple[SpellType, int], Spell] = {}
@@ -263,6 +276,7 @@ class SpellMenuOverlay:
             text_factory=self.localized_texts,
             window_factory=windows,
             faces=self.faces,
+            palette_shifter=self.palette_shifter,
             cursor_active=self.phase is SpellSelectionPhase.TARGET,
         )
         self.party_window = self.party_panel.window
@@ -662,7 +676,7 @@ class SpellMenuOverlay:
             FACE_SIZE,
             TRANSPARENT_INDEX,
         )
-        self.party_panel.draw_faces()
+        self.party_panel.draw_faces(self.dimmed_member_indexes)
         self.caster_cursor.draw()
         if self.phase in (
             SpellSelectionPhase.SPELL,

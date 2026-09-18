@@ -2130,6 +2130,7 @@ class Game:
             texts=self.texts,
             fonts=self.fonts,
             faces=self.faces,
+            palette_shifter=self.palette_shifter,
             member_index=self.selected_member_index,
             on_invalid_action=self.alert.start,
         )

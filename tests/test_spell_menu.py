@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from contextlib import nullcontext
 import unittest
 from unittest.mock import Mock, call, patch
 
@@ -10,6 +11,8 @@ from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
 from app.spell import SpellType
 from member import ProficiencyKind
+from rendering import DIMMED_PALETTE
+from ui import DEFAULT_TEXT_COLOR
 from ui.spell_menu import (
     FACE_SIZE,
     GUIDE_WINDOW_GRID,
@@ -240,6 +243,10 @@ class SpellMenuTest(unittest.TestCase):
         self.assertFalse(mock.update(InputState(confirm=InputButton(True, True))))
 
         self.assertEqual(target.hp, target.max_hp)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset(range(5)))
+        self.assertTrue(
+            all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
+        )
         self.assertEqual(mock.member.mp, initial_mp - mock.spells["HEALING1"].mp)
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertEqual(mock.selected_spell.key, "HEALING1")
@@ -319,7 +326,7 @@ class SpellMenuTest(unittest.TestCase):
 
     @patch("ui.spell_menu.play_se")
     @patch("ui.spell_menu.random.random", return_value=0.5)
-    def test_spell_use_animates_applied_proficiency_for_fifteen_frames(
+    def test_spell_use_animates_applied_proficiency_for_six_frames(
         self,
         _random_value: Mock,
         play_se: Mock,
@@ -342,9 +349,11 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         play_se.assert_called_once_with("spell_healing1")
 
-        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT):
+        for _frame in range(5):
             mock.update(InputState())
 
+        self.assertNotEqual(mock.proficiency_window.texts[0].text, "%SACRED%２－０２")
+        mock.update(InputState())
         self.assertEqual(mock.proficiency_window.texts[0].text, "%SACRED%２－０２")
         play_se.assert_called_once_with("spell_healing1")
 
@@ -373,7 +382,9 @@ class SpellMenuTest(unittest.TestCase):
         random_value: Mock,
         play_se: Mock,
     ) -> None:
-        mock = SpellMenuHarness(member_index=1)
+        palette_shifter = Mock()
+        palette_shifter.shifted.side_effect = lambda _name: nullcontext()
+        mock = SpellMenuHarness(member_index=1, palette_shifter=palette_shifter)
         proficiency = mock.member.proficiency(ProficiencyKind.SACRED)
         proficiency.level = 3
         mock._build_windows()
@@ -395,6 +406,17 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertEqual(mock.member_cursor.selected_key, 0)
         self.assertEqual(mock._usable_target_indexes(mock.spells["CURE"]), (0,))
+        self.assertEqual(mock.dimmed_member_indexes, frozenset((1, 2, 3, 4)))
+        self.assertEqual(
+            [text.color for text in mock.party_window.texts],
+            [DEFAULT_TEXT_COLOR] * 10,
+        )
+        with patch("ui.party_status.pyxel.blt"):
+            mock.party_panel.draw_faces(mock.dimmed_member_indexes)
+        self.assertEqual(
+            palette_shifter.shifted.call_args_list,
+            [call(DIMMED_PALETTE)] * 4,
+        )
 
         mock.update(InputState(confirm=InputButton(True, True)))
 
@@ -426,6 +448,15 @@ class SpellMenuTest(unittest.TestCase):
         self.assertEqual(mock.member.mp, remaining_mp)
         self.assertTrue(target.stunned)
         invalid_action.assert_called_once_with()
+        self.assertEqual(mock.dimmed_member_indexes, frozenset(range(5)))
+        self.assertTrue(
+            all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
+        )
+        mock.update(InputState(cancel=InputButton(True, True)))
+        self.assertEqual(mock.dimmed_member_indexes, frozenset())
+        self.assertTrue(
+            all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
+        )
 
     @patch("ui.spell_menu.play_se")
     @patch("ui.spell_menu.random.random", return_value=0.5)
@@ -449,6 +480,7 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertEqual(mock.selected_spell.key, "HEALING1")
         self.assertEqual(mock.member_cursor.selected_key, 1)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 2, 3, 4)))
 
     def test_spell_cursor_draws_only_after_caster_confirmation(self) -> None:
         mock = SpellMenuHarness()

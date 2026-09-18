@@ -22,6 +22,7 @@ from ui.party_status import (
     PARTY_WINDOW_GRID,
 )
 from ui.tagged_text import ICON_BANK, ICON_COLKEY, ICON_SIZE, TEXT_ICONS
+from ui import DEFAULT_TEXT_COLOR
 from ui.item_menu import (
     CATEGORY_CURSOR_X,
     CATEGORY_TEXT_X,
@@ -876,6 +877,7 @@ class ItemMenuTest(unittest.TestCase):
         mock = ItemMenuHarness(items=items, inventory_system=inventory)
         target = mock.party_panel.party[1]
         target.hp = 1
+        mock.party_panel.party[0].hp = 0
 
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -883,6 +885,11 @@ class ItemMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
         self.assertEqual(mock.member_cursor.selected_key, 1)
         self.assertEqual(inventory.quantity(potion), 2)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 2, 3, 4)))
+        self.assertEqual(
+            [text.color for text in mock.party_window.texts],
+            [DEFAULT_TEXT_COLOR] * 10,
+        )
 
         with (
             patch("ui.item_menu.random.random", return_value=0.5),
@@ -913,6 +920,10 @@ class ItemMenuTest(unittest.TestCase):
         self.assertTrue(mock.item_cursor.active)
         self.assertFalse(mock.member_cursor.active)
         self.assertEqual(mock.inventory_system.quantity(potion), 1)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset())
+        self.assertTrue(
+            all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
+        )
 
     def test_potion_without_an_injured_target_reports_invalid_action(self) -> None:
         invalid_action = Mock()

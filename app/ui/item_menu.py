@@ -189,8 +189,12 @@ class ItemMenuOverlay:
 
     @property
     def dimmed_member_indexes(self) -> frozenset[int]:
-        """Return party positions unable to equip the selected equipment."""
+        """Return party positions unable to receive the effect or equip the item."""
 
+        if self.phase is ItemSelectionPhase.TARGET:
+            spell = self._field_healing_spell(self.selected_item)
+            usable = self._usable_target_indexes(spell) if spell is not None else ()
+            return frozenset(range(len(self.party_panel.party))).difference(usable)
         if self.phase is not ItemSelectionPhase.ITEM:
             return frozenset()
         item = self.selected_item
