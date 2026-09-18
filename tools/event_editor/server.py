@@ -15,6 +15,9 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from scripts.event_pipeline import (
+    load_missions,
+    save_missions,
+    validate_missions,
     FACE_SIZE,
     FACE_SHEET_HEIGHT,
     FACE_SHEET_WIDTH,
@@ -58,7 +61,7 @@ MIME_TYPES = {
 def _valid_id(value: str) -> bool:
     return (
         re.fullmatch(r"[a-z][a-z0-9_]*", value) is not None
-        and value not in {"flags", "messages"}
+        and value not in {"flags", "messages", "missions"}
     )
 
 
@@ -91,7 +94,7 @@ class EventEditorApplication:
     ) -> None:
         if not _valid_id(namespace):
             raise ValueError(
-                "namespaceはlower_snake_caseで指定してください。flagsとmessagesは予約名です。"
+                "namespaceはlower_snake_caseで指定してください。flags、messages、missionsは予約名です。"
             )
         self.content_root = content_root.resolve()
         self.runtime_path = runtime_path.resolve()
@@ -128,7 +131,7 @@ class EventEditorApplication:
     def source_path_for(self, namespace: str) -> Path:
         if not _valid_id(namespace):
             raise ValueError(
-                "namespaceはlower_snake_caseで指定してください。flagsとmessagesは予約名です。"
+                "namespaceはlower_snake_caseで指定してください。flags、messages、missionsは予約名です。"
             )
         path = (self.content_root / "events" / f"{namespace}.json").resolve()
         source_root = (self.content_root / "events").resolve()
@@ -193,6 +196,7 @@ class EventEditorApplication:
         data: object,
         flags: object,
         messages: object,
+        missions: object | None = None,
     ) -> list[dict[str, str]]:
         self.source_path_for(namespace)
         if not isinstance(data, dict):
@@ -202,10 +206,12 @@ class EventEditorApplication:
                 "path": namespace,
                 "message": "イベントJSONのルートはobjectである必要があります。",
             }]
+        missions = load_missions(self.content_root) if missions is None else missions
         catalogs = self.catalogs(flags, messages)
         return [
             item.as_dict()
             for item in (
+                *validate_missions(missions, **catalogs),
                 *validate_event_flags(flags),
                 *validate_event_messages(
                     messages,
@@ -240,6 +246,7 @@ class EventEditorApplication:
             "data": data,
             "flags": flags,
             "messages": messages,
+            "missions": load_missions(self.content_root),
             "namespace_options": self.namespace_options(),
             "catalogs": {
                 key: sorted(values) for key, values in catalogs.items()
@@ -268,8 +275,10 @@ class EventEditorApplication:
         data: object,
         flags: object,
         messages: object,
+        missions: object | None = None,
     ) -> dict[str, object]:
-        diagnostics = self.validate(namespace, data, flags, messages)
+        missions = load_missions(self.content_root) if missions is None else missions
+        diagnostics = self.validate(namespace, data, flags, messages, missions)
         if (
             any(item["severity"] == "error" for item in diagnostics)
             or not isinstance(data, dict)
@@ -281,12 +290,14 @@ class EventEditorApplication:
         catalogs["flag_ids"] = set(compiled_flags)
         compiled = compile_event_sources(
             sources,
+            missions=missions,
             **{key: value for key, value in catalogs.items() if key != "actor_ids"},
         )
         compiled_messages = compile_event_messages(
             messages,
             character_keys=catalogs["character_keys"],
         )
+        save_missions(self.content_root / "events" / "missions.json", missions)
         save_event_source(self.source_path_for(namespace), data)
         save_event_flags(event_flags_path(self.content_root), flags)
         save_event_messages(event_messages_path(self.content_root), messages)
@@ -412,6 +423,7 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
             except (UnicodeDecodeError, json.JSONDecodeError):
                 self._error(HTTPStatus.BAD_REQUEST, "JSONを読み込めません。")
                 return
+            missions = payload.get("missions") if isinstance(payload, dict) else None
             data = payload.get("data") if isinstance(payload, dict) else None
             flags = payload.get("flags") if isinstance(payload, dict) else None
             messages = (
@@ -438,12 +450,12 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
                     return
             try:
                 response = (
-                    application.save(namespace, data, flags, messages)
+                    application.save(namespace, data, flags, messages, missions)
                     if parsed.path == "/api/save"
                     else {
                         "saved": False,
                         "diagnostics": application.validate(
-                            namespace, data, flags, messages
+                            namespace, data, flags, messages, missions
                         ),
                     }
                 )

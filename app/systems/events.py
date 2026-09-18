@@ -15,6 +15,7 @@ else:
     from ..resources.events import EventCatalog, EventDefinition
     from ..state import SaveData
 
+from .conditions import evaluate_condition
 from .inventory import InventorySystem
 from .party import PartySystem, PartySystemError
 
@@ -227,22 +228,10 @@ class EventRunner:
         raise EventRuntimeError(self.event_id, path, f"unsupported command: {command_type}")
 
     def _condition(self, condition: object) -> bool:
-        if not isinstance(condition, Mapping):
-            raise TypeError("condition must be a mapping")
-        condition_type = condition["type"]
-        if condition_type == "flag_set":
-            return condition["flag_id"] in self.save_data.event_flags
-        if condition_type == "member_in_party":
-            return self.party.contains(str(condition["character_key"]))
-        if condition_type == "item_at_least":
-            return self.inventory.quantity(str(condition["item_key"])) >= int(condition["quantity"])
-        if condition_type == "all":
-            return all(self._condition(child) for child in condition["conditions"])
-        if condition_type == "any":
-            return any(self._condition(child) for child in condition["conditions"])
-        if condition_type == "not":
-            return not self._condition(condition["condition"])
-        raise ValueError(f"unsupported condition: {condition_type}")
+        return evaluate_condition(
+            condition, save_data=self.save_data,
+            party=self.party, inventory=self.inventory,
+        )
 
     def _require_field(self, command_type: object) -> None:
         if self.context is not EventContext.FIELD:

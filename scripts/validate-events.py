@@ -10,6 +10,8 @@ import sys
 
 from event_pipeline import (
     event_source_paths,
+    load_missions,
+    validate_missions,
     load_event_flags,
     load_event_messages,
     load_event_source,
@@ -31,12 +33,14 @@ def main() -> int:
     try:
         paths = event_source_paths(content_root)
         sources = {path.stem: load_event_source(path) for path in paths}
+        missions = load_missions(content_root)
         flags = load_event_flags(content_root)
         messages = load_event_messages(content_root)
         catalogs = reference_catalogs(
             content_root, app_root=PROJECT_ROOT / "app"
         )
         diagnostics = [
+            *validate_missions(missions, **catalogs),
             *validate_event_flags(flags),
             *validate_event_messages(
                 messages,
@@ -59,6 +63,7 @@ def main() -> int:
     print(
         f"検証完了: {len(paths)} event source, {len(flags)} flag, "
         f"{len(messages)} message, "
+        f"{len(missions) if isinstance(missions, list) else 0} mission, "
         f"{errors} error, {warnings} warning"
     )
     return 1 if errors else 0

@@ -127,6 +127,7 @@ class InformationPhase(StrEnum):
 
     MENU = "menu"
     CONVERSATION_LOG = "conversation_log"
+    MISSION = "mission"
     MONSTER_BOOK = "monster_book"
 
 
@@ -280,6 +281,7 @@ class InformationMenuOverlay:
         fonts: FontResources,
         images: ImageResources,
         on_invalid_action: Callable[[], None] | None = None,
+        mission_message_ids: Sequence[str] = (),
     ) -> None:
         if not isinstance(monsters, Sequence) or not all(
             isinstance(monster, MonsterDefinition) for monster in monsters
@@ -311,6 +313,13 @@ class InformationMenuOverlay:
         if on_invalid_action is not None and not callable(on_invalid_action):
             raise TypeError("on_invalid_action must be callable")
 
+        if (
+            not isinstance(mission_message_ids, Sequence)
+            or isinstance(mission_message_ids, (str, bytes))
+            or not all(isinstance(message_id, str) and message_id for message_id in mission_message_ids)
+        ):
+            raise TypeError("mission_message_ids must contain non-empty message IDs")
+
         self.monsters = tuple(monsters)
         self.monster_records = monster_records
         self.items = items
@@ -321,6 +330,8 @@ class InformationMenuOverlay:
         self.fonts = fonts
         self.images = images
         self.on_invalid_action = on_invalid_action
+        self.mission_scroll_row = 0
+        self.mission_message_ids = tuple(mission_message_ids)
         self.phase = InformationPhase.MENU
         self.selected_log_index = 0
         self.conversation_scroll_row = 0
@@ -353,6 +364,7 @@ class InformationMenuOverlay:
             role=FontRole.STANDARD,
         )
         self.window_factory = WindowFactory(fonts.font_for(settings.language))
+        self._mission_rows = self._resolve_mission_rows()
         self._conversation_entries = self._resolve_conversation_entries()
         self._build_information_menu()
 
@@ -568,8 +580,39 @@ class InformationMenuOverlay:
         else:
             self.conversation_cursor = None
 
+    def _resolve_mission_rows(self) -> tuple[str, ...]:
+        rows: list[str] = []
+        for message_id in self.mission_message_ids:
+            lines = self.event_messages.formatted_lines(message_id, self.localizer, {})
+            if any(lines):
+                if rows:
+                    rows.append("")
+                rows.extend(lines)
+        return tuple(rows)
+
+    def _build_mission_window(self) -> None:
+        visible_count = self.conversation_visible_row_count
+        max_scroll = max(0, len(self._mission_rows) - visible_count)
+        self.mission_scroll_row = min(max_scroll, max(0, self.mission_scroll_row))
+        self.main_window = self.window_factory.create(
+            *INFORMATION_MAIN_WINDOW_GRID,
+            tuple(
+                self.log_text_factory.create(
+                    text, CONVERSATION_LOG_TEXT_X,
+                    CONVERSATION_LOG_FIRST_Y + index * self.conversation_row_height,
+                )
+                for index, text in enumerate(self._mission_rows[
+                    self.mission_scroll_row:self.mission_scroll_row + visible_count
+                ])
+            ),
+            vertical_navigation=max_scroll > 0,
+        )
+        self.conversation_cursor = None
+
     def _show_selected_category(self) -> None:
-        if self.header_cursor.selected_key == "conversation_log":
+        if self.header_cursor.selected_key == "mission":
+            self._build_mission_window()
+        elif self.header_cursor.selected_key == "conversation_log":
             self._build_conversation_window(
                 cursor_active=self.phase is InformationPhase.CONVERSATION_LOG
             )
@@ -716,13 +759,37 @@ class InformationMenuOverlay:
             if input_state.cancel.triggered:
                 return True
             if input_state.confirm.triggered:
-                if self.header_cursor.selected_key == "conversation_log":
+                if self.header_cursor.selected_key == "mission" and self._mission_rows:
+                    self.phase = InformationPhase.MISSION
+                    self.header_cursor.active = False
+                elif self.header_cursor.selected_key == "conversation_log":
                     self._open_conversation_log()
                 elif self.header_cursor.selected_key == "monster_book":
                     self._open_monster_book()
                 return False
             if self.header_window.update(input_state.navigation):
                 self._show_selected_category()
+            return False
+
+        if self.phase is InformationPhase.MISSION:
+            if input_state.cancel.triggered:
+                self.phase = InformationPhase.MENU
+                self.header_cursor.active = True
+                self._show_selected_category()
+                return False
+            direction = 0
+            if input_state.navigation in (Direction.UP, Direction.DOWN):
+                direction = -1 if input_state.navigation is Direction.UP else 1
+            page = self.conversation_visible_row_count
+            if input_state.previous_page.triggered:
+                direction = -page
+            elif input_state.next_page.triggered:
+                direction = page
+            if direction:
+                self.mission_scroll_row += direction
+                self._build_mission_window()
+                self.windows = [self.header_window, self.main_window]
+            self.main_window.set_vertical_navigation_pressed((direction > 0) - (direction < 0))
             return False
 
         if self.phase is InformationPhase.CONVERSATION_LOG:

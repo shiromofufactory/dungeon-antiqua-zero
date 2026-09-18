@@ -34,7 +34,8 @@
   同じフォントで表示される。
 - 決定・キャンセルのどちらでも閉じられ、開く操作の押しっぱなしでは閉じない。
 - 開閉中に移動・メニュー操作がフィールドへ伝わらない。
-- 情報メニューの先頭には `information.mission` があり、現在の本文は空欄。
+- 情報メニューの先頭には `information.mission` があり、条件成立したミッションを制作順に表示する。
+  表示と操作は [`information-menu.md`](./information-menu.md) を参照する。
 
 回帰検証は `python3 -B -m unittest tests.test_hint tests.test_settings_system tests.test_state tests.test_game`
 で実行する。

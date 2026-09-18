@@ -2181,6 +2181,7 @@ class GameTest(unittest.TestCase):
         mock.settings = Settings()
         mock.texts = Mock()
         mock.event_messages = Mock()
+        mock.event_catalog = Mock(missions=())
         mock.fonts = Mock()
         mock.images = Mock()
 
@@ -2199,6 +2200,7 @@ class GameTest(unittest.TestCase):
             monster_records=mock.save_data.monster_records,
             items=mock.items,
             logs=mock.save_data.logs,
+            mission_message_ids=(),
             settings=mock.settings,
             texts=mock.texts,
             event_messages=mock.event_messages,

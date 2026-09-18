@@ -444,6 +444,14 @@ Composition Rootとし、単一のローカルHTTPサーバーと認証セッシ
 `/event/` へ振り分ける。統合するのは起動、静的ファイル配信、ナビゲーションだけとし、各画面の
 Application、編集中状態、保存、検証処理はそれぞれのモジュールに保持する。
 
+ミッションはイベントエディタの派生タブとして同じApplicationから保存する。
+正本の検証・生成は `scripts/event_pipeline/missions.py`、実行時の不変定義は
+`resources/events.py` の `EventCatalog` が所有する。イベントとミッションの条件評価は
+`systems/conditions.py` へ集約し、SaveData、PartySystem、InventorySystemだけを渡す。
+情報メニューの本文とスクロール状態は `ui/information_menu.py` が所有し、Gameは画面を開く時に
+表示対象のメッセージIDを渡す。制作形式は [`features/events.md`](./features/events.md)、
+表示操作は [`features/information-menu.md`](./features/information-menu.md) を参照する。
+
 マップチップメタデータ設定ツールとマップエディタは対話UIだけを `tools/` に置き、JSON Schema、
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。

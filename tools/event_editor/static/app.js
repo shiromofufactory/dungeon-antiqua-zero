@@ -5,7 +5,7 @@ document.addEventListener("contextmenu", (event) => event.preventDefault(), { ca
 const CLIENT = "event-editor-ui";
 const NAMESPACE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const UI_STORAGE_KEY = "da0.event-editor.ui.v1";
-const LIST_TABS = ["flag", "event", "message"];
+const LIST_TABS = ["flag", "event", "mission", "message"];
 const COMMAND_OPTIONS = [
   ["message", "message"],
   ["set_flag", "set_flag"],
@@ -28,10 +28,13 @@ const state = {
   data: null,
   flags: [],
   messages: [],
+  missions: [],
+  selectedMission: 0,
   catalogs: {},
   faceSheet: null,
   diagnostics: [],
   namespaceOptions: [],
+  selectedFlag: 0,
   selectedEvent: 0,
   selectedMessage: 0,
   mode: "event",
@@ -252,6 +255,9 @@ function snapshot() {
     data: state.data,
     flags: state.flags,
     messages: state.messages,
+    missions: state.missions,
+    selectedMission: state.selectedMission,
+    selectedFlag: state.selectedFlag,
     selectedEvent: state.selectedEvent,
     selectedMessage: state.selectedMessage,
     mode: state.mode,
@@ -279,6 +285,9 @@ function restore(value) {
   state.data = restored.data;
   state.flags = restored.flags;
   state.messages = restored.messages;
+  state.missions = restored.missions || [];
+  state.selectedMission = restored.selectedMission || 0;
+  state.selectedFlag = restored.selectedFlag || 0;
   state.selectedEvent = restored.selectedEvent;
   state.selectedMessage = restored.selectedMessage;
   state.mode = restored.mode;
@@ -302,7 +311,10 @@ function redo() {
 }
 
 function normalize() {
+  if (!Array.isArray(state.missions)) state.missions = [];
+  state.selectedMission = Math.max(0, Math.min(state.selectedMission, state.missions.length - 1));
   if (!Array.isArray(state.flags)) state.flags = [];
+  state.selectedFlag = Math.max(0, Math.min(state.selectedFlag || 0, state.flags.length - 1));
   if (!Array.isArray(state.data.events)) state.data.events = [];
   if (!Array.isArray(state.messages)) state.messages = [];
   if (!LIST_TABS.includes(state.mode)) state.mode = "event";
@@ -319,11 +331,20 @@ function normalize() {
   }
 }
 
+function currentFlag() {
+  return state.flags[state.selectedFlag] || null;
+}
+
 function currentEvent() {
   return state.data.events[state.selectedEvent] || null;
 }
 
+function currentMission() {
+  return state.missions[state.selectedMission] || null;
+}
+
 function currentMessage() {
+  if (state.mode === "mission") return state.messages.find((message) => message.message_id === currentMission()?.message_id) || null;
   return state.messages[state.selectedMessage] || null;
 }
 
@@ -453,6 +474,7 @@ function listForKind(kind) {
   if (kind === "flag") return state.flags;
   if (kind === "event") return state.data.events;
   if (kind === "message") return state.messages;
+  if (kind === "mission") return state.missions;
   return null;
 }
 
@@ -465,11 +487,15 @@ function moveListItem(kind, sourceIndex, targetIndex) {
   if (sourceIndex < insertionIndex) insertionIndex -= 1;
   if (sourceIndex === insertionIndex) return false;
 
+  const selectedFlag = currentFlag();
+  const selectedMission = currentMission();
   const selectedEvent = currentEvent();
   const selectedMessage = currentMessage();
   commit(() => {
     const [item] = items.splice(sourceIndex, 1);
     items.splice(insertionIndex, 0, item);
+    if (selectedFlag) state.selectedFlag = state.flags.indexOf(selectedFlag);
+    if (selectedMission) state.selectedMission = state.missions.indexOf(selectedMission);
     if (selectedEvent) state.selectedEvent = state.data.events.indexOf(selectedEvent);
     if (selectedMessage) state.selectedMessage = state.messages.indexOf(selectedMessage);
   });
@@ -493,13 +519,12 @@ function renderLists() {
   $("flags").className = "list";
   $("flags").innerHTML = state.flags.map((flag, index) => `
     ${renderListDropZone("flag", index)}
-    <div class="list-item reorderable-list-item" data-list-item-kind="flag">
+    <div class="list-item reorderable-list-item ${state.mode === "flag" && index === state.selectedFlag ? "active" : ""}" data-list-item-kind="flag">
       <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(flag.flag_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="flag" data-index="${index}">⠿</span>
-      <div class="list-item-body">
-        <div class="field"><label>グローバルID</label><input value="${esc(flag.flag_id)}" data-flag-index="${index}" data-flag-field="flag_id"></div>
-        <div class="field compact"><label>制作メモ</label><input value="${esc(flag.note || "")}" data-flag-index="${index}" data-flag-field="note"></div>
-        <div class="row compact"><button class="danger icon" data-action="delete-flag" data-index="${index}">削除</button></div>
-      </div>
+      <button type="button" class="list-item-select" data-action="select-flag" data-index="${index}">
+        <strong>${esc(flag.flag_id)}</strong>
+        <small>${esc(flag.note || "メモなし")}</small>
+      </button>
     </div>
   `).join("") + (state.flags.length ? renderListDropZone("flag", state.flags.length) : '<div class="empty">フラグはありません。</div>');
 
@@ -514,6 +539,17 @@ function renderLists() {
       </button>
     </div>
   `).join("") + (state.data.events.length ? renderListDropZone("event", state.data.events.length) : '<div class="empty">イベントはありません。</div>');
+
+  if ($("missions")) {
+    $("missions").className = "list";
+    $("missions").innerHTML = state.missions.map((mission, index) => `
+      ${renderListDropZone("mission", index)}
+      <div class="list-item reorderable-list-item ${state.mode === "mission" && index === state.selectedMission ? "active" : ""}" data-list-item-kind="mission">
+        <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(mission.id)}を移動" title="ドラッグして表示順を変更" data-list-item-drag data-list-kind="mission" data-index="${index}">⠿</span>
+        <button type="button" class="list-item-select" data-action="select-mission" data-index="${index}"><strong>${index + 1}. ${esc(mission.id)}</strong><small>${esc(mission.note || mission.message_id)}</small></button>
+      </div>
+    `).join("") + (state.missions.length ? renderListDropZone("mission", state.missions.length) : '<div class="empty">ミッションはありません。</div>');
+  }
 
   $("messages").className = "list";
   $("messages").innerHTML = state.messages.map((message, index) => `
@@ -533,6 +569,7 @@ function field(label, html, full = false) {
 }
 
 function commandAt(path) {
+  if (path === "mission") return currentMission();
   let commands = currentEvent().commands;
   let command = null;
   const parts = path.split("/").filter(Boolean);
@@ -701,12 +738,56 @@ function renderMessageEditor() {
   `;
 }
 
+function renderMissionEditor() {
+  const mission = currentMission();
+  $("event-editor").className = mission ? "" : "empty";
+  if (!mission) {
+    $("event-editor").innerHTML = "ミッションを追加・選択してください。";
+    return;
+  }
+  const message = currentMessage();
+  $("event-editor").innerHTML = `
+    <div class="event-meta">${field("ミッションID", `<input data-mission-field="id" value="${esc(mission.id)}">`)}${field("制作メモ", `<input data-mission-field="note" value="${esc(mission.note || "")}">`)}<button class="danger" data-action="delete-mission">ミッションを削除</button></div>
+    <div class="heading"><h2>表示条件</h2><button data-action="toggle-mission-condition">${mission.condition ? "条件を外す（常に表示）" : "条件を設定"}</button></div>
+    ${mission.condition ? renderCondition(mission.condition, "mission", "condition") : '<p class="compact">常に表示します。</p>'}
+    <div class="heading compact"><h2>メッセージ</h2><button data-action="new-mission-message">専用メッセージを新規作成</button></div>
+    ${field("メッセージID（イベントと共通）", `<select data-mission-field="message_id">${options(messageIds(), mission.message_id)}</select>`, true)}
+    ${renderMessagePreview(mission.message_id)}
+    ${message ? `<div class="message-form compact">${[
+      ["text_ja", "日本語"], ["text_en", "英語（未翻訳なら空欄）"], ["text_zhcn", "簡体字中国語（未翻訳なら空欄）"],
+    ].map(([key, label]) => field(label + "（1行ごとにゲーム内の1行）", `<textarea rows="5" data-message-field="${key}">${esc((message[key] || []).join("\n"))}</textarea>`, true)).join("")}</div>` : ""}
+  `;
+}
+
+function newMissionMessage(mission) {
+  const message = {message_id: uniqueId(`mission.${mission.id}`, state.messages, "message_id"), text_ja: ["ミッションの内容"], text_en: [], text_zhcn: []};
+  state.messages.push(message);
+  mission.message_id = message.message_id;
+}
+
+function renderFlagEditor() {
+  const flag = currentFlag();
+  $("event-editor").className = flag ? "" : "empty";
+  if (!flag) {
+    $("event-editor").innerHTML = "グローバルフラグを追加・選択してください。";
+    return;
+  }
+  $("event-editor").innerHTML = `
+    <div class="heading"><h2>グローバルフラグ編集</h2><button class="danger" data-action="delete-flag">フラグを削除</button></div>
+    <div class="message-form">
+      ${field("グローバルID", `<input data-flag-field="flag_id" value="${esc(flag.flag_id)}">`, true)}
+      ${field("制作メモ", `<textarea rows="6" data-flag-field="note">${esc(flag.note || "")}</textarea>`, true)}
+    </div>
+  `;
+}
+
 function renderEditor() {
-  if (state.mode === "message") {
+  if (state.mode === "mission") {
+    renderMissionEditor();
+  } else if (state.mode === "message") {
     renderMessageEditor();
   } else if (state.mode === "flag") {
-    $("event-editor").className = "empty";
-    $("event-editor").innerHTML = "グローバルフラグは左の一覧で編集します。";
+    renderFlagEditor();
   } else {
     renderEventEditor();
   }
@@ -784,6 +865,7 @@ function requestBody() {
     data: state.data,
     flags: state.flags,
     messages: state.messages,
+    missions: state.missions,
   });
 }
 
@@ -815,7 +897,7 @@ async function save() {
       state.namespaceOptions = result.namespace_options || state.namespaceOptions;
       toast(linkedActor
         ? `イベントを保存し、${linkedActor.mapId}のactor ${linkedActor.actorId}へ紐づけました。`
-        : "イベント定義とメッセージを保存し、ゲーム用データを生成しました。");
+        : "イベント・ミッション・メッセージを保存し、ゲーム用データを生成しました。");
     } else {
       toast("エラーを修正してください。");
     }
@@ -833,6 +915,8 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.data = payload.data;
   state.flags = payload.flags;
   state.messages = payload.messages;
+  state.missions = payload.missions || [];
+  state.selectedMission = 0;
   state.catalogs = payload.catalogs;
   state.faceSheet = payload.face_sheet;
   state.diagnostics = payload.diagnostics;
@@ -842,6 +926,7 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
     : state.data.events.findIndex((event) => event.id === selectedEventId);
   state.selectedEvent = requestedEventIndex >= 0 ? requestedEventIndex : 0;
   state.selectedMessage = 0;
+  state.selectedFlag = 0;
   state.pendingActorEventId = null;
   state.mode = selectedEventId !== null || !LIST_TABS.includes(selectedListTab)
     ? "event"
@@ -859,8 +944,8 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
 }
 
 async function openNamespace(namespace, selectedListTab = state.mode) {
-  if (!NAMESPACE_PATTERN.test(namespace) || ["flags", "messages"].includes(namespace)) {
-    toast("namespaceはlower_snake_caseで入力してください（flagsとmessagesは予約名です）。");
+  if (!NAMESPACE_PATTERN.test(namespace) || ["flags", "messages", "missions"].includes(namespace)) {
+    toast("namespaceはlower_snake_caseで入力してください（flags、messages、missionsは予約名です）。");
     return false;
   }
   if (namespace === state.data.namespace) {
@@ -899,10 +984,37 @@ document.body.addEventListener("click", (event) => {
   } else if (action === "add-flag") {
     commit(() => {
       state.flags.push({flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
+      state.selectedFlag = state.flags.length - 1;
       state.mode = "flag";
     });
+  } else if (action === "select-flag") {
+    state.selectedFlag = Number(target.dataset.index);
+    state.mode = "flag";
+    render();
   } else if (action === "delete-flag") {
-    commit(() => state.flags.splice(Number(target.dataset.index), 1));
+    commit(() => state.flags.splice(state.selectedFlag, 1));
+  } else if (action === "add-mission") {
+    commit(() => {
+      const mission = {id: uniqueId("mission", state.missions), note: "", condition: defaultCondition(), message_id: ""};
+      newMissionMessage(mission);
+      state.missions.push(mission);
+      state.selectedMission = state.missions.length - 1;
+      state.mode = "mission";
+    });
+  } else if (action === "select-mission") {
+    state.selectedMission = Number(target.dataset.index);
+    state.mode = "mission";
+    render();
+  } else if (action === "delete-mission") {
+    commit(() => state.missions.splice(state.selectedMission, 1));
+  } else if (action === "toggle-mission-condition") {
+    commit(() => {
+      const mission = currentMission();
+      if (mission.condition) delete mission.condition;
+      else mission.condition = defaultCondition();
+    });
+  } else if (action === "new-mission-message") {
+    commit(() => newMissionMessage(currentMission()));
   } else if (action === "add-event") {
     addEvent();
   } else if (action === "select-event") {
@@ -972,18 +1084,13 @@ document.body.addEventListener("click", (event) => {
   }
 });
 
-$("flags").addEventListener("change", (event) => {
-  const target = event.target;
-  if (target.dataset.flagField) {
-    commit(() => {
-      state.flags[Number(target.dataset.flagIndex)][target.dataset.flagField] = target.value;
-    });
-  }
-});
-
 $("event-editor").addEventListener("change", (event) => {
   const target = event.target;
-  if (target.dataset.eventField) {
+  if (target.dataset.flagField) {
+    commit(() => { currentFlag()[target.dataset.flagField] = target.value; });
+  } else if (target.dataset.missionField) {
+    commit(() => { currentMission()[target.dataset.missionField] = target.value; });
+  } else if (target.dataset.eventField) {
     commit(() => {
       const eventRecord = currentEvent();
       if (target.dataset.eventField === "id" && eventRecord.id === state.pendingActorEventId) {
@@ -1170,7 +1277,7 @@ configureEditorNavigation();
     const uiSettings = loadUiSettings();
     const storedNamespace = typeof uiSettings.namespace === "string"
       && NAMESPACE_PATTERN.test(uiSettings.namespace)
-      && !["flags", "messages"].includes(uiSettings.namespace)
+      && !["flags", "messages", "missions"].includes(uiSettings.namespace)
       ? uiSettings.namespace
       : null;
     const requestedNamespace = parameters.get("namespace") || storedNamespace;

@@ -43,7 +43,9 @@ def _positive_integer(value: object, *, maximum: int | None = None) -> bool:
     )
 
 
-def _condition_is_valid(value: object) -> bool:
+def _condition_is_valid(value: object, *, depth: int = 0) -> bool:
+    if depth > 16:
+        return False
     if not isinstance(value, dict) or not isinstance(value.get("type"), str):
         return False
     condition_type = value["type"]
@@ -68,11 +70,11 @@ def _condition_is_valid(value: object) -> bool:
             set(value) == {"type", "conditions"}
             and isinstance(children, list)
             and bool(children)
-            and all(_condition_is_valid(child) for child in children)
+            and all(_condition_is_valid(child, depth=depth + 1) for child in children)
         )
     if condition_type == "not":
         return set(value) == {"type", "condition"} and _condition_is_valid(
-            value.get("condition")
+            value.get("condition"), depth=depth + 1
         )
     return False
 
@@ -161,6 +163,13 @@ class EventDefinition:
     commands: tuple[Mapping[str, object], ...]
 
 
+@dataclass(frozen=True)
+class MissionDefinition:
+    id: str
+    message_id: str
+    condition: Mapping[str, object] | None = None
+
+
 class EventCatalog:
     """Own immutable, fully qualified event definitions."""
 
@@ -169,6 +178,7 @@ class EventCatalog:
         events: Mapping[str, EventDefinition] | None = None,
         *,
         flag_ids: frozenset[str] = frozenset(),
+        missions: tuple[MissionDefinition, ...] = (),
     ) -> None:
         normalized = {} if events is None else dict(events)
         if not all(
@@ -183,8 +193,17 @@ class EventCatalog:
             for flag_id in flag_ids
         ):
             raise TypeError("flag_ids must be fully qualified event IDs")
+        if not isinstance(missions, tuple) or not all(
+            isinstance(mission, MissionDefinition) for mission in missions
+        ):
+            raise TypeError("missions must contain MissionDefinition values")
+        self._missions = missions
         self._events = MappingProxyType(normalized)
         self._flag_ids = flag_ids
+
+    @property
+    def missions(self) -> tuple[MissionDefinition, ...]:
+        return self._missions
 
     @property
     def ids(self) -> tuple[str, ...]:
@@ -220,7 +239,7 @@ class EventCatalog:
     def from_document(cls, document: object) -> EventCatalog:
         if not isinstance(document, dict):
             raise EventResourceError("イベントJSONのルートが不正です。")
-        if set(document) != {"format_version", "source_sha256", "flags", "events"}:
+        if set(document) - {"missions"} != {"format_version", "source_sha256", "flags", "events"}:
             raise EventResourceError("イベントJSONのルート属性が不正です。")
         if document.get("format_version") != EVENT_FORMAT_VERSION:
             raise EventResourceError("イベントJSONのformat_versionが不正です。")
@@ -252,7 +271,31 @@ class EventCatalog:
             if not isinstance(frozen, tuple):
                 raise AssertionError("event commands must freeze to a tuple")
             loaded[event_id] = EventDefinition(event_id, frozen)
-        return cls(loaded, flag_ids=frozenset(flag_values))
+        mission_values = document.get("missions", [])
+        if not isinstance(mission_values, list):
+            raise EventResourceError("ミッション一覧が不正です。")
+        missions: list[MissionDefinition] = []
+        seen: set[str] = set()
+        for mission in mission_values:
+            if not isinstance(mission, dict) or set(mission) - {"condition"} != {"id", "message_id"}:
+                raise EventResourceError("ミッション定義が不正です。")
+            mission_id = mission.get("id")
+            message_id = mission.get("message_id")
+            if (
+                not isinstance(mission_id, str)
+                or not LOCAL_ID_PATTERN.fullmatch(mission_id)
+                or mission_id in seen
+            ):
+                raise EventResourceError("ミッションIDが不正です。")
+            if not isinstance(message_id, str) or not MESSAGE_ID_PATTERN.fullmatch(message_id):
+                raise EventResourceError("ミッションメッセージIDが不正です。")
+            if "condition" in mission and not _condition_is_valid(mission["condition"]):
+                raise EventResourceError("ミッション条件が不正です。")
+            seen.add(mission_id)
+            missions.append(MissionDefinition(
+                mission_id, message_id, _freeze(mission.get("condition"))
+            ))
+        return cls(loaded, flag_ids=frozenset(flag_values), missions=tuple(missions))
 
 
 __all__ = [
@@ -260,4 +303,5 @@ __all__ = [
     "EventCatalog",
     "EventDefinition",
     "EventResourceError",
+    "MissionDefinition",
 ]

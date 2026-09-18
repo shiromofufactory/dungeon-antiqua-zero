@@ -101,12 +101,15 @@ class EventEditorServerTest(unittest.TestCase):
         flags: object | None = None,
         messages: object | None = None,
         namespace: str | None = None,
+        missions: object | None = None,
     ) -> dict:
         payload = {"data": data}
         if flags is not None:
             payload["flags"] = flags
         if messages is not None:
             payload["messages"] = messages
+        if missions is not None:
+            payload["missions"] = missions
         if namespace is not None:
             payload["namespace"] = namespace
         request = Request(
@@ -120,6 +123,34 @@ class EventEditorServerTest(unittest.TestCase):
         )
         with urlopen(request, timeout=2) as response:
             return json.loads(response.read())
+
+    def test_mission_http_save_includes_conditions_and_message_reference(self) -> None:
+        payload = self.get_json("/api/document?token=test-token")
+        missions = [{"id": "hello", "message_id": "sample.hello"}]
+        result = self.post_json("/api/save", payload["data"], flags=payload["flags"], messages=payload["messages"], missions=missions)
+        self.assertTrue(result["saved"])
+        self.assertEqual(self.get_json("/api/document?token=test-token")["missions"], missions)
+
+    def test_saves_missions_and_rejects_referenced_flag_or_message_deletion(self) -> None:
+        from scripts.event_pipeline import load_event_sources
+        from app.resources.events import EventCatalog
+
+        payload = self.application.document_payload()
+        missions = [{"id": "find_elder", "note": "制作メモ", "condition": {"type": "not", "condition": {"type": "flag_set", "flag_id": "story.done"}}, "message_id": "sample.hello"}]
+        result = self.application.save("sample", payload["data"], payload["flags"], payload["messages"], missions)
+        self.assertTrue(result["saved"])
+        self.assertEqual(self.application.document_payload()["missions"], missions)
+        self.assertNotIn("missions", load_event_sources(self.content_root))
+        runtime_before = self.application.runtime_path.read_bytes()
+        catalog = EventCatalog.from_json(self.application.runtime_path)
+        self.assertEqual(catalog.missions[0].id, "find_elder")
+        for flags, messages in (([], payload["messages"]), (payload["flags"], [])):
+            result = self.application.save("sample", payload["data"], flags, messages, missions)
+            self.assertFalse(result["saved"])
+            self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+        # Old clients omitting missions retain the existing ordered definitions.
+        self.assertTrue(self.application.save("sample", payload["data"], payload["flags"], payload["messages"])["saved"])
+        self.assertEqual(self.application.document_payload()["missions"], missions)
 
     def test_serves_new_structured_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")

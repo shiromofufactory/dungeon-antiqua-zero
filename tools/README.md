@@ -160,19 +160,20 @@ npm run tools:map-editor -- --map field_01 --tileset dungeon --profile dungeon
 [`docs/features/events.md`](../docs/features/events.md)を参照する。
 
 ```sh
-npm run tools:event-editor
+npm run editor -- --editor event
 ```
 
 ヘッダーから既存のnamespaceを切り替え、新しいnamespaceを入力してイベントファイルを新規作成
 できる。namespaceはマップIDと1対1で対応する必要はない。全namespaceから共有するフラグと、
-イベント専用メッセージも同じ画面で作成する。
+イベント・ミッション共通のメッセージも同じ画面で作成する。「ミッション」タブでは条件と
+多言語本文を編集し、一覧のドラッグでゲーム内の表示順を変更できる。
 
 保存時に `content/events/<namespace>.json`、`content/events/flags.json`、
-`content/events/messages.json` を検証し、成功した
+`content/events/messages.json`、`content/events/missions.json` を検証し、成功した
 場合だけ原子的に保存して、Git管理外の `app/events/events.json` と
 `app/events/messages.json` を再生成する。キャラクター、アイテム、イベントメッセージ、BGM、
 SE、宣言済みグローバルフラグは一覧から選択できる。JSONを手編集する場合も
-`npm run events:validate` と `npm run events:build` が同じ検証処理を使用する。
+`python3 -B scripts/validate-events.py` と `npm run events-build` が同じ検証処理を使用する。
 
 ## Battle Test
 

@@ -34,7 +34,12 @@ from .messages import (
     validate_event_messages,
 )
 
+from .missions import load_missions, save_missions, validate_missions
+
 __all__ = (
+    "load_missions",
+    "save_missions",
+    "validate_missions",
     "EVENT_RUNTIME_FORMAT_VERSION",
     "EVENT_SOURCE_FORMAT_VERSION",
     "reference_catalogs",

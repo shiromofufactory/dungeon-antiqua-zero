@@ -60,6 +60,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         event_messages: EventMessageCatalog | None = None,
         language: Language = Language.JAPANESE,
         category: str = "conversation_log",
+        mission_message_ids: tuple[str, ...] = (),
     ) -> InformationMenuOverlay:
         fonts = Mock()
         font_map = {
@@ -82,6 +83,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
             monster_records={} if records is None else records,
             items=load_items(),
             logs=[] if logs is None else logs,
+            mission_message_ids=mission_message_ids,
             settings=Settings(language=language),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
             event_messages=(
@@ -137,6 +139,39 @@ class InformationMenuOverlayTest(unittest.TestCase):
         self.assertEqual(overlay.main_window.texts, ())
         self.assertFalse(overlay.update(input_state(confirm=True)))
         invalid_action.assert_not_called()
+        self.assertTrue(overlay.update(input_state(cancel=True)))
+
+    def test_missions_show_in_source_order_in_current_language(self) -> None:
+        messages = EventMessageCatalog.from_records([
+            {"message_id": "mission.second", "text_ja": ["二番", "本文"], "text_en": ["Second"], "text_zhcn": []},
+            {"message_id": "mission.first", "text_ja": ["一番"], "text_en": ["First"], "text_zhcn": []},
+        ])
+        for language, expected in ((Language.JAPANESE, ["一番", "", "二番", "本文"]), (Language.ENGLISH, ["Ｆｉｒｓｔ", "", "Ｓｅｃｏｎｄ"])):
+            overlay = self.create_overlay(category="mission", language=language, event_messages=messages, mission_message_ids=("mission.first", "mission.missing", "mission.second"))
+            self.assertEqual([text.text for text in overlay.main_window.texts], expected)
+            self.assertEqual(overlay.logs, ())
+
+    def test_long_missions_scroll_and_cancel_back_to_category(self) -> None:
+        lines = [f"行{index}" for index in range(30)]
+        messages = EventMessageCatalog.from_records([
+            {"message_id": "mission.long", "text_ja": lines, "text_en": [], "text_zhcn": []},
+        ])
+        overlay = self.create_overlay(category="mission", event_messages=messages, mission_message_ids=("mission.long",))
+        overlay.update(input_state(confirm=True))
+        self.assertIs(overlay.phase, InformationPhase.MISSION)
+        self.assertFalse(overlay.header_cursor.active)
+        for _ in range(40):
+            overlay.update(input_state(navigation=Direction.DOWN))
+        self.assertEqual(overlay.main_window.texts[-1].text, "行２９")
+        overlay.update(input_state(previous_page=True))
+        self.assertLess(overlay.mission_scroll_row, 30 - overlay.conversation_visible_row_count)
+        for _ in range(40):
+            overlay.update(input_state(navigation=Direction.UP))
+        self.assertEqual(overlay.mission_scroll_row, 0)
+        self.assertFalse(overlay.update(input_state(cancel=True)))
+        self.assertIs(overlay.phase, InformationPhase.MENU)
+        self.assertTrue(overlay.header_cursor.active)
+        self.assertEqual(overlay.header_cursor.selected_key, "mission")
         self.assertTrue(overlay.update(input_state(cancel=True)))
 
     def test_empty_conversation_log_alerts_and_stays_in_submenu(self) -> None:
@@ -453,7 +488,10 @@ class InformationMenuOverlayTest(unittest.TestCase):
 
         detail = [text.text for text in overlay.monster_detail_window.texts]
 
-        self.assertIn("おたから：ちりょうやく", detail)
+        expected_item = overlay.items[monster.treasure_item_key].localized_name(
+            overlay.localizer
+        )
+        self.assertIn(f"おたから：{expected_item}", detail)
 
     def test_boss_hp_is_shown_after_complete_identification(self) -> None:
         number, monster = next(

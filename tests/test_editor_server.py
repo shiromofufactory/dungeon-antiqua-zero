@@ -346,6 +346,24 @@ class EditorServerTest(unittest.TestCase):
             )
         )
 
+    def test_routes_mission_save_and_validation_through_event_editor(self) -> None:
+        payload = self.get_json("/event/api/document?namespace=sample&token=shared-token")
+        body = {
+            "namespace": "sample", "data": payload["data"], "flags": payload["flags"],
+            "messages": [*payload["messages"], {
+                "message_id": "sample.hello", "text_ja": ["こんにちは"],
+                "text_en": [], "text_zhcn": [],
+            }],
+            "missions": [{"id": "hello", "message_id": "sample.hello"}],
+        }
+        result = self.post_json("/event/api/save", body, "X-Event-Editor-Token")
+        self.assertTrue(result["saved"])
+        saved = self.get_json("/event/api/document?namespace=sample&token=shared-token")
+        self.assertEqual(saved["missions"], body["missions"])
+        body["missions"][0]["message_id"] = "sample.missing"
+        result = self.post_json("/event/api/validate", body, "X-Event-Editor-Token")
+        self.assertIn("unknown_message", {item["code"] for item in result["diagnostics"]})
+
     def test_routes_tileset_save_requests(self) -> None:
         payload = self.get_json(
             "/tileset/api/document?token=shared-token"

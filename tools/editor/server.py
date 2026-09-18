@@ -355,6 +355,7 @@ def make_handler(
                 return False, None
 
         def _event_response(self, path: str, payload: object) -> object:
+            missions = payload.get("missions") if isinstance(payload, dict) else None
             data = payload.get("data") if isinstance(payload, dict) else None
             flags = payload.get("flags") if isinstance(payload, dict) else None
             messages = payload.get("messages") if isinstance(payload, dict) else None
@@ -371,12 +372,12 @@ def make_handler(
                 messages = load_event_messages(event_application.content_root)
             if path == "/api/save":
                 return event_application.save(
-                    namespace, data, flags, messages
+                    namespace, data, flags, messages, missions
                 )
             return {
                 "saved": False,
                 "diagnostics": event_application.validate(
-                    namespace, data, flags, messages
+                    namespace, data, flags, messages, missions
                 ),
             }
 

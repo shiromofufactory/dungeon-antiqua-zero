@@ -31,10 +31,12 @@
       <nav class="sidebar-tabs" role="tablist" aria-label="編集対象">
         <button id="list-tab-flag" class="sidebar-tab" type="button" role="tab" aria-controls="list-panel-flag" data-action="select-list-tab" data-list-tab="flag">フラグ</button>
         <button id="list-tab-event" class="sidebar-tab active" type="button" role="tab" aria-controls="list-panel-event" data-action="select-list-tab" data-list-tab="event" aria-selected="true">イベント</button>
+        <button id="list-tab-mission" class="sidebar-tab" type="button" role="tab" aria-controls="list-panel-mission" data-action="select-list-tab" data-list-tab="mission">ミッション</button>
         <button id="list-tab-message" class="sidebar-tab" type="button" role="tab" aria-controls="list-panel-message" data-action="select-list-tab" data-list-tab="message">メッセージ</button>
       </nav>
       <section id="list-panel-flag" role="tabpanel" aria-labelledby="list-tab-flag" data-list-panel="flag" hidden><div class="heading"><h2>グローバルフラグ</h2><button data-action="add-flag">追加</button></div><div id="flags"></div></section>
       <section id="list-panel-event" role="tabpanel" aria-labelledby="list-tab-event" data-list-panel="event"><div class="heading"><h2>イベント</h2><button data-action="add-event">追加</button></div><div id="events"></div></section>
+      <section id="list-panel-mission" role="tabpanel" aria-labelledby="list-tab-mission" data-list-panel="mission" hidden><div class="heading"><h2>ミッション（表示順）</h2><button data-action="add-mission">追加</button></div><div id="missions"></div></section>
       <section id="list-panel-message" role="tabpanel" aria-labelledby="list-tab-message" data-list-panel="message" hidden><div class="heading"><h2>メッセージ</h2><button data-action="add-message">追加</button></div><div id="messages"></div></section>
     </aside>
     <section class="panel editor"><div id="event-editor" class="empty">イベントを選択してください。</div></section>

@@ -81,7 +81,7 @@ def event_source_paths(content_root: Path) -> tuple[Path, ...]:
         tuple(
             path
             for path in sorted(directory.glob("*.json"))
-            if path.name not in {"flags.json", "messages.json"}
+            if path.name not in {"flags.json", "messages.json", "missions.json"}
         )
         if directory.is_dir()
         else ()
@@ -116,9 +116,13 @@ def _validate_condition(
     flag_ids: set[str],
     character_keys: set[str],
     item_keys: set[str],
+    depth: int = 0,
 ) -> None:
     if not isinstance(value, Mapping):
         _diagnostic(diagnostics, "error", "invalid_condition", path, "conditionはobjectで指定してください。")
+        return
+    if depth > MAX_BRANCH_DEPTH:
+        _diagnostic(diagnostics, "error", "condition_too_deep", path, f"条件の入れ子は{MAX_BRANCH_DEPTH}段までです。")
         return
     condition_type = value.get("type")
     if condition_type == "flag_set":
@@ -152,6 +156,7 @@ def _validate_condition(
                     flag_ids=flag_ids,
                     character_keys=character_keys,
                     item_keys=item_keys,
+                    depth=depth + 1,
                 )
     elif condition_type == "not":
         _known_fields(value, {"type", "condition"}, diagnostics, path)
@@ -162,6 +167,7 @@ def _validate_condition(
             flag_ids=flag_ids,
             character_keys=character_keys,
             item_keys=item_keys,
+            depth=depth + 1,
         )
     else:
         _diagnostic(diagnostics, "error", "unknown_condition", f"{path}.type", f"未対応のconditionです: {condition_type}")
@@ -354,9 +360,17 @@ def validate_event_sources(
 
 def compile_event_sources(
     sources: Mapping[str, Mapping[str, object]],
+    *,
+    missions: object = None,
     **catalogs: Iterable[str],
 ) -> dict[str, object]:
-    diagnostics = validate_event_sources(sources, **catalogs)
+    from .missions import validate_missions
+
+    mission_values = [] if missions is None else missions
+    diagnostics = [
+        *validate_event_sources(sources, **catalogs),
+        *validate_missions(mission_values, **catalogs),
+    ]
     errors = [item for item in diagnostics if item.severity == "error"]
     if errors:
         raise EventSourceError(errors[0].message)
@@ -369,7 +383,7 @@ def compile_event_sources(
             full_id = f"{namespace}.{event['id']}"
             events[full_id] = {"commands": event["commands"]}
     canonical = json.dumps(
-        {"sources": sources, "flags": flag_ids},
+        {"sources": sources, "flags": flag_ids, "missions": mission_values},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -378,6 +392,10 @@ def compile_event_sources(
         "format_version": EVENT_RUNTIME_FORMAT_VERSION,
         "source_sha256": hashlib.sha256(canonical).hexdigest(),
         "flags": flag_ids,
+        "missions": [
+            {key: value for key, value in mission.items() if key != "note"}
+            for mission in mission_values
+        ],
         "events": {key: events[key] for key in sorted(events)},
     }
 

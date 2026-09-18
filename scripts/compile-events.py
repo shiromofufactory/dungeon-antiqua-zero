@@ -13,6 +13,8 @@ from event_pipeline import (
     compile_event_sources,
     compile_event_messages,
     event_source_paths,
+    load_missions,
+    validate_missions,
     load_event_flags,
     load_event_source,
     load_event_messages,
@@ -39,6 +41,7 @@ def main() -> int:
         content_root = args.content_root.resolve()
         paths = event_source_paths(content_root)
         sources = {path.stem: load_event_source(path) for path in paths}
+        missions = load_missions(content_root)
         flags = load_event_flags(content_root)
         messages = load_event_messages(content_root)
         compiled_flags = compile_event_flags(flags)
@@ -48,6 +51,7 @@ def main() -> int:
         catalogs["flag_ids"] = set(compiled_flags)
         compiled = compile_event_sources(
             sources,
+            missions=missions,
             **catalogs,
         )
         compiled_messages = compile_event_messages(
@@ -61,7 +65,8 @@ def main() -> int:
         return 1
     print(
         f"生成完了: {len(compiled['events'])} event, "
-        f"{len(compiled_flags)} flag, {len(compiled_messages)} message "
+        f"{len(compiled_flags)} flag, {len(compiled_messages)} message, "
+        f"{len(compiled['missions'])} mission "
         f"→ {args.output.resolve()}"
     )
     return 0

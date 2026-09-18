@@ -86,6 +86,7 @@ from resources import (
     MapResources,
     play_se,
 )
+from systems.conditions import evaluate_condition
 from resources.event_messages import (
     EventMessageCatalog,
     EventMessageResourceError,
@@ -1917,6 +1918,13 @@ class Game:
             monster_records=self.save_data.monster_records,
             items=self.items,
             logs=self.save_data.logs,
+            mission_message_ids=tuple(
+                mission.message_id for mission in self.event_catalog.missions
+                if mission.condition is None or evaluate_condition(
+                    mission.condition, save_data=self.save_data,
+                    party=self.party_system, inventory=self.inventory_system,
+                )
+            ),
             settings=self.settings,
             texts=self.texts,
             event_messages=self.event_messages,
