@@ -187,6 +187,22 @@ class MonsterChargePresentationTest(unittest.TestCase):
 
 
 class MonsterEscapePresentationTest(unittest.TestCase):
+    def test_identical_monsters_escape_and_record_the_actual_individual(self) -> None:
+        first, second = charge_monster(), charge_monster()
+        self.assertEqual(first, second)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (first, second)
+        mock.escaped_monster_indexes = set()
+        mock.progression = Mock()
+        mock._show_monster_action_message = Mock()
+        with patch("scenes.battle.play_se"):
+            mock._begin_monster_escape(second)
+        self.assertTrue(first.is_alive)
+        self.assertFalse(second.is_alive)
+        self.assertEqual(mock.monster_escape_actor_index, 1)
+        self.assertEqual(mock.escaped_monster_indexes, {1})
+        mock.progression.record_enemy_escape.assert_called_once_with(1)
+
     def test_escape_moves_left_after_da2_delay_and_excludes_rewards(self) -> None:
         actor = charge_monster()
         actor.special_actions = (MonsterSpecialAction.ESCAPE,)

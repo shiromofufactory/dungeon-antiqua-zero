@@ -253,6 +253,11 @@ class BattleProgression:
             )
             awards[kind] = max(awards.get(kind, 0), amount)
 
+    def used_spell_kinds(self, character_key: str) -> frozenset[ProficiencyKind]:
+        """Expose school usage for auto tie-breaking without mutable records."""
+
+        return frozenset(self._spell_uses.get(character_key, ()))
+
     def record_spell_use(
         self,
         member: Member,

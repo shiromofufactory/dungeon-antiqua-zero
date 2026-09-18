@@ -1704,8 +1704,9 @@ class BattleScreenMockTest(unittest.TestCase):
                     mock.attack_presentation.motion_frame_count - 1
                 )
                 mock._begin_action_return = Mock()
+                mock._complete_current_turn = Mock()
 
-                expected_wait_frames = 12 if is_focused else 6
+                expected_wait_frames = 18 if is_focused else 6
                 self.assertEqual(
                     FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT
                     if is_focused else JUMP_ATTACK_RETURN_WAIT_FRAME_COUNT,
@@ -7803,46 +7804,50 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertIs(mock.global_command_cursor, new_cursor)
 
-    def test_auto_battle_selects_attack_or_defend_from_target_availability(self) -> None:
+    def test_auto_battle_starts_cancellable_planning_before_any_action(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.auto_battle_active = False
         mock.global_command_cursor = Mock()
         mock.global_command_window = Mock()
-        mock._active_member_attack_targets = Mock(return_value=(2, 3, 4))
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.auto_battle_sequence = 0
+        mock._hide_command_guide = Mock()
+        snapshot = object()
+        mock._auto_battle_snapshot = Mock(return_value=snapshot)
+        mock._refresh_input_guide = Mock()
         mock._begin_attack_target_selection = Mock()
         mock._begin_defense = Mock()
 
-        mock._begin_auto_battle()
+        with patch("scenes.battle.AutoBattlePlanner") as planner:
+            mock._begin_auto_battle()
+            planner.assert_called_once_with(snapshot)
+            self.assertIs(mock.auto_battle_planner,planner.return_value)
 
         self.assertTrue(mock.auto_battle_active)
-        mock._begin_attack_target_selection.assert_called_once_with()
+        self.assertIs(mock.phase,BattleMockPhase.AUTO_THINKING)
+        self.assertEqual(mock.auto_battle_sequence,1)
+        mock._begin_attack_target_selection.assert_not_called()
         mock._begin_defense.assert_not_called()
 
-        mock._active_member_attack_targets.return_value = ()
-        mock._begin_attack_target_selection.reset_mock()
-        mock._begin_defense.reset_mock()
-        mock._begin_auto_action()
+    def test_auto_battle_executes_the_planned_ambush_target(self) -> None:
+        from auto_battle_model import AutoAction
 
-        mock._begin_attack_target_selection.assert_not_called()
-        mock._begin_defense.assert_called_once_with()
-
-    def test_auto_battle_uses_unrestricted_ambush_while_hidden(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.active_party_index = 0
         mock.hidden_party_indexes = {0}
-        mock._active_member_attack_targets = Mock(return_value=(0, 1, 2, 3, 4))
+        mock._remember_active_command = Mock()
+        mock.target_cursor = Mock()
         mock._begin_attack_target_selection = Mock()
         mock._begin_defense = Mock()
 
-        mock._begin_auto_action()
-
-        mock._active_member_attack_targets.assert_called_once_with(
-            command=BattleCommand.AMBUSH
-        )
+        mock._execute_auto_action(AutoAction(BattleCommand.AMBUSH,(7,)))
         mock._begin_attack_target_selection.assert_called_once_with(
             command=BattleCommand.AMBUSH
         )
         mock._begin_defense.assert_not_called()
+        self.assertEqual(mock.selected_target_index,2)
+        mock.target_cursor.select_key.assert_called_once_with(2)
 
     def test_auto_attack_target_selection_starts_a_forward_jump(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -7861,6 +7866,7 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_auto_target_selection_confirms_the_default_target(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.auto_battle_active = True
+        mock.selected_command = BattleCommand.ATTACK
         mock.action_offset_x = ACTION_MOVE_DISTANCE
         mock._begin_attack_presentation = Mock()
 
@@ -7871,6 +7877,7 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_auto_target_selection_waits_until_forward_jump_lands(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.auto_battle_active = True
+        mock.selected_command = BattleCommand.ATTACK
         mock.action_offset_x = ACTION_MOVE_DISTANCE - ACTION_MOVE_SPEED
         mock._begin_attack_presentation = Mock()
 

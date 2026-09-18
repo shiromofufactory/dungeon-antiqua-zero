@@ -8,10 +8,20 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from math import ceil, hypot
 from pathlib import Path
+from time import perf_counter
 from typing import Callable, TypeVar
 
 import pyxel
 
+from auto_battle import AutoBattlePlanner
+from auto_battle_model import (
+    AutoAction,
+    AutoBattleLogEntry,
+    AutoBattleObservations,
+    AutoBattlePolicy,
+    AutoBattleSnapshot,
+    AutoCombatant,
+)
 from attack_pose import (
     AttackPoseDefinition,
     AttackWeaponSprite,
@@ -634,6 +644,7 @@ class BattlePhase(StrEnum):
     INITIAL = "initial"
     COMMAND = "command"
     GLOBAL_COMMAND = "global_command"
+    AUTO_THINKING = "auto_thinking"
     ITEM = "item"
     SPELL = "spell"
     TARGET = "target"
@@ -1877,6 +1888,11 @@ class BattleScene:
         self.selected_command: str | None = None
         self.escape_return_phase = BattlePhase.COMMAND
         self.auto_battle_active = False
+        self.auto_battle_policy = AutoBattlePolicy()
+        self.auto_battle_planner: AutoBattlePlanner | None = None
+        self.auto_battle_observations = AutoBattleObservations()
+        self.auto_battle_log: list[AutoBattleLogEntry] = []
+        self.auto_battle_sequence = 0
         self.input_device = InputDevice.KEYBOARD
         self.confirm_hold_frame_count = 0
         self.selectable_target_indexes: tuple[int, ...] = ()
@@ -2054,6 +2070,9 @@ class BattleScene:
         self._update_affinity_popups()
         if hasattr(self, "active_party_pulse_frame"):
             self._update_active_party_pulse()
+        if getattr(self, "auto_battle_active", False) and input_state.cancel.triggered:
+            self._cancel_auto_battle()
+            return
         self._update_action_motion()
         if self.phase is BattlePhase.ACTION_RETURN:
             if self.action_party_index is None:
@@ -2070,8 +2089,8 @@ class BattleScene:
         if self.phase is BattlePhase.DEFEAT_MESSAGE:
             self._update_defeat_message(input_state)
             return
-        if getattr(self, "auto_battle_active", False) and input_state.cancel.triggered:
-            self._cancel_auto_battle()
+        if self.phase is BattlePhase.AUTO_THINKING:
+            self._update_auto_thinking()
             return
         if self.phase is BattlePhase.MONSTER_ACTION:
             self._update_monster_action()
@@ -2225,6 +2244,11 @@ class BattleScene:
 
     def _restart_battle(self) -> None:
         """Initialize or explicitly restart this scene and replay its entrance."""
+
+        self.auto_battle_planner = None
+        self.auto_battle_observations = AutoBattleObservations()
+        self.auto_battle_log = []
+        self.auto_battle_sequence = 0
 
         self._release_transient_action_palettes()
         self._restart_battle_bgm()
@@ -2600,7 +2624,7 @@ class BattleScene:
         )
 
     def _begin_auto_battle(self) -> None:
-        """Start automatic normal attacks and defensive fallbacks."""
+        """Start planning one action at a time from current battle state."""
 
         self.auto_battle_active = True
         if self.global_command_cursor is not None:
@@ -2610,27 +2634,188 @@ class BattleScene:
         self._refresh_input_guide()
 
     def _begin_auto_action(self) -> None:
-        """Choose the active member's automatic action for this turn."""
+        """Capture observations and start a cancellable, private forecast."""
 
-        command = (
-            BattleCommand.AMBUSH
-            if getattr(self, "active_party_index", None)
-            in getattr(self, "hidden_party_indexes", set())
-            else BattleCommand.ATTACK
+        self.auto_battle_planner = AutoBattlePlanner(self._auto_battle_snapshot())
+        self.auto_battle_sequence += 1
+        self.phase = BattlePhase.AUTO_THINKING
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self._hide_command_guide()
+
+    def _auto_battle_snapshot(self) -> AutoBattleSnapshot:
+        """Explicitly mask hidden HP and affinities at the scene boundary."""
+
+        observations = self.auto_battle_observations
+        combatants = []
+        for index, member in enumerate(self.party):
+            if index in self.escaped_party_indexes:
+                continue
+            learned = tuple(
+                s
+                for s in self.spells.values()
+                if s.type is not SpellType.ITEM and s.on_battle and s.is_learned_by(member)
+            )
+            combatants.append(
+                AutoCombatant.from_member(
+                    member,
+                    index,
+                    front=self._party_member_is_front_row(index),
+                    spells=learned,
+                    hidden=index in self.hidden_party_indexes,
+                    defending=index in self.defending_party_indexes,
+                    cover=self.cover_target_by_party_index.get(index),
+                    focus=(
+                        5 + self.focused_target_by_party_index[index]
+                        if index in self.focused_target_by_party_index
+                        else None
+                    ),
+                )
+            )
+        for index, monster in enumerate(self.monsters):
+            fields = frozenset(self.save_data.monster_records.get(monster.key, ()))
+            hp_shown = index in self.identified_monster_indexes
+            combatants.append(
+                AutoCombatant(
+                    number=5 + index,
+                    key=f"enemy:{monster.key}:{index}",
+                    species_key=monster.key,
+                    enemy=True,
+                    max_hp=monster.state.max_hp
+                    if "profile" in fields or hp_shown
+                    else None,
+                    hp=monster.state.hp if hp_shown else None,
+                    alive=monster.is_alive,
+                    max_mp=monster.max_mp,
+                    mp=max(0, monster.max_mp - observations.enemy_mp_spent.get(index, 0)),
+                    front=monster.is_front_row,
+                    agility=monster.agility,
+                    magic=monster.magic,
+                    defense=monster.combat_stats.defense,
+                    evasion=monster.combat_stats.evasion,
+                    spell_defense=monster.combat_stats.spell_resistance,
+                    attack=monster.combat_stats.attack,
+                    hit=monster.combat_stats.hit,
+                    spells=tuple(self.spells[k] for k in monster.spell_keys),
+                    special_actions=monster.special_actions,
+                    effect=monster.additional_effect,
+                    resistances=frozenset(
+                        r for r in monster.resistances if r.value in fields
+                    ),
+                    weaknesses=frozenset(
+                        r for r in monster.weaknesses if r.value in fields
+                    ),
+                    shadow=monster.is_shadow if "profile" in fields else False,
+                    boss=monster.is_boss,
+                    poisoned=monster.state.poisoned,
+                    sleeping=monster.state.sleeping,
+                    silenced=monster.state.silenced,
+                    stunned=monster.state.stunned,
+                    protection=monster.state.defense_modifier,
+                    speed=monster.state.speed_modifier,
+                    known_fields=fields,
+                    hp_displayed=hp_shown,
+                    net_damage=observations.enemy_net_damage.get(index, 0),
+                )
+            )
+        numbers = {id(visual): i for i, visual in enumerate(self.party_visuals)}
+        numbers.update({id(monster): 5 + i for i, monster in enumerate(self.monsters)})
+        used = self.progression.used_spell_kinds(
+            self.party[self.active_party_index].definition.key
         )
-        if self._active_member_attack_targets(command=command):
-            if command is BattleCommand.AMBUSH:
-                self._begin_attack_target_selection(command=command)
-            else:
-                self._begin_attack_target_selection()
+        return AutoBattleSnapshot(
+            tuple(combatants),
+            tuple((numbers[id(e.actor)], e.gauge) for e in self._timeline_order.entries),
+            self.active_party_index,
+            tuple(self.spells.values()),
+            self.auto_battle_policy,
+            frozenset(self.surprise_pending_party_indexes),
+            tuple(self.surprise_original_front_rows.items()),
+            frozenset(t.value for t, k in SPELL_PROFICIENCY_BY_TYPE.items() if k in used),
+        )
+
+    def _update_auto_thinking(self) -> None:
+        """Keep input responsive without dropping or reordering candidates."""
+
+        deadline = perf_counter() + 0.008
+        planner = self.auto_battle_planner
+        if planner is None:
             return
-        self._begin_defense()
+        while planner.result is None and perf_counter() < deadline:
+            planner.advance()
+        if planner.result is not None:
+            decision = planner.result
+            self.auto_battle_log.append(
+                AutoBattleLogEntry(self.auto_battle_sequence, planner.snapshot, decision)
+            )
+            del self.auto_battle_log[:-16]
+            self.auto_battle_planner = None
+            self._execute_auto_action(decision.action)
+
+    def _execute_auto_action(self, action: AutoAction) -> None:
+        """Use the manual command/target paths, including cost and progression."""
+
+        command = action.command
+        self._remember_active_command(command)
+        if command in (
+            BattleCommand.ATTACK,
+            BattleCommand.AMBUSH,
+            BattleCommand.AIM,
+            BattleCommand.FOCUS,
+        ):
+            self._begin_attack_target_selection(command=command)
+            self.selected_target_index = action.targets[0] - 5
+            self.target_cursor.select_key(self.selected_target_index)
+        elif command is BattleCommand.IDENTIFY:
+            self._begin_identify_target_selection()
+            self.selected_target_index = action.targets[0] - 5
+            self.target_cursor.select_key(self.selected_target_index)
+        elif command in (BattleCommand.SPELL, BattleCommand.ITEM):
+            spell = self.spells[action.spell_key]
+            candidate = None
+            if command is BattleCommand.ITEM:
+                slot = EquipmentSlot(action.equipment_slot)
+                candidate = BattleItemCandidate(
+                    self.party[self.active_party_index].equipment.item_at(slot), slot
+                )
+                self._remember_active_item(candidate)
+            else:
+                self.last_spell_key_by_party_index[self.active_party_index] = spell.key
+            self._begin_action_motion(use_cast_pose=command is BattleCommand.SPELL)
+            self._begin_action_target_selection(spell, item_candidate=candidate)
+            if not spell.to_all:
+                if spell.to_enemy:
+                    self.selected_target_index = action.targets[0] - 5
+                    self.target_cursor.select_key(self.selected_target_index)
+                else:
+                    self.selected_party_target_index = action.targets[0]
+                    self.party_target_cursor.select_key(self.selected_party_target_index)
+        elif command is BattleCommand.COVER:
+            self._begin_cover_target_selection()
+            self.selected_party_target_index = action.targets[0]
+            self._confirm_cover_target_selection()
+        elif command is BattleCommand.HIDE:
+            self._begin_hide()
+        elif command is BattleCommand.FORMATION:
+            self._begin_formation_change()
+        else:
+            self._begin_defense()
 
     def _cancel_auto_battle(self) -> None:
         """Leave auto mode without cancelling an already-running animation."""
 
         self.auto_battle_active = False
-        if self.phase is BattlePhase.TARGET:
+        self.auto_battle_planner = None
+        if self.phase is BattlePhase.AUTO_THINKING:
+            self._open_member_command_menu()
+        elif self.phase is BattlePhase.ACTION_TARGET:
+            self._clear_action_target_state()
+            self.selected_command = None
+            self._begin_action_return()
+            self._open_member_command_menu()
+        elif self.phase is BattlePhase.IDENTIFY_RESULT:
+            self._finish_identify_result()
+        elif self.phase is BattlePhase.TARGET:
             self.selected_command = None
             self.selectable_target_indexes = ()
             self.selected_target_index = None
@@ -2673,6 +2858,9 @@ class BattleScene:
 
     def _accept_escape_confirmation(self) -> None:
         """Start the current member's escape and commit the party to follow."""
+
+        self.auto_battle_active = False
+        self.auto_battle_planner = None
 
         if self.active_party_index is None:
             raise RuntimeError("escape confirmation requires an active member")
@@ -2779,6 +2967,7 @@ class BattleScene:
         self.timeline_animation_frame = 0
         self.timeline_advance = None
         self.auto_battle_active = False
+        self.auto_battle_planner = None
         self.command_cursor.active = False
         self.command_window.close_immediately()
         global_command_window = getattr(self, "global_command_window", None)
@@ -3952,6 +4141,10 @@ class BattleScene:
         return tuple(WindowCursor(window, (target,)) for target in targets)
 
     def _update_action_target_selection(self, input_state: InputState) -> None:
+        if getattr(self, "auto_battle_active", False):
+            if self.action_offset_x >= ACTION_MOVE_DISTANCE:
+                self._confirm_action_target_selection()
+            return
         """Confirm a spell/item target, or return to its selection window."""
 
         if input_state.cancel.triggered:
@@ -4638,6 +4831,9 @@ class BattleScene:
         for result in presentation.damage_results:
             monster = self.monsters[result.target_index]
             monster.state.take_damage(result.damage)
+            observations = getattr(self, "auto_battle_observations", None)
+            if observations is not None:
+                observations.damage(result.target_index, result.damage)
             damage_popups.append(
                 BattleSpellDamagePopup(
                     result.popup_x,
@@ -5115,9 +5311,15 @@ class BattleScene:
 
     def _update_target_selection(self, input_state: InputState) -> None:
         if getattr(self, "auto_battle_active", False):
+            if self.selected_command is BattleCommand.FOCUS:
+                self._begin_focus_presentation()
+                return
             if self.action_offset_x < ACTION_MOVE_DISTANCE:
                 return
-            self._begin_attack_presentation()
+            if self.selected_command is BattleCommand.IDENTIFY:
+                self._begin_identify_presentation()
+            else:
+                self._begin_attack_presentation()
             return
         if input_state.cancel.triggered:
             self.selected_command = None
@@ -5198,13 +5400,23 @@ class BattleScene:
             detail_texts,
         )
         self.identify_detail_window.open_immediately()
+        self.identify_result_elapsed_frame = 0
         self.phase = BattlePhase.IDENTIFY_RESULT
 
     def _update_identify_result(self, input_state: InputState) -> None:
         """Close the inspected detail and finish the acting member's turn."""
 
-        if not (input_state.confirm.triggered or input_state.cancel.triggered):
+        if getattr(self, "auto_battle_active", False):
+            self.identify_result_elapsed_frame += 1
+        timed_out = (
+            getattr(self, "auto_battle_active", False)
+            and self.identify_result_elapsed_frame >= 60
+        )
+        if not (timed_out or input_state.confirm.triggered or input_state.cancel.triggered):
             return
+        self._finish_identify_result()
+
+    def _finish_identify_result(self) -> None:
         if self.identify_detail_window is not None:
             self.identify_detail_window.close_immediately()
         self.identify_detail_window = None
@@ -5491,6 +5703,9 @@ class BattleScene:
                 if strike.is_hit:
                     if monster.is_alive:
                         monster.state.take_damage(strike.damage)
+                        observations = getattr(self, "auto_battle_observations", None)
+                        if observations is not None:
+                            observations.damage(presentation.target_index, strike.damage)
                         strike.additional_effects = (
                             self._apply_additional_effects_to_monster(
                                 presentation.target_index,
@@ -5646,6 +5861,9 @@ class BattleScene:
 
     def _begin_victory_summary(self) -> None:
         """Settle rewards and show DA1's victory message over the battlefield."""
+
+        self.auto_battle_active = False
+        self.auto_battle_planner = None
 
         self._begin_hidden_party_victory_return()
         self._clear_damage_popups_for_victory()
@@ -6403,6 +6621,9 @@ class BattleScene:
         monster_index = next(
             index for index, monster in enumerate(self.monsters) if monster is actor
         )
+        observations = getattr(self, "auto_battle_observations", None)
+        if observations is not None:
+            observations.damage(monster_index, damage)
         _base_x, y = self._monster_base_position(monster_index)
         damage_popups.append(
             BattleSpellDamagePopup(
@@ -6735,7 +6956,7 @@ class BattleScene:
             self._start_timeline_animation()
             return
         if hasattr(self, "progression"):
-            self.progression.record_enemy_action(self.monsters.index(actor))
+            self.progression.record_enemy_action(self._monster_index(actor))
         if action is MonsterAction.ESCAPE:
             self._begin_monster_escape(actor)
             return
@@ -6752,6 +6973,14 @@ class BattleScene:
                 self._start_timeline_animation()
             return
         self._begin_standard_monster_attack(actor)
+
+    def _monster_index(self, actor: BattleMonster) -> int:
+        """Distinguish equal-valued monsters by their encounter identity."""
+
+        for index, monster in enumerate(self.monsters):
+            if monster is actor:
+                return index
+        raise ValueError("monster actor is not in this encounter")
 
     def _select_monster_action(
         self,
@@ -6829,6 +7058,10 @@ class BattleScene:
             self.phase = BattlePhase.ACTION_PRESENTATION
             self._show_monster_spell_mp_lack_message(actor)
             return True
+
+        observations = getattr(self, "auto_battle_observations", None)
+        if observations is not None:
+            observations.spend_mp(self._monster_index(actor), spell.mp)
 
         indexes = candidates if spell.to_all else (random.choice(candidates),)
         target_side = "ally" if spell.to_enemy else "enemy"
@@ -7126,7 +7359,7 @@ class BattleScene:
     def _begin_monster_charge(self, actor: BattleMonster) -> None:
         """Start a ranged 1.5x charge toward one living party member."""
 
-        actor_index = self.monsters.index(actor)
+        actor_index = self._monster_index(actor)
         target_index, result = self._resolve_monster_attack(
             actor,
             self._monster_charge_target_indexes(),
@@ -7238,7 +7471,7 @@ class BattleScene:
     def _begin_monster_escape(self, actor: BattleMonster) -> None:
         """Start DA2's leftward enemy escape without death presentation."""
 
-        actor_index = self.monsters.index(actor)
+        actor_index = self._monster_index(actor)
         self.monster_escape_actor_index = actor_index
         self.monster_escape_animation_frame = 0
         self.escaped_monster_indexes.add(actor_index)

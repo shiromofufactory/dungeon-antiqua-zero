@@ -7,7 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from monster import MonsterSpecialAction
+if __package__ == "":
+    from monster import MonsterSpecialAction
+else:
+    from .monster import MonsterSpecialAction
 
 
 class MonsterAction(StrEnum):
@@ -31,6 +34,26 @@ class MonsterSpellAction:
 
 
 MonsterActionChoice = MonsterAction | MonsterSpellAction
+
+
+def monster_action_candidates(
+    *, special_actions: Sequence[MonsterSpecialAction], is_front_row: bool,
+    can_attack: bool, can_charge: bool, spell_keys: Sequence[str],
+    escape_eligible: bool,
+) -> tuple[MonsterActionChoice, ...]:
+    """Share candidate construction between live AI and deterministic forecasts."""
+
+    candidates: list[MonsterActionChoice] = []
+    if MonsterSpecialAction.ESCAPE in special_actions and escape_eligible:
+        candidates.append(MonsterAction.ESCAPE)
+    if MonsterSpecialAction.CHARGE in special_actions and can_charge:
+        candidates.append(MonsterAction.CHARGE)
+    candidates.extend(MonsterSpellAction(key) for key in spell_keys)
+    if is_front_row and can_attack:
+        candidates.append(MonsterAction.ATTACK)
+    elif not is_front_row:
+        candidates.append(MonsterAction.IDLE)
+    return tuple(candidates)
 
 
 def select_monster_action(
@@ -80,7 +103,7 @@ def select_monster_action(
     if any(not isinstance(action, MonsterSpecialAction) for action in specials):
         raise TypeError("special_actions must contain MonsterSpecialAction values")
 
-    candidates: list[MonsterActionChoice] = []
+    escape_eligible = False
     if (
         MonsterSpecialAction.ESCAPE in specials
         and party_actual_attacks
@@ -88,25 +111,24 @@ def select_monster_action(
     ):
         member_attack = random.choice(tuple(party_actual_attacks))
         if member_attack > monster_attack * random.uniform(1.0, 2.0):
-            candidates.append(MonsterAction.ESCAPE)
-    if MonsterSpecialAction.CHARGE in specials and can_charge:
-        candidates.append(MonsterAction.CHARGE)
-    candidates.extend(MonsterSpellAction(key) for key in spell_keys)
-    if is_front_row and can_attack:
-        candidates.append(MonsterAction.ATTACK)
-    elif not is_front_row:
-        candidates.append(MonsterAction.IDLE)
+            escape_eligible = True
+    candidates = monster_action_candidates(
+        special_actions=specials, is_front_row=is_front_row,
+        can_attack=can_attack, can_charge=can_charge, spell_keys=spell_keys,
+        escape_eligible=escape_eligible,
+    )
 
     if not candidates:
         return None
     if len(candidates) == 1:
         return candidates[0]
-    return random.choice(candidates)
+    return random.choice(list(candidates))
 
 
 __all__ = [
     "MonsterAction",
     "MonsterActionChoice",
     "MonsterSpellAction",
+    "monster_action_candidates",
     "select_monster_action",
 ]

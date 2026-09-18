@@ -44,6 +44,7 @@
 - [情報メニュー・ミッション・モンスター図鑑](./information-menu.md)
 - [エンカウントと戦闘復帰](./encounters.md)
 - [戦闘表示データ](./battle.md)
+- [オートバトル](./auto-battle.md)
 - [宝箱](./treasures.md)
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)

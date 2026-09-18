@@ -61,6 +61,9 @@ app/
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
 ├── battle_surprise.py        # 平均素早さ差による不意打ち抽選の純粋ルール
 ├── battle_physical.py        # DA2準拠の通常攻撃力、命中、物理ダメージ計算
+├── auto_battle.py            # 固定回復の優先と短期予測による1行動の判断
+├── auto_battle_model.py      # 判断用スナップショット、方針、観測履歴、評価結果
+├── auto_battle_simulation.py # 本体と切り離した戦闘予測と味方の継続方針
 ├── attack_pose.py             # 通常攻撃コンポジット定義の検証と武器別ポーズ解決
 ├── monster.py                # モンスター種族、基本戦闘能力、戦闘ごとのHP、敵隊列ルール
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
@@ -1425,6 +1428,15 @@ Fieldを逆参照しない。表示条件は [フィールド仕様](./features/
 衝突判定には含めない。詳細は [`features/field.md`](./features/field.md) を参照する。
 
 ### SystemとDomain Model
+
+オートバトルの判断仕様は [features/auto-battle.md](./features/auto-battle.md) を参照する。
+`auto_battle.py` と `auto_battle_simulation.py` はPyxelの更新・描画に依存しない戦闘ルールであり、
+`auto_battle_model.py` の読み取り専用の戦闘状態、
+開示済み情報と観測履歴、使用方針、対応済み効果の計算を明示的に受け取る。
+Scene、Game、Windowへ逆参照せず、候補評価中に本体状態・本体乱数・成長記録を変更しない。
+固定回復の選択規則は予測中の味方継続方針と共用し、必要な回復をケース評価に依存させない。
+BattleSceneは計算の開始・中断と結果の実行を所有し、実際の効果・消費・遷移には
+手動操作と共通の戦闘ルールを使う。判断履歴と計算途中の位置はSceneの一時状態として所有する。
 
 Member、Item、Spellなど、データとそのデータに密接なルールはDomain Modelへ置く。複数のModelやSaveDataをまたぐ操作はSystemへ置く。
 

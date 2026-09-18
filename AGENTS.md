@@ -110,6 +110,7 @@
   この検証コマンドは `package.json` のnpm scriptsへ復元しない。
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。
 - ゲームルールは可能な範囲でPyxel非依存のテストを用意する。
+- オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
 - ミッションの検証・条件判定・情報メニュー表示は `python3 -B -m unittest tests.test_missions tests.test_information_menu tests.test_event_editor_server tests.test_editor_server`、エディタ操作は `node --test tests/test_mission_editor.mjs` で回帰検証する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。
 - 強制割り込みゲームメニューは `python3 -B -m unittest tests.test_game_menu tests.test_input tests.test_audio_resources` で停止・復帰・BGM保持を回帰検証する。
