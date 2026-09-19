@@ -31,6 +31,9 @@ RESULT_CHARACTER_GRID_X = 2
 RESULT_CHARACTER_GRID_Y = 2
 RESULT_CHARACTER_SPRITE_WIDTH = 16
 RESULT_CHARACTER_SPRITE_HEIGHT = 32
+RESULT_AILMENT_SPRITE_SOURCE_X = 16 * 6
+RESULT_DEAD_SPRITE_SOURCE_X = 16 * 9
+RESULT_DEAD_SPRITE_WIDTH = 24
 RESULT_TEXT_GRID_X = 8
 RESULT_NAME_GRID_Y = 2
 RESULT_HP_GRID_Y = 5
@@ -62,10 +65,19 @@ def result_window_grid(member_index: int) -> tuple[int, int, int, int]:
 def member_battle_sprite_region(member: Member) -> tuple[int, int, int, int] | None:
     if member.definition.key in MISSING_RESULT_SPRITE_CHARACTER_KEYS:
         return None
+    if member.is_dead:
+        source_x = RESULT_DEAD_SPRITE_SOURCE_X
+        width = RESULT_DEAD_SPRITE_WIDTH
+    elif member.paralyzed or member.poisoned:
+        source_x = RESULT_AILMENT_SPRITE_SOURCE_X
+        width = RESULT_CHARACTER_SPRITE_WIDTH
+    else:
+        source_x = 0
+        width = RESULT_CHARACTER_SPRITE_WIDTH
     return (
-        0,
+        source_x,
         member.definition.battle_sprite * RESULT_CHARACTER_SPRITE_HEIGHT,
-        RESULT_CHARACTER_SPRITE_WIDTH,
+        width,
         RESULT_CHARACTER_SPRITE_HEIGHT,
     )
 
@@ -196,7 +208,6 @@ class BattleResultOverlay:
     def _refresh(self) -> None:
         for index, (window, member) in enumerate(zip(self.windows, self.party)):
             before = self.growth.before[index]
-            after = self.growth.after[index]
             current = self._snapshot(index)
             window.clear_texts()
             name = member.definition.localized_name(self.localizer)
@@ -214,10 +225,10 @@ class BattleResultOverlay:
                 font_spans=placement.font_spans,
             )
             hp_max = pad(current.max_hp, 3)
-            if after.max_hp > before.max_hp:
+            if current.max_hp > before.max_hp:
                 hp_max = f"%COL_POSITIVE%{hp_max}%COL_END%"
             mp_max = pad(current.max_mp, 3)
-            if after.max_mp > before.max_mp:
+            if current.max_mp > before.max_mp:
                 mp_max = f"%COL_POSITIVE%{mp_max}%COL_END%"
             window.add_text(
                 f"ＨＰ　{pad(current.hp, 3)}／{hp_max}",
@@ -307,12 +318,15 @@ def _interpolated_proficiency(
 __all__ = [
     "BattleResultOverlay",
     "MISSING_RESULT_SPRITE_CHARACTER_KEYS",
+    "RESULT_AILMENT_SPRITE_SOURCE_X",
     "RESULT_ANIMATION_FRAME_COUNT",
     "RESULT_INCREMENT_SE_ID",
     "RESULT_CHARACTER_GRID_X",
     "RESULT_CHARACTER_GRID_Y",
     "RESULT_CHARACTER_SPRITE_HEIGHT",
     "RESULT_CHARACTER_SPRITE_WIDTH",
+    "RESULT_DEAD_SPRITE_SOURCE_X",
+    "RESULT_DEAD_SPRITE_WIDTH",
     "RESULT_HP_GRID_Y",
     "RESULT_MP_GRID_Y",
     "RESULT_NAME_GRID_Y",

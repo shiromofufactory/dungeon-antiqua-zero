@@ -18,10 +18,14 @@ from resources import FontResources
 from state import SaveData, Settings
 from systems import BattleProgression, EnemyProgressionData
 from ui.battle_result import (
+    RESULT_AILMENT_SPRITE_SOURCE_X,
     RESULT_ANIMATION_FRAME_COUNT,
+    RESULT_DEAD_SPRITE_SOURCE_X,
+    RESULT_DEAD_SPRITE_WIDTH,
     RESULT_INCREMENT_SE_ID,
     RESULT_WAIT_FRAME_COUNT,
     BattleResultOverlay,
+    member_battle_sprite_region,
 )
 
 
@@ -136,6 +140,63 @@ class BattleResultOverlayTest(unittest.TestCase):
         self.assertNotIn("%COL_POSITIVE%ＭＰ", mp_text)
         self.assertIn("／%COL_POSITIVE%", mp_text)
         self.assertTrue(mp_text.endswith("%COL_END%"))
+
+    def test_marks_max_mp_only_after_the_displayed_value_increases(self) -> None:
+        original = self.overlay.growth.before[0]
+        before = replace(original, mp=min(original.mp, 16), max_mp=16)
+        after = replace(before, max_mp=24)
+        overlay = BattleResultOverlay(
+            party=self.party,
+            growth=replace(self.overlay.growth, before=(before,), after=(after,)),
+            settings=Settings(),
+            fonts=FontResources(),
+            character_sprites=object(),
+        )
+
+        def mp_text() -> str:
+            return next(
+                placement.text
+                for placement in overlay.windows[0].texts
+                if placement.text.startswith("ＭＰ")
+            )
+
+        self.assertEqual(overlay._snapshot(0).max_mp, 16)
+        self.assertNotIn("%COL_POSITIVE%", mp_text())
+        for _frame in range(RESULT_WAIT_FRAME_COUNT):
+            overlay.update(InputState())
+        for _frame in range(3):
+            overlay.update(InputState())
+            self.assertEqual(overlay._snapshot(0).max_mp, 16)
+            self.assertNotIn("%COL_POSITIVE%", mp_text())
+
+        overlay.update(InputState())
+
+        self.assertEqual(overlay._snapshot(0).max_mp, 17)
+        self.assertIn("／%COL_POSITIVE%", mp_text())
+
+    def test_uses_death_and_ailment_poses_in_the_result(self) -> None:
+        member = self.party[0]
+        sprite_y = member.definition.battle_sprite * 32
+
+        member.poisoned = True
+        self.assertEqual(
+            member_battle_sprite_region(member),
+            (RESULT_AILMENT_SPRITE_SOURCE_X, sprite_y, 16, 32),
+        )
+
+        member.poisoned = False
+        member.paralyzed = True
+        self.assertEqual(
+            member_battle_sprite_region(member),
+            (RESULT_AILMENT_SPRITE_SOURCE_X, sprite_y, 16, 32),
+        )
+
+        member.hp = 0
+        member.poisoned = True
+        self.assertEqual(
+            member_battle_sprite_region(member),
+            (RESULT_DEAD_SPRITE_SOURCE_X, sprite_y, RESULT_DEAD_SPRITE_WIDTH, 32),
+        )
 
 
 if __name__ == "__main__":
