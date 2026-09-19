@@ -1266,7 +1266,8 @@ DA2同様に増減表示より状態名を優先する。`Game` はダンジョ�
 
 毒と麻痺は戦闘後も続く真偽値、眠りと混乱は戦闘中の残りターン数として `Member` が保持する。
 町・ダンジョンなどからワールドマップへ切り替える際は `Game` が全Memberへワールドマップ復帰を
-通知し、毒と麻痺だけを解除する。状態表示の優先順位は死亡、麻痺、眠り、混乱、毒とする。
+通知し、HP・MP・死亡状態を維持したまま、それ以外の状態異常と戦闘中補正を解除する。
+状態表示の優先順位は死亡、麻痺、眠り、混乱、毒とする。
 戦闘またはダンジョン歩行による全滅では、共通の全滅帰還フェードで完全暗転した後に
 復帰メッセージOverlayを表示する。最終ページの確認時に全Memberへ `fully_recover()` を呼び、
 HP・MP、状態異常、戦闘中補正を全回復してから入口直前へ戻す。
@@ -1502,7 +1503,7 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 |---|---|
 | フィールドで入力を受けた結果 | `FieldScene` |
 | フィールドや迷宮の移動ルール | `Field` または探索用System |
-| エンカウント加算、発生判定、全滅時の出口解決 | `EncounterSystem` |
+| エンカウント加算、発生判定、モンスター候補抽出・編成、全滅時の出口解決 | `EncounterSystem` |
 | エンカウント画面の回転・拡大パラメータ | `rendering/encounter.py` |
 | フィールドの描画 | `FieldScene` またはField専用Renderer |
 | 拠点のセル検索、近隣名表示候補 | `WorldSiteCatalog` |
@@ -1529,8 +1530,8 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 現在のComposition Rootでは `Game` が `EncounterSystem` の結果を受け、フィールド画面の保存、
 `BattleScene` の生成、`BattleResult` に応じたフィールド復帰を調停する。エンカウント変数は
 `SaveData`、戦闘内の一時状態は `BattleScene`、回転・拡大のフレーム状態は
-`EncounterTransition` がそれぞれ所有する。ワールドマップへ切り替える時点での毒・麻痺解除は、
-`Game` が `Member.recover_world_map_entry_ailments()` を呼んで行う。
+`EncounterTransition` がそれぞれ所有する。ワールドマップへ切り替える時点での死亡以外の
+状態異常・戦闘中補正の解除は、`Game` が `Member.recover_world_map_entry_ailments()` を呼んで行う。
 
 配置に迷った場合は「どの状態を変更するか」「その状態の所有者は誰か」を先に決める。複数箇所から呼ばれるという理由だけで `util.py` へ移動しない。
 

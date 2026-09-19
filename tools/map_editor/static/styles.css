@@ -136,6 +136,8 @@ input[type="number"], input[type="text"], select { width: 100%; min-width: 0; pa
 .resource-dialog-content { padding: 18px; display: grid; gap: 14px; }
 .resource-dialog-content h2 { font-size: 16px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.encounter-toggle { min-height: 38px; padding: 8px 10px; display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 6px; background: #141713; color: var(--text); cursor: pointer; }
+.encounter-toggle input { margin: 0; accent-color: var(--pink); }
 
 @media (max-width: 1180px) {
   .workspace { height: auto; min-height: calc(100vh - 76px); grid-template-columns: minmax(220px,280px) minmax(500px,1fr); }

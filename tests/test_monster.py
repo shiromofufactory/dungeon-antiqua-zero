@@ -63,6 +63,9 @@ class MonsterSpellDefinitionTest(unittest.TestCase):
         self.assertEqual((treant.magic, treant.intelligence), (15, 0))
         self.assertEqual(treant.spell_keys, ("SLEEP",))
         self.assertEqual(treant.treasure_rate, 16)
+        self.assertFalse(treant.early_appear)
+        self.assertEqual(treant.max_occurrence, 1)
+        self.assertFalse(treant.is_large_animal)
 
 
 class MonsterBattleStateTest(unittest.TestCase):

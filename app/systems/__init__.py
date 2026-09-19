@@ -13,7 +13,10 @@ from .encounter import (
     ENCOUNTER_STEP_MIN,
     ENCOUNTER_THRESHOLD,
     EncounterAdvance,
+    EncounterFormation,
+    EncounterGenerationError,
     EncounterSystem,
+    MAX_ENCOUNTER_MONSTERS,
 )
 from .inventory import InventorySystem
 from .monster_records import (
@@ -80,6 +83,8 @@ __all__ = [
     "ENCOUNTER_STEP_MIN",
     "ENCOUNTER_THRESHOLD",
     "EncounterAdvance",
+    "EncounterFormation",
+    "EncounterGenerationError",
     "EncounterSystem",
     "InventorySystem",
     "MONSTER_COMBAT_FIELD_KEYS",
@@ -105,6 +110,7 @@ __all__ = [
     "SAVE_FORMAT_VERSION",
     "SAVE_SLOT_COUNT",
     "MAX_GOLD",
+    "MAX_ENCOUNTER_MONSTERS",
     "BattleGrowthResult",
     "BattleProgression",
     "BattleTreasureDrop",

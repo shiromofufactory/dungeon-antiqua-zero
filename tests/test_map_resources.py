@@ -36,7 +36,7 @@ class MapResourcesTest(unittest.TestCase):
         self.atlas = bytes([0] * (32 * 16))
         (self.maps_dir / "test_map.bin").write_bytes(self.atlas)
         self.runtime = {
-            "format_version": 7,
+            "format_version": 9,
             "map_id": "test_map",
             "profile": "world",
             "tileset_id": "worldmap",
@@ -222,6 +222,48 @@ class MapResourcesTest(unittest.TestCase):
         self.runtime["interact_through_rows"] = ["00"]
         self._write_runtime()
         with self.assertRaisesRegex(MapResourceError, "interact_through_rows"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+    def test_loads_and_validates_dungeon_random_encounter_settings(self) -> None:
+        self.runtime["profile"] = "dungeon"
+        self.runtime["random_encounter"] = {
+            "monster_level": "dynamic",
+            "danger": "low",
+            "polarity": "neutral",
+            "allow_demons": True,
+            "allow_humans": True,
+            "allow_giants": True,
+            "allow_large_animals": True,
+        }
+        self._write_runtime()
+
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+        self.assertEqual(loaded.random_encounter.monster_level, "dynamic")
+        self.assertEqual(loaded.random_encounter.danger, "low")
+        self.assertEqual(loaded.random_encounter.polarity, "neutral")
+        self.assertTrue(loaded.random_encounter.allow_demons)
+
+        self.runtime["random_encounter"].update(
+            {"monster_level": 9, "danger": "high", "polarity": "yin"}
+        )
+        self.runtime["random_encounter"]["allow_humans"] = False
+        self._write_runtime()
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.assertEqual(loaded.random_encounter.monster_level, 9)
+        self.assertEqual(loaded.random_encounter.danger, "high")
+        self.assertEqual(loaded.random_encounter.polarity, "yin")
+        self.assertFalse(loaded.random_encounter.allow_humans)
+
+        self.runtime["random_encounter"]["monster_level"] = 10
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "monster_level"):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+        self.runtime["random_encounter"]["monster_level"] = 1
+        self.runtime["random_encounter"]["allow_giants"] = 1
+        self._write_runtime()
+        with self.assertRaisesRegex(MapResourceError, "allow_giants"):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
     def test_accepts_depth_groups_and_rejects_unknown_object_draw_group(self) -> None:

@@ -612,6 +612,8 @@ class MapEditorApplication:
             height,
         )
         reset_source["bgm_id"] = source["bgm_id"]
+        if source.get("profile") == "dungeon":
+            reset_source["random_encounter"] = dict(source["random_encounter"])
         payload = self._document_payload(reset_source, is_new=False)
         payload["dirty"] = True
         return payload

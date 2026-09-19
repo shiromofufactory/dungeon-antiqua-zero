@@ -428,21 +428,38 @@ class MemberTest(unittest.TestCase):
         self.assertTrue(self.member.poisoned)
         self.assertTrue(self.member.paralyzed)
 
-    def test_world_map_entry_cures_only_poison_and_paralysis(self) -> None:
+    def test_world_map_entry_cures_every_condition_without_restoring_points(
+        self,
+    ) -> None:
         self.member.hp = 1
         self.member.mp = 2
         self.member.poisoned = True
         self.member.paralyzed = True
         self.member.sleeping = 2
+        self.member.confused = 3
         self.member.stunned = True
+        self.member.protection_level = 2
+        self.member.speed_modifier = -1
 
         self.member.recover_world_map_entry_ailments()
 
         self.assertFalse(self.member.poisoned)
         self.assertFalse(self.member.paralyzed)
-        self.assertEqual(self.member.sleeping, 2)
-        self.assertTrue(self.member.stunned)
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 0)
+        self.assertFalse(self.member.stunned)
+        self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.speed_modifier, 0)
         self.assertEqual(self.member.hp, 1)
+        self.assertEqual(self.member.mp, 2)
+
+    def test_world_map_entry_does_not_revive_a_dead_member(self) -> None:
+        self.member.hp = 0
+        self.member.mp = 2
+
+        self.member.recover_world_map_entry_ailments()
+
+        self.assertEqual(self.member.hp, 0)
         self.assertEqual(self.member.mp, 2)
 
     def test_full_recovery_restores_points_and_all_conditions(self) -> None:

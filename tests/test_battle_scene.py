@@ -11,7 +11,6 @@ from tools.screen_mocks._fixtures import load_mock_items
 from field import FieldPosition
 from game import (
     ENCOUNTER_JINGLE_ID,
-    RANDOM_BATTLE_ENCOUNTER,
     TELEPORT_SOUND_CHANNEL,
     TELEPORT_SOUND_ID,
     Game,
@@ -37,7 +36,7 @@ from scenes.battle import (
     monster_slot_indexes,
 )
 from state import Language, SaveData, Settings
-from systems import DungeonExitReturn, EncounterAdvance
+from systems import DungeonExitReturn, EncounterAdvance, EncounterFormation
 from text_catalog import TextCatalog
 from ui import LocalizedWindowTextFactory, POSITIVE_COLOR
 from ui.tagged_text import TextColor, split_tagged_text
@@ -57,9 +56,6 @@ class BattleEncounterTest(unittest.TestCase):
     def test_encounter_rejects_an_index_outside_its_lineup(self) -> None:
         with self.assertRaisesRegex(ValueError, "front monster indexes"):
             BattleEncounter(("Coyote",), frozenset((1,)))
-
-    def test_random_encounter_enables_surprise(self) -> None:
-        self.assertTrue(RANDOM_BATTLE_ENCOUNTER.surprise_enabled)
 
     def test_standard_first_monster_keeps_all_five_slots(self) -> None:
         monsters = tuple(
@@ -640,7 +636,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.field.stop.assert_called_once_with()
         game.bgm.play.assert_called_once_with(ENCOUNTER_JINGLE_ID, loop=False)
 
-    def test_encounter_transition_builds_the_fixed_test_lineup_at_black(
+    def test_encounter_transition_builds_the_generated_lineup_at_black(
         self,
     ) -> None:
         game = Game.__new__(Game)
@@ -649,6 +645,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.palette_shifter = Mock(base_colors=(0,))
         battle = Mock()
         game._build_battle_scene = Mock(return_value=battle)
+        encounter = BattleEncounter(("Giant Spider",), surprise_enabled=True)
+        game._create_random_battle_encounter = Mock(return_value=encounter)
 
         for _frame in range(ENCOUNTER_TRANSITION_FRAME_COUNT):
             game._update_encounter_transition()
@@ -656,21 +654,35 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertIsNone(game.encounter_transition)
         self.assertIsNone(game.encounter_snapshot)
         self.assertIs(game.battle_scene, battle)
-        game._build_battle_scene.assert_called_once_with(RANDOM_BATTLE_ENCOUNTER)
+        game._create_random_battle_encounter.assert_called_once_with()
+        game._build_battle_scene.assert_called_once_with(encounter)
         self.assertTrue(game.pending_first_party_turn_hint)
-        self.assertEqual(
-            RANDOM_BATTLE_ENCOUNTER.monster_keys,
-            (
-                "Treant",
-                "Cobra",
-                "Cobra",
-                "Cobra",
-            ),
+
+    def test_game_resolves_dynamic_map_level_and_enables_surprise(self) -> None:
+        game = Game.__new__(Game)
+        game.current_map = SimpleNamespace(
+            random_encounter=SimpleNamespace(monster_level="dynamic")
         )
-        self.assertEqual(
-            RANDOM_BATTLE_ENCOUNTER.front_monster_indexes,
-            frozenset((1, 2, 3)),
+        game.save_data = SaveData(battle_count=20)
+        game.monsters = (object(),)
+        game.encounter_system = Mock()
+        game.encounter_system.dynamic_monster_level.return_value = 3
+        game.encounter_system.generate_formation.return_value = EncounterFormation(
+            ("Giant Spider", "Coyote"),
+            frozenset((1,)),
         )
+
+        encounter = game._create_random_battle_encounter()
+
+        game.encounter_system.dynamic_monster_level.assert_called_once_with()
+        game.encounter_system.generate_formation.assert_called_once_with(
+            game.monsters,
+            game.current_map.random_encounter,
+            monster_level=3,
+        )
+        self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
+        self.assertEqual(encounter.front_monster_indexes, frozenset((1,)))
+        self.assertTrue(encounter.surprise_enabled)
 
     def test_party_command_ready_requires_an_open_window_on_a_party_turn(
         self,

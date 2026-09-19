@@ -243,6 +243,82 @@ class MapSourceTest(unittest.TestCase):
             },
         )
 
+    def test_validates_and_compiles_dungeon_random_encounter_settings(self) -> None:
+        dungeon_tileset = initial_tileset(
+            "test_dungeon",
+            "mapchips/dungeon",
+            "dungeon",
+            "floor",
+            "passable",
+        )
+        source = initial_map_source(
+            "test_dungeon", dungeon_tileset, "dungeon", 16, 15
+        )
+
+        self.assertEqual(
+            source["random_encounter"],
+            {
+                "monster_level": "dynamic",
+                "danger": "low",
+                "polarity": "neutral",
+                "allow_demons": False,
+                "allow_humans": False,
+                "allow_giants": False,
+                "allow_large_animals": False,
+            },
+        )
+        self.assertEqual(
+            [
+                item
+                for item in validate_map_source(source, dungeon_tileset)
+                if item.severity == "error"
+            ],
+            [],
+        )
+
+        source["random_encounter"] = {
+            "monster_level": 9,
+            "danger": "high",
+            "polarity": "yin",
+            "allow_demons": True,
+            "allow_humans": False,
+            "allow_giants": True,
+            "allow_large_animals": False,
+        }
+        compiled = compile_map(
+            source,
+            dungeon_tileset,
+            self.image_path,
+            self.palette_path,
+        )
+        self.assertEqual(compiled.runtime["format_version"], 9)
+        self.assertEqual(
+            compiled.runtime["random_encounter"],
+            source["random_encounter"],
+        )
+
+        source["random_encounter"] = {
+            "monster_level": 0,
+            "danger": "middle",
+            "polarity": "unknown",
+            "allow_demons": 1,
+            "allow_humans": True,
+            "allow_giants": True,
+            "allow_large_animals": True,
+        }
+        codes = {item.code for item in validate_map_source(source, dungeon_tileset)}
+        self.assertIn("invalid_encounter_monster_level", codes)
+        self.assertIn("invalid_encounter_danger", codes)
+        self.assertIn("invalid_encounter_polarity", codes)
+        self.assertIn("invalid_encounter_monster_filter", codes)
+
+        world = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        world["random_encounter"] = {"monster_level": 1, "danger": "low"}
+        self.assertIn(
+            "random_encounter_requires_dungeon",
+            {item.code for item in validate_map_source(world, self.tileset)},
+        )
+
     def test_allows_actor_on_blocked_cell_and_rejects_overlapping_actor_triggers(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["actors"] = [

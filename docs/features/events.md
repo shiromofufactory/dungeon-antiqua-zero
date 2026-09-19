@@ -435,15 +435,16 @@ npm run events:build
 ### 制作用形式
 
 actor種別と共通スプライトシート参照はversion 4で追加され、現在の制作用マップの
-`format_version` は宝箱actorを追加した6とする。`sprite_source` と `floating` は省略時の
-既定値を持つ後方互換な属性としてversion 6へ追加する。version 3のactorは `appearance_id` を
+`format_version` はdungeonの出現種別設定を追加した8とする。宝箱actor、
+`sprite_source` と `floating` はversion 6で追加した。後者2つは省略時の既定値を持つ。
+version 3のactorは `appearance_id` を
 廃止し、用途に応じた `kind` と共通シート内の
 `sprite_index` へ明示的に移行する。actorのないversion 3マップはversion番号だけを更新できる。
 既存の `sites`、`arrival_points`、`event_triggers` はそのまま維持する。
 
 ```json
 {
-  "format_version": 6,
+  "format_version": 8,
   "actors": [
     {
       "id": "village_elder",

@@ -133,6 +133,9 @@ class MonsterDefinition:
     max_hp: int
     max_mp: int
     level: int
+    early_appear: bool
+    max_occurrence: int
+    is_large_animal: bool
     magic: int
     intelligence: int
     spell_keys: tuple[str, ...]
@@ -193,7 +196,7 @@ class MonsterDefinition:
             raise MonsterDataError("monster.treasure_rate must be from 0 to 16")
 
         flags: dict[str, bool] = {}
-        for field_name in ("is_boss", "shadow"):
+        for field_name in ("is_boss", "shadow", "early_appear", "large_animal"):
             value = record.get(field_name)
             if (
                 isinstance(value, bool)
@@ -214,6 +217,13 @@ class MonsterDefinition:
             max_hp=_required_monster_integer(record, "mhp", positive=True),
             max_mp=_required_monster_integer(record, "mmp"),
             level=_required_monster_integer(record, "lv", positive=True),
+            early_appear=flags["early_appear"],
+            max_occurrence=_required_monster_integer(
+                record,
+                "max_occ",
+                positive=True,
+            ),
+            is_large_animal=flags["large_animal"],
             magic=_required_monster_integer(record, "mag"),
             intelligence=_required_monster_integer(record, "int"),
             spell_keys=monster_spell_keys_from_record(record),

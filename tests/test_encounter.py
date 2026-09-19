@@ -6,6 +6,7 @@ import unittest
 
 from app.field import FieldPosition
 from app.input import Direction
+from app.monster import MonsterDefinition
 from app.rendering import (
     ENCOUNTER_BLACK_COLOR,
     ENCOUNTER_FADE_FRAME_COUNT,
@@ -16,8 +17,19 @@ from app.rendering import (
     ENCOUNTER_WHITEOUT_FRAME_COUNT,
     EncounterTransition,
 )
-from app.resources.maps import CompiledMap, MapCell, MapDestination, WorldSite
-from app.systems import ENCOUNTER_THRESHOLD, EncounterSystem
+from app.resources import load_record_array
+from app.resources.maps import (
+    CompiledMap,
+    MapCell,
+    MapDestination,
+    MapRandomEncounter,
+    WorldSite,
+)
+from app.systems import (
+    ENCOUNTER_THRESHOLD,
+    EncounterGenerationError,
+    EncounterSystem,
+)
 
 
 class FixedRandom:
@@ -28,6 +40,59 @@ class FixedRandom:
     def randint(self, minimum: int, maximum: int) -> int:
         self.calls.append((minimum, maximum))
         return self.value
+
+
+class ScriptedRandom:
+    def __init__(
+        self,
+        *,
+        randrange_values: tuple[int, ...],
+        randint_values: tuple[int, ...],
+    ) -> None:
+        self.randrange_values = list(randrange_values)
+        self.randint_values = list(randint_values)
+        self.randrange_calls: list[int] = []
+        self.randint_calls: list[tuple[int, int]] = []
+
+    def randrange(self, stop: int) -> int:
+        self.randrange_calls.append(stop)
+        return self.randrange_values.pop(0)
+
+    def randint(self, minimum: int, maximum: int) -> int:
+        self.randint_calls.append((minimum, maximum))
+        return self.randint_values.pop(0)
+
+
+def monster(key: str, **overrides: object) -> MonsterDefinition:
+    record = dict(load_record_array("monsters.json")[0])
+    record.update(
+        {
+            "name_en": key,
+            "name_ja": key,
+            "lv": 3,
+            "early_appear": 0,
+            "max_occ": 1,
+            "tribe": "ANIMAL",
+            "large_animal": 1,
+            "weakness": "",
+            **overrides,
+        }
+    )
+    return MonsterDefinition.from_record(record)
+
+
+def encounter_settings(**overrides: object) -> MapRandomEncounter:
+    values = {
+        "monster_level": 3,
+        "danger": "high",
+        "polarity": "neutral",
+        "allow_demons": True,
+        "allow_humans": True,
+        "allow_giants": True,
+        "allow_large_animals": True,
+    }
+    values.update(overrides)
+    return MapRandomEncounter(**values)  # type: ignore[arg-type]
 
 
 def dungeon_map(
@@ -75,6 +140,222 @@ class EncounterSystemTest(unittest.TestCase):
         self.assertEqual(triggered.count, 0)
         self.assertTrue(triggered.triggered)
         self.assertEqual(random_source.calls, [(1, 4), (1, 4)])
+
+    def test_dynamic_level_is_provisionally_fixed_at_one(self) -> None:
+        self.assertEqual(EncounterSystem.dynamic_monster_level(), 1)
+
+    def test_high_danger_can_add_an_early_next_level_monster(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(2, 2),
+            randint_values=(1,),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+        monsters = (
+            monster("Level 3"),
+            monster("Early Level 4", lv=4, early_appear=1),
+            monster("Late Level 4", lv=4, early_appear=0),
+        )
+
+        formation = system.generate_formation(
+            monsters,
+            encounter_settings(),
+            monster_level=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Early Level 4",))
+        self.assertEqual(random_source.randrange_calls, [4, 3])
+
+    def test_low_danger_halves_max_occurrence_rounding_up(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 2),
+            randint_values=(3,),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Pack", max_occ=5),),
+            encounter_settings(danger="low"),
+            monster_level=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Pack", "Pack", "Pack"))
+        self.assertEqual(random_source.randint_calls, [(1, 3)])
+
+    def test_later_groups_are_front_row_and_high_danger_can_lower_level(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1, 0, 2),
+            randint_values=(1, 2),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (
+                monster("Level 3"),
+                monster("Level 2", lv=2, max_occ=2),
+            ),
+            encounter_settings(),
+            monster_level=3,
+        )
+
+        self.assertEqual(
+            formation.monster_keys,
+            ("Level 3", "Level 2", "Level 2"),
+        )
+        self.assertEqual(formation.front_monster_indexes, frozenset((1, 2)))
+
+    def test_stops_before_a_group_would_exceed_five_monsters(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 0, 0),
+            randint_values=(4, 2),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Pack", max_occ=4),),
+            encounter_settings(),
+            monster_level=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Pack",) * 4)
+        self.assertEqual(formation.front_monster_indexes, frozenset())
+
+    def test_species_switches_and_large_animal_off_follow_map_filters(self) -> None:
+        system = EncounterSystem()
+        settings = encounter_settings(
+            allow_demons=False,
+            allow_humans=False,
+            allow_giants=False,
+            allow_large_animals=False,
+        )
+        pool = system._weighted_pool(
+            (
+                monster("Demon", tribe="DEMON"),
+                monster("Human", tribe="HUMAN"),
+                monster("Mage", tribe="MAGE"),
+                monster("Giant", tribe="GIANT"),
+                monster("Small Animal", large_animal=0),
+                monster("Large Animal", large_animal=1),
+            ),
+            settings,
+            3,
+        )
+
+        self.assertEqual(tuple(item.key for item, _weight in pool), ("Small Animal",))
+
+    def test_large_animal_on_adds_an_early_next_level_candidate(self) -> None:
+        monsters = (
+            monster("Level 3", large_animal=0),
+            monster(
+                "Early Large Animal",
+                lv=4,
+                early_appear=1,
+                large_animal=1,
+            ),
+        )
+        system = EncounterSystem()
+
+        disabled = system._weighted_pool(
+            monsters,
+            encounter_settings(allow_large_animals=False),
+            3,
+        )
+        enabled = system._weighted_pool(
+            monsters,
+            encounter_settings(allow_large_animals=True),
+            3,
+        )
+
+        self.assertEqual(
+            tuple(item.key for item, _weight in disabled),
+            ("Level 3",),
+        )
+        self.assertEqual(
+            tuple(item.key for item, _weight in enabled),
+            ("Level 3", "Early Large Animal"),
+        )
+
+    def test_current_level_one_low_danger_pool_matches_master_data(self) -> None:
+        monsters = tuple(
+            MonsterDefinition.from_record(record)
+            for record in load_record_array("monsters.json")
+        )
+        system = EncounterSystem()
+
+        disabled = system._weighted_pool(
+            monsters,
+            encounter_settings(
+                monster_level="dynamic",
+                danger="low",
+                allow_demons=False,
+                allow_humans=False,
+                allow_giants=False,
+                allow_large_animals=False,
+            ),
+            1,
+        )
+        enabled = system._weighted_pool(
+            monsters,
+            encounter_settings(
+                monster_level="dynamic",
+                danger="low",
+                allow_demons=False,
+                allow_humans=False,
+                allow_giants=False,
+                allow_large_animals=True,
+            ),
+            1,
+        )
+
+        expected = ("Giant Spider", "Coyote", "Goblin")
+        self.assertEqual(tuple(item.key for item, _weight in disabled), expected)
+        self.assertEqual(tuple(item.key for item, _weight in enabled), expected)
+
+    def test_polarity_excludes_or_halves_elemental_weakness_candidates(self) -> None:
+        monsters = (
+            monster("Plain"),
+            monster("Fire Weak", weakness="炎"),
+            monster("Freeze Weak", weakness="冷"),
+        )
+        system = EncounterSystem()
+
+        yang = system._weighted_pool(
+            monsters,
+            encounter_settings(polarity="yang"),
+            3,
+        )
+        yin = system._weighted_pool(
+            monsters,
+            encounter_settings(polarity="yin"),
+            3,
+        )
+        neutral = system._weighted_pool(
+            monsters,
+            encounter_settings(polarity="neutral"),
+            3,
+        )
+
+        self.assertEqual(
+            tuple((item.key, weight) for item, weight in yang),
+            (("Plain", 2), ("Freeze Weak", 2)),
+        )
+        self.assertEqual(
+            tuple((item.key, weight) for item, weight in yin),
+            (("Plain", 2), ("Fire Weak", 2)),
+        )
+        self.assertEqual(
+            tuple((item.key, weight) for item, weight in neutral),
+            (("Plain", 2), ("Fire Weak", 1), ("Freeze Weak", 1)),
+        )
+
+    def test_rejects_settings_with_no_eligible_first_group(self) -> None:
+        system = EncounterSystem()
+
+        with self.assertRaises(EncounterGenerationError):
+            system.generate_formation(
+                (monster("Demon", tribe="DEMON"),),
+                encounter_settings(allow_demons=False),
+                monster_level=3,
+            )
 
     def test_finds_nearest_outward_exit_and_lands_before_trigger_cell(self) -> None:
         sites = (

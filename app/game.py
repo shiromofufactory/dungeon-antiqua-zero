@@ -358,16 +358,6 @@ SE_PREVIEW_SOUND_ID = 9
 GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
 WELCOME_BGM_ID = "da3-welcome"
 ENCOUNTER_JINGLE_ID = "da3-encount"
-RANDOM_BATTLE_ENCOUNTER = BattleEncounter(
-    (
-        "Treant",
-        "Cobra",
-        "Cobra",
-        "Cobra",
-    ),
-    frozenset((1, 2, 3)),
-    surprise_enabled=True,
-)
 INITIAL_GOLD = 100
 INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
 
@@ -805,8 +795,30 @@ class Game:
             return
         self.encounter_transition = None
         self.encounter_snapshot = None
-        self.battle_scene = self._build_battle_scene(RANDOM_BATTLE_ENCOUNTER)
+        self.battle_scene = self._build_battle_scene(
+            self._create_random_battle_encounter()
+        )
         self.pending_first_party_turn_hint = True
+
+    def _create_random_battle_encounter(self) -> BattleEncounter:
+        """Resolve the map level and convert its generated formation for battle."""
+
+        settings = self.current_map.random_encounter
+        if settings is None:
+            raise RuntimeError("current dungeon has no random encounter settings")
+        monster_level = settings.monster_level
+        if monster_level == "dynamic":
+            monster_level = self.encounter_system.dynamic_monster_level()
+        formation = self.encounter_system.generate_formation(
+            self.monsters,
+            settings,
+            monster_level=monster_level,
+        )
+        return BattleEncounter(
+            formation.monster_keys,
+            formation.front_monster_indexes,
+            surprise_enabled=True,
+        )
 
     def _show_hint_once(self, hint_id: str) -> bool:
         """Open one progression hint once per save after its trigger occurs."""
@@ -3587,7 +3599,6 @@ __all__ = [
     "GAME_ERRORS",
     "GAME_SETTINGS_ENV",
     "Game",
-    "RANDOM_BATTLE_ENCOUNTER",
     "SCREEN_HEIGHT",
     "SCREEN_WIDTH",
     "create_game_input_reader",

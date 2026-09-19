@@ -1,4 +1,4 @@
-"""Random encounter progress and dungeon-defeat return rules."""
+"""Random encounter progress, formation, and dungeon-defeat return rules."""
 
 from __future__ import annotations
 
@@ -8,16 +8,25 @@ import random
 if __package__ == "systems":
     from field import FieldPosition
     from input import Direction
-    from resources.maps import CompiledMap
+    from monster import MonsterDefinition, MonsterTribe
+    from resistance import ResistanceType
+    from resources.maps import CompiledMap, MapRandomEncounter
 else:
     from ..field import FieldPosition
     from ..input import Direction
-    from ..resources.maps import CompiledMap
+    from ..monster import MonsterDefinition, MonsterTribe
+    from ..resistance import ResistanceType
+    from ..resources.maps import CompiledMap, MapRandomEncounter
 
 
 ENCOUNTER_STEP_MIN = 1
 ENCOUNTER_STEP_MAX = 4
 ENCOUNTER_THRESHOLD = 120
+MAX_ENCOUNTER_MONSTERS = 5
+
+
+class EncounterGenerationError(RuntimeError):
+    """Raised when map settings leave no monster for the first formation group."""
 
 
 @dataclass(frozen=True)
@@ -34,6 +43,14 @@ class DungeonExitReturn:
 
     position: FieldPosition
     facing: Direction
+
+
+@dataclass(frozen=True)
+class EncounterFormation:
+    """Monster keys and front-row positions produced for one random battle."""
+
+    monster_keys: tuple[str, ...]
+    front_monster_indexes: frozenset[int]
 
 
 class EncounterSystem:
@@ -56,6 +73,132 @@ class EncounterSystem:
         if advanced >= ENCOUNTER_THRESHOLD:
             return EncounterAdvance(count=0, triggered=True)
         return EncounterAdvance(count=advanced, triggered=False)
+
+    @staticmethod
+    def dynamic_monster_level() -> int:
+        """Resolve the provisional dynamic map level."""
+
+        return 1
+
+    def generate_formation(
+        self,
+        monsters: tuple[MonsterDefinition, ...],
+        settings: MapRandomEncounter,
+        *,
+        monster_level: int,
+    ) -> EncounterFormation:
+        """Build one weighted, at-most-five-monster random formation."""
+
+        if not isinstance(settings, MapRandomEncounter):
+            raise TypeError("encounter settings must be a MapRandomEncounter")
+        if not monsters or not all(
+            isinstance(monster, MonsterDefinition) for monster in monsters
+        ):
+            raise TypeError("monsters must contain MonsterDefinition values")
+        if (
+            isinstance(monster_level, bool)
+            or not isinstance(monster_level, int)
+            or not 1 <= monster_level <= 9
+        ):
+            raise ValueError("monster level must be from 1 to 9")
+
+        keys: list[str] = []
+        front_indexes: set[int] = set()
+        current_level = monster_level
+        group_index = 0
+        while True:
+            weighted_pool = self._weighted_pool(
+                monsters,
+                settings,
+                current_level,
+            )
+            if not weighted_pool:
+                if not keys:
+                    raise EncounterGenerationError(
+                        "random encounter settings have no eligible monsters"
+                    )
+                break
+
+            selected = self._weighted_choice(weighted_pool)
+            maximum = selected.max_occurrence
+            if settings.danger == "low":
+                maximum = (maximum + 1) // 2
+            occurrence = self._random.randint(1, maximum)
+            if len(keys) + occurrence > MAX_ENCOUNTER_MONSTERS:
+                break
+
+            start_index = len(keys)
+            keys.extend((selected.key,) * occurrence)
+            if group_index > 0:
+                front_indexes.update(range(start_index, len(keys)))
+            group_index += 1
+
+            branch = self._random.randrange(3)
+            if settings.danger == "high":
+                if branch == 1:
+                    current_level -= 1
+                elif branch == 2:
+                    break
+            elif branch != 0:
+                # The stated low-danger probabilities leave 1/6 unspecified;
+                # both non-continuation outcomes terminate the formation.
+                break
+
+        return EncounterFormation(tuple(keys), frozenset(front_indexes))
+
+    def _weighted_pool(
+        self,
+        monsters: tuple[MonsterDefinition, ...],
+        settings: MapRandomEncounter,
+        monster_level: int,
+    ) -> tuple[tuple[MonsterDefinition, int], ...]:
+        pool: list[tuple[MonsterDefinition, int]] = []
+        for monster in monsters:
+            level_matches = monster.level == monster_level
+            early_matches = (
+                settings.danger == "high"
+                and monster.level == monster_level + 1
+                and monster.early_appear
+            )
+            if not (level_matches or early_matches):
+                continue
+            if not settings.allow_demons and monster.tribe is MonsterTribe.DEMON:
+                continue
+            if not settings.allow_humans and monster.tribe in (
+                MonsterTribe.HUMAN,
+                MonsterTribe.MAGE,
+            ):
+                continue
+            if not settings.allow_giants and monster.tribe is MonsterTribe.GIANT:
+                continue
+            if not settings.allow_large_animals and monster.is_large_animal:
+                continue
+
+            has_fire_weakness = ResistanceType.FIRE in monster.weaknesses
+            has_freeze_weakness = ResistanceType.FREEZE in monster.weaknesses
+            if settings.polarity == "yang" and has_fire_weakness:
+                continue
+            if settings.polarity == "yin" and has_freeze_weakness:
+                continue
+            weight = (
+                1
+                if settings.polarity == "neutral"
+                and (has_fire_weakness or has_freeze_weakness)
+                else 2
+            )
+            pool.append((monster, weight))
+        return tuple(pool)
+
+    def _weighted_choice(
+        self,
+        pool: tuple[tuple[MonsterDefinition, int], ...],
+    ) -> MonsterDefinition:
+        target = self._random.randrange(sum(weight for _monster, weight in pool))
+        for monster, weight in pool:
+            if target < weight:
+                return monster
+            target -= weight
+        raise AssertionError("weighted monster pool selection fell through")
 
     @staticmethod
     def defeat_return(
@@ -116,5 +259,8 @@ __all__ = [
     "ENCOUNTER_STEP_MIN",
     "ENCOUNTER_THRESHOLD",
     "EncounterAdvance",
+    "EncounterFormation",
+    "EncounterGenerationError",
     "EncounterSystem",
+    "MAX_ENCOUNTER_MONSTERS",
 ]

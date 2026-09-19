@@ -1280,10 +1280,15 @@ class Member:
         self.speed_modifier = 0
 
     def recover_world_map_entry_ailments(self) -> None:
-        """Clear ZERO's persistent ailments when entering the world map."""
+        """Clear every non-death condition when entering the world map."""
 
         self.poisoned = False
         self.paralyzed = False
+        self.sleeping = 0
+        self.confused = 0
+        self.stunned = False
+        self.protection_level = 0
+        self.speed_modifier = 0
 
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""

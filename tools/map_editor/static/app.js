@@ -1067,11 +1067,14 @@ function renderInspector() {
     .sort()
     .map((bgmId) => `<option value="${escapeHtml(bgmId)}" ${bgmId === state.data.bgm_id ? "selected" : ""}>${escapeHtml(bgmId)}</option>`)
     .join("");
+  const encounterSettings = state.data.profile === "dungeon" ? `
+        <div class="field full"><label>エンカウント</label><button class="button secondary" type="button" data-action="open-random-encounter-dialog">エンカウント設定</button></div>` : "";
   byId("inspector-content").innerHTML = `
     <div class="section">
       <div class="section-title"><h2>マップ設定</h2><span class="subtle">${escapeHtml(state.data.profile)} / ${escapeHtml(state.data.tileset_id)}</span></div>
       <div class="form-grid">
         <div class="field full"><label>BGM</label><select data-map-field="bgm_id">${bgmOptions}</select></div>
+        ${encounterSettings}
         <div class="field"><label>幅</label><input id="map-width" type="number" min="${MIN_MAP_WIDTH}" max="512" value="${width}"></div>
         <div class="field"><label>高さ</label><input id="map-height" type="number" min="${MIN_MAP_HEIGHT}" max="512" value="${height}"></div>
         <div class="field"><label>横方向</label><select id="resize-horizontal"><option value="left" ${state.resizeHorizontal === "left" ? "selected" : ""}>左側を増減</option><option value="right" ${state.resizeHorizontal === "right" ? "selected" : ""}>右側を増減</option></select></div>
@@ -2447,11 +2450,25 @@ function resizeMap() {
   });
 }
 
+function openRandomEncounterDialog() {
+  if (state.data?.profile !== "dungeon") return;
+  const settings = state.data.random_encounter;
+  byId("encounter-monster-level").value = String(settings.monster_level);
+  byId("encounter-danger").value = settings.danger;
+  byId("encounter-polarity").value = settings.polarity;
+  byId("encounter-allow-demons").checked = settings.allow_demons;
+  byId("encounter-allow-humans").checked = settings.allow_humans;
+  byId("encounter-allow-giants").checked = settings.allow_giants;
+  byId("encounter-allow-large-animals").checked = settings.allow_large_animals;
+  byId("random-encounter-dialog").showModal();
+}
+
 function handleInspectorAction(element) {
   const action = element.dataset.action;
   if (state.tab === "object" && state.objectLayer === "all"
     && ["delete-instance", "attach-site", "open-attached-site"].includes(action)) return;
-  if (action === "resize-map") resizeMap();
+  if (action === "open-random-encounter-dialog") openRandomEncounterDialog();
+  else if (action === "resize-map") resizeMap();
   else if (action === "reroll") commit(() => { state.data.visual_seed += 1; });
   else if (action === "delete-bulk-selection") deleteBulkSelection();
   else if (action === "delete-instance") commit(() => {
@@ -2807,6 +2824,24 @@ byId("change-map-tileset-form").addEventListener("submit", async (event) => {
   } catch (error) {
     showToast(error.message, true);
   }
+});
+byId("random-encounter-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget || event.target.dataset.action === "close-random-encounter-dialog") byId("random-encounter-dialog").close();
+});
+byId("random-encounter-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const monsterLevelValue = byId("encounter-monster-level").value;
+  const nextSettings = {
+    monster_level: monsterLevelValue === "dynamic" ? "dynamic" : Number(monsterLevelValue),
+    danger: byId("encounter-danger").value,
+    polarity: byId("encounter-polarity").value,
+    allow_demons: byId("encounter-allow-demons").checked,
+    allow_humans: byId("encounter-allow-humans").checked,
+    allow_giants: byId("encounter-allow-giants").checked,
+    allow_large_animals: byId("encounter-allow-large-animals").checked,
+  };
+  byId("random-encounter-dialog").close();
+  commit(() => { state.data.random_encounter = nextSettings; });
 });
 byId("delete-map-button").addEventListener("click", async () => {
   if (state.dirty) {

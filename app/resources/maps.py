@@ -13,7 +13,7 @@ from typing import Any, Mapping
 import pyxel
 
 
-FORMAT_VERSION = 7
+FORMAT_VERSION = 9
 PIXEL_FORMAT = "pyxel-palette-index-u8"
 MAP_TILE_SIZE = 16
 MAP_OBJECT_DRAW_GROUPS = frozenset(
@@ -25,6 +25,8 @@ MAP_ACTOR_KINDS = frozenset(("prop", "stationary", "roaming", "treasure"))
 MAP_ACTOR_SPRITE_SOURCES = frozenset(("npc", "pc"))
 TREASURE_CONTENT_TYPES = frozenset(("gold", "item"))
 MAP_EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
+MAP_ENCOUNTER_DANGERS = frozenset(("low", "high"))
+MAP_ENCOUNTER_POLARITIES = frozenset(("yang", "neutral", "yin"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
 
@@ -128,6 +130,17 @@ class WorldSite:
 
 
 @dataclass(frozen=True)
+class MapRandomEncounter:
+    monster_level: int | str
+    danger: str
+    polarity: str
+    allow_demons: bool
+    allow_humans: bool
+    allow_giants: bool
+    allow_large_animals: bool
+
+
+@dataclass(frozen=True)
 class CompiledMap:
     """Validated map data optimized for drawing and collision checks."""
 
@@ -153,6 +166,7 @@ class CompiledMap:
     actor_event_triggers: Mapping[str, tuple[MapEventTrigger, ...]] = MappingProxyType({})
     bgm_id: str = "da3-field"
     interact_through_rows: tuple[str, ...] = ()
+    random_encounter: MapRandomEncounter | None = None
 
     def is_blocked(self, x: int, y: int) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
@@ -315,6 +329,10 @@ class MapResources:
         profile = self._required_id(runtime, "profile")
         tileset_id = self._required_id(runtime, "tileset_id")
         bgm_id = self._required_bgm_id(runtime, "bgm_id")
+        random_encounter = self._random_encounter(
+            runtime.get("random_encounter"),
+            profile,
+        )
         tile_size = self._positive_integer(runtime.get("tile_size"), "tile_size")
         if tile_size != MAP_TILE_SIZE:
             raise MapResourceError(
@@ -422,6 +440,61 @@ class MapResources:
             ),
             bgm_id=bgm_id,
             interact_through_rows=interact_through_rows,
+            random_encounter=random_encounter,
+        )
+
+    @staticmethod
+    def _random_encounter(
+        value: object,
+        profile: str,
+    ) -> MapRandomEncounter | None:
+        if profile != "dungeon":
+            if value is not None:
+                raise MapResourceError(
+                    "マップJSONのrandom_encounterはdungeonマップだけに指定できます。"
+                )
+            return None
+        if not isinstance(value, dict):
+            raise MapResourceError(
+                "dungeonマップのrandom_encounterが不正です。"
+            )
+        monster_level = value.get("monster_level")
+        if monster_level != "dynamic" and not (
+            isinstance(monster_level, int)
+            and not isinstance(monster_level, bool)
+            and 1 <= monster_level <= 9
+        ):
+            raise MapResourceError(
+                "マップJSONのrandom_encounter.monster_levelは1〜9またはdynamicである必要があります。"
+            )
+        danger = value.get("danger")
+        if danger not in MAP_ENCOUNTER_DANGERS:
+            raise MapResourceError(
+                "マップJSONのrandom_encounter.dangerはlowまたはhighである必要があります。"
+            )
+        polarity = value.get("polarity")
+        if polarity not in MAP_ENCOUNTER_POLARITIES:
+            raise MapResourceError(
+                "マップJSONのrandom_encounter.polarityはyang、neutral、yinのいずれかである必要があります。"
+            )
+        filters = {}
+        for field in (
+            "allow_demons",
+            "allow_humans",
+            "allow_giants",
+            "allow_large_animals",
+        ):
+            enabled = value.get(field)
+            if not isinstance(enabled, bool):
+                raise MapResourceError(
+                    f"マップJSONのrandom_encounter.{field}はbooleanである必要があります。"
+                )
+            filters[field] = enabled
+        return MapRandomEncounter(
+            monster_level=monster_level,
+            danger=danger,
+            polarity=polarity,
+            **filters,
         )
 
     @staticmethod
@@ -1116,6 +1189,7 @@ __all__ = [
     "MAP_FACINGS",
     "MAP_TILE_SIZE",
     "MapObjectTile",
+    "MapRandomEncounter",
     "MapResourceError",
     "MapResources",
     "MapTreasureContents",

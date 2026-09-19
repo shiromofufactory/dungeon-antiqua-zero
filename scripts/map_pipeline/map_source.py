@@ -24,8 +24,8 @@ from .tileset import (
 )
 
 
-SOURCE_FORMAT_VERSION = 6
-RUNTIME_FORMAT_VERSION = 7
+SOURCE_FORMAT_VERSION = 8
+RUNTIME_FORMAT_VERSION = 9
 MAX_MAP_DIMENSION = 512
 MIN_MAP_WIDTH = 16
 MIN_MAP_HEIGHT = 15
@@ -43,6 +43,17 @@ DEFAULT_BGM_IDS = {
     "dungeon": "da3-field",
     "town": "da3-town",
 }
+DEFAULT_RANDOM_ENCOUNTER = {
+    "monster_level": "dynamic",
+    "danger": "low",
+    "polarity": "neutral",
+    "allow_demons": False,
+    "allow_humans": False,
+    "allow_giants": False,
+    "allow_large_animals": False,
+}
+RANDOM_ENCOUNTER_DANGERS = frozenset(("low", "high"))
+RANDOM_ENCOUNTER_POLARITIES = frozenset(("yang", "neutral", "yin"))
 BGM_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:/[a-z0-9][a-z0-9_-]*)*$")
 DIRECTION_OFFSETS = {
     "n": (0, -1),
@@ -155,7 +166,7 @@ def initial_map_source(
     fill = ground_ids[0]
     if not isinstance(fill, str):
         raise ValueError("初期地面を決定できません。")
-    return {
+    source = {
         "format_version": SOURCE_FORMAT_VERSION,
         "map_id": map_id,
         "profile": profile,
@@ -170,6 +181,9 @@ def initial_map_source(
         "actors": [],
         "event_triggers": [],
     }
+    if profile == "dungeon":
+        source["random_encounter"] = dict(DEFAULT_RANDOM_ENCOUNTER)
+    return source
 
 
 def validate_map_source(
@@ -218,6 +232,69 @@ def validate_map_source(
             "unknown_bgm",
             "bgm_id",
             f"存在しないBGM IDです: {bgm_id}",
+        )
+
+    random_encounter = data.get("random_encounter")
+    if profile == "dungeon":
+        if not isinstance(random_encounter, dict):
+            _diagnostic(
+                diagnostics,
+                "error",
+                "invalid_random_encounter",
+                "random_encounter",
+                "dungeonマップにはランダムエンカウント設定が必要です。",
+            )
+        else:
+            monster_level = random_encounter.get("monster_level")
+            if monster_level != "dynamic" and not (
+                _is_int(monster_level) and 1 <= monster_level <= 9
+            ):
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "invalid_encounter_monster_level",
+                    "random_encounter.monster_level",
+                    "モンスターレベルは1〜9の整数またはdynamicで指定してください。",
+                )
+            danger = random_encounter.get("danger")
+            if danger not in RANDOM_ENCOUNTER_DANGERS:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "invalid_encounter_danger",
+                    "random_encounter.danger",
+                    "危険度はlowまたはhighで指定してください。",
+                )
+            polarity = random_encounter.get("polarity")
+            if polarity not in RANDOM_ENCOUNTER_POLARITIES:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "invalid_encounter_polarity",
+                    "random_encounter.polarity",
+                    "傾向はyang、neutral、yinのいずれかで指定してください。",
+                )
+            for field, label in (
+                ("allow_demons", "悪魔出現"),
+                ("allow_humans", "人間出現"),
+                ("allow_giants", "巨人出現"),
+                ("allow_large_animals", "大型動物出現"),
+            ):
+                if not isinstance(random_encounter.get(field), bool):
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "invalid_encounter_monster_filter",
+                        f"random_encounter.{field}",
+                        f"{label}はbooleanで指定してください。",
+                    )
+    elif random_encounter is not None:
+        _diagnostic(
+            diagnostics,
+            "error",
+            "random_encounter_requires_dungeon",
+            "random_encounter",
+            "ランダムエンカウント設定はdungeonマップだけに指定できます。",
         )
 
     size = data.get("size")
@@ -1598,7 +1675,7 @@ def resolve_map(
             "destination": dict(site["destination"]),
         })
 
-    return {
+    resolved = {
         "size": [width, height],
         "ground_cells": ground_cells,
         "object_cells": object_cells,
@@ -1613,6 +1690,9 @@ def resolve_map(
             data["event_triggers"], instances_by_id
         ),
     }
+    if data["profile"] == "dungeon":
+        resolved["random_encounter"] = dict(data["random_encounter"])
+    return resolved
 
 
 def _source_image(path: Path) -> Image.Image:
@@ -1789,6 +1869,8 @@ def compile_map(
         "actors": resolved["actors"],
         "event_triggers": resolved["event_triggers"],
     }
+    if data["profile"] == "dungeon":
+        runtime["random_encounter"] = dict(data["random_encounter"])
     return CompiledMap(runtime=runtime, atlas=bytes(bundle))
 
 
