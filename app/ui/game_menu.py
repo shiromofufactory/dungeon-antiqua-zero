@@ -24,6 +24,7 @@ from .tagged_text import tagged_text_width
 from .window import CursorTarget, DEFAULT_TEXT_COLOR, TEXT_GRID_X, WindowFactory
 
 GAME_MENU_WINDOW_GRID = (0, 22, 64, 16)
+GAME_MENU_LINE_STEP = 3
 
 
 class GameMenuAction(Enum):
@@ -56,7 +57,7 @@ class GameMenuOverlay:
             placement = factory.create(
                 texts.text(text_key, localizer),
                 0,
-                2 + index * 4,
+                2 + index * GAME_MENU_LINE_STEP,
                 color=(DEFAULT_TEXT_COLOR if index == 0 else NEGATIVE_COLOR),
             )
             placements.append(placement)

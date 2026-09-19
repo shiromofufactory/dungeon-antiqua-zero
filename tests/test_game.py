@@ -13,6 +13,10 @@ from game import (
     ALERT_SOUND_ID,
     FIELD_POISON_SE_CHANNEL,
     FIELD_POISON_SE_ID,
+    FIRST_BATTLE_HINT_ID,
+    FIRST_DEFEAT_RESTART_HINT_ID,
+    FIRST_DUNGEON_EXIT_HINT_ID,
+    FIRST_RESULT_HINT_ID,
     FACES_IMAGE_ID,
     INITIAL_GOLD,
     INITIAL_PARTY_KEYS,
@@ -81,8 +85,9 @@ from rendering import (
     DIMMED_PALETTE,
     MONOCHROME_PALETTE,
     FadeThroughBlack,
+    FadeEvent,
 )
-from scenes import BattleResult
+from scenes import BattlePhase, BattleResult
 from state import DisplayMode, Language, SaveData, Settings
 from systems import InventorySystem
 from ui import (
@@ -2541,6 +2546,106 @@ class GameTest(unittest.TestCase):
         mock.update()
         self.assertIsNone(mock.hint_overlay)
         mock._update_field.assert_not_called()
+
+    @patch("game.HintOverlay")
+    def test_progression_hint_is_recorded_once_only_after_it_is_shown(
+        self,
+        hint_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings(in_game_hints_enabled=False)
+        mock.save_data = SaveData()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.hint_overlay = None
+
+        self.assertFalse(mock._show_hint_once(FIRST_BATTLE_HINT_ID))
+        self.assertEqual(mock.save_data.event_flags, set())
+
+        mock.settings = mock.settings.with_in_game_hints_enabled(True)
+        self.assertTrue(mock._show_hint_once(FIRST_BATTLE_HINT_ID))
+        self.assertIn("hint.shown.first_battle", mock.save_data.event_flags)
+        hint_class.assert_called_once_with(
+            text_key="hint.first_battle",
+            settings=mock.settings,
+            texts=mock.texts,
+            fonts=mock.fonts,
+        )
+
+        mock.hint_overlay = None
+        self.assertFalse(mock._show_hint_once(FIRST_BATTLE_HINT_ID))
+        hint_class.assert_called_once()
+
+    def test_pending_field_hint_opens_after_fade(self) -> None:
+        mock = Game.__new__(Game)
+        mock.pending_hint_after_fade = FIRST_DUNGEON_EXIT_HINT_ID
+        mock._show_hint_once = Mock()
+
+        mock._show_pending_hint_after_fade()
+
+        self.assertIsNone(mock.pending_hint_after_fade)
+        mock._show_hint_once.assert_called_once_with(FIRST_DUNGEON_EXIT_HINT_ID)
+
+    def test_result_phase_requests_the_first_result_hint(self) -> None:
+        mock = Game.__new__(Game)
+        mock.battle_scene = Mock(phase=BattlePhase.RESULT, result=None)
+        mock.pending_first_party_turn_hint = False
+        mock._show_hint_once = Mock()
+        mock._begin_battle_return = Mock()
+
+        self.assertTrue(mock._update_battle_scene(InputState()))
+
+        mock.battle_scene.update.assert_called_once_with(InputState())
+        mock._show_hint_once.assert_called_once_with(FIRST_RESULT_HINT_ID)
+        mock._begin_battle_return.assert_not_called()
+
+    def test_first_battle_hint_waits_for_an_open_party_command_window(self) -> None:
+        mock = Game.__new__(Game)
+        mock.battle_scene = Mock(phase=BattlePhase.ENTRANCE, result=None)
+        mock.battle_scene.is_party_command_ready = False
+        mock.pending_first_party_turn_hint = True
+        mock._show_hint_once = Mock()
+
+        self.assertTrue(mock._update_battle_scene(InputState()))
+        mock._show_hint_once.assert_not_called()
+
+        mock.battle_scene.is_party_command_ready = True
+        self.assertTrue(mock._update_battle_scene(InputState()))
+        mock._show_hint_once.assert_called_once_with(FIRST_BATTLE_HINT_ID)
+        self.assertFalse(mock.pending_first_party_turn_hint)
+
+    def test_dungeon_exit_queues_hint_for_completed_fade(self) -> None:
+        mock = Game.__new__(Game)
+        mock.current_map = Mock(profile="dungeon")
+        mock.world_map = Mock(profile="world")
+        mock.pending_target_map = mock.world_map
+        mock.pending_site = Mock()
+        mock._apply_pending_map_destination = Mock()
+        mock._queue_hint_after_fade = Mock()
+
+        mock._apply_pending_site_change()
+
+        mock._queue_hint_after_fade.assert_called_once_with(
+            FIRST_DUNGEON_EXIT_HINT_ID
+        )
+
+    def test_defeat_hint_opens_after_return_fade_finishes(self) -> None:
+        mock = Game.__new__(Game)
+        mock.battle_return_fade = Mock(
+            visible_rate=1.0,
+            update=Mock(return_value=FadeEvent.FINISHED),
+        )
+        mock.battle_return_result = BattleResult.DEFEAT
+        mock.palette_shifter = Mock(base_colors=(0,))
+        mock.bgm = Mock()
+        mock._show_hint_once = Mock()
+
+        mock._update_battle_return(InputState())
+
+        self.assertIsNone(mock.battle_return_fade)
+        mock._show_hint_once.assert_called_once_with(
+            FIRST_DEFEAT_RESTART_HINT_ID
+        )
 
     def test_start_game_starts_prologue_only_for_new_game(self) -> None:
         mock = Game.__new__(Game)

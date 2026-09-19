@@ -657,6 +657,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertIsNone(game.encounter_snapshot)
         self.assertIs(game.battle_scene, battle)
         game._build_battle_scene.assert_called_once_with(RANDOM_BATTLE_ENCOUNTER)
+        self.assertTrue(game.pending_first_party_turn_hint)
         self.assertEqual(
             RANDOM_BATTLE_ENCOUNTER.monster_keys,
             (
@@ -670,6 +671,27 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             RANDOM_BATTLE_ENCOUNTER.front_monster_indexes,
             frozenset((1, 2, 3)),
         )
+
+    def test_party_command_ready_requires_an_open_window_on_a_party_turn(
+        self,
+    ) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.active_party_index = 0
+        scene.global_command_window = Mock(is_open=False)
+        scene.command_window = Mock(is_open=False)
+
+        scene.phase = BattlePhase.GLOBAL_COMMAND
+        self.assertFalse(scene.is_party_command_ready)
+        scene.global_command_window.is_open = True
+        self.assertTrue(scene.is_party_command_ready)
+
+        scene.phase = BattlePhase.COMMAND
+        self.assertFalse(scene.is_party_command_ready)
+        scene.command_window.is_open = True
+        self.assertTrue(scene.is_party_command_ready)
+
+        scene.active_party_index = None
+        self.assertFalse(scene.is_party_command_ready)
 
     @patch("game.pyxel.Image")
     def test_encounter_snapshot_hides_the_player(self, image_type: Mock) -> None:

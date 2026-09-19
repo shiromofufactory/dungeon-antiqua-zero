@@ -11,7 +11,7 @@ from resources import FontResources
 from scenes import BattleScene
 from state import Language, Settings
 from text_catalog import TextCatalog
-from ui.game_menu import GameMenuAction, GameMenuOverlay
+from ui.game_menu import GAME_MENU_LINE_STEP, GameMenuAction, GameMenuOverlay
 from ui.tagged_text import tagged_text_width
 
 
@@ -195,6 +195,17 @@ class GameMenuTest(unittest.TestCase):
                 menu = self.open(game)
                 self.assertEqual(len(menu.window.texts), 3)
                 self.assertTrue(all(text.text for text in menu.window.texts))
+
+    def test_menu_uses_standard_twelve_pixel_line_spacing(self) -> None:
+        game = self.game()
+        menu = self.open(game)
+
+        text_y = [menu.window.text_position(text)[1] for text in menu.window.texts]
+        cursor_y = [target.y * 4 + menu.window.pixel_y for target in menu.cursor.targets]
+
+        self.assertEqual(GAME_MENU_LINE_STEP * 4, 12)
+        self.assertEqual(text_y, [96, 108, 120])
+        self.assertEqual(cursor_y, text_y)
 
     def test_transparent_menu_centers_left_aligned_text_block_in_each_language(self) -> None:
         for language in Language:

@@ -5499,6 +5499,25 @@ class BattleScreenMockTest(unittest.TestCase):
             BATTLE_POPUP_FRAME_COUNT,
         )
 
+    def test_weapon_use_popup_prefixes_its_spell_school_icon(self) -> None:
+        item = load_mock_items()["WAND of POISON"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.spells = load_mock_spells()
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
+        mock.battle_popup = BattleTimedPopup()
+
+        mock._show_item_use_message(item)
+
+        self.assertEqual(
+            mock.action_popup_window.texts,
+            (WindowText("%NETHER%ポイズンワンド", 2, 2),),
+        )
+        self.assertEqual(mock.action_popup_window.width, 20)
+        self.assertEqual(mock.action_popup_window.x, 44)
+
     def test_spell_cast_message_disappears_after_da2_popup_duration(self) -> None:
         popup = BattleTimedPopup()
         popup.show(BATTLE_POPUP_FRAME_COUNT)

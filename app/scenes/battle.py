@@ -88,7 +88,7 @@ from item import (
     ItemSpecial,
     additional_effect_from_character,
 )
-from localization import Localizer, ascii_to_fullwidth, format_number
+from localization import LocalizedText, Localizer, ascii_to_fullwidth, format_number
 from member import (
     EquipmentSlot,
     FormationRow,
@@ -131,7 +131,13 @@ from resources import (
     play_se,
 )
 from state import Language, SaveData, Settings
-from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
+from spell import (
+    SPELL_PROFICIENCY_BY_TYPE,
+    SPELL_TYPE_ICON_TAGS,
+    Spell,
+    SpellAction,
+    SpellType,
+)
 from spell_effect import (
     SpellEffectPlayer,
     load_spell_effects,
@@ -2050,6 +2056,18 @@ class BattleScene:
                 self.entrance_fade, self.escape_fade, self.result_transition_fade,
             )
         )
+
+    @property
+    def is_party_command_ready(self) -> bool:
+        """Report that a living party member's command window is fully open."""
+
+        if getattr(self, "active_party_index", None) is None:
+            return False
+        if self.phase is BattlePhase.GLOBAL_COMMAND:
+            return self.global_command_window.is_open
+        if self.phase is BattlePhase.COMMAND:
+            return self.command_window.is_open
+        return False
 
     def update(self, input_state: InputState) -> None:
         """Advance the battle by one frame from an immutable input snapshot."""
@@ -4942,17 +4960,28 @@ class BattleScene:
                 )
 
     def _show_item_use_message(self, item: Item) -> None:
-        """Show only the used item's name in the timed action popup."""
+        """Show the used item, including a spell-school icon for weapons."""
 
         if (
             getattr(self, "action_popup_window", None) is None
             or getattr(self, "battle_popup", None) is None
         ):
             return
-        self._show_battle_popup(
-            item.localized_name(self.localizer),
-            BATTLE_POPUP_FRAME_COUNT,
-        )
+        name = item.localized_name(self.localizer)
+        message = name
+        if item.is_weapon and item.use_spell_key:
+            spell = getattr(self, "spells", {}).get(item.use_spell_key)
+            icon = SPELL_TYPE_ICON_TAGS.get(spell.type, "") if spell else ""
+            if icon:
+                message = LocalizedText(
+                    f"{icon}{name}",
+                    prefers_wide_font=name.prefers_wide_font,
+                    narrow_spans=tuple(
+                        (start + len(icon), end + len(icon))
+                        for start, end in name.narrow_spans
+                    ),
+                )
+        self._show_battle_popup(message, BATTLE_POPUP_FRAME_COUNT)
 
     def _show_spell_cast_message(
         self,

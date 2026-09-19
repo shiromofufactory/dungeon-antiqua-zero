@@ -9,12 +9,28 @@
 - 最初のヒントは `hint.load.mission`。セーブデータのロードが成功したとき、毎回表示する。
   ロード後のフィールドへのフェードイン完了を待って開閉アニメーションを更新する。
 - ニューゲーム、ロード失敗、設定が無効の場合は表示しない。
+- 次の進行ヒントは、設定が有効な状態で各条件を初めて満たしたときに1回だけ表示する。
+  表示時に対応する `hint.shown.*` を `SaveData.event_flags` へ保存し、ロード後も再表示しない。
+  設定が無効な間に条件を満たした場合は表示済みにせず、設定を有効にした後の次回成立時に表示する。
+
+| 条件 | 文言キー | 表示済みフラグ | 表示位置 |
+|---|---|---|---|
+| 最初の味方手番で全体／個別コマンドWindowが開き終わったとき | `hint.first_battle` | `hint.shown.first_battle` | 戦闘画面上 |
+| 成長リザルトが初めて表示されたとき | `hint.first_result` | `hint.shown.first_result` | リザルト画面上 |
+| ダンジョンからワールドマップへのフェードイン完了後 | `hint.first_dungeon_exit` | `hint.shown.first_dungeon_exit` | フィールド上 |
+| 全滅復帰のフェードイン完了後 | `hint.first_defeat_restart` | `hint.shown.first_defeat_restart` | フィールド上 |
+
+上記4文言は `content/data/texts.json` を正本とする。成長変化がなくリザルト画面を省略した戦闘では
+`hint.first_result` の条件を満たさない。戦闘からの逃走はダンジョン脱出に含めない。
 
 ## Windowと操作
 
 座標・寸法は4×4pxグリッド。
 
-- 共通Window `(0, 20, 64, 20)` を使い、標準Windowの8フレームの開閉アニメーションを付ける。
+- `hint.load.mission`、`hint.first_battle`、`hint.first_dungeon_exit`、
+  `hint.first_defeat_restart` は画面最上部のWindow `(0, 0, 64, 20)` を使う。
+- `hint.first_result` は画面最下部のWindow `(0, 40, 64, 20)` を使う。
+  いずれも標準Windowの8フレームの開閉アニメーションを付ける。
 - 見出しは必ず `hint.heading` をX=4、Y=2に置く。
 - 本文はX=4に置き、見出しの次の行からメッセージ欄・会話ログと同じ行間で表示する。
   日本語・簡体字中国語はY=6から4グリッド（16px）間隔、英語はY=5から3グリッド（12px）間隔。
@@ -34,6 +50,8 @@
   同じフォントで表示される。
 - 決定・キャンセルのどちらでも閉じられ、開く操作の押しっぱなしでは閉じない。
 - 開閉中に移動・メニュー操作がフィールドへ伝わらない。
+- 戦闘開始・リザルトではBattleSceneの更新を停止し、ヒントを戦闘画面より手前へ表示する。
+- ダンジョン脱出・全滅復帰ではフィールドが完全に表示された後にヒントを開く。
 - 情報メニューの先頭には `information.mission` があり、条件成立したミッションを制作順に表示する。
   表示と操作は [`information-menu.md`](./information-menu.md) を参照する。
 

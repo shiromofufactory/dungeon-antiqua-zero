@@ -5,19 +5,24 @@ from unittest.mock import Mock
 
 from tools._bootstrap import APP_ROOT
 from input import InputButton, InputState
+from localization import Localizer
 from resources import FontResources, FontRole
 from state import Language, Settings
 from text_catalog import TextCatalog
-from ui.hint import HintOverlay
+from ui.hint import HINT_BOTTOM_WINDOW_GRID, HINT_TOP_WINDOW_GRID, HintOverlay
 from ui.window import WINDOW_ANIMATION_FRAME_COUNT, WindowState
 
 
 class HintOverlayTest(unittest.TestCase):
-    def overlay(self, language: Language = Language.JAPANESE) -> HintOverlay:
+    def overlay(
+        self,
+        language: Language = Language.JAPANESE,
+        text_key: str = "hint.load.mission",
+    ) -> HintOverlay:
         fonts = Mock()
         fonts.baseline_offset_for.return_value = 0
         return HintOverlay(
-            text_key="hint.load.mission", settings=Settings(language=language),
+            text_key=text_key, settings=Settings(language=language),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"), fonts=fonts,
         )
 
@@ -29,6 +34,43 @@ class HintOverlayTest(unittest.TestCase):
         ])
         self.assertEqual([line.y for line in overlay.window.texts], [2, 6, 10, 14])
         self.assertEqual(overlay.window.state, WindowState.OPENING)
+
+    def test_requested_hints_are_at_top_and_result_is_at_bottom(self) -> None:
+        for text_key in (
+            "hint.load.mission",
+            "hint.first_battle",
+            "hint.first_dungeon_exit",
+            "hint.first_defeat_restart",
+        ):
+            with self.subTest(text_key=text_key):
+                overlay = self.overlay(text_key=text_key)
+                self.assertEqual(
+                    (overlay.window.x, overlay.window.y,
+                     overlay.window.width, overlay.window.height),
+                    HINT_TOP_WINDOW_GRID,
+                )
+
+        overlay = self.overlay(text_key="hint.first_result")
+        self.assertEqual(
+            (overlay.window.x, overlay.window.y,
+             overlay.window.width, overlay.window.height),
+            HINT_BOTTOM_WINDOW_GRID,
+        )
+        self.assertEqual(
+            overlay.window.pixel_y + overlay.window.pixel_height,
+            240,
+        )
+
+    def test_progression_hints_have_displayable_text(self) -> None:
+        texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        for text_key in (
+            "hint.first_battle",
+            "hint.first_result",
+            "hint.first_dungeon_exit",
+            "hint.first_defeat_restart",
+        ):
+            for language in Language:
+                self.assertTrue(texts.lines(text_key, Localizer(language)))
 
     def test_dismissal_waits_for_release_opening_and_closing(self) -> None:
         for button in ("confirm", "cancel"):

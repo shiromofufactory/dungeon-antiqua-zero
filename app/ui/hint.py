@@ -19,6 +19,14 @@ from .localized_text import LocalizedWindowTextFactory
 from .window import WindowFactory
 
 HINT_WINDOW_GRID = (0, 20, 64, 20)
+HINT_TOP_WINDOW_GRID = (0, 0, 64, 20)
+HINT_BOTTOM_WINDOW_GRID = (0, 40, 64, 20)
+TOP_HINT_TEXT_KEYS = frozenset((
+    "hint.load.mission",
+    "hint.first_battle",
+    "hint.first_dungeon_exit",
+    "hint.first_defeat_restart",
+))
 HINT_TEXT_X = 4
 HINT_HEADING_Y = 2
 HINT_CJK_ROW_HEIGHT = 4
@@ -57,8 +65,14 @@ class HintOverlay:
                 for index, line in enumerate(texts.lines(text_key, localizer))
             ),
         )
+        if text_key in TOP_HINT_TEXT_KEYS:
+            window_grid = HINT_TOP_WINDOW_GRID
+        elif text_key == "hint.first_result":
+            window_grid = HINT_BOTTOM_WINDOW_GRID
+        else:
+            window_grid = HINT_WINDOW_GRID
         self.window = WindowFactory(self.text_factory.font).create(
-            *HINT_WINDOW_GRID, placements, opened=False,
+            *window_grid, placements, opened=False,
         )
         self._waiting_for_release = True
         self.window.open()

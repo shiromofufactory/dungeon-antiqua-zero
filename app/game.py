@@ -113,7 +113,13 @@ from rendering import (
     FieldRenderer,
     PaletteShifter,
 )
-from scenes import BattleDataError, BattleEncounter, BattleResult, BattleScene
+from scenes import (
+    BattleDataError,
+    BattleEncounter,
+    BattlePhase,
+    BattleResult,
+    BattleScene,
+)
 from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
@@ -222,6 +228,11 @@ FIELD_MEMBER_ADVANCED_TEXT_KEY = "field.member.advanced"
 FIELD_PARTY_ANNIHILATED_TEXT_KEY = "field.party.annihilated"
 DEFEAT_RETURN_MESSAGE_TEXT_KEY = "defeat.return.message"
 DEFEAT_RETURN_FACE_POSITION = FacePosition(0, 224)
+HINT_SHOWN_FLAG_PREFIX = "hint.shown."
+FIRST_BATTLE_HINT_ID = "first_battle"
+FIRST_RESULT_HINT_ID = "first_result"
+FIRST_DUNGEON_EXIT_HINT_ID = "first_dungeon_exit"
+FIRST_DEFEAT_RESTART_HINT_ID = "first_defeat_restart"
 MENU_MEMBER_TEXT_KEYS = (
     "menu.member.hp",
     "menu.member.mp",
@@ -572,10 +583,12 @@ class Game:
         self.status_screen: StatusMenuOverlay | None = None
         self.information_screen: InformationMenuOverlay | None = None
         self.hint_overlay: HintOverlay | None = None
+        self.pending_hint_after_fade: str | None = None
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
         self.battle_scene: BattleScene | None = None
+        self.pending_first_party_turn_hint = False
         self.pending_shop = None
         self.shop_return_to_debug = False
         self.debug_screen: DebugMenuOverlay | None = None
@@ -793,6 +806,40 @@ class Game:
         self.encounter_transition = None
         self.encounter_snapshot = None
         self.battle_scene = self._build_battle_scene(RANDOM_BATTLE_ENCOUNTER)
+        self.pending_first_party_turn_hint = True
+
+    def _show_hint_once(self, hint_id: str) -> bool:
+        """Open one progression hint once per save after its trigger occurs."""
+
+        if not isinstance(hint_id, str) or not hint_id:
+            raise ValueError("hint ID must be a non-empty string")
+        shown_flag = f"{HINT_SHOWN_FLAG_PREFIX}{hint_id}"
+        if (
+            not self.settings.in_game_hints_enabled
+            or shown_flag in self.save_data.event_flags
+            or getattr(self, "hint_overlay", None) is not None
+        ):
+            return False
+        hint_overlay = HintOverlay(
+            text_key=f"hint.{hint_id}",
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+        )
+        self.hint_overlay = hint_overlay
+        self.save_data.event_flags.add(shown_flag)
+        return True
+
+    def _queue_hint_after_fade(self, hint_id: str) -> None:
+        """Reserve a field hint until the active fade-in has completed."""
+
+        self.pending_hint_after_fade = hint_id
+
+    def _show_pending_hint_after_fade(self) -> None:
+        hint_id = getattr(self, "pending_hint_after_fade", None)
+        self.pending_hint_after_fade = None
+        if hint_id is not None:
+            self._show_hint_once(hint_id)
 
     def _begin_battle_return(self, result: BattleResult) -> None:
         """Begin the field return, reusing escape's already-covered screen."""
@@ -855,11 +902,14 @@ class Game:
             else:
                 self._apply_battle_return()
         if event is FadeEvent.FINISHED:
+            finished_result = self.battle_return_result
             self.bgm.set_fade_rate(1.0)
             self.battle_return_fade = None
             self.battle_return_result = None
             self.defeat_return_sound_waiting = False
             self.defeat_return_bgm_restart_pending = False
+            if finished_result is BattleResult.DEFEAT:
+                self._show_hint_once(FIRST_DEFEAT_RESTART_HINT_ID)
 
     def _begin_defeat_return_message(self) -> None:
         """Show the fixed rescue message over the fully black screen."""
@@ -872,6 +922,26 @@ class Game:
             faces=self.faces,
             face_position=DEFEAT_RETURN_FACE_POSITION,
         )
+
+    def _update_battle_scene(self, input_state: InputState) -> bool:
+        """Update the active battle and detect Game-owned hint timings."""
+
+        battle_scene = getattr(self, "battle_scene", None)
+        if battle_scene is None:
+            return False
+        battle_scene.update(input_state)
+        if (
+            getattr(self, "pending_first_party_turn_hint", False)
+            and battle_scene.is_party_command_ready
+        ):
+            self.pending_first_party_turn_hint = False
+            self._show_hint_once(FIRST_BATTLE_HINT_ID)
+        if battle_scene.phase is BattlePhase.RESULT:
+            self._show_hint_once(FIRST_RESULT_HINT_ID)
+        result = getattr(battle_scene, "result", None)
+        if isinstance(result, BattleResult):
+            self._begin_battle_return(result)
+        return True
 
     def _apply_battle_return(self) -> None:
         """Commit battle result changes while the screen is fully black."""
@@ -1310,10 +1380,16 @@ class Game:
         site = self.pending_site
         if site is None:
             raise RuntimeError("site map change has no entered site")
+        leaving_dungeon = (
+            getattr(self.current_map, "profile", None) == "dungeon"
+            and self.pending_target_map is self.world_map
+        )
         if self.current_map is self.world_map:
             self.travel_system.enter_site(self.save_data, site)
         self._apply_pending_map_destination()
         self.pending_site = None
+        if leaving_dungeon:
+            self._queue_hint_after_fade(FIRST_DUNGEON_EXIT_HINT_ID)
 
     def _party_window_texts(
         self,
@@ -2107,6 +2183,7 @@ class Game:
                 self.animate_main_windows_with_fade = False
         if event is FadeEvent.FINISHED:
             self.fade_bgm = False
+            self._show_pending_hint_after_fade()
             if getattr(self, "event_resume_after_fade", False):
                 self.event_resume_after_fade = False
                 try:
@@ -3031,25 +3108,23 @@ class Game:
         if getattr(self, "encounter_transition", None) is not None:
             self._update_encounter_transition()
             return
+        hint_overlay = getattr(self, "hint_overlay", None)
+        if (
+            hint_overlay is not None
+            and not getattr(getattr(self, "fade", None), "is_active", False)
+        ):
+            if hint_overlay.update(input_state):
+                self.hint_overlay = None
+            return
         if getattr(self, "battle_return_fade", None) is not None:
             self._update_battle_return(input_state)
             return
-        battle_scene = getattr(self, "battle_scene", None)
-        if battle_scene is not None:
-            battle_scene.update(input_state)
-            result = getattr(battle_scene, "result", None)
-            if isinstance(result, BattleResult):
-                self._begin_battle_return(result)
+        if self._update_battle_scene(input_state):
             return
         if getattr(self, "_returning_to_start", False):
             self._update_return_to_start(input_state)
             return
         if self._update_fade():
-            return
-        hint_overlay = getattr(self, "hint_overlay", None)
-        if hint_overlay is not None:
-            if hint_overlay.update(input_state):
-                self.hint_overlay = None
             return
         start_screen = getattr(self, "start_screen", None)
         if start_screen is not None:
@@ -3255,6 +3330,9 @@ class Game:
             battle_scene = getattr(self, "battle_scene", None)
             if battle_scene is not None:
                 battle_scene.draw()
+                hint_overlay = getattr(self, "hint_overlay", None)
+                if hint_overlay is not None:
+                    hint_overlay.draw()
                 return
             start_screen = getattr(self, "start_screen", None)
             if start_screen is not None:
