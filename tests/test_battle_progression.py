@@ -284,6 +284,35 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertFalse(growth.has_result_growth)
         self.assertFalse(growth.has_level_up_growth)
 
+    def test_victory_limits_hp_growth_to_one_internal_level_step(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        member.experience_offset = required_experience_for_level(5)
+        progression = BattleProgression((EnemyProgressionData(1, 1, 1, 0),))
+
+        progression.settle(SaveData(), (member,))
+
+        self.assertEqual(member.internal_level, 5)
+        self.assertEqual(member.max_hp, 48)
+        self.assertEqual(member.calculated_max_hp(), 72)
+
+    def test_victory_uses_spell_step_when_maximum_spell_level_increases(
+        self,
+    ) -> None:
+        member = Member.from_record(member_record("Mage"))
+        member.experience_offset = required_experience_for_level(5)
+        member.proficiency(ProficiencyKind.MYSTIC).progress = 95
+        progression = BattleProgression((EnemyProgressionData(10, 10, 1, 0),))
+        progression.record_spell_use(
+            member, ProficiencyKind.MYSTIC, (10,), mp_spent=1
+        )
+
+        progression.settle(SaveData(), (member,))
+
+        self.assertEqual(member.internal_level, 5)
+        self.assertEqual(member.proficiency(ProficiencyKind.MYSTIC).level, 2)
+        self.assertEqual(member.max_mp, 11)
+        self.assertEqual(member.calculated_max_mp(), 14)
+
     def test_mp_recipient_alone_is_excluded_from_hp_growth(self) -> None:
         first = Member.from_record(member_record("First"))
         second = Member.from_record(member_record("Second"))

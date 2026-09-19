@@ -980,23 +980,85 @@ class Member:
     def calculated_max_hp(self) -> int:
         """Return the current internal-level HP ceiling without mutating state."""
 
-        return min(
-            self.definition.base_hp * (4 + self.internal_level) // 5,
-            MAX_HP,
+        return min(self._uncapped_max_hp(self.internal_level), MAX_HP)
+
+    def apply_max_hp_growth(self) -> int:
+        """Move max HP toward its ceiling by at most one internal-level step."""
+
+        target = self.calculated_max_hp()
+        if target <= self.max_hp:
+            return 0
+        step = max(
+            1,
+            self._uncapped_max_hp(self.internal_level)
+            - self._uncapped_max_hp(self.internal_level - 1),
+        )
+        amount = min(target - self.max_hp, step)
+        self.max_hp += amount
+        return amount
+
+    def maximum_spell_level(self) -> int:
+        """Return the highest current level among the three spell schools."""
+
+        return max(
+            self.proficiency(kind).level for kind in SPELL_PROFICIENCY_KINDS
         )
 
     def calculated_max_mp(self) -> int:
         """Return the current level/proficiency MP ceiling without mutating state."""
 
-        maximum_spell_level = max(
-            self.proficiency(kind).level for kind in SPELL_PROFICIENCY_KINDS
-        )
         return min(
-            self.definition.base_mp
-            * (11 + self.internal_level)
-            * (7 + maximum_spell_level)
-            // 200,
+            self._uncapped_max_mp(
+                self.internal_level,
+                self.maximum_spell_level(),
+            ),
             MAX_MP,
+        )
+
+    def apply_max_mp_growth(
+        self,
+        *,
+        maximum_spell_level_increased: bool,
+    ) -> int:
+        """Move max MP toward its ceiling by one relevant level step."""
+
+        if not isinstance(maximum_spell_level_increased, bool):
+            raise TypeError("maximum_spell_level_increased must be a boolean")
+        target = self.calculated_max_mp()
+        if target <= self.max_mp:
+            return 0
+        maximum_spell_level = self.maximum_spell_level()
+        current_raw = self._uncapped_max_mp(
+            self.internal_level,
+            maximum_spell_level,
+        )
+        if maximum_spell_level_increased:
+            previous_raw = self._uncapped_max_mp(
+                self.internal_level,
+                maximum_spell_level - 1,
+            )
+        else:
+            previous_raw = self._uncapped_max_mp(
+                self.internal_level - 1,
+                maximum_spell_level,
+            )
+        amount = min(target - self.max_mp, max(1, current_raw - previous_raw))
+        self.max_mp += amount
+        return amount
+
+    def _uncapped_max_hp(self, internal_level: int) -> int:
+        return self.definition.base_hp * (4 + internal_level) // 5
+
+    def _uncapped_max_mp(
+        self,
+        internal_level: int,
+        maximum_spell_level: int,
+    ) -> int:
+        return (
+            self.definition.base_mp
+            * (11 + internal_level)
+            * (7 + maximum_spell_level)
+            // 200
         )
 
     @property
@@ -1280,8 +1342,11 @@ class Member:
         self.speed_modifier = 0
 
     def recover_world_map_entry_ailments(self) -> None:
-        """Clear every non-death condition when entering the world map."""
+        """Restore points and clear non-death conditions on world-map entry."""
 
+        if self.is_alive:
+            self.hp = self.max_hp
+        self.mp = self.max_mp
         self.poisoned = False
         self.paralyzed = False
         self.sleeping = 0

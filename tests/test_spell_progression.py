@@ -82,6 +82,22 @@ class MenuSpellProgressionTest(unittest.TestCase):
         self.assertEqual((sacred.level, sacred.progress), (2, 4))
         self.assertGreater(self.member.max_mp, 1)
 
+    def test_application_limits_mp_growth_to_one_spell_level_step(self) -> None:
+        self.member.internal_level = 5
+        mystic = self.member.proficiency(ProficiencyKind.MYSTIC)
+        mystic.progress = 98
+
+        growth = apply_menu_spell_proficiency_growth(
+            self.member,
+            ProficiencyKind.MYSTIC,
+            mp_spent=1,
+        )
+
+        self.assertEqual((growth.before_total, growth.after_total), (198, 200))
+        self.assertEqual(mystic.level, 2)
+        self.assertEqual(self.member.max_mp, 11)
+        self.assertEqual(self.member.calculated_max_mp(), 14)
+
     def test_rejects_weapon_proficiency_and_invalid_mp(self) -> None:
         with self.assertRaisesRegex(ValueError, "spell school"):
             menu_spell_proficiency_gain(

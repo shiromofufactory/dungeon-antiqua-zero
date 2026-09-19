@@ -459,7 +459,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの確定はPyxel非依存の `systems/battle_progression.py` が所有する。`BattleScene` はその記録契機、勝利演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
+戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 遭遇済みモンスター、開示済み属性、お宝取得済みの更新と照会は、Pyxel非依存の
 `systems/monster_records.py` が `SaveData.monster_records` に対して行う。BattleSceneは遭遇、
@@ -494,7 +494,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 この判定結果を描画するだけとし、イベント習得状態や呪文効果を画面固有状態へ埋め込まない。
 メニューから発動した呪文の熟練度は、Pyxel非依存の `systems/spell_progression.py` が
 `floor(√実消費MP) + 使用種別の適性 + 他の呪文種別の最高LV - 使用種別のLV` を0以上へ丸めて
-確定し、レベル上昇時の最大MP再計算も行う。`ui/spell_menu.py` は発動前後の熟練度を受け取り、
+確定し、レベル上昇時は `Member` の共通成長規則で最大MPを1段分だけ理論値へ近づける。`ui/spell_menu.py` は発動前後の熟練度を受け取り、
 対象選択中の小Window表示と表示値の補間を所有する。補間時間は [フィールド](./features/field.md) を参照する。呪文自体のSEとの競合を避けるため、
 このメニュー経路の数字変化SEは再生しない。
 キュアーが対象とする状態の判定と解除は `Member.has_curable_ailment` / `cure_ailments()` が所有し、
@@ -1266,7 +1266,8 @@ DA2同様に増減表示より状態名を優先する。`Game` はダンジョ�
 
 毒と麻痺は戦闘後も続く真偽値、眠りと混乱は戦闘中の残りターン数として `Member` が保持する。
 町・ダンジョンなどからワールドマップへ切り替える際は `Game` が全Memberへワールドマップ復帰を
-通知し、HP・MP・死亡状態を維持したまま、それ以外の状態異常と戦闘中補正を解除する。
+通知し、死亡状態を維持したまま、生存者のHPと全員のMPを最大まで回復し、それ以外の
+状態異常と戦闘中補正を解除する。
 状態表示の優先順位は死亡、麻痺、眠り、混乱、毒とする。
 戦闘またはダンジョン歩行による全滅では、共通の全滅帰還フェードで完全暗転した後に
 復帰メッセージOverlayを表示する。最終ページの確認時に全Memberへ `fully_recover()` を呼び、
@@ -1530,8 +1531,9 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 現在のComposition Rootでは `Game` が `EncounterSystem` の結果を受け、フィールド画面の保存、
 `BattleScene` の生成、`BattleResult` に応じたフィールド復帰を調停する。エンカウント変数は
 `SaveData`、戦闘内の一時状態は `BattleScene`、回転・拡大のフレーム状態は
-`EncounterTransition` がそれぞれ所有する。ワールドマップへ切り替える時点での死亡以外の
-状態異常・戦闘中補正の解除は、`Game` が `Member.recover_world_map_entry_ailments()` を呼んで行う。
+`EncounterTransition` がそれぞれ所有する。ワールドマップへ切り替える時点でのHP・MP回復と
+死亡以外の状態異常・戦闘中補正の解除は、`Game` が
+`Member.recover_world_map_entry_ailments()` を呼んで行う。
 
 配置に迷った場合は「どの状態を変更するか」「その状態の所有者は誰か」を先に決める。複数箇所から呼ばれるという理由だけで `util.py` へ移動しない。
 

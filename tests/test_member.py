@@ -428,7 +428,7 @@ class MemberTest(unittest.TestCase):
         self.assertTrue(self.member.poisoned)
         self.assertTrue(self.member.paralyzed)
 
-    def test_world_map_entry_cures_every_condition_without_restoring_points(
+    def test_world_map_entry_restores_points_and_cures_every_condition(
         self,
     ) -> None:
         self.member.hp = 1
@@ -450,8 +450,8 @@ class MemberTest(unittest.TestCase):
         self.assertFalse(self.member.stunned)
         self.assertEqual(self.member.protection_level, 0)
         self.assertEqual(self.member.speed_modifier, 0)
-        self.assertEqual(self.member.hp, 1)
-        self.assertEqual(self.member.mp, 2)
+        self.assertEqual(self.member.hp, self.member.max_hp)
+        self.assertEqual(self.member.mp, self.member.max_mp)
 
     def test_world_map_entry_does_not_revive_a_dead_member(self) -> None:
         self.member.hp = 0
@@ -460,7 +460,7 @@ class MemberTest(unittest.TestCase):
         self.member.recover_world_map_entry_ailments()
 
         self.assertEqual(self.member.hp, 0)
-        self.assertEqual(self.member.mp, 2)
+        self.assertEqual(self.member.mp, self.member.max_mp)
 
     def test_full_recovery_restores_points_and_all_conditions(self) -> None:
         self.member.hp = 1
@@ -621,6 +621,75 @@ class MemberTest(unittest.TestCase):
 
         self.assertEqual((self.member.hp, self.member.max_hp), (44, 44))
         self.assertEqual((self.member.mp, self.member.max_mp), (12, 12))
+
+    def test_max_hp_growth_is_limited_to_one_internal_level_step(self) -> None:
+        self.member.internal_level = 5
+
+        amount = self.member.apply_max_hp_growth()
+
+        self.assertEqual(amount, 9)
+        self.assertEqual(self.member.max_hp, 53)
+        self.assertEqual(self.member.hp, 44)
+        self.assertEqual(self.member.calculated_max_hp(), 79)
+
+    def test_max_mp_growth_uses_one_internal_level_step_without_spell_level_up(
+        self,
+    ) -> None:
+        self.member.internal_level = 5
+
+        amount = self.member.apply_max_mp_growth(
+            maximum_spell_level_increased=False
+        )
+
+        self.assertEqual(amount, 1)
+        self.assertEqual(self.member.max_mp, 13)
+        self.assertEqual(self.member.mp, 12)
+        self.assertEqual(self.member.calculated_max_mp(), 17)
+
+    def test_max_mp_growth_uses_one_spell_level_step_after_spell_level_up(
+        self,
+    ) -> None:
+        self.member.internal_level = 5
+        self.member.proficiency(ProficiencyKind.MYSTIC).level = 2
+
+        amount = self.member.apply_max_mp_growth(
+            maximum_spell_level_increased=True
+        )
+
+        self.assertEqual(amount, 2)
+        self.assertEqual(self.member.max_mp, 14)
+        self.assertEqual(self.member.mp, 12)
+        self.assertEqual(self.member.calculated_max_mp(), 19)
+
+    def test_growth_steps_use_uncapped_values_near_point_limits(self) -> None:
+        member = Member.from_record_at_internal_level(
+            {
+                "name_en": "Limit",
+                "name_ja": "Limit",
+                "race": "HUMAN",
+                "gender": "NONE",
+                "base_str": 1,
+                "base_agi": 1,
+                "base_mag": 1,
+                **GROWTH_FIELDS,
+                "base_hp": 60,
+                "base_mp": 32,
+                **FACE_FIELDS,
+                **PROFICIENCY_FIELDS,
+                "sp_mystic": 2,
+            },
+            99,
+        )
+        member.hp = member.max_hp = 980
+        member.mp = member.max_mp = 240
+
+        hp_amount = member.apply_max_hp_growth()
+        mp_amount = member.apply_max_mp_growth(
+            maximum_spell_level_increased=True
+        )
+
+        self.assertEqual((hp_amount, member.max_hp), (12, 992))
+        self.assertEqual((mp_amount, member.max_mp), (15, 255))
 
     def test_initial_skills_and_equipment_are_copied_to_member_state(self) -> None:
         dagger = self.item("DAGGER", "RIGHT", "KNIFE")

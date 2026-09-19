@@ -341,6 +341,7 @@ class BattleProgression:
             raise TypeError("monster_record_system must be a MonsterRecordSystem")
 
         before = tuple(_snapshot(member) for member in party)
+        before_by_key = dict(zip(keys, before))
         experience_gained, gold_gained = self.rewards()
         save_data.experience += experience_gained
         save_data.gold = min(MAX_GOLD, save_data.gold + gold_gained)
@@ -383,7 +384,19 @@ class BattleProgression:
                 and key in spell_users
                 and member.calculated_max_mp() > member.max_mp
             ):
-                member.max_mp = member.calculated_max_mp()
+                old_maximum_spell_level = max(
+                    before_by_key[key].proficiencies[kind].level
+                    for kind in (
+                        ProficiencyKind.MYSTIC,
+                        ProficiencyKind.SACRED,
+                        ProficiencyKind.NETHER,
+                    )
+                )
+                member.apply_max_mp_growth(
+                    maximum_spell_level_increased=(
+                        member.maximum_spell_level() > old_maximum_spell_level
+                    )
+                )
                 mp_growth_key = key
                 break
 
@@ -394,7 +407,7 @@ class BattleProgression:
                 and key != mp_growth_key
                 and member.calculated_max_hp() > member.max_hp
             ):
-                member.max_hp = member.calculated_max_hp()
+                member.apply_max_hp_growth()
                 break
 
         treasure_drop = self._settle_treasure(inventory_system, party)

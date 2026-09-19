@@ -77,11 +77,16 @@ def apply_menu_spell_proficiency_growth(
     proficiency = member.proficiency(kind)
     before_total = proficiency.level * 100 + proficiency.progress
     before_level = proficiency.level
+    before_maximum_spell_level = member.maximum_spell_level()
     proficiency.add_progress(amount)
     after_total = proficiency.level * 100 + proficiency.progress
 
     if proficiency.level > before_level:
-        member.max_mp = max(member.max_mp, member.calculated_max_mp())
+        member.apply_max_mp_growth(
+            maximum_spell_level_increased=(
+                member.maximum_spell_level() > before_maximum_spell_level
+            )
+        )
 
     return MenuSpellProficiencyGrowth(kind, before_total, after_total)
 
