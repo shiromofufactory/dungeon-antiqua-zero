@@ -182,7 +182,7 @@ class EncounterSystemTest(unittest.TestCase):
         self.assertEqual(formation.monster_keys, ("Pack", "Pack", "Pack"))
         self.assertEqual(random_source.randint_calls, [(1, 3), (1, 4)])
 
-    def test_later_groups_are_front_row_and_high_danger_can_lower_level(self) -> None:
+    def test_high_danger_can_continue_with_a_lower_level_group(self) -> None:
         random_source = ScriptedRandom(
             randrange_values=(0, 0, 0),
             randint_values=(1, 1, 2, 3),
@@ -202,7 +202,6 @@ class EncounterSystemTest(unittest.TestCase):
             formation.monster_keys,
             ("Level 3", "Level 2", "Level 2"),
         )
-        self.assertEqual(formation.front_monster_indexes, frozenset((1, 2)))
 
     def test_stops_before_a_group_would_exceed_five_monsters(self) -> None:
         random_source = ScriptedRandom(
@@ -218,7 +217,6 @@ class EncounterSystemTest(unittest.TestCase):
         )
 
         self.assertEqual(formation.monster_keys, ("Pack",) * 4)
-        self.assertEqual(formation.front_monster_indexes, frozenset())
 
     def test_low_danger_stops_before_exceeding_its_four_monster_limit(self) -> None:
         random_source = ScriptedRandom(

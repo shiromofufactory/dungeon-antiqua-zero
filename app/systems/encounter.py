@@ -48,10 +48,9 @@ class DungeonExitReturn:
 
 @dataclass(frozen=True)
 class EncounterFormation:
-    """Monster keys and front-row positions produced for one random battle."""
+    """Ordered monster keys produced for one random battle."""
 
     monster_keys: tuple[str, ...]
-    front_monster_indexes: frozenset[int]
 
 
 class EncounterSystem:
@@ -104,9 +103,7 @@ class EncounterSystem:
             raise ValueError("monster level must be from 1 to 9")
 
         keys: list[str] = []
-        front_indexes: set[int] = set()
         current_level = monster_level
-        group_index = 0
         maximum_monsters = (
             MAX_ENCOUNTER_MONSTERS
             if settings.danger == "high"
@@ -133,11 +130,7 @@ class EncounterSystem:
             if len(keys) + occurrence > maximum_monsters:
                 break
 
-            start_index = len(keys)
             keys.extend((selected.key,) * occurrence)
-            if group_index > 0:
-                front_indexes.update(range(start_index, len(keys)))
-            group_index += 1
 
             remaining = maximum_monsters - len(keys)
             if remaining < self._random.randint(1, maximum_monsters):
@@ -145,7 +138,7 @@ class EncounterSystem:
             if self._random.randrange(2) == 0:
                 current_level = max(1, current_level - 1)
 
-        return EncounterFormation(tuple(keys), frozenset(front_indexes))
+        return EncounterFormation(tuple(keys))
 
     def _weighted_pool(
         self,

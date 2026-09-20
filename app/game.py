@@ -573,6 +573,7 @@ class Game:
         self.status_screen: StatusMenuOverlay | None = None
         self.information_screen: InformationMenuOverlay | None = None
         self.hint_overlay: HintOverlay | None = None
+        self._load_mission_hint_shown_this_launch = False
         self.pending_hint_after_fade: str | None = None
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
@@ -817,7 +818,6 @@ class Game:
         )
         return BattleEncounter(
             formation.monster_keys,
-            formation.front_monster_indexes,
             surprise_enabled=True,
         )
 
@@ -2382,11 +2382,19 @@ class Game:
         self.bgm.play(self.current_map.bgm_id)
         if is_new_game:
             self._start_field_event(NEW_GAME_EVENT_ID)
-        elif self.settings.in_game_hints_enabled:
+        elif (
+            self.settings.in_game_hints_enabled
+            and not getattr(
+                self,
+                "_load_mission_hint_shown_this_launch",
+                False,
+            )
+        ):
             self.hint_overlay = HintOverlay(
                 text_key="hint.load.mission",
                 settings=self.settings, texts=self.texts, fonts=self.fonts,
             )
+            self._load_mission_hint_shown_this_launch = True
 
     def _finish_spell(self) -> None:
         if self.spell_screen is None:
@@ -2627,11 +2635,17 @@ class Game:
 
         settings = self.settings
         palette_shifter = self.palette_shifter
+        load_mission_hint_shown = getattr(
+            self,
+            "_load_mission_hint_shown_this_launch",
+            False,
+        )
         self.__init__(
             settings=settings,
             palette_shifter=palette_shifter,
             settings_repository=self.settings_repository,
         )
+        self._load_mission_hint_shown_this_launch = load_mission_hint_shown
 
     def _visible_windows(self) -> tuple[object, ...]:
         windows = list(getattr(self, "windows", ()))

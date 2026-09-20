@@ -2530,6 +2530,34 @@ class GameTest(unittest.TestCase):
             texts=mock.texts, fonts=mock.fonts,
         )
         self.assertIs(mock.hint_overlay, hint_class.return_value)
+        self.assertTrue(mock._load_mission_hint_shown_this_launch)
+
+    @patch("game.ShopSystem")
+    @patch("game.HintOverlay")
+    def test_loaded_game_does_not_repeat_mission_hint_in_same_launch(
+        self, hint_class: Mock, _shop_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings()
+        mock._load_mission_hint_shown_this_launch = True
+        mock.pending_loaded_state = Mock(
+            save_data=SaveData(), active_party=(), character_states={},
+            inventory=InventorySystem({}),
+        )
+        mock.pending_loaded_map = Mock(sites=(), bgm_id="da3-field")
+        mock.pending_loaded_field = Mock()
+        mock.pending_loaded_renderer = Mock()
+        mock.pending_load_slot = 2
+        mock.shops = ()
+        mock._build_main_windows = Mock()
+        mock._refresh_site_name_label = Mock()
+        mock._reset_field_actors = Mock()
+        mock.bgm = Mock()
+
+        mock._apply_start_game()
+
+        hint_class.assert_not_called()
+        self.assertTrue(mock._load_mission_hint_shown_this_launch)
 
     def test_hint_consumes_input_and_finishes_without_updating_field(self) -> None:
         mock = Game.__new__(Game)
@@ -3746,11 +3774,16 @@ class GameTest(unittest.TestCase):
         mock.settings = Settings(language=Language.ENGLISH, screen_scale=3)
         mock.settings_repository = Mock()
         mock.palette_shifter = Mock()
+        mock._load_mission_hint_shown_this_launch = True
+
+        def reinitialize(game: Game, **_kwargs: object) -> None:
+            game._load_mission_hint_shown_this_launch = False
+
         with patch.object(
             Game,
             "__init__",
             autospec=True,
-            return_value=None,
+            side_effect=reinitialize,
         ) as initialize:
             Game._return_to_start_without_window_restart(mock)
 
@@ -3760,6 +3793,7 @@ class GameTest(unittest.TestCase):
             palette_shifter=mock.palette_shifter,
             settings_repository=mock.settings_repository,
         )
+        self.assertTrue(mock._load_mission_hint_shown_this_launch)
 
     def test_return_to_title_closes_all_menu_windows_and_disables_cursors(
         self,

@@ -77,14 +77,12 @@ BATTLE_TEST_MONSTER_KEYS = (
     "Coyote",
     "Coyote",
 )
-BATTLE_TEST_FRONT_MONSTER_INDEXES = frozenset((2, 3, 4))
 
 # Compatibility names retained for the existing focused regression tests.
 BATTLE_MOCK_PARTY_CHARACTER_KEYS = tuple(
     member.character_key for member in BATTLE_TEST_PARTY
 )
 BATTLE_MOCK_MONSTER_KEYS = BATTLE_TEST_MONSTER_KEYS
-BATTLE_MOCK_FRONT_MONSTER_INDEXES = BATTLE_TEST_FRONT_MONSTER_INDEXES
 BATTLE_MOCK_FRONT_CHARACTER_KEYS = frozenset(
     member.character_key
     for member in BATTLE_TEST_PARTY
@@ -137,10 +135,7 @@ class BattleTestApp(BattleScene):
             monster_records=tuple(
                 load_record_array("monsters.json", APP_ROOT / "data")
             ),
-            encounter=BattleEncounter(
-                BATTLE_TEST_MONSTER_KEYS,
-                BATTLE_TEST_FRONT_MONSTER_INDEXES,
-            ),
+            encounter=BattleEncounter(BATTLE_TEST_MONSTER_KEYS),
             attack_poses=load_attack_poses(APP_ROOT / "effects" / "attack_poses.json"),
             spell_effect_renderer=SpellEffectRenderer(
                 resources,

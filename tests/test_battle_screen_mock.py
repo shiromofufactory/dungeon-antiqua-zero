@@ -1050,6 +1050,40 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.battle_popup.visible)
         mock._activate_timeline_head.assert_called_once_with()
 
+    def test_surprise_notice_waits_until_timed_popup_closes(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.surprise_prevented_by_index = None
+        mock.surprise_active = True
+        mock.texts = Mock()
+        mock.texts.text.return_value = "はいごから こうげきされた！"
+        mock.localizer = Mock()
+        mock.battle_popup = BattleTimedPopup()
+        mock._show_battle_popup = Mock(
+            side_effect=lambda _message, frame_count, **_kwargs: (
+                mock.battle_popup.show(frame_count)
+            )
+        )
+
+        waiting = mock._show_surprise_notice()
+
+        self.assertTrue(waiting)
+        self.assertIs(mock.phase, BattleMockPhase.SURPRISE_NOTICE)
+        self.assertTrue(mock.battle_popup.visible)
+        mock._show_battle_popup.assert_called_once_with(
+            "はいごから こうげきされた！",
+            BATTLE_POPUP_FRAME_COUNT,
+            align_left=True,
+        )
+
+        mock._activate_timeline_head = Mock()
+        mock._update_surprise_notice()
+        mock._activate_timeline_head.assert_not_called()
+
+        mock.battle_popup.clear()
+        mock._update_surprise_notice()
+        mock._activate_timeline_head.assert_called_once_with()
+
     def test_party_sprites_use_formation_and_defense_source_images(self) -> None:
         self.assertEqual(DEFEND_SPRITE_SOURCE_X, 16 * 7)
         mock = BattleScreenMock.__new__(BattleScreenMock)

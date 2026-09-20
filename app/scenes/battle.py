@@ -647,6 +647,7 @@ class BattlePhase(StrEnum):
     """Interactive phases implemented by the battle scene."""
 
     ENTRANCE = "entrance"
+    SURPRISE_NOTICE = "surprise_notice"
     SURPRISE_PREVENTED = "surprise_prevented"
     INITIAL = "initial"
     COMMAND = "command"
@@ -1447,7 +1448,6 @@ class BattleEncounter:
     """Immutable monster lineup supplied by an encounter source or test fixture."""
 
     monster_keys: tuple[str, ...]
-    front_monster_indexes: frozenset[int] = frozenset()
     surprise_enabled: bool = False
 
     def __post_init__(self) -> None:
@@ -1457,25 +1457,23 @@ class BattleEncounter:
             )
         if not all(isinstance(key, str) and key for key in self.monster_keys):
             raise TypeError("battle encounter monster keys must be non-empty strings")
-        if not all(
-            isinstance(index, int)
-            and not isinstance(index, bool)
-            and 0 <= index < len(self.monster_keys)
-            for index in self.front_monster_indexes
-        ):
-            raise ValueError("front monster indexes must refer to encounter monsters")
         if not isinstance(self.surprise_enabled, bool):
             raise TypeError("surprise_enabled must be a boolean")
 
 
 def _battle_start_front_monster_indexes(
-    encounter: BattleEncounter,
+    slot_indexes: Sequence[int],
 ) -> frozenset[int]:
-    """Promote the whole lineup when an encounter supplies no front row."""
+    """Resolve rows from display slots, promoting a lineup with no front slot."""
 
-    if encounter.front_monster_indexes:
-        return encounter.front_monster_indexes
-    return frozenset(range(len(encounter.monster_keys)))
+    front_indexes = frozenset(
+        index
+        for index, slot_index in enumerate(slot_indexes)
+        if slot_index >= 2
+    )
+    if front_indexes:
+        return front_indexes
+    return frozenset(range(len(slot_indexes)))
 
 
 def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
@@ -1679,7 +1677,18 @@ class BattleScene:
             key: MonsterDefinition.from_record(record)
             for key, record in monsters_by_key.items()
         }
-        front_monster_indexes = _battle_start_front_monster_indexes(encounter)
+        encounter_definitions = tuple(
+            _record_for_key(
+                self.monster_definitions_by_key,
+                key,
+                label="monster definition",
+            )
+            for key in encounter.monster_keys
+        )
+        self.monster_slot_indexes = monster_slot_indexes(encounter_definitions)
+        front_monster_indexes = _battle_start_front_monster_indexes(
+            self.monster_slot_indexes
+        )
         self.monsters = tuple(
             BattleMonster.from_record(
                 _record_for_key(monsters_by_key, key, label="monster"),
@@ -1696,7 +1705,6 @@ class BattleScene:
                     f"{monster.key}.spells contains unknown spell keys: "
                     f"{', '.join(unknown_spell_keys)}"
                 )
-        self.monster_slot_indexes = monster_slot_indexes(self.monsters)
         self.monster_positions = tuple(
             MONSTER_POSITIONS[index] for index in self.monster_slot_indexes
         )
@@ -2127,6 +2135,9 @@ class BattleScene:
         if self.phase is BattlePhase.ENTRANCE:
             self._update_entrance_animation()
             return
+        if self.phase is BattlePhase.SURPRISE_NOTICE:
+            self._update_surprise_notice()
+            return
         if self.phase is BattlePhase.SURPRISE_PREVENTED:
             self._update_surprise_prevented(input_state)
             return
@@ -2521,7 +2532,7 @@ class BattleScene:
         self.surprise_active = True
 
     def _show_surprise_notice(self) -> bool:
-        """Show a hit notice, or start the prevention acknowledgement."""
+        """Show a surprise result and report whether timeline activation waits."""
 
         prevented_by_index = getattr(
             self,
@@ -2547,12 +2558,13 @@ class BattleScene:
             message = self.texts.text("battle.surprise", self.localizer)
         else:
             return False
+        self.phase = BattlePhase.SURPRISE_NOTICE
         self._show_battle_popup(
             message,
             BATTLE_POPUP_FRAME_COUNT,
             align_left=True,
         )
-        return False
+        return True
 
     def _prepare_party_for_restart(self) -> None:
         """Allow a composition root to apply fixture state before gauge rolls."""
@@ -2592,6 +2604,13 @@ class BattleScene:
         if not (input_state.confirm.triggered or input_state.cancel.triggered):
             return
         self.battle_popup.clear()
+        self._activate_timeline_head()
+
+    def _update_surprise_notice(self) -> None:
+        """Start the first handoff after the timed surprise notice closes."""
+
+        if self.battle_popup.visible:
+            return
         self._activate_timeline_head()
 
     def _open_global_command_menu(self) -> None:

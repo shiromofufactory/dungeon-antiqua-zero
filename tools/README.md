@@ -208,8 +208,8 @@ npm run test-battle
 
 パーティ構成、内部レベル、前後列、開始HP・MPは
 `tools/screen_mocks/battle.py` の `BATTLE_TEST_PARTY` で指定する。開始HP・MPを `None` にすると
-最大値で開始する。敵の種類と前衛位置は `BATTLE_TEST_MONSTER_KEYS` と
-`BATTLE_TEST_FRONT_MONSTER_INDEXES` で指定する。Sキーによる再開始でも同じ指定状態へ戻る。
+最大値で開始する。敵の種類は `BATTLE_TEST_MONSTER_KEYS` で指定し、前衛・後衛は本編と同じく
+表示スロットから決まる。Sキーによる再開始でも同じ状態へ戻る。
 全員が死亡すると「ぜんめつした...」を表示し、決定またはキャンセル入力後に同じ指定状態から
 戦闘を再開始する。
 

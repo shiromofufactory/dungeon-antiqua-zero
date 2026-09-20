@@ -44,38 +44,29 @@ from ui.tagged_text import TextColor, split_tagged_text
 
 
 class BattleEncounterTest(unittest.TestCase):
-    def test_encounter_keeps_order_and_front_row_indexes(self) -> None:
-        encounter = BattleEncounter(
-            ("Giant Spider", "Coyote"),
-            frozenset((1,)),
-        )
+    def test_encounter_keeps_order(self) -> None:
+        encounter = BattleEncounter(("Giant Spider", "Coyote"))
 
         self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
-        self.assertEqual(encounter.front_monster_indexes, frozenset((1,)))
         self.assertFalse(encounter.surprise_enabled)
 
     def test_battle_start_promotes_every_monster_when_all_are_rear(self) -> None:
-        encounter = BattleEncounter(("Giant Spider", "Giant Spider"))
-
         self.assertEqual(
-            _battle_start_front_monster_indexes(encounter),
+            _battle_start_front_monster_indexes((0, 1)),
             frozenset((0, 1)),
         )
 
-    def test_battle_start_preserves_a_mixed_monster_formation(self) -> None:
-        encounter = BattleEncounter(
-            ("Giant Spider", "Coyote"),
-            frozenset((1,)),
-        )
-
+    def test_battle_start_resolves_rows_from_standard_display_slots(self) -> None:
         self.assertEqual(
-            _battle_start_front_monster_indexes(encounter),
-            frozenset((1,)),
+            _battle_start_front_monster_indexes((0, 1, 2, 3, 4)),
+            frozenset((2, 3, 4)),
         )
 
-    def test_encounter_rejects_an_index_outside_its_lineup(self) -> None:
-        with self.assertRaisesRegex(ValueError, "front monster indexes"):
-            BattleEncounter(("Coyote",), frozenset((1,)))
+    def test_battle_start_resolves_rows_when_tall_monster_skips_slot(self) -> None:
+        self.assertEqual(
+            _battle_start_front_monster_indexes((0, 2, 3, 4)),
+            frozenset((1, 2, 3)),
+        )
 
     def test_standard_first_monster_keeps_all_five_slots(self) -> None:
         monsters = tuple(
@@ -169,8 +160,11 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         with patch("scenes.battle.pyxel.rndi", return_value=0):
             scene._prepare_surprise()
 
+        self.assertTrue(scene.surprise_active)
         self.assertTrue(scene._party_member_is_front_row(0))
         self.assertTrue(scene._party_member_is_front_row(1))
+        self.assertEqual(scene._party_sprite_width(0, is_escaping=False), -16)
+        self.assertEqual(scene._party_sprite_width(1, is_escaping=False), -16)
 
     def test_living_vigilance_owner_prevents_surprise(self) -> None:
         vigilant = self._member(10, FormationRow.FRONT, vigilant=True)
@@ -689,7 +683,6 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.encounter_system.dynamic_monster_level.return_value = 3
         game.encounter_system.generate_formation.return_value = EncounterFormation(
             ("Giant Spider", "Coyote"),
-            frozenset((1,)),
         )
 
         encounter = game._create_random_battle_encounter()
@@ -701,7 +694,6 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             monster_level=3,
         )
         self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
-        self.assertEqual(encounter.front_monster_indexes, frozenset((1,)))
         self.assertTrue(encounter.surprise_enabled)
 
     def test_party_command_ready_requires_an_open_window_on_a_party_turn(
