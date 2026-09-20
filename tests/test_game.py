@@ -857,6 +857,8 @@ class GameTest(unittest.TestCase):
         mock.command_cursor = Mock(active=False)
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.showing_field = True
+        mock.selected_member_index = 1
+        mock.menu_member_selected = True
         mock.alert = Mock()
         window = Mock(is_animating=True)
         mock.windows = (window,)
@@ -874,6 +876,8 @@ class GameTest(unittest.TestCase):
             mock._update_fade()
 
         self.assertFalse(mock.showing_field)
+        self.assertEqual(mock.selected_member_index, 0)
+        self.assertFalse(mock.menu_member_selected)
         self.assertTrue(mock.command_cursor.active)
         self.assertIsNone(mock.pending_screen_change)
         mock._refresh_party_window_texts.assert_called_once_with()
@@ -2829,6 +2833,34 @@ class GameTest(unittest.TestCase):
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)
         self.assertIsNone(mock.pending_screen_change)
         mock.command_window.update.assert_not_called()
+
+    @patch("game.SpellMenuOverlay")
+    def test_first_spell_screen_in_menu_uses_automatic_caster_selection(
+        self,
+        spell_screen_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.alert = Mock()
+        mock.command_cursor = Mock(active=True)
+        mock.party = (Mock(), Mock())
+        mock.spells = {"HEALING1": Mock()}
+        mock.settings = Settings()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.faces = object()
+        mock.palette_shifter = Mock()
+        mock.selected_member_index = 0
+        mock.menu_member_selected = False
+        spell_screen_class.return_value.member_index = 1
+
+        mock._start_spell()
+
+        self.assertEqual(
+            spell_screen_class.call_args.kwargs["member_index"],
+            None,
+        )
+        self.assertEqual(mock.selected_member_index, 1)
+        self.assertTrue(mock.menu_member_selected)
 
     def test_cancel_from_spell_returns_to_selected_menu_command(self) -> None:
         mock = Game.__new__(Game)

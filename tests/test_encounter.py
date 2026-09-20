@@ -146,8 +146,8 @@ class EncounterSystemTest(unittest.TestCase):
 
     def test_high_danger_can_add_an_early_next_level_monster(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(2, 2),
-            randint_values=(1,),
+            randrange_values=(2,),
+            randint_values=(1, 5),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
         monsters = (
@@ -163,12 +163,13 @@ class EncounterSystemTest(unittest.TestCase):
         )
 
         self.assertEqual(formation.monster_keys, ("Early Level 4",))
-        self.assertEqual(random_source.randrange_calls, [4, 3])
+        self.assertEqual(random_source.randrange_calls, [4])
+        self.assertEqual(random_source.randint_calls, [(1, 1), (1, 5)])
 
     def test_low_danger_halves_max_occurrence_rounding_up(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(0, 2),
-            randint_values=(3,),
+            randrange_values=(0,),
+            randint_values=(3, 2),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
@@ -179,12 +180,12 @@ class EncounterSystemTest(unittest.TestCase):
         )
 
         self.assertEqual(formation.monster_keys, ("Pack", "Pack", "Pack"))
-        self.assertEqual(random_source.randint_calls, [(1, 3)])
+        self.assertEqual(random_source.randint_calls, [(1, 3), (1, 4)])
 
     def test_later_groups_are_front_row_and_high_danger_can_lower_level(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(0, 1, 0, 2),
-            randint_values=(1, 2),
+            randrange_values=(0, 0, 0),
+            randint_values=(1, 1, 2, 3),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
@@ -205,8 +206,8 @@ class EncounterSystemTest(unittest.TestCase):
 
     def test_stops_before_a_group_would_exceed_five_monsters(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(0, 0, 0),
-            randint_values=(4, 2),
+            randrange_values=(0, 1, 0),
+            randint_values=(4, 1, 2),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
@@ -218,6 +219,64 @@ class EncounterSystemTest(unittest.TestCase):
 
         self.assertEqual(formation.monster_keys, ("Pack",) * 4)
         self.assertEqual(formation.front_monster_indexes, frozenset())
+
+    def test_low_danger_stops_before_exceeding_its_four_monster_limit(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1, 0),
+            randint_values=(3, 1, 2),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Pack", max_occ=4),),
+            encounter_settings(danger="low"),
+            monster_level=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Pack",) * 3)
+
+    def test_remaining_capacity_roll_can_end_before_another_group(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0,),
+            randint_values=(2, 4),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Pack", max_occ=2),),
+            encounter_settings(),
+            monster_level=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Pack", "Pack"))
+        self.assertEqual(random_source.randrange_calls, [2])
+
+    def test_level_reduction_does_not_go_below_one(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 0, 0),
+            randint_values=(1, 1, 1, 5),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Level 1", lv=1),),
+            encounter_settings(),
+            monster_level=1,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Level 1", "Level 1"))
+
+    def test_pool_does_not_add_the_same_monster_key_twice(self) -> None:
+        duplicate = monster("Duplicate")
+        system = EncounterSystem()
+
+        pool = system._weighted_pool(
+            (duplicate, duplicate),
+            encounter_settings(),
+            3,
+        )
+
+        self.assertEqual(tuple(item.key for item, _weight in pool), ("Duplicate",))
 
     def test_species_switches_and_large_animal_off_follow_map_filters(self) -> None:
         system = EncounterSystem()

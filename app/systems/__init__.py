@@ -16,6 +16,7 @@ from .encounter import (
     EncounterFormation,
     EncounterGenerationError,
     EncounterSystem,
+    LOW_DANGER_MAX_ENCOUNTER_MONSTERS,
     MAX_ENCOUNTER_MONSTERS,
 )
 from .inventory import InventorySystem
@@ -106,6 +107,7 @@ __all__ = [
     "PartySystemError",
     "PlaySeEffect",
     "LoadedGameState",
+    "LOW_DANGER_MAX_ENCOUNTER_MONSTERS",
     "SAVE_DIRECTORY",
     "SAVE_FORMAT_VERSION",
     "SAVE_SLOT_COUNT",

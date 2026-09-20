@@ -22,6 +22,7 @@ else:
 ENCOUNTER_STEP_MIN = 1
 ENCOUNTER_STEP_MAX = 4
 ENCOUNTER_THRESHOLD = 120
+LOW_DANGER_MAX_ENCOUNTER_MONSTERS = 4
 MAX_ENCOUNTER_MONSTERS = 5
 
 
@@ -106,6 +107,11 @@ class EncounterSystem:
         front_indexes: set[int] = set()
         current_level = monster_level
         group_index = 0
+        maximum_monsters = (
+            MAX_ENCOUNTER_MONSTERS
+            if settings.danger == "high"
+            else LOW_DANGER_MAX_ENCOUNTER_MONSTERS
+        )
         while True:
             weighted_pool = self._weighted_pool(
                 monsters,
@@ -124,7 +130,7 @@ class EncounterSystem:
             if settings.danger == "low":
                 maximum = (maximum + 1) // 2
             occurrence = self._random.randint(1, maximum)
-            if len(keys) + occurrence > MAX_ENCOUNTER_MONSTERS:
+            if len(keys) + occurrence > maximum_monsters:
                 break
 
             start_index = len(keys)
@@ -133,16 +139,11 @@ class EncounterSystem:
                 front_indexes.update(range(start_index, len(keys)))
             group_index += 1
 
-            branch = self._random.randrange(3)
-            if settings.danger == "high":
-                if branch == 1:
-                    current_level -= 1
-                elif branch == 2:
-                    break
-            elif branch != 0:
-                # The stated low-danger probabilities leave 1/6 unspecified;
-                # both non-continuation outcomes terminate the formation.
+            remaining = maximum_monsters - len(keys)
+            if remaining < self._random.randint(1, maximum_monsters):
                 break
+            if self._random.randrange(2) == 0:
+                current_level = max(1, current_level - 1)
 
         return EncounterFormation(tuple(keys), frozenset(front_indexes))
 
@@ -153,6 +154,7 @@ class EncounterSystem:
         monster_level: int,
     ) -> tuple[tuple[MonsterDefinition, int], ...]:
         pool: list[tuple[MonsterDefinition, int]] = []
+        included_keys: set[str] = set()
         for monster in monsters:
             level_matches = monster.level == monster_level
             early_matches = (
@@ -161,6 +163,8 @@ class EncounterSystem:
                 and monster.early_appear
             )
             if not (level_matches or early_matches):
+                continue
+            if monster.key in included_keys:
                 continue
             if not settings.allow_demons and monster.tribe is MonsterTribe.DEMON:
                 continue
@@ -187,6 +191,7 @@ class EncounterSystem:
                 else 2
             )
             pool.append((monster, weight))
+            included_keys.add(monster.key)
         return tuple(pool)
 
     def _weighted_choice(
@@ -262,5 +267,6 @@ __all__ = [
     "EncounterFormation",
     "EncounterGenerationError",
     "EncounterSystem",
+    "LOW_DANGER_MAX_ENCOUNTER_MONSTERS",
     "MAX_ENCOUNTER_MONSTERS",
 ]

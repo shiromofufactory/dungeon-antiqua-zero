@@ -30,6 +30,7 @@ from scenes.battle import (
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
     MONSTER_POSITIONS,
+    _battle_start_front_monster_indexes,
     BattleCharacter,
     BattlePhase,
     FormationAnimationCompletion,
@@ -52,6 +53,25 @@ class BattleEncounterTest(unittest.TestCase):
         self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
         self.assertEqual(encounter.front_monster_indexes, frozenset((1,)))
         self.assertFalse(encounter.surprise_enabled)
+
+    def test_battle_start_promotes_every_monster_when_all_are_rear(self) -> None:
+        encounter = BattleEncounter(("Giant Spider", "Giant Spider"))
+
+        self.assertEqual(
+            _battle_start_front_monster_indexes(encounter),
+            frozenset((0, 1)),
+        )
+
+    def test_battle_start_preserves_a_mixed_monster_formation(self) -> None:
+        encounter = BattleEncounter(
+            ("Giant Spider", "Coyote"),
+            frozenset((1,)),
+        )
+
+        self.assertEqual(
+            _battle_start_front_monster_indexes(encounter),
+            frozenset((1,)),
+        )
 
     def test_encounter_rejects_an_index_outside_its_lineup(self) -> None:
         with self.assertRaisesRegex(ValueError, "front monster indexes"):

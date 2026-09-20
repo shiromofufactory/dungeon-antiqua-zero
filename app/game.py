@@ -583,6 +583,7 @@ class Game:
         self.shop_return_to_debug = False
         self.debug_screen: DebugMenuOverlay | None = None
         self.selected_member_index = 0
+        self.menu_member_selected = False
         self.site_name_site = None
         self.site_name_text: WindowText | None = None
         self._site_name_cache: tuple[str, Language] | None = None
@@ -1960,6 +1961,7 @@ class Game:
             palette_shifter=self.palette_shifter,
             member_index=self.selected_member_index,
         )
+        self.menu_member_selected = True
 
     def _start_item(self) -> None:
         self.command_cursor.active = False
@@ -1998,6 +2000,7 @@ class Game:
             member_index=self.selected_member_index,
             on_invalid_action=self.alert.start,
         )
+        self.menu_member_selected = True
 
     def _finish_equipment(self) -> None:
         if self.equipment_screen is None:
@@ -2096,6 +2099,8 @@ class Game:
             self.showing_field = True
         elif change is GameScreenChange.SHOW_MENU:
             self.showing_field = False
+            self.selected_member_index = 0
+            self.menu_member_selected = False
             self._refresh_party_window_texts()
             self._refresh_info_window_texts()
             self.command_cursor.active = True
@@ -2212,6 +2217,11 @@ class Game:
 
     def _start_spell(self) -> None:
         self.command_cursor.active = False
+        member_index = (
+            self.selected_member_index
+            if getattr(self, "menu_member_selected", True)
+            else None
+        )
         self.spell_screen = SpellMenuOverlay(
             party=self.party,
             spells=self.spells,
@@ -2220,9 +2230,12 @@ class Game:
             fonts=self.fonts,
             faces=self.faces,
             palette_shifter=self.palette_shifter,
-            member_index=self.selected_member_index,
+            member_index=member_index,
             on_invalid_action=self.alert.start,
         )
+        if member_index is None:
+            self.selected_member_index = self.spell_screen.member_index
+        self.menu_member_selected = True
 
     def _start_save(self) -> None:
         self.command_cursor.active = False
@@ -2379,6 +2392,7 @@ class Game:
         if self.spell_screen is None:
             return
         self.selected_member_index = self.spell_screen.member_index
+        self.menu_member_selected = True
         self.spell_screen = None
         self._refresh_party_window_texts()
         self.command_cursor.active = True
@@ -3272,6 +3286,7 @@ class Game:
             selected_member_index = self.party_cursor.selected_key
             if isinstance(selected_member_index, int):
                 self.selected_member_index = selected_member_index
+                self.menu_member_selected = True
             return
 
         if input_state.cancel.triggered:

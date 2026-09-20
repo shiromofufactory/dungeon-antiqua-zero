@@ -1468,6 +1468,16 @@ class BattleEncounter:
             raise TypeError("surprise_enabled must be a boolean")
 
 
+def _battle_start_front_monster_indexes(
+    encounter: BattleEncounter,
+) -> frozenset[int]:
+    """Promote the whole lineup when an encounter supplies no front row."""
+
+    if encounter.front_monster_indexes:
+        return encounter.front_monster_indexes
+    return frozenset(range(len(encounter.monster_keys)))
+
+
 def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
     """Select presentation slots for the encountered monster image sizes."""
 
@@ -1669,10 +1679,11 @@ class BattleScene:
             key: MonsterDefinition.from_record(record)
             for key, record in monsters_by_key.items()
         }
+        front_monster_indexes = _battle_start_front_monster_indexes(encounter)
         self.monsters = tuple(
             BattleMonster.from_record(
                 _record_for_key(monsters_by_key, key, label="monster"),
-                is_front_row=index in encounter.front_monster_indexes,
+                is_front_row=index in front_monster_indexes,
             )
             for index, key in enumerate(encounter.monster_keys)
         )

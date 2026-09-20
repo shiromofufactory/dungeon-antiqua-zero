@@ -9,7 +9,7 @@ from tools._bootstrap import APP_ROOT as _APP_ROOT
 
 from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
-from app.spell import SpellType
+from app.spell import SpellAction, SpellType
 from member import ProficiencyKind
 from rendering import DIMMED_PALETTE
 from ui import DEFAULT_TEXT_COLOR
@@ -45,7 +45,7 @@ from ui.spell_menu import (
     SpellMenuDataError,
     SpellSelectionPhase,
 )
-from tests.ui_test_support import SpellMenuHarness
+from tests.ui_test_support import SpellMenuHarness, load_test_spells
 
 
 class SpellMenuTest(unittest.TestCase):
@@ -188,6 +188,37 @@ class SpellMenuTest(unittest.TestCase):
 
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertEqual(mock.selected_spell.key, "HEALING1")
+
+    def test_defaults_to_first_member_with_a_usable_field_spell(self) -> None:
+        mock = SpellMenuHarness(member_index=None)
+
+        self.assertEqual(mock.member.definition.key, "Cerion")
+        self.assertEqual(mock.member_index, 1)
+        self.assertEqual(mock.selected_spell.key, "HEALING1")
+
+    def test_defaults_spell_cursor_to_first_usable_spell(self) -> None:
+        mock = SpellMenuHarness(member_index=1)
+
+        self.assertEqual(
+            [target.key for target in mock.spell_cursor.targets],
+            ["FIRE1", "HEALING1"],
+        )
+        self.assertEqual(mock.selected_spell.key, "HEALING1")
+
+    def test_first_usable_spell_order_is_top_to_bottom_then_left_to_right(
+        self,
+    ) -> None:
+        spells = load_test_spells()
+        spells["FIRE1"] = replace(
+            spells["FIRE1"],
+            on_camp=True,
+            to_enemy=False,
+            action=SpellAction.HEAL,
+        )
+
+        mock = SpellMenuHarness(member_index=1, spells=spells)
+
         self.assertEqual(mock.selected_spell.key, "FIRE1")
 
     def test_cancel_returns_from_spell_to_caster_then_to_menu(self) -> None:
@@ -237,7 +268,6 @@ class SpellMenuTest(unittest.TestCase):
         initial_mp = mock.member.mp
 
         mock.update(InputState(confirm=InputButton(True, True)))
-        mock.update(InputState(navigation=Direction.RIGHT))
         self.assertFalse(mock.update(InputState(confirm=InputButton(True, True))))
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertFalse(mock.update(InputState(confirm=InputButton(True, True))))
@@ -278,10 +308,11 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
         self.assertFalse(mock.member_cursor.active)
 
+        mock.spell_cursor.select_key("FIRE1")
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
 
-        mock.update(InputState(navigation=Direction.RIGHT))
+        mock.spell_cursor.select_key("HEALING1")
         self.assertEqual(mock.selected_spell.key, "HEALING1")
         mock.update(InputState(confirm=InputButton(True, True)))
 
@@ -340,7 +371,6 @@ class SpellMenuTest(unittest.TestCase):
         mock.member.proficiency(ProficiencyKind.MYSTIC).level = 5
 
         mock.update(InputState(confirm=InputButton(True, True)))
-        mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
 
@@ -368,7 +398,6 @@ class SpellMenuTest(unittest.TestCase):
         mock.on_invalid_action = invalid_action
 
         mock.update(InputState(confirm=InputButton(True, True)))
-        mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
 
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
@@ -470,7 +499,6 @@ class SpellMenuTest(unittest.TestCase):
         mock.party[1].hp = 1
 
         mock.update(InputState(confirm=InputButton(True, True)))
-        mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
 

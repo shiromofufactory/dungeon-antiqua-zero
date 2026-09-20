@@ -111,7 +111,7 @@ class SpellMenuOverlay:
         fonts: FontResources,
         faces: object,
         palette_shifter: PaletteShifter | None = None,
-        member_index: int = 0,
+        member_index: int | None = 0,
         event_spell_keys: Collection[str] = (),
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
@@ -119,7 +119,7 @@ class SpellMenuOverlay:
 
         if not party:
             raise ValueError("party must contain at least one member")
-        if (
+        if member_index is not None and (
             isinstance(member_index, bool)
             or not isinstance(member_index, int)
             or not 0 <= member_index < len(party)
@@ -145,12 +145,16 @@ class SpellMenuOverlay:
         self.fonts = fonts
         self.faces = faces
         self.palette_shifter = palette_shifter
-        self.member_index = member_index
         self.event_spell_keys = frozenset(event_spell_keys)
         self.on_invalid_action = on_invalid_action
         self.phase = SpellSelectionPhase.CASTER
         self._proficiency_animation: _ProficiencyAnimation | None = None
         self._spells_by_position = self._index_spells()
+        self.member_index = (
+            self._first_usable_member_index()
+            if member_index is None
+            else member_index
+        )
         self._build_windows()
 
     @property
@@ -198,6 +202,33 @@ class SpellMenuOverlay:
                 raise SpellMenuDataError(f"呪文用テキストが見つかりません: {key}")
             labels[key] = label
         return labels
+
+    def _first_usable_spell_key(self, member: Member) -> str | None:
+        """Return the first enabled field spell in visual row-major order."""
+
+        for level in SPELL_DISPLAY_LEVELS:
+            for spell_type in SPELL_TYPE_ORDER:
+                spell = self._spells_by_position.get((spell_type, level))
+                if (
+                    spell is not None
+                    and spell.is_learned_by(member, self.event_spell_keys)
+                    and self._is_supported_menu_spell(spell)
+                    and member.mp >= spell.mp
+                ):
+                    return spell.key
+        return None
+
+    def _first_usable_member_index(self) -> int:
+        """Return the first party member who has an enabled field spell."""
+
+        return next(
+            (
+                index
+                for index, member in enumerate(self.party)
+                if self._first_usable_spell_key(member) is not None
+            ),
+            0,
+        )
 
     def _build_windows(self) -> None:
         localizer = Localizer(self.settings.language)
@@ -260,6 +291,9 @@ class SpellMenuOverlay:
             targets,
             active=self.phase is SpellSelectionPhase.SPELL,
         )
+        first_usable_spell_key = self._first_usable_spell_key(self.member)
+        if first_usable_spell_key is not None:
+            self.spell_cursor.select_key(first_usable_spell_key)
         self.proficiency_window = windows.create(
             *PROFICIENCY_WINDOW_GRID,
             (),

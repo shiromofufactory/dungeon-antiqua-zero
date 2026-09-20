@@ -114,7 +114,7 @@ class SpellMenuHarness(SpellMenuOverlay):
         fonts: FontResources | None = None,
         faces: object | None = None,
         palette_shifter: PaletteShifter | None = None,
-        member_index: int = 0,
+        member_index: int | None = 0,
         event_spell_keys: Collection[str] = (),
     ) -> None:
         if party is None:
