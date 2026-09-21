@@ -10,6 +10,7 @@ from app.attack_pose import (
     attack_sequence,
     load_attack_poses,
     parse_attack_poses,
+    throwing_projectile_sequence,
 )
 
 
@@ -110,6 +111,31 @@ class AttackPoseTest(unittest.TestCase):
         self.assertEqual(
             attack_sequence(primary_only, "SPEAR-1", branches=("3", "4")),
             (),
+        )
+
+    def test_selects_branch_two_and_three_weapon_sprites_for_throwing(self) -> None:
+        source = document()
+        source["poses"].append(
+            {
+                **source["poses"][1],
+                "id": "SPEAR-1_3",
+                "branch": "3",
+                "weapons": [
+                    {
+                        **source["poses"][1]["weapons"][0],
+                        "image": 12,
+                    }
+                ],
+            }
+        )
+        poses = parse_attack_poses(source)
+
+        self.assertEqual(
+            tuple(
+                sprite.image
+                for sprite in throwing_projectile_sequence(poses, "SPEAR-1")
+            ),
+            (10, 12),
         )
 
     def test_loads_json_from_runtime_path(self) -> None:

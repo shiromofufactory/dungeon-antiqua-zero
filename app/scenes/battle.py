@@ -27,6 +27,7 @@ from attack_pose import (
     AttackWeaponSprite,
     attack_sequence,
     load_attack_poses,
+    throwing_projectile_sequence,
 )
 from battle_command_memory import BattleCommandMemory
 from battle_commands import (
@@ -501,6 +502,8 @@ ATTACK_POSE_SWING_FRAME_COUNT = 8
 ATTACK_MOTION_FRAME_COUNT = (
     ATTACK_POSE_RAISE_FRAME_COUNT + ATTACK_POSE_SWING_FRAME_COUNT
 )
+THROWING_PROJECTILE_SPEED = 16
+THROWING_PROJECTILE_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT = 3
 ATTACK_HIT_PATTERN_COUNT = 3
 ATTACK_HIT_PATTERN_FRAME_COUNT = 5
@@ -1031,6 +1034,35 @@ class BattleActionPresentation:
             self.post_effect_elapsed_frame += 1
 
 
+def throwing_projectile_frame_count(
+    start: tuple[int, int],
+    end: tuple[int, int],
+) -> int:
+    """Return endpoint-inclusive frames for one constant-speed throw."""
+
+    distance = hypot(end[0] - start[0], end[1] - start[1])
+    return max(2, ceil(distance / THROWING_PROJECTILE_SPEED) + 1)
+
+
+def throwing_projectile_position(
+    start: tuple[int, int],
+    end: tuple[int, int],
+    elapsed_frame: int,
+) -> tuple[int, int]:
+    """Advance a projectile at a fixed Euclidean speed, clamped at its target."""
+
+    offset_x = end[0] - start[0]
+    offset_y = end[1] - start[1]
+    distance = hypot(offset_x, offset_y)
+    if distance == 0:
+        return end
+    travelled = min(distance, elapsed_frame * THROWING_PROJECTILE_SPEED)
+    return (
+        round(start[0] + offset_x * travelled / distance),
+        round(start[1] + offset_y * travelled / distance),
+    )
+
+
 @dataclass
 class BattleAttackStrike:
     """Own one independently resolved hand strike on the shared timeline."""
@@ -1040,6 +1072,9 @@ class BattleAttackStrike:
     effect_row: int | None
     motion_start_frame: int
     hit_start_frame: int
+    pose_change_frame: int | None = None
+    projectile_sprites: tuple[AttackWeaponSprite, ...] = ()
+    projectile_frame_count: int = 0
     effect_flip_x: bool = False
     is_hit: bool = True
     is_critical: bool = False
@@ -1053,16 +1088,57 @@ class BattleAttackStrike:
         if (
             not self.poses
             or elapsed_frame < self.motion_start_frame
-            or elapsed_frame >= self.motion_end_frame
+            or elapsed_frame >= self.pose_end_frame
         ):
             return None
-        if len(self.poses) == 1 or elapsed_frame < self.hit_start_frame:
+        if len(self.poses) == 1 or elapsed_frame < self.swing_start_frame:
             return self.poses[0]
         return self.poses[1]
 
     @property
+    def swing_start_frame(self) -> int:
+        return (
+            self.hit_start_frame
+            if self.pose_change_frame is None
+            else self.pose_change_frame
+        )
+
+    @property
+    def pose_end_frame(self) -> int:
+        return self.swing_start_frame + ATTACK_POSE_SWING_FRAME_COUNT
+
+    @property
+    def projectile_start_frame(self) -> int | None:
+        return (
+            self.pose_end_frame
+            if self.projectile_sprites and self.projectile_frame_count > 0
+            else None
+        )
+
+    @property
+    def projectile_end_frame(self) -> int | None:
+        start_frame = self.projectile_start_frame
+        if start_frame is None:
+            return None
+        return start_frame + self.projectile_frame_count
+
+    def projectile_at(self, elapsed_frame: int) -> AttackWeaponSprite | None:
+        start_frame = self.projectile_start_frame
+        end_frame = self.projectile_end_frame
+        if (
+            start_frame is None
+            or end_frame is None
+            or not start_frame <= elapsed_frame < end_frame
+        ):
+            return None
+        pattern = (
+            (elapsed_frame - start_frame) // THROWING_PROJECTILE_PATTERN_FRAME_COUNT
+        ) % len(self.projectile_sprites)
+        return self.projectile_sprites[pattern]
+
+    @property
     def motion_end_frame(self) -> int:
-        return self.hit_start_frame + ATTACK_POSE_SWING_FRAME_COUNT
+        return self.projectile_end_frame or self.pose_end_frame
 
     def hit_elapsed_frame(self, elapsed_frame: int) -> int:
         return elapsed_frame - self.hit_start_frame
@@ -6132,6 +6208,31 @@ class BattleScene:
         self.identify_effect_elapsed_frame = 0
         self._begin_action_return(complete_turn=True)
 
+    def _throwing_projectile_frame_count(
+        self,
+        actor_index: int,
+        target_side: str,
+        target_index: int,
+        projectile_sprites: tuple[AttackWeaponSprite, ...],
+    ) -> int:
+        """Measure a throw from the actor's forward position to target center."""
+
+        if not projectile_sprites:
+            return 0
+        first_sprite = projectile_sprites[0]
+        start = (
+            self._party_sprite_x(actor_index)
+            - ACTION_MOVE_DISTANCE
+            + first_sprite.position_x,
+            PARTY_SPRITE_Y[actor_index] + first_sprite.position_y,
+        )
+        target_x, target_y = self._spell_effect_anchor(target_side, target_index)
+        end = (
+            target_x - ATTACK_WEAPON_SPRITE_SIZE // 2,
+            target_y - ATTACK_WEAPON_SPRITE_SIZE // 2,
+        )
+        return throwing_projectile_frame_count(start, end)
+
     def _begin_attack_presentation(self) -> bool:
         """Resolve each equipped hand and start its authored attack sequence."""
 
@@ -6188,10 +6289,32 @@ class BattleScene:
         records = getattr(self, "monster_record_system", None)
         motion_start_frame = AIM_RETICLE_END_FRAME if is_aimed else 0
         for weapon, weapon_attack, weapon_hit, pose_branches in equipped_attacks:
-            hit_start_frame = (
+            pose_change_frame = (
                 AIM_ATTACK_HIT_START_FRAME
                 if not strikes and is_aimed
                 else motion_start_frame + ATTACK_POSE_RAISE_FRAME_COUNT
+            )
+            projectile_sprites = (
+                throwing_projectile_sequence(
+                    getattr(self, "attack_poses", {}),
+                    weapon.weapon_img,
+                )
+                if weapon.subtype == "THROWING" and pose_branches == ("1", "2")
+                else ()
+            )
+            projectile_frame_count = self._throwing_projectile_frame_count(
+                self.active_party_index,
+                "enemy",
+                index,
+                projectile_sprites,
+            )
+            hit_start_frame = (
+                pose_change_frame
+                if not projectile_sprites
+                else pose_change_frame
+                + ATTACK_POSE_SWING_FRAME_COUNT
+                + projectile_frame_count
+                - 1
             )
             attack = member_physical_attack(
                 weapon_attack=weapon_attack,
@@ -6247,6 +6370,11 @@ class BattleScene:
                     effect_row=ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype),
                     motion_start_frame=motion_start_frame,
                     hit_start_frame=hit_start_frame,
+                    pose_change_frame=(
+                        pose_change_frame if projectile_sprites else None
+                    ),
+                    projectile_sprites=projectile_sprites,
+                    projectile_frame_count=projectile_frame_count,
                     effect_flip_x=bool(strikes),
                     is_hit=result.hit,
                     is_critical=getattr(result, "critical", False),
@@ -7446,7 +7574,29 @@ class BattleScene:
                     random.randint(0, 99) if target_incapacitated else None
                 ),
             )
-            hit_start_frame = motion_start_frame + ATTACK_POSE_RAISE_FRAME_COUNT
+            pose_change_frame = motion_start_frame + ATTACK_POSE_RAISE_FRAME_COUNT
+            projectile_sprites = (
+                throwing_projectile_sequence(
+                    getattr(self, "attack_poses", {}),
+                    weapon.weapon_img,
+                )
+                if weapon.subtype == "THROWING" and pose_branches == ("1", "2")
+                else ()
+            )
+            projectile_frame_count = self._throwing_projectile_frame_count(
+                actor_index,
+                "ally",
+                target_index,
+                projectile_sprites,
+            )
+            hit_start_frame = (
+                pose_change_frame
+                if not projectile_sprites
+                else pose_change_frame
+                + ATTACK_POSE_SWING_FRAME_COUNT
+                + projectile_frame_count
+                - 1
+            )
             strikes.append(
                 BattleAttackStrike(
                     damage=result.damage,
@@ -7458,6 +7608,11 @@ class BattleScene:
                     effect_row=ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype),
                     motion_start_frame=motion_start_frame,
                     hit_start_frame=hit_start_frame,
+                    pose_change_frame=(
+                        pose_change_frame if projectile_sprites else None
+                    ),
+                    projectile_sprites=projectile_sprites,
+                    projectile_frame_count=projectile_frame_count,
                     effect_flip_x=bool(strikes),
                     is_hit=result.hit,
                     is_critical=result.critical,
@@ -9049,6 +9204,7 @@ class BattleScene:
             self._draw_background()
         self._draw_party()
         self._draw_monsters()
+        self._draw_party_attack_projectile()
         self._draw_aim_reticle()
         self._draw_party_attack_effect()
         self._draw_confused_monster_attack_effect()
@@ -9938,6 +10094,59 @@ class BattleScene:
                     else ATTACK_EFFECT_CELL_SIZE
                 ),
                 ATTACK_EFFECT_CELL_SIZE,
+                TRANSPARENT_INDEX,
+            )
+
+    def _draw_party_attack_projectile(self) -> None:
+        """Draw a kunai or shuriken travelling from its wielder to the target."""
+
+        presentation = getattr(self, "attack_presentation", None)
+        actor_index = getattr(self, "action_party_index", None)
+        if (
+            getattr(self, "phase", None) is not BattlePhase.ATTACK_PRESENTATION
+            or presentation is None
+            or actor_index is None
+        ):
+            return
+        actor_position = self._party_draw_position(actor_index)
+        if actor_position is None:
+            return
+        target_x, target_y = self._spell_effect_anchor(
+            presentation.target_side,
+            presentation.target_index,
+        )
+        for strike in presentation.strikes:
+            sprite = strike.projectile_at(presentation.elapsed_frame)
+            start_frame = strike.projectile_start_frame
+            if sprite is None or start_frame is None:
+                continue
+            first_sprite = strike.projectile_sprites[0]
+            start_x = actor_position[0] + first_sprite.position_x
+            start_y = actor_position[1] + first_sprite.position_y
+            end_x = target_x - ATTACK_WEAPON_SPRITE_SIZE // 2
+            end_y = target_y - ATTACK_WEAPON_SPRITE_SIZE // 2
+            step = presentation.elapsed_frame - start_frame
+            x, y = throwing_projectile_position(
+                (start_x, start_y),
+                (end_x, end_y),
+                step,
+            )
+            pyxel.blt(
+                x,
+                y,
+                0,
+                sprite.image * ATTACK_WEAPON_SPRITE_SIZE,
+                ATTACK_WEAPON_SPRITE_Y,
+                (
+                    -ATTACK_WEAPON_SPRITE_SIZE
+                    if sprite.flip_x
+                    else ATTACK_WEAPON_SPRITE_SIZE
+                ),
+                (
+                    -ATTACK_WEAPON_SPRITE_SIZE
+                    if sprite.flip_y
+                    else ATTACK_WEAPON_SPRITE_SIZE
+                ),
                 TRANSPARENT_INDEX,
             )
 

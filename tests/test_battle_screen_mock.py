@@ -16,6 +16,8 @@ from tools.screen_mocks.battle import (
     ATTACK_MOTION_FRAME_COUNT,
     ATTACK_POSE_RAISE_FRAME_COUNT,
     ATTACK_POSE_SWING_FRAME_COUNT,
+    ATTACK_WEAPON_SPRITE_SIZE,
+    ATTACK_WEAPON_SPRITE_Y,
     DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT,
     ATTACK_LANDING_GUARD_FRAME_COUNT,
     ATTACK_RETURN_JUMP_FRAME_COUNT,
@@ -214,6 +216,8 @@ from tools.screen_mocks.battle import (
     TIMELINE_INTERRUPT_OVERFLOW_FRAME_COUNT,
     TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT,
     TIMELINE_VISIBLE_ENTRY_COUNT,
+    THROWING_PROJECTILE_PATTERN_FRAME_COUNT,
+    THROWING_PROJECTILE_SPEED,
     UNSELECTABLE_TARGET_PALETTE,
     UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
     WEAPON_ATTRIBUTE_RESISTANCE,
@@ -223,6 +227,8 @@ from tools.screen_mocks.battle import (
     identify_detail_texts,
     member_attack_reach,
     selectable_attack_target_indexes,
+    throwing_projectile_frame_count,
+    throwing_projectile_position,
 )
 from monster_ai import MonsterAction
 from battle_commands import BattleCommand, BattleCommandOption
@@ -1482,6 +1488,106 @@ class BattleScreenMockTest(unittest.TestCase):
         presentation.elapsed_frame = ATTACK_MOTION_FRAME_COUNT
         self.assertIsNone(presentation.pose)
 
+    def test_throwing_motion_follows_poses_with_alternating_projectile(self) -> None:
+        first_pose = Mock(spec=AttackPoseDefinition)
+        second_pose = Mock(spec=AttackPoseDefinition)
+        kunai = AttackWeaponSprite(7, -14, 5, "front", False, False)
+        rotated = AttackWeaponSprite(9, -14, 5, "front", False, False)
+        pose_change_frame = ATTACK_POSE_RAISE_FRAME_COUNT
+        projectile_start_frame = pose_change_frame + ATTACK_POSE_SWING_FRAME_COUNT
+        projectile_frame_count = 8
+        hit_start_frame = (
+            projectile_start_frame + projectile_frame_count - 1
+        )
+        strike = BattleAttackStrike(
+            damage=10,
+            poses=(first_pose, second_pose),
+            effect_row=None,
+            motion_start_frame=0,
+            hit_start_frame=hit_start_frame,
+            pose_change_frame=pose_change_frame,
+            projectile_sprites=(kunai, rotated),
+            projectile_frame_count=projectile_frame_count,
+        )
+
+        self.assertEqual(THROWING_PROJECTILE_SPEED, 12)
+        self.assertEqual(THROWING_PROJECTILE_PATTERN_FRAME_COUNT, 2)
+        self.assertIs(strike.pose_at(pose_change_frame - 1), first_pose)
+        self.assertIs(strike.pose_at(pose_change_frame), second_pose)
+        self.assertIsNone(strike.pose_at(projectile_start_frame))
+        self.assertIs(strike.projectile_at(projectile_start_frame), kunai)
+        self.assertIs(strike.projectile_at(projectile_start_frame + 1), kunai)
+        self.assertIs(strike.projectile_at(projectile_start_frame + 2), rotated)
+        self.assertIs(strike.projectile_at(hit_start_frame), rotated)
+        self.assertEqual(
+            strike.motion_end_frame,
+            projectile_start_frame + projectile_frame_count,
+        )
+
+    def test_throwing_projectile_uses_fixed_speed_and_shorter_near_travel(self) -> None:
+        self.assertEqual(throwing_projectile_frame_count((0, 0), (24, 0)), 3)
+        self.assertEqual(throwing_projectile_frame_count((0, 0), (120, 0)), 11)
+        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 1), (12, 0))
+        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 2), (24, 0))
+        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 3), (30, 0))
+
+    def test_draws_throwing_projectile_from_authored_pose_to_target_center(self) -> None:
+        first = AttackWeaponSprite(8, -9, 1, "back", False, False)
+        second = AttackWeaponSprite(9, -9, 1, "back", False, False)
+        projectile_start_frame = (
+            ATTACK_POSE_RAISE_FRAME_COUNT + ATTACK_POSE_SWING_FRAME_COUNT
+        )
+        projectile_frame_count = throwing_projectile_frame_count(
+            (131, 65),
+            (28, 72),
+        )
+        strike = BattleAttackStrike(
+            damage=10,
+            poses=(),
+            effect_row=None,
+            motion_start_frame=0,
+            hit_start_frame=(
+                projectile_start_frame + projectile_frame_count - 1
+            ),
+            pose_change_frame=ATTACK_POSE_RAISE_FRAME_COUNT,
+            projectile_sprites=(first, second),
+            projectile_frame_count=projectile_frame_count,
+        )
+        presentation = BattleAttackPresentation(0, (strike,))
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.attack_presentation = presentation
+        mock.action_party_index = 0
+        mock._party_draw_position = Mock(return_value=(140, 64))
+        mock._spell_effect_anchor = Mock(return_value=(36, 80))
+
+        presentation.elapsed_frame = projectile_start_frame
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party_attack_projectile()
+        self.assertEqual(
+            blt.call_args.args,
+            (
+                131,
+                65,
+                0,
+                8 * ATTACK_WEAPON_SPRITE_SIZE,
+                ATTACK_WEAPON_SPRITE_Y,
+                ATTACK_WEAPON_SPRITE_SIZE,
+                ATTACK_WEAPON_SPRITE_SIZE,
+                1,
+            ),
+        )
+
+        presentation.elapsed_frame = strike.hit_start_frame
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party_attack_projectile()
+        self.assertEqual(blt.call_args.args[:2], (28, 72))
+        self.assertEqual(
+            blt.call_args.args[3],
+            strike.projectile_at(strike.hit_start_frame).image
+            * ATTACK_WEAPON_SPRITE_SIZE,
+        )
+
     def test_aim_holds_the_first_pose_until_the_reticle_finishes(self) -> None:
         first = Mock(spec=AttackPoseDefinition)
         second = Mock(spec=AttackPoseDefinition)
@@ -2703,6 +2809,97 @@ class BattleScreenMockTest(unittest.TestCase):
             blt.call_args.args[5:7],
             (-ATTACK_EFFECT_CELL_SIZE, ATTACK_EFFECT_CELL_SIZE),
         )
+
+    def test_kunai_and_shuriken_build_projectiles_from_branches_two_and_three(
+        self,
+    ) -> None:
+        items = load_mock_items()
+        for item_key, expected_images in (
+            ("IRON KUNAI", (7, 7)),
+            ("SHURIKENS", (8, 9)),
+        ):
+            with self.subTest(item_key=item_key):
+                member = load_mock_party(
+                    items,
+                    load_mock_skills(),
+                    character_keys=("Kagetora",),
+                    internal_level=MAX_INTERNAL_LEVEL,
+                )[0]
+                member.equipment = member.equipment.replaced(
+                    {
+                        EquipmentSlot.RIGHT: items[item_key],
+                        EquipmentSlot.LEFT: None,
+                    }
+                )
+                weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+                assert weapon is not None
+                authored_poses = {
+                    f"{weapon.weapon_img}_{branch}": AttackPoseDefinition(
+                        f"{weapon.weapon_img}_{branch}",
+                        weapon.weapon_img,
+                        branch,
+                        3 if branch == "1" else 2,
+                        (
+                            AttackWeaponSprite(
+                                image,
+                                -14,
+                                5,
+                                "front",
+                                False,
+                                False,
+                            ),
+                        ),
+                    )
+                    for branch, image in zip(("1", "2", "3"), (7, *expected_images))
+                }
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = (member,)
+                mock.active_party_index = 0
+                mock.monsters = (_damage_test_monster(),)
+                mock.attack_poses = authored_poses
+                mock.phase = BattleMockPhase.TARGET
+                mock.selected_command = BattleCommand.ATTACK
+                mock.selectable_target_indexes = (0,)
+                mock.selected_target_index = 0
+                mock.target_cursor = Mock(active=True)
+                mock.command_window = Mock()
+                mock._refresh_monster_name_colors = Mock()
+                mock._resolve_member_attack_additional_effects = Mock(return_value=())
+
+                with patch(
+                    "scenes.battle.resolve_physical_attack",
+                    return_value=SimpleNamespace(
+                        hit=True,
+                        damage=10,
+                        critical=False,
+                    ),
+                ):
+                    self.assertTrue(mock._begin_attack_presentation())
+
+                strike = mock.attack_presentation.strikes[0]
+                self.assertEqual(
+                    tuple(pose.branch for pose in strike.poses),
+                    ("1", "2"),
+                )
+                self.assertEqual(
+                    tuple(sprite.image for sprite in strike.projectile_sprites),
+                    expected_images,
+                )
+                self.assertEqual(
+                    strike.hit_start_frame,
+                    ATTACK_MOTION_FRAME_COUNT
+                    + strike.projectile_frame_count
+                    - 1,
+                )
+                monster = mock.monsters[0]
+                starting_hp = monster.state.hp
+                with patch("scenes.battle.play_se") as play_se:
+                    for _frame in range(strike.hit_start_frame - 1):
+                        mock._update_attack_presentation()
+                    self.assertEqual(monster.state.hp, starting_hp)
+                    mock._update_attack_presentation()
+                self.assertEqual(monster.state.hp, starting_hp - 10)
+                play_se.assert_called_once_with(ATTACK_SLASH_SE_ID)
 
     def test_dual_wield_followup_still_attacks_without_authored_poses(self) -> None:
         items = load_mock_items()

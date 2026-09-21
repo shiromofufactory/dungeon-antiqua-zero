@@ -204,6 +204,23 @@ def attack_sequence(
     return ordered[:2]
 
 
+def throwing_projectile_sequence(
+    poses: Mapping[str, AttackPoseDefinition],
+    weapon_img: str,
+) -> tuple[AttackWeaponSprite, ...]:
+    """Return the authored branch-2/3 weapon sprites used during a throw."""
+
+    return tuple(
+        pose.weapons[0]
+        for pose in attack_sequence(
+            poses,
+            weapon_img,
+            branches=("2", "3"),
+        )
+        if pose.weapons
+    )
+
+
 __all__ = [
     "ATTACK_POSE_FORMAT_VERSION",
     "AttackPoseDataError",
@@ -212,4 +229,5 @@ __all__ = [
     "attack_sequence",
     "load_attack_poses",
     "parse_attack_poses",
+    "throwing_projectile_sequence",
 ]
