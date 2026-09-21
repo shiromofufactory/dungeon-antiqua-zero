@@ -527,6 +527,31 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertTrue(any(a.spell_key == "POISON1" for a in actions))
         self.assertTrue(any(a.spell_key == "SLOW" for a in actions))
 
+    def test_break_forecast_uses_lowered_defense_and_skips_no_change_targets(self):
+        spell = self.spells["ARMOR BREAK"]
+        caster = replace(self.specs[0], spells=(spell,))
+        enemy = self.enemy(defense=20)
+        forecast = BattleForecast(self.snapshot(caster, enemy), 0)
+
+        actions = [a for a in forecast.candidates(0) if a.spell_key == spell.key]
+        self.assertEqual(
+            actions,
+            [AutoAction(BattleCommand.SPELL, (5,), spell.key)],
+        )
+        forecast.cast(forecast.actors[0], actions[0])
+        self.assertEqual(forecast.actors[5].protection, -1)
+        self.assertEqual(forecast.actors[5].defense, 5)
+
+        for unusable in (
+            self.enemy(defense=20, protection=-1),
+            self.enemy(defense=0),
+        ):
+            actions = BattleForecast(
+                self.snapshot(caster, unusable),
+                0,
+            ).candidates(0)
+            self.assertFalse(any(a.spell_key == spell.key for a in actions))
+
     def test_resistance_pruning_does_not_change_enemy_spell_choices(self):
         spell = self.spells["SLEEP"]
         ally = replace(self.specs[0], resistances=frozenset((ResistanceType.SLEEP,)))

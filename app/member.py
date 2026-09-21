@@ -1322,6 +1322,16 @@ class Member:
         self.protection_level -= 1
         return True
 
+    def apply_armor_break(self) -> bool:
+        """Apply DA2's BREAK rule, cancelling every positive defense stage."""
+
+        if self.protection_level <= MIN_PROTECTION_LEVEL or not self.is_alive:
+            return False
+        self.protection_level = (
+            0 if self.protection_level > 0 else MIN_PROTECTION_LEVEL
+        )
+        return True
+
     def apply_slow(self) -> bool:
         """Apply DA2's SLOW state or cancel any positive HASTE state."""
 

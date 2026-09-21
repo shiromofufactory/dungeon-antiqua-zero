@@ -536,6 +536,19 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.battle_stats.defense, 5)
         self.assertFalse(self.member.apply_defense_down())
 
+    def test_armor_break_cancels_all_protection_or_applies_defense_down(self) -> None:
+        armor = self.item("ARMOR", "BODY", defense=20)
+        self.member.equipment = EquipmentSet({EquipmentSlot.BODY: armor})
+        self.member.protection_level = 2
+
+        self.assertTrue(self.member.apply_armor_break())
+        self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.battle_stats.defense, 20)
+        self.assertTrue(self.member.apply_armor_break())
+        self.assertEqual(self.member.protection_level, -1)
+        self.assertEqual(self.member.battle_stats.defense, 5)
+        self.assertFalse(self.member.apply_armor_break())
+
     def test_death_clears_battle_modifiers(self) -> None:
         self.member.poisoned = True
         self.member.paralyzed = True

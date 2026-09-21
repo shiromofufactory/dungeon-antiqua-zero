@@ -67,6 +67,8 @@ from tools.screen_mocks.battle import (
     CRITICAL_MARKER_SOURCE_X,
     CRITICAL_MARKER_SOURCE_Y,
     CRITICAL_MARKER_WIDTH,
+    DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT,
+    DEFENSE_DOWN_ICON_SOURCE_Y,
     DEFENSE_DOWN_MARKER_SOURCE_X,
     DEFENSE_DOWN_MARKER_SOURCE_Y,
     FORMATION_COMMAND_GUIDE_TEXT_KEYS,
@@ -351,6 +353,7 @@ def _damage_test_monster(
     index: int = 0,
     *,
     hp: int = 10_000,
+    defense: int = 0,
     spell_resistance: int = 0,
     weaknesses: frozenset[ResistanceType] = frozenset(),
     resistances: frozenset[ResistanceType] = frozenset(),
@@ -366,7 +369,7 @@ def _damage_test_monster(
         is_front_row=True,
         state=MonsterBattleState(max_hp=hp),
         agility=1,
-        combat_stats=MonsterCombatStats(0, 0, 0, 0, spell_resistance),
+        combat_stats=MonsterCombatStats(0, 0, defense, 0, spell_resistance),
         weaknesses=weaknesses,
         resistances=resistances,
     )
@@ -5282,6 +5285,62 @@ class BattleScreenMockTest(unittest.TestCase):
             (1,),
         )
 
+    def test_break_applies_da2_defense_formula_and_excludes_repeat_target(self) -> None:
+        spell = load_mock_spells()["ARMOR BREAK"]
+        target = _damage_test_monster(defense=20)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (target,)
+        mock.spell_damage_popups = []
+
+        with patch("scenes.battle.random.randint", return_value=0) as randint:
+            results = mock._resolve_break_results(spell, (0,))
+        mock._apply_action_results(
+            BattleActionPresentation((), break_results=results)
+        )
+
+        self.assertEqual(spell.rate, 24)
+        self.assertEqual(target.state.defense_modifier, -1)
+        self.assertEqual(target.effective_defense, 5)
+        self.assertEqual(mock._selectable_enemy_indexes_for_spell(spell), ())
+        self.assertEqual(mock.spell_damage_popups, [])
+        randint.assert_called_once_with(0, 19)
+
+    def test_break_can_target_zero_defense_monster_but_always_misses(self) -> None:
+        spell = load_mock_spells()["ARMOR BREAK"]
+        target = _damage_test_monster(defense=0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (target,)
+        mock.spell_damage_popups = []
+
+        self.assertEqual(mock._selectable_enemy_indexes_for_spell(spell), (0,))
+        with patch("scenes.battle.random.randint") as randint:
+            results = mock._resolve_break_results(spell, (0,))
+        mock._apply_action_results(
+            BattleActionPresentation((), break_results=results)
+        )
+
+        self.assertEqual(target.state.defense_modifier, 0)
+        self.assertEqual(
+            [popup.is_miss for popup in mock.spell_damage_popups],
+            [True],
+        )
+        randint.assert_not_called()
+
     def test_sleep_resistance_fails_and_shows_miss_with_resist_marker(self) -> None:
         spell = load_mock_spells()["SLEEP"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -5530,6 +5589,40 @@ class BattleScreenMockTest(unittest.TestCase):
             SPEED_ICON_SIZE,
             SPEED_ICON_SIZE,
             SPEED_ICON_TRANSPARENT_INDEX,
+        )
+
+    def test_break_icon_uses_da2_negative_defense_animation_below_monster(
+        self,
+    ) -> None:
+        self.assertEqual(
+            (PROTECTION_ICON_SOURCE_X, DEFENSE_DOWN_ICON_SOURCE_Y),
+            (64, 136),
+        )
+        monster = _damage_test_monster(defense=20)
+        monster.state.defense_modifier = -1
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = ()
+        mock.monsters = (monster,)
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT,
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_speed_modifier_icons()
+
+        blt.assert_called_once_with(
+            4 + monster.width - 24,
+            MONSTER_POSITIONS[0][1] + monster.height,
+            0,
+            PROTECTION_ICON_SOURCE_X + PROTECTION_ICON_SIZE,
+            DEFENSE_DOWN_ICON_SOURCE_Y,
+            PROTECTION_ICON_SIZE,
+            PROTECTION_ICON_SIZE,
+            1,
         )
 
     def test_haste_icon_uses_positive_animation_beside_party_member(self) -> None:

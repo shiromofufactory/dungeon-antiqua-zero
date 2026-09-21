@@ -108,6 +108,7 @@ ALLY_SPELL_ACTIONS = frozenset(
         SpellAction.DAMAGE,
         SpellAction.SLEEP,
         SpellAction.SLOW,
+        SpellAction.BREAK,
         SpellAction.PROTECTION,
         SpellAction.IDENTIFY,
         SpellAction.HASTE,
@@ -116,7 +117,9 @@ ALLY_SPELL_ACTIONS = frozenset(
         SpellAction.REVIVE,
     )
 )
-ENEMY_SPELL_ACTIONS = frozenset((SpellAction.SLEEP, SpellAction.SLOW))
+ENEMY_SPELL_ACTIONS = frozenset(
+    (SpellAction.SLEEP, SpellAction.SLOW, SpellAction.BREAK)
+)
 RECOVERY_ACTIONS = frozenset(
     (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE, SpellAction.MANA)
 )
@@ -361,6 +364,12 @@ class BattleForecast:
             targets = self.enemies()
             if spell.action is SpellAction.SLOW:
                 targets = tuple(a for a in targets if a.speed > -1)
+            elif spell.action is SpellAction.BREAK:
+                targets = tuple(
+                    a
+                    for a in targets
+                    if a.protection > -1 and a.defense > 0
+                )
             elif spell.action is SpellAction.SILENCE:
                 targets = tuple(
                     a for a in targets if a.spec.spells and a.silenced <= 0
@@ -525,6 +534,7 @@ class BattleForecast:
         if spell.action in (
             SpellAction.SLEEP,
             SpellAction.SLOW,
+            SpellAction.BREAK,
             SpellAction.SILENCE,
         ):
             effective = tuple(
@@ -971,6 +981,7 @@ class BattleForecast:
                     in (
                         SpellAction.SLEEP,
                         SpellAction.SLOW,
+                        SpellAction.BREAK,
                         SpellAction.SILENCE,
                     )
                     or spell.attribute is ResistanceType.POISON
@@ -986,6 +997,10 @@ class BattleForecast:
                             self.apply_extra(actor, target, AdditionalEffect.SLEEP)
                         elif spell.action is SpellAction.SLOW:
                             target.speed = 0 if target.speed > 0 else -1
+                        elif spell.action is SpellAction.BREAK:
+                            target.protection = (
+                                0 if target.protection > 0 else -1
+                            )
                         elif spell.action is SpellAction.SILENCE:
                             target.silenced = max(
                                 target.silenced,
@@ -1133,11 +1148,26 @@ class BattleForecast:
                 if spell.to_enemy and spell.action in ENEMY_SPELL_ACTIONS:
                     for n in targets:
                         target = self.actors[n]
-                        if self.status_success(actor, target, spell, actor.spec.magic):
+                        if (
+                            spell.action is not SpellAction.BREAK
+                            or (
+                                target.protection > -1
+                                and target.defense > 0
+                            )
+                        ) and self.status_success(
+                            actor,
+                            target,
+                            spell,
+                            actor.spec.magic,
+                        ):
                             if spell.action is SpellAction.SLEEP:
                                 self.apply_extra(actor, target, AdditionalEffect.SLEEP)
-                            else:
+                            elif spell.action is SpellAction.SLOW:
                                 target.speed = 0 if target.speed > 0 else -1
+                            else:
+                                target.protection = (
+                                    0 if target.protection > 0 else -1
+                                )
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
             targets = available if action is MonsterAction.CHARGE else melee
             protected = targets[int(self.roll(actor, 0, 1) * len(targets))]

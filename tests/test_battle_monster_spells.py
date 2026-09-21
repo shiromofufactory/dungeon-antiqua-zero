@@ -101,6 +101,34 @@ class MonsterSpellTest(unittest.TestCase):
             actor_is_enemy=True,
         )
 
+    def test_break_cancels_all_protection_then_applies_defense_down(self) -> None:
+        actor = spellcaster(magic=7, spell_key="ARMOR BREAK")
+        mock = spell_scene(actor)
+        spell = mock.spells["ARMOR BREAK"]
+        target = mock.party[0]
+        target.protection_level = 2
+        self.assertGreater(target.battle_stats.defense, 0)
+
+        with (
+            patch("scenes.battle.random.choice", return_value=0),
+            patch("scenes.battle.random.randint", return_value=0),
+        ):
+            self.assertTrue(mock._begin_monster_spell(actor, spell))
+        assert mock.action_presentation is not None
+        mock._apply_action_results(mock.action_presentation)
+        self.assertEqual(target.protection_level, 0)
+
+        with (
+            patch("scenes.battle.random.choice", return_value=0),
+            patch("scenes.battle.random.randint", return_value=0),
+        ):
+            self.assertTrue(mock._begin_monster_spell(actor, spell))
+        assert mock.action_presentation is not None
+        mock._apply_action_results(mock.action_presentation)
+
+        self.assertEqual(target.protection_level, -1)
+        self.assertEqual(actor.state.mp, 6)
+
     def test_all_target_sleep_applies_to_every_living_member(self) -> None:
         actor = spellcaster(magic=15, spell_key="SLEEP")
         mock = spell_scene(actor)

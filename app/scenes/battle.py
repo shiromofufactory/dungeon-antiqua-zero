@@ -441,12 +441,14 @@ HASTE_ICON_PATTERN_FRAME_COUNTS = (
 SPEED_ICON_TRANSPARENT_INDEX = TRANSPARENT_INDEX
 PROTECTION_ICON_SOURCE_X = 64
 PROTECTION_ICON_SOURCE_Y = 128
+DEFENSE_DOWN_ICON_SOURCE_Y = 136
 PROTECTION_ICON_SIZE = 8
 PROTECTION_ICON_PATTERN_COUNT = 3
 PROTECTION_ICON_PATTERN_FRAME_COUNTS = (
     6 * FPS // DA2_REFERENCE_FPS,
     3 * FPS // DA2_REFERENCE_FPS,
 )
+DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT = 6 * FPS // DA2_REFERENCE_FPS
 PROTECTION_ICON_NAME_OFFSET_X = -PROTECTION_ICON_SIZE
 MISS_SPRITE_SOURCE_X = DAMAGE_NUMBER_SPRITE_X + DAMAGE_NUMBER_SPRITE_SIZE * 10
 MISS_SPRITE_WIDTH = 16
@@ -797,6 +799,16 @@ class BattleSlowResult:
 
 
 @dataclass(frozen=True)
+class BattleBreakResult:
+    """Resolved BREAK magic waiting for application to a monster."""
+
+    target_index: int
+    success: bool
+    popup_x: int
+    popup_y: int
+
+
+@dataclass(frozen=True)
 class BattlePoisonResult:
     """Resolved poison application waiting for its timed application."""
 
@@ -868,6 +880,16 @@ class BattlePartySlowResult:
     popup_y: int
 
 
+@dataclass(frozen=True)
+class BattlePartyBreakResult:
+    """Resolved monster BREAK result waiting for application to a member."""
+
+    target_index: int
+    success: bool
+    popup_x: int
+    popup_y: int
+
+
 @dataclass
 class BattleSpellDamagePopup:
     """One non-blocking spell-damage number animated with DA2's offsets."""
@@ -920,6 +942,7 @@ class BattleActionPresentation:
     sleep_results: tuple[BattleSleepResult, ...] = ()
     poison_results: tuple[BattlePoisonResult, ...] = ()
     slow_results: tuple[BattleSlowResult, ...] = ()
+    break_results: tuple[BattleBreakResult, ...] = ()
     protection_results: tuple[BattleProtectionResult, ...] = ()
     haste_results: tuple[BattleHasteResult, ...] = ()
     cure_results: tuple[BattleCureResult, ...] = ()
@@ -927,6 +950,7 @@ class BattleActionPresentation:
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
+    party_break_results: tuple[BattlePartyBreakResult, ...] = ()
     fade_escape: bool = False
     result_start_frame: int = 0
     post_effect_wait_frame_count: int = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
@@ -4257,6 +4281,12 @@ class BattleScene:
                 for index in indexes
                 if self.monsters[index].state.speed_modifier > MIN_SPEED_MODIFIER
             )
+        if spell.action is SpellAction.BREAK:
+            return tuple(
+                index
+                for index in indexes
+                if self.monsters[index].state.defense_modifier >= 0
+            )
         return indexes
 
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
@@ -4626,12 +4656,15 @@ class BattleScene:
         sleep_results = self._resolve_sleep_results(spell, indexes)
         poison_results = self._resolve_poison_results(spell, indexes)
         slow_results = self._resolve_slow_results(spell, indexes)
+        break_results = self._resolve_break_results(spell, indexes)
         protection_results = self._resolve_protection_results(spell, indexes)
         haste_results = self._resolve_haste_results(spell, indexes)
         cure_results = self._resolve_cure_results(spell, indexes)
         revive_results = self._resolve_revive_results(spell, indexes)
         silence_results = self._resolve_silence_results(spell, indexes)
-        status_results = sleep_results or slow_results or silence_results
+        status_results = (
+            sleep_results or slow_results or break_results or silence_results
+        )
         effect_indexes = (
             tuple(result.target_index for result in status_results if result.success)
             if status_results
@@ -4668,6 +4701,7 @@ class BattleScene:
             sleep_results=sleep_results,
             poison_results=poison_results,
             slow_results=slow_results,
+            break_results=break_results,
             protection_results=protection_results,
             haste_results=haste_results,
             cure_results=cure_results,
@@ -4816,6 +4850,60 @@ class BattleScene:
                 BattleSlowResult(
                     target_index=index,
                     success=resolution.success,
+                    popup_x=center_x,
+                    popup_y=base_y + monster.height - 8,
+                )
+            )
+        return tuple(results)
+
+    def _resolve_break_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleBreakResult, ...]:
+        """Resolve BREAK with DA2's status check and zero-defense immunity."""
+
+        if spell.action is not SpellAction.BREAK:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("BREAK spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("BREAK requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattleBreakResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            success = False
+            if (
+                monster.state.defense_modifier >= 0
+                and monster.effective_defense > 0
+            ):
+                success = resolve_status_spell(
+                    spell_modifier=modifier,
+                    rate=spell.rate,
+                    target_spell_defense=monster.combat_stats.spell_resistance,
+                    attribute=spell.attribute,
+                    target_weaknesses=monster.weaknesses,
+                    target_resistances=monster.resistances,
+                    success_roll=random.randint(0, 19),
+                ).success
+            _base_x, base_y = self._monster_base_position(index)
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            results.append(
+                BattleBreakResult(
+                    target_index=index,
+                    success=success,
                     popup_x=center_x,
                     popup_y=base_y + monster.height - 8,
                 )
@@ -5172,6 +5260,19 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+        for result in presentation.break_results:
+            monster = self.monsters[result.target_index]
+            if result.success:
+                monster.state.apply_defense_down()
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
         for result in presentation.protection_results:
             self.party[result.target_index].apply_protection()
         for result in presentation.haste_results:
@@ -5214,6 +5315,19 @@ class BattleScene:
             member = self.party[result.target_index]
             if result.success:
                 member.apply_slow()
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
+        for result in presentation.party_break_results:
+            member = self.party[result.target_index]
+            if result.success:
+                member.apply_armor_break()
             else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
@@ -7540,7 +7654,14 @@ class BattleScene:
             spell,
             indexes,
         )
-        status_results = party_sleep_results or party_slow_results
+        party_break_results = self._resolve_monster_break_results(
+            actor,
+            spell,
+            indexes,
+        )
+        status_results = (
+            party_sleep_results or party_slow_results or party_break_results
+        )
         effect_indexes = (
             tuple(result.target_index for result in status_results if result.success)
             if status_results
@@ -7571,6 +7692,7 @@ class BattleScene:
             tuple(effects),
             party_sleep_results=party_sleep_results,
             party_slow_results=party_slow_results,
+            party_break_results=party_break_results,
             result_start_frame=max(
                 effect_frame_count - SPELL_RESULT_OVERLAP_FRAME_COUNT,
                 0,
@@ -7661,6 +7783,44 @@ class BattleScene:
                 BattlePartySlowResult(
                     target_index=index,
                     success=resolution.success,
+                    popup_x=x + 6,
+                    popup_y=y + 16,
+                )
+            )
+        return tuple(results)
+
+    def _resolve_monster_break_results(
+        self,
+        actor: BattleMonster,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattlePartyBreakResult, ...]:
+        """Resolve a monster's BREAK spell against party battle stats."""
+
+        if spell.action is not SpellAction.BREAK or not spell.to_enemy:
+            return ()
+        results: list[BattlePartyBreakResult] = []
+        for index in indexes:
+            member = self.party[index]
+            success = False
+            if member.protection_level >= 0 and member.battle_stats.defense > 0:
+                success = resolve_status_spell(
+                    spell_modifier=actor.magic,
+                    rate=spell.rate,
+                    target_spell_defense=member.battle_stats.spell_resistance,
+                    attribute=spell.attribute,
+                    target_weaknesses=frozenset(),
+                    target_resistances=member.resistances,
+                    success_roll=random.randint(0, 19),
+                ).success
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
+            results.append(
+                BattlePartyBreakResult(
+                    target_index=index,
+                    success=success,
                     popup_x=x + 6,
                     popup_y=y + 16,
                 )
@@ -9403,15 +9563,36 @@ class BattleScene:
             )
 
     def _draw_speed_modifier_icons(self) -> None:
-        """Draw DA2's animated HASTE and SLOW markers for combatants."""
+        """Draw DA2's animated defense-down, HASTE, and SLOW markers."""
 
         for index, visual in enumerate(getattr(self, "party_visuals", ())):
             member = visual.member
             modifier = getattr(member, "speed_modifier", 0)
-            if not getattr(member, "is_alive", True) or modifier == 0:
+            defense_down = getattr(member, "protection_level", 0) < 0
+            if not getattr(member, "is_alive", True) or (
+                modifier == 0 and not defense_down
+            ):
                 continue
             position = self._party_draw_position(index)
             if position is None:
+                continue
+            x, y = position
+            if defense_down:
+                defense_pattern = (
+                    pyxel.frame_count // DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT
+                ) % PROTECTION_ICON_PATTERN_COUNT
+                pyxel.blt(
+                    x + 22,
+                    y + 24,
+                    0,
+                    PROTECTION_ICON_SOURCE_X
+                    + defense_pattern * PROTECTION_ICON_SIZE,
+                    DEFENSE_DOWN_ICON_SOURCE_Y,
+                    PROTECTION_ICON_SIZE,
+                    PROTECTION_ICON_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+            if modifier == 0:
                 continue
             frame_count = (
                 SLOW_ICON_PATTERN_FRAME_COUNT
@@ -9424,10 +9605,9 @@ class BattleScene:
                 if modifier < 0
                 else SPEED_ICON_POSITIVE_SOURCE_Y
             )
-            x, y = position
             pyxel.blt(
                 x + 22,
-                y + 24,
+                y + (15 if defense_down else 24),
                 0,
                 SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE,
                 source_y,
@@ -9437,7 +9617,26 @@ class BattleScene:
             )
         for index, monster in enumerate(getattr(self, "monsters", ())):
             modifier = monster.state.speed_modifier
-            if not monster.is_alive or modifier == 0:
+            defense_down = monster.state.defense_modifier < 0
+            if not monster.is_alive or (modifier == 0 and not defense_down):
+                continue
+            _base_x, y = self._monster_base_position(index)
+            if defense_down:
+                defense_pattern = (
+                    pyxel.frame_count // DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT
+                ) % PROTECTION_ICON_PATTERN_COUNT
+                pyxel.blt(
+                    self._monster_draw_x(index) + monster.width - 24,
+                    y + monster.height,
+                    0,
+                    PROTECTION_ICON_SOURCE_X
+                    + defense_pattern * PROTECTION_ICON_SIZE,
+                    DEFENSE_DOWN_ICON_SOURCE_Y,
+                    PROTECTION_ICON_SIZE,
+                    PROTECTION_ICON_SIZE,
+                    TRANSPARENT_INDEX,
+                )
+            if modifier == 0:
                 continue
             frame_count = (
                 SLOW_ICON_PATTERN_FRAME_COUNT
@@ -9450,9 +9649,10 @@ class BattleScene:
                 if modifier < 0
                 else SPEED_ICON_POSITIVE_SOURCE_Y
             )
-            _base_x, y = self._monster_base_position(index)
             pyxel.blt(
-                self._monster_draw_x(index) + monster.width - 24,
+                self._monster_draw_x(index)
+                + monster.width
+                - (16 if defense_down else 24),
                 y + monster.height,
                 0,
                 SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE,
