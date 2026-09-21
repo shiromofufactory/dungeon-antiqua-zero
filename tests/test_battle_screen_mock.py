@@ -3287,7 +3287,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
         self.assertIs(mock.phase, BattleMockPhase.MONSTER_DEATH)
-        self.assertEqual(mock.dying_monster_index, 0)
+        self.assertEqual(mock.dying_monster_indexes, (0,))
         self.assertIsInstance(mock.monster_death_animation, MonsterDeathAnimation)
 
         frame_count = (
@@ -3300,7 +3300,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertNotIn(monster, mock.timeline)
         self.assertEqual(mock.timeline[0], actor)
-        self.assertIsNone(mock.dying_monster_index)
+        self.assertEqual(mock.dying_monster_indexes, ())
         self.assertIsNone(mock.monster_death_animation)
         self.assertEqual(
             mock.palette_shifter.remove_variant.call_args_list[0],
@@ -3355,9 +3355,8 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock.timeline = mock._timeline_order.actors
         mock.monster_death_animation = MonsterDeathAnimation()
-        mock.dying_monster_index = 0
+        mock.dying_monster_indexes = (0,)
         mock.monster_death_from_timeline_head = True
-        mock.pending_monster_death_indexes = []
         mock.action_party_index = None
         mock._sync_monster_death_palette = Mock()
         mock._release_palette_variant = Mock()
@@ -3383,10 +3382,8 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(mock.spell_damage_popups, [])
 
-    def test_simultaneous_spell_defeats_play_each_monster_death_in_order(self) -> None:
+    def test_simultaneous_spell_defeats_share_one_monster_death_effect(self) -> None:
         monsters = (_damage_test_monster(0, hp=1), _damage_test_monster(1, hp=1))
-        for monster in monsters:
-            monster.state.defeat()
         actor = object()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = monsters
@@ -3398,14 +3395,11 @@ class BattleScreenMockTest(unittest.TestCase):
             )
         )
         mock.timeline = mock._timeline_order.actors
-        mock.phase = BattleMockPhase.MONSTER_DEATH
-        mock.dying_monster_index = 0
-        mock.monster_death_animation = MonsterDeathAnimation()
-        mock.pending_monster_death_indexes = [1]
         mock.action_party_index = None
         mock.target_cursor = Mock(active=False)
         mock.command_window = Mock()
         mock.palette_shifter = Mock()
+        mock.progression = Mock()
         mock._complete_current_turn = Mock()
         mock.result = None
         frame_count = (
@@ -3415,18 +3409,20 @@ class BattleScreenMockTest(unittest.TestCase):
         )
 
         with patch("scenes.battle.play_se") as play_se:
-            for _frame in range(frame_count):
-                mock._update_monster_death_animation()
-
-            self.assertEqual(mock.dying_monster_index, 1)
-            self.assertNotIn(monsters[0], mock.timeline)
-            self.assertIn(monsters[1], mock.timeline)
-            self.assertEqual(mock.pending_monster_death_indexes, [])
-
+            self.assertTrue(mock._begin_monster_deaths((0, 1)))
+            self.assertEqual(mock.dying_monster_indexes, (0, 1))
             for _frame in range(frame_count):
                 mock._update_monster_death_animation()
 
         play_se.assert_called_once_with(BATTLE_MONSTER_DEATH_SE_ID)
+        mock.progression.record_simultaneous_enemy_defeats.assert_called_once_with(
+            (0, 1)
+        )
+        mock.progression.record_enemy_defeat.assert_not_called()
+        self.assertEqual(mock.dying_monster_indexes, ())
+        self.assertFalse(monsters[0].is_alive)
+        self.assertFalse(monsters[1].is_alive)
+        self.assertNotIn(monsters[0], mock.timeline)
         self.assertNotIn(monsters[1], mock.timeline)
         self.assertIs(mock.result, BattleResult.VICTORY)
         mock._complete_current_turn.assert_not_called()
@@ -3458,7 +3454,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
         mock.phase = BattleMockPhase.MONSTER_DEATH
-        mock.dying_monster_index = 0
+        mock.dying_monster_indexes = (0,)
         mock.monster_death_animation = animation
         mock.palette_shifter = Mock()
         mock.palette_shifter.shifted.return_value = nullcontext()
@@ -3482,6 +3478,47 @@ class BattleScreenMockTest(unittest.TestCase):
             64,
             1,
         )
+
+    def test_simultaneous_monster_deaths_draw_with_shared_animation(self) -> None:
+        monsters = (
+            _damage_test_monster(0, hp=1),
+            _damage_test_monster(1, hp=1),
+        )
+        for monster in monsters:
+            monster.state.defeat()
+        animation = MonsterDeathAnimation()
+        for _frame in range(
+            MONSTER_DEATH_TINT_FRAME_COUNT
+            + MONSTER_DEATH_BRIGHTEN_FRAME_COUNT
+            + MONSTER_DEATH_DISSOLVE_FRAME_COUNT // 2
+        ):
+            animation.update()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = monsters
+        mock.monster_images = {monster.key: object() for monster in monsters}
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock.phase = BattleMockPhase.MONSTER_DEATH
+        mock.dying_monster_indexes = (0, 1)
+        mock.monster_death_animation = animation
+        mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.return_value = nullcontext()
+
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.dither") as dither,
+        ):
+            mock._draw_monsters()
+
+        self.assertEqual(
+            mock.palette_shifter.shifted.call_args_list,
+            [call(MONSTER_DEATH_PALETTE), call(MONSTER_DEATH_PALETTE)],
+        )
+        self.assertEqual(
+            dither.call_args_list,
+            [call(0.5), call(1.0), call(0.5), call(1.0)],
+        )
+        self.assertEqual(blt.call_count, 2)
 
     def test_defeating_last_front_monster_promotes_living_rear_monsters(
         self,
@@ -3565,7 +3602,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.monster_blink_frames_remaining = 0
         mock.phase = BattleMockPhase.TARGET
         mock.selectable_target_indexes = (1,)
-        mock.dying_monster_index = None
+        mock.dying_monster_indexes = ()
         mock.palette_shifter = Mock()
         mock.palette_shifter.shifted.return_value = nullcontext()
 

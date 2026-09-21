@@ -226,6 +226,27 @@ class BattleProgression:
         self._defeated_enemy_indexes.add(enemy_index)
         self._last_defeated_enemy_index = enemy_index
 
+    def record_simultaneous_enemy_defeats(
+        self,
+        enemy_indexes: Iterable[int],
+    ) -> None:
+        """Record one simultaneous group, preferring its smallest drop index."""
+
+        indexes = tuple(dict.fromkeys(enemy_indexes))
+        if not indexes:
+            raise ValueError("enemy_indexes must contain at least one index")
+        newly_defeated: list[int] = []
+        for enemy_index in indexes:
+            self._require_enemy_index(enemy_index)
+            if enemy_index in self._escaped_enemy_indexes:
+                raise ValueError("an escaped enemy cannot be defeated")
+            if enemy_index not in self._defeated_enemy_indexes:
+                newly_defeated.append(enemy_index)
+        if not newly_defeated:
+            return
+        self._defeated_enemy_indexes.update(newly_defeated)
+        self._last_defeated_enemy_index = min(newly_defeated)
+
     def record_weapon_action(
         self,
         member: Member,

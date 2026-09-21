@@ -137,6 +137,49 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertFalse(records.treasure_was_acquired("First Enemy"))
         self.assertTrue(records.treasure_was_acquired("Last Enemy"))
 
+    def test_simultaneous_defeats_choose_smallest_index_for_treasure(self) -> None:
+        save_data = SaveData()
+        inventory = InventorySystem(self.items)
+        records = MonsterRecordSystem(save_data)
+        member = Member.from_record(member_record("Fighter"))
+        progression = BattleProgression(
+            (
+                EnemyProgressionData(
+                    1,
+                    1,
+                    1,
+                    0,
+                    "Smallest Index Enemy",
+                    self.sword.key,
+                    16,
+                ),
+                EnemyProgressionData(
+                    1,
+                    1,
+                    1,
+                    0,
+                    "Larger Index Enemy",
+                    self.other_item.key,
+                    16,
+                ),
+            )
+        )
+
+        progression.record_simultaneous_enemy_defeats((1, 0))
+
+        with patch("systems.battle_progression.random.randrange", return_value=15):
+            growth = progression.settle(
+                save_data,
+                (member,),
+                inventory_system=inventory,
+                monster_record_system=records,
+            )
+
+        self.assertEqual(growth.treasure_drop.monster_key, "Smallest Index Enemy")
+        self.assertEqual(growth.treasure_drop.item_key, self.sword.key)
+        self.assertEqual(inventory.quantity(self.sword), 1)
+        self.assertEqual(inventory.quantity(self.other_item), 0)
+
     def test_treasure_rate_is_a_sixteenth_roll(self) -> None:
         member = Member.from_record(member_record("Fighter"))
 

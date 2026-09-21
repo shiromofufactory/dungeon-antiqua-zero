@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from math import ceil, hypot
@@ -1914,7 +1914,7 @@ class BattleScene:
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.monster_death_animation: MonsterDeathAnimation | None = None
-        self.dying_monster_index: int | None = None
+        self.dying_monster_indexes: tuple[int, ...] = ()
         self.monster_death_from_timeline_head = False
         self.entrance_animation_frame = 0
         self.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
@@ -1942,7 +1942,6 @@ class BattleScene:
         self.healing_popups: list[BattleHealingPopup] = []
         self.spell_damage_popups: list[BattleSpellDamagePopup] = []
         self.affinity_popups: list[BattleAffinityPopup] = []
-        self.pending_monster_death_indexes: list[int] = []
         self.attack_presentation: BattleAttackPresentation | None = None
         self.action_gauge_adjustment = 0.0
         self.battle_popup = BattleTimedPopup()
@@ -2383,7 +2382,7 @@ class BattleScene:
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.monster_death_animation = None
-        self.dying_monster_index = None
+        self.dying_monster_indexes = ()
         self.monster_death_from_timeline_head = False
         self.entrance_animation_frame = 0
         self.selected_command = None
@@ -2415,9 +2414,6 @@ class BattleScene:
         self.healing_popups.clear()
         self.spell_damage_popups.clear()
         self.affinity_popups.clear()
-        pending_deaths = getattr(self, "pending_monster_death_indexes", None)
-        if pending_deaths is not None:
-            pending_deaths.clear()
         self.attack_presentation = None
         self.action_gauge_adjustment = 0.0
         self.focused_target_by_party_index.clear()
@@ -5158,8 +5154,7 @@ class BattleScene:
             if defeated_indexes:
                 if getattr(self, "action_party_index", None) is not None:
                     self._begin_action_return()
-                self.pending_monster_death_indexes = defeated_indexes[1:]
-                self._begin_monster_death(defeated_indexes[0])
+                self._begin_monster_deaths(defeated_indexes)
                 return
             if getattr(self, "action_party_index", None) is not None:
                 self._begin_action_return(complete_turn=True)
@@ -5889,14 +5884,36 @@ class BattleScene:
             index = self.selected_target_index
         if index is None:
             return False
-        monster = self.monsters[index]
+        return self._begin_monster_deaths(
+            (index,),
+            from_timeline_head=from_timeline_head,
+        )
+
+    def _begin_monster_deaths(
+        self,
+        indexes: Iterable[int],
+        *,
+        from_timeline_head: bool = False,
+    ) -> bool:
+        """Start one synchronized defeat effect for one or more targets."""
+
+        dying_indexes = tuple(dict.fromkeys(indexes))
+        if not dying_indexes:
+            return False
+        if from_timeline_head and len(dying_indexes) != 1:
+            raise ValueError("timeline-head death must have exactly one target")
         if hasattr(self, "progression"):
-            self.progression.record_enemy_defeat(index)
-        if monster.is_alive:
-            monster.state.defeat()
+            if len(dying_indexes) == 1:
+                self.progression.record_enemy_defeat(dying_indexes[0])
+            else:
+                self.progression.record_simultaneous_enemy_defeats(dying_indexes)
+        for index in dying_indexes:
+            monster = self.monsters[index]
+            if monster.is_alive:
+                monster.state.defeat()
         promote_rear_monsters_if_front_empty(self.monsters)
         self.phase = BattlePhase.MONSTER_DEATH
-        self.dying_monster_index = index
+        self.dying_monster_indexes = dying_indexes
         self.monster_death_from_timeline_head = from_timeline_head
         self.monster_death_animation = MonsterDeathAnimation()
         self.target_cursor.active = False
@@ -5916,30 +5933,25 @@ class BattleScene:
             self._sync_monster_death_palette()
             return
 
-        dying_index = self.dying_monster_index
-        if dying_index is None:
-            raise RuntimeError("monster death phase requires a target")
-        defeated = self.monsters[dying_index]
+        dying_indexes = self.dying_monster_indexes
+        if not dying_indexes:
+            raise RuntimeError("monster death phase requires at least one target")
         from_timeline_head = getattr(
             self,
             "monster_death_from_timeline_head",
             False,
         )
         if not from_timeline_head:
-            self._timeline_order = remove_timeline_actor(
-                self._timeline_order,
-                defeated,
-            )
+            for dying_index in dying_indexes:
+                self._timeline_order = remove_timeline_actor(
+                    self._timeline_order,
+                    self.monsters[dying_index],
+                )
             self.timeline = self._timeline_order.actors
         self.monster_death_animation = None
-        self.dying_monster_index = None
+        self.dying_monster_indexes = ()
         self.monster_death_from_timeline_head = False
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
-        pending_indexes = getattr(self, "pending_monster_death_indexes", [])
-        if pending_indexes:
-            next_index = pending_indexes.pop(0)
-            self._begin_monster_death(next_index)
-            return
         self._sync_unselectable_target_palette()
         if self._monsters_are_defeated():
             self._begin_victory_summary()
@@ -6281,9 +6293,6 @@ class BattleScene:
         self.monster_action = None
         self.attack_presentation = None
         self.focus_presentation_elapsed_frame = 0
-        pending_deaths = getattr(self, "pending_monster_death_indexes", None)
-        if pending_deaths is not None:
-            pending_deaths.clear()
         self._clear_action_motion_state()
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
@@ -8850,7 +8859,7 @@ class BattleScene:
         for index, monster in enumerate(self.monsters):
             is_dying = (
                 self.phase is BattlePhase.MONSTER_DEATH
-                and index == self.dying_monster_index
+                and index in self.dying_monster_indexes
             )
             attack_presentation = getattr(self, "attack_presentation", None)
             is_attack_target = (
@@ -8867,11 +8876,6 @@ class BattleScene:
                     for result in action_presentation.damage_results
                 )
             )
-            is_pending_death = index in getattr(
-                self,
-                "pending_monster_death_indexes",
-                (),
-            )
             is_escaping = self.phase is BattlePhase.MONSTER_ACTION and index == getattr(
                 self, "monster_escape_actor_index", None
             )
@@ -8880,7 +8884,6 @@ class BattleScene:
                 and not is_dying
                 and not is_attack_target
                 and not is_spell_damage_target
-                and not is_pending_death
                 and not is_escaping
             ):
                 continue
