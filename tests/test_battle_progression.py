@@ -308,6 +308,44 @@ class BattleProgressionTest(unittest.TestCase):
         proficiency = member.proficiency(ProficiencyKind.MYSTIC)
         self.assertEqual((proficiency.level, proficiency.progress), (2, 2))
 
+    def test_escape_settles_proficiencies_and_mp_without_rewards_or_hp(self) -> None:
+        save_data = SaveData(experience=30, gold=40)
+        member = Member.from_record(member_record("Escaping Mage"))
+        member.max_hp = 1
+        member.hp = 1
+        member.max_mp = 1
+        member.mp = 1
+        member.proficiency(ProficiencyKind.SWORD).progress = 95
+        member.proficiency(ProficiencyKind.MYSTIC).progress = 95
+        progression = BattleProgression(
+            (EnemyProgressionData(10, 0, 1, 500),)
+        )
+        progression.record_weapon_action(member, (self.sword,), (10,))
+        progression.record_spell_use(
+            member,
+            ProficiencyKind.MYSTIC,
+            (10,),
+            mp_spent=9,
+        )
+
+        growth = progression.settle_escape(save_data, (member,))
+
+        self.assertEqual((save_data.experience, save_data.gold), (30, 40))
+        self.assertEqual((growth.experience_gained, growth.gold_gained), (0, 0))
+        self.assertEqual(member.max_hp, 1)
+        self.assertGreater(member.max_mp, 1)
+        self.assertGreater(
+            member.proficiency(ProficiencyKind.SWORD).level * 100
+            + member.proficiency(ProficiencyKind.SWORD).progress,
+            195,
+        )
+        self.assertGreater(
+            member.proficiency(ProficiencyKind.MYSTIC).level * 100
+            + member.proficiency(ProficiencyKind.MYSTIC).progress,
+            195,
+        )
+        self.assertTrue(growth.has_result_growth)
+
     def test_result_growth_distinguishes_progress_from_level_up(self) -> None:
         member = Member.from_record(member_record("Fighter"))
         progression = BattleProgression((EnemyProgressionData(1, 1, 1, 0),))

@@ -400,6 +400,71 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             target_color=0,
         )
 
+    def test_escape_settlement_opens_result_from_the_black_screen(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.progression = Mock()
+        scene.progression.settle_escape.return_value = Mock(
+            has_result_growth=True,
+        )
+        scene.save_data = SaveData()
+        scene.result_party = (object(),)
+        scene.settings = Settings()
+        scene.fonts = object()
+        scene.character_sprites = object()
+        scene.bgm = Mock()
+        scene.return_bgm_id = "da3-field"
+        scene.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+
+        with patch("scenes.battle.BattleResultOverlay") as overlay:
+            scene._begin_escape_result()
+
+        scene.progression.settle_escape.assert_called_once_with(
+            scene.save_data,
+            scene.result_party,
+        )
+        scene.bgm.stop.assert_called_once_with()
+        scene.bgm.set_fade_rate.assert_called_once_with(1.0)
+        scene.bgm.transition_to.assert_called_once_with("da3-field")
+        self.assertIs(scene.result_overlay, overlay.return_value)
+        self.assertIs(scene.result_outcome, BattleResult.ESCAPED)
+        self.assertIs(scene.phase, BattlePhase.RESULT_TRANSITION)
+        self.assertTrue(scene.result_transition_covered)
+        self.assertIs(
+            scene.result_transition_fade.phase,
+            FadePhase.FADING_IN,
+        )
+
+    def test_escape_skips_result_when_nothing_grew(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.result = None
+        scene.progression = Mock()
+        scene.progression.settle_escape.return_value = Mock(
+            has_result_growth=False,
+        )
+        scene.save_data = SaveData()
+        scene.result_party = (object(),)
+        scene.bgm = Mock()
+        scene.return_bgm_id = "da3-field"
+
+        with patch("scenes.battle.BattleResultOverlay") as overlay:
+            scene._begin_escape_result()
+
+        self.assertIs(scene.result, BattleResult.ESCAPED)
+        scene.bgm.transition_to.assert_not_called()
+        overlay.assert_not_called()
+
+    def test_escape_result_confirmation_reports_escape_after_growth(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        scene.result = None
+        scene.result_outcome = BattleResult.ESCAPED
+        scene.result_overlay = Mock(animation_complete=True)
+        scene.result_overlay.update.return_value = True
+        scene.growth_result = Mock(has_level_up_growth=False)
+
+        scene._update_result(InputState(confirm=InputButton(triggered=True)))
+
+        self.assertIs(scene.result, BattleResult.ESCAPED)
+
     def test_japanese_victory_numbers_use_fullwidth_glyphs(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         scene.settings = Settings(language=Language.JAPANESE)
@@ -857,7 +922,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertIs(rear.formation_row, FormationRow.FRONT)
 
-    def test_escape_reuses_battle_blackout_and_starts_with_field_fade_in(
+    def test_escape_return_fades_the_result_out_before_showing_the_field(
         self,
     ) -> None:
         game = Game.__new__(Game)
@@ -866,9 +931,42 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         game._begin_battle_return(BattleResult.ESCAPED)
 
+        game._apply_battle_return.assert_not_called()
+        self.assertIs(game.battle_return_result, BattleResult.ESCAPED)
+        self.assertIs(game.battle_return_fade.phase, FadePhase.FADING_OUT)
+
+    def test_escape_without_result_reuses_the_existing_blackout(self) -> None:
+        game = Game.__new__(Game)
+        game.palette_shifter = Mock(base_colors=(0,))
+        game._apply_battle_return = Mock()
+
+        game._begin_battle_return(
+            BattleResult.ESCAPED,
+            screen_already_covered=True,
+        )
+
         game._apply_battle_return.assert_called_once_with()
         self.assertIs(game.battle_return_result, BattleResult.ESCAPED)
         self.assertIs(game.battle_return_fade.phase, FadePhase.FADING_IN)
+
+    def test_game_marks_skipped_escape_result_as_already_covered(self) -> None:
+        game = Game.__new__(Game)
+        game.battle_scene = Mock(
+            phase=BattlePhase.ESCAPE,
+            result=BattleResult.ESCAPED,
+            result_overlay=None,
+            is_party_command_ready=False,
+        )
+        game.pending_first_party_turn_hint = False
+        game._show_hint_once = Mock()
+        game._begin_battle_return = Mock()
+
+        game._update_battle_scene(InputState())
+
+        game._begin_battle_return.assert_called_once_with(
+            BattleResult.ESCAPED,
+            screen_already_covered=True,
+        )
 
     @patch("game.pyxel.play_pos")
     @patch("game.pyxel.play")

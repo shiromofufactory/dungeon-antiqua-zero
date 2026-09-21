@@ -929,17 +929,24 @@ class Game:
         if hint_id is not None:
             self._show_hint_once(hint_id)
 
-    def _begin_battle_return(self, result: BattleResult) -> None:
-        """Begin the field return, reusing escape's already-covered screen."""
+    def _begin_battle_return(
+        self,
+        result: BattleResult,
+        *,
+        screen_already_covered: bool = False,
+    ) -> None:
+        """Begin the fade from a completed battle screen back to the field."""
 
         if not isinstance(result, BattleResult):
             raise TypeError("battle return result must be a BattleResult")
+        if not isinstance(screen_already_covered, bool):
+            raise TypeError("screen_already_covered must be a bool")
         self.battle_return_result = result
         self.defeat_return_message = None
         self.defeat_return_sound_waiting = False
         self.defeat_return_bgm_restart_pending = False
         self.battle_return_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
-        if result is BattleResult.ESCAPED:
+        if screen_already_covered:
             self._apply_battle_return()
             self.battle_return_fade.start_fade_in()
             self.palette_shifter.set_global_mix(
@@ -1028,7 +1035,16 @@ class Game:
             self._show_hint_once(FIRST_RESULT_HINT_ID)
         result = getattr(battle_scene, "result", None)
         if isinstance(result, BattleResult):
-            self._begin_battle_return(result)
+            if (
+                result is BattleResult.ESCAPED
+                and getattr(battle_scene, "result_overlay", None) is None
+            ):
+                self._begin_battle_return(
+                    result,
+                    screen_already_covered=True,
+                )
+            else:
+                self._begin_battle_return(result)
         return True
 
     def _apply_battle_return(self) -> None:

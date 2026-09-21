@@ -330,6 +330,9 @@ class BattleProgression:
         members: Sequence[Member],
         *,
         ineligible_member_keys: Iterable[str] = (),
+        hp_growth_ineligible_member_keys: Iterable[str] = (),
+        award_rewards: bool = True,
+        allow_max_hp_growth: bool = True,
         inventory_system: InventorySystem | None = None,
         monster_record_system: MonsterRecordSystem | None = None,
     ) -> BattleGrowthResult:
@@ -348,6 +351,15 @@ class BattleProgression:
         ineligible = frozenset(ineligible_member_keys)
         if not all(isinstance(key, str) and key for key in ineligible):
             raise ValueError("ineligible_member_keys must contain strings")
+        hp_growth_ineligible = frozenset(hp_growth_ineligible_member_keys)
+        if not all(isinstance(key, str) and key for key in hp_growth_ineligible):
+            raise ValueError(
+                "hp_growth_ineligible_member_keys must contain strings"
+            )
+        if not isinstance(award_rewards, bool):
+            raise TypeError("award_rewards must be a bool")
+        if not isinstance(allow_max_hp_growth, bool):
+            raise TypeError("allow_max_hp_growth must be a bool")
         if (inventory_system is None) != (monster_record_system is None):
             raise ValueError(
                 "inventory_system and monster_record_system must be supplied together"
@@ -363,12 +375,15 @@ class BattleProgression:
 
         before = tuple(_snapshot(member) for member in party)
         before_by_key = dict(zip(keys, before))
-        experience_gained, gold_gained = self.rewards()
-        save_data.experience += experience_gained
-        save_data.gold = min(MAX_GOLD, save_data.gold + gold_gained)
-
-        for member in party:
-            member.refresh_internal_level(save_data.experience)
+        if award_rewards:
+            experience_gained, gold_gained = self.rewards()
+            save_data.experience += experience_gained
+            save_data.gold = min(MAX_GOLD, save_data.gold + gold_gained)
+            for member in party:
+                member.refresh_internal_level(save_data.experience)
+        else:
+            experience_gained = 0
+            gold_gained = 0
 
         eligible = {
             member.definition.key
@@ -424,14 +439,20 @@ class BattleProgression:
         for _index, member in ordered:
             key = member.definition.key
             if (
-                key in eligible
+                allow_max_hp_growth
+                and key in eligible
+                and key not in hp_growth_ineligible
                 and key != mp_growth_key
                 and member.calculated_max_hp() > member.max_hp
             ):
                 member.apply_max_hp_growth()
                 break
 
-        treasure_drop = self._settle_treasure(inventory_system, party)
+        treasure_drop = (
+            self._settle_treasure(inventory_system, party)
+            if award_rewards
+            else None
+        )
         if treasure_drop is not None:
             assert monster_record_system is not None
             monster_record_system.record_treasure_acquired(
@@ -445,6 +466,20 @@ class BattleProgression:
             before,
             tuple(_snapshot(member) for member in party),
             treasure_drop,
+        )
+
+    def settle_escape(
+        self,
+        save_data: SaveData,
+        members: Sequence[Member],
+    ) -> BattleGrowthResult:
+        """Settle proficiencies and max MP after escape, never HP or rewards."""
+
+        return self.settle(
+            save_data,
+            members,
+            award_rewards=False,
+            allow_max_hp_growth=False,
         )
 
     def _settle_treasure(

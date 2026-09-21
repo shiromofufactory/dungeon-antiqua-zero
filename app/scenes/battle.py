@@ -2085,6 +2085,7 @@ class BattleScene:
         self.result_transition_covered = False
         self.growth_jingle_played = False
         self.victory_exit_pending = False
+        self.result_outcome = BattleResult.VICTORY
         self.action_progression_weapon: Item | None = None
         self.action_progression_enemy_levels: tuple[int, ...] = ()
         self.windows = [
@@ -2536,6 +2537,7 @@ class BattleScene:
         self.result_transition_covered = False
         self.growth_jingle_played = False
         self.victory_exit_pending = False
+        self.result_outcome = BattleResult.VICTORY
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
         self.target_cursor.active = False
@@ -3096,11 +3098,11 @@ class BattleScene:
             self.escape_fade.start()
 
     def _update_escape_animation(self) -> None:
-        """Fade out after acknowledgement and finish once fully covered."""
+        """Fade out after acknowledgement and open escape growth at black."""
 
         self._update_escape_fade()
         if self.escape_fade_covered:
-            self.result = BattleResult.ESCAPED
+            self._begin_escape_result()
 
     def _update_escape_fade(self) -> None:
         """Fade to black once and hold the covered frame for the scene owner."""
@@ -5578,7 +5580,7 @@ class BattleScene:
         )
         self.bgm.set_fade_rate(bgm_rate)
         if self.fade_escape_bgm_fade_frame >= FADE_ESCAPE_BGM_FADE_FRAME_COUNT:
-            self.result = BattleResult.ESCAPED
+            self._begin_escape_result()
 
     def _update_healing_popups(self) -> None:
         """Advance recovery numbers independently from the battle phase."""
@@ -6400,7 +6402,7 @@ class BattleScene:
         ):
             self.result = BattleResult.VICTORY
             return
-        ineligible = {
+        hp_growth_ineligible = {
             member.definition.key
             for index, member in enumerate(self.party)
             if index in self.escaped_party_indexes or member.is_dead
@@ -6408,11 +6410,12 @@ class BattleScene:
         growth = self.progression.settle(
             self.save_data,
             self.result_party,
-            ineligible_member_keys=ineligible,
+            hp_growth_ineligible_member_keys=hp_growth_ineligible,
             inventory_system=self.inventory_system,
             monster_record_system=self.monster_record_system,
         )
         self.growth_result = growth
+        self.result_outcome = BattleResult.VICTORY
         message = self.texts.formatted_text(
             "battle.victory.reward",
             self.localizer,
@@ -6445,6 +6448,35 @@ class BattleScene:
         self.active_party_index = None
         self.timeline = ()
         self._play_victory_jingle(BATTLE_WIN_BGM_ID)
+
+    def _begin_escape_result(self) -> None:
+        """Settle escape growth and reveal its result screen from black."""
+
+        self.bgm.stop()
+        self.bgm.set_fade_rate(1.0)
+        growth = self.progression.settle_escape(
+            self.save_data,
+            self.result_party,
+        )
+        self.growth_result = growth
+        self.result_outcome = BattleResult.ESCAPED
+        if not growth.has_result_growth:
+            self.result = BattleResult.ESCAPED
+            return
+        if self.return_bgm_id is not None:
+            self.bgm.transition_to(self.return_bgm_id)
+        self.result_overlay = BattleResultOverlay(
+            party=self.result_party,
+            growth=growth,
+            settings=self.settings,
+            fonts=self.fonts,
+            character_sprites=self.character_sprites,
+        )
+        self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
+        self.result_transition_fade.start_fade_in()
+        self.result_transition_covered = True
+        self.phase = BattlePhase.RESULT_TRANSITION
 
     def _victory_summary_placements(
         self,
@@ -6561,7 +6593,10 @@ class BattleScene:
             self.phase = BattlePhase.RESULT
 
     def _update_result(self, input_state: InputState) -> None:
-        if self._finish_pending_victory():
+        if (
+            self.result_outcome is BattleResult.VICTORY
+            and self._finish_pending_victory()
+        ):
             return
         overlay = self.result_overlay
         if overlay is None:
@@ -6576,7 +6611,10 @@ class BattleScene:
             self._play_victory_jingle(BATTLE_LEVEL_UP_BGM_ID)
             self.growth_jingle_played = True
         if completed:
-            self._request_victory_completion()
+            if self.result_outcome is BattleResult.ESCAPED:
+                self.result = BattleResult.ESCAPED
+            else:
+                self._request_victory_completion()
 
     def _request_victory_completion(self) -> None:
         """Leave results after the victory jingle, unless another track replaced it."""

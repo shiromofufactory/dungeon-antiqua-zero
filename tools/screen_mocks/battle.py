@@ -159,7 +159,10 @@ class BattleTestApp(BattleScene):
         if bgm is not None:
             bgm.update()
         super().update(self.input_reader.poll())
-        if getattr(self, "result", None) is BattleResult.VICTORY:
+        if getattr(self, "result", None) in (
+            BattleResult.VICTORY,
+            BattleResult.ESCAPED,
+        ):
             pyxel.quit()
 
     def _restart_battle(self) -> None:
@@ -198,12 +201,6 @@ class BattleTestApp(BattleScene):
                 )
             member.hp = hp
             member.mp = mp
-
-    def _update_escape_animation(self) -> None:
-        super()._update_escape_animation()
-        if getattr(self, "result", None) is BattleResult.ESCAPED:
-            pyxel.quit()
-
 
 def main() -> int:
     return run_screen_mock(

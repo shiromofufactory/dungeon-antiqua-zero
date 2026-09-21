@@ -8772,16 +8772,18 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_escape_finishes_when_fade_reaches_black(self) -> None:
+    def test_escape_opens_growth_result_when_fade_reaches_black(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.escape_fade_covered = True
         mock._update_escape_fade = Mock()
+        mock._begin_escape_result = Mock()
 
         with patch("tools.screen_mocks.battle.pyxel.quit") as quit_game:
             mock._update_escape_animation()
 
         mock._update_escape_fade.assert_called_once_with()
-        quit_game.assert_called_once_with()
+        mock._begin_escape_result.assert_called_once_with()
+        quit_game.assert_not_called()
 
     def test_escape_fade_reaches_black_and_does_not_fade_back_in(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -8812,6 +8814,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.bgm = Mock()
+        mock._begin_escape_result = Mock()
 
         mock._begin_fade_escape()
 
@@ -8838,9 +8841,9 @@ class BattleScreenMockTest(unittest.TestCase):
                 1.0 - frame / FADE_ESCAPE_BGM_FADE_FRAME_COUNT,
             )
             if frame < FADE_ESCAPE_BGM_FADE_FRAME_COUNT:
-                self.assertIsNone(getattr(mock, "result", None))
+                mock._begin_escape_result.assert_not_called()
 
-        self.assertIs(mock.result, BattleResult.ESCAPED)
+        mock._begin_escape_result.assert_called_once_with()
 
     def test_escape_fade_starts_only_after_escape_message_acknowledgement(
         self,
