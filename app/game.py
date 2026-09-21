@@ -132,6 +132,7 @@ from systems import (
     EventContext,
     EventRunner,
     EventRuntimeError,
+    ENCOUNTER_THRESHOLD,
     EncounterSystem,
     InventorySystem,
     LoadedGameState,
@@ -195,6 +196,13 @@ APP_ROOT = Path(__file__).resolve().parent
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 FPS = 60
+
+FIELD_FADE_ENCOUNTER_MULTIPLIER = 2
+FIELD_FADE_PULSE_PALETTE = DIMMED_PALETTE
+FIELD_FADE_PULSE_TARGET_COLOR = 0x000000
+FIELD_FADE_PULSE_MIN_BASE_RATE = 0.5
+FIELD_FADE_PULSE_CYCLE_FRAME_COUNT = 90
+FIELD_FADE_PULSE_HALF_CYCLE_FRAME_COUNT = FIELD_FADE_PULSE_CYCLE_FRAME_COUNT // 2
 
 MENU_COMMANDS = (
     ("item", "menu.command.item"),
@@ -561,6 +569,8 @@ class Game:
         self.animate_main_windows_with_fade = False
         self.showing_field = False
         self.encounter_system = EncounterSystem()
+        self.field_fade_active = False
+        self.field_fade_pulse_frame = 0
         self.encounter_transition: EncounterTransition | None = None
         self.encounter_snapshot = None
         self.battle_return_fade: FadeThroughBlack | None = None
@@ -662,12 +672,77 @@ class Game:
         current_map = getattr(self, "current_map", None)
         if getattr(current_map, "profile", None) != "dungeon":
             return False
-        advanced = self.encounter_system.advance(self.save_data.encounter_count)
+        threshold = ENCOUNTER_THRESHOLD * (
+            FIELD_FADE_ENCOUNTER_MULTIPLIER
+            if getattr(self, "field_fade_active", False)
+            else 1
+        )
+        advanced = self.encounter_system.advance(
+            self.save_data.encounter_count,
+            threshold=threshold,
+        )
         self.save_data.encounter_count = advanced.count
         if not advanced.triggered:
             return False
         self._begin_random_encounter()
         return True
+
+    def _activate_field_fade(self) -> bool:
+        """Double the random-encounter threshold until the current floor ends."""
+
+        if (
+            getattr(getattr(self, "current_map", None), "profile", None)
+            != "dungeon"
+            or getattr(self, "field_fade_active", False)
+        ):
+            return False
+        self.field_fade_active = True
+        self.field_fade_pulse_frame = 0
+        self._sync_field_fade_palette()
+        return True
+
+    def _reset_field_fade(self) -> None:
+        """End the current-floor FADE effect and restore the shared dim palette."""
+
+        self.field_fade_active = False
+        self.field_fade_pulse_frame = 0
+        self._restore_dimmed_palette()
+
+    def _restore_dimmed_palette(self) -> None:
+        palette_shifter = getattr(self, "palette_shifter", None)
+        if palette_shifter is None:
+            return
+        palette_shifter.define_mix(
+            DIMMED_PALETTE,
+            base_rate=FIELD_FADE_PULSE_MIN_BASE_RATE,
+            target_color=FIELD_FADE_PULSE_TARGET_COLOR,
+        )
+
+    def _sync_field_fade_palette(self) -> None:
+        palette_shifter = getattr(self, "palette_shifter", None)
+        if palette_shifter is None:
+            return
+        half_cycle = FIELD_FADE_PULSE_HALF_CYCLE_FRAME_COUNT
+        distance_from_peak = abs(
+            half_cycle - getattr(self, "field_fade_pulse_frame", 0)
+        )
+        progress_to_normal = distance_from_peak / half_cycle
+        base_rate = FIELD_FADE_PULSE_MIN_BASE_RATE + (
+            (1.0 - FIELD_FADE_PULSE_MIN_BASE_RATE) * progress_to_normal
+        )
+        palette_shifter.define_mix(
+            FIELD_FADE_PULSE_PALETTE,
+            base_rate=base_rate,
+            target_color=FIELD_FADE_PULSE_TARGET_COLOR,
+        )
+
+    def _update_field_fade_pulse(self) -> None:
+        if not getattr(self, "field_fade_active", False):
+            return
+        self.field_fade_pulse_frame = (
+            self.field_fade_pulse_frame + 1
+        ) % FIELD_FADE_PULSE_CYCLE_FRAME_COUNT
+        self._sync_field_fade_palette()
 
     def _apply_dungeon_step_health_changes(self) -> None:
         """Apply DA2's step HP change, death notice, and row correction."""
@@ -985,6 +1060,10 @@ class Game:
         if getattr(self, "party", ()):
             self._promote_first_recoverable_member()
         self.battle_scene = None
+        if getattr(self, "field_fade_active", False):
+            self._sync_field_fade_palette()
+        else:
+            self._restore_dimmed_palette()
         self.bgm.set_fade_rate(0.0)
         if field_defeat:
             self.bgm.stop()
@@ -1368,6 +1447,11 @@ class Game:
         arrival = self.pending_target_arrival
         if target_map is None or arrival is None:
             raise RuntimeError("map change has incomplete destination data")
+        previous_map_id = getattr(
+            getattr(self, "current_map", None),
+            "map_id",
+            None,
+        )
         if target_map is getattr(self, "world_map", None):
             for member in self.party:
                 member.recover_world_map_entry_ailments()
@@ -1384,6 +1468,8 @@ class Game:
             screen_height=SCREEN_HEIGHT,
         )
         self._reset_field_actors()
+        if target_map.map_id != previous_map_id:
+            self._reset_field_fade()
         self.bgm.play(target_map.bgm_id)
         self.pending_target_map = None
         self.pending_target_arrival = None
@@ -1979,6 +2065,7 @@ class Game:
             faces=self.faces,
             palette_shifter=self.palette_shifter,
             inventory_system=inventory_system,
+            on_field_fade=self._activate_field_fade,
             on_invalid_action=self.alert.start,
         )
 
@@ -2097,8 +2184,13 @@ class Game:
             raise RuntimeError("fade midpoint has no pending field screen change")
         if change is GameScreenChange.SHOW_FIELD:
             self.showing_field = True
+            if getattr(self, "field_fade_active", False):
+                self._sync_field_fade_palette()
+            else:
+                self._restore_dimmed_palette()
         elif change is GameScreenChange.SHOW_MENU:
             self.showing_field = False
+            self._restore_dimmed_palette()
             self.selected_member_index = 0
             self.menu_member_selected = False
             self._refresh_party_window_texts()
@@ -2231,6 +2323,7 @@ class Game:
             faces=self.faces,
             palette_shifter=self.palette_shifter,
             member_index=member_index,
+            on_field_fade=self._activate_field_fade,
             on_invalid_action=self.alert.start,
         )
         if member_index is None:
@@ -2378,6 +2471,7 @@ class Game:
         self.pending_load_slot = None
         self.start_screen = None
         self.showing_field = True
+        self._reset_field_fade()
         self._refresh_site_name_label(force=True)
         self.bgm.play(self.current_map.bgm_id)
         if is_new_game:
@@ -3176,6 +3270,7 @@ class Game:
                 self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
+            self._update_field_fade_pulse()
             field_birds = getattr(self, "field_birds", None)
             if field_birds is not None:
                 field_birds.update(
@@ -3451,6 +3546,13 @@ class Game:
     def _draw_field_screen(self, *, draw_player: bool = True) -> None:
         """Draw the current field and any field-owned overlays."""
 
+        fade_draw_options = {}
+        if getattr(self, "field_fade_active", False):
+            fade_draw_options = {
+                "player_palette_shifter": self.palette_shifter,
+                "player_palette_name": FIELD_FADE_PULSE_PALETTE,
+            }
+
         if isinstance(getattr(self, "field_actors", None), FieldActors):
             player_member = self._field_player_member()
             draw_options = {
@@ -3465,14 +3567,19 @@ class Game:
                     f"pc:{player_member.definition.key}"
                 ),
                 "treasure_image": self.field_treasure_image,
+                **fade_draw_options,
             }
             if not draw_player:
                 draw_options["draw_player"] = False
             self.field_renderer.draw(self.field, **draw_options)
         elif draw_player:
-            self.field_renderer.draw(self.field)
+            self.field_renderer.draw(self.field, **fade_draw_options)
         else:
-            self.field_renderer.draw(self.field, draw_player=False)
+            self.field_renderer.draw(
+                self.field,
+                draw_player=False,
+                **fade_draw_options,
+            )
         field_birds = getattr(self, "field_birds", None)
         if field_birds is not None:
             field_birds.draw(

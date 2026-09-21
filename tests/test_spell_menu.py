@@ -493,6 +493,60 @@ class SpellMenuTest(unittest.TestCase):
         )
 
     @patch("ui.spell_menu.play_se")
+    def test_fade_activates_without_ally_targeting_and_spends_mp(
+        self,
+        play_se: Mock,
+    ) -> None:
+        activate = Mock(return_value=True)
+        mock = SpellMenuHarness(member_index=0, on_field_fade=activate)
+        proficiency = mock.member.proficiency(ProficiencyKind.NETHER)
+        proficiency.level = 4
+        mock.member.proficiency(ProficiencyKind.MYSTIC).level = 9
+        spell = mock.spells["FADE"]
+        mock.member.mp = max(mock.member.mp, spell.mp)
+        initial_mp = mock.member.mp
+        initial_progress = proficiency.progress
+        mock._build_windows()
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.spell_cursor.select_key("FADE")
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        activate.assert_called_once_with()
+        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertFalse(mock.member_cursor.active)
+        self.assertEqual(mock.member.mp, initial_mp - spell.mp)
+        self.assertGreater(proficiency.progress, initial_progress)
+        self.assertIsNotNone(mock._proficiency_animation)
+        play_se.assert_called_once_with("spell_healing1")
+
+        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
+            mock.update(InputState())
+
+        self.assertIsNone(mock._proficiency_animation)
+        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertEqual(mock.spell_cursor.selected_key, "FADE")
+
+    def test_fade_activation_failure_does_not_spend_mp(self) -> None:
+        activate = Mock(return_value=False)
+        invalid_action = Mock()
+        mock = SpellMenuHarness(member_index=0, on_field_fade=activate)
+        mock.on_invalid_action = invalid_action
+        proficiency = mock.member.proficiency(ProficiencyKind.NETHER)
+        proficiency.level = 4
+        spell = mock.spells["FADE"]
+        mock.member.mp = max(mock.member.mp, spell.mp)
+        initial_mp = mock.member.mp
+        mock._build_windows()
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.spell_cursor.select_key("FADE")
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(mock.member.mp, initial_mp)
+        invalid_action.assert_called_once_with()
+
+    @patch("ui.spell_menu.play_se")
     @patch("ui.spell_menu.random.random")
     def test_revive_spells_restore_dead_targets_at_authored_hp_percentages(
         self,

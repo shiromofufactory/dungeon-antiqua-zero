@@ -959,6 +959,37 @@ class ItemMenuTest(unittest.TestCase):
         random_value.assert_not_called()
         play_se.assert_called_once_with(HEALING_SE_ID)
 
+    def test_dark_chrism_activates_field_fade_without_target_selection(self) -> None:
+        activate_fade = Mock(return_value=True)
+        mock = ItemMenuHarness(on_field_fade=activate_fade)
+        item = mock.items["DARK CHRISM"]
+        self.select_item(mock, item.key)
+
+        with patch("ui.item_menu.play_se") as play_se:
+            mock.update(InputState(confirm=InputButton(True, True)))
+
+        activate_fade.assert_called_once_with()
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity(item), 0)
+        play_se.assert_called_once_with(HEALING_SE_ID)
+
+    def test_dark_chrism_is_not_consumed_when_field_fade_is_already_active(
+        self,
+    ) -> None:
+        invalid_action = Mock()
+        mock = ItemMenuHarness(
+            on_field_fade=Mock(return_value=False),
+            on_invalid_action=invalid_action,
+        )
+        item = mock.items["DARK CHRISM"]
+        self.select_item(mock, item.key)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity(item), 1)
+        invalid_action.assert_called_once_with()
+
     def test_potion_without_an_injured_target_reports_invalid_action(self) -> None:
         invalid_action = Mock()
         mock = ItemMenuHarness(on_invalid_action=invalid_action)

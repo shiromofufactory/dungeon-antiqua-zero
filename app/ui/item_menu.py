@@ -68,7 +68,7 @@ DROP_CONFIRM_CURSOR_X = 2
 DROP_CONFIRM_YES_Y = 2
 DROP_CONFIRM_NO_Y = 5
 HEALING_SE_ID = "spell_healing1"
-FIELD_RECOVERY_ITEM_KEYS = frozenset(("POTION", "DIVINE TEAR"))
+FIELD_USE_ITEM_KEYS = frozenset(("POTION", "DIVINE TEAR", "DARK CHRISM"))
 
 
 def _validate_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
@@ -114,6 +114,7 @@ class ItemMenuOverlay:
         faces: object,
         palette_shifter: PaletteShifter | None = None,
         inventory_system: InventorySystem,
+        on_field_fade: Callable[[], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         """Build the DA2-style item view from menu-owned state."""
@@ -136,6 +137,8 @@ class ItemMenuOverlay:
             raise TypeError("inventory_system must be an InventorySystem")
         if on_invalid_action is not None and not callable(on_invalid_action):
             raise TypeError("on_invalid_action must be callable")
+        if on_field_fade is not None and not callable(on_field_fade):
+            raise TypeError("on_field_fade must be callable")
 
         self.party = party
         self.items = dict(item_catalog)
@@ -147,6 +150,7 @@ class ItemMenuOverlay:
         self.fonts = fonts
         self.faces = faces
         self.palette_shifter = palette_shifter
+        self.on_field_fade = on_field_fade
         self.on_invalid_action = on_invalid_action
         self.phase = ItemSelectionPhase.CATEGORY
         self.selected_item_index = 0
@@ -192,7 +196,7 @@ class ItemMenuOverlay:
         """Return party positions unable to receive the effect or equip the item."""
 
         if self.phase is ItemSelectionPhase.TARGET:
-            spell = self._field_recovery_spell(self.selected_item)
+            spell = self._field_use_spell(self.selected_item)
             usable = self._usable_target_indexes(spell) if spell is not None else ()
             return frozenset(range(len(self.party_panel.party))).difference(usable)
         if self.phase is not ItemSelectionPhase.ITEM:
@@ -478,12 +482,12 @@ class ItemMenuOverlay:
         self.category_cursor.active = True
         self._build_item_windows()
 
-    def _field_recovery_spell(self, item: Item | None) -> Spell | None:
+    def _field_use_spell(self, item: Item | None) -> Spell | None:
         """Resolve the currently supported camp-use item effect."""
 
         if (
             item is None
-            or item.key not in FIELD_RECOVERY_ITEM_KEYS
+            or item.key not in FIELD_USE_ITEM_KEYS
             or item.equip_type is not ItemEquipType.ITEM
             or not item.use_spell_key
         ):
@@ -493,7 +497,12 @@ class ItemMenuOverlay:
             spell is None
             or not spell.on_camp
             or spell.to_enemy
-            or spell.action not in (SpellAction.HEAL, SpellAction.REVIVE)
+            or spell.action
+            not in (SpellAction.HEAL, SpellAction.REVIVE, SpellAction.FADE)
+            or (
+                spell.action is SpellAction.FADE
+                and self.on_field_fade is None
+            )
         ):
             return None
         return spell
@@ -528,9 +537,12 @@ class ItemMenuOverlay:
             self.on_invalid_action()
 
     def _enter_target_selection(self) -> None:
-        spell = self._field_recovery_spell(self.selected_item)
+        spell = self._field_use_spell(self.selected_item)
         if spell is None:
             self._notify_invalid_action()
+            return
+        if spell.action is SpellAction.FADE:
+            self._use_selected_fade_item()
             return
         target_indexes = self._usable_target_indexes(spell)
         if not target_indexes:
@@ -589,7 +601,7 @@ class ItemMenuOverlay:
 
     def _use_selected_recovery_item(self) -> bool:
         item = self.selected_item
-        spell = self._field_recovery_spell(item)
+        spell = self._field_use_spell(item)
         selected_target = self.member_cursor.selected_key
         if (
             item is None
@@ -627,6 +639,39 @@ class ItemMenuOverlay:
             return False
         play_se(HEALING_SE_ID)
         self._refresh_after_recovery_item(item, spell, selected_target)
+        return True
+
+    def _use_selected_fade_item(self) -> bool:
+        """Consume a camp-use FADE item after activating the floor effect."""
+
+        item = self.selected_item
+        spell = self._field_use_spell(item)
+        if (
+            item is None
+            or spell is None
+            or spell.action is not SpellAction.FADE
+            or self.inventory_system.quantity(item) <= 0
+            or self.on_field_fade is None
+            or not self.on_field_fade()
+        ):
+            self._notify_invalid_action()
+            return False
+        if item.breaks_on_use and not self.inventory_system.remove(item):
+            self._notify_invalid_action()
+            return False
+        play_se(HEALING_SE_ID)
+        items = self.category_items
+        self.selected_item_index = min(
+            self.selected_item_index,
+            max(0, len(items) - 1),
+        )
+        self.scroll_offset = min(
+            self.scroll_offset,
+            max(0, len(items) - ITEM_VISIBLE_COUNT),
+        )
+        self.phase = ItemSelectionPhase.ITEM
+        self._build_item_windows()
+        self._build_party_panel()
         return True
 
     def _start_drop_confirmation(self, item: Item) -> None:

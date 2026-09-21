@@ -59,18 +59,27 @@ class EncounterSystem:
     def __init__(self, *, random_source: random.Random | None = None) -> None:
         self._random = random_source or random.Random()
 
-    def advance(self, count: int) -> EncounterAdvance:
+    def advance(
+        self,
+        count: int,
+        *,
+        threshold: int = ENCOUNTER_THRESHOLD,
+    ) -> EncounterAdvance:
         """Advance one completed dungeon step and reset when battle starts."""
 
         if isinstance(count, bool) or not isinstance(count, int):
             raise TypeError("encounter count must be an integer")
         if count < 0:
             raise ValueError("encounter count must not be negative")
+        if isinstance(threshold, bool) or not isinstance(threshold, int):
+            raise TypeError("encounter threshold must be an integer")
+        if threshold <= 0:
+            raise ValueError("encounter threshold must be positive")
         advanced = count + self._random.randint(
             ENCOUNTER_STEP_MIN,
             ENCOUNTER_STEP_MAX,
         )
-        if advanced >= ENCOUNTER_THRESHOLD:
+        if advanced >= threshold:
             return EncounterAdvance(count=0, triggered=True)
         return EncounterAdvance(count=advanced, triggered=False)
 

@@ -118,6 +118,7 @@ from rendering import (
     FadeEvent,
     FadeThroughBlack,
     MonsterDeathAnimation,
+    MosaicFadeOut,
     SpellEffectRenderer,
     draw_character_shadow,
     floating_offset,
@@ -189,6 +190,7 @@ BATTLE_HIDE_SE_ID = "battle_hide"
 BATTLE_IDENTIFY_SE_ID = "battle_identify"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
+FADE_ESCAPE_BGM_FADE_FRAME_COUNT = DEFAULT_FADE_FRAME_COUNT
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
 # Pyxel can remap only four 16-color palette blocks. The battle scene does
 # not use its default dimmed block, so the active-member pulse owns that slot.
@@ -676,6 +678,7 @@ class BattlePhase(StrEnum):
     ESCAPE_MEMBER = "escape_member"
     ESCAPE_MESSAGE = "escape_message"
     ESCAPE = "escape"
+    FADE_ESCAPE = "fade_escape"
     FORMATION = "formation"
     MONSTER_DEATH = "monster_death"
     DEFEAT_MESSAGE = "defeat_message"
@@ -924,6 +927,7 @@ class BattleActionPresentation:
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
+    fade_escape: bool = False
     result_start_frame: int = 0
     post_effect_wait_frame_count: int = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
     results_applied: bool = False
@@ -1986,6 +1990,9 @@ class BattleScene:
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
+        self.fade_escape_transition: MosaicFadeOut | None = None
+        self.fade_escape_snapshot = None
+        self.fade_escape_bgm_fade_frame = 0
         self.healing_popups: list[BattleHealingPopup] = []
         self.spell_damage_popups: list[BattleSpellDamagePopup] = []
         self.affinity_popups: list[BattleAffinityPopup] = []
@@ -2120,7 +2127,7 @@ class BattleScene:
             for fade in (
                 self.entrance_fade, self.escape_fade, self.result_transition_fade,
             )
-        )
+        ) or getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
 
     @property
     def is_party_command_ready(self) -> bool:
@@ -2207,6 +2214,9 @@ class BattleScene:
             return
         if self.phase is BattlePhase.ESCAPE:
             self._update_escape_animation()
+            return
+        if self.phase is BattlePhase.FADE_ESCAPE:
+            self._update_fade_escape()
             return
         if self.phase is BattlePhase.FORMATION:
             self._update_formation_animation()
@@ -2428,6 +2438,9 @@ class BattleScene:
         self.escape_actor_index = None
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
+        self.fade_escape_transition = None
+        self.fade_escape_snapshot = None
+        self.fade_escape_bgm_fade_frame = 0
         self.monster_death_animation = None
         self.dying_monster_indexes = ()
         self.monster_death_from_timeline_head = False
@@ -2616,6 +2629,7 @@ class BattleScene:
         """Restart the battle track from its beginning for this scene."""
 
         self.bgm.stop()
+        self.bgm.set_fade_rate(1.0)
         self.bgm.play(BATTLE_BGM_ID)
 
     def _close_spell_windows(self) -> None:
@@ -4248,6 +4262,15 @@ class BattleScene:
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return ally targets that can still receive the spell."""
 
+        if spell.action is SpellAction.FADE:
+            active_index = getattr(self, "active_party_index", None)
+            if (
+                active_index is None
+                or active_index in getattr(self, "escaped_party_indexes", set())
+                or self._party_member_is_dead(active_index)
+            ):
+                return ()
+            return (active_index,)
         if spell.action is SpellAction.REVIVE:
             escaped = getattr(self, "escaped_party_indexes", set())
             party_count = len(
@@ -4650,6 +4673,7 @@ class BattleScene:
             cure_results=cure_results,
             revive_results=revive_results,
             silence_results=silence_results,
+            fade_escape=spell.action is SpellAction.FADE,
             result_start_frame=result_start_frame,
         )
         affinity_popups = getattr(self, "affinity_popups", None)
@@ -5385,6 +5409,9 @@ class BattleScene:
             self.action_progression_enemy_levels = ()
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
             self._sync_unselectable_target_palette()
+            if presentation.fade_escape:
+                self._begin_fade_escape()
+                return
             if defeated_indexes:
                 if getattr(self, "action_party_index", None) is not None:
                     self._begin_action_return()
@@ -5398,6 +5425,46 @@ class BattleScene:
         if presentation.spell_effects:
             self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
             self.spell_effect_renderer.prepare(presentation.spell_effects[0].player)
+
+    def _begin_fade_escape(self) -> None:
+        """Freeze the completed battle frame for FADE's mosaic escape."""
+
+        self.phase = BattlePhase.FADE_ESCAPE
+        self.fade_escape_transition = MosaicFadeOut()
+        self.fade_escape_snapshot = None
+        self.fade_escape_bgm_fade_frame = 0
+        self.palette_shifter.set_global_mix(
+            base_rate=1.0,
+            target_color=self.palette_shifter.base_colors[0],
+        )
+
+    def _update_fade_escape(self) -> None:
+        """Grow the mosaic while fading the captured battle frame to black."""
+
+        transition = getattr(self, "fade_escape_transition", None)
+        if transition is None:
+            raise RuntimeError("FADE escape phase requires a mosaic transition")
+        if getattr(self, "fade_escape_snapshot", None) is None:
+            return
+        if not transition.is_finished:
+            transition.update()
+            self.palette_shifter.set_global_mix(
+                base_rate=transition.visible_rate,
+                target_color=self.palette_shifter.base_colors[0],
+            )
+            return
+
+        self.fade_escape_bgm_fade_frame = min(
+            self.fade_escape_bgm_fade_frame + 1,
+            FADE_ESCAPE_BGM_FADE_FRAME_COUNT,
+        )
+        bgm_rate = 1.0 - (
+            self.fade_escape_bgm_fade_frame
+            / FADE_ESCAPE_BGM_FADE_FRAME_COUNT
+        )
+        self.bgm.set_fade_rate(bgm_rate)
+        if self.fade_escape_bgm_fade_frame >= FADE_ESCAPE_BGM_FADE_FRAME_COUNT:
+            self.result = BattleResult.ESCAPED
 
     def _update_healing_popups(self) -> None:
         """Advance recovery numbers independently from the battle phase."""
@@ -8182,6 +8249,12 @@ class BattleScene:
         """Draw the battle screen in explicit back-to-front order."""
 
         if (
+            getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
+            and getattr(self, "fade_escape_snapshot", None) is not None
+        ):
+            self._draw_fade_escape_mosaic()
+            return
+        if (
             getattr(self, "phase", None) is BattlePhase.RESULT_TRANSITION
             and self.result_transition_covered
         ):
@@ -8223,6 +8296,45 @@ class BattleScene:
         self._draw_protection_icons()
         self._draw_target_cursor()
         self._draw_identify_result()
+        if (
+            getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
+            and getattr(self, "fade_escape_snapshot", None) is None
+        ):
+            self._capture_fade_escape_snapshot()
+
+    def _capture_fade_escape_snapshot(self) -> None:
+        snapshot = pyxel.Image(SCREEN_WIDTH, SCREEN_HEIGHT)
+        snapshot.blt(
+            0,
+            0,
+            pyxel.screen,
+            0,
+            0,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )
+        self.fade_escape_snapshot = snapshot
+
+    def _draw_fade_escape_mosaic(self) -> None:
+        transition = getattr(self, "fade_escape_transition", None)
+        snapshot = getattr(self, "fade_escape_snapshot", None)
+        if transition is None or snapshot is None:
+            raise RuntimeError("FADE escape mosaic has incomplete state")
+        pyxel.camera()
+        block_size = transition.block_size
+        for y in range(0, SCREEN_HEIGHT, block_size):
+            for x in range(0, SCREEN_WIDTH, block_size):
+                color = snapshot.pget(
+                    min(x + block_size // 2, SCREEN_WIDTH - 1),
+                    min(y + block_size // 2, SCREEN_HEIGHT - 1),
+                )
+                pyxel.rect(
+                    x,
+                    y,
+                    min(block_size, SCREEN_WIDTH - x),
+                    min(block_size, SCREEN_HEIGHT - y),
+                    color,
+                )
 
     def _draw_identify_effect(self) -> None:
         """Draw DA2's five-tile Identify pattern from bank 0 at Y=144."""

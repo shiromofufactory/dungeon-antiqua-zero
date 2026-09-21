@@ -13,6 +13,9 @@ from game import (
     ALERT_SOUND_ID,
     FIELD_POISON_SE_CHANNEL,
     FIELD_POISON_SE_ID,
+    FIELD_FADE_PULSE_MIN_BASE_RATE,
+    FIELD_FADE_PULSE_PALETTE,
+    FIELD_FADE_PULSE_TARGET_COLOR,
     FIRST_BATTLE_HINT_ID,
     FIRST_DEFEAT_RESTART_HINT_ID,
     FIRST_DUNGEON_EXIT_HINT_ID,
@@ -104,6 +107,39 @@ from world_sites import WorldSiteCatalog
 
 
 class GameTest(unittest.TestCase):
+    def test_field_fade_activates_once_on_a_dungeon_floor(self) -> None:
+        game = Game.__new__(Game)
+        game.current_map = Mock(profile="dungeon")
+        game.palette_shifter = Mock()
+        game.field_fade_active = False
+        game.save_data = SaveData(encounter_count=119)
+
+        self.assertTrue(game._activate_field_fade())
+        self.assertTrue(game.field_fade_active)
+        self.assertEqual(game.field_fade_pulse_frame, 0)
+        self.assertEqual(game.save_data.encounter_count, 119)
+        self.assertFalse(game._activate_field_fade())
+
+        game._update_field_fade_pulse()
+
+        self.assertEqual(game.field_fade_pulse_frame, 1)
+        game.palette_shifter.define_mix.assert_called_with(
+            FIELD_FADE_PULSE_PALETTE,
+            base_rate=1.0
+            - (1.0 - FIELD_FADE_PULSE_MIN_BASE_RATE) / 45,
+            target_color=FIELD_FADE_PULSE_TARGET_COLOR,
+        )
+
+    def test_field_fade_cannot_activate_outside_a_dungeon(self) -> None:
+        game = Game.__new__(Game)
+        game.current_map = Mock(profile="town")
+        game.palette_shifter = Mock()
+        game.field_fade_active = False
+
+        self.assertFalse(game._activate_field_fade())
+        self.assertFalse(game.field_fade_active)
+        game.palette_shifter.define_mix.assert_not_called()
+
     def test_birds_draw_above_field_and_below_field_overlays(self) -> None:
         game = Game.__new__(Game)
         game.field = Mock()
@@ -205,6 +241,23 @@ class GameTest(unittest.TestCase):
                     ],
                     phase,
                 )
+
+    def test_field_fade_draws_only_the_player_with_the_pulsing_palette(self) -> None:
+        game = Game.__new__(Game)
+        game.field = Mock()
+        game.field_renderer = Mock()
+        game.field_actors = None
+        game.field_fade_active = True
+        game.palette_shifter = Mock()
+        game._draw_site_name = Mock()
+
+        game._draw_field_screen()
+
+        game.field_renderer.draw.assert_called_once_with(
+            game.field,
+            player_palette_shifter=game.palette_shifter,
+            player_palette_name=FIELD_FADE_PULSE_PALETTE,
+        )
 
     @patch("game.StartMenuOverlay")
     @patch("game.BgmPlayer")
@@ -1409,6 +1462,7 @@ class GameTest(unittest.TestCase):
         mock.pending_target_map = None
         mock.pending_target_arrival = None
         mock.bgm = Mock()
+        mock.field_fade_active = True
         member = Mock()
         mock.party = (member,)
 
@@ -1433,6 +1487,7 @@ class GameTest(unittest.TestCase):
             screen_height=240,
         )
         self.assertIs(mock.current_map, target_map)
+        self.assertFalse(mock.field_fade_active)
         mock.bgm.play.assert_called_once_with("da3-town")
         member.recover_world_map_entry_ailments.assert_not_called()
         play.assert_not_called()
@@ -1944,6 +1999,7 @@ class GameTest(unittest.TestCase):
             faces=mock.faces,
             palette_shifter=mock.palette_shifter,
             inventory_system=mock.inventory_system,
+            on_field_fade=mock._activate_field_fade,
             on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.item_screen, item_screen_class.return_value)
@@ -2856,6 +2912,7 @@ class GameTest(unittest.TestCase):
             faces=mock.faces,
             palette_shifter=mock.palette_shifter,
             member_index=2,
+            on_field_fade=mock._activate_field_fade,
             on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)

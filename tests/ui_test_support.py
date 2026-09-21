@@ -116,6 +116,7 @@ class SpellMenuHarness(SpellMenuOverlay):
         palette_shifter: PaletteShifter | None = None,
         member_index: int | None = 0,
         event_spell_keys: Collection[str] = (),
+        on_field_fade: Callable[[], bool] | None = None,
     ) -> None:
         if party is None:
             items = load_test_items()
@@ -136,6 +137,7 @@ class SpellMenuHarness(SpellMenuOverlay):
             member_index=member_index,
             palette_shifter=palette_shifter,
             event_spell_keys=event_spell_keys,
+            on_field_fade=on_field_fade,
         )
 
 
@@ -154,6 +156,7 @@ class ItemMenuHarness(ItemMenuOverlay):
         faces: object | None = None,
         palette_shifter: PaletteShifter | None = None,
         inventory_system: InventorySystem | None = None,
+        on_field_fade: Callable[[], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         item_catalog = load_test_items() if items is None else items
@@ -180,6 +183,7 @@ class ItemMenuHarness(ItemMenuOverlay):
                 if inventory_system is None
                 else inventory_system
             ),
+            on_field_fade=on_field_fade,
             on_invalid_action=on_invalid_action,
         )
 

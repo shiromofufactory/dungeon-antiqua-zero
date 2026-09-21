@@ -1529,7 +1529,8 @@ EventRunnerは必要に応じてWorldProgressionの判定結果を条件とし�
 | Scene切り替え、フェード、BGM調停 | `SceneManager` |
 
 現在のComposition Rootでは `Game` が `EncounterSystem` の結果を受け、フィールド画面の保存、
-`BattleScene` の生成、`BattleResult` に応じたフィールド復帰を調停する。エンカウント変数は
+`BattleScene` の生成、`BattleResult` に応じたフィールド復帰を調停する。同一マップ内だけ有効な
+FADE状態と遭遇ボーダー補正、およびPC暗色点滅のRenderer入力も `Game` が所有する。エンカウント変数は
 `SaveData`、戦闘内の一時状態は `BattleScene`、回転・拡大のフレーム状態は
 `EncounterTransition` がそれぞれ所有する。ワールドマップへ切り替える時点でのHP・MP回復と
 死亡以外の状態異常・戦闘中補正の解除は、`Game` が

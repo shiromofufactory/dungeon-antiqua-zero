@@ -144,6 +144,26 @@ class EncounterSystemTest(unittest.TestCase):
     def test_dynamic_level_is_provisionally_fixed_at_one(self) -> None:
         self.assertEqual(EncounterSystem.dynamic_monster_level(), 1)
 
+    def test_accepts_a_doubled_threshold_without_changing_the_count(self) -> None:
+        random_source = FixedRandom(4)
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        before = system.advance(ENCOUNTER_THRESHOLD - 1, threshold=240)
+        triggered = system.advance(236, threshold=240)
+
+        self.assertEqual(before.count, ENCOUNTER_THRESHOLD + 3)
+        self.assertFalse(before.triggered)
+        self.assertEqual(triggered.count, 0)
+        self.assertTrue(triggered.triggered)
+
+    def test_rejects_invalid_threshold(self) -> None:
+        system = EncounterSystem()
+
+        for threshold, error in ((True, TypeError), (1.5, TypeError), (0, ValueError)):
+            with self.subTest(threshold=threshold):
+                with self.assertRaises(error):
+                    system.advance(0, threshold=threshold)  # type: ignore[arg-type]
+
     def test_high_danger_can_add_an_early_next_level_monster(self) -> None:
         random_source = ScriptedRandom(
             randrange_values=(2,),

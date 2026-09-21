@@ -20,6 +20,7 @@ from tools.screen_mocks.battle import (
     ATTACK_RETURN_JUMP_FRAME_COUNT,
     JUMP_ATTACK_RETURN_WAIT_FRAME_COUNT,
     FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT,
+    FADE_ESCAPE_BGM_FADE_FRAME_COUNT,
     ATTACK_BLUNT_SE_ID,
     ATTACK_SE_ID_BY_SUBTYPE,
     ATTACK_SLASH_SE_ID,
@@ -4075,6 +4076,18 @@ class BattleScreenMockTest(unittest.TestCase):
             (2,),
         )
 
+    def test_fade_can_target_only_its_living_caster(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.active_party_index = 1
+        mock.escaped_party_indexes = set()
+        mock._party_member_is_dead = Mock(return_value=False)
+        fade = load_mock_spells()["FADE"]
+
+        self.assertEqual(mock._selectable_party_indexes_for_spell(fade), (1,))
+
+        mock._party_member_is_dead.return_value = True
+        self.assertEqual(mock._selectable_party_indexes_for_spell(fade), ())
+
     def test_item_command_opens_item_selection_instead_of_completing_turn(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.COMMAND
@@ -5859,6 +5872,27 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.battle_popup.visible)
         mock._complete_current_turn.assert_called_once_with()
 
+    def test_fade_presentation_starts_mosaic_escape_instead_of_returning(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.action_presentation = BattleActionPresentation(
+            (),
+            fade_escape=True,
+            post_effect_wait_frame_count=0,
+        )
+        mock.action_progression_weapon = None
+        mock._apply_action_results = Mock()
+        mock._release_palette_variant = Mock()
+        mock._sync_unselectable_target_palette = Mock()
+        mock._begin_fade_escape = Mock()
+        mock._begin_action_return = Mock()
+        mock._complete_current_turn = Mock()
+
+        mock._update_action_presentation()
+
+        mock._begin_fade_escape.assert_called_once_with()
+        mock._begin_action_return.assert_not_called()
+        mock._complete_current_turn.assert_not_called()
+
     def test_all_target_spell_creates_one_effect_per_target_and_one_sound(self) -> None:
         spell = load_mock_spells()["FIRE1"]
         definition = SpellEffectDefinition.from_record(
@@ -6316,6 +6350,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._restart_battle_bgm()
 
         mock.bgm.stop.assert_called_once_with()
+        mock.bgm.set_fade_rate.assert_called_once_with(1.0)
         mock.bgm.play.assert_called_once_with(BATTLE_BGM_ID)
 
     def test_timeline_animation_finishes_interrupt_then_readies_new_head(
@@ -8679,6 +8714,40 @@ class BattleScreenMockTest(unittest.TestCase):
             mock.palette_shifter.set_global_mix.call_count,
             update_count,
         )
+
+    def test_fade_escape_waits_for_snapshot_then_finishes_at_black(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
+        mock.bgm = Mock()
+
+        mock._begin_fade_escape()
+
+        self.assertIs(mock.phase, BattleMockPhase.FADE_ESCAPE)
+        transition = mock.fade_escape_transition
+        assert transition is not None
+        mock._update_fade_escape()
+        self.assertEqual(transition.frame, 0)
+
+        mock.fade_escape_snapshot = Mock()
+        for _frame in range(transition.frame_count):
+            mock._update_fade_escape()
+
+        self.assertIsNone(getattr(mock, "result", None))
+        mock.bgm.set_fade_rate.assert_not_called()
+        mock.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=0.0,
+            target_color=0x000000,
+        )
+
+        for frame in range(1, FADE_ESCAPE_BGM_FADE_FRAME_COUNT + 1):
+            mock._update_fade_escape()
+            mock.bgm.set_fade_rate.assert_called_with(
+                1.0 - frame / FADE_ESCAPE_BGM_FADE_FRAME_COUNT,
+            )
+            if frame < FADE_ESCAPE_BGM_FADE_FRAME_COUNT:
+                self.assertIsNone(getattr(mock, "result", None))
+
+        self.assertIs(mock.result, BattleResult.ESCAPED)
 
     def test_escape_fade_starts_only_after_escape_message_acknowledgement(
         self,

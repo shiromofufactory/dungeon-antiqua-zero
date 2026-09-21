@@ -597,9 +597,20 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertTrue(game._advance_random_encounter())
 
-        game.encounter_system.advance.assert_called_once_with(158)
+        game.encounter_system.advance.assert_called_once_with(158, threshold=120)
         self.assertEqual(game.save_data.encounter_count, 0)
         game._begin_random_encounter.assert_called_once_with()
+
+        game.field_fade_active = True
+        game.save_data.encounter_count = 158
+        game.encounter_system.reset_mock()
+        game.encounter_system.advance.return_value = EncounterAdvance(161, False)
+        game._begin_random_encounter.reset_mock()
+
+        self.assertFalse(game._advance_random_encounter())
+        game.encounter_system.advance.assert_called_once_with(158, threshold=240)
+        self.assertEqual(game.save_data.encounter_count, 161)
+        game._begin_random_encounter.assert_not_called()
 
         game.current_map.profile = "town"
         game.encounter_system.reset_mock()

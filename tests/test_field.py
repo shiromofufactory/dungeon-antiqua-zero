@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import MappingProxyType
 import unittest
 from unittest.mock import Mock, call
@@ -443,6 +444,29 @@ class FieldRendererTest(unittest.TestCase):
                 1,
             ),
         )
+
+    def test_player_palette_shift_is_scoped_to_the_player_sprite(self) -> None:
+        map_data = compiled_map(("000", "000", "000"), profile="dungeon")
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        walking_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=0)
+        palette_shifter = Mock()
+        palette_shifter.shifted.return_value = nullcontext()
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=32,
+            screen_height=32,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            player_character_image=walking_image,
+            player_palette_shifter=palette_shifter,
+            player_palette_name="field_fade",
+        )
+
+        palette_shifter.shifted.assert_called_once_with("field_fade")
 
     def test_interior_player_uses_down_up_left_right_rows(
         self,

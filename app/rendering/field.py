@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import pyxel
@@ -122,6 +123,8 @@ class FieldRenderer:
         player_sprite_index: int = 0,
         player_floating: bool = False,
         player_floating_phase: int = 0,
+        player_palette_shifter: Any | None = None,
+        player_palette_name: str | None = None,
         treasure_image: Any | None = None,
         frame_count: int | None = None,
         draw_player: bool = True,
@@ -142,6 +145,12 @@ class FieldRenderer:
             player_floating_phase, int
         ):
             raise TypeError("field renderer player_floating_phase must be an integer")
+        if (player_palette_shifter is None) != (player_palette_name is None):
+            raise ValueError(
+                "player palette shifter and name must be provided together"
+            )
+        if player_palette_name is not None and not player_palette_name:
+            raise ValueError("player palette name must not be empty")
 
         camera_x, camera_y = self.camera_position(field)
         self._draw_ground(camera_x, camera_y, frame_count)
@@ -239,6 +248,8 @@ class FieldRenderer:
                     sprite_index=sprite_index,
                     floating=floating,
                     floating_phase=floating_phase,
+                    palette_shifter=player_palette_shifter,
+                    palette_name=player_palette_name,
                 )
             elif kind == "prop":
                 self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
@@ -391,6 +402,8 @@ class FieldRenderer:
         sprite_index: int = 0,
         floating: bool = False,
         floating_phase: int = 0,
+        palette_shifter: Any | None = None,
+        palette_name: str | None = None,
     ) -> None:
         if not isinstance(floating, bool):
             raise TypeError("actor character floating must be a boolean")
@@ -452,16 +465,22 @@ class FieldRenderer:
                 field.world_x - camera_x,
                 field.world_y - camera_y,
             )
-        self._pyxel.blt(
-            field.world_x - camera_x,
-            draw_y,
-            source_image,
-            source_x,
-            source_y,
-            FIELD_CHARACTER_SIZE,
-            draw_height,
-            FIELD_CHARACTER_COLKEY,
+        context = (
+            nullcontext()
+            if palette_shifter is None
+            else palette_shifter.shifted(palette_name)
         )
+        with context:
+            self._pyxel.blt(
+                field.world_x - camera_x,
+                draw_y,
+                source_image,
+                source_x,
+                source_y,
+                FIELD_CHARACTER_SIZE,
+                draw_height,
+                FIELD_CHARACTER_COLKEY,
+            )
 
     def _draw_player_character(
         self,
@@ -474,6 +493,8 @@ class FieldRenderer:
         sprite_index: int,
         floating: bool = False,
         floating_phase: int = 0,
+        palette_shifter: Any | None = None,
+        palette_name: str | None = None,
     ) -> None:
         if not isinstance(floating, bool):
             raise TypeError("player floating must be a boolean")
@@ -483,6 +504,8 @@ class FieldRenderer:
                 camera_x,
                 camera_y,
                 frame_count,
+                palette_shifter=palette_shifter,
+                palette_name=palette_name,
             )
             return
         if isinstance(sprite_index, bool) or not isinstance(sprite_index, int):
@@ -526,16 +549,22 @@ class FieldRenderer:
             field.world_x - camera_x,
             field.world_y - camera_y,
         )
-        self._pyxel.blt(
-            field.world_x - camera_x,
-            field.world_y - camera_y - FIELD_CHARACTER_SIZE,
-            image,
-            source_x,
-            source_y,
-            FIELD_CHARACTER_SIZE,
-            FIELD_PLAYER_CHARACTER_HEIGHT,
-            FIELD_CHARACTER_COLKEY,
+        context = (
+            nullcontext()
+            if palette_shifter is None
+            else palette_shifter.shifted(palette_name)
         )
+        with context:
+            self._pyxel.blt(
+                field.world_x - camera_x,
+                field.world_y - camera_y - FIELD_CHARACTER_SIZE,
+                image,
+                source_x,
+                source_y,
+                FIELD_CHARACTER_SIZE,
+                FIELD_PLAYER_CHARACTER_HEIGHT,
+                FIELD_CHARACTER_COLKEY,
+            )
 
     def _draw_prop(
         self,

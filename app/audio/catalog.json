@@ -88,6 +88,10 @@
     "spell_spark": {
       "channel": 1,
       "sound": 17
+    },
+    "spell_armor_break": {
+      "channel": 1,
+      "sound": 33
     }
   }
 }

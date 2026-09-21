@@ -84,7 +84,7 @@ PROFICIENCY_TEXT_Y = 2
 class _ProficiencyAnimation:
     growth: MenuSpellProficiencyGrowth
     spell: Spell
-    preferred_target_index: int
+    preferred_target_index: int | None
     frame: int = 0
 
 
@@ -113,6 +113,7 @@ class SpellMenuOverlay:
         palette_shifter: PaletteShifter | None = None,
         member_index: int | None = 0,
         event_spell_keys: Collection[str] = (),
+        on_field_fade: Callable[[], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         """Build a DA2-style spell view from menu-owned state."""
@@ -137,6 +138,8 @@ class SpellMenuOverlay:
             raise TypeError("event_spell_keys must contain strings")
         if on_invalid_action is not None and not callable(on_invalid_action):
             raise TypeError("on_invalid_action must be callable")
+        if on_field_fade is not None and not callable(on_field_fade):
+            raise TypeError("on_field_fade must be callable")
 
         self.party = party
         self.spells = dict(spell_catalog)
@@ -146,6 +149,7 @@ class SpellMenuOverlay:
         self.faces = faces
         self.palette_shifter = palette_shifter
         self.event_spell_keys = frozenset(event_spell_keys)
+        self.on_field_fade = on_field_fade
         self.on_invalid_action = on_invalid_action
         self.phase = SpellSelectionPhase.CASTER
         self._proficiency_animation: _ProficiencyAnimation | None = None
@@ -474,6 +478,9 @@ class SpellMenuOverlay:
         ):
             self._notify_invalid_action()
             return
+        if spell.action is SpellAction.FADE:
+            self._use_field_fade_spell(spell)
+            return
         target_indexes = self._usable_target_indexes(spell)
         if not target_indexes:
             self._notify_invalid_action()
@@ -491,8 +498,7 @@ class SpellMenuOverlay:
         self.member_cursor.active = False
         self._refresh_visible_windows()
 
-    @staticmethod
-    def _is_supported_menu_spell(spell: Spell) -> bool:
+    def _is_supported_menu_spell(self, spell: Spell) -> bool:
         """Return whether the currently implemented camp effect can use it."""
 
         return (
@@ -500,6 +506,10 @@ class SpellMenuOverlay:
             and not spell.to_enemy
             and spell.action
             in (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE)
+        ) or (
+            spell.on_camp
+            and spell.action is SpellAction.FADE
+            and self.on_field_fade is not None
         )
 
     def _can_use_spell_on_target(self, spell: Spell, target: Member) -> bool:
@@ -566,7 +576,7 @@ class SpellMenuOverlay:
         self,
         growth: MenuSpellProficiencyGrowth,
         spell: Spell,
-        preferred_target_index: int,
+        preferred_target_index: int | None,
     ) -> None:
         self._proficiency_animation = _ProficiencyAnimation(
             growth,
@@ -575,7 +585,8 @@ class SpellMenuOverlay:
         )
         self._build_windows()
         self.spell_cursor.select_key(spell.key)
-        self.member_cursor.select_key(preferred_target_index)
+        if preferred_target_index is not None:
+            self.member_cursor.select_key(preferred_target_index)
         self._refresh_guide()
         self._refresh_proficiency_window()
 
@@ -585,13 +596,50 @@ class SpellMenuOverlay:
             return
         if animation.frame >= PROFICIENCY_ANIMATION_FRAME_COUNT:
             self._proficiency_animation = None
-            self._refresh_after_healing(
-                animation.spell,
-                animation.preferred_target_index,
-            )
+            if animation.preferred_target_index is None:
+                self.phase = SpellSelectionPhase.SPELL
+                self._build_windows()
+                self.spell_cursor.select_key(animation.spell.key)
+                self._refresh_guide()
+                self._refresh_proficiency_window()
+            else:
+                self._refresh_after_healing(
+                    animation.spell,
+                    animation.preferred_target_index,
+                )
             return
         animation.frame += 1
         self._refresh_proficiency_window()
+
+    def _use_field_fade_spell(self, spell: Spell) -> bool:
+        """Apply the floor-scoped FADE effect without opening ally targeting."""
+
+        if (
+            spell.action is not SpellAction.FADE
+            or not self._is_supported_menu_spell(spell)
+            or self.member.mp < spell.mp
+            or self.on_field_fade is None
+            or not self.on_field_fade()
+        ):
+            self._notify_invalid_action()
+            return False
+        self.member.mp -= spell.mp
+        play_se(HEALING_SE_ID)
+        kind = SPELL_PROFICIENCY_BY_TYPE[spell.type]
+        growth = apply_menu_spell_proficiency_growth(
+            self.member,
+            kind,
+            mp_spent=spell.mp,
+        )
+        if growth.applied_amount > 0:
+            self._start_proficiency_animation(growth, spell, None)
+        else:
+            self.phase = SpellSelectionPhase.SPELL
+            self._build_windows()
+            self.spell_cursor.select_key(spell.key)
+            self._refresh_guide()
+            self._refresh_proficiency_window()
+        return True
 
     def _use_selected_spell(self) -> bool:
         spell = self.selected_spell

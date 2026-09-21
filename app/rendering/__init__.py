@@ -79,6 +79,11 @@ from .monster_death import (
     MonsterDeathAnimation,
     MonsterDeathPhase,
 )
+from .mosaic_fade import (
+    DEFAULT_MOSAIC_FADE_FRAME_COUNT,
+    DEFAULT_MOSAIC_MAX_BLOCK_SIZE,
+    MosaicFadeOut,
+)
 from .palette import (
     DIMMED_PALETTE,
     MONOCHROME_PALETTE,
@@ -155,6 +160,9 @@ __all__ = [
     "MONSTER_DEATH_TINT_FRAME_COUNT",
     "MonsterDeathAnimation",
     "MonsterDeathPhase",
+    "DEFAULT_MOSAIC_FADE_FRAME_COUNT",
+    "DEFAULT_MOSAIC_MAX_BLOCK_SIZE",
+    "MosaicFadeOut",
     "PaletteShifter",
     "SPELL_EFFECT_FLASH_PALETTE",
     "SpellEffectRenderer",
