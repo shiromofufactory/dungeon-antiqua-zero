@@ -91,6 +91,7 @@ app/
 │   ├── status_menu.py        # ステータスメニューOverlay
 │   ├── information_menu.py   # 情報サブメニューとモンスター図鑑Overlay
 │   ├── spell_menu.py         # 呪文メニューOverlay
+│   ├── teleport_menu.py      # 本編TELEPORTとデバッグ移動で共有する行き先選択Overlay
 │   ├── debug_menu.py         # 現在の開発用デバッグOverlay
 │   ├── debug_text.py         # 翻訳対象外のデバッグ専用日本語テキスト
 │   ├── party_status.py       # 子メニュー共通の下部パーティ表示
@@ -492,7 +493,7 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 レベル1から9の呪文はMemberの対応する元素・神聖・暗黒熟練度以下を習得済みとし、
 レベル0は通常成長から除外してイベント習得キーがある場合だけ習得済みとする。呪文メニューOverlayは
 この判定結果を描画するだけとし、イベント習得状態や呪文効果を画面固有状態へ埋め込まない。
-メニューから発動した呪文の熟練度は、Pyxel非依存の `systems/spell_progression.py` が
+メニューから発動したFADEとTELEPORT以外の呪文の熟練度は、Pyxel非依存の `systems/spell_progression.py` が
 `floor(√実消費MP) + 使用種別の適性 + 他の呪文種別の最高LV - 使用種別のLV` を0以上へ丸めて
 確定し、レベル上昇時は `Member` の共通成長規則で最大MPを1段分だけ理論値へ近づける。`ui/spell_menu.py` は発動前後の熟練度を受け取り、
 対象選択中の小Window表示と表示値の補間を所有する。補間時間は [フィールド](./features/field.md) を参照する。呪文自体のSEとの競合を避けるため、
@@ -1349,7 +1350,8 @@ Scene切り替えはTransitionとして調停する。拠点名Windowやフェ�
 通常の設定項目と視覚的に区別する。
 
 デバッグメニュー固有の入力、数値入力バッファ、候補一覧は
-`app/ui/debug_menu.py` が所有する。`Game` はデバッグ画面の生成、終了、更新後の
+`app/ui/debug_menu.py` が所有する。ただしTELEPORTの行き先候補一覧は本編と共通の
+`app/ui/teleport_menu.py` が所有し、デバッグメニューは同じOverlayを呼び出す。`Game` はデバッグ画面の生成、終了、更新後の
 パーティ参照だけを担当し、デバッグ項目ごとの分岐を `game.py` へ増やさない。数値入力はDA2の
 セーブコード入力と同じ0〜9の2段パッド、削除、決定で構成し、パーティLVは1〜99、Goldは
 0〜999999へ制限する。メンバー候補20人は10行×2列に配置し、スクロールなしで1画面に表示する。

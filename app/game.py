@@ -22,8 +22,9 @@ from game_data import (
     load_skills,
     load_spells,
 )
-from ui.debug_menu import DebugMenuOverlay, DebugShopTarget, DebugTeleportTarget
+from ui.debug_menu import DebugMenuOverlay, DebugShopTarget
 from ui.debug_text import DEBUG_TEXT
+from ui.teleport_menu import TeleportTarget
 from ui.game_menu import GameMenuAction, GameMenuOverlay
 from ui.field_menu_guide import FieldMenuGuide
 from ui.hint import HintOverlay
@@ -601,6 +602,7 @@ class Game:
         self.pending_site = None
         self.pending_target_map = None
         self.pending_target_arrival = None
+        self.pending_teleport_source: str | None = None
         self.pending_loaded_state: LoadedGameState | None = None
         self.pending_loaded_map = None
         self.pending_loaded_field: FieldMovement | None = None
@@ -1952,18 +1954,18 @@ class Game:
             settings=self.settings,
             fonts=self.fonts,
             alert=self.alert,
-            teleport_targets=self._debug_teleport_targets(),
+            teleport_targets=self._teleport_targets(),
             on_teleport=self._start_debug_teleport,
             shop_targets=self._debug_shop_targets(),
             on_shop=self._start_debug_shop,
         )
 
-    def _debug_teleport_targets(self) -> tuple[DebugTeleportTarget, ...]:
+    def _teleport_targets(self) -> tuple[TeleportTarget, ...]:
         """Build localized choices accepted by the real teleport rules."""
 
         localizer = Localizer(self.settings.language)
         return tuple(
-            DebugTeleportTarget(
+            TeleportTarget(
                 site.id,
                 self.texts.text(
                     site.name_text_key,
@@ -1973,6 +1975,11 @@ class Game:
             )
             for site in self.travel_system.teleport_destinations(self.save_data)
         )
+
+    def _debug_teleport_targets(self) -> tuple[TeleportTarget, ...]:
+        """Retain the development-menu entry point for focused harnesses."""
+
+        return self._teleport_targets()
 
     def _debug_shop_targets(self) -> tuple[DebugShopTarget, ...]:
         """Expose every loaded shop to the development-only selector."""
@@ -2015,7 +2022,25 @@ class Game:
         return True
 
     def _start_debug_teleport(self, site_id: str) -> bool:
-        """Stage one visited teleport destination and begin fading out."""
+        """Stage one debug-selected destination through the shared travel path."""
+
+        return self._start_teleport(site_id, source="debug")
+
+    def _start_field_teleport(self, site_id: str) -> bool:
+        """Stage one TELEPORT destination selected from the field spell menu."""
+
+        return self._start_teleport(site_id, source="spell")
+
+    def _start_item_teleport(self, site_id: str) -> bool:
+        """Stage one destination selected with a field teleport item."""
+
+        return self._start_teleport(site_id, source="item")
+
+    def _start_teleport(self, site_id: str, *, source: str) -> bool:
+        """Resolve one visited destination and begin the common teleport fade."""
+
+        if source not in ("debug", "spell", "item"):
+            raise ValueError(f"unsupported teleport source: {source}")
 
         try:
             destination = self.travel_system.teleport_destination(
@@ -2027,6 +2052,7 @@ class Game:
         if not self._stage_map_destination(destination):
             return False
         self.pending_site = None
+        self.pending_teleport_source = source
         self._begin_screen_change(GameScreenChange.TELEPORT)
         pyxel.play(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
         return True
@@ -2045,12 +2071,24 @@ class Game:
             self.settings_window = None
             self.settings_cursor = None
 
-    def _apply_pending_debug_teleport(self) -> None:
-        """Apply a debug teleport and return directly to the world map."""
+    def _apply_pending_teleport(self) -> None:
+        """Apply shared debug/spell/item teleport state and return to the field."""
 
-        self._finish_debug_menu(resume_settings=False)
+        source = getattr(self, "pending_teleport_source", None)
+        if source == "debug":
+            self._finish_debug_menu(resume_settings=False)
+        elif source == "spell":
+            if self.spell_screen is not None:
+                self.selected_member_index = self.spell_screen.member_index
+            self.spell_screen = None
+            self._refresh_party_window_texts()
+        elif source == "item":
+            self.item_screen = None
+        else:
+            raise RuntimeError("teleport has no pending source")
         self._apply_pending_map_destination()
         self.showing_field = True
+        self.pending_teleport_source = None
 
     def _start_status(self) -> None:
         self.command_cursor.active = False
@@ -2082,6 +2120,8 @@ class Game:
             palette_shifter=self.palette_shifter,
             inventory_system=inventory_system,
             on_field_fade=self._activate_field_fade,
+            teleport_targets=self._teleport_targets(),
+            on_field_teleport=self._start_item_teleport,
             on_invalid_action=self.alert.start,
         )
 
@@ -2261,7 +2301,7 @@ class Game:
         elif change is GameScreenChange.CHANGE_MAP:
             self._apply_pending_site_change()
         elif change is GameScreenChange.TELEPORT:
-            self._apply_pending_debug_teleport()
+            self._apply_pending_teleport()
         elif change is GameScreenChange.START_GAME:
             self._apply_start_game()
         else:
@@ -2340,6 +2380,8 @@ class Game:
             palette_shifter=self.palette_shifter,
             member_index=member_index,
             on_field_fade=self._activate_field_fade,
+            teleport_targets=self._teleport_targets(),
+            on_field_teleport=self._start_field_teleport,
             on_invalid_action=self.alert.start,
         )
         if member_index is None:

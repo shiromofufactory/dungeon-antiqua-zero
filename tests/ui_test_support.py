@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 
 from tools._bootstrap import APP_ROOT
 
@@ -21,6 +21,7 @@ from text_catalog import TextCatalog
 from ui.equipment_menu import EquipmentMenuOverlay
 from ui.item_menu import ItemMenuOverlay
 from ui.spell_menu import SpellMenuOverlay
+from ui.teleport_menu import TeleportTarget
 from ui.status_menu import FACES_IMAGE_ID, StatusMenuOverlay, WindowCursor, WindowFactory
 
 
@@ -117,6 +118,8 @@ class SpellMenuHarness(SpellMenuOverlay):
         member_index: int | None = 0,
         event_spell_keys: Collection[str] = (),
         on_field_fade: Callable[[], bool] | None = None,
+        teleport_targets: Iterable[TeleportTarget] = (),
+        on_field_teleport: Callable[[str], bool] | None = None,
     ) -> None:
         if party is None:
             items = load_test_items()
@@ -138,6 +141,8 @@ class SpellMenuHarness(SpellMenuOverlay):
             palette_shifter=palette_shifter,
             event_spell_keys=event_spell_keys,
             on_field_fade=on_field_fade,
+            teleport_targets=teleport_targets,
+            on_field_teleport=on_field_teleport,
         )
 
 
@@ -157,6 +162,8 @@ class ItemMenuHarness(ItemMenuOverlay):
         palette_shifter: PaletteShifter | None = None,
         inventory_system: InventorySystem | None = None,
         on_field_fade: Callable[[], bool] | None = None,
+        teleport_targets: Iterable[TeleportTarget] = (),
+        on_field_teleport: Callable[[str], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         item_catalog = load_test_items() if items is None else items
@@ -184,6 +191,8 @@ class ItemMenuHarness(ItemMenuOverlay):
                 else inventory_system
             ),
             on_field_fade=on_field_fade,
+            teleport_targets=teleport_targets,
+            on_field_teleport=on_field_teleport,
             on_invalid_action=on_invalid_action,
         )
 

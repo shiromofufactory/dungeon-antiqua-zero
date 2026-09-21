@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from enum import Enum, StrEnum
 
 from battle_magic import DA2_DEFAULT_ITEM_SPELL_ABILITY, resolve_healing
@@ -27,6 +28,7 @@ from ui import (
     pad,
 )
 from ui.party_status import PartyStatusPanel
+from ui.teleport_menu import TeleportMenuOverlay, TeleportTarget
 from ui.text_layout import right_aligned_grid_x
 
 FACES_IMAGE_ID = "faces/faces"
@@ -68,7 +70,15 @@ DROP_CONFIRM_CURSOR_X = 2
 DROP_CONFIRM_YES_Y = 2
 DROP_CONFIRM_NO_Y = 5
 HEALING_SE_ID = "spell_healing1"
-FIELD_USE_ITEM_KEYS = frozenset(("POTION", "DIVINE TEAR", "DARK CHRISM"))
+TELEPORT_RING_KEY = "TELEPORT RING"
+FIELD_USE_ITEM_KEYS = frozenset(
+    ("POTION", "DIVINE TEAR", "DARK CHRISM", TELEPORT_RING_KEY)
+)
+
+
+@dataclass(frozen=True)
+class _ItemMenuAlert:
+    start: Callable[[], None]
 
 
 def _validate_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
@@ -115,6 +125,8 @@ class ItemMenuOverlay:
         palette_shifter: PaletteShifter | None = None,
         inventory_system: InventorySystem,
         on_field_fade: Callable[[], bool] | None = None,
+        teleport_targets: Iterable[TeleportTarget] = (),
+        on_field_teleport: Callable[[str], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         """Build the DA2-style item view from menu-owned state."""
@@ -139,6 +151,15 @@ class ItemMenuOverlay:
             raise TypeError("on_invalid_action must be callable")
         if on_field_fade is not None and not callable(on_field_fade):
             raise TypeError("on_field_fade must be callable")
+        registered_teleports = tuple(teleport_targets)
+        if not all(
+            isinstance(target, TeleportTarget) for target in registered_teleports
+        ):
+            raise TypeError("teleport_targets must contain TeleportTarget values")
+        if on_field_teleport is not None and not callable(on_field_teleport):
+            raise TypeError("on_field_teleport must be callable")
+        if registered_teleports and on_field_teleport is None:
+            raise ValueError("on_field_teleport is required for teleport targets")
 
         self.party = party
         self.items = dict(item_catalog)
@@ -151,7 +172,10 @@ class ItemMenuOverlay:
         self.faces = faces
         self.palette_shifter = palette_shifter
         self.on_field_fade = on_field_fade
+        self.teleport_targets = registered_teleports
+        self.on_field_teleport = on_field_teleport
         self.on_invalid_action = on_invalid_action
+        self.teleport_menu: TeleportMenuOverlay | None = None
         self.phase = ItemSelectionPhase.CATEGORY
         self.selected_item_index = 0
         self.scroll_offset = 0
@@ -488,7 +512,10 @@ class ItemMenuOverlay:
         if (
             item is None
             or item.key not in FIELD_USE_ITEM_KEYS
-            or item.equip_type is not ItemEquipType.ITEM
+            or (
+                item.equip_type is not ItemEquipType.ITEM
+                and item.key != TELEPORT_RING_KEY
+            )
             or not item.use_spell_key
         ):
             return None
@@ -498,10 +525,19 @@ class ItemMenuOverlay:
             or not spell.on_camp
             or spell.to_enemy
             or spell.action
-            not in (SpellAction.HEAL, SpellAction.REVIVE, SpellAction.FADE)
+            not in (
+                SpellAction.HEAL,
+                SpellAction.REVIVE,
+                SpellAction.FADE,
+                SpellAction.TELEPORT,
+            )
             or (
                 spell.action is SpellAction.FADE
                 and self.on_field_fade is None
+            )
+            or (
+                spell.action is SpellAction.TELEPORT
+                and self.on_field_teleport is None
             )
         ):
             return None
@@ -543,6 +579,9 @@ class ItemMenuOverlay:
             return
         if spell.action is SpellAction.FADE:
             self._use_selected_fade_item()
+            return
+        if spell.action is SpellAction.TELEPORT:
+            self._open_teleport_item_menu()
             return
         target_indexes = self._usable_target_indexes(spell)
         if not target_indexes:
@@ -674,6 +713,50 @@ class ItemMenuOverlay:
         self._build_party_panel()
         return True
 
+    def _open_teleport_item_menu(self) -> None:
+        """Open the shared destination selector for the teleport ring."""
+
+        item = self.selected_item
+        spell = self._field_use_spell(item)
+        if (
+            item is None
+            or spell is None
+            or spell.action is not SpellAction.TELEPORT
+            or self.inventory_system.quantity(item) <= 0
+            or self.on_field_teleport is None
+        ):
+            self._notify_invalid_action()
+            return
+        self.teleport_menu = TeleportMenuOverlay(
+            targets=self.teleport_targets,
+            settings=self.settings,
+            fonts=self.fonts,
+            alert=_ItemMenuAlert(self._notify_invalid_action),
+            on_teleport=self._use_selected_teleport_item,
+        )
+
+    def _use_selected_teleport_item(self, site_id: str) -> bool:
+        """Begin teleport and consume the loose ring only after acceptance."""
+
+        item = self.selected_item
+        spell = self._field_use_spell(item)
+        if (
+            item is None
+            or spell is None
+            or spell.action is not SpellAction.TELEPORT
+            or self.inventory_system.quantity(item) <= 0
+            or self.on_field_teleport is None
+            or (
+                item.breaks_on_use
+                and not self.inventory_system.can_remove(item)
+            )
+            or not self.on_field_teleport(site_id)
+        ):
+            return False
+        if item.breaks_on_use and not self.inventory_system.remove(item):
+            raise RuntimeError("accepted teleport item could not be consumed")
+        return True
+
     def _start_drop_confirmation(self, item: Item) -> None:
         raw_name = self.localizer.value(item.names, "name")
         if not isinstance(raw_name, str) or not raw_name:
@@ -772,6 +855,11 @@ class ItemMenuOverlay:
     def update(self, input_state: InputState) -> bool:
         """Update selection and report whether the menu should be restored."""
 
+        if self.teleport_menu is not None:
+            if self.teleport_menu.update(input_state):
+                self.teleport_menu = None
+            return False
+
         self.item_list_window.set_vertical_navigation_pressed()
 
         if self.phase is ItemSelectionPhase.CONFIRMATION:
@@ -842,6 +930,9 @@ class ItemMenuOverlay:
         return False
 
     def draw(self) -> None:
+        if self.teleport_menu is not None:
+            self.teleport_menu.draw()
+            return
         for window in self.windows:
             window.draw()
         self.party_panel.draw_faces(self.dimmed_member_indexes)

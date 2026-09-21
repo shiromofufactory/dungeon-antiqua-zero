@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
@@ -49,6 +49,7 @@ from ui import (
     WindowText,
     pad,
 )
+from ui.teleport_menu import TeleportMenuOverlay, TeleportTarget
 
 FACES_IMAGE_ID = "faces/faces"
 MEMBER_WINDOW_GRID = (0, 0, 28, 12)
@@ -88,6 +89,11 @@ class _ProficiencyAnimation:
     frame: int = 0
 
 
+@dataclass(frozen=True)
+class _SpellMenuAlert:
+    start: Callable[[], None]
+
+
 class SpellSelectionPhase(Enum):
     """Selection stage used by the DA2-style spell menu."""
 
@@ -114,6 +120,8 @@ class SpellMenuOverlay:
         member_index: int | None = 0,
         event_spell_keys: Collection[str] = (),
         on_field_fade: Callable[[], bool] | None = None,
+        teleport_targets: Iterable[TeleportTarget] = (),
+        on_field_teleport: Callable[[str], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         """Build a DA2-style spell view from menu-owned state."""
@@ -140,6 +148,15 @@ class SpellMenuOverlay:
             raise TypeError("on_invalid_action must be callable")
         if on_field_fade is not None and not callable(on_field_fade):
             raise TypeError("on_field_fade must be callable")
+        registered_teleports = tuple(teleport_targets)
+        if not all(
+            isinstance(target, TeleportTarget) for target in registered_teleports
+        ):
+            raise TypeError("teleport_targets must contain TeleportTarget values")
+        if on_field_teleport is not None and not callable(on_field_teleport):
+            raise TypeError("on_field_teleport must be callable")
+        if registered_teleports and on_field_teleport is None:
+            raise ValueError("on_field_teleport is required for teleport targets")
 
         self.party = party
         self.spells = dict(spell_catalog)
@@ -150,9 +167,12 @@ class SpellMenuOverlay:
         self.palette_shifter = palette_shifter
         self.event_spell_keys = frozenset(event_spell_keys)
         self.on_field_fade = on_field_fade
+        self.teleport_targets = registered_teleports
+        self.on_field_teleport = on_field_teleport
         self.on_invalid_action = on_invalid_action
         self.phase = SpellSelectionPhase.CASTER
         self._proficiency_animation: _ProficiencyAnimation | None = None
+        self.teleport_menu: TeleportMenuOverlay | None = None
         self._spells_by_position = self._index_spells()
         self.member_index = (
             self._first_usable_member_index()
@@ -481,6 +501,9 @@ class SpellMenuOverlay:
         if spell.action is SpellAction.FADE:
             self._use_field_fade_spell(spell)
             return
+        if spell.action is SpellAction.TELEPORT:
+            self._open_field_teleport(spell)
+            return
         target_indexes = self._usable_target_indexes(spell)
         if not target_indexes:
             self._notify_invalid_action()
@@ -510,6 +533,10 @@ class SpellMenuOverlay:
             spell.on_camp
             and spell.action is SpellAction.FADE
             and self.on_field_fade is not None
+        ) or (
+            spell.on_camp
+            and spell.action is SpellAction.TELEPORT
+            and self.on_field_teleport is not None
         )
 
     def _can_use_spell_on_target(self, spell: Spell, target: Member) -> bool:
@@ -611,6 +638,39 @@ class SpellMenuOverlay:
         animation.frame += 1
         self._refresh_proficiency_window()
 
+    def _open_field_teleport(self, spell: Spell) -> bool:
+        """Open the shared provisional destination selector for TELEPORT."""
+
+        if (
+            spell.action is not SpellAction.TELEPORT
+            or not self._is_supported_menu_spell(spell)
+            or self.member.mp < spell.mp
+            or self.on_field_teleport is None
+        ):
+            self._notify_invalid_action()
+            return False
+        self.teleport_menu = TeleportMenuOverlay(
+            targets=self.teleport_targets,
+            settings=self.settings,
+            fonts=self.fonts,
+            alert=_SpellMenuAlert(self._notify_invalid_action),
+            on_teleport=self._use_field_teleport,
+        )
+        return True
+
+    def _use_field_teleport(self, site_id: str) -> bool:
+        spell = self.selected_spell
+        if (
+            spell is None
+            or spell.action is not SpellAction.TELEPORT
+            or self.member.mp < spell.mp
+            or self.on_field_teleport is None
+            or not self.on_field_teleport(site_id)
+        ):
+            return False
+        self.member.mp -= spell.mp
+        return True
+
     def _use_field_fade_spell(self, spell: Spell) -> bool:
         """Apply the floor-scoped FADE effect without opening ally targeting."""
 
@@ -625,20 +685,11 @@ class SpellMenuOverlay:
             return False
         self.member.mp -= spell.mp
         play_se(HEALING_SE_ID)
-        kind = SPELL_PROFICIENCY_BY_TYPE[spell.type]
-        growth = apply_menu_spell_proficiency_growth(
-            self.member,
-            kind,
-            mp_spent=spell.mp,
-        )
-        if growth.applied_amount > 0:
-            self._start_proficiency_animation(growth, spell, None)
-        else:
-            self.phase = SpellSelectionPhase.SPELL
-            self._build_windows()
-            self.spell_cursor.select_key(spell.key)
-            self._refresh_guide()
-            self._refresh_proficiency_window()
+        self.phase = SpellSelectionPhase.SPELL
+        self._build_windows()
+        self.spell_cursor.select_key(spell.key)
+        self._refresh_guide()
+        self._refresh_proficiency_window()
         return True
 
     def _use_selected_spell(self) -> bool:
@@ -706,6 +757,11 @@ class SpellMenuOverlay:
     def update(self, input_state: InputState) -> bool:
         """Update selection and report whether the menu should be restored."""
 
+        if self.teleport_menu is not None:
+            if self.teleport_menu.update(input_state):
+                self.teleport_menu = None
+            return False
+
         if self._proficiency_animation is not None:
             self._update_proficiency_animation()
             return False
@@ -750,6 +806,9 @@ class SpellMenuOverlay:
         return False
 
     def draw(self) -> None:
+        if self.teleport_menu is not None:
+            self.teleport_menu.draw()
+            return
         for window in self.windows:
             window.draw()
 

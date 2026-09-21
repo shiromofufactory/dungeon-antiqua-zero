@@ -4079,17 +4079,56 @@ class BattleScreenMockTest(unittest.TestCase):
             (2,),
         )
 
-    def test_fade_can_target_only_its_living_caster(self) -> None:
+    def test_fade_and_teleport_can_target_only_their_living_caster(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.active_party_index = 1
         mock.escaped_party_indexes = set()
         mock._party_member_is_dead = Mock(return_value=False)
-        fade = load_mock_spells()["FADE"]
+        spells = load_mock_spells()
 
-        self.assertEqual(mock._selectable_party_indexes_for_spell(fade), (1,))
+        for spell_key in ("FADE", "TELEPORT"):
+            with self.subTest(spell_key=spell_key):
+                self.assertEqual(
+                    mock._selectable_party_indexes_for_spell(spells[spell_key]),
+                    (1,),
+                )
 
         mock._party_member_is_dead.return_value = True
-        self.assertEqual(mock._selectable_party_indexes_for_spell(fade), ())
+        for spell_key in ("FADE", "TELEPORT"):
+            with self.subTest(spell_key=spell_key):
+                self.assertEqual(
+                    mock._selectable_party_indexes_for_spell(spells[spell_key]),
+                    (),
+                )
+
+    def test_teleport_action_presentation_uses_fade_escape(self) -> None:
+        spell = load_mock_spells()["TELEPORT"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.monsters = ()
+        mock.active_party_index = 0
+        mock.action_targets_enemy = False
+        mock.action_targets_all = True
+        mock.selectable_party_target_indexes = (0,)
+        mock.selectable_target_indexes = ()
+        mock.selected_party_target_index = None
+        mock.selected_target_index = None
+        mock.spell_effects = {}
+        mock.target_cursor = Mock(active=True)
+        mock.party_target_cursor = Mock(active=False)
+        mock.all_target_cursors = ()
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+
+        self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        self.assertTrue(mock.action_presentation.fade_escape)
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
 
     def test_item_command_opens_item_selection_instead_of_completing_turn(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -6235,7 +6274,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.target_cursor.active)
 
     def test_allied_all_target_creates_one_cursor_for_each_living_member(self) -> None:
-        spell = load_mock_spells()["TELEPORT"]
+        spell = load_mock_spells()["MAGIC SHIELD"]
         items = load_mock_items()
         party_keys = ("Fiora", "Cerion", "Alvan")
         mock = BattleScreenMock.__new__(BattleScreenMock)

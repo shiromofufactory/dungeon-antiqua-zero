@@ -13,6 +13,7 @@ from app.spell import SpellAction, SpellType
 from member import ProficiencyKind
 from rendering import DIMMED_PALETTE, MONOCHROME_PALETTE
 from ui import DEFAULT_TEXT_COLOR
+from ui.teleport_menu import TeleportTarget
 from ui.spell_menu import (
     FACE_SIZE,
     GUIDE_WINDOW_GRID,
@@ -516,16 +517,57 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
         self.assertFalse(mock.member_cursor.active)
         self.assertEqual(mock.member.mp, initial_mp - spell.mp)
-        self.assertGreater(proficiency.progress, initial_progress)
-        self.assertIsNotNone(mock._proficiency_animation)
-        play_se.assert_called_once_with("spell_healing1")
-
-        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
-            mock.update(InputState())
-
+        self.assertEqual(proficiency.progress, initial_progress)
         self.assertIsNone(mock._proficiency_animation)
+        play_se.assert_called_once_with("spell_healing1")
         self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
         self.assertEqual(mock.spell_cursor.selected_key, "FADE")
+
+    def test_teleport_uses_shared_destination_menu_without_proficiency_growth(
+        self,
+    ) -> None:
+        teleport = Mock(return_value=True)
+        target = TeleportTarget("sample_town", "サンプルの町")
+        mock = SpellMenuHarness(
+            member_index=0,
+            event_spell_keys={"TELEPORT"},
+            teleport_targets=(target,),
+            on_field_teleport=teleport,
+        )
+        spell = mock.spells["TELEPORT"]
+        proficiency = mock.member.proficiency(ProficiencyKind.MYSTIC)
+        initial_mp = mock.member.mp
+        initial_progress = proficiency.progress
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.spell_cursor.select_key(spell.key)
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIsNotNone(mock.teleport_menu)
+        assert mock.teleport_menu is not None
+        self.assertEqual(mock.teleport_menu.cursor.selected_key, "sample_town")
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        teleport.assert_called_once_with("sample_town")
+        self.assertEqual(mock.member.mp, initial_mp - spell.mp)
+        self.assertEqual(proficiency.progress, initial_progress)
+        self.assertIsNone(mock._proficiency_animation)
+
+    def test_canceling_teleport_destination_returns_to_spell_selection(self) -> None:
+        mock = SpellMenuHarness(
+            event_spell_keys={"TELEPORT"},
+            teleport_targets=(TeleportTarget("sample_town", "サンプルの町"),),
+            on_field_teleport=Mock(return_value=True),
+        )
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.spell_cursor.select_key("TELEPORT")
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        mock.update(InputState(cancel=InputButton(True, True)))
+
+        self.assertIsNone(mock.teleport_menu)
+        self.assertIs(mock.phase, SpellSelectionPhase.SPELL)
+        self.assertEqual(mock.spell_cursor.selected_key, "TELEPORT")
 
     def test_fade_activation_failure_does_not_spend_mp(self) -> None:
         activate = Mock(return_value=False)

@@ -1651,8 +1651,77 @@ class GameTest(unittest.TestCase):
             mock.pending_screen_change,
             GameScreenChange.TELEPORT,
         )
+        self.assertEqual(mock.pending_teleport_source, "debug")
         self.assertEqual(mock.fade.frame_count, SITE_MAP_FADE_FRAME_COUNT)
         play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+
+    @patch("game.pyxel.play")
+    def test_field_teleport_uses_the_same_staged_transition(self, play: Mock) -> None:
+        destination = MapDestination("worldmap", "sample_town_world")
+        arrival = MapArrivalPoint(
+            "sample_town_world",
+            MapCell(7, 8),
+            "down",
+            True,
+            "sample_town",
+        )
+        target_map = Mock()
+        target_map.arrival_point.return_value = arrival
+        mock = Game.__new__(Game)
+        mock.save_data = SaveData(visited_site_ids={"sample_town"})
+        mock.travel_system = Mock()
+        mock.travel_system.teleport_destination.return_value = destination
+        mock.map_resources = Mock()
+        mock.map_resources.map.return_value = target_map
+        mock.pending_site = None
+        mock.pending_target_map = None
+        mock.pending_target_arrival = None
+        mock.pending_screen_change = None
+        mock.fade = FadeThroughBlack()
+
+        self.assertTrue(mock._start_field_teleport("sample_town"))
+
+        self.assertEqual(mock.pending_teleport_source, "spell")
+        self.assertIs(mock.pending_target_map, target_map)
+        self.assertIs(mock.pending_target_arrival, arrival)
+        self.assertIs(mock.pending_screen_change, GameScreenChange.TELEPORT)
+        play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+
+    def test_applying_spell_teleport_closes_spell_menu_and_returns_to_field(
+        self,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.pending_teleport_source = "spell"
+        mock.spell_screen = Mock(member_index=2)
+        mock.selected_member_index = 0
+        mock._refresh_party_window_texts = Mock()
+        mock._apply_pending_map_destination = Mock()
+        mock.showing_field = False
+
+        mock._apply_pending_teleport()
+
+        self.assertEqual(mock.selected_member_index, 2)
+        self.assertIsNone(mock.spell_screen)
+        self.assertTrue(mock.showing_field)
+        self.assertIsNone(mock.pending_teleport_source)
+        mock._refresh_party_window_texts.assert_called_once_with()
+        mock._apply_pending_map_destination.assert_called_once_with()
+
+    def test_applying_item_teleport_closes_item_menu_and_returns_to_field(
+        self,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.pending_teleport_source = "item"
+        mock.item_screen = Mock()
+        mock._apply_pending_map_destination = Mock()
+        mock.showing_field = False
+
+        mock._apply_pending_teleport()
+
+        self.assertIsNone(mock.item_screen)
+        self.assertTrue(mock.showing_field)
+        self.assertIsNone(mock.pending_teleport_source)
+        mock._apply_pending_map_destination.assert_called_once_with()
 
     @patch("game.pyxel.channels")
     def test_se_volume_applies_to_every_game_se_channel(
@@ -1690,6 +1759,7 @@ class GameTest(unittest.TestCase):
         mock = Game.__new__(Game)
         mock.pending_target_map = target_map
         mock.pending_target_arrival = arrival
+        mock.pending_teleport_source = "debug"
         mock.world_map = target_map
         mock.debug_screen = Mock(party=party)
         mock.party = ()
@@ -1704,7 +1774,7 @@ class GameTest(unittest.TestCase):
         mock.travel_system = Mock()
         mock.bgm = Mock()
 
-        mock._apply_pending_debug_teleport()
+        mock._apply_pending_teleport()
 
         field_movement_class.assert_called_once_with(
             target_map,
@@ -1718,6 +1788,7 @@ class GameTest(unittest.TestCase):
         )
         self.assertTrue(mock.showing_field)
         self.assertIsNone(mock.debug_screen)
+        self.assertIsNone(mock.pending_teleport_source)
         self.assertIsNone(mock.settings_window)
         self.assertIsNone(mock.settings_cursor)
         mock.bgm.play.assert_called_once_with("da3-field")
@@ -1976,6 +2047,7 @@ class GameTest(unittest.TestCase):
         mock.settings_cursor = None
         mock.confirmation_cursor = None
         mock.item_screen = None
+        mock._teleport_targets = Mock(return_value=())
 
         mock.update()
 
@@ -2000,6 +2072,8 @@ class GameTest(unittest.TestCase):
             palette_shifter=mock.palette_shifter,
             inventory_system=mock.inventory_system,
             on_field_fade=mock._activate_field_fade,
+            teleport_targets=(),
+            on_field_teleport=mock._start_item_teleport,
             on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.item_screen, item_screen_class.return_value)
@@ -2890,6 +2964,7 @@ class GameTest(unittest.TestCase):
         mock.settings_cursor = None
         mock.confirmation_cursor = None
         mock.spell_screen = None
+        mock._teleport_targets = Mock(return_value=())
 
         mock.update()
 
@@ -2913,6 +2988,8 @@ class GameTest(unittest.TestCase):
             palette_shifter=mock.palette_shifter,
             member_index=2,
             on_field_fade=mock._activate_field_fade,
+            teleport_targets=(),
+            on_field_teleport=mock._start_field_teleport,
             on_invalid_action=mock.alert.start,
         )
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)
@@ -2936,6 +3013,7 @@ class GameTest(unittest.TestCase):
         mock.palette_shifter = Mock()
         mock.selected_member_index = 0
         mock.menu_member_selected = False
+        mock._teleport_targets = Mock(return_value=())
         spell_screen_class.return_value.member_index = 1
 
         mock._start_spell()

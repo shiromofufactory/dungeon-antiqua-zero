@@ -15,7 +15,7 @@ from member import (
     MIN_INTERNAL_LEVEL,
     Member,
 )
-from resources import FontResources, FontRole
+from resources import FontResources
 from state import Language, SaveData, Settings
 from systems import DebugPartyEditor, DebugPartyError, InventorySystem
 
@@ -31,6 +31,11 @@ from ui import (
     input_icon_tag,
 )
 from ui.debug_text import DEBUG_TEXT
+from ui.teleport_menu import (
+    TeleportMenuLabels,
+    TeleportMenuOverlay,
+    TeleportTarget,
+)
 
 DEBUG_WINDOW_GRID = (2, 2, 60, 56)
 DEBUG_ROW_HEIGHT = 3
@@ -79,11 +84,6 @@ ITEM_CURSOR_X = (4, 34)
 ITEM_GUIDE_X = 24
 ITEM_QUANTITY_X = 28
 ITEM_GUIDE_Y = 52
-TELEPORT_FIRST_Y = 9
-TELEPORT_ROW_HEIGHT = DEBUG_ROW_HEIGHT
-TELEPORT_VISIBLE_COUNT = 13
-TELEPORT_TEXT_X = 6
-TELEPORT_CURSOR_X = 4
 SHOP_FIRST_Y = 7
 SHOP_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 SHOP_VISIBLE_COUNT = 13
@@ -121,18 +121,7 @@ class DebugItemPane(Enum):
     WAREHOUSE = auto()
 
 
-@dataclass(frozen=True)
-class DebugTeleportTarget:
-    """One stable teleport target and its already-localized display name."""
-
-    site_id: str
-    name: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.site_id, str) or not self.site_id:
-            raise ValueError("debug teleport site ID must be a non-empty string")
-        if not isinstance(self.name, str) or not self.name:
-            raise ValueError("debug teleport name must be a non-empty string")
+DebugTeleportTarget = TeleportTarget
 
 
 @dataclass(frozen=True)
@@ -210,7 +199,7 @@ class DebugMenuOverlay:
         settings: Settings,
         fonts: FontResources,
         alert: object,
-        teleport_targets: Iterable[DebugTeleportTarget] = (),
+        teleport_targets: Iterable[TeleportTarget] = (),
         on_teleport: Callable[[str], bool] | None = None,
         shop_targets: Iterable[DebugShopTarget] = (),
         on_shop: Callable[[str], bool] | None = None,
@@ -229,12 +218,10 @@ class DebugMenuOverlay:
             raise TypeError("alert must provide start()")
         registered_teleports = tuple(teleport_targets)
         if not all(
-            isinstance(target, DebugTeleportTarget)
+            isinstance(target, TeleportTarget)
             for target in registered_teleports
         ):
-            raise TypeError(
-                "teleport_targets must contain DebugTeleportTarget values"
-            )
+            raise TypeError("teleport_targets must contain TeleportTarget values")
         site_ids = tuple(target.site_id for target in registered_teleports)
         if len(site_ids) != len(set(site_ids)):
             raise ValueError("debug teleport site IDs must be unique")
@@ -272,11 +259,6 @@ class DebugMenuOverlay:
             fonts,
             settings.language,
         )
-        self.teleport_texts = LocalizedWindowTextFactory.from_language(
-            fonts,
-            settings.language,
-            role=FontRole.LARGE,
-        )
         self.windows = WindowFactory(fonts.font_for(Language.JAPANESE))
         self.phase = DebugMenuPhase.MAIN
         self.main_window: Window
@@ -300,10 +282,7 @@ class DebugMenuOverlay:
         self.inventory_item_scroll_offset = 0
         self.warehouse_item_index = 0
         self.warehouse_item_scroll_offset = 0
-        self.teleport_window: Window | None = None
-        self.teleport_cursor: WindowCursor | None = None
-        self.teleport_index = 0
-        self.teleport_scroll_offset = 0
+        self.teleport_menu: TeleportMenuOverlay | None = None
         self.shop_window: Window | None = None
         self.shop_cursor: WindowCursor | None = None
         self.shop_index = 0
@@ -318,6 +297,31 @@ class DebugMenuOverlay:
     @property
     def party(self) -> tuple[Member, ...]:
         return self.editor.party
+
+    @property
+    def teleport_window(self) -> Window | None:
+        return None if self.teleport_menu is None else self.teleport_menu.window
+
+    @property
+    def teleport_cursor(self) -> WindowCursor | None:
+        return None if self.teleport_menu is None else self.teleport_menu.cursor
+
+    @property
+    def teleport_texts(self) -> LocalizedWindowTextFactory:
+        if self.teleport_menu is None:
+            return LocalizedWindowTextFactory.from_language(
+                self.fonts,
+                self.settings.language,
+            )
+        return self.teleport_menu.target_texts
+
+    @property
+    def teleport_index(self) -> int:
+        return 0 if self.teleport_menu is None else self.teleport_menu.index
+
+    @property
+    def teleport_scroll_offset(self) -> int:
+        return 0 if self.teleport_menu is None else self.teleport_menu.scroll_offset
 
     def _member_count_text(self) -> str:
         return DEBUG_TEXT.member_count(self.editor.other_member_count)
@@ -915,105 +919,36 @@ class DebugMenuOverlay:
         elif self.item_window is not None:
             self.item_window.update()
 
-    def _build_teleport_window(self) -> None:
-        placements = [
-            self.debug_texts.create(DEBUG_TEXT.teleport_destination, 4, 3)
-        ]
-        visible_targets = self.teleport_targets[
-            self.teleport_scroll_offset :
-            self.teleport_scroll_offset + TELEPORT_VISIBLE_COUNT
-        ]
-        cursor_targets: list[CursorTarget] = []
-        if not visible_targets:
-            placements.append(
-                self.debug_texts.create(
-                    DEBUG_TEXT.no_teleport_destinations,
-                    TELEPORT_TEXT_X,
-                    TELEPORT_FIRST_Y,
-                    color=DISABLED_COLOR,
-                )
-            )
-        else:
-            for row, target in enumerate(visible_targets):
-                y = TELEPORT_FIRST_Y + row * TELEPORT_ROW_HEIGHT
-                placements.append(
-                    self.teleport_texts.create(target.name, TELEPORT_TEXT_X, y)
-                )
-                cursor_targets.append(
-                    CursorTarget(TELEPORT_CURSOR_X, y, key=target.site_id)
-                )
-        placements.append(self._guide_text())
-        self.teleport_window = self.windows.create(
-            *DEBUG_WINDOW_GRID,
-            tuple(placements),
-            vertical_navigation=(
-                len(self.teleport_targets) > TELEPORT_VISIBLE_COUNT
-            ),
-            opened=True,
-        )
-        if not cursor_targets:
-            self.teleport_cursor = None
-            return
-        self.teleport_cursor = self.teleport_window.set_cursor(
-            tuple(cursor_targets)
-        )
-        self._select_cursor_key(
-            self.teleport_cursor,
-            self.teleport_targets[self.teleport_index].site_id,
-        )
-
     def _open_teleport(self) -> None:
         self.phase = DebugMenuPhase.TELEPORT
-        self.teleport_index = 0
-        self.teleport_scroll_offset = 0
-        self._build_teleport_window()
+        self.teleport_menu = TeleportMenuOverlay(
+            targets=self.teleport_targets,
+            settings=self.settings,
+            fonts=self.fonts,
+            alert=self.alert,
+            on_teleport=(
+                self.on_teleport
+                if self.on_teleport is not None
+                else lambda _site_id: False
+            ),
+            labels=TeleportMenuLabels(
+                title=DEBUG_TEXT.teleport_destination,
+                empty=DEBUG_TEXT.no_teleport_destinations,
+                close_guide=DEBUG_TEXT.close_guide,
+            ),
+        )
 
     def _close_teleport(self) -> None:
         self.phase = DebugMenuPhase.MAIN
-        self.teleport_window = None
-        self.teleport_cursor = None
+        self.teleport_menu = None
         self._build_main_window(selected_key="teleport")
 
-    def _move_teleport(self, distance: int) -> None:
-        if distance not in (-1, 1):
-            raise ValueError("teleport distance must be -1 or 1")
-        if not self.teleport_targets:
-            return
-        self.teleport_index = (
-            self.teleport_index + distance
-        ) % len(self.teleport_targets)
-        if self.teleport_index < self.teleport_scroll_offset:
-            self.teleport_scroll_offset = self.teleport_index
-        elif (
-            self.teleport_index
-            >= self.teleport_scroll_offset + TELEPORT_VISIBLE_COUNT
-        ):
-            self.teleport_scroll_offset = (
-                self.teleport_index - TELEPORT_VISIBLE_COUNT + 1
-            )
-        self._build_teleport_window()
-
-    def _confirm_teleport(self) -> None:
-        if self.teleport_cursor is None or self.on_teleport is None:
-            self.alert.start()
-            return
-        site_id = self.teleport_cursor.selected_key
-        if not isinstance(site_id, str) or not self.on_teleport(site_id):
-            self.alert.start()
-
     def _update_teleport(self, input_state: InputState) -> None:
-        if input_state.cancel.triggered:
+        if self.teleport_menu is None:
             self._close_teleport()
             return
-        if input_state.confirm.triggered:
-            self._confirm_teleport()
-            return
-        if input_state.navigation is Direction.UP:
-            self._move_teleport(-1)
-        elif input_state.navigation is Direction.DOWN:
-            self._move_teleport(1)
-        elif self.teleport_window is not None:
-            self.teleport_window.update()
+        if self.teleport_menu.update(input_state):
+            self._close_teleport()
 
     def _build_shop_window(self) -> None:
         placements = [self.debug_texts.create(DEBUG_TEXT.shop_selection, 4, 3)]
@@ -1364,9 +1299,9 @@ class DebugMenuOverlay:
             self.item_window.draw()
         elif (
             self.phase is DebugMenuPhase.TELEPORT
-            and self.teleport_window is not None
+            and self.teleport_menu is not None
         ):
-            self.teleport_window.draw()
+            self.teleport_menu.draw()
         elif self.phase is DebugMenuPhase.SHOP and self.shop_window is not None:
             self.shop_window.draw()
         else:

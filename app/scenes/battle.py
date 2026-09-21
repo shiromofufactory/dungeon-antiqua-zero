@@ -4294,7 +4294,7 @@ class BattleScene:
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return ally targets that can still receive the spell."""
 
-        if spell.action is SpellAction.FADE:
+        if spell.action in (SpellAction.FADE, SpellAction.TELEPORT):
             active_index = getattr(self, "active_party_index", None)
             if (
                 active_index is None
@@ -4709,7 +4709,7 @@ class BattleScene:
             cure_results=cure_results,
             revive_results=revive_results,
             silence_results=silence_results,
-            fade_escape=spell.action is SpellAction.FADE,
+            fade_escape=spell.action in (SpellAction.FADE, SpellAction.TELEPORT),
             result_start_frame=result_start_frame,
         )
         affinity_popups = getattr(self, "affinity_popups", None)

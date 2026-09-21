@@ -52,6 +52,7 @@ from ui.item_menu import (
     ItemCategory,
     ItemSelectionPhase,
 )
+from ui.teleport_menu import TeleportTarget
 from tests.ui_test_support import ItemMenuHarness
 from state import Language, Settings
 from systems import InventorySystem
@@ -987,6 +988,60 @@ class ItemMenuTest(unittest.TestCase):
         mock.update(InputState(confirm=InputButton(True, True)))
 
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity(item), 1)
+        invalid_action.assert_called_once_with()
+
+    def test_teleport_ring_opens_shared_destination_menu_and_is_consumed(
+        self,
+    ) -> None:
+        start_teleport = Mock(return_value=True)
+        target = TeleportTarget("sample_town", "サンプルの町")
+        mock = ItemMenuHarness(
+            teleport_targets=(target,),
+            on_field_teleport=start_teleport,
+        )
+        item = mock.items["TELEPORT RING"]
+        self.select_item(mock, item.key)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIsNotNone(mock.teleport_menu)
+        self.assertEqual(mock.inventory_system.quantity(item), 1)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        start_teleport.assert_called_once_with("sample_town")
+        self.assertEqual(mock.inventory_system.quantity(item), 0)
+
+    def test_canceling_teleport_ring_destination_keeps_the_ring(self) -> None:
+        start_teleport = Mock(return_value=True)
+        mock = ItemMenuHarness(
+            teleport_targets=(TeleportTarget("sample_town", "サンプルの町"),),
+            on_field_teleport=start_teleport,
+        )
+        item = mock.items["TELEPORT RING"]
+        self.select_item(mock, item.key)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(cancel=InputButton(True, True)))
+
+        self.assertIsNone(mock.teleport_menu)
+        self.assertEqual(mock.inventory_system.quantity(item), 1)
+        start_teleport.assert_not_called()
+
+    def test_failed_teleport_ring_destination_keeps_the_ring(self) -> None:
+        invalid_action = Mock()
+        mock = ItemMenuHarness(
+            teleport_targets=(TeleportTarget("sample_town", "サンプルの町"),),
+            on_field_teleport=Mock(return_value=False),
+            on_invalid_action=invalid_action,
+        )
+        item = mock.items["TELEPORT RING"]
+        self.select_item(mock, item.key)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+
         self.assertEqual(mock.inventory_system.quantity(item), 1)
         invalid_action.assert_called_once_with()
 
