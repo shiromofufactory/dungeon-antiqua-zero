@@ -533,7 +533,13 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.adjusted_abilities.agility, 25)
         self.assertEqual(self.member.effective_agility, 25)
 
-        self.member.speed_modifier = 2
+        self.member.speed_modifier = -1
+        self.assertTrue(self.member.apply_haste())
+        self.assertEqual(self.member.speed_modifier, 0)
+        self.assertTrue(self.member.apply_haste())
+        self.assertTrue(self.member.apply_haste())
+        self.assertFalse(self.member.apply_haste())
+        self.assertEqual(self.member.speed_modifier, 2)
         self.assertEqual(self.member.effective_agility, 37)
         self.assertTrue(self.member.apply_slow())
         self.assertEqual(self.member.speed_modifier, 0)

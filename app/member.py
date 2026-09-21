@@ -1317,6 +1317,14 @@ class Member:
         self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
         return True
 
+    def apply_haste(self) -> bool:
+        """Raise DA2's battle speed by one stage, up to the second stage."""
+
+        if self.speed_modifier >= MAX_SPEED_MODIFIER or not self.is_alive:
+            return False
+        self.speed_modifier += 1
+        return True
+
     def defeat(self) -> None:
         """Set HP to zero and clear battle modifiers after instant death."""
 

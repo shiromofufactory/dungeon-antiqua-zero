@@ -106,6 +106,9 @@ ALLY_SPELL_ACTIONS = frozenset(
         SpellAction.SLOW,
         SpellAction.PROTECTION,
         SpellAction.IDENTIFY,
+        SpellAction.HASTE,
+        SpellAction.SILENCE,
+        SpellAction.CURE,
     )
 )
 ENEMY_SPELL_ACTIONS = frozenset((SpellAction.SLEEP, SpellAction.SLOW))
@@ -353,6 +356,10 @@ class BattleForecast:
             targets = self.enemies()
             if spell.action is SpellAction.SLOW:
                 targets = tuple(a for a in targets if a.speed > -1)
+            elif spell.action is SpellAction.SILENCE:
+                targets = tuple(
+                    a for a in targets if a.spec.spells and a.silenced <= 0
+                )
         else:
             targets = tuple(
                 a
@@ -361,6 +368,10 @@ class BattleForecast:
             )
             if spell.action is SpellAction.PROTECTION:
                 targets = tuple(a for a in targets if a.protection < 2)
+            elif spell.action is SpellAction.HASTE:
+                targets = tuple(a for a in targets if a.speed < 2)
+            elif spell.action is SpellAction.CURE:
+                targets = tuple(a for a in targets if self.cure_spell_curable(a))
         return tuple(a.spec.number for a in targets)
 
     def command_options(self, actor):
@@ -437,7 +448,10 @@ class BattleForecast:
                 actions.append(AutoAction(command))
             elif command is BattleCommand.SPELL:
                 for spell in actor.spec.spells:
-                    if continuation and spell.action is not SpellAction.HEAL:
+                    if continuation and spell.action not in (
+                        SpellAction.HEAL,
+                        SpellAction.CURE,
+                    ):
                         continue
                     if self.snapshot.policy.spell_mode is SpellMode.NEVER:
                         reject(spell.key, "spell_policy")
@@ -471,7 +485,7 @@ class BattleForecast:
                     if (
                         continuation
                         and spell is not None
-                        and spell.action is not SpellAction.HEAL
+                        and spell.action not in (SpellAction.HEAL, SpellAction.CURE)
                     ):
                         continue
                     if spell is not None:
@@ -492,7 +506,11 @@ class BattleForecast:
         if not targets:
             reject(spell.key, "no_targets")
             return ()
-        if spell.action in (SpellAction.SLEEP, SpellAction.SLOW):
+        if spell.action in (
+            SpellAction.SLEEP,
+            SpellAction.SLOW,
+            SpellAction.SILENCE,
+        ):
             effective = tuple(
                 n
                 for n in targets
@@ -542,6 +560,17 @@ class BattleForecast:
             or actor.stunned
         )
 
+    @staticmethod
+    def cure_spell_curable(actor) -> bool:
+        """Return whether dedicated CURE can remove one of its four ailments."""
+
+        return bool(
+            actor.poisoned
+            or actor.sleeping
+            or actor.paralyzed
+            or actor.confused
+        )
+
     def delay(self, actor: ForecastActor, action: AutoAction) -> float:
         if action.command is BattleCommand.AIM:
             return -16.0
@@ -577,17 +606,18 @@ class BattleForecast:
     def recovery_action(
         self, number: int, actions: tuple[AutoAction, ...]
     ) -> tuple[AutoAction, str] | None:
-        """Choose mandatory recovery from current allies without advancing time.
-
-        Only live-supported effects are present in actions. Dedicated CURE and
-        REVIVE remain excluded until the battle itself implements them.
-        """
+        """Choose mandatory recovery from current allies without advancing time."""
 
         actor = self.actors[number]
         heals = [
             a
             for a in actions
             if a.spell_key and self.spells[a.spell_key].action is SpellAction.HEAL
+        ]
+        cures = [
+            a
+            for a in actions
+            if a.spell_key and self.spells[a.spell_key].action is SpellAction.CURE
         ]
         for stage in ("urgent", "cure", "heal"):
             targets = list(self.allies())
@@ -609,17 +639,27 @@ class BattleForecast:
                     continue
                 if stage == "cure" and not self.curable(target):
                     continue
-                available = [
-                    a
-                    for a in heals
-                    if target.spec.number in a.targets
-                    and (stage != "cure" or self.spells[a.spell_key].intensity == 0)
-                ]
+                if stage == "cure":
+                    available = [
+                        a
+                        for a in (*heals, *cures)
+                        if target.spec.number in a.targets
+                        and (
+                            self.spells[a.spell_key].action is SpellAction.CURE
+                            or self.spells[a.spell_key].intensity == 0
+                        )
+                    ]
+                else:
+                    available = [
+                        a for a in heals if target.spec.number in a.targets
+                    ]
                 if not available:
                     continue
 
                 def recovery(a, target=target):
                     spell = self.spells[a.spell_key]
+                    if spell.action is SpellAction.CURE:
+                        return 0
                     return self.heal_result(actor, target, spell, 0.0).amount
 
                 adequate = [
@@ -834,6 +874,11 @@ class BattleForecast:
                     target.sleeping = target.confused = 0
             elif spell.action is SpellAction.PROTECTION:
                 target.protection = min(2, target.protection + 1)
+            elif spell.action is SpellAction.HASTE:
+                target.speed = min(2, target.speed + 1)
+            elif spell.action is SpellAction.CURE:
+                target.poisoned = target.paralyzed = False
+                target.sleeping = target.confused = 0
             elif spell.action is SpellAction.IDENTIFY:
                 self.identify(target)
             else:
@@ -860,15 +905,33 @@ class BattleForecast:
                     )
                     target.damage(result.damage)
                 if target.is_alive and (
-                    spell.action in (SpellAction.SLEEP, SpellAction.SLOW)
+                    spell.action
+                    in (
+                        SpellAction.SLEEP,
+                        SpellAction.SLOW,
+                        SpellAction.SILENCE,
+                    )
                     or spell.attribute is ResistanceType.POISON
                 ):
                     successful = self.status_success(actor, target, spell, modifier)
+                    if (
+                        spell.action is SpellAction.SILENCE
+                        and not target.spec.spells
+                    ):
+                        successful = False
                     if successful:
                         if spell.action is SpellAction.SLEEP:
                             self.apply_extra(actor, target, AdditionalEffect.SLEEP)
                         elif spell.action is SpellAction.SLOW:
                             target.speed = 0 if target.speed > 0 else -1
+                        elif spell.action is SpellAction.SILENCE:
+                            target.silenced = max(
+                                target.silenced,
+                                4
+                                + int(
+                                    self.roll(actor, target.spec.number, 11) * 3
+                                ),
+                            )
                         if spell.attribute is ResistanceType.POISON:
                             target.poisoned = True
         actor.hidden = False

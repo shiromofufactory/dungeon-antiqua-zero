@@ -56,7 +56,7 @@ from monster_ai import (
     MonsterSpellAction,
     select_monster_action,
 )
-from battle_speed import MIN_SPEED_MODIFIER, modified_agility
+from battle_speed import MAX_SPEED_MODIFIER, MIN_SPEED_MODIFIER, modified_agility
 from battle_physical import (
     PHYSICAL_STATUS_EFFECTS,
     PhysicalAttackResult,
@@ -425,10 +425,15 @@ PARTY_CONDITION_ICON_FIELDS = (
     "stunned",
 )
 SPEED_ICON_SOURCE_X = 96
+SPEED_ICON_POSITIVE_SOURCE_Y = 128
 SPEED_ICON_NEGATIVE_SOURCE_Y = 136
 SPEED_ICON_SIZE = 8
 SPEED_ICON_PATTERN_COUNT = 4
 SLOW_ICON_PATTERN_FRAME_COUNT = 8 * FPS // DA2_REFERENCE_FPS
+HASTE_ICON_PATTERN_FRAME_COUNTS = (
+    4 * FPS // DA2_REFERENCE_FPS,
+    2 * FPS // DA2_REFERENCE_FPS,
+)
 SPEED_ICON_TRANSPARENT_INDEX = TRANSPARENT_INDEX
 PROTECTION_ICON_SOURCE_X = 64
 PROTECTION_ICON_SOURCE_Y = 128
@@ -802,6 +807,34 @@ class BattleProtectionResult:
 
 
 @dataclass(frozen=True)
+class BattleHasteResult:
+    """One guaranteed HASTE stage waiting for its timed application."""
+
+    target_index: int
+
+
+@dataclass(frozen=True)
+class BattleCureResult:
+    """One CURE application waiting for its timed ailment removal."""
+
+    target_index: int
+
+
+@dataclass(frozen=True)
+class BattleSilenceResult:
+    """Resolved SILENCE magic waiting for its timed application."""
+
+    target_index: int
+    success: bool
+    turns: int
+    affinity: SpellAffinity
+    popup_x: int
+    popup_y: int
+    affinity_x: int
+    affinity_y: int
+
+
+@dataclass(frozen=True)
 class BattlePartySleepResult:
     """Resolved monster SLEEP result waiting for application to a member."""
 
@@ -875,6 +908,9 @@ class BattleActionPresentation:
     poison_results: tuple[BattlePoisonResult, ...] = ()
     slow_results: tuple[BattleSlowResult, ...] = ()
     protection_results: tuple[BattleProtectionResult, ...] = ()
+    haste_results: tuple[BattleHasteResult, ...] = ()
+    cure_results: tuple[BattleCureResult, ...] = ()
+    silence_results: tuple[BattleSilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
     result_start_frame: int = 0
@@ -4190,13 +4226,13 @@ class BattleScene:
         indexes = tuple(
             index for index, monster in enumerate(self.monsters) if monster.is_alive
         )
-        if spell.action is not SpellAction.SLOW:
-            return indexes
-        return tuple(
-            index
-            for index in indexes
-            if self.monsters[index].state.speed_modifier > MIN_SPEED_MODIFIER
-        )
+        if spell.action is SpellAction.SLOW:
+            return tuple(
+                index
+                for index in indexes
+                if self.monsters[index].state.speed_modifier > MIN_SPEED_MODIFIER
+            )
+        return indexes
 
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return living ally targets that can still receive the spell."""
@@ -4208,13 +4244,25 @@ class BattleScene:
             if index not in hidden
             or (not spell.to_all and index == self.active_party_index)
         )
-        if spell.action is not SpellAction.PROTECTION:
-            return indexes
-        return tuple(
-            index
-            for index in indexes
-            if self.party[index].protection_level < MAX_PROTECTION_LEVEL
-        )
+        if spell.action is SpellAction.PROTECTION:
+            return tuple(
+                index
+                for index in indexes
+                if self.party[index].protection_level < MAX_PROTECTION_LEVEL
+            )
+        if spell.action is SpellAction.HASTE:
+            return tuple(
+                index
+                for index in indexes
+                if self.party[index].speed_modifier < MAX_SPEED_MODIFIER
+            )
+        if spell.action is SpellAction.CURE:
+            return tuple(
+                index
+                for index in indexes
+                if self.party[index].has_curable_ailment
+            )
+        return indexes
 
     @staticmethod
     def _make_all_target_cursors(
@@ -4535,7 +4583,10 @@ class BattleScene:
         poison_results = self._resolve_poison_results(spell, indexes)
         slow_results = self._resolve_slow_results(spell, indexes)
         protection_results = self._resolve_protection_results(spell, indexes)
-        status_results = sleep_results or slow_results
+        haste_results = self._resolve_haste_results(spell, indexes)
+        cure_results = self._resolve_cure_results(spell, indexes)
+        silence_results = self._resolve_silence_results(spell, indexes)
+        status_results = sleep_results or slow_results or silence_results
         effect_indexes = (
             tuple(result.target_index for result in status_results if result.success)
             if status_results
@@ -4573,6 +4624,9 @@ class BattleScene:
             poison_results=poison_results,
             slow_results=slow_results,
             protection_results=protection_results,
+            haste_results=haste_results,
+            cure_results=cure_results,
+            silence_results=silence_results,
             result_start_frame=result_start_frame,
         )
         affinity_popups = getattr(self, "affinity_popups", None)
@@ -4595,6 +4649,15 @@ class BattleScene:
                 result.affinity,
             )
             for result in sleep_results
+            if result.affinity is not SpellAffinity.NORMAL
+        )
+        affinity_popups.extend(
+            BattleAffinityPopup(
+                result.affinity_x,
+                result.affinity_y,
+                result.affinity,
+            )
+            for result in silence_results
             if result.affinity is not SpellAffinity.NORMAL
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
@@ -4768,6 +4831,95 @@ class BattleScene:
         if spell.to_enemy:
             raise BattleDataError("PROTECTION spells must target allies")
         return tuple(BattleProtectionResult(index) for index in indexes)
+
+    def _resolve_haste_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleHasteResult, ...]:
+        """Resolve DA2's guaranteed one-stage speed increase."""
+
+        if spell.action is not SpellAction.HASTE:
+            return ()
+        if spell.to_enemy:
+            raise BattleDataError("HASTE spells must target allies")
+        return tuple(BattleHasteResult(index) for index in indexes)
+
+    def _resolve_cure_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleCureResult, ...]:
+        """Resolve CURE without changing HP or battle-only buffs."""
+
+        if spell.action is not SpellAction.CURE:
+            return ()
+        if spell.to_enemy:
+            raise BattleDataError("CURE spells must target allies")
+        return tuple(BattleCureResult(index) for index in indexes)
+
+    def _resolve_silence_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleSilenceResult, ...]:
+        """Resolve SILENCE with the shared DA2-style status success rule."""
+
+        if spell.action is not SpellAction.SILENCE:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("SILENCE spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("SILENCE requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattleSilenceResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            if monster.spell_keys:
+                resolution = resolve_status_spell(
+                    spell_modifier=modifier,
+                    rate=spell.rate,
+                    target_spell_defense=monster.combat_stats.spell_resistance,
+                    attribute=spell.attribute,
+                    target_weaknesses=monster.weaknesses,
+                    target_resistances=monster.resistances,
+                    success_roll=random.randint(0, 19),
+                )
+                success = resolution.success
+                affinity = resolution.affinity
+            else:
+                success = False
+                affinity = SpellAffinity.NORMAL
+            _base_x, base_y = self._monster_base_position(index)
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            results.append(
+                BattleSilenceResult(
+                    target_index=index,
+                    success=success,
+                    turns=(
+                        random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                        if success
+                        else 0
+                    ),
+                    affinity=affinity,
+                    popup_x=center_x,
+                    popup_y=base_y + monster.height - 8,
+                    affinity_x=center_x - AFFINITY_ICON_WIDTH // 2,
+                    affinity_y=base_y + 20,
+                )
+            )
+        return tuple(results)
 
     def _resolve_spell_damage_results(
         self,
@@ -4958,6 +5110,23 @@ class BattleScene:
                 )
         for result in presentation.protection_results:
             self.party[result.target_index].apply_protection()
+        for result in presentation.haste_results:
+            self.party[result.target_index].apply_haste()
+        for result in presentation.cure_results:
+            self.party[result.target_index].cure_ailments()
+        for result in presentation.silence_results:
+            monster = self.monsters[result.target_index]
+            if result.success:
+                monster.state.apply_silence(result.turns)
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
         for result in presentation.party_sleep_results:
             member = self.party[result.target_index]
             if result.success:
@@ -9057,22 +9226,60 @@ class BattleScene:
             )
 
     def _draw_speed_modifier_icons(self) -> None:
-        """Draw DA2's animated speed-down marker beside slowed monsters."""
+        """Draw DA2's animated HASTE and SLOW markers for combatants."""
 
-        pattern = (
-            pyxel.frame_count // SLOW_ICON_PATTERN_FRAME_COUNT
-        ) % SPEED_ICON_PATTERN_COUNT
-        source_x = SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE
-        for index, monster in enumerate(getattr(self, "monsters", ())):
-            if not monster.is_alive or monster.state.speed_modifier >= 0:
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            member = visual.member
+            modifier = getattr(member, "speed_modifier", 0)
+            if not getattr(member, "is_alive", True) or modifier == 0:
                 continue
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            frame_count = (
+                SLOW_ICON_PATTERN_FRAME_COUNT
+                if modifier < 0
+                else HASTE_ICON_PATTERN_FRAME_COUNTS[modifier - 1]
+            )
+            pattern = (pyxel.frame_count // frame_count) % SPEED_ICON_PATTERN_COUNT
+            source_y = (
+                SPEED_ICON_NEGATIVE_SOURCE_Y
+                if modifier < 0
+                else SPEED_ICON_POSITIVE_SOURCE_Y
+            )
+            x, y = position
+            pyxel.blt(
+                x + 22,
+                y + 24,
+                0,
+                SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE,
+                source_y,
+                SPEED_ICON_SIZE,
+                SPEED_ICON_SIZE,
+                SPEED_ICON_TRANSPARENT_INDEX,
+            )
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            modifier = monster.state.speed_modifier
+            if not monster.is_alive or modifier == 0:
+                continue
+            frame_count = (
+                SLOW_ICON_PATTERN_FRAME_COUNT
+                if modifier < 0
+                else HASTE_ICON_PATTERN_FRAME_COUNTS[modifier - 1]
+            )
+            pattern = (pyxel.frame_count // frame_count) % SPEED_ICON_PATTERN_COUNT
+            source_y = (
+                SPEED_ICON_NEGATIVE_SOURCE_Y
+                if modifier < 0
+                else SPEED_ICON_POSITIVE_SOURCE_Y
+            )
             _base_x, y = self._monster_base_position(index)
             pyxel.blt(
                 self._monster_draw_x(index) + monster.width - 24,
                 y + monster.height,
                 0,
-                source_x,
-                SPEED_ICON_NEGATIVE_SOURCE_Y,
+                SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE,
+                source_y,
                 SPEED_ICON_SIZE,
                 SPEED_ICON_SIZE,
                 SPEED_ICON_TRANSPARENT_INDEX,

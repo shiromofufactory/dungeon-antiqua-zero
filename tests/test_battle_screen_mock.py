@@ -154,8 +154,12 @@ from tools.screen_mocks.battle import (
     SILENCE_ICON_SOURCE_X,
     SILENCE_ICON_SOURCE_Y,
     SILENCE_MONSTER_OFFSET_X,
+    SILENCE_MAX_TURNS,
+    SILENCE_MIN_TURNS,
+    HASTE_ICON_PATTERN_FRAME_COUNTS,
     SLOW_ICON_PATTERN_FRAME_COUNT,
     SPEED_ICON_NEGATIVE_SOURCE_Y,
+    SPEED_ICON_POSITIVE_SOURCE_Y,
     SPEED_ICON_SIZE,
     SPEED_ICON_SOURCE_X,
     SPEED_ICON_TRANSPARENT_INDEX,
@@ -4968,6 +4972,135 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_damage_popups, [])
         randint.assert_called_once_with(0, 19)
 
+    def test_haste_cancels_slow_then_raises_party_speed_by_one_stage(self) -> None:
+        spell = load_mock_spells()["HASTE"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        target = mock.party[0]
+        target.speed_modifier = -1
+
+        results = mock._resolve_haste_results(spell, (0,))
+        mock._apply_action_results(BattleActionPresentation((), haste_results=results))
+
+        self.assertEqual(target.speed_modifier, 0)
+        self.assertEqual(target.effective_agility, target.adjusted_abilities.agility)
+
+    def test_cure_removes_its_four_ailments_but_not_stun(self) -> None:
+        spell = load_mock_spells()["CURE"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        target = mock.party[0]
+        target.poisoned = True
+        target.paralyzed = True
+        target.sleeping = 2
+        target.confused = 2
+        target.stunned = True
+
+        results = mock._resolve_cure_results(spell, (0,))
+        mock._apply_action_results(BattleActionPresentation((), cure_results=results))
+
+        self.assertFalse(target.poisoned)
+        self.assertFalse(target.paralyzed)
+        self.assertEqual(target.sleeping, 0)
+        self.assertEqual(target.confused, 0)
+        self.assertTrue(target.stunned)
+
+    def test_silence_uses_authored_rate_and_applies_da2_duration(self) -> None:
+        spell = load_mock_spells()["SILENCE"]
+        monster = _damage_test_monster()
+        monster.spell_keys = ("SLEEP",)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (monster,)
+        mock.spell_damage_popups = []
+
+        with patch(
+            "scenes.battle.random.randint",
+            side_effect=(0, SILENCE_MAX_TURNS),
+        ) as randint:
+            results = mock._resolve_silence_results(spell, (0,))
+        mock._apply_action_results(
+            BattleActionPresentation((), silence_results=results)
+        )
+
+        self.assertEqual(monster.state.silenced, SILENCE_MAX_TURNS)
+        self.assertEqual(spell.rate, 12)
+        self.assertEqual(
+            randint.call_args_list,
+            [call(0, 19), call(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)],
+        )
+
+    def test_spell_targeting_excludes_unchangeable_haste_and_cure(self) -> None:
+        spells = load_mock_spells()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+        )
+        mock.party[0].speed_modifier = 2
+        mock.party[1].poisoned = True
+        silent = _damage_test_monster(0)
+        silent.spell_keys = ("SLEEP",)
+        silent.state.silenced = 2
+        caster = _damage_test_monster(1)
+        caster.spell_keys = ("SLEEP",)
+        mock.monsters = (silent, caster, _damage_test_monster(2))
+
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(spells["HASTE"]), (1,)
+        )
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(spells["CURE"]), (1,)
+        )
+        self.assertEqual(
+            mock._selectable_enemy_indexes_for_spell(spells["SILENCE"]),
+            (0, 1, 2),
+        )
+
+    def test_silence_can_target_non_spellcaster_but_always_misses(self) -> None:
+        spell = load_mock_spells()["SILENCE"]
+        monster = _damage_test_monster()
+        self.assertFalse(monster.spell_keys)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (monster,)
+
+        self.assertEqual(
+            mock._selectable_enemy_indexes_for_spell(spell),
+            (0,),
+        )
+        with patch("scenes.battle.random.randint") as randint:
+            results = mock._resolve_silence_results(spell, (0,))
+
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0].success)
+        self.assertEqual(results[0].turns, 0)
+        self.assertEqual(results[0].affinity, SpellAffinity.NORMAL)
+        randint.assert_not_called()
+
     def test_poison_attribute_uses_status_roll_after_dealing_spell_damage(self) -> None:
         spell = load_mock_spells()["POISON1"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -5323,6 +5456,38 @@ class BattleScreenMockTest(unittest.TestCase):
             0,
             SPEED_ICON_SOURCE_X + SPEED_ICON_SIZE,
             SPEED_ICON_NEGATIVE_SOURCE_Y,
+            SPEED_ICON_SIZE,
+            SPEED_ICON_SIZE,
+            SPEED_ICON_TRANSPARENT_INDEX,
+        )
+
+    def test_haste_icon_uses_positive_animation_beside_party_member(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        member.speed_modifier = 1
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (SimpleNamespace(member=member),)
+        mock.monsters = ()
+        mock._party_draw_position = Mock(return_value=(188, PARTY_SPRITE_Y[0]))
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                HASTE_ICON_PATTERN_FRAME_COUNTS[0],
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_speed_modifier_icons()
+
+        blt.assert_called_once_with(
+            188 + 22,
+            PARTY_SPRITE_Y[0] + 24,
+            0,
+            SPEED_ICON_SOURCE_X + SPEED_ICON_SIZE,
+            SPEED_ICON_POSITIVE_SOURCE_Y,
             SPEED_ICON_SIZE,
             SPEED_ICON_SIZE,
             SPEED_ICON_TRANSPARENT_INDEX,

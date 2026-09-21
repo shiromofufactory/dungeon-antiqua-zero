@@ -173,6 +173,16 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.speed_modifier, -1)
         self.assertFalse(state.apply_slow())
 
+    def test_haste_cancels_slow_then_stacks_twice(self) -> None:
+        state = MonsterBattleState(max_hp=10, speed_modifier=-1)
+
+        self.assertTrue(state.apply_haste())
+        self.assertEqual(state.speed_modifier, 0)
+        self.assertTrue(state.apply_haste())
+        self.assertTrue(state.apply_haste())
+        self.assertEqual(state.speed_modifier, 2)
+        self.assertFalse(state.apply_haste())
+
     def test_mhp_must_be_a_positive_integer(self) -> None:
         for value in (None, True, 0, -1, 1.5, "2"):
             with self.subTest(value=value):

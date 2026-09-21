@@ -498,6 +498,14 @@ class MonsterBattleState:
         self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
         return True
 
+    def apply_haste(self) -> bool:
+        """Raise battle speed by one stage, up to DA2's second stage."""
+
+        if self.speed_modifier >= MAX_SPEED_MODIFIER or not self.is_alive:
+            return False
+        self.speed_modifier += 1
+        return True
+
     def spend_mp(self, amount: int) -> bool:
         """Spend MP when possible and report whether the spell can proceed."""
 

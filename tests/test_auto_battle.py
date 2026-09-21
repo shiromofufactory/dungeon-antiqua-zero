@@ -239,6 +239,74 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(result.action.targets, (0,))
                 self.assertEqual(result.action.spell_key, "PANACEA")
 
+    def test_dedicated_cure_is_selected_for_its_four_ailments(self):
+        caster = replace(
+            self.specs[1],
+            spells=(self.spells["CURE"],),
+            mp=self.spells["CURE"].mp,
+        )
+        for field, value in (
+            ("poisoned", True),
+            ("sleeping", 2),
+            ("paralyzed", True),
+            ("confused", 2),
+        ):
+            with self.subTest(field=field):
+                ally = replace(self.specs[0], **{field: value})
+                result = decide_auto_battle(
+                    self.snapshot(caster, ally, self.enemy(), active=1)
+                )
+                self.assertEqual(result.reason, "recovery_cure")
+                self.assertEqual(result.action.spell_key, "CURE")
+                self.assertEqual(result.action.targets, (0,))
+
+    def test_forecast_applies_haste_cure_and_silence(self):
+        caster = replace(
+            self.specs[1],
+            spells=(
+                self.spells["HASTE"],
+                self.spells["CURE"],
+                self.spells["SILENCE"],
+            ),
+            mp=99,
+            max_mp=99,
+        )
+        ally = replace(self.specs[0], poisoned=True, speed=-1)
+        enemy = self.enemy(
+            spells=(self.spells["SLEEP"],),
+            spell_defense=0,
+        )
+        forecast = BattleForecast(
+            self.snapshot(caster, ally, enemy, active=1),
+            0,
+        )
+        forecast.roll = Mock(return_value=0.0)
+        spell_actions = {
+            (action.spell_key, action.targets)
+            for action in forecast.candidates(1)
+            if action.command is BattleCommand.SPELL
+        }
+        self.assertIn(("HASTE", (0,)), spell_actions)
+        self.assertIn(("CURE", (0,)), spell_actions)
+        self.assertIn(("SILENCE", (5,)), spell_actions)
+
+        forecast.cast(
+            forecast.actors[1],
+            AutoAction(BattleCommand.SPELL, (0,), "HASTE"),
+        )
+        forecast.cast(
+            forecast.actors[1],
+            AutoAction(BattleCommand.SPELL, (0,), "CURE"),
+        )
+        forecast.cast(
+            forecast.actors[1],
+            AutoAction(BattleCommand.SPELL, (5,), "SILENCE"),
+        )
+
+        self.assertEqual(forecast.actors[0].speed, 0)
+        self.assertFalse(forecast.actors[0].poisoned)
+        self.assertEqual(forecast.actors[5].silenced, 4)
+
     def test_urgent_heal_precedes_treatment_of_another_ally(self):
         ring = replace(self.items["MIRACLE RING"], use_spell_key="PANACEA")
         wounded = replace(self.specs[0], hp=1)
@@ -517,7 +585,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         ).candidates(1, excluded)
         self.assertFalse(any(a.command is BattleCommand.ITEM for a in actions))
         self.assertIn(("TELEPORT RING", "breaks_on_use"), excluded)
-        self.assertIn(("CURE", "unsupported_effect"), excluded)
+        self.assertIn(("CURE", "no_targets"), excluded)
         self.assertFalse(any(a.spell_key == "POTION" for a in actions))
         self.assertFalse(any(a.command is BattleCommand.ESCAPE for a in actions))
 
