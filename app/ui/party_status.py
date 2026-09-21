@@ -8,7 +8,7 @@ import pyxel
 
 from localization import Localizer
 from member import BATTLE_PARTY_MEMBER_COUNT, Member
-from rendering import DIMMED_PALETTE, PaletteShifter
+from rendering import DIMMED_PALETTE, MONOCHROME_PALETTE, PaletteShifter
 from resources import TRANSPARENT_INDEX
 from text_catalog import TextCatalog
 from ui import (
@@ -100,7 +100,7 @@ class PartyStatusPanel:
         return tuple(placements)
 
     def draw_faces(self, dimmed_member_indexes: Iterable[int] = ()) -> None:
-        """Draw faces, optionally dimming selected members by palette shift."""
+        """Draw faces with death taking priority over optional dimming."""
 
         try:
             dimmed = frozenset(dimmed_member_indexes)
@@ -116,7 +116,10 @@ class PartyStatusPanel:
 
         for index, member in enumerate(self.party):
             face_position = member.face_position
-            if index in dimmed and self.palette_shifter is not None:
+            if member.is_dead and self.palette_shifter is not None:
+                with self.palette_shifter.shifted(MONOCHROME_PALETTE):
+                    self._draw_face(index, face_position.x, face_position.y)
+            elif index in dimmed and self.palette_shifter is not None:
                 with self.palette_shifter.shifted(DIMMED_PALETTE):
                     self._draw_face(index, face_position.x, face_position.y)
             else:

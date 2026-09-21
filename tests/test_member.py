@@ -462,6 +462,32 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.hp, 0)
         self.assertEqual(self.member.mp, self.member.max_mp)
 
+    def test_revive_restores_authored_hp_percentage_without_restoring_mp(self) -> None:
+        self.member.hp = 0
+        self.member.mp = 2
+        self.member.stunned = True
+        self.member.protection_level = 2
+        self.member.speed_modifier = 1
+
+        restored = self.member.revive(25)
+
+        self.assertEqual(restored, max(1, self.member.max_hp // 4))
+        self.assertEqual(self.member.hp, restored)
+        self.assertEqual(self.member.mp, 2)
+        self.assertFalse(self.member.stunned)
+        self.assertEqual(self.member.protection_level, 0)
+        self.assertEqual(self.member.speed_modifier, 0)
+        self.assertEqual(self.member.revive(100), 0)
+
+    def test_revive_validates_hp_percentage(self) -> None:
+        self.member.hp = 0
+
+        with self.assertRaises(TypeError):
+            self.member.revive(True)
+        for percentage in (0, 101):
+            with self.subTest(percentage=percentage), self.assertRaises(ValueError):
+                self.member.revive(percentage)
+
     def test_full_recovery_restores_points_and_all_conditions(self) -> None:
         self.member.hp = 1
         self.member.mp = 2

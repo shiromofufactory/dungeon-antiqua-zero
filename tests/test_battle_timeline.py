@@ -8,6 +8,7 @@ from battle_timeline import (
     TimelineOrder,
     complete_timeline_action,
     initialize_timeline_order,
+    insert_timeline_actor,
     ready_timeline_head,
     remove_timeline_actor,
     remove_timeline_head,
@@ -133,6 +134,27 @@ class BattleTimelineTest(unittest.TestCase):
         remaining = remove_timeline_actor(order, first)
 
         self.assertEqual(remaining.actors, (second,))
+
+    def test_returning_actor_is_stably_inserted_by_gauge(self) -> None:
+        order = TimelineOrder(
+            (
+                TimelineEntry("current", 20, 64.0),
+                TimelineEntry("equal", 30, 30.0),
+                TimelineEntry("later", 10, 10.0),
+            )
+        )
+
+        inserted = insert_timeline_actor(
+            order,
+            "revived",
+            agility=30,
+            gauge=30.0,
+        )
+
+        self.assertEqual(
+            inserted.actors,
+            ("current", "equal", "revived", "later"),
+        )
 
     def test_timeline_head_can_leave_without_being_reinserted(self) -> None:
         order = TimelineOrder(

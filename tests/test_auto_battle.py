@@ -260,6 +260,58 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(result.action.spell_key, "CURE")
                 self.assertEqual(result.action.targets, (0,))
 
+    def test_revive_is_selected_for_the_first_dead_member(self):
+        dead = replace(self.specs[0], hp=0, alive=False)
+        caster = replace(
+            self.specs[1],
+            spells=(self.spells["REVIVE1"],),
+            mp=self.spells["REVIVE1"].mp,
+        )
+
+        result = decide_auto_battle(
+            self.snapshot(caster, dead, self.enemy(), active=1)
+        )
+
+        self.assertEqual(result.reason, "recovery_revive")
+        self.assertEqual(result.action.spell_key, "REVIVE1")
+        self.assertEqual(result.action.targets, (0,))
+
+    def test_revive_prefers_the_larger_restored_hp_before_mp_cost(self):
+        dead = replace(self.specs[0], hp=0, alive=False, max_hp=100)
+        caster = replace(
+            self.specs[1],
+            spells=(self.spells["REVIVE1"], self.spells["REVIVE2"]),
+            mp=99,
+            max_mp=99,
+        )
+
+        result = decide_auto_battle(
+            self.snapshot(caster, dead, self.enemy(), active=1)
+        )
+
+        self.assertEqual(result.action.spell_key, "REVIVE2")
+
+    def test_forecast_revive_restores_hp_and_returns_target_to_timeline(self):
+        dead = replace(self.specs[0], hp=0, alive=False, max_hp=100)
+        caster = replace(
+            self.specs[1],
+            spells=(self.spells["REVIVE1"],),
+            mp=99,
+            max_mp=99,
+        )
+        forecast = BattleForecast(
+            self.snapshot(caster, dead, self.enemy(), active=1),
+            0,
+        )
+
+        forecast.cast(
+            forecast.actors[1],
+            AutoAction(BattleCommand.SPELL, (0,), "REVIVE1"),
+        )
+
+        self.assertEqual(forecast.actors[0].hp, 25)
+        self.assertIn(0, forecast.order.actors)
+
     def test_forecast_applies_haste_cure_and_silence(self):
         caster = replace(
             self.specs[1],

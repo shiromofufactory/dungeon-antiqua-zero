@@ -68,7 +68,7 @@ DROP_CONFIRM_CURSOR_X = 2
 DROP_CONFIRM_YES_Y = 2
 DROP_CONFIRM_NO_Y = 5
 HEALING_SE_ID = "spell_healing1"
-FIELD_HEALING_ITEM_KEYS = frozenset(("POTION",))
+FIELD_RECOVERY_ITEM_KEYS = frozenset(("POTION", "DIVINE TEAR"))
 
 
 def _validate_item_info_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
@@ -192,7 +192,7 @@ class ItemMenuOverlay:
         """Return party positions unable to receive the effect or equip the item."""
 
         if self.phase is ItemSelectionPhase.TARGET:
-            spell = self._field_healing_spell(self.selected_item)
+            spell = self._field_recovery_spell(self.selected_item)
             usable = self._usable_target_indexes(spell) if spell is not None else ()
             return frozenset(range(len(self.party_panel.party))).difference(usable)
         if self.phase is not ItemSelectionPhase.ITEM:
@@ -478,12 +478,12 @@ class ItemMenuOverlay:
         self.category_cursor.active = True
         self._build_item_windows()
 
-    def _field_healing_spell(self, item: Item | None) -> Spell | None:
+    def _field_recovery_spell(self, item: Item | None) -> Spell | None:
         """Resolve the currently supported camp-use item effect."""
 
         if (
             item is None
-            or item.key not in FIELD_HEALING_ITEM_KEYS
+            or item.key not in FIELD_RECOVERY_ITEM_KEYS
             or item.equip_type is not ItemEquipType.ITEM
             or not item.use_spell_key
         ):
@@ -493,7 +493,7 @@ class ItemMenuOverlay:
             spell is None
             or not spell.on_camp
             or spell.to_enemy
-            or spell.action is not SpellAction.HEAL
+            or spell.action not in (SpellAction.HEAL, SpellAction.REVIVE)
         ):
             return None
         return spell
@@ -507,7 +507,9 @@ class ItemMenuOverlay:
             or member.confused
         )
 
-    def _can_heal_target(self, spell: Spell, target: Member) -> bool:
+    def _can_use_recovery_on_target(self, spell: Spell, target: Member) -> bool:
+        if spell.action is SpellAction.REVIVE:
+            return target.is_dead
         if target.hp <= 0:
             return False
         if target.hp < target.max_hp:
@@ -518,7 +520,7 @@ class ItemMenuOverlay:
         return tuple(
             index
             for index, target in enumerate(self.party_panel.party)
-            if self._can_heal_target(spell, target)
+            if self._can_use_recovery_on_target(spell, target)
         )
 
     def _notify_invalid_action(self) -> None:
@@ -526,7 +528,7 @@ class ItemMenuOverlay:
             self.on_invalid_action()
 
     def _enter_target_selection(self) -> None:
-        spell = self._field_healing_spell(self.selected_item)
+        spell = self._field_recovery_spell(self.selected_item)
         if spell is None:
             self._notify_invalid_action()
             return
@@ -546,7 +548,7 @@ class ItemMenuOverlay:
         self.item_list_window.active = True
         self.member_cursor.active = False
 
-    def _refresh_after_healing_item(
+    def _refresh_after_recovery_item(
         self,
         item: Item,
         spell: Spell,
@@ -585,9 +587,9 @@ class ItemMenuOverlay:
             )
         self._build_party_panel(selected_target_index=next_target_index)
 
-    def _use_selected_healing_item(self) -> bool:
+    def _use_selected_recovery_item(self) -> bool:
         item = self.selected_item
-        spell = self._field_healing_spell(item)
+        spell = self._field_recovery_spell(item)
         selected_target = self.member_cursor.selected_key
         if (
             item is None
@@ -606,22 +608,25 @@ class ItemMenuOverlay:
 
         for index in target_indexes:
             target = self.party_panel.party[index]
-            result = resolve_healing(
-                intensity=spell.intensity,
-                ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
-                current_hp=target.hp,
-                max_hp=target.max_hp,
-                random_factor=random.random(),
-            )
-            target.apply_healing(
-                result.amount,
-                cure_ailments=result.cures_ailments,
-            )
+            if spell.action is SpellAction.REVIVE:
+                target.revive(spell.intensity)
+            else:
+                result = resolve_healing(
+                    intensity=spell.intensity,
+                    ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
+                    current_hp=target.hp,
+                    max_hp=target.max_hp,
+                    random_factor=random.random(),
+                )
+                target.apply_healing(
+                    result.amount,
+                    cure_ailments=result.cures_ailments,
+                )
         if item.breaks_on_use and not self.inventory_system.remove(item):
             self._notify_invalid_action()
             return False
         play_se(HEALING_SE_ID)
-        self._refresh_after_healing_item(item, spell, selected_target)
+        self._refresh_after_recovery_item(item, spell, selected_target)
         return True
 
     def _start_drop_confirmation(self, item: Item) -> None:
@@ -734,7 +739,7 @@ class ItemMenuOverlay:
                 return False
             self.member_cursor.update(input_state.navigation)
             if input_state.confirm.triggered:
-                self._use_selected_healing_item()
+                self._use_selected_recovery_item()
             return False
 
         if self.phase is ItemSelectionPhase.CATEGORY:

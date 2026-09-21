@@ -194,6 +194,26 @@ def remove_timeline_actor(
     )
 
 
+def insert_timeline_actor(
+    order: TimelineOrder[Actor],
+    actor: Actor,
+    *,
+    agility: int,
+    gauge: Real,
+) -> TimelineOrder[Actor]:
+    """Stably insert a returning combatant without disturbing equal gauges."""
+
+    entry = TimelineEntry(actor, agility, gauge)
+    entries = list(order.entries)
+    insertion_index = len(entries)
+    for index, current in enumerate(entries):
+        if entry.gauge > current.gauge:
+            insertion_index = index
+            break
+    entries.insert(insertion_index, entry)
+    return TimelineOrder(tuple(entries))
+
+
 __all__ = [
     "GAUGE_READY_VALUE",
     "INITIAL_GAUGE_MULTIPLIER_MAX",
@@ -203,6 +223,7 @@ __all__ = [
     "TimelineOrder",
     "complete_timeline_action",
     "initialize_timeline_order",
+    "insert_timeline_actor",
     "ready_timeline_head",
     "remove_timeline_actor",
     "remove_timeline_head",

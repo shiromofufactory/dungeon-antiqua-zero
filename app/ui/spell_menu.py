@@ -498,10 +498,13 @@ class SpellMenuOverlay:
         return (
             spell.on_camp
             and not spell.to_enemy
-            and spell.action in (SpellAction.HEAL, SpellAction.CURE)
+            and spell.action
+            in (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE)
         )
 
     def _can_use_spell_on_target(self, spell: Spell, target: Member) -> bool:
+        if spell.action is SpellAction.REVIVE:
+            return target.is_dead
         if target.hp <= 0:
             return False
         if spell.action is SpellAction.CURE:
@@ -632,9 +635,12 @@ class SpellMenuOverlay:
                     result.amount,
                     cure_ailments=result.cures_ailments,
                 )
-        else:
+        elif spell.action is SpellAction.CURE:
             for index in target_indexes:
                 self.party_panel.party[index].cure_ailments()
+        else:
+            for index in target_indexes:
+                self.party_panel.party[index].revive(spell.intensity)
         self.member.mp -= spell.mp
         play_se(HEALING_SE_ID)
         kind = SPELL_PROFICIENCY_BY_TYPE[spell.type]

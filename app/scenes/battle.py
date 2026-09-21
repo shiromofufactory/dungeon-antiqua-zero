@@ -65,10 +65,12 @@ from battle_physical import (
     resolve_physical_attack,
 )
 from battle_timeline import (
+    GAUGE_READY_VALUE,
     TimelineAdvance,
     TimelineOrder,
     complete_timeline_action,
     initialize_timeline_order,
+    insert_timeline_actor,
     ready_timeline_head,
     remove_timeline_actor,
     remove_timeline_head,
@@ -821,6 +823,14 @@ class BattleCureResult:
 
 
 @dataclass(frozen=True)
+class BattleReviveResult:
+    """One dead ally and authored HP percentage waiting for revival."""
+
+    target_index: int
+    hp_percentage: int
+
+
+@dataclass(frozen=True)
 class BattleSilenceResult:
     """Resolved SILENCE magic waiting for its timed application."""
 
@@ -910,6 +920,7 @@ class BattleActionPresentation:
     protection_results: tuple[BattleProtectionResult, ...] = ()
     haste_results: tuple[BattleHasteResult, ...] = ()
     cure_results: tuple[BattleCureResult, ...] = ()
+    revive_results: tuple[BattleReviveResult, ...] = ()
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
@@ -4235,8 +4246,18 @@ class BattleScene:
         return indexes
 
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
-        """Return living ally targets that can still receive the spell."""
+        """Return ally targets that can still receive the spell."""
 
+        if spell.action is SpellAction.REVIVE:
+            escaped = getattr(self, "escaped_party_indexes", set())
+            party_count = len(
+                getattr(self, "party_visuals", getattr(self, "party", ()))
+            )
+            return tuple(
+                index
+                for index in range(party_count)
+                if index not in escaped and self._party_member_is_dead(index)
+            )
         hidden = getattr(self, "hidden_party_indexes", set())
         indexes = tuple(
             index
@@ -4585,6 +4606,7 @@ class BattleScene:
         protection_results = self._resolve_protection_results(spell, indexes)
         haste_results = self._resolve_haste_results(spell, indexes)
         cure_results = self._resolve_cure_results(spell, indexes)
+        revive_results = self._resolve_revive_results(spell, indexes)
         silence_results = self._resolve_silence_results(spell, indexes)
         status_results = sleep_results or slow_results or silence_results
         effect_indexes = (
@@ -4626,6 +4648,7 @@ class BattleScene:
             protection_results=protection_results,
             haste_results=haste_results,
             cure_results=cure_results,
+            revive_results=revive_results,
             silence_results=silence_results,
             result_start_frame=result_start_frame,
         )
@@ -4857,6 +4880,23 @@ class BattleScene:
         if spell.to_enemy:
             raise BattleDataError("CURE spells must target allies")
         return tuple(BattleCureResult(index) for index in indexes)
+
+    def _resolve_revive_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleReviveResult, ...]:
+        """Resolve REVIVE from its authored maximum-HP percentage."""
+
+        if spell.action is not SpellAction.REVIVE:
+            return ()
+        if spell.to_enemy:
+            raise BattleDataError("REVIVE spells must target allies")
+        if not 1 <= spell.intensity <= 100:
+            raise BattleDataError("REVIVE intensity must be from 1 to 100")
+        return tuple(
+            BattleReviveResult(index, spell.intensity) for index in indexes
+        )
 
     def _resolve_silence_results(
         self,
@@ -5114,6 +5154,11 @@ class BattleScene:
             self.party[result.target_index].apply_haste()
         for result in presentation.cure_results:
             self.party[result.target_index].cure_ailments()
+        for result in presentation.revive_results:
+            member = self.party[result.target_index]
+            if member.revive(result.hp_percentage) > 0:
+                self._refresh_party_hp_text(result.target_index)
+                self._reinsert_revived_party_member(result.target_index)
         for result in presentation.silence_results:
             monster = self.monsters[result.target_index]
             if result.success:
@@ -5127,6 +5172,7 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+
         for result in presentation.party_sleep_results:
             member = self.party[result.target_index]
             if result.success:
@@ -5153,6 +5199,25 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+
+    def _reinsert_revived_party_member(self, index: int) -> None:
+        """Return a revived member to the current timeline at a reset gauge."""
+
+        order = getattr(self, "_timeline_order", None)
+        visuals = getattr(self, "party_visuals", ())
+        if order is None or not 0 <= index < len(visuals):
+            return
+        actor = visuals[index]
+        if any(entry.actor is actor for entry in order.entries):
+            return
+        agility = self._actor_agility(actor)
+        self._timeline_order = insert_timeline_actor(
+            order,
+            actor,
+            agility=agility,
+            gauge=min(float(agility), GAUGE_READY_VALUE),
+        )
+        self.timeline = self._timeline_order.actors
 
     def _show_item_use_message(self, item: Item) -> None:
         """Show the used item, including a spell-school icon for weapons."""

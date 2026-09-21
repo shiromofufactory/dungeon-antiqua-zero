@@ -8,7 +8,7 @@ from tools._bootstrap import APP_ROOT as _APP_ROOT
 
 from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
-from app.rendering import DIMMED_PALETTE
+from app.rendering import DIMMED_PALETTE, MONOCHROME_PALETTE
 from ui.party_status import (
     PARTY_AILMENT_ICON_X,
     PARTY_AILMENT_ICON_Y,
@@ -532,6 +532,17 @@ class ItemMenuTest(unittest.TestCase):
             ],
         )
 
+    def test_shared_party_panel_draws_dead_face_in_monochrome(self) -> None:
+        palette_shifter = Mock()
+        palette_shifter.shifted.side_effect = lambda _name: nullcontext()
+        mock = ItemMenuHarness(palette_shifter=palette_shifter)
+        mock.party[2].hp = 0
+
+        with patch("ui.party_status.pyxel.blt"):
+            mock.party_panel.draw_faces()
+
+        palette_shifter.shifted.assert_called_once_with(MONOCHROME_PALETTE)
+
     def test_dims_only_members_who_cannot_equip_selected_equipment(self) -> None:
         palette_shifter = Mock()
         palette_shifter.shifted.side_effect = lambda _name: nullcontext()
@@ -924,6 +935,29 @@ class ItemMenuTest(unittest.TestCase):
         self.assertTrue(
             all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
         )
+
+    def test_divine_tear_revives_a_dead_field_party_member_at_full_hp(self) -> None:
+        mock = ItemMenuHarness()
+        item = mock.items["DIVINE TEAR"]
+        target = mock.party_panel.party[1]
+        target.hp = 0
+        self.select_item(mock, item.key)
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 1)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 2, 3, 4)))
+        with (
+            patch("ui.item_menu.random.random") as random_value,
+            patch("ui.item_menu.play_se") as play_se,
+        ):
+            mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(target.hp, target.max_hp)
+        self.assertEqual(mock.inventory_system.quantity(item), 0)
+        random_value.assert_not_called()
+        play_se.assert_called_once_with(HEALING_SE_ID)
 
     def test_potion_without_an_injured_target_reports_invalid_action(self) -> None:
         invalid_action = Mock()

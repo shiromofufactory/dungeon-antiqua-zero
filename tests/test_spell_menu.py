@@ -11,7 +11,7 @@ from app.input import Direction, InputButton, InputState
 from app.resources import TRANSPARENT_INDEX
 from app.spell import SpellAction, SpellType
 from member import ProficiencyKind
-from rendering import DIMMED_PALETTE
+from rendering import DIMMED_PALETTE, MONOCHROME_PALETTE
 from ui import DEFAULT_TEXT_COLOR
 from ui.spell_menu import (
     FACE_SIZE,
@@ -444,7 +444,12 @@ class SpellMenuTest(unittest.TestCase):
             mock.party_panel.draw_faces(mock.dimmed_member_indexes)
         self.assertEqual(
             palette_shifter.shifted.call_args_list,
-            [call(DIMMED_PALETTE)] * 4,
+            [
+                call(DIMMED_PALETTE),
+                call(MONOCHROME_PALETTE),
+                call(DIMMED_PALETTE),
+                call(DIMMED_PALETTE),
+            ],
         )
 
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -486,6 +491,50 @@ class SpellMenuTest(unittest.TestCase):
         self.assertTrue(
             all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
         )
+
+    @patch("ui.spell_menu.play_se")
+    @patch("ui.spell_menu.random.random")
+    def test_revive_spells_restore_dead_targets_at_authored_hp_percentages(
+        self,
+        random_value: Mock,
+        play_se: Mock,
+    ) -> None:
+        cases = (("REVIVE1", 25, ()), ("REVIVE2", 100, {"REVIVE2"}))
+        for spell_key, percentage, event_spell_keys in cases:
+            with self.subTest(spell_key=spell_key):
+                mock = SpellMenuHarness(
+                    member_index=1,
+                    event_spell_keys=event_spell_keys,
+                )
+                sacred = mock.member.proficiency(ProficiencyKind.SACRED)
+                sacred.level = 5
+                mock.member.mp = max(mock.member.mp, mock.spells[spell_key].mp)
+                mock._build_windows()
+                target = mock.party[0]
+                target.hp = 0
+                target.stunned = True
+                initial_mp = mock.member.mp
+
+                mock.update(InputState(confirm=InputButton(True, True)))
+                mock.spell_cursor.select_key(spell_key)
+                mock.update(InputState(confirm=InputButton(True, True)))
+
+                self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+                self.assertEqual(
+                    mock._usable_target_indexes(mock.spells[spell_key]),
+                    (0,),
+                )
+                mock.update(InputState(confirm=InputButton(True, True)))
+
+                self.assertEqual(
+                    target.hp,
+                    max(1, target.max_hp * percentage // 100),
+                )
+                self.assertFalse(target.stunned)
+                self.assertEqual(mock.member.mp, initial_mp - mock.spells[spell_key].mp)
+
+        random_value.assert_not_called()
+        self.assertEqual(play_se.call_count, len(cases))
 
     @patch("ui.spell_menu.play_se")
     @patch("ui.spell_menu.random.random", return_value=0.5)

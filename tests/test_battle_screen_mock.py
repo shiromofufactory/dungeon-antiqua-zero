@@ -173,6 +173,7 @@ from tools.screen_mocks.battle import (
     BattleActionPresentation,
     BattleAttackPresentation,
     BattleAttackStrike,
+    BattleReviveResult,
     BattleHealingPopup,
     BattleAffinityPopup,
     BattleSpellDamagePopup,
@@ -5012,6 +5013,63 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(target.sleeping, 0)
         self.assertEqual(target.confused, 0)
         self.assertTrue(target.stunned)
+
+    def test_revive_targets_only_dead_members_still_in_the_battle(self) -> None:
+        spell = load_mock_spells()["REVIVE1"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion", "Alvan"),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.party[1].hp = 0
+        mock.party[2].hp = 0
+        mock.escaped_party_indexes = {2}
+
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(spell),
+            (1,),
+        )
+
+    def test_revive_restores_hp_and_reinserts_member_into_timeline(self) -> None:
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion"),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        target = party[1]
+        target.hp = 0
+        target.stunned = True
+        visuals = tuple(
+            BattleMockCharacter(member, index * 16, 0, index)
+            for index, member in enumerate(party)
+        )
+        order = TimelineOrder(
+            (TimelineEntry(visuals[0], visuals[0].agility, 64.0),)
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = party
+        mock.party_visuals = visuals
+        mock._timeline_order = order
+        mock.timeline = order.actors
+        mock.monsters = ()
+        mock._refresh_party_hp_text = Mock()
+        result = BattleReviveResult(1, 25)
+
+        mock._apply_action_results(
+            BattleActionPresentation((), revive_results=(result,))
+        )
+
+        self.assertEqual(target.hp, max(1, target.max_hp // 4))
+        self.assertFalse(target.stunned)
+        self.assertEqual(mock.timeline, (visuals[0], visuals[1]))
+        self.assertEqual(
+            mock._timeline_order.entries[1].gauge,
+            min(float(visuals[1].agility), 64.0),
+        )
+        mock._refresh_party_hp_text.assert_called_once_with(1)
 
     def test_silence_uses_authored_rate_and_applies_da2_duration(self) -> None:
         spell = load_mock_spells()["SILENCE"]

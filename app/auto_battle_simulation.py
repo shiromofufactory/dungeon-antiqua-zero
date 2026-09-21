@@ -39,9 +39,11 @@ if __package__:
     )
     from .battle_speed import modified_agility
     from .battle_timeline import (
+        GAUGE_READY_VALUE,
         TimelineEntry,
         TimelineOrder,
         complete_timeline_action,
+        insert_timeline_actor,
         ready_timeline_head,
     )
     from .item import AdditionalEffect, ItemEquipType, ItemSpecial
@@ -84,9 +86,11 @@ else:
     )
     from battle_speed import modified_agility
     from battle_timeline import (
+        GAUGE_READY_VALUE,
         TimelineEntry,
         TimelineOrder,
         complete_timeline_action,
+        insert_timeline_actor,
         ready_timeline_head,
     )
     from item import AdditionalEffect, ItemEquipType, ItemSpecial
@@ -109,6 +113,7 @@ ALLY_SPELL_ACTIONS = frozenset(
         SpellAction.HASTE,
         SpellAction.SILENCE,
         SpellAction.CURE,
+        SpellAction.REVIVE,
     )
 )
 ENEMY_SPELL_ACTIONS = frozenset((SpellAction.SLEEP, SpellAction.SLOW))
@@ -361,11 +366,16 @@ class BattleForecast:
                     a for a in targets if a.spec.spells and a.silenced <= 0
                 )
         else:
-            targets = tuple(
-                a
-                for a in self.allies()
-                if not a.hidden or (not spell.to_all and a is actor)
-            )
+            if spell.action is SpellAction.REVIVE:
+                targets = tuple(
+                    a for a in self.ally_actors if not a.is_alive and not a.removed
+                )
+            else:
+                targets = tuple(
+                    a
+                    for a in self.allies()
+                    if not a.hidden or (not spell.to_all and a is actor)
+                )
             if spell.action is SpellAction.PROTECTION:
                 targets = tuple(a for a in targets if a.protection < 2)
             elif spell.action is SpellAction.HASTE:
@@ -451,6 +461,7 @@ class BattleForecast:
                     if continuation and spell.action not in (
                         SpellAction.HEAL,
                         SpellAction.CURE,
+                        SpellAction.REVIVE,
                     ):
                         continue
                     if self.snapshot.policy.spell_mode is SpellMode.NEVER:
@@ -485,7 +496,12 @@ class BattleForecast:
                     if (
                         continuation
                         and spell is not None
-                        and spell.action not in (SpellAction.HEAL, SpellAction.CURE)
+                        and spell.action
+                        not in (
+                            SpellAction.HEAL,
+                            SpellAction.CURE,
+                            SpellAction.REVIVE,
+                        )
                     ):
                         continue
                     if spell is not None:
@@ -619,8 +635,17 @@ class BattleForecast:
             for a in actions
             if a.spell_key and self.spells[a.spell_key].action is SpellAction.CURE
         ]
-        for stage in ("urgent", "cure", "heal"):
-            targets = list(self.allies())
+        revives = [
+            a
+            for a in actions
+            if a.spell_key and self.spells[a.spell_key].action is SpellAction.REVIVE
+        ]
+        for stage in ("urgent", "cure", "heal", "revive"):
+            targets = list(
+                (a for a in self.ally_actors if not a.is_alive and not a.removed)
+                if stage == "revive"
+                else self.allies()
+            )
             if stage == "cure":
                 ordering = {e.actor: i for i, e in enumerate(self.order.entries)}
                 targets.sort(
@@ -630,8 +655,10 @@ class BattleForecast:
                         a.spec.number,
                     )
                 )
-            else:
+            elif stage != "revive":
                 targets.sort(key=lambda a: (a.hp / a.max_hp, a.spec.number))
+            else:
+                targets.sort(key=lambda a: a.spec.number)
             for target in targets:
                 if stage == "urgent" and target.hp * 100 > target.max_hp * 35:
                     continue
@@ -639,6 +666,27 @@ class BattleForecast:
                     continue
                 if stage == "cure" and not self.curable(target):
                     continue
+                if stage == "revive":
+                    available = [
+                        a for a in revives if target.spec.number in a.targets
+                    ]
+                    if not available:
+                        continue
+                    action = min(
+                        available,
+                        key=lambda a: (
+                            -max(
+                                1,
+                                target.max_hp
+                                * self.spells[a.spell_key].intensity
+                                // 100,
+                            ),
+                            self.cost(actor, a),
+                            -self.delay(actor, a),
+                            a.stable_key(self.snapshot),
+                        ),
+                    )
+                    return action, stage
                 if stage == "cure":
                     available = [
                         a
@@ -879,6 +927,20 @@ class BattleForecast:
             elif spell.action is SpellAction.CURE:
                 target.poisoned = target.paralyzed = False
                 target.sleeping = target.confused = 0
+            elif spell.action is SpellAction.REVIVE:
+                target.hp = max(1, target.max_hp * spell.intensity // 100)
+                target.poisoned = target.paralyzed = target.stunned = False
+                target.sleeping = target.confused = target.silenced = 0
+                target.protection = target.speed = 0
+                target.hidden = False
+                target.focus = target.cover = None
+                if target.spec.number not in self.order.actors:
+                    self.order = insert_timeline_actor(
+                        self.order,
+                        target.spec.number,
+                        agility=target.agility,
+                        gauge=min(float(target.agility), GAUGE_READY_VALUE),
+                    )
             elif spell.action is SpellAction.IDENTIFY:
                 self.identify(target)
             else:

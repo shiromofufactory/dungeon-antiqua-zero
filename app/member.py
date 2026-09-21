@@ -1222,6 +1222,19 @@ class Member:
         self.confused = 0
         return cured
 
+    def revive(self, hp_percentage: int) -> int:
+        """Revive a dead member at an authored percentage of maximum HP."""
+
+        if isinstance(hp_percentage, bool) or not isinstance(hp_percentage, int):
+            raise TypeError("hp_percentage must be an integer")
+        if not 1 <= hp_percentage <= 100:
+            raise ValueError("hp_percentage must be from 1 to 100")
+        if self.is_alive:
+            return 0
+        self._clear_conditions_on_death()
+        self.hp = max(1, self.max_hp * hp_percentage // 100)
+        return self.hp
+
     def take_damage(self, damage: int) -> int:
         """Apply battle damage, waking from sleep or confusion like DA2."""
 
