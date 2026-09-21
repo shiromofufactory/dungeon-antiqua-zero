@@ -296,6 +296,7 @@ class MonsterBattleState:
     mp: int | None = None
     poisoned: bool = False
     sleeping: int = 0
+    confused: int = 0
     silenced: int = 0
     stunned: bool = False
     defense_modifier: int = 0
@@ -328,6 +329,10 @@ class MonsterBattleState:
             raise TypeError("sleeping must be an integer")
         if self.sleeping < 0:
             raise ValueError("sleeping must not be negative")
+        if isinstance(self.confused, bool) or not isinstance(self.confused, int):
+            raise TypeError("confused must be an integer")
+        if self.confused < 0:
+            raise ValueError("confused must not be negative")
         if isinstance(self.silenced, bool) or not isinstance(self.silenced, int):
             raise TypeError("silenced must be an integer")
         if self.silenced < 0:
@@ -385,7 +390,9 @@ class MonsterBattleState:
         self.hp = max(0, previous - damage)
         if damage > 0:
             self.sleeping = 0
+            self.confused = 0
         if self.hp <= 0:
+            self.confused = 0
             self.silenced = 0
             self.stunned = False
             self.defense_modifier = 0
@@ -393,13 +400,36 @@ class MonsterBattleState:
         return previous - self.hp
 
     def apply_sleep(self, turns: int) -> None:
-        """Apply DA2's non-shortening sleep duration."""
+        """Apply DA2's non-shortening sleep duration and clear confusion."""
 
         if isinstance(turns, bool) or not isinstance(turns, int):
             raise TypeError("turns must be an integer")
         if turns <= 0:
             raise ValueError("turns must be positive")
         self.sleeping = max(self.sleeping, turns)
+        self.confused = 0
+
+    def apply_confusion(self, turns: int) -> bool:
+        """Apply DA2's non-shortening confusion duration and clear sleep."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
+        if not self.is_alive:
+            return False
+        previous = self.confused
+        self.confused = max(self.confused, turns)
+        self.sleeping = 0
+        return self.confused != previous
+
+    def elapse_confusion_turn(self) -> bool:
+        """Consume one confused action and report whether confusion was active."""
+
+        if self.confused <= 0:
+            return False
+        self.confused -= 1
+        return True
 
     def apply_poison(self) -> bool:
         """Apply persistent poison and report whether the state changed."""
@@ -420,6 +450,7 @@ class MonsterBattleState:
         assert previous is not None
         self.hp = max(0, previous - damage)
         if self.hp <= 0:
+            self.confused = 0
             self.silenced = 0
             self.stunned = False
             self.defense_modifier = 0
@@ -523,6 +554,7 @@ class MonsterBattleState:
         """Set HP to zero for a mock attack that always defeats its target."""
 
         self.hp = 0
+        self.confused = 0
         self.silenced = 0
         self.stunned = False
         self.defense_modifier = 0
@@ -535,6 +567,7 @@ class MonsterBattleState:
         self.mp = self.max_mp
         self.poisoned = False
         self.sleeping = 0
+        self.confused = 0
         self.silenced = 0
         self.stunned = False
         self.defense_modifier = 0

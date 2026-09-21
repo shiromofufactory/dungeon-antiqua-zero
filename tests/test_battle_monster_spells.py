@@ -153,6 +153,32 @@ class MonsterSpellTest(unittest.TestCase):
         self.assertEqual(tuple(member.sleeping for member in mock.party), (2, 3))
         self.assertEqual(actor.state.mp, 9)
 
+    def test_confuse_replaces_sleep_on_the_selected_member(self) -> None:
+        actor = spellcaster(magic=15, spell_key="CONFUSION")
+        mock = spell_scene(actor)
+        spell = mock.spells["CONFUSION"]
+        mock.party[1].apply_sleep(2)
+
+        with (
+            patch("scenes.battle.random.choice", return_value=1),
+            patch("scenes.battle.random.randint", side_effect=(0, 3)),
+        ):
+            self.assertTrue(mock._begin_monster_spell(actor, spell))
+
+        presentation = mock.action_presentation
+        assert presentation is not None
+        self.assertEqual(
+            tuple(
+                (result.target_index, result.turns)
+                for result in presentation.party_confuse_results
+            ),
+            ((1, 3),),
+        )
+        mock._apply_action_results(presentation)
+        self.assertEqual(mock.party[1].sleeping, 0)
+        self.assertEqual(mock.party[1].confused, 3)
+        self.assertEqual(actor.state.mp, 9)
+
     def test_mp_shortage_is_not_filtered_by_ai_but_spell_fails_at_cast(self) -> None:
         actor = spellcaster(magic=15, spell_key="SLEEP", max_mp=2)
         mock = spell_scene(actor)

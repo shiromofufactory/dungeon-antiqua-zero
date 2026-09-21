@@ -1282,6 +1282,28 @@ class Member:
         self.sleeping = max(self.sleeping, turns)
         self.confused = 0
 
+    def apply_confusion(self, turns: int) -> bool:
+        """Apply DA2's non-shortening confusion duration and clear sleep."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
+        if not self.is_alive:
+            return False
+        previous = self.confused
+        self.confused = max(self.confused, turns)
+        self.sleeping = 0
+        return self.confused != previous
+
+    def elapse_confusion_turn(self) -> bool:
+        """Consume one confused action and report whether confusion was active."""
+
+        if self.confused <= 0:
+            return False
+        self.confused -= 1
+        return True
+
     def elapse_sleep_turn(self) -> bool:
         """Consume one sleeping action and report whether it was skipped."""
 

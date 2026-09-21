@@ -92,6 +92,10 @@
     "spell_armor_break": {
       "channel": 1,
       "sound": 33
+    },
+    "spell_confusion": {
+      "channel": 1,
+      "sound": 35
     }
   }
 }

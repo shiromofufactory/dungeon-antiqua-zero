@@ -552,6 +552,23 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             ).candidates(0)
             self.assertFalse(any(a.spell_key == spell.key for a in actions))
 
+    def test_confuse_is_a_supported_status_spell_in_forecasts(self):
+        spell = self.spells["CONFUSION"]
+        caster = replace(self.specs[0], spells=(spell,))
+        enemy = self.enemy(spell_defense=0)
+        forecast = BattleForecast(self.snapshot(caster, enemy), 0)
+        forecast.roll = Mock(return_value=0.0)
+
+        actions = [a for a in forecast.candidates(0) if a.spell_key == spell.key]
+        self.assertEqual(
+            actions,
+            [AutoAction(BattleCommand.SPELL, (5,), spell.key)],
+        )
+        forecast.cast(forecast.actors[0], actions[0])
+
+        self.assertEqual(forecast.actors[5].confused, 2)
+        self.assertEqual(forecast.actors[5].sleeping, 0)
+
     def test_resistance_pruning_does_not_change_enemy_spell_choices(self):
         spell = self.spells["SLEEP"]
         ally = replace(self.specs[0], resistances=frozenset((ResistanceType.SLEEP,)))
@@ -843,6 +860,30 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(enemy.sleeping, 1)
         enemy.damage(1)
         self.assertEqual(enemy.sleeping, 0)
+
+    def test_confused_forecast_actors_attack_their_own_side(self):
+        forecast = BattleForecast(
+            self.snapshot(self.specs[0], self.specs[1], self.enemy(), self.enemy(6)),
+            0,
+        )
+        forecast.roll = Mock(return_value=0.0)
+        member = forecast.actors[0]
+        member.confused = 2
+        ally_hp = forecast.actors[1].hp
+
+        forecast.confused_turn(member)
+
+        self.assertEqual(member.confused, 1)
+        self.assertLess(forecast.actors[1].hp, ally_hp)
+
+        monster = forecast.actors[5]
+        monster.confused = 2
+        other_hp = forecast.actors[6].hp
+
+        forecast.confused_turn(monster)
+
+        self.assertEqual(monster.confused, 1)
+        self.assertLess(forecast.actors[6].hp, other_hp)
 
     def test_guard_cover_and_hide_change_the_actual_damage_recipient(self):
         coverer = replace(self.specs[1], defending=True, cover=0)

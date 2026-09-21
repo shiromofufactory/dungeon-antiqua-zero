@@ -21,6 +21,7 @@ DA2_MONSTER_DEATH_BASE_RATE = 10
 PHYSICAL_STATUS_EFFECTS = frozenset(
     (
         AdditionalEffect.SLEEP,
+        AdditionalEffect.CONFUSE,
         AdditionalEffect.DEATH,
         AdditionalEffect.STUN,
         AdditionalEffect.POISON,

@@ -9,6 +9,7 @@ from unittest.mock import Mock, call, patch
 from tools.screen_mocks.battle import (
     ATTACK_DAMAGE_FRAME_COUNT,
     ATTACK_EFFECT_CELL_SIZE,
+    ATTACK_EFFECT_ROW_BY_SUBTYPE,
     ATTACK_HIT_FRAME_COUNT,
     ATTACK_HIT_PATTERN_FRAME_COUNT,
     ATTACK_HIT_START_FRAME,
@@ -57,6 +58,7 @@ from tools.screen_mocks.battle import (
     COMMAND_GUIDE_TEXT_X,
     COMMAND_GUIDE_WINDOW_GRID,
     COMMAND_TEXT_KEYS,
+    CONFUSED_MONSTER_ATTACK_EFFECT_ROW,
     ADDITIONAL_EFFECT_MARKER_FRAME_COUNT,
     ADDITIONAL_EFFECT_MARKER_HEIGHT,
     ADDITIONAL_EFFECT_MARKER_WIDTH,
@@ -153,6 +155,13 @@ from tools.screen_mocks.battle import (
     SLEEP_ICON_SOURCE_Y,
     SLEEP_MAX_TURNS,
     SLEEP_MIN_TURNS,
+    CONFUSE_MAX_TURNS,
+    CONFUSE_MIN_TURNS,
+    CONFUSE_ICON_PATTERN_FRAME_COUNT,
+    CONFUSE_ICON_SIZE,
+    CONFUSE_ICON_SOURCE_X,
+    CONFUSE_ICON_SOURCE_Y,
+    CONFUSE_MONSTER_OFFSET_X,
     SILENCE_ICON_SIZE,
     SILENCE_ICON_SOURCE_X,
     SILENCE_ICON_SOURCE_Y,
@@ -319,6 +328,7 @@ def _attack_presentation(
     damage_applied: bool = False,
     affinity_popup_started: bool = False,
     return_started: bool = False,
+    target_side: str = "enemy",
 ) -> BattleAttackPresentation:
     motion_start_frame = AIM_RETICLE_END_FRAME if is_aimed else 0
     hit_start_frame = (
@@ -342,6 +352,7 @@ def _attack_presentation(
                 affinity_popup_started=affinity_popup_started,
             ),
         ),
+        target_side=target_side,
         is_aimed=is_aimed,
         is_focused=is_focused,
         elapsed_frame=elapsed_frame,
@@ -398,6 +409,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._draw_party = Mock()
         mock._draw_monsters = Mock()
         mock._draw_party_attack_effect = Mock()
+        mock._draw_confused_monster_attack_effect = Mock()
         mock._draw_spell_effects = Mock()
         mock._draw_sleeping_icons = Mock()
         mock._draw_poison_icons = Mock()
@@ -416,6 +428,10 @@ class BattleScreenMockTest(unittest.TestCase):
         manager.attach_mock(mock._draw_party, "party")
         manager.attach_mock(mock._draw_monsters, "monsters")
         manager.attach_mock(mock._draw_party_attack_effect, "party_attack_effect")
+        manager.attach_mock(
+            mock._draw_confused_monster_attack_effect,
+            "confused_monster_attack_effect",
+        )
         manager.attach_mock(mock._draw_spell_effects, "spell_effects")
         manager.attach_mock(mock._draw_sleeping_icons, "sleeping_icons")
         manager.attach_mock(mock._draw_poison_icons, "poison_icons")
@@ -438,6 +454,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.party(),
                 call.monsters(),
                 call.party_attack_effect(),
+                call.confused_monster_attack_effect(),
                 call.spell_effects(),
                 call.sleeping_icons(),
                 call.poison_icons(),
@@ -1890,6 +1907,66 @@ class BattleScreenMockTest(unittest.TestCase):
             1,
         )
 
+    def test_confused_friendly_attack_draws_impact_and_damage_over_ally(self) -> None:
+        presentation = _attack_presentation(
+            1,
+            12,
+            (),
+            2,
+            elapsed_frame=ATTACK_HIT_START_FRAME,
+            damage_applied=True,
+            target_side="ally",
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ATTACK_PRESENTATION
+        mock.attack_presentation = presentation
+        mock.attack_effect_image = object()
+        mock._party_draw_position = Mock(return_value=(156, 64))
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party_attack_effect()
+
+        blt.assert_called_once_with(
+            132,
+            56,
+            mock.attack_effect_image,
+            0,
+            128,
+            ATTACK_EFFECT_CELL_SIZE,
+            ATTACK_EFFECT_CELL_SIZE,
+            1,
+        )
+
+        presentation.elapsed_frame += ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_party_attack_damage()
+
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    162,
+                    78,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X + 8,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    8,
+                    8,
+                    1,
+                ),
+                call(
+                    170,
+                    78,
+                    0,
+                    DAMAGE_NUMBER_SPRITE_X + 16,
+                    DAMAGE_NUMBER_SPRITE_Y,
+                    8,
+                    8,
+                    1,
+                ),
+            ],
+        )
+
     def test_attack_records_weapon_before_return_clears_the_actor(self) -> None:
         monster = BattleMockMonster(
             key="monster",
@@ -3155,6 +3232,114 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.focused_target_by_party_index, {})
         mock._start_timeline_animation.assert_called_once_with()
         mock.command_window.open.assert_not_called()
+
+    def test_confused_member_is_forced_to_attack_without_opening_commands(self) -> None:
+        member = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=(BATTLE_MOCK_PARTY_CHARACTER_KEYS[0],),
+        )[0]
+        member.apply_confusion(2)
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = (visual,)
+        mock.timeline = (visual,)
+        mock.escape_requested = False
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.defending_party_indexes = set()
+        mock.focused_target_by_party_index = {0: 1}
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock._begin_confused_party_action = Mock(return_value=True)
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(member.confused, 1)
+        self.assertEqual(mock.focused_target_by_party_index, {})
+        mock._begin_confused_party_action.assert_called_once_with(0)
+        mock.command_window.open.assert_not_called()
+
+    def test_confused_member_prefers_an_actionable_ally_target(self) -> None:
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion", "Alvan"),
+        )
+        party[1].apply_sleep(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = party
+        mock.party_visuals = tuple(
+            BattleMockCharacter(member, 0, 0, 0) for member in party
+        )
+        mock.active_party_index = 0
+        mock.escaped_party_indexes = set()
+        mock.hidden_party_indexes = set()
+        mock._begin_confused_member_friendly_attack = Mock(return_value=True)
+
+        with patch("scenes.battle.random.choice", return_value=2) as choice:
+            self.assertTrue(mock._begin_confused_party_action(0))
+
+        choice.assert_called_once_with((2,))
+        mock._begin_confused_member_friendly_attack.assert_called_once_with(
+            0,
+            2,
+        )
+
+    def test_confused_member_friendly_attack_uses_physical_resolution(self) -> None:
+        party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion"),
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = party
+        mock.active_party_index = 0
+        mock.defending_party_indexes = set()
+        mock.hidden_party_indexes = set()
+        weapon = party[0].equipment.weapon_at(EquipmentSlot.RIGHT)
+        assert weapon is not None
+        mock.attack_poses = {
+            f"{weapon.weapon_img}_1": AttackPoseDefinition(
+                f"{weapon.weapon_img}_1",
+                weapon.weapon_img,
+                "1",
+                1,
+                (),
+            ),
+            f"{weapon.weapon_img}_2": AttackPoseDefinition(
+                f"{weapon.weapon_img}_2",
+                weapon.weapon_img,
+                "2",
+                2,
+                (),
+            ),
+        }
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+
+        with patch("scenes.battle.random.randint", return_value=0):
+            self.assertTrue(mock._begin_confused_member_friendly_attack(0, 1))
+
+        presentation = mock.attack_presentation
+        assert presentation is not None
+        self.assertEqual(presentation.target_side, "ally")
+        self.assertEqual(presentation.target_index, 1)
+        self.assertTrue(presentation.strikes[0].is_hit)
+        self.assertGreater(presentation.strikes[0].damage, 0)
+        self.assertEqual(
+            tuple(pose.branch for pose in presentation.strikes[0].poses),
+            ("1", "2"),
+        )
+        self.assertEqual(
+            presentation.strikes[0].effect_row,
+            ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype),
+        )
+        self.assertIs(mock.phase, BattleMockPhase.ATTACK_PRESENTATION)
 
     def test_poison_damage_precedes_a_sleeping_members_skipped_turn(self) -> None:
         member = load_mock_party(
@@ -4989,6 +5174,53 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.monsters[0].state.sleeping, SLEEP_MAX_TURNS)
         self.assertEqual(mock.spell_damage_popups, [])
 
+    def test_confuse_uses_authored_rate_and_replaces_sleep(self) -> None:
+        spell = load_mock_spells()["CONFUSION"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            load_mock_items(),
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.action_targets_all = False
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.monsters = (_damage_test_monster(),)
+        mock.monsters[0].state.apply_sleep(2)
+        mock.spell_effects = {}
+        mock.target_cursor = SimpleNamespace(active=True)
+        mock.party_target_cursor = None
+        mock.all_target_cursors = ()
+        mock.spell_damage_popups = []
+        mock.affinity_popups = []
+        mock._refresh_monster_name_colors = Mock()
+
+        with patch(
+            "scenes.battle.random.randint",
+            side_effect=(0, CONFUSE_MAX_TURNS),
+        ) as randint:
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        assert mock.action_presentation is not None
+        result = mock.action_presentation.confuse_results[0]
+        self.assertTrue(result.success)
+        self.assertEqual(result.turns, CONFUSE_MAX_TURNS)
+        self.assertEqual(spell.rate, 12)
+        self.assertEqual(
+            randint.call_args_list,
+            [call(0, 19), call(CONFUSE_MIN_TURNS, CONFUSE_MAX_TURNS)],
+        )
+
+        mock._apply_action_results(mock.action_presentation)
+
+        self.assertEqual(mock.monsters[0].state.confused, CONFUSE_MAX_TURNS)
+        self.assertEqual(mock.monsters[0].state.sleeping, 0)
+        self.assertEqual(mock.spell_damage_popups, [])
+
     def test_slow_uses_authored_rate_and_applies_zero_speed_formula(self) -> None:
         spell = load_mock_spells()["SLOW"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -5566,6 +5798,56 @@ class BattleScreenMockTest(unittest.TestCase):
                     SLEEP_ICON_SOURCE_Y,
                     SLEEP_ICON_SIZE,
                     SLEEP_ICON_SIZE,
+                    1,
+                ),
+            ],
+        )
+
+    def test_confusion_icons_use_four_patterns_from_bank_zero_128_128(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.apply_confusion(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party_visuals = (
+            SimpleNamespace(member=SimpleNamespace(confused=2)),
+        )
+        mock.monsters = (monster,)
+        mock._party_condition_icon_position = Mock(return_value=(168, 64))
+        mock._monster_base_position = Mock(
+            return_value=(MONSTER_POSITIONS[0][0], MONSTER_POSITIONS[0][1])
+        )
+        mock._monster_draw_x = Mock(return_value=4)
+
+        with (
+            patch(
+                "tools.screen_mocks.battle.pyxel.frame_count",
+                CONFUSE_ICON_PATTERN_FRAME_COUNT * 2,
+            ),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
+            mock._draw_confusion_icons()
+
+        expected_source_x = CONFUSE_ICON_SOURCE_X + CONFUSE_ICON_SIZE * 2
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(
+                    168,
+                    64,
+                    0,
+                    expected_source_x,
+                    CONFUSE_ICON_SOURCE_Y,
+                    CONFUSE_ICON_SIZE,
+                    CONFUSE_ICON_SIZE,
+                    1,
+                ),
+                call(
+                    4 + CONFUSE_MONSTER_OFFSET_X,
+                    MONSTER_POSITIONS[0][1],
+                    0,
+                    expected_source_x,
+                    CONFUSE_ICON_SOURCE_Y,
+                    CONFUSE_ICON_SIZE,
+                    CONFUSE_ICON_SIZE,
                     1,
                 ),
             ],
@@ -7246,6 +7528,107 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIsNone(mock.blinking_monster_index)
         self.assertEqual(mock.monster_blink_frames_remaining, 0)
         mock._start_timeline_animation.assert_called_once_with()
+
+    def test_confused_monster_is_forced_to_attack_without_ai_selection(self) -> None:
+        actor = _damage_test_monster()
+        actor.state.apply_confusion(2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor,)
+        mock.timeline = (actor,)
+        mock.party = (
+            SimpleNamespace(hp=30, formation_row=FormationRow.FRONT),
+        )
+        mock.party_visuals = (
+            SimpleNamespace(member=mock.party[0]),
+        )
+        mock.escaped_party_indexes = set()
+        mock.temporary_front_party_indexes = set()
+        mock.command_cursor = Mock()
+        mock.command_window = Mock()
+        mock._begin_confused_monster_action = Mock(return_value=True)
+        mock._select_monster_action = Mock()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(actor.state.confused, 1)
+        self.assertIs(mock.phase, BattleMockPhase.MONSTER_ACTION)
+        self.assertEqual(mock.blinking_monster_index, 0)
+        self.assertEqual(
+            mock.monster_blink_frames_remaining,
+            MONSTER_BLINK_FRAME_COUNT,
+        )
+        self.assertTrue(mock.monster_confused_action_pending)
+        mock._begin_confused_monster_action.assert_not_called()
+        mock._select_monster_action.assert_not_called()
+
+        mock.monster_blink_frames_remaining = 1
+        mock.progression = Mock()
+        mock._update_monster_action()
+
+        self.assertIsNone(mock.blinking_monster_index)
+        self.assertFalse(mock.monster_confused_action_pending)
+        mock.progression.record_enemy_action.assert_called_once_with(0)
+        mock._begin_confused_monster_action.assert_called_once_with(actor)
+        mock._select_monster_action.assert_not_called()
+
+    def test_confused_monster_targets_another_living_monster(self) -> None:
+        actor = _damage_test_monster()
+        target = _damage_test_monster()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor, target)
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+
+        with (
+            patch("scenes.battle.random.choice", return_value=1),
+            patch("scenes.battle.random.randint", return_value=0),
+        ):
+            self.assertTrue(mock._begin_confused_monster_action(actor))
+
+        assert mock.action_presentation is not None
+        result = mock.action_presentation.confused_attack_results[0]
+        self.assertEqual(result.target_side, "enemy")
+        self.assertEqual(result.target_index, 1)
+        self.assertEqual(result.effect_row, CONFUSED_MONSTER_ATTACK_EFFECT_ROW)
+        self.assertEqual(
+            mock.action_presentation.post_effect_wait_frame_count,
+            ATTACK_HIT_FRAME_COUNT + 1,
+        )
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+
+    def test_confused_monster_attack_draws_rod_wand_impact(self) -> None:
+        actor = _damage_test_monster()
+        target = _damage_test_monster()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (actor, target)
+        mock.phase = BattleMockPhase.MONSTER_ACTION
+
+        with (
+            patch("scenes.battle.random.choice", return_value=1),
+            patch("scenes.battle.random.randint", return_value=0),
+        ):
+            self.assertTrue(mock._begin_confused_monster_action(actor))
+
+        assert mock.action_presentation is not None
+        mock.action_presentation.elapsed_frame = (
+            mock.action_presentation.result_start_frame
+            + ATTACK_HIT_PATTERN_FRAME_COUNT
+        )
+        mock.attack_effect_image = object()
+        mock._spell_effect_anchor = Mock(return_value=(40, 50))
+
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_confused_monster_attack_effect()
+
+        blt.assert_called_once_with(
+            8,
+            26,
+            mock.attack_effect_image,
+            ATTACK_EFFECT_CELL_SIZE,
+            CONFUSED_MONSTER_ATTACK_EFFECT_ROW * ATTACK_EFFECT_CELL_SIZE,
+            ATTACK_EFFECT_CELL_SIZE,
+            ATTACK_EFFECT_CELL_SIZE,
+            1,
+        )
 
     def test_poison_damage_precedes_a_sleeping_monsters_skipped_turn(self) -> None:
         actor = _damage_test_monster(
@@ -9094,6 +9477,7 @@ class BattleScreenMockTest(unittest.TestCase):
         for effect, state_field in (
             (AdditionalEffect.POISON, "poisoned"),
             (AdditionalEffect.SLEEP, "sleeping"),
+            (AdditionalEffect.CONFUSE, "confused"),
             (AdditionalEffect.STUN, "stunned"),
             (AdditionalEffect.DEFENSE_DOWN, "defense_modifier"),
         ):
@@ -9214,6 +9598,7 @@ class BattleScreenMockTest(unittest.TestCase):
         for effect, state_field in (
             (AdditionalEffect.POISON, "poisoned"),
             (AdditionalEffect.SLEEP, "sleeping"),
+            (AdditionalEffect.CONFUSE, "confused"),
             (AdditionalEffect.PARALIZE, "paralyzed"),
             (AdditionalEffect.STUN, "stunned"),
             (AdditionalEffect.DEFENSE_DOWN, "protection_level"),

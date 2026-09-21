@@ -402,6 +402,14 @@ SLEEP_ICON_PATTERN_COUNT = 4
 SLEEP_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 SLEEP_MIN_TURNS = 2
 SLEEP_MAX_TURNS = 3
+CONFUSE_MIN_TURNS = 2
+CONFUSE_MAX_TURNS = 3
+CONFUSE_ICON_SOURCE_X = 128
+CONFUSE_ICON_SOURCE_Y = 128
+CONFUSE_ICON_SIZE = 8
+CONFUSE_ICON_PATTERN_COUNT = 4
+CONFUSE_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
+CONFUSE_MONSTER_OFFSET_X = 48
 SILENCE_MIN_TURNS = 4
 SILENCE_MAX_TURNS = 6
 SILENCE_ICON_SOURCE_X = 56
@@ -425,6 +433,7 @@ PARTY_CONDITION_ICON_OFFSET_X = 12
 PARTY_CONDITION_ICON_FIELDS = (
     "poisoned",
     "sleeping",
+    "confused",
     "paralyzed",
     "stunned",
 )
@@ -540,6 +549,7 @@ ATTACK_EFFECT_ROW_BY_SUBTYPE = {
     "ROD": 3,
     "SPEAR": 4,
 }
+CONFUSED_MONSTER_ATTACK_EFFECT_ROW = ATTACK_EFFECT_ROW_BY_SUBTYPE["WAND"]
 ATTACK_SE_ID_BY_SUBTYPE = {
     "AXE": ATTACK_SLASH_SE_ID,
     "SWORD": ATTACK_SLASH_SE_ID,
@@ -552,6 +562,7 @@ ATTACK_SE_ID_BY_SUBTYPE = {
 }
 ADDITIONAL_EFFECT_RESISTANCE = {
     AdditionalEffect.SLEEP: ResistanceType.SLEEP,
+    AdditionalEffect.CONFUSE: ResistanceType.CONFUSE,
     AdditionalEffect.DEATH: ResistanceType.DEATH,
     AdditionalEffect.STUN: ResistanceType.STUN,
     AdditionalEffect.POISON: ResistanceType.POISON,
@@ -789,6 +800,20 @@ class BattleSleepResult:
 
 
 @dataclass(frozen=True)
+class BattleConfuseResult:
+    """Resolved CONFUSE magic waiting for its timed application."""
+
+    target_index: int
+    success: bool
+    turns: int
+    affinity: SpellAffinity
+    popup_x: int
+    popup_y: int
+    affinity_x: int
+    affinity_y: int
+
+
+@dataclass(frozen=True)
 class BattleSlowResult:
     """Resolved SLOW magic waiting for its timed application."""
 
@@ -871,6 +896,17 @@ class BattlePartySleepResult:
 
 
 @dataclass(frozen=True)
+class BattlePartyConfuseResult:
+    """Resolved monster CONFUSE result waiting for application to a member."""
+
+    target_index: int
+    success: bool
+    turns: int
+    popup_x: int
+    popup_y: int
+
+
+@dataclass(frozen=True)
 class BattlePartySlowResult:
     """Resolved monster SLOW result waiting for application to a member."""
 
@@ -928,6 +964,20 @@ class BattleAffinityPopup:
         self.elapsed_frame += 1
 
 
+@dataclass(frozen=True)
+class BattleConfusedAttackResult:
+    """One same-side basic attack forced by confusion."""
+
+    target_side: str
+    target_index: int
+    damage: int
+    is_hit: bool
+    popup_x: int
+    popup_y: int
+    effect_row: int | None
+    additional_effects: tuple[AdditionalEffect, ...] = ()
+
+
 @dataclass
 class BattleActionPresentation:
     """Own the visual layers that must finish before a turn advances.
@@ -940,6 +990,7 @@ class BattleActionPresentation:
     healing_results: tuple[BattleHealingResult, ...] = ()
     damage_results: tuple[BattleSpellDamageResult, ...] = ()
     sleep_results: tuple[BattleSleepResult, ...] = ()
+    confuse_results: tuple[BattleConfuseResult, ...] = ()
     poison_results: tuple[BattlePoisonResult, ...] = ()
     slow_results: tuple[BattleSlowResult, ...] = ()
     break_results: tuple[BattleBreakResult, ...] = ()
@@ -949,8 +1000,10 @@ class BattleActionPresentation:
     revive_results: tuple[BattleReviveResult, ...] = ()
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
+    party_confuse_results: tuple[BattlePartyConfuseResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
     party_break_results: tuple[BattlePartyBreakResult, ...] = ()
+    confused_attack_results: tuple[BattleConfusedAttackResult, ...] = ()
     fade_escape: bool = False
     result_start_frame: int = 0
     post_effect_wait_frame_count: int = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
@@ -1031,6 +1084,7 @@ class BattleAttackPresentation:
 
     target_index: int
     strikes: tuple[BattleAttackStrike, ...]
+    target_side: str = "enemy"
     is_aimed: bool = False
     is_focused: bool = False
     elapsed_frame: int = 0
@@ -1040,6 +1094,8 @@ class BattleAttackPresentation:
     def __post_init__(self) -> None:
         if not self.strikes:
             raise ValueError("an attack presentation requires at least one strike")
+        if self.target_side not in ("ally", "enemy"):
+            raise ValueError("attack target side must be ally or enemy")
 
     @property
     def pose(self) -> AttackPoseDefinition | None:
@@ -1956,6 +2012,7 @@ class BattleScene:
         self.active_party_pulse_frame = 0
         self.blinking_monster_index: int | None = None
         self.monster_blink_frames_remaining = 0
+        self.monster_confused_action_pending = False
         self.monster_attack_target_index: int | None = None
         self.monster_attack_damage: int | None = None
         self.monster_attack_critical = False
@@ -4656,6 +4713,7 @@ class BattleScene:
         healing_results = self._resolve_healing_results(spell, indexes)
         damage_results = self._resolve_spell_damage_results(spell, indexes)
         sleep_results = self._resolve_sleep_results(spell, indexes)
+        confuse_results = self._resolve_confuse_results(spell, indexes)
         poison_results = self._resolve_poison_results(spell, indexes)
         slow_results = self._resolve_slow_results(spell, indexes)
         break_results = self._resolve_break_results(spell, indexes)
@@ -4665,7 +4723,11 @@ class BattleScene:
         revive_results = self._resolve_revive_results(spell, indexes)
         silence_results = self._resolve_silence_results(spell, indexes)
         status_results = (
-            sleep_results or slow_results or break_results or silence_results
+            sleep_results
+            or confuse_results
+            or slow_results
+            or break_results
+            or silence_results
         )
         effect_indexes = (
             tuple(result.target_index for result in status_results if result.success)
@@ -4701,6 +4763,7 @@ class BattleScene:
             healing_results=healing_results,
             damage_results=damage_results,
             sleep_results=sleep_results,
+            confuse_results=confuse_results,
             poison_results=poison_results,
             slow_results=slow_results,
             break_results=break_results,
@@ -4723,6 +4786,15 @@ class BattleScene:
                 result.affinity,
             )
             for result in damage_results
+            if result.affinity is not SpellAffinity.NORMAL
+        )
+        affinity_popups.extend(
+            BattleAffinityPopup(
+                result.affinity_x,
+                result.affinity_y,
+                result.affinity,
+            )
+            for result in confuse_results
             if result.affinity is not SpellAffinity.NORMAL
         )
         affinity_popups.extend(
@@ -5190,6 +5262,68 @@ class BattleScene:
             )
         return tuple(results)
 
+    def _resolve_confuse_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleConfuseResult, ...]:
+        """Resolve CONFUSE success and duration without mutating monsters yet."""
+
+        if spell.action is not SpellAction.CONFUSE:
+            return ()
+        if not spell.to_enemy:
+            raise BattleDataError("CONFUSE spells must target enemies")
+        if self.active_party_index is None:
+            raise RuntimeError("CONFUSE requires an active party member")
+
+        actor = self.party[self.active_party_index]
+        spell_level = (
+            spell.level
+            if spell.type is SpellType.ITEM
+            else actor.proficiency(SPELL_PROFICIENCY_BY_TYPE[spell.type]).level
+        )
+        modifier = member_spell_modifier(
+            magic=actor.adjusted_abilities.magic,
+            spell_level=spell_level,
+            internal_level=actor.internal_level,
+        )
+        results: list[BattleConfuseResult] = []
+        for index in indexes:
+            monster = self.monsters[index]
+            resolution = resolve_status_spell(
+                spell_modifier=modifier,
+                rate=spell.rate,
+                target_spell_defense=monster.combat_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
+                success_roll=(
+                    0
+                    if spell.attribute is not None
+                    and spell.attribute in monster.resistances
+                    else random.randint(0, 19)
+                ),
+            )
+            _base_x, base_y = self._monster_base_position(index)
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            results.append(
+                BattleConfuseResult(
+                    target_index=index,
+                    success=resolution.success,
+                    turns=(
+                        random.randint(CONFUSE_MIN_TURNS, CONFUSE_MAX_TURNS)
+                        if resolution.success
+                        else 0
+                    ),
+                    affinity=resolution.affinity,
+                    popup_x=center_x,
+                    popup_y=base_y + monster.height - 8,
+                    affinity_x=center_x - AFFINITY_ICON_WIDTH // 2,
+                    affinity_y=base_y + 20,
+                )
+            )
+        return tuple(results)
+
     def _apply_action_results(self, presentation: BattleActionPresentation) -> None:
         """Apply resolved state changes and start independent result popups."""
 
@@ -5236,6 +5370,19 @@ class BattleScene:
             monster = self.monsters[result.target_index]
             if result.success:
                 monster.state.apply_sleep(result.turns)
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
+        for result in presentation.confuse_results:
+            monster = self.monsters[result.target_index]
+            if result.success:
+                monster.state.apply_confusion(result.turns)
             else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
@@ -5313,6 +5460,19 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+        for result in presentation.party_confuse_results:
+            member = self.party[result.target_index]
+            if result.success:
+                member.apply_confusion(result.turns)
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(
+                        result.popup_x,
+                        result.popup_y,
+                        0,
+                        is_miss=True,
+                    )
+                )
         for result in presentation.party_slow_results:
             member = self.party[result.target_index]
             if result.success:
@@ -5339,6 +5499,35 @@ class BattleScene:
                         is_miss=True,
                     )
                 )
+        for result in presentation.confused_attack_results:
+            if result.target_side == "ally":
+                member = self.party[result.target_index]
+                member.take_damage(result.damage)
+                self._apply_additional_effects_to_member(
+                    result.target_index,
+                    result.additional_effects,
+                )
+                self._refresh_party_hp_text(result.target_index)
+            elif result.target_side == "enemy":
+                monster = self.monsters[result.target_index]
+                monster.state.take_damage(result.damage)
+                self._apply_additional_effects_to_monster(
+                    result.target_index,
+                    result.additional_effects,
+                )
+                promote_rear_monsters_if_front_empty(self.monsters)
+            else:
+                raise RuntimeError("confused attack target side must be ally or enemy")
+            damage_popups.append(
+                BattleSpellDamagePopup(
+                    result.popup_x,
+                    result.popup_y,
+                    result.damage,
+                    is_miss=not result.is_hit,
+                )
+            )
+            if result.is_hit:
+                play_se(BATTLE_HIT_SE_ID)
 
     def _reinsert_revived_party_member(self, index: int) -> None:
         """Return a revived member to the current timeline at a reset gauge."""
@@ -5510,6 +5699,13 @@ class BattleScene:
                 for result in presentation.damage_results
                 if not self.monsters[result.target_index].is_alive
             ]
+            defeated_indexes.extend(
+                result.target_index
+                for result in presentation.confused_attack_results
+                if result.target_side == "enemy"
+                and not self.monsters[result.target_index].is_alive
+            )
+            defeated_indexes = list(dict.fromkeys(defeated_indexes))
             self.action_presentation = None
             progression_weapon = getattr(self, "action_progression_weapon", None)
             if defeated_indexes and progression_weapon is not None:
@@ -6180,6 +6376,10 @@ class BattleScene:
                     random.randint(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS)
                 )
                 changed = True
+            elif effect is AdditionalEffect.CONFUSE:
+                changed = monster.state.apply_confusion(
+                    random.randint(CONFUSE_MIN_TURNS, CONFUSE_MAX_TURNS)
+                )
             elif effect is AdditionalEffect.POISON:
                 changed = monster.state.apply_poison()
             elif effect is AdditionalEffect.SILENCE and monster.spell_keys:
@@ -6206,14 +6406,18 @@ class BattleScene:
         if self._action_forward_jump_in_progress():
             return
         presentation.elapsed_frame += 1
-        monster = self.monsters[presentation.target_index]
+        targets_enemy = presentation.target_side == "enemy"
+        monster = (
+            self.monsters[presentation.target_index] if targets_enemy else None
+        )
+        member = self.party[presentation.target_index] if not targets_enemy else None
         for strike in presentation.strikes:
             if (
                 not strike.damage_applied
                 and strike.hit_elapsed_frame(presentation.elapsed_frame) >= 0
             ):
                 if strike.is_hit:
-                    if monster.is_alive:
+                    if targets_enemy and monster is not None and monster.is_alive:
                         monster.state.take_damage(strike.damage)
                         observations = getattr(self, "auto_battle_observations", None)
                         if observations is not None:
@@ -6225,11 +6429,22 @@ class BattleScene:
                             )
                         )
                         promote_rear_monsters_if_front_empty(self.monsters)
+                    elif member is not None and not self._member_is_dead(member):
+                        member.take_damage(strike.damage)
+                        strike.additional_effects = (
+                            self._apply_additional_effects_to_member(
+                                presentation.target_index,
+                                strike.additional_effects,
+                            )
+                        )
+                        self._refresh_party_hp_text(presentation.target_index)
                     play_se(strike.sound_effect_id)
                 strike.damage_applied = True
             if (
                 strike.is_hit
                 and strike.is_weak
+                and targets_enemy
+                and monster is not None
                 and not strike.affinity_popup_started
                 and strike.damage_popup_elapsed_frame(presentation.elapsed_frame) >= 0
             ):
@@ -6253,7 +6468,7 @@ class BattleScene:
             strike.damage_applied for strike in presentation.strikes
         ):
             party_index = getattr(self, "action_party_index", None)
-            if party_index is not None:
+            if party_index is not None and monster is not None:
                 self._record_equipped_weapon_action(
                     party_index,
                     (getattr(monster, "level", 1),),
@@ -6282,11 +6497,17 @@ class BattleScene:
         if not presentation.return_started or not presentation.result_complete:
             return
         target_index = presentation.target_index
-        target_is_alive = self.monsters[target_index].is_alive
+        target_is_alive = (
+            self.monsters[target_index].is_alive
+            if targets_enemy
+            else not self._party_member_is_dead(target_index)
+        )
         self.attack_presentation = None
-        if not target_is_alive:
+        if not target_is_alive and targets_enemy:
             self._begin_monster_death(target_index)
             return
+        if not target_is_alive:
+            self._remove_defeated_party_from_timeline()
         self._complete_current_turn()
 
     def _begin_monster_death(
@@ -7045,6 +7266,18 @@ class BattleScene:
             if status_skips_turn:
                 self._start_timeline_animation()
                 return
+            if getattr(actor.member, "confused", 0):
+                if isinstance(actor.member, Member):
+                    actor.member.elapse_confusion_turn()
+                else:
+                    actor.member.confused = max(actor.member.confused - 1, 0)
+                getattr(self, "focused_target_by_party_index", {}).pop(
+                    self.active_party_index,
+                    None,
+                )
+                if not self._begin_confused_party_action(self.active_party_index):
+                    self._start_timeline_animation()
+                return
             if getattr(self, "escape_requested", False):
                 self._begin_party_member_escape(self.active_party_index)
                 return
@@ -7077,6 +7310,7 @@ class BattleScene:
             self.monster_attack_animation_frame = 0
             self.monster_attack_damage_applied = False
             self.monster_action = None
+            self.monster_confused_action_pending = False
             self.monster_charge_presentation = None
             self.monster_escape_actor_index = None
             self.monster_escape_animation_frame = 0
@@ -7094,6 +7328,19 @@ class BattleScene:
                 self.monster_blink_frames_remaining = 0
                 self._start_timeline_animation()
                 return
+            confusion_turns = getattr(actor.state, "confused", 0)
+            if (
+                isinstance(confusion_turns, int)
+                and not isinstance(confusion_turns, bool)
+                and confusion_turns > 0
+            ):
+                actor.state.elapse_confusion_turn()
+                actor.state.elapse_silence_turn()
+                self.phase = BattlePhase.MONSTER_ACTION
+                self.blinking_monster_index = self._monster_index(actor)
+                self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
+                self.monster_confused_action_pending = True
+                return
             if not self._monster_can_attempt_action(actor):
                 self.blinking_monster_index = None
                 self.monster_blink_frames_remaining = 0
@@ -7105,6 +7352,267 @@ class BattleScene:
             )
             self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
         self._refresh_party_text_colors()
+
+    def _begin_confused_party_action(self, actor_index: int) -> bool:
+        """Force DA2's confused member attack against an ally when possible."""
+
+        actor = self.party[actor_index]
+        ally_indexes = tuple(
+            index
+            for index in self._active_party_indexes()
+            if index != actor_index
+            and index not in getattr(self, "hidden_party_indexes", set())
+            and not getattr(self.party[index], "paralyzed", False)
+            and not getattr(self.party[index], "sleeping", 0)
+            and not getattr(self.party[index], "confused", 0)
+        )
+        if not ally_indexes:
+            targets = self._active_member_attack_targets(
+                command=BattleCommand.ATTACK,
+            )
+            if not targets:
+                return False
+            self.selected_command = BattleCommand.ATTACK
+            self.selectable_target_indexes = targets
+            self.selected_target_index = random.choice(targets)
+            self._begin_action_motion(use_cast_pose=False)
+            return self._begin_attack_presentation()
+
+        target_index = random.choice(ally_indexes)
+        return self._begin_confused_member_friendly_attack(
+            actor_index,
+            target_index,
+        )
+
+    def _begin_confused_member_friendly_attack(
+        self,
+        actor_index: int,
+        target_index: int,
+    ) -> bool:
+        """Start the normal weapon motion against one other party member."""
+
+        actor = self.party[actor_index]
+        target = self.party[target_index]
+        right_weapon = actor.equipment.weapon_at(EquipmentSlot.RIGHT)
+        if right_weapon is None:
+            return False
+        actor_stats = actor.battle_stats
+        target_stats = target.battle_stats
+        equipped_attacks: list[tuple[Item, int, int, tuple[str, str]]] = [
+            (
+                right_weapon,
+                actor_stats.attack_right,
+                actor_stats.hit_right.total,
+                ("1", "2"),
+            )
+        ]
+        left_weapon = actor.equipment.weapon_at(EquipmentSlot.LEFT)
+        if (
+            left_weapon is not None
+            and actor.has_skill("Dual-Wield")
+            and actor_stats.attack_left is not None
+            and actor_stats.hit_left is not None
+        ):
+            equipped_attacks.append(
+                (
+                    left_weapon,
+                    actor_stats.attack_left,
+                    actor_stats.hit_left.total,
+                    ("3", "4"),
+                )
+            )
+
+        strikes: list[BattleAttackStrike] = []
+        motion_start_frame = 0
+        target_defending = target_index in self.defending_party_indexes
+        target_incapacitated = bool(getattr(target, "sleeping", 0))
+        for weapon, weapon_attack, weapon_hit, pose_branches in equipped_attacks:
+            attack = member_physical_attack(
+                weapon_attack=weapon_attack,
+                strength=actor.adjusted_abilities.strength,
+                weapon_level=actor.weapon_level(weapon),
+                internal_level=actor.internal_level,
+            )
+            result = resolve_physical_attack(
+                attack=attack,
+                hit=weapon_hit,
+                agility=actor.effective_agility,
+                target_defense=target_stats.defense,
+                target_evasion=target_stats.evasion,
+                hit_roll=random.randint(0, 99),
+                target_defending=target_defending,
+                target_incapacitated=target_incapacitated,
+                critical_roll=(
+                    random.randint(0, 99) if target_incapacitated else None
+                ),
+            )
+            hit_start_frame = motion_start_frame + ATTACK_POSE_RAISE_FRAME_COUNT
+            strikes.append(
+                BattleAttackStrike(
+                    damage=result.damage,
+                    poses=attack_sequence(
+                        getattr(self, "attack_poses", {}),
+                        weapon.weapon_img,
+                        branches=pose_branches,
+                    ),
+                    effect_row=ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype),
+                    motion_start_frame=motion_start_frame,
+                    hit_start_frame=hit_start_frame,
+                    effect_flip_x=bool(strikes),
+                    is_hit=result.hit,
+                    is_critical=result.critical,
+                    additional_effects=(
+                        self._resolve_member_attack_effects_against_member(
+                            actor,
+                            weapon,
+                            target,
+                            result,
+                            target_defending=target_defending,
+                        )
+                    ),
+                    sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
+                        weapon.subtype,
+                        ATTACK_SLASH_SE_ID,
+                    ),
+                )
+            )
+            motion_start_frame = (
+                strikes[-1].motion_end_frame + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT
+            )
+
+        self._begin_action_motion(use_cast_pose=False)
+        getattr(self, "hidden_party_indexes", set()).discard(actor_index)
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self.attack_presentation = BattleAttackPresentation(
+            target_index=target_index,
+            strikes=tuple(strikes),
+            target_side="ally",
+        )
+        self.phase = BattlePhase.ATTACK_PRESENTATION
+        return True
+
+    def _resolve_member_attack_effects_against_member(
+        self,
+        actor: Member,
+        weapon: Item,
+        target: Member,
+        result: PhysicalAttackResult,
+        *,
+        target_defending: bool,
+    ) -> tuple[AdditionalEffect, ...]:
+        """Resolve a confused member's weapon effects against an ally."""
+
+        candidates = self._effect_candidates_for_member_attack(actor, weapon)
+        if not candidates:
+            return ()
+        hit_reached_guard = target_defending and result.hit_value >= 0
+        if not result.hit and not hit_reached_guard:
+            return ()
+        effect_roll = random.randint(0, 99)
+        successful: list[AdditionalEffect] = []
+        for effect, stacked_death in candidates:
+            resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
+            resolution = resolve_physical_additional_effect(
+                effect=effect,
+                adjusted_hit=result.adjusted_hit,
+                effect_roll=effect_roll,
+                target_is_member=True,
+                target_is_resistant=(
+                    resistance is not None and resistance in target.resistances
+                ),
+                target_defending=target_defending,
+                critical=result.critical,
+                stacked_death=stacked_death,
+            )
+            if resolution.success:
+                successful.append(effect)
+        return tuple(successful)
+
+    def _begin_confused_monster_action(self, actor: BattleMonster) -> bool:
+        """Force a confused monster to attack another monster when available."""
+
+        actor_index = self._monster_index(actor)
+        ally_indexes = tuple(
+            index
+            for index, monster in enumerate(self.monsters)
+            if index != actor_index and monster.is_alive
+        )
+        if not ally_indexes:
+            targets = self._monster_attack_target_indexes(actor)
+            if not targets:
+                return False
+            self._begin_standard_monster_attack(actor)
+            return True
+
+        target_index = random.choice(ally_indexes)
+        target = self.monsters[target_index]
+        result = resolve_physical_attack(
+            attack=actor.combat_stats.attack,
+            hit=actor.combat_stats.hit,
+            agility=actor.effective_agility,
+            target_defense=target.effective_defense,
+            target_evasion=target.combat_stats.evasion,
+            hit_roll=random.randint(0, 99),
+            target_incapacitated=target.state.sleeping > 0,
+            critical_roll=(
+                random.randint(0, 99) if target.state.sleeping > 0 else None
+            ),
+        )
+        effects = self._resolve_monster_attack_effects_against_monster(
+            actor,
+            target,
+            result,
+        )
+        _base_x, base_y = self._monster_base_position(target_index)
+        center_x = self._monster_draw_x(target_index) + target.width // 2
+        self.action_presentation = BattleActionPresentation(
+            (),
+            confused_attack_results=(
+                BattleConfusedAttackResult(
+                    target_side="enemy",
+                    target_index=target_index,
+                    damage=result.damage,
+                    is_hit=result.hit,
+                    popup_x=center_x,
+                    popup_y=base_y + target.height - 8,
+                    effect_row=CONFUSED_MONSTER_ATTACK_EFFECT_ROW,
+                    additional_effects=effects,
+                ),
+            ),
+            result_start_frame=1,
+            post_effect_wait_frame_count=ATTACK_HIT_FRAME_COUNT + 1,
+        )
+        self.phase = BattlePhase.ACTION_PRESENTATION
+        return True
+
+    def _resolve_monster_attack_effects_against_monster(
+        self,
+        actor: BattleMonster,
+        target: BattleMonster,
+        result: PhysicalAttackResult,
+    ) -> tuple[AdditionalEffect, ...]:
+        """Resolve a confused monster's authored effect against its ally."""
+
+        effect = actor.additional_effect
+        if effect not in PHYSICAL_STATUS_EFFECTS or not result.hit:
+            return ()
+        resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
+        resolution = resolve_physical_additional_effect(
+            effect=effect,
+            adjusted_hit=result.adjusted_hit,
+            effect_roll=random.randint(0, 99),
+            target_is_member=False,
+            target_is_boss=target.is_boss,
+            target_is_weak=(
+                resistance is not None and resistance in target.weaknesses
+            ),
+            target_is_resistant=(
+                resistance is not None and resistance in target.resistances
+            ),
+            critical=result.critical,
+        )
+        return (effect,) if resolution.success else ()
 
     def _apply_turn_start_hp_change(
         self,
@@ -7561,6 +8069,14 @@ class BattleScene:
         if not isinstance(actor, BattleMonster):
             self._start_timeline_animation()
             return
+        if getattr(self, "monster_confused_action_pending", False):
+            self.monster_confused_action_pending = False
+            self.blinking_monster_index = None
+            if hasattr(self, "progression"):
+                self.progression.record_enemy_action(self._monster_index(actor))
+            if not self._begin_confused_monster_action(actor):
+                self._start_timeline_animation()
+            return
         action = self._select_monster_action(actor)
         turn_was_silenced = actor.state.elapse_silence_turn()
         if action is None:
@@ -7687,6 +8203,11 @@ class BattleScene:
             spell,
             indexes,
         )
+        party_confuse_results = self._resolve_monster_confuse_results(
+            actor,
+            spell,
+            indexes,
+        )
         party_slow_results = self._resolve_monster_slow_results(
             actor,
             spell,
@@ -7698,7 +8219,10 @@ class BattleScene:
             indexes,
         )
         status_results = (
-            party_sleep_results or party_slow_results or party_break_results
+            party_sleep_results
+            or party_confuse_results
+            or party_slow_results
+            or party_break_results
         )
         effect_indexes = (
             tuple(result.target_index for result in status_results if result.success)
@@ -7729,6 +8253,7 @@ class BattleScene:
         self.action_presentation = BattleActionPresentation(
             tuple(effects),
             party_sleep_results=party_sleep_results,
+            party_confuse_results=party_confuse_results,
             party_slow_results=party_slow_results,
             party_break_results=party_break_results,
             result_start_frame=max(
@@ -7782,6 +8307,47 @@ class BattleScene:
                     success=resolution.success,
                     turns=(
                         random.randint(SLEEP_MIN_TURNS, SLEEP_MAX_TURNS)
+                        if resolution.success
+                        else 0
+                    ),
+                    popup_x=x + 6,
+                    popup_y=y + 16,
+                )
+            )
+        return tuple(results)
+
+    def _resolve_monster_confuse_results(
+        self,
+        actor: BattleMonster,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattlePartyConfuseResult, ...]:
+        """Resolve a monster's CONFUSE spell against party battle stats."""
+
+        if spell.action is not SpellAction.CONFUSE or not spell.to_enemy:
+            return ()
+        results: list[BattlePartyConfuseResult] = []
+        for index in indexes:
+            member = self.party[index]
+            resolution = resolve_status_spell(
+                spell_modifier=actor.magic,
+                rate=spell.rate,
+                target_spell_defense=member.battle_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=frozenset(),
+                target_resistances=member.resistances,
+                success_roll=random.randint(0, 19),
+            )
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
+            results.append(
+                BattlePartyConfuseResult(
+                    target_index=index,
+                    success=resolution.success,
+                    turns=(
+                        random.randint(CONFUSE_MIN_TURNS, CONFUSE_MAX_TURNS)
                         if resolution.success
                         else 0
                     ),
@@ -8276,6 +8842,18 @@ class BattleScene:
                     )
                     member.confused = 0
                 changed = True
+            elif effect is AdditionalEffect.CONFUSE:
+                if isinstance(member, Member):
+                    changed = member.apply_confusion(
+                        random.randint(CONFUSE_MIN_TURNS, CONFUSE_MAX_TURNS)
+                    )
+                else:
+                    member.confused = max(
+                        getattr(member, "confused", 0),
+                        random.randint(CONFUSE_MIN_TURNS, CONFUSE_MAX_TURNS),
+                    )
+                    member.sleeping = 0
+                    changed = True
             elif effect is AdditionalEffect.POISON:
                 if isinstance(member, Member):
                     changed = member.apply_poison()
@@ -8473,9 +9051,11 @@ class BattleScene:
         self._draw_monsters()
         self._draw_aim_reticle()
         self._draw_party_attack_effect()
+        self._draw_confused_monster_attack_effect()
         self._draw_spell_effects()
         self._draw_identify_effect()
         self._draw_sleeping_icons()
+        self._draw_confusion_icons()
         self._draw_silence_icons()
         self._draw_poison_icons()
         self._draw_paralyze_icons()
@@ -8664,14 +9244,21 @@ class BattleScene:
             return
         presentation = getattr(self, "attack_presentation", None)
         if self._party_attack_smash_marker_visible(presentation):
-            monster = self.monsters[presentation.target_index]
-            _target_x, target_y = self._monster_base_position(presentation.target_index)
-            self._draw_critical_marker(
-                self._monster_draw_x(presentation.target_index)
-                + monster.width // 2
-                - CRITICAL_MARKER_WIDTH // 2,
-                target_y + 20,
-            )
+            if getattr(presentation, "target_side", "enemy") == "ally":
+                position = self._party_draw_position(presentation.target_index)
+                if position is not None:
+                    self._draw_critical_marker(*position)
+            else:
+                monster = self.monsters[presentation.target_index]
+                _target_x, target_y = self._monster_base_position(
+                    presentation.target_index
+                )
+                self._draw_critical_marker(
+                    self._monster_draw_x(presentation.target_index)
+                    + monster.width // 2
+                    - CRITICAL_MARKER_WIDTH // 2,
+                    target_y + 20,
+                )
         target_index = getattr(self, "monster_attack_target_index", None)
         animation_frame = getattr(self, "monster_attack_animation_frame", -1)
         if (
@@ -8720,6 +9307,36 @@ class BattleScene:
             or strike.is_weak
             or self._party_attack_smash_marker_visible(presentation)
         ):
+            return
+        if getattr(presentation, "target_side", "enemy") == "ally":
+            member = self.party[presentation.target_index]
+            if self._member_is_dead(member):
+                return
+            effect = next(
+                (
+                    candidate
+                    for candidate in (
+                        AdditionalEffect.STUN,
+                        AdditionalEffect.DEFENSE_DOWN,
+                    )
+                    if candidate in strike.additional_effects
+                ),
+                None,
+            )
+            position = self._party_draw_position(presentation.target_index)
+            if effect is None or position is None:
+                return
+            source_x, source_y = ADDITIONAL_EFFECT_MARKER_SOURCE[effect]
+            pyxel.blt(
+                position[0],
+                position[1],
+                0,
+                source_x,
+                source_y,
+                ADDITIONAL_EFFECT_MARKER_WIDTH,
+                ADDITIONAL_EFFECT_MARKER_HEIGHT,
+                TRANSPARENT_INDEX,
+            )
             return
         monster = self.monsters[presentation.target_index]
         if not monster.is_alive:
@@ -8789,6 +9406,26 @@ class BattleScene:
             if position is None:
                 continue
             x, y = position
+            attack_presentation = getattr(self, "attack_presentation", None)
+            friendly_strike = (
+                attack_presentation.latest_result_strike()
+                if (
+                    self.phase is BattlePhase.ATTACK_PRESENTATION
+                    and attack_presentation is not None
+                    and getattr(attack_presentation, "target_side", "enemy") == "ally"
+                    and index == attack_presentation.target_index
+                )
+                else None
+            )
+            if (
+                friendly_strike is not None
+                and friendly_strike.is_hit
+                and friendly_strike.damage > 0
+            ):
+                shake_index = (
+                    attack_presentation.elapsed_frame * DA2_REFERENCE_FPS // FPS
+                ) % len(MONSTER_DAMAGE_SHAKE_X)
+                x += MONSTER_DAMAGE_SHAKE_X[shake_index]
             if is_hide_motion:
                 reference_frame = min(
                     self.hide_presentation_elapsed_frame * DA2_REFERENCE_FPS // FPS,
@@ -8829,7 +9466,6 @@ class BattleScene:
                 self, "escape_actor_index", None
             )
             width = self._party_sprite_width(index, is_escaping=is_escaping)
-            attack_presentation = getattr(self, "attack_presentation", None)
             attack_pose = (
                 attack_presentation.pose
                 if (
@@ -9176,8 +9812,17 @@ class BattleScene:
             self, "covering_party_index", None
         ):
             return DEFEND_SPRITE_SOURCE_X
+        attack_presentation = getattr(self, "attack_presentation", None)
+        if (
+            self.phase is BattlePhase.ATTACK_PRESENTATION
+            and attack_presentation is not None
+            and getattr(attack_presentation, "target_side", "enemy") == "ally"
+            and index == attack_presentation.target_index
+        ):
+            strike = attack_presentation.latest_result_strike()
+            if strike is not None and strike.is_hit and strike.damage > 0:
+                return MONSTER_DAMAGE_SPRITE_SOURCE_X
         if index == getattr(self, "action_party_index", None):
-            attack_presentation = getattr(self, "attack_presentation", None)
             if (
                 self.phase is BattlePhase.ATTACK_PRESENTATION
                 and attack_presentation is not None
@@ -9269,7 +9914,7 @@ class BattleScene:
         ):
             return
         anchor_x, anchor_y = self._spell_effect_anchor(
-            "enemy",
+            getattr(presentation, "target_side", "enemy"),
             presentation.target_index,
         )
         for strike in presentation.strikes:
@@ -9296,6 +9941,39 @@ class BattleScene:
                 TRANSPARENT_INDEX,
             )
 
+    def _draw_confused_monster_attack_effect(self) -> None:
+        """Draw the rod/wand impact when a confused monster attacks another."""
+
+        presentation = getattr(self, "action_presentation", None)
+        if (
+            getattr(self, "phase", None) is not BattlePhase.ACTION_PRESENTATION
+            or presentation is None
+        ):
+            return
+        effect_elapsed_frame = (
+            presentation.elapsed_frame - presentation.result_start_frame
+        )
+        if not 0 <= effect_elapsed_frame < ATTACK_HIT_FRAME_COUNT:
+            return
+        pattern = effect_elapsed_frame // ATTACK_HIT_PATTERN_FRAME_COUNT
+        for result in presentation.confused_attack_results:
+            if not result.is_hit or result.effect_row is None:
+                continue
+            anchor_x, anchor_y = self._spell_effect_anchor(
+                result.target_side,
+                result.target_index,
+            )
+            pyxel.blt(
+                anchor_x - ATTACK_EFFECT_CELL_SIZE // 2,
+                anchor_y - ATTACK_EFFECT_CELL_SIZE // 2 + 8,
+                self.attack_effect_image,
+                pattern * ATTACK_EFFECT_CELL_SIZE,
+                result.effect_row * ATTACK_EFFECT_CELL_SIZE,
+                ATTACK_EFFECT_CELL_SIZE,
+                ATTACK_EFFECT_CELL_SIZE,
+                TRANSPARENT_INDEX,
+            )
+
     def _draw_aim_reticle(self) -> None:
         """Draw the four converging corners and timed center marker for Aim."""
 
@@ -9307,7 +9985,7 @@ class BattleScene:
         ):
             return
         center_x, center_y = self._spell_effect_anchor(
-            "enemy",
+            getattr(presentation, "target_side", "enemy"),
             presentation.target_index,
         )
         distance = presentation.aim_reticle_distance
@@ -9337,7 +10015,7 @@ class BattleScene:
         )
 
     def _draw_party_attack_damage(self) -> None:
-        """Draw each resolved damage or miss result over the target monster."""
+        """Draw each resolved damage or miss result over the attack target."""
 
         presentation = getattr(self, "attack_presentation", None)
         if (
@@ -9345,9 +10023,22 @@ class BattleScene:
             or presentation is None
         ):
             return
-        monster = self.monsters[presentation.target_index]
-        _target_x, target_y = self._monster_base_position(presentation.target_index)
-        anchor_x = self._monster_draw_x(presentation.target_index) + monster.width // 2
+        if getattr(presentation, "target_side", "enemy") == "ally":
+            position = self._party_draw_position(presentation.target_index)
+            if position is None:
+                return
+            target_x, target_y = position
+            anchor_x = target_x + 14
+            result_y = target_y + 16
+        else:
+            monster = self.monsters[presentation.target_index]
+            _target_x, target_y = self._monster_base_position(
+                presentation.target_index
+            )
+            anchor_x = (
+                self._monster_draw_x(presentation.target_index) + monster.width // 2
+            )
+            result_y = target_y + monster.height - 8
         for strike in presentation.strikes:
             if not strike.damage_applied:
                 continue
@@ -9371,7 +10062,7 @@ class BattleScene:
             vertical_offset = offsets[reference_frame]
             if vertical_offset < 0:
                 continue
-            y = target_y + monster.height - 8 - vertical_offset
+            y = result_y - vertical_offset
             if not strike.is_hit:
                 pyxel.blt(
                     anchor_x - MISS_SPRITE_WIDTH // 2,
@@ -9409,6 +10100,7 @@ class BattleScene:
             is_attack_target = (
                 self.phase is BattlePhase.ATTACK_PRESENTATION
                 and attack_presentation is not None
+                and getattr(attack_presentation, "target_side", "enemy") == "enemy"
                 and index == attack_presentation.target_index
             )
             action_presentation = getattr(self, "action_presentation", None)
@@ -9597,6 +10289,46 @@ class BattleScene:
                 SLEEP_ICON_SOURCE_Y,
                 SLEEP_ICON_SIZE,
                 SLEEP_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
+
+    def _draw_confusion_icons(self) -> None:
+        """Draw ZERO's four-pattern confusion icon for every combatant."""
+
+        pattern = (
+            pyxel.frame_count // CONFUSE_ICON_PATTERN_FRAME_COUNT
+        ) % CONFUSE_ICON_PATTERN_COUNT
+        source_x = CONFUSE_ICON_SOURCE_X + pattern * CONFUSE_ICON_SIZE
+
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if not getattr(visual.member, "confused", 0):
+                continue
+            position = self._party_condition_icon_position(index, "confused")
+            if position is None:
+                continue
+            x, y = position
+            pyxel.blt(
+                x,
+                y,
+                0,
+                source_x,
+                CONFUSE_ICON_SOURCE_Y,
+                CONFUSE_ICON_SIZE,
+                CONFUSE_ICON_SIZE,
+                TRANSPARENT_INDEX,
+            )
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            if not monster.is_alive or not monster.state.confused:
+                continue
+            _base_x, y = self._monster_base_position(index)
+            pyxel.blt(
+                self._monster_draw_x(index) + CONFUSE_MONSTER_OFFSET_X,
+                y,
+                0,
+                source_x,
+                CONFUSE_ICON_SOURCE_Y,
+                CONFUSE_ICON_SIZE,
+                CONFUSE_ICON_SIZE,
                 TRANSPARENT_INDEX,
             )
 

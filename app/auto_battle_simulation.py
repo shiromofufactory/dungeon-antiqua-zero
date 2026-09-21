@@ -101,12 +101,13 @@ else:
     from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 
 
-# Kept deliberately separate: current monster casts apply only SLEEP and SLOW.
+# Kept deliberately separate because monster casters support fewer actions.
 ALLY_SPELL_ACTIONS = frozenset(
     (
         SpellAction.HEAL,
         SpellAction.DAMAGE,
         SpellAction.SLEEP,
+        SpellAction.CONFUSE,
         SpellAction.SLOW,
         SpellAction.BREAK,
         SpellAction.PROTECTION,
@@ -118,7 +119,7 @@ ALLY_SPELL_ACTIONS = frozenset(
     )
 )
 ENEMY_SPELL_ACTIONS = frozenset(
-    (SpellAction.SLEEP, SpellAction.SLOW, SpellAction.BREAK)
+    (SpellAction.SLEEP, SpellAction.CONFUSE, SpellAction.SLOW, SpellAction.BREAK)
 )
 RECOVERY_ACTIONS = frozenset(
     (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE, SpellAction.MANA)
@@ -140,6 +141,7 @@ DIRECT_COMMANDS = frozenset(
 )
 EFFECT_RESISTANCE = {
     AdditionalEffect.SLEEP: ResistanceType.SLEEP,
+    AdditionalEffect.CONFUSE: ResistanceType.CONFUSE,
     AdditionalEffect.POISON: ResistanceType.POISON,
     AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
     AdditionalEffect.SILENCE: ResistanceType.SILENCE,
@@ -533,6 +535,7 @@ class BattleForecast:
             return ()
         if spell.action in (
             SpellAction.SLEEP,
+            SpellAction.CONFUSE,
             SpellAction.SLOW,
             SpellAction.BREAK,
             SpellAction.SILENCE,
@@ -881,6 +884,12 @@ class BattleForecast:
                 target.sleeping, 2 + int(self.roll(actor, target.spec.number, 11) * 2)
             )
             target.confused = 0
+        elif effect is AdditionalEffect.CONFUSE:
+            target.confused = max(
+                target.confused,
+                2 + int(self.roll(actor, target.spec.number, 11) * 2),
+            )
+            target.sleeping = 0
         elif effect is AdditionalEffect.POISON:
             target.poisoned = True
         elif effect is AdditionalEffect.STUN:
@@ -980,6 +989,7 @@ class BattleForecast:
                     spell.action
                     in (
                         SpellAction.SLEEP,
+                        SpellAction.CONFUSE,
                         SpellAction.SLOW,
                         SpellAction.BREAK,
                         SpellAction.SILENCE,
@@ -995,6 +1005,8 @@ class BattleForecast:
                     if successful:
                         if spell.action is SpellAction.SLEEP:
                             self.apply_extra(actor, target, AdditionalEffect.SLEEP)
+                        elif spell.action is SpellAction.CONFUSE:
+                            self.apply_extra(actor, target, AdditionalEffect.CONFUSE)
                         elif spell.action is SpellAction.SLOW:
                             target.speed = 0 if target.speed > 0 else -1
                         elif spell.action is SpellAction.BREAK:
@@ -1162,6 +1174,12 @@ class BattleForecast:
                         ):
                             if spell.action is SpellAction.SLEEP:
                                 self.apply_extra(actor, target, AdditionalEffect.SLEEP)
+                            elif spell.action is SpellAction.CONFUSE:
+                                self.apply_extra(
+                                    actor,
+                                    target,
+                                    AdditionalEffect.CONFUSE,
+                                )
                             elif spell.action is SpellAction.SLOW:
                                 target.speed = 0 if target.speed > 0 else -1
                             else:
@@ -1212,6 +1230,128 @@ class BattleForecast:
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
+
+    def confused_turn(self, actor: ForecastActor) -> None:
+        """Forecast DA2's forced same-side basic attack for one confused actor."""
+
+        actor.confused = max(0, actor.confused - 1)
+        if actor.spec.enemy:
+            actor.silenced = max(0, actor.silenced - 1)
+            friendly = tuple(a for a in self.enemies() if a is not actor)
+            if friendly:
+                targets = friendly
+            else:
+                visible = tuple(a for a in self.allies() if not a.hidden)
+                targets = tuple(a for a in visible if a.front) if actor.front else ()
+        else:
+            friendly = tuple(
+                a
+                for a in self.allies()
+                if a is not actor
+                and not a.hidden
+                and not (a.sleeping or a.paralyzed or a.confused)
+            )
+            if friendly:
+                targets = friendly
+            else:
+                targets = tuple(
+                    self.actors[number]
+                    for number in self.attack_targets(actor, BattleCommand.ATTACK)
+                )
+        if targets:
+            target = targets[int(self.roll(actor, 0, 15) * len(targets))]
+            self.confused_physical(actor, target)
+        actor.hidden = False
+        self.normalize()
+        self.advance(actor, 0)
+
+    def confused_physical(
+        self,
+        actor: ForecastActor,
+        target: ForecastActor,
+    ) -> None:
+        """Apply one forced basic attack without assuming the target's side."""
+
+        if actor.spec.enemy:
+            results = (
+                resolve_physical_attack(
+                    attack=actor.spec.attack,
+                    hit=actor.spec.hit,
+                    agility=actor.agility,
+                    target_defense=target.defense,
+                    target_evasion=target.evasion,
+                    hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
+                    target_defending=target.defending,
+                    target_incapacitated=bool(target.sleeping),
+                    critical_roll=(
+                        int(self.roll(actor, target.spec.number, 3) * 100)
+                        if target.sleeping
+                        else None
+                    ),
+                ),
+            )
+            effect_sources = (
+                ((actor.spec.effect, False),)
+                if actor.spec.effect in PHYSICAL_STATUS_EFFECTS
+                else (),
+            )
+        else:
+            results = tuple(
+                self.physical_results(
+                    actor,
+                    target,
+                    AutoAction(BattleCommand.ATTACK, (target.spec.number,)),
+                )
+            )
+            effect_sources = []
+            for weapon in actor.spec.weapons:
+                candidates = []
+                if weapon.effect in PHYSICAL_STATUS_EFFECTS:
+                    candidates.append(
+                        (
+                            weapon.effect,
+                            weapon.effect is AdditionalEffect.DEATH
+                            and actor.has_skill("Lethal"),
+                        )
+                    )
+                if (
+                    actor.has_skill("Lethal")
+                    and weapon.effect is not AdditionalEffect.DEATH
+                ):
+                    candidates.append((AdditionalEffect.DEATH, False))
+                effect_sources.append(tuple(candidates))
+
+        for hand, (result, candidates) in enumerate(zip(results, effect_sources)):
+            if not target.is_alive or not result.hit:
+                continue
+            target.damage(result.damage)
+            for effect, stacked in candidates:
+                if not target.is_alive:
+                    break
+                resistance = EFFECT_RESISTANCE[effect]
+                success = resolve_physical_additional_effect(
+                    effect=effect,
+                    adjusted_hit=result.adjusted_hit,
+                    effect_roll=int(
+                        self.roll(actor, target.spec.number, 4 + hand * 3) * 100
+                    ),
+                    target_is_member=not target.spec.enemy,
+                    target_is_boss=target.spec.boss,
+                    target_is_weak=(
+                        resistance is not None
+                        and resistance in target.spec.weaknesses
+                    ),
+                    target_is_resistant=(
+                        resistance is not None
+                        and resistance in target.spec.resistances
+                    ),
+                    target_defending=target.defending,
+                    critical=result.critical,
+                    stacked_death=stacked,
+                ).success
+                if success:
+                    self.apply_extra(actor, target, effect)
+        target.interrupt_focus()
 
     def prepare_turn(self, actor) -> bool:
         if not actor.spec.enemy:
@@ -1320,6 +1460,9 @@ class BattleForecast:
         actor = self.actors[self.order.entries[0].actor]
         if self.prepare_turn(actor):
             self.advance(actor, 0)
+            return 0.0
+        if actor.confused:
+            self.confused_turn(actor)
             return 0.0
         if actor.spec.enemy:
             self.enemy_turn(actor)

@@ -396,6 +396,19 @@ class MemberTest(unittest.TestCase):
         self.assertEqual(self.member.sleeping, 0)
         self.assertFalse(self.member.elapse_sleep_turn())
 
+    def test_confusion_replaces_sleep_and_positive_damage_clears_it(self) -> None:
+        self.member.apply_sleep(2)
+
+        self.assertTrue(self.member.apply_confusion(3))
+        self.assertEqual(self.member.sleeping, 0)
+        self.assertEqual(self.member.confused, 3)
+        self.assertTrue(self.member.elapse_confusion_turn())
+        self.assertEqual(self.member.confused, 2)
+        self.member.take_damage(1)
+
+        self.assertEqual(self.member.confused, 0)
+        self.assertFalse(self.member.elapse_confusion_turn())
+
     def test_poison_damage_does_not_wake_the_member(self) -> None:
         self.member.poisoned = True
         self.member.apply_sleep(2)

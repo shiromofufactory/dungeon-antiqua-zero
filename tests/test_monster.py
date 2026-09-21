@@ -108,6 +108,20 @@ class MonsterBattleStateTest(unittest.TestCase):
         self.assertEqual(state.sleeping, 0)
         self.assertFalse(state.elapse_sleep_turn())
 
+    def test_confusion_replaces_sleep_and_positive_damage_clears_it(self) -> None:
+        state = MonsterBattleState(max_hp=10)
+        state.apply_sleep(2)
+
+        self.assertTrue(state.apply_confusion(3))
+        self.assertEqual(state.sleeping, 0)
+        self.assertEqual(state.confused, 3)
+        self.assertTrue(state.elapse_confusion_turn())
+        self.assertEqual(state.confused, 2)
+        state.take_damage(1)
+
+        self.assertEqual(state.confused, 0)
+        self.assertFalse(state.elapse_confusion_turn())
+
     def test_stun_skips_exactly_one_future_action(self) -> None:
         state = MonsterBattleState(max_hp=10)
 
