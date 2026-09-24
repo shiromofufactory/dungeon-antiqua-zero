@@ -213,6 +213,7 @@ class GameTest(unittest.TestCase):
         game.field_prop_image = object()
         game.field_actor_character_image = object()
         game.field_actor_pc_character_image = object()
+        game.fairy_pc_sprite_indices = frozenset((0, 1, 2))
         game.field_player_character_image = object()
         game.field_treasure_image = object()
         game._draw_site_name = Mock()
@@ -240,6 +241,12 @@ class GameTest(unittest.TestCase):
                         "player_floating_phase"
                     ],
                     phase,
+                )
+                self.assertEqual(
+                    game.field_renderer.draw.call_args.kwargs[
+                        "actor_pc_fairy_sprite_indices"
+                    ],
+                    frozenset((0, 1, 2)),
                 )
 
     def test_field_fade_draws_only_the_player_with_the_pulsing_palette(self) -> None:

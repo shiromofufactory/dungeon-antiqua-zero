@@ -515,6 +515,11 @@ class Game:
             definition.key: definition.face_position
             for definition in character_definitions
         }
+        self.fairy_pc_sprite_indices = frozenset(
+            definition.battle_sprite
+            for definition in character_definitions
+            if definition.race is Race.FAIRY
+        )
         self.save_repository = SaveRepository()
         self.current_save_slot: int | None = None
         self.texts = TextCatalog.from_json(RUNTIME_TEXTS_PATH)
@@ -3618,6 +3623,11 @@ class Game:
                 "prop_image": self.field_prop_image,
                 "actor_character_image": self.field_actor_character_image,
                 "actor_pc_character_image": self.field_actor_pc_character_image,
+                "actor_pc_fairy_sprite_indices": getattr(
+                    self,
+                    "fairy_pc_sprite_indices",
+                    (),
+                ),
                 "player_character_image": self.field_player_character_image,
                 "player_sprite_index": player_member.definition.battle_sprite,
                 "player_floating": player_member.definition.race is Race.FAIRY,

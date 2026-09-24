@@ -1058,6 +1058,93 @@ class FieldRendererTest(unittest.TestCase):
             1,
         )
 
+    def test_nonfloating_fairy_pc_actor_does_not_draw_a_shadow(self) -> None:
+        map_data = compiled_map(("0000", "0000", "0000"), profile="town")
+        object.__setattr__(
+            map_data,
+            "actors",
+            (
+                MapActor(
+                    "resting_fairy",
+                    MapCell(0, 0),
+                    "stationary",
+                    1,
+                    "down",
+                    sprite_source="pc",
+                    floating=False,
+                ),
+                MapActor(
+                    "floating_fairy",
+                    MapCell(1, 0),
+                    "stationary",
+                    1,
+                    "down",
+                    sprite_source="pc",
+                    floating=True,
+                ),
+                MapActor(
+                    "human",
+                    MapCell(2, 0),
+                    "stationary",
+                    3,
+                    "down",
+                    sprite_source="pc",
+                    floating=False,
+                ),
+            ),
+        )
+        field = FieldMovement(map_data, start=FieldPosition(3, 1))
+        actors = FieldActors(map_data)
+        pc_image = Mock(width=384, height=384)
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data,
+            screen_width=64,
+            screen_height=48,
+            pyxel_api=pyxel,
+        )
+
+        renderer.draw(
+            field,
+            actors=actors,
+            actor_pc_character_image=pc_image,
+            actor_pc_fairy_sprite_indices=(0, 1, 2),
+            draw_player=False,
+        )
+
+        shadow_calls = [
+            draw_call
+            for draw_call in pyxel.blt.call_args_list
+            if draw_call.args[2] == CHARACTER_SHADOW_BANK
+            and draw_call.args[3] == CHARACTER_SHADOW_SOURCE_X
+            and draw_call.args[4] == CHARACTER_SHADOW_SOURCE_Y
+        ]
+        self.assertEqual(
+            shadow_calls,
+            [
+                call(
+                    16,
+                    0,
+                    CHARACTER_SHADOW_BANK,
+                    CHARACTER_SHADOW_SOURCE_X,
+                    CHARACTER_SHADOW_SOURCE_Y,
+                    16,
+                    16,
+                    1,
+                ),
+                call(
+                    32,
+                    0,
+                    CHARACTER_SHADOW_BANK,
+                    CHARACTER_SHADOW_SOURCE_X,
+                    CHARACTER_SHADOW_SOURCE_Y,
+                    16,
+                    16,
+                    1,
+                ),
+            ],
+        )
+
     def test_actor_floating_phase_varies_by_stable_actor_identity(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="town")
         object.__setattr__(

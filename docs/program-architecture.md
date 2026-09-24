@@ -1027,8 +1027,9 @@ HP・MPラベルも `menu.member.*` の安定キーを使う。顔は32×32pxで
 `CharacterDefinition.race` が `Race.FAIRY` かどうかから自動判定する。フィールド描画専用の
 キャラクターフラグは追加せず、`Member` やSaveDataにも複製しない。一方、マップ上の人物actorは
 場面ごとに姿勢が異なるため、制作マップの `floating` を `MapActor`、実行時の `FieldActor` へ
-渡す。PC用歩行画像を参照するactorでも画像が表すPCの種族を逆引きせず、配置側の明示値を
-優先する。
+渡す。PC用歩行画像を参照するactorの待機パターンは、画像が表すPCの種族ではなく配置側の
+明示値を優先する。影だけは、Composition Rootが妖精の `battle_sprite` を抽出して描画層へ渡し、
+妖精PC画像かつ `floating=false` の配置を判別する。
 
 カーソルのY方向の浮遊とフィールドキャラクターの待機パターンは、`app/rendering` 配下の
 小さな共通描画規則へ、それぞれの定数と純粋関数を置く。`ui/window.py` と
@@ -1046,7 +1047,9 @@ Pythonの実行ごとに変わる組み込み `hash()` や実行時乱数は使�
 `(80, 144)` から16×16pxを描く規則として所有する。`FieldRenderer` は町・ダンジョンのPCおよび
 人物actorを描く直前に、この影を16×32px本体の下半分と同じ座標へ描く。影は個別の深度要素にせず、
 対象キャラクターと同じ足元Yの描画処理内で本体より先に描く。prop、宝箱、ワールドマップ用
-16×16px PCには適用しない。
+16×16px PCには適用しない。PC歩行画像を使う人物actorでは、Composition Rootが
+`CharacterDefinition.race` から妖精に対応する画像番号を渡し、その画像かつ `floating=false` の
+配置だけ影を描かない。妖精以外のPC画像やNPC画像のactorでは、従来どおり影を描く。
 
 戦闘中のPCは `CharacterDefinition.race == Race.FAIRY` の判定と、カーソルと共通のY方向浮遊関数、
 `pc:{character_key}` の位相を使う。`BattleScene` は最終的に選択した戦闘ポーズの描画元Xを

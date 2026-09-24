@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from contextlib import nullcontext
 from typing import Any
 
@@ -119,6 +120,7 @@ class FieldRenderer:
         prop_image: Any | None = None,
         actor_character_image: Any | None = None,
         actor_pc_character_image: Any | None = None,
+        actor_pc_fairy_sprite_indices: Collection[int] = (),
         player_character_image: Any | None = None,
         player_sprite_index: int = 0,
         player_floating: bool = False,
@@ -141,6 +143,17 @@ class FieldRenderer:
             raise TypeError("field renderer draw_player must be a boolean")
         if not isinstance(player_floating, bool):
             raise TypeError("field renderer player_floating must be a boolean")
+        fairy_sprite_indices = frozenset(actor_pc_fairy_sprite_indices)
+        if any(
+            isinstance(sprite_index, bool)
+            or not isinstance(sprite_index, int)
+            or sprite_index < 0
+            for sprite_index in fairy_sprite_indices
+        ):
+            raise TypeError(
+                "field renderer actor PC fairy sprite indices must be "
+                "non-negative integers"
+            )
         if isinstance(player_floating_phase, bool) or not isinstance(
             player_floating_phase, int
         ):
@@ -161,7 +174,7 @@ class FieldRenderer:
             draw_groups=("object",),
         )
         characters: list[
-            tuple[int, FieldMovement, str, int, Any | None, bool, int]
+            tuple[int, FieldMovement, str, int, Any | None, bool, int, bool]
         ] = []
         if draw_player:
             characters.append(
@@ -173,6 +186,7 @@ class FieldRenderer:
                     player_character_image,
                     player_floating,
                     player_floating_phase,
+                    True,
                 )
             )
         if actors is not None:
@@ -197,6 +211,11 @@ class FieldRenderer:
                         actor.floating,
                         floating_phase_offset(
                             f"actor:{self.map_data.map_id}:{actor.id}"
+                        ),
+                        not (
+                            actor.sprite_source == "pc"
+                            and actor.sprite_index in fairy_sprite_indices
+                            and not actor.floating
                         ),
                     )
                 )
@@ -237,6 +256,7 @@ class FieldRenderer:
                 image,
                 floating,
                 floating_phase,
+                draw_shadow,
             ) = payload
             if kind == "player":
                 self._draw_player_character(
@@ -277,6 +297,7 @@ class FieldRenderer:
                     sprite_index=sprite_index,
                     floating=floating,
                     floating_phase=floating_phase,
+                    draw_shadow=draw_shadow,
                 )
         self._draw_objects(
             camera_x,
@@ -402,11 +423,14 @@ class FieldRenderer:
         sprite_index: int = 0,
         floating: bool = False,
         floating_phase: int = 0,
+        draw_shadow: bool = True,
         palette_shifter: Any | None = None,
         palette_name: str | None = None,
     ) -> None:
         if not isinstance(floating, bool):
             raise TypeError("actor character floating must be a boolean")
+        if not isinstance(draw_shadow, bool):
+            raise TypeError("actor character draw_shadow must be a boolean")
         if image is None:
             frame = (frame_count // FIELD_CHARACTER_ANIMATION_INTERVAL) % 2
             row = FIELD_CHARACTER_FACING_ROWS[field.facing]
@@ -460,11 +484,12 @@ class FieldRenderer:
             source_image = image
             draw_y = field.world_y - camera_y - FIELD_CHARACTER_SIZE
             draw_height = FIELD_ACTOR_CHARACTER_HEIGHT
-            draw_character_shadow(
-                self._pyxel,
-                field.world_x - camera_x,
-                field.world_y - camera_y,
-            )
+            if draw_shadow:
+                draw_character_shadow(
+                    self._pyxel,
+                    field.world_x - camera_x,
+                    field.world_y - camera_y,
+                )
         context = (
             nullcontext()
             if palette_shifter is None
