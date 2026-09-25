@@ -15,7 +15,7 @@ if __package__ == "ui":
     from rendering import MONOCHROME_PALETTE, PaletteShifter
     from resources import FontResources, TRANSPARENT_INDEX
     from state import Language, Settings
-    from systems import SAVE_SLOT_COUNT, SaveSlotSummary
+    from systems import AUTO_SAVE_SLOT, SAVE_SLOT_COUNT, SaveSlotSummary
     from text_catalog import TextCatalog
 else:
     from ..input import Direction, InputState
@@ -24,7 +24,7 @@ else:
     from ..rendering import MONOCHROME_PALETTE, PaletteShifter
     from ..resources import FontResources, TRANSPARENT_INDEX
     from ..state import Language, Settings
-    from ..systems import SAVE_SLOT_COUNT, SaveSlotSummary
+    from ..systems import AUTO_SAVE_SLOT, SAVE_SLOT_COUNT, SaveSlotSummary
     from ..text_catalog import TextCatalog
 
 from .colors import DISABLED_COLOR, POSITIVE_COLOR
@@ -75,6 +75,7 @@ START_TEXT_KEYS = (
     "start.load_failed",
     "start.no_save_data",
     "save.slot",
+    "save.auto_slot",
     "settings.yes",
     "settings.no",
 )
@@ -91,6 +92,7 @@ class StartMenuOverlay:
         self,
         *,
         summaries: Sequence[SaveSlotSummary],
+        autosave_summary: SaveSlotSummary | None = None,
         settings: Settings,
         texts: TextCatalog,
         fonts: FontResources,
@@ -109,6 +111,11 @@ class StartMenuOverlay:
             for index, summary in enumerate(summaries, start=1)
         ):
             raise ValueError("summaries must be ordered from slot 1")
+        if autosave_summary is not None and (
+            not isinstance(autosave_summary, SaveSlotSummary)
+            or autosave_summary.slot != AUTO_SAVE_SLOT
+        ):
+            raise ValueError("autosave_summary must describe slot 0")
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
         if not isinstance(texts, TextCatalog):
@@ -129,6 +136,9 @@ class StartMenuOverlay:
             raise TypeError("on_invalid_action must be callable")
 
         self.summaries = tuple(summaries)
+        self.autosave_summary = autosave_summary or SaveSlotSummary(
+            AUTO_SAVE_SLOT, occupied=False
+        )
         self.settings = settings
         self.texts = texts
         self.fonts = fonts
@@ -151,13 +161,19 @@ class StartMenuOverlay:
             Language.JAPANESE,
         )
         self.window_factory = WindowFactory(fonts.font_for(Language.JAPANESE))
-        self.selected_slot = self._latest_saved_slot() or 1
+        latest_slot = self._latest_saved_slot()
+        self.selected_slot = 1 if latest_slot is None else latest_slot
         self.base_slot = min(
-            max(1, self.selected_slot - SAVE_VISIBLE_SLOT_COUNT + 1),
+            max(
+                0 if self.selected_slot == AUTO_SAVE_SLOT else 1,
+                self.selected_slot - SAVE_VISIBLE_SLOT_COUNT + 1,
+            ),
             SAVE_SLOT_COUNT - SAVE_VISIBLE_SLOT_COUNT + 1,
         )
         self.mode = "main"
-        self.focus = "slots" if any(summary.occupied for summary in summaries) else "commands"
+        self.focus = "slots" if any(
+            summary.occupied for summary in (self.autosave_summary, *summaries)
+        ) else "commands"
         self.selected_command = "new_game"
         self.pending_delete_slot: int | None = None
         self.confirmation_window = None
@@ -166,8 +182,12 @@ class StartMenuOverlay:
 
     @property
     def visible_summaries(self) -> tuple[SaveSlotSummary, ...]:
-        start = self.base_slot - 1
-        return self.summaries[start : start + SAVE_VISIBLE_SLOT_COUNT]
+        return (self.autosave_summary, *self.summaries)[
+            self.base_slot : self.base_slot + SAVE_VISIBLE_SLOT_COUNT
+        ]
+
+    def _summary_for_slot(self, slot: int) -> SaveSlotSummary:
+        return self.autosave_summary if slot == AUTO_SAVE_SLOT else self.summaries[slot - 1]
 
     def _localized_texts(self) -> dict[str, str]:
         localized = {
@@ -182,7 +202,7 @@ class StartMenuOverlay:
 
     def _latest_saved_slot(self) -> int | None:
         dated: list[tuple[datetime, int]] = []
-        for summary in self.summaries:
+        for summary in (self.autosave_summary, *self.summaries):
             if not format_saved_at(summary.saved_at):
                 continue
             dated.append((datetime.fromisoformat(summary.saved_at or ""), summary.slot))
@@ -191,6 +211,8 @@ class StartMenuOverlay:
         return max(dated, key=lambda value: value[0])[1]
 
     def _slot_label(self, slot: int) -> str:
+        if slot == AUTO_SAVE_SLOT:
+            return self.localized["save.auto_slot"]
         slot_number = (
             str(slot)
             if self.settings.language is Language.ENGLISH
@@ -300,18 +322,21 @@ class StartMenuOverlay:
 
     def _move_slot(self, distance: int) -> None:
         next_slot = self.selected_slot + distance
-        if self.mode == "main" and (next_slot < 1 or next_slot > SAVE_SLOT_COUNT):
+        if self.mode == "main" and (next_slot < AUTO_SAVE_SLOT or next_slot > SAVE_SLOT_COUNT):
             self.focus = "commands"
             self._build_windows()
             return
-        self.selected_slot = ((next_slot - 1) % SAVE_SLOT_COUNT) + 1
+        self.selected_slot = (
+            ((next_slot - 1) % SAVE_SLOT_COUNT) + 1
+            if self.mode == "delete" else next_slot
+        )
         max_base_slot = SAVE_SLOT_COUNT - SAVE_VISIBLE_SLOT_COUNT + 1
         if self.selected_slot < self.base_slot:
             self.base_slot = (
                 max_base_slot if self.selected_slot == SAVE_SLOT_COUNT else self.selected_slot
             )
         elif self.selected_slot >= self.base_slot + SAVE_VISIBLE_SLOT_COUNT:
-            self.base_slot = 1 if self.selected_slot == 1 else self.selected_slot - 2
+            self.base_slot = self.selected_slot - SAVE_VISIBLE_SLOT_COUNT + 1
         message_key = "start.delete_select" if self.mode == "delete" else None
         self._build_windows(message_key=message_key)
 
@@ -320,6 +345,9 @@ class StartMenuOverlay:
             self._invalid_action()
             return
         self.mode = "delete"
+        if self.selected_slot == AUTO_SAVE_SLOT:
+            self.selected_slot = 1
+            self.base_slot = 1
         self.focus = "slots"
         self._build_windows(message_key="start.delete_select")
 
@@ -447,7 +475,7 @@ class StartMenuOverlay:
             return
 
         if input_state.confirm.triggered:
-            summary = self.summaries[self.selected_slot - 1]
+            summary = self._summary_for_slot(self.selected_slot)
             if summary.occupied and self.on_load(self.selected_slot):
                 return
             self._build_windows(

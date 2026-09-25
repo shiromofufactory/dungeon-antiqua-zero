@@ -89,10 +89,11 @@ from rendering import (
     MONOCHROME_PALETTE,
     FadeThroughBlack,
     FadeEvent,
+    FadePhase,
 )
 from scenes import BattlePhase, BattleResult
 from state import DisplayMode, Language, SaveData, Settings
-from systems import InventorySystem
+from systems import AUTO_SAVE_SLOT, InventorySystem, SaveSystemError
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
@@ -1483,6 +1484,7 @@ class GameTest(unittest.TestCase):
         mock.travel_system.enter_site.assert_not_called()
         mock._apply_pending_screen_change()
         mock.travel_system.enter_site.assert_called_once_with(mock.save_data, site)
+        self.assertTrue(mock.auto_save_after_fade)
         field_movement_class.assert_called_once_with(
             target_map,
             start=FieldPosition(4, 5),
@@ -1569,6 +1571,7 @@ class GameTest(unittest.TestCase):
         mock._apply_pending_screen_change()
 
         mock.travel_system.enter_site.assert_not_called()
+        self.assertTrue(mock.auto_save_after_fade)
         self.assertIs(mock.current_map, world_map)
         self.assertEqual(mock.current_sites.sites, ())
         field_movement_class.assert_called_once_with(
@@ -2537,6 +2540,63 @@ class GameTest(unittest.TestCase):
         self.assertIs(result, summary)
         self.assertEqual(mock.current_save_slot, 3)
 
+    @patch("game.create_save_document")
+    def test_autosave_writes_slot_zero_without_changing_manual_slot(
+        self, create_document: Mock
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.save_data = SaveData()
+        mock.party = (Mock(),)
+        mock.character_states = {"Fiora": mock.party[0]}
+        mock.inventory_system = Mock()
+        mock.current_map = Mock(map_id="worldmap")
+        mock.field = Mock(position=FieldPosition(7, 8), facing=Direction.UP)
+        mock.save_repository = Mock()
+        mock.current_save_slot = 3
+        create_document.return_value = {"format_version": 2}
+
+        mock._auto_save()
+
+        self.assertEqual(create_document.call_args.kwargs["map_id"], "worldmap")
+        self.assertEqual(create_document.call_args.kwargs["position"], FieldPosition(7, 8))
+        mock.save_repository.save.assert_called_once_with(
+            AUTO_SAVE_SLOT, create_document.return_value
+        )
+        self.assertEqual(mock.current_save_slot, 3)
+
+        mock.save_repository.save.side_effect = SaveSystemError("disk full")
+        mock._auto_save()
+        self.assertEqual(mock.current_save_slot, 3)
+
+    def test_arrival_autosave_waits_until_hint_flag_is_recorded(self) -> None:
+        mock = Game.__new__(Game)
+        mock.fade = Mock(
+            is_active=True,
+            phase=FadePhase.FADING_IN,
+            visible_rate=1.0,
+            update=Mock(return_value=FadeEvent.FINISHED),
+        )
+        mock.palette_shifter = Mock(base_colors=(0,))
+        mock.fade_bgm = False
+        mock.animate_main_windows_with_fade = False
+        mock.auto_save_after_fade = True
+        mock.event_resume_after_fade = False
+        mock.save_data = SaveData()
+        saved_flags = []
+        mock._show_pending_hint_after_fade = Mock(
+            side_effect=lambda: mock.save_data.event_flags.add(
+                "hint.shown.first_dungeon_exit"
+            )
+        )
+        mock._auto_save = Mock(
+            side_effect=lambda: saved_flags.append(set(mock.save_data.event_flags))
+        )
+
+        mock._update_fade()
+
+        self.assertEqual(saved_flags, [{"hint.shown.first_dungeon_exit"}])
+        self.assertFalse(mock.auto_save_after_fade)
+
     @patch("game.FieldRenderer")
     @patch("game.FieldMovement")
     @patch("game.restore_save_document")
@@ -2636,6 +2696,15 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.showing_field)
         mock.bgm.play.assert_called_once_with("dungeon/ruins")
         mock._start_field_event.assert_not_called()
+
+        mock.pending_loaded_state = loaded
+        mock.pending_loaded_map = mock.current_map
+        mock.pending_loaded_field = mock.field
+        mock.pending_loaded_renderer = mock.field_renderer
+        mock.pending_load_slot = AUTO_SAVE_SLOT
+        mock._apply_start_game()
+
+        self.assertIsNone(mock.current_save_slot)
 
     @patch("game.ShopSystem")
     @patch("game.HintOverlay")

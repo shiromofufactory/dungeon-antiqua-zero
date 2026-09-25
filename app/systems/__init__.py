@@ -41,6 +41,7 @@ from .events import (
 )
 from .party import PartySystem, PartySystemError
 from .save import (
+    AUTO_SAVE_SLOT,
     SAVE_DIRECTORY,
     SAVE_FORMAT_VERSION,
     SAVE_SLOT_COUNT,
@@ -77,6 +78,7 @@ from .treasure import TreasureOpenStatus, TreasureSystem
 
 
 __all__ = [
+    "AUTO_SAVE_SLOT",
     "DebugPartyEditor",
     "DebugPartyError",
     "DungeonExitReturn",

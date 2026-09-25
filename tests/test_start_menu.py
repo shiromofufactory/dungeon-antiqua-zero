@@ -10,7 +10,7 @@ from app.input import Direction, InputButton, InputState
 from app.member import FacePosition
 from app.rendering import MONOCHROME_PALETTE
 from app.state import Language, Settings
-from app.systems import SAVE_SLOT_COUNT, SaveSlotSummary
+from app.systems import AUTO_SAVE_SLOT, SAVE_SLOT_COUNT, SaveSlotSummary
 from app.text_catalog import TextCatalog
 from app.ui.colors import DISABLED_COLOR
 from app.ui.start_menu import START_COMMANDS, StartMenuOverlay
@@ -35,6 +35,7 @@ class StartMenuOverlayTest(unittest.TestCase):
         self,
         slot_summaries: tuple[SaveSlotSummary, ...] | None = None,
         *,
+        autosave_summary: SaveSlotSummary | None = None,
         on_new_game: Mock | None = None,
         on_load: Mock | None = None,
         on_delete: Mock | None = None,
@@ -53,6 +54,7 @@ class StartMenuOverlayTest(unittest.TestCase):
         fonts.baseline_offset_for.return_value = 0
         return StartMenuOverlay(
             summaries=summaries() if slot_summaries is None else slot_summaries,
+            autosave_summary=autosave_summary,
             settings=Settings(language=language),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
             fonts=fonts,
@@ -101,6 +103,55 @@ class StartMenuOverlayTest(unittest.TestCase):
         overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
 
         on_load.assert_called_once_with(5)
+
+    def test_autosave_is_latest_loadable_slot_and_delete_excludes_it(self) -> None:
+        on_load = Mock(return_value=True)
+        on_delete = Mock(return_value=True)
+        autosave = SaveSlotSummary(
+            AUTO_SAVE_SLOT, True, "2026-09-25T12:34:56+09:00", ("Fiora",)
+        )
+        overlay = self.create_overlay(
+            summaries(2),
+            autosave_summary=autosave,
+            on_load=on_load,
+            on_delete=on_delete,
+        )
+
+        self.assertEqual(overlay.selected_slot, AUTO_SAVE_SLOT)
+        self.assertEqual(overlay.base_slot, AUTO_SAVE_SLOT)
+        self.assertEqual([slot.slot for slot in overlay.visible_summaries], [0, 1, 2])
+        self.assertEqual(overlay.slot_windows[0].texts[0].text, "［オートセーブ］")
+        overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
+        on_load.assert_called_once_with(AUTO_SAVE_SLOT)
+
+        overlay.focus = "commands"
+        overlay._build_windows()
+        overlay.command_cursor.select_key("delete_data")
+        overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
+        self.assertEqual(overlay.mode, "delete")
+        self.assertEqual(overlay.selected_slot, 1)
+        self.assertEqual(overlay.base_slot, 1)
+        self.assertEqual([slot.slot for slot in overlay.visible_summaries], [1, 2, 3])
+        overlay.update(InputState(navigation=Direction.UP))
+        self.assertEqual(overlay.selected_slot, SAVE_SLOT_COUNT)
+        on_delete.assert_not_called()
+
+    def test_autosave_alone_does_not_enable_data_deletion(self) -> None:
+        autosave = SaveSlotSummary(
+            AUTO_SAVE_SLOT, True, "2026-09-25T12:34:56+09:00", ("Fiora",)
+        )
+        invalid = Mock()
+        overlay = self.create_overlay(
+            autosave_summary=autosave, on_invalid_action=invalid
+        )
+        overlay.focus = "commands"
+        overlay._build_windows()
+        overlay.command_cursor.select_key("delete_data")
+
+        overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
+
+        self.assertEqual(overlay.mode, "main")
+        invalid.assert_called_once_with()
 
     def test_english_slot_label_uses_standard_english_font(self) -> None:
         overlay = self.create_overlay(language=Language.ENGLISH)

@@ -14,6 +14,7 @@ from input import Direction
 from state import Difficulty, SaveData
 from member import EquipmentSlot, internal_level_for_experience, required_experience_for_level
 from systems import (
+    AUTO_SAVE_SLOT,
     SAVE_FORMAT_VERSION,
     SAVE_SLOT_COUNT,
     InventorySystem,
@@ -298,6 +299,22 @@ class SaveSystemTest(unittest.TestCase):
             self.assertEqual(len(summaries), SAVE_SLOT_COUNT)
             self.assertFalse(summaries[0].occupied)
             self.assertEqual(summaries[-1], summary)
+
+    def test_autosave_uses_slot_zero_and_cannot_be_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            document = self.save_document()
+
+            summary = repository.save(AUTO_SAVE_SLOT, document)
+
+            self.assertEqual(summary.slot, AUTO_SAVE_SLOT)
+            self.assertEqual(repository.load(AUTO_SAVE_SLOT), document)
+            self.assertEqual(repository.summary(AUTO_SAVE_SLOT), summary)
+            self.assertEqual(len(repository.summaries()), SAVE_SLOT_COUNT)
+            self.assertTrue(repository.slot_path(AUTO_SAVE_SLOT).exists())
+            with self.assertRaises(ValueError):
+                repository.delete(AUTO_SAVE_SLOT)
+            self.assertTrue(repository.slot_path(AUTO_SAVE_SLOT).exists())
 
     def test_repository_preview_derives_dead_active_members_from_saved_hp(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

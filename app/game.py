@@ -127,6 +127,7 @@ from spell import SpellDataError
 from spell_effect import SpellEffectDataError
 from state import DisplayMode, Difficulty, Language, SaveData, Settings, SpellMode
 from systems import (
+    AUTO_SAVE_SLOT,
     ChangeBgmEffect,
     DebugPartyEditor,
     DebugPartyError,
@@ -575,6 +576,7 @@ class Game:
         self._returning_to_start = False
         self.fade = FadeThroughBlack()
         self.pending_screen_change: GameScreenChange | None = None
+        self.auto_save_after_fade = False
         self.fade_bgm = False
         self.animate_main_windows_with_fade = False
         self.showing_field = False
@@ -621,6 +623,7 @@ class Game:
         self._refresh_site_name_label()
         self.start_screen: StartMenuOverlay | None = StartMenuOverlay(
             summaries=self.save_repository.summaries(),
+            autosave_summary=self.save_repository.summary(AUTO_SAVE_SLOT),
             settings=self.settings,
             texts=self.texts,
             fonts=self.fonts,
@@ -2316,6 +2319,10 @@ class Game:
         else:
             raise RuntimeError(f"unsupported field screen change: {change}")
         self.pending_screen_change = None
+        self.auto_save_after_fade = change in (
+            GameScreenChange.CHANGE_MAP,
+            GameScreenChange.TELEPORT,
+        )
 
     def _restart_main_windows_for_fade_in(self) -> None:
         """Synchronize the eight-frame window opening with fade-in."""
@@ -2361,6 +2368,9 @@ class Game:
         if event is FadeEvent.FINISHED:
             self.fade_bgm = False
             self._show_pending_hint_after_fade()
+            if getattr(self, "auto_save_after_fade", False):
+                self.auto_save_after_fade = False
+                self._auto_save()
             if getattr(self, "event_resume_after_fade", False):
                 self.event_resume_after_fade = False
                 try:
@@ -2434,8 +2444,14 @@ class Game:
             summary = self.save_repository.save(slot, document)
         except (SaveSystemError, TypeError, ValueError):
             return None
-        self.current_save_slot = slot
+        if slot != AUTO_SAVE_SLOT:
+            self.current_save_slot = slot
         return summary
+
+    def _auto_save(self) -> None:
+        """Persist a completed field arrival without changing the manual slot."""
+
+        self._save_to_slot(AUTO_SAVE_SLOT)
 
     def _start_new_game(self) -> None:
         """Fade from the opening selector into the initialized new game."""
@@ -2505,7 +2521,9 @@ class Game:
             self.current_sites = WorldSiteCatalog(self.current_map.sites)
             self.field = self.pending_loaded_field
             self.field_renderer = self.pending_loaded_renderer
-            self.current_save_slot = self.pending_load_slot
+            self.current_save_slot = (
+                self.pending_load_slot if self.pending_load_slot != AUTO_SAVE_SLOT else None
+            )
             self.shop_system = ShopSystem(
                 shops=self.shops,
                 inventory=self.inventory_system,

@@ -50,6 +50,7 @@ else:
 
 SAVE_FORMAT_VERSION = 2
 SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, SAVE_FORMAT_VERSION))
+AUTO_SAVE_SLOT = 0
 SAVE_SLOT_COUNT = 8
 SAVE_DIRECTORY = Path.home() / ".config" / ".pyxel" / "dungeon-antiqua-zero"
 MAX_SAVE_GOLD = 999_999
@@ -70,7 +71,7 @@ class SaveSlotSummary:
     dead_character_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        _validate_slot(self.slot)
+        _validate_slot(self.slot, allow_auto=True)
         if not isinstance(self.occupied, bool):
             raise TypeError("occupied must be a boolean")
         if self.saved_at is not None and (
@@ -860,7 +861,7 @@ class SaveRepository:
         self.directory = directory
 
     def slot_path(self, slot: int) -> Path:
-        _validate_slot(slot)
+        _validate_slot(slot, allow_auto=True)
         return self.directory / f"save{slot}.json"
 
     def summaries(self) -> tuple[SaveSlotSummary, ...]:
@@ -927,8 +928,9 @@ class SaveRepository:
         return document
 
     def delete(self, slot: int) -> None:
-        """Delete one slot file; deleting an empty slot is harmless."""
+        """Delete one manual slot file; deleting an empty slot is harmless."""
 
+        _validate_slot(slot)
         path = self.slot_path(slot)
         try:
             path.unlink(missing_ok=True)
@@ -983,14 +985,18 @@ class SaveRepository:
         )
 
 
-def _validate_slot(slot: int) -> None:
+def _validate_slot(slot: int, *, allow_auto: bool = False) -> None:
     if isinstance(slot, bool) or not isinstance(slot, int):
         raise TypeError("save slot must be an integer")
-    if not 1 <= slot <= SAVE_SLOT_COUNT:
+    if not (
+        1 <= slot <= SAVE_SLOT_COUNT
+        or (allow_auto and slot == AUTO_SAVE_SLOT)
+    ):
         raise ValueError(f"save slot must be from 1 to {SAVE_SLOT_COUNT}")
 
 
 __all__ = [
+    "AUTO_SAVE_SLOT",
     "SAVE_DIRECTORY",
     "SAVE_FORMAT_VERSION",
     "SAVE_SLOT_COUNT",
