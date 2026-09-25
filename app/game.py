@@ -2347,6 +2347,9 @@ class Game:
             self.bgm.set_fade_rate(fade.visible_rate)
         if event is FadeEvent.COVERED:
             self._apply_pending_screen_change()
+            if getattr(self, "fade_bgm", False):
+                self.bgm.set_fade_rate(1.0)
+                self.fade_bgm = False
         elif was_fading_in and getattr(
             self,
             "animate_main_windows_with_fade",

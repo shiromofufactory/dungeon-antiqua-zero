@@ -2869,31 +2869,51 @@ class GameTest(unittest.TestCase):
             {"base_rate": 1.0, "target_color": 0x000000},
         )
 
-    def test_map_change_fades_bgm_out_and_in_with_screen(self) -> None:
-        mock = Game.__new__(Game)
-        mock.fade = FadeThroughBlack(SITE_MAP_FADE_FRAME_COUNT)
-        mock.pending_screen_change = None
-        mock.bgm = Mock()
-        mock.palette_shifter = Mock(base_colors=(0x000000,))
-        mock._apply_pending_screen_change = Mock()
+    def test_field_change_restores_bgm_at_fade_midpoint(self) -> None:
+        for change in (
+            GameScreenChange.CHANGE_MAP,
+            GameScreenChange.TELEPORT,
+            GameScreenChange.START_GAME,
+        ):
+            with self.subTest(change=change):
+                frame_count = (
+                    SITE_MAP_FADE_FRAME_COUNT
+                    if change is not GameScreenChange.START_GAME
+                    else DEFAULT_FADE_FRAME_COUNT
+                )
+                mock = Game.__new__(Game)
+                mock.fade = FadeThroughBlack(frame_count)
+                mock.pending_screen_change = None
+                mock.bgm = Mock()
+                mock.palette_shifter = Mock(base_colors=(0x000000,))
+                mock._apply_pending_screen_change = Mock(
+                    side_effect=lambda: mock.bgm.play("destination")
+                )
 
-        mock._begin_screen_change(GameScreenChange.CHANGE_MAP)
-        for _frame in range(SITE_MAP_FADE_FRAME_COUNT * 2):
-            mock._update_fade()
+                mock._begin_screen_change(change)
+                for _frame in range(frame_count):
+                    mock._update_fade()
 
-        expected_rates = [
-            1.0 - frame / SITE_MAP_FADE_FRAME_COUNT
-            for frame in range(1, SITE_MAP_FADE_FRAME_COUNT + 1)
-        ] + [
-            frame / SITE_MAP_FADE_FRAME_COUNT
-            for frame in range(1, SITE_MAP_FADE_FRAME_COUNT + 1)
-        ]
-        self.assertEqual(
-            [call.args[0] for call in mock.bgm.set_fade_rate.call_args_list],
-            expected_rates,
-        )
-        mock._apply_pending_screen_change.assert_called_once_with()
-        self.assertFalse(mock.fade_bgm)
+                self.assertEqual(
+                    [call.args[0] for call in mock.bgm.set_fade_rate.call_args_list],
+                    [1.0 - frame / frame_count for frame in range(1, frame_count + 1)]
+                    + [1.0],
+                )
+                self.assertEqual(
+                    mock.bgm.mock_calls[-2:],
+                    [call.play("destination"), call.set_fade_rate(1.0)],
+                )
+                mock._apply_pending_screen_change.assert_called_once_with()
+                self.assertFalse(mock.fade_bgm)
+
+                for _frame in range(frame_count):
+                    mock._update_fade()
+
+                self.assertFalse(mock.fade.is_active)
+                self.assertEqual(
+                    mock.bgm.set_fade_rate.call_count,
+                    frame_count + 1,
+                )
 
     def test_menu_change_does_not_fade_bgm(self) -> None:
         mock = Game.__new__(Game)
