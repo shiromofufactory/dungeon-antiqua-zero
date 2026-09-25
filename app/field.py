@@ -294,15 +294,20 @@ class FieldActors:
     def stop(self, actor_id: str) -> None:
         self.actor(actor_id).movement.stop()
 
-    def face_toward(self, actor_id: str, target: FieldPosition) -> None:
+    def face_toward(
+        self,
+        actor_id: str,
+        target: FieldPosition,
+    ) -> Direction | None:
         actor = self.actor(actor_id)
         if actor.kind in ("prop", "treasure"):
-            return
+            return None
         actor.movement.stop()
+        previous_facing = actor.movement.facing
         dx = target.x - actor.movement.position.x
         dy = target.y - actor.movement.position.y
         if (dx == 0) == (dy == 0):
-            return
+            return previous_facing
         step_x = 0 if dx == 0 else (1 if dx > 0 else -1)
         step_y = 0 if dy == 0 else (1 if dy > 0 else -1)
         actor.movement.facing = next(
@@ -310,6 +315,22 @@ class FieldActors:
             for direction in Direction
             if (direction.dx, direction.dy) == (step_x, step_y)
         )
+        return previous_facing
+
+    def restore_stationary_facing(
+        self,
+        actor_id: str,
+        facing: Direction,
+    ) -> None:
+        """Restore a stationary actor after a player-initiated conversation."""
+
+        if not isinstance(facing, Direction):
+            raise TypeError("restored actor facing must be a Direction")
+        actor = self.actor(actor_id)
+        if actor.kind != "stationary":
+            raise ValueError("only stationary field actors restore their facing")
+        actor.movement.stop()
+        actor.movement.facing = facing
 
     def update(
         self,

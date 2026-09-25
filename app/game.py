@@ -562,6 +562,10 @@ class Game:
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
         self.event_resume_after_fade = False
+        self.event_stationary_actor_facing_restore: tuple[
+            str,
+            Direction,
+        ] | None = None
         self.last_event_error: str | None = None
         self.settings_window = None
         self.settings_cursor: WindowCursor | None = None
@@ -2872,6 +2876,7 @@ class Game:
             self.character_states = self.party_system.character_states
             if effect is None:
                 if runner.is_complete:
+                    self._restore_event_stationary_actor_facing()
                     self.event_runner = None
                     self.event_effect = None
                     self.event_message = None
@@ -2994,12 +2999,24 @@ class Game:
     def _abort_event(self, error: BaseException) -> None:
         self.last_event_error = str(error)
         print(f"イベントを中断しました: {error}", file=sys.stderr)
+        self._restore_event_stationary_actor_facing()
         self.event_runner = None
         self.event_effect = None
         self.event_message = None
         self.event_move_remaining = 0
         self.event_resume_after_fade = False
         self.alert.start()
+
+    def _restore_event_stationary_actor_facing(self) -> None:
+        restore = getattr(self, "event_stationary_actor_facing_restore", None)
+        self.event_stationary_actor_facing_restore = None
+        if restore is None:
+            return
+        actors = getattr(self, "field_actors", None)
+        if actors is None:
+            return
+        actor_id, facing = restore
+        actors.restore_stationary_facing(actor_id, facing)
 
     def _release_latch_blocks_field(self, input_state: InputState) -> bool:
         blocked = False
@@ -3036,6 +3053,7 @@ class Game:
         if trigger is None:
             return False
         if trigger.actor_id is not None and self.field_actors is not None:
+            self.event_stationary_actor_facing_restore = None
             if activation in ("touch", "interact"):
                 actor = self.field_actors.actor(trigger.actor_id)
                 if actor.kind in ("stationary", "roaming"):
@@ -3047,10 +3065,15 @@ class Game:
                             for direction in Direction
                             if (direction.dx, direction.dy) == (dx, dy)
                         )
-                self.field_actors.face_toward(
+                previous_facing = self.field_actors.face_toward(
                     trigger.actor_id,
                     self.field.position,
                 )
+                if actor.kind == "stationary" and previous_facing is not None:
+                    self.event_stationary_actor_facing_restore = (
+                        trigger.actor_id,
+                        previous_facing,
+                    )
             else:
                 self.field_actors.stop(trigger.actor_id)
         self._start_field_event(

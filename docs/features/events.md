@@ -510,7 +510,9 @@ actorは次の4種類とする。
 下地が通行不可のセルにも配置できる。すべてのactor自身がpartyと他actorの進入を防ぐ。
 `stationary` と `roaming` はactorをアンカーとする
 `touch` または `interact` で起動される際、未完了の自律歩行を初期セルへ戻し、partyの先頭と
-actorを互いの方へ向ける。`prop` は会話や調査でも向きを変えない。宝箱の中身、入力、演出、保存規則は
+actorを互いの方へ向ける。`stationary` はイベント終了時に会話開始直前の向きへ戻す。
+`roaming` は会話時の向きを維持し、その後の自律移動で向きを更新する。`prop` は会話や調査でも
+向きを変えない。宝箱の中身、入力、演出、保存規則は
 [`treasures.md`](./treasures.md) を正本とする。
 
 actorの配置、現在位置、向き、待機タイマーはFieldの一時状態とし、セーブしない。
@@ -883,6 +885,8 @@ Runnerとマップトリガーを一度に作り込みすぎない。
   interactを単独トリガーとして選択できない。
 - `interact_through` を有効にしたオブジェクト越しに、1セル奥のactorイベントを決定入力で起動できる。
 - 人物actorのtouch・interact起動時は、partyの先頭とactorが互いの方を向いてからイベントを開始する。
+- `stationary` actorは会話イベントの終了後に開始直前の向きへ戻り、`roaming` actorは会話時の
+  向きを維持する。
 - 人物actorは配置ごとの `floating` を保存でき、`true` の配置だけが
   `map_id` とactor IDから決まる安定した開始位相で停止中の画像パターンを切り替える。
   描画Y座標は変更しない。

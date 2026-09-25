@@ -327,6 +327,63 @@ class GameEventTriggerTest(unittest.TestCase):
         )
         self.assertIs(game.field.facing, Direction.RIGHT)
 
+    def test_stationary_actor_restores_its_facing_when_event_finishes(self) -> None:
+        actor = MapActor("elder", MapCell(2, 1), "stationary", 0, "up")
+        trigger = MapEventTrigger(
+            "elder_talk",
+            "sample.talk",
+            frozenset(("interact",)),
+            actor_id="elder",
+            offsets=(MapCell(0, 0),),
+        )
+        game = game_for(trigger, actors=(actor,))
+
+        game._update_field(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+        self.assertIs(
+            game.field_actors.actor("elder").movement.facing,
+            Direction.LEFT,
+        )
+
+        game.event_runner = Mock(advance=Mock(return_value=None), is_complete=True)
+        game.party_system = Mock(active_party=(object(),), character_states={})
+        game.party = game.party_system.active_party
+        game.selected_member_index = 0
+        game._continue_event()
+
+        self.assertIs(
+            game.field_actors.actor("elder").movement.facing,
+            Direction.UP,
+        )
+        self.assertIsNone(game.event_stationary_actor_facing_restore)
+
+    def test_roaming_actor_keeps_its_facing_when_event_finishes(self) -> None:
+        actor = MapActor("villager", MapCell(2, 1), "roaming", 0, "up")
+        trigger = MapEventTrigger(
+            "villager_talk",
+            "sample.talk",
+            frozenset(("interact",)),
+            actor_id="villager",
+            offsets=(MapCell(0, 0),),
+        )
+        game = game_for(trigger, actors=(actor,))
+
+        game._update_field(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+        game.event_runner = Mock(advance=Mock(return_value=None), is_complete=True)
+        game.party_system = Mock(active_party=(object(),), character_states={})
+        game.party = game.party_system.active_party
+        game.selected_member_index = 0
+        game._continue_event()
+
+        self.assertIs(
+            game.field_actors.actor("villager").movement.facing,
+            Direction.LEFT,
+        )
+        self.assertIsNone(game.event_stationary_actor_facing_restore)
+
     def test_touching_character_actor_turns_both_characters_toward_each_other(
         self,
     ) -> None:

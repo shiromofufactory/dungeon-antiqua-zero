@@ -822,6 +822,19 @@ class ItemMenuTest(unittest.TestCase):
             ],
         )
 
+    def test_recorded_summary_moves_up_when_inventory_is_empty(self) -> None:
+        items = ItemMenuHarness().items
+        inventory = InventorySystem(items, recorded_keys=tuple(items)[:3])
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
+
+        self.assertEqual(
+            [(text.text, text.y) for text in mock.item_info_window.texts],
+            [
+                ("きろくずみ：", ITEM_SUMMARY_COUNT_LABEL_Y),
+                ("　　３／　？？", ITEM_SUMMARY_COUNT_VALUE_Y),
+            ],
+        )
+
     def test_drop_confirmation_no_and_cancel_keep_the_item(self) -> None:
         mock = ItemMenuHarness()
         item = mock.inventory[0]

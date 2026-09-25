@@ -323,7 +323,6 @@ class SaveMenuOverlay:
                     SAVE_CONFIRM_NO_Y,
                 ),
             ),
-            opened=False,
         )
         self.confirmation_cursor = self.confirmation_window.set_cursor(
             (
@@ -339,7 +338,6 @@ class SaveMenuOverlay:
                 ),
             )
         )
-        self.confirmation_window.open()
 
     def _cancel_overwrite_confirmation(self) -> None:
         self.pending_overwrite_slot = None
@@ -371,12 +369,6 @@ class SaveMenuOverlay:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
-        if (
-            self.confirmation_window is not None
-            and self.confirmation_window.is_animating
-        ):
-            self.confirmation_window.update()
-            return False
         if self.confirmation_cursor is not None:
             if input_state.cancel.triggered:
                 self._cancel_overwrite_confirmation()

@@ -417,17 +417,27 @@ class ItemMenuOverlay:
         recorded_total = (
             pad(catalog_count, 3) if recorded_count == catalog_count else "　？？"
         )
+        recorded_label_y = (
+            ITEM_SUMMARY_RECORDED_LABEL_Y
+            if owned_count
+            else ITEM_SUMMARY_COUNT_LABEL_Y
+        )
+        recorded_value_y = (
+            ITEM_SUMMARY_RECORDED_VALUE_Y
+            if owned_count
+            else ITEM_SUMMARY_COUNT_VALUE_Y
+        )
         placements.extend(
             (
                 self.localized_texts.create(
                     recorded_label,
                     ITEM_INFO_X,
-                    ITEM_SUMMARY_RECORDED_LABEL_Y,
+                    recorded_label_y,
                 ),
                 self.localized_texts.create(
                     f"{pad(recorded_count, 3)}／{recorded_total}",
                     ITEM_SUMMARY_VALUE_X,
-                    ITEM_SUMMARY_RECORDED_VALUE_Y,
+                    recorded_value_y,
                 ),
             )
         )

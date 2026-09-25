@@ -223,9 +223,14 @@ class FieldMovementTest(unittest.TestCase):
         )
         actors = FieldActors(map_data)
 
-        actors.face_toward("elder", FieldPosition(2, 1))
+        previous_facing = actors.face_toward("elder", FieldPosition(2, 1))
 
+        self.assertIs(previous_facing, Direction.UP)
         self.assertIs(actors.actor("elder").movement.facing, Direction.RIGHT)
+
+        actors.restore_stationary_facing("elder", previous_facing)
+
+        self.assertIs(actors.actor("elder").movement.facing, Direction.UP)
 
     def test_stationary_actor_faces_party_across_a_counter(self) -> None:
         map_data = compiled_map(("0000", "0000", "0000"))

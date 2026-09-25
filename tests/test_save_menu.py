@@ -285,10 +285,10 @@ class SaveMenuOverlayTest(unittest.TestCase):
 
         self.assertEqual(overlay.pending_overwrite_slot, 1)
         self.assertIsNotNone(overlay.confirmation_cursor)
+        self.assertTrue(overlay.confirmation_window.is_open)
+        self.assertFalse(overlay.confirmation_window.is_animating)
         on_save.assert_not_called()
 
-        for _frame in range(8):
-            overlay.update(InputState())
         overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
 
         on_save.assert_called_once_with(1)
