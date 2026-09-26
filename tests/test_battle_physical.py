@@ -35,26 +35,24 @@ class MemberPhysicalAttackTest(unittest.TestCase):
 
 
 class ResolvePhysicalAttackTest(unittest.TestCase):
-    def test_matches_da2_hit_and_damage_calculation(self) -> None:
+    def test_hit_and_damage_use_base_accuracy_without_agility_modifier(self) -> None:
         result = resolve_physical_attack(
             attack=100,
             hit=90,
-            agility=25,
             target_defense=10,
             target_evasion=20,
             hit_roll=40,
         )
 
         self.assertTrue(result.hit)
-        self.assertEqual(result.adjusted_hit, 112.5)
-        self.assertEqual(result.hit_value, 50.0)
-        self.assertEqual(result.damage, 81)
+        self.assertEqual(result.adjusted_hit, 90.0)
+        self.assertEqual(result.hit_value, 32.0)
+        self.assertEqual(result.damage, 76)
 
     def test_negative_hit_value_is_a_miss(self) -> None:
         result = resolve_physical_attack(
             attack=100,
             hit=90,
-            agility=25,
             target_defense=10,
             target_evasion=20,
             hit_roll=91,
@@ -62,20 +60,19 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
 
         self.assertFalse(result.hit)
         self.assertEqual(result.damage, 0)
-        self.assertEqual(result.hit_value, -1.0)
+        self.assertEqual(result.hit_value, -19.0)
 
     def test_zero_hit_value_still_hits_like_da2(self) -> None:
         result = resolve_physical_attack(
             attack=20,
             hit=100,
-            agility=5,
             target_defense=0,
             target_evasion=20,
-            hit_roll=60,
+            hit_roll=80,
         )
 
         self.assertTrue(result.hit)
-        self.assertEqual(result.adjusted_hit, 75.0)
+        self.assertEqual(result.adjusted_hit, 100.0)
         self.assertEqual(result.hit_value, 0.0)
         self.assertEqual(result.damage, 16)
 
@@ -83,7 +80,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=0,
-            agility=20,
             target_defense=0,
             target_evasion=100,
             hit_roll=99,
@@ -98,7 +94,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=0,
-            agility=20,
             target_defense=0,
             target_evasion=100,
             hit_roll=99,
@@ -114,7 +109,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=40,
             target_evasion=0,
             hit_roll=0,
@@ -133,7 +127,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=40,
             target_evasion=0,
             hit_roll=0,
@@ -149,7 +142,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=100,
             hit_roll=99,
@@ -166,7 +158,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=80,
-            agility=20,
             target_defense=0,
             target_evasion=100,
             hit_roll=99,
@@ -185,7 +176,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=0,
             hit_roll=0,
@@ -201,7 +191,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=0,
             hit_roll=0,
@@ -219,7 +208,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=0,
             hit_roll=0,
@@ -235,7 +223,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=40,
             target_evasion=0,
             hit_roll=0,
@@ -252,7 +239,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=0,
             hit_roll=76,
@@ -269,7 +255,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=0,
             hit_roll=76,
@@ -287,7 +272,6 @@ class ResolvePhysicalAttackTest(unittest.TestCase):
         result = resolve_physical_attack(
             attack=100,
             hit=100,
-            agility=20,
             target_defense=0,
             target_evasion=0,
             hit_roll=75,

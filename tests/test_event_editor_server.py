@@ -14,6 +14,28 @@ from tools.event_editor.server import EventEditorApplication, create_server
 
 
 class EventEditorServerTest(unittest.TestCase):
+    def test_validates_empty_then_with_else_without_warning(self) -> None:
+        data = {
+            "format_version": 1,
+            "namespace": "sample",
+            "events": [{
+                "id": "guard",
+                "commands": [{
+                    "command": "branch",
+                    "condition": {"type": "flag_set", "flag_id": "story.done"},
+                    "then": [],
+                    "else": [
+                        {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},
+                        {"command": "set_flag", "flag_id": "story.done"},
+                    ],
+                }],
+            }],
+        }
+
+        result = self.post_json("/api/validate", data)
+
+        self.assertEqual(result["diagnostics"], [])
+
     def test_saves_named_battle_and_battle_start_event(self) -> None:
         data = {
             "format_version": 1,

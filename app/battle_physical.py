@@ -86,7 +86,6 @@ def resolve_physical_attack(
     *,
     attack: int,
     hit: int,
-    agility: int,
     target_defense: int,
     target_evasion: int,
     hit_roll: int,
@@ -105,7 +104,6 @@ def resolve_physical_attack(
 
     attack = _nonnegative_integer(attack, "attack")
     hit = _nonnegative_integer(hit, "hit")
-    agility = _nonnegative_integer(agility, "agility")
     target_defense = _nonnegative_integer(target_defense, "target_defense")
     target_evasion = _nonnegative_integer(target_evasion, "target_evasion")
     hit_roll = _nonnegative_integer(hit_roll, "hit_roll")
@@ -139,10 +137,6 @@ def resolve_physical_attack(
         raise ValueError("critical_rate_scale must be positive")
 
     adjusted_hit = float(hit)
-    if agility > 20:
-        adjusted_hit *= 1 + (agility - 20) / 20
-    elif agility < 10:
-        adjusted_hit *= 1 + (agility - 10) / 20
 
     has_ambush_advantage = target_incapacitated or attacker_hidden
     if has_ambush_advantage:

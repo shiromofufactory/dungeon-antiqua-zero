@@ -825,7 +825,6 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         expected = resolve_physical_attack(
             attack=weapon.attack,
             hit=weapon.hit,
-            agility=actor.agility,
             target_defense=target.defense,
             target_evasion=target.evasion,
             hit_roll=int(forecast.roll(actor, 5, 2) * 100),

@@ -808,7 +808,6 @@ class BattleForecast:
                     attack=weapon.attack
                     * (2 if action.command is BattleCommand.FOCUS else 1),
                     hit=weapon.hit,
-                    agility=actor.agility,
                     target_defense=target.defense,
                     target_evasion=target.evasion,
                     hit_roll=int(
@@ -1196,7 +1195,6 @@ class BattleForecast:
             result = resolve_physical_attack(
                 attack=int(actor.spec.attack * (1.5 if charged else 1)),
                 hit=actor.spec.hit,
-                agility=actor.agility,
                 target_defense=target.defense,
                 target_evasion=target.evasion,
                 target_defending=target.defending,
@@ -1277,7 +1275,6 @@ class BattleForecast:
                 resolve_physical_attack(
                     attack=actor.spec.attack,
                     hit=actor.spec.hit,
-                    agility=actor.agility,
                     target_defense=target.defense,
                     target_evasion=target.evasion,
                     hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),

@@ -902,6 +902,12 @@ class Game:
         self.battle_scene = self._build_battle_scene(
             event_encounter or self._create_random_battle_encounter()
         )
+        battle_id = getattr(self, "pending_event_battle_id", None)
+        if (
+            battle_id is not None
+            and self.event_catalog.battle_start_event(battle_id) is not None
+        ):
+            self.battle_scene.defer_first_party_command()
         self.pending_first_party_turn_hint = True
 
     def _create_random_battle_encounter(self) -> BattleEncounter:
@@ -1112,21 +1118,29 @@ class Game:
         battle_scene = getattr(self, "battle_scene", None)
         if battle_scene is None:
             return False
-        battle_scene.update(input_state)
         if (
-            getattr(self, "pending_first_party_turn_hint", False)
-            and battle_scene.is_party_command_ready
+            getattr(battle_scene, "is_party_command_pending", False) is True
+            and not getattr(self, "pending_first_party_turn_hint", False)
+            and getattr(self, "hint_overlay", None) is None
         ):
-            self.pending_first_party_turn_hint = False
+            battle_scene.open_pending_party_command()
+        battle_scene.update(input_state)
+        if getattr(self, "pending_first_party_turn_hint", False):
             battle_id = getattr(self, "pending_event_battle_id", None)
-            self.pending_event_battle_id = None
             event_id = (
                 self.event_catalog.battle_start_event(battle_id)
                 if battle_id is not None else None
             )
-            if event_id is not None:
+            if (
+                event_id is not None
+                and battle_scene.is_party_command_pending is True
+            ):
+                self.pending_first_party_turn_hint = False
+                self.pending_event_battle_id = None
                 self._start_battle_event(event_id)
-            else:
+            elif event_id is None and battle_scene.is_party_command_ready:
+                self.pending_first_party_turn_hint = False
+                self.pending_event_battle_id = None
                 self._show_hint_once(FIRST_BATTLE_HINT_ID)
         if battle_scene.phase is BattlePhase.RESULT:
             self._show_hint_once(FIRST_RESULT_HINT_ID)
@@ -1154,6 +1168,7 @@ class Game:
         field_defeat = result is BattleResult.DEFEAT and battle_scene is None
         if battle_scene is not None:
             battle_scene.clear_temporary_member_conditions()
+            battle_scene.release_palette_variants()
         if result is BattleResult.VICTORY:
             self.save_data.battle_count += 1
         elif result is BattleResult.DEFEAT:
@@ -2923,6 +2938,9 @@ class Game:
             self.settings.to_dict(),
             ensure_ascii=True,
         )
+        battle_scene = getattr(self, "battle_scene", None)
+        if battle_scene is not None:
+            battle_scene.release_palette_variants()
         self.bgm.stop()
         if self.applied_screen_scale != self.settings.screen_scale:
             os.environ.pop(pyxel.WINDOW_STATE_ENV, None)
@@ -2995,6 +3013,15 @@ class Game:
             self.event_release_confirm = release_confirm
             self.last_event_error = None
             self._continue_event()
+            if (
+                self.event_runner is None
+                and getattr(self, "suspended_field_event", None) is None
+            ):
+                # An event with no waiting effect (for example an empty
+                # branch) must not interrupt a held field movement input.
+                self.event_release_direction = None
+                self.event_release_confirm = False
+                return False
         except (
             KeyError,
             EventRuntimeError,
@@ -3227,12 +3254,11 @@ class Game:
                     )
             else:
                 self.field_actors.stop(trigger.actor_id)
-        self._start_field_event(
+        return self._start_field_event(
             trigger.event_id,
             release_direction=release_direction,
             release_confirm=release_confirm,
         )
-        return True
 
     def _try_open_treasure(
         self,

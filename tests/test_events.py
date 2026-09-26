@@ -76,6 +76,28 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_empty_then_runs_else_only_while_flag_is_off(self) -> None:
+        commands = [{
+            "command": "branch",
+            "condition": {"type": "flag_set", "flag_id": "sample.done"},
+            "then": [],
+            "else": [
+                {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},
+                {"command": "set_flag", "flag_id": "sample.done"},
+            ],
+        }]
+        runner = self.runner(commands)
+
+        effect = runner.advance()
+        self.assertEqual(effect, StartBattleEffect("guard", ("SLIME",)))
+        runner.complete_effect(effect)
+        self.assertIsNone(runner.advance())
+        self.assertIn("sample.done", self.save_data.event_flags)
+
+        next_runner = self.runner(commands)
+        self.assertIsNone(next_runner.advance())
+        self.assertTrue(next_runner.is_complete)
+
     def test_start_battle_waits_and_then_continues(self) -> None:
         runner = self.runner([
             {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},

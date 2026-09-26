@@ -51,6 +51,29 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_empty_then_with_commands_in_else_is_not_a_warning(self) -> None:
+        source = sample_source()
+
+        diagnostics = validate_event_sources({"sample": source}, **CATALOGS)
+        compiled = compile_event_sources({"sample": source}, **CATALOGS)
+
+        self.assertEqual(diagnostics, [])
+        self.assertEqual(
+            compiled["events"]["sample.greeting"]["commands"][0]["then"],
+            [],
+        )
+
+    def test_branch_with_both_sides_empty_still_warns(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"][0]["else"] = []
+
+        diagnostics = validate_event_sources({"sample": source}, **CATALOGS)
+
+        self.assertEqual(
+            [(item.code, item.path) for item in diagnostics],
+            [("empty_commands", "sample.events[0].commands[0].then")],
+        )
+
     def test_compiles_event_battle_and_start_trigger(self) -> None:
         source = sample_source()
         source["events"][0]["commands"] = [{

@@ -4002,6 +4002,19 @@ class GameTest(unittest.TestCase):
         reset.assert_not_called()
         mock._return_to_start_without_window_restart.assert_called_once_with()
 
+    def test_return_to_title_releases_active_battle_palette(self) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings()
+        mock.applied_screen_scale = mock.settings.screen_scale
+        mock.bgm = Mock()
+        mock.battle_scene = Mock()
+        mock._return_to_start_without_window_restart = Mock()
+
+        mock._return_to_start_screen()
+
+        mock.battle_scene.release_palette_variants.assert_called_once_with()
+        mock._return_to_start_without_window_restart.assert_called_once_with()
+
     def test_in_memory_title_return_reinitializes_same_game_object(self) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings(language=Language.ENGLISH, screen_scale=3)

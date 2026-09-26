@@ -20,16 +20,22 @@ from localization import Localizer
 from member import FormationRow
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
+    DIMMED_PALETTE,
     ENCOUNTER_TRANSITION_FRAME_COUNT,
     EncounterTransition,
     FadePhase,
     FadeThroughBlack,
+    MONOCHROME_PALETTE,
+    PaletteShifter,
 )
 from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
     MONSTER_POSITIONS,
+    MONSTER_DEATH_PALETTE,
+    SPELL_EFFECT_FLASH_PALETTE,
+    UNSELECTABLE_TARGET_PALETTE,
     _battle_start_front_monster_indexes,
     BattleCharacter,
     BattlePhase,
@@ -41,6 +47,31 @@ from systems import DungeonExitReturn, EncounterAdvance, EncounterFormation
 from text_catalog import TextCatalog
 from ui import LocalizedWindowTextFactory, POSITIVE_COLOR
 from ui.tagged_text import TextColor, split_tagged_text
+
+
+class BattlePaletteLifecycleTest(unittest.TestCase):
+    def test_repeated_battles_release_palette_slots_at_every_exit(self) -> None:
+        colors = list(range(62))
+        shifter = PaletteShifter(colors, Mock())
+        base = shifter.base_colors
+        shifter.define_variant(DIMMED_PALETTE, base)
+        shifter.define_variant(MONOCHROME_PALETTE, base)
+
+        for battle_number in range(6):
+            scene = BattleScene.__new__(BattleScene)
+            scene.palette_shifter = shifter
+            scene._sync_unselectable_target_palette()
+            self.assertEqual(len(colors), 248)
+            if battle_number % 2:
+                shifter.remove_variant(UNSELECTABLE_TARGET_PALETTE)
+                shifter.define_variant(MONSTER_DEATH_PALETTE, base)
+            else:
+                shifter.remove_variant(UNSELECTABLE_TARGET_PALETTE)
+                shifter.define_variant(SPELL_EFFECT_FLASH_PALETTE, base)
+
+            scene.release_palette_variants()
+
+            self.assertEqual(len(colors), 186)
 
 
 class BattleEncounterTest(unittest.TestCase):
@@ -798,6 +829,48 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.active_party_index = None
         self.assertFalse(scene.is_party_command_ready)
 
+    def test_first_party_command_waits_for_battle_start_event(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        member = SimpleNamespace(
+            hp=10, is_alive=True, stunned=False, paralyzed=False,
+            sleeping=0, confused=0,
+        )
+        actor = BattleCharacter(member, 0, 0, 0)
+        scene.party_visuals = (actor,)
+        scene.timeline = (actor,)
+        scene.defending_party_indexes = set()
+        scene.command_window = Mock()
+        scene.global_command_window = Mock()
+        scene.command_cursor = Mock()
+        scene.global_command_cursor = None
+        scene.initial_global_command_pending = False
+        scene._remove_defeated_party_from_timeline = Mock()
+        scene._party_is_defeated = Mock(return_value=False)
+        scene._prune_surprise_pending_party = Mock(return_value=False)
+        scene._begin_front_promotion_if_needed = Mock(return_value=False)
+        scene._apply_turn_start_hp_change = Mock(return_value=False)
+        scene._skip_surprised_party_turn = Mock(return_value=False)
+        scene._begin_focused_attack = Mock(return_value=False)
+        scene._refresh_party_text_colors = Mock()
+        scene._hide_command_guide = Mock()
+        scene._refresh_command_options = Mock()
+        scene._select_initial_member_command = Mock()
+        scene._refresh_input_guide = Mock()
+
+        scene.defer_first_party_command()
+        scene._activate_timeline_head()
+
+        self.assertTrue(scene.is_party_command_pending)
+        self.assertIs(scene.phase, BattlePhase.INITIAL)
+        scene.command_window.open.assert_not_called()
+        scene.global_command_window.open.assert_not_called()
+
+        scene.open_pending_party_command()
+
+        self.assertFalse(scene.is_party_command_pending)
+        self.assertIs(scene.phase, BattlePhase.COMMAND)
+        scene.command_window.open.assert_called_once_with()
+
     @patch("game.pyxel.Image")
     def test_encounter_snapshot_hides_the_player(self, image_type: Mock) -> None:
         game = Game.__new__(Game)
@@ -897,6 +970,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         self.assertEqual(game.save_data.battle_count, 5)
         battle_scene.clear_temporary_member_conditions.assert_called_once_with()
+        battle_scene.release_palette_variants.assert_called_once_with()
         member.fully_recover.assert_not_called()
         member.recover_world_map_entry_ailments.assert_not_called()
 

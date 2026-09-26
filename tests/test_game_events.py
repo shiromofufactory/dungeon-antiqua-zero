@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 import unittest
 from unittest.mock import ANY, Mock, patch
 
@@ -9,13 +9,14 @@ from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
 from resources import (
     CompiledMap,
+    EventCatalog,
     MapActor,
     MapCell,
     MapEventTrigger,
     MapTreasureContents,
 )
 from rendering import FadeThroughBlack
-from scenes.battle import BattleResult
+from scenes.battle import BattleEncounter, BattlePhase, BattleResult
 from state import SaveData, Settings
 from systems import (
     InventorySystem,
@@ -99,6 +100,83 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    def test_completed_flag_branch_does_not_pause_held_step_movement(self) -> None:
+        trigger = MapEventTrigger(
+            "floor", "sample.run", frozenset(("step",)),
+            cells=(MapCell(2, 1),),
+        )
+        game = game_for(trigger, width=4)
+        game._start_field_event = Game._start_field_event.__get__(game, Game)
+        game.event_catalog = EventCatalog.from_document({
+            "format_version": 1,
+            "source_sha256": "0" * 64,
+            "flags": ["sample.done"],
+            "events": {"sample.run": {"commands": [{
+                "command": "branch",
+                "condition": {"type": "flag_set", "flag_id": "sample.done"},
+                "then": [],
+                "else": [{
+                    "command": "start_battle", "battle_id": "guard",
+                    "monster_keys": ["SLIME"],
+                }],
+            }]}},
+        })
+        game.party = (object(),)
+        game.character_states = {}
+        game.party_system = Mock(
+            active_party=game.party, character_states=game.character_states,
+        )
+        game.inventory_system = Mock()
+        game.save_data = SimpleNamespace(event_flags={"sample.done"})
+        game.selected_member_index = 0
+        game.event_runner = None
+        game._apply_dungeon_step_health_changes = Mock()
+        game._advance_random_encounter = Mock(return_value=False)
+
+        game._update_field(InputState(held_direction=Direction.RIGHT))
+
+        self.assertEqual(game.field.position, FieldPosition(2, 1))
+        self.assertIsNone(game.event_runner)
+        self.assertIsNone(game.event_release_direction)
+        game._update_field(InputState(held_direction=Direction.RIGHT))
+        self.assertEqual(game.field.position, FieldPosition(3, 1))
+
+        game.field = FieldMovement(
+            game.current_map,
+            start=FieldPosition(1, 1),
+            speed=16,
+            facing=Direction.RIGHT,
+        )
+        game.save_data.event_flags.clear()
+        game.suspended_field_event = None
+        game._begin_random_encounter = Mock()
+        game._update_field(InputState(held_direction=Direction.RIGHT))
+
+        self.assertEqual(game.field.position, FieldPosition(2, 1))
+        self.assertEqual(game.pending_event_battle_id, "guard")
+        self.assertIs(game.event_release_direction, Direction.RIGHT)
+        game._begin_random_encounter.assert_called_once_with()
+
+    def test_registered_battle_event_defers_first_command_menu(self) -> None:
+        game = Game.__new__(Game)
+        game.encounter_transition = Mock(
+            is_finished=True,
+            palette_base_rate=0.0,
+            palette_target_color=0,
+        )
+        game.palette_shifter = Mock(base_colors=(0,))
+        game.pending_event_battle_encounter = BattleEncounter(("SLIME",))
+        game.pending_event_battle_id = "shrine_guard"
+        game.event_catalog = Mock()
+        game.event_catalog.battle_start_event.return_value = "sample.guard_opens"
+        battle = Mock()
+        game._build_battle_scene = Mock(return_value=battle)
+
+        game._update_encounter_transition()
+
+        battle.defer_first_party_command.assert_called_once_with()
+        self.assertTrue(game.pending_first_party_turn_hint)
+
     def test_named_battle_suspends_field_event_until_result(self) -> None:
         game = Game.__new__(Game)
         runner = Mock()
@@ -124,9 +202,13 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertIs(game.event_runner, runner)
         game._continue_event.assert_called_once_with()
 
-    def test_named_battle_event_starts_at_first_party_command(self) -> None:
+    def test_named_battle_event_starts_before_first_command_window_opens(self) -> None:
         game = Game.__new__(Game)
-        game.battle_scene = Mock(is_party_command_ready=True, result=None)
+        game.battle_scene = Mock(
+            is_party_command_pending=True,
+            is_party_command_ready=False,
+            result=None,
+        )
         game.pending_first_party_turn_hint = True
         game.pending_event_battle_id = "shrine_guard"
         game.event_catalog = Mock()
@@ -139,8 +221,27 @@ class GameEventTriggerTest(unittest.TestCase):
         game.battle_scene.update.assert_called_once_with(InputState())
         game._start_battle_event.assert_called_once_with("sample.guard_opens")
         game._show_hint_once.assert_not_called()
+        game.battle_scene.open_pending_party_command.assert_not_called()
         self.assertIsNone(game.pending_event_battle_id)
         self.assertFalse(game.pending_first_party_turn_hint)
+
+    def test_command_window_waits_until_battle_event_and_hint_finish(self) -> None:
+        game = Game.__new__(Game)
+        game.battle_scene = Mock(
+            is_party_command_pending=True,
+            is_party_command_ready=False,
+            phase=BattlePhase.INITIAL,
+            result=None,
+        )
+        game.pending_first_party_turn_hint = False
+        game.hint_overlay = Mock()
+
+        game._update_battle_scene(InputState())
+        game.battle_scene.open_pending_party_command.assert_not_called()
+
+        game.hint_overlay = None
+        game._update_battle_scene(InputState())
+        game.battle_scene.open_pending_party_command.assert_called_once_with()
 
     @patch("game.MessageOverlay")
     def test_touching_treasure_opens_it_before_normal_movement(

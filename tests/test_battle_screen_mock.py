@@ -2682,11 +2682,11 @@ class BattleScreenMockTest(unittest.TestCase):
             first_strike = mock.attack_presentation.strikes[0]
             self.assertEqual(first_strike.effect_row, 2)
             self.assertTrue(first_strike.is_hit)
-            self.assertEqual(first_strike.damage, 43)
+            self.assertEqual(first_strike.damage, 40)
             self.assertEqual(monsters[4].state.hp, 100)
             for _frame in range(ATTACK_HIT_START_FRAME):
                 mock._update_attack_presentation()
-            self.assertEqual(monsters[4].state.hp, 57)
+            self.assertEqual(monsters[4].state.hp, 60)
             play_se.assert_called_once_with(ATTACK_SLASH_SE_ID)
             for _frame in range(
                 ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT + ATTACK_DAMAGE_FRAME_COUNT

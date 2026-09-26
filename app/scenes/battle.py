@@ -2302,6 +2302,29 @@ class BattleScene:
             return self.command_window.is_open
         return False
 
+    @property
+    def is_party_command_pending(self) -> bool:
+        """Report the first party command held for a battle-start event."""
+
+        return getattr(self, "_pending_first_party_command", False)
+
+    def defer_first_party_command(self) -> None:
+        """Hold the first command menu until the battle-start event finishes."""
+
+        self._defer_first_party_command = True
+
+    def open_pending_party_command(self) -> None:
+        """Open the command menu after the battle-start event and hint."""
+
+        if not self.is_party_command_pending:
+            return
+        self._pending_first_party_command = False
+        if self.initial_global_command_pending:
+            self.initial_global_command_pending = False
+            self._open_global_command_menu()
+        else:
+            self._open_member_command_menu()
+
     def update(self, input_state: InputState) -> None:
         """Advance the battle by one frame from an immutable input snapshot."""
 
@@ -2323,6 +2346,8 @@ class BattleScene:
         self.input_device = input_state.device
         self._refresh_input_guide()
         if getattr(self, "result", None) is not None:
+            return
+        if self.is_party_command_pending:
             return
         if getattr(self, "restart_enabled", True) and input_state.menu.triggered:
             self._restart_battle()
@@ -2528,6 +2553,8 @@ class BattleScene:
     def _restart_battle(self) -> None:
         """Initialize or explicitly restart this scene and replay its entrance."""
 
+        self._defer_first_party_command = False
+        self._pending_first_party_command = False
         self.auto_battle_planner = None
         self.auto_battle_observations = AutoBattleObservations()
         self.auto_battle_log = []
@@ -6363,7 +6390,6 @@ class BattleScene:
             result = resolve_physical_attack(
                 attack=attack,
                 hit=weapon_hit,
-                agility=member.effective_agility,
                 target_defense=monster.effective_defense,
                 target_evasion=monster_stats.evasion,
                 hit_roll=random.randint(0, 99),
@@ -7024,6 +7050,16 @@ class BattleScene:
         for member in self.result_party:
             member.clear_temporary_battle_conditions()
 
+    def release_palette_variants(self) -> None:
+        """Release this battle's palette blocks before the shared shifter is reused."""
+
+        for name in (
+            SPELL_EFFECT_FLASH_PALETTE,
+            MONSTER_DEATH_PALETTE,
+            UNSELECTABLE_TARGET_PALETTE,
+        ):
+            self._release_palette_variant(name)
+
     def _release_palette_variant(self, name: str) -> None:
         palette_shifter = getattr(self, "palette_shifter", None)
         if palette_shifter is not None:
@@ -7445,6 +7481,12 @@ class BattleScene:
                 self._begin_auto_action()
                 self._refresh_party_text_colors()
                 return
+            if getattr(self, "_defer_first_party_command", False):
+                self._defer_first_party_command = False
+                self._pending_first_party_command = True
+                self.phase = BattlePhase.INITIAL
+                self._refresh_party_text_colors()
+                return
             if getattr(self, "initial_global_command_pending", False):
                 self.initial_global_command_pending = False
                 self._open_global_command_menu()
@@ -7593,7 +7635,6 @@ class BattleScene:
             result = resolve_physical_attack(
                 attack=attack,
                 hit=weapon_hit,
-                agility=actor.effective_agility,
                 target_defense=target_stats.defense,
                 target_evasion=target_stats.evasion,
                 hit_roll=random.randint(0, 99),
@@ -7734,7 +7775,6 @@ class BattleScene:
         result = resolve_physical_attack(
             attack=actor.combat_stats.attack,
             hit=actor.combat_stats.hit,
-            agility=actor.effective_agility,
             target_defense=target.effective_defense,
             target_evasion=target.combat_stats.evasion,
             hit_roll=random.randint(0, 99),
@@ -8707,7 +8747,6 @@ class BattleScene:
         result = resolve_physical_attack(
             attack=attack,
             hit=actor.combat_stats.hit,
-            agility=actor.effective_agility,
             target_defense=target_stats.defense,
             target_evasion=target_stats.evasion,
             hit_roll=random.randint(0, 99),
