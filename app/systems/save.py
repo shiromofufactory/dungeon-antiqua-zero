@@ -25,7 +25,7 @@ if __package__ == "systems":
         ProficiencyKind,
         required_experience_for_level,
     )
-    from state import Difficulty, SaveData
+    from state import AutoRecoveryConfig, AutoRecoveryMethod, Difficulty, SaveData
     from systems.inventory import InventorySystem
 else:
     from ..battle_command_memory import BattleCommandMemory
@@ -44,7 +44,7 @@ else:
         ProficiencyKind,
         required_experience_for_level,
     )
-    from ..state import Difficulty, SaveData
+    from ..state import AutoRecoveryConfig, AutoRecoveryMethod, Difficulty, SaveData
     from .inventory import InventorySystem
 
 
@@ -172,6 +172,7 @@ def restore_save_document(
             "play_time_frames",
             "progress",
         ),
+        auto_recovery=_restore_auto_recovery(document.get("auto_recovery")),
         event_flags=_string_set(document.get("event_flags"), "event_flags"),
         visited_site_ids=_string_set(
             document.get("visited_site_ids"),
@@ -231,6 +232,18 @@ def restore_save_document(
         raise SaveSystemError(
             f"active character has no saved state: {error.args[0]}"
         ) from error
+    if save_data.auto_recovery.healer_key not in (
+        None,
+        *(
+            member.definition.key
+            for member in active_party
+            if member.proficiency(ProficiencyKind.SACRED).aptitude >= 1
+        ),
+    ):
+        save_data.auto_recovery = AutoRecoveryConfig(
+            threshold=save_data.auto_recovery.threshold,
+            method=save_data.auto_recovery.method,
+        )
 
     inventory_document = _required_mapping(document, "inventory", "save")
     quantities = _required_mapping(inventory_document, "quantities", "inventory")
@@ -416,6 +429,22 @@ def _required_mapping(
     label: str,
 ) -> Mapping[str, object]:
     return _mapping(value.get(key), f"{label}.{key}")
+
+
+def _restore_auto_recovery(value: object) -> AutoRecoveryConfig:
+    if value is None:
+        return AutoRecoveryConfig()
+    data = _mapping(value, "auto_recovery")
+    threshold = data.get("threshold")
+    method_value = data.get("method")
+    healer_key = data.get("healer_key")
+    if isinstance(threshold, bool) or not isinstance(threshold, int):
+        raise SaveSystemError("auto_recovery.threshold must be an integer")
+    try:
+        method = AutoRecoveryMethod(method_value)
+        return AutoRecoveryConfig(threshold, method, healer_key)
+    except (TypeError, ValueError) as error:
+        raise SaveSystemError("auto_recovery has an unsupported setting") from error
 
 
 def _required_string(value: Mapping[str, object], key: str, label: str) -> str:
@@ -660,6 +689,11 @@ def create_save_document(
         ),
         "monster_records": _serialize_monster_records(save_data.monster_records),
         "logs": _serialize_logs(save_data.logs),
+        "auto_recovery": {
+            "threshold": save_data.auto_recovery.threshold,
+            "method": save_data.auto_recovery.method.value,
+            "healer_key": save_data.auto_recovery.healer_key,
+        },
         "battle_command_memory": _serialize_battle_command_memory(
             BattleCommandMemory()
             if battle_command_memory is None

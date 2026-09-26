@@ -34,6 +34,47 @@ PARTY_AILMENT_ICON_X = PARTY_FACE_X + PARTY_FACE_SIZE
 PARTY_AILMENT_ICON_Y = PARTY_FACE_Y
 
 
+def draw_member_face_at(
+    member: Member,
+    *,
+    x: int,
+    y: int,
+    faces: object,
+    palette_shifter: PaletteShifter | None = None,
+    dimmed: bool = False,
+) -> None:
+    """Draw one face and the same poison/paralysis markers in any panel."""
+
+    position = member.face_position
+
+    def draw_face() -> None:
+        pyxel.blt(
+            x, y, faces, position.x, position.y,
+            PARTY_FACE_SIZE, PARTY_FACE_SIZE, TRANSPARENT_INDEX,
+        )
+
+    if member.is_dead and palette_shifter is not None:
+        with palette_shifter.shifted(MONOCHROME_PALETTE):
+            draw_face()
+    elif dimmed and palette_shifter is not None:
+        with palette_shifter.shifted(DIMMED_PALETTE):
+            draw_face()
+    else:
+        draw_face()
+    icon_x = x + PARTY_FACE_SIZE
+    for active, tag in (
+        (member.poisoned, "%POISON%"),
+        (member.paralyzed, "%PARALIZE%"),
+    ):
+        if active:
+            icon = TEXT_ICONS[tag]
+            pyxel.blt(
+                icon_x, y, ICON_BANK, icon.u, icon.v,
+                ICON_SIZE, ICON_SIZE, ICON_COLKEY,
+            )
+            icon_x += ICON_SIZE
+
+
 class PartyStatusPanel:
     """Own the window, faces, and optional target cursor shared by child menus."""
 
@@ -115,50 +156,14 @@ class PartyStatusPanel:
             raise ValueError("dimmed member index is outside the party")
 
         for index, member in enumerate(self.party):
-            face_position = member.face_position
-            if member.is_dead and self.palette_shifter is not None:
-                with self.palette_shifter.shifted(MONOCHROME_PALETTE):
-                    self._draw_face(index, face_position.x, face_position.y)
-            elif index in dimmed and self.palette_shifter is not None:
-                with self.palette_shifter.shifted(DIMMED_PALETTE):
-                    self._draw_face(index, face_position.x, face_position.y)
-            else:
-                self._draw_face(index, face_position.x, face_position.y)
-            self._draw_ailment_icons(index, member)
-
-    def _draw_face(self, index: int, source_x: int, source_y: int) -> None:
-        pyxel.blt(
-            PARTY_FACE_X + index * PARTY_COLUMN_WIDTH * 4,
-            PARTY_FACE_Y,
-            self.faces,
-            source_x,
-            source_y,
-            PARTY_FACE_SIZE,
-            PARTY_FACE_SIZE,
-            TRANSPARENT_INDEX,
-        )
-
-    def _draw_ailment_icons(self, index: int, member: Member) -> None:
-        x = PARTY_AILMENT_ICON_X + index * PARTY_COLUMN_WIDTH * 4
-        for active, tag in (
-            (member.poisoned, "%POISON%"),
-            (member.paralyzed, "%PARALIZE%"),
-        ):
-            if not active:
-                continue
-            icon = TEXT_ICONS[tag]
-            pyxel.blt(
-                x,
-                PARTY_AILMENT_ICON_Y,
-                ICON_BANK,
-                icon.u,
-                icon.v,
-                ICON_SIZE,
-                ICON_SIZE,
-                ICON_COLKEY,
+            draw_member_face_at(
+                member,
+                x=PARTY_FACE_X + index * PARTY_COLUMN_WIDTH * 4,
+                y=PARTY_FACE_Y,
+                faces=self.faces,
+                palette_shifter=self.palette_shifter,
+                dimmed=index in dimmed,
             )
-            x += ICON_SIZE
-
 
 __all__ = [
     "PARTY_COLUMN_WIDTH",
@@ -173,4 +178,5 @@ __all__ = [
     "PARTY_TEXT_X",
     "PARTY_WINDOW_GRID",
     "PartyStatusPanel",
+    "draw_member_face_at",
 ]

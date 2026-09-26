@@ -78,6 +78,7 @@ app/
 │   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
 │   ├── battle_progression.py # 戦闘実績、報酬、熟練度、HP・MP成長の確定
 │   ├── spell_progression.py  # メニュー呪文使用時の熟練度・最大MP成長
+│   ├── auto_recovery.py      # オート回復の1手選択と反復実行（予定）
 │   ├── save.py               # セーブv2とv1移行の変換、検証、スロット永続化
 │   ├── settings.py           # 端末設定の読込と原子的な永続化
 │   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
@@ -91,6 +92,7 @@ app/
 │   ├── status_menu.py        # ステータスメニューOverlay
 │   ├── information_menu.py   # 情報サブメニューとモンスター図鑑Overlay
 │   ├── spell_menu.py         # 呪文メニューOverlay
+│   ├── spell_proficiency.py  # 呪文熟練度の小Window用表示・補間規則
 │   ├── teleport_menu.py      # 本編TELEPORTとデバッグ移動で共有する行き先選択Overlay
 │   ├── debug_menu.py         # 現在の開発用デバッグOverlay
 │   ├── debug_text.py         # 翻訳対象外のデバッグ専用日本語テキスト
@@ -203,6 +205,7 @@ app/
 │   ├── status_menu.py       # ステータスメニューOverlay
 │   ├── information_menu.py  # 情報サブメニューとモンスター図鑑Overlay
 │   ├── spell_menu.py        # 呪文メニューOverlay
+│   ├── auto_recovery.py     # オート回復設定・実行Overlay（予定）
 │   └── shop.py              # ショップOverlay
 │
 ├── systems/
@@ -496,11 +499,17 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 この判定結果を描画するだけとし、イベント習得状態や呪文効果を画面固有状態へ埋め込まない。
 メニューから発動したFADEとTELEPORT以外の呪文の熟練度は、Pyxel非依存の `systems/spell_progression.py` が
 `floor(√実消費MP) + 使用種別の適性 + 他の呪文種別の最高LV - 使用種別のLV` を0以上へ丸めて
-確定し、レベル上昇時は `Member` の共通成長規則で最大MPを1段分だけ理論値へ近づける。`ui/spell_menu.py` は発動前後の熟練度を受け取り、
-対象選択中の小Window表示と表示値の補間を所有する。補間時間は [フィールド](./features/field.md) を参照する。呪文自体のSEとの競合を避けるため、
+確定し、レベル上昇時は `Member` の共通成長規則で最大MPを1段分だけ理論値へ近づける。`ui/spell_proficiency.py` は
+呪文メニューとオート回復で使う小Windowの文言・補間規則を共有し、各Overlayが配置と表示期間を所有する。
+補間時間は [フィールド](./features/field.md) を参照する。呪文自体のSEとの競合を避けるため、
 このメニュー経路の数字変化SEは再生しない。
 キュアーが対象とする状態の判定と解除は `Member.has_curable_ailment` / `cure_ailments()` が所有し、
 呪文メニューOverlayは対象選択、MP消費、熟練度成長の契機だけを調停する。
+オート回復は [`features/auto-recovery.md`](./features/auto-recovery.md) を正本とする。
+`systems/auto_recovery.py` が回復の1手選択と反復実行を所有し、`ui/auto_recovery.py` は
+設定、実行入力、結果表示を所有する。設定値はセーブごとの状態へ置く。
+顔と状態異常アイコンの描画規則は `ui/party_status.py` と共有し、同部品の5人固定配置を
+オート回復画面へそのまま使わず、6人・2段表示を指定できるようにする。
 戦闘中の呪文効果計算はPyxel非依存の `app/battle_magic.py` が所有し、`BattleScene` は対象の確定、
 結果をMemberまたはMonsterへ反映するタイミング、エフェクトおよび数字・属性相性ポップアップの
 進行だけを扱う。キャラクターごとの術補正値は同モジュールの独立関数とし、攻撃呪文と今後の

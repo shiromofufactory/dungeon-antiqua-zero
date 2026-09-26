@@ -45,6 +45,7 @@
 - [エンカウントと戦闘復帰](./encounters.md)
 - [戦闘表示データ](./battle.md)
 - [オートバトル](./auto-battle.md)
+- [オート回復](./auto-recovery.md)
 - [宝箱](./treasures.md)
 - [ワールドマップ拠点](./world-sites.md)
 - [ショップ](./shop.md)

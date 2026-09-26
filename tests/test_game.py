@@ -403,13 +403,14 @@ class GameTest(unittest.TestCase):
         )
 
         args = factory.create.call_args_list[1].args
-        self.assertEqual(args[:4], (48, 0, 16, 27))
+        self.assertEqual(args[:4], (48, 0, 16, 31))
         self.assertEqual(
             [(text.text, text.x, text.y) for text in args[4]],
             [
                 (label, 4, 2 + index * 3)
                 for index, label in enumerate(
                     (
+                        "かいふく",
                         "アイテム",
                         "じゅもん",
                         "そうび",
@@ -465,18 +466,18 @@ class GameTest(unittest.TestCase):
         for window in mock.windows:
             window.open.assert_called_once_with()
         info_args = factory.create.call_args_list[2].args
-        self.assertEqual(info_args[:4], (48, 27, 16, 27))
+        self.assertEqual(info_args[:4], (48, 31, 16, 26))
         self.assertEqual(
             [(text.text, text.x, text.y) for text in info_args[4]],
             [
-                ("Ｇｏｌｄ", 2, 2),
-                ("　　　１００", 2, 5),
-                ("けいけんち", 2, 8),
-                ("　　　　　０", 2, 11),
-                ("なんいど", 2, 14),
-                ("ノーマル", 4, 17),
-                ("プレイじかん", 2, 20),
-                ("　００：００", 2, 23),
+                ("Ｇｏｌｄ", 2, 1),
+                ("　　　１００", 2, 4),
+                ("けいけんち", 2, 7),
+                ("　　　　　０", 2, 10),
+                ("なんいど", 2, 13),
+                ("ノーマル", 4, 16),
+                ("プレイじかん", 2, 19),
+                ("　００：００", 2, 22),
             ],
         )
 
@@ -967,6 +968,7 @@ class GameTest(unittest.TestCase):
         game.localized_texts.create.side_effect = (
             lambda text, x, y: WindowText(text, x, y)
         )
+        game.fonts = Mock()
         game.info_window = Mock()
 
         game._refresh_info_window_texts()

@@ -38,6 +38,29 @@ class SpellMode(StrEnum):
     NEVER = "never"
 
 
+class AutoRecoveryMethod(StrEnum):
+    SPELLS = "spells"
+    SPELLS_ITEMS = "spells_items"
+    ITEMS_SPELLS = "items_spells"
+
+
+@dataclass(frozen=True)
+class AutoRecoveryConfig:
+    threshold: int = 60
+    method: AutoRecoveryMethod = AutoRecoveryMethod.SPELLS_ITEMS
+    healer_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.threshold, bool) or self.threshold not in (60, 70, 80, 90, 100):
+            raise ValueError("auto recovery threshold is unsupported")
+        if not isinstance(self.method, AutoRecoveryMethod):
+            raise TypeError("auto recovery method is unsupported")
+        if self.healer_key is not None and (
+            not isinstance(self.healer_key, str) or not self.healer_key
+        ):
+            raise TypeError("auto recovery healer key must be a non-empty string")
+
+
 class SettingsDataError(ValueError):
     """Raised when persisted settings cannot be interpreted safely."""
 
@@ -225,6 +248,7 @@ class SaveData:
     encounter_count: int = 0
     difficulty: Difficulty = Difficulty.NORMAL
     play_time_frames: int = 0
+    auto_recovery: AutoRecoveryConfig = field(default_factory=AutoRecoveryConfig)
     event_flags: set[str] = field(default_factory=set)
     visited_site_ids: set[str] = field(default_factory=set)
     opened_treasures: set[tuple[str, str]] = field(default_factory=set)
@@ -246,6 +270,8 @@ class SaveData:
                 raise ValueError(f"{name} must not be negative")
         if not isinstance(self.difficulty, Difficulty):
             raise TypeError("difficulty must be a Difficulty")
+        if not isinstance(self.auto_recovery, AutoRecoveryConfig):
+            raise TypeError("auto_recovery must be AutoRecoveryConfig")
         if not isinstance(self.event_flags, set) or not all(
             isinstance(event_flag, str)
             and _FLAG_ID_PATTERN.fullmatch(event_flag) is not None

@@ -23,6 +23,7 @@ from game_data import (
     load_spells,
 )
 from ui.debug_menu import DebugMenuOverlay, DebugShopTarget
+from ui.auto_recovery import AutoRecoveryOverlay
 from ui.debug_text import DEBUG_TEXT
 from ui.teleport_menu import TeleportTarget
 from ui.game_menu import GameMenuAction, GameMenuOverlay
@@ -70,6 +71,7 @@ from member import (
     MemberDataError,
     Race,
 )
+from systems.auto_recovery import valid_config_for_party
 from monster import MonsterDataError
 from resources import (
     TRANSPARENT_INDEX,
@@ -207,6 +209,7 @@ FIELD_FADE_PULSE_CYCLE_FRAME_COUNT = 90
 FIELD_FADE_PULSE_HALF_CYCLE_FRAME_COUNT = FIELD_FADE_PULSE_CYCLE_FRAME_COUNT // 2
 
 MENU_COMMANDS = (
+    ("heal", "menu.command.heal"),
     ("item", "menu.command.item"),
     ("spell", "menu.command.spell"),
     ("equip", "menu.command.equip"),
@@ -377,6 +380,8 @@ class GameScreenChange(Enum):
 
     SHOW_FIELD = auto()
     SHOW_MENU = auto()
+    OPEN_RECOVERY = auto()
+    CLOSE_RECOVERY = auto()
     OPEN_ITEM = auto()
     CLOSE_ITEM = auto()
     OPEN_SPELL = auto()
@@ -563,10 +568,13 @@ class Game:
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
         self.event_resume_after_fade = False
-        self.event_stationary_actor_facing_restore: tuple[
-            str,
-            Direction,
-        ] | None = None
+        self.event_stationary_actor_facing_restore: (
+            tuple[
+                str,
+                Direction,
+            ]
+            | None
+        ) = None
         self.last_event_error: str | None = None
         self.settings_window = None
         self.settings_cursor: WindowCursor | None = None
@@ -591,6 +599,7 @@ class Game:
         self.defeat_return_sound_waiting = False
         self.defeat_return_bgm_restart_pending = False
         self.item_screen: ItemMenuOverlay | None = None
+        self.auto_recovery_screen: AutoRecoveryOverlay | None = None
         self.equipment_screen: EquipmentMenuOverlay | None = None
         self.status_screen: StatusMenuOverlay | None = None
         self.information_screen: InformationMenuOverlay | None = None
@@ -704,11 +713,9 @@ class Game:
     def _activate_field_fade(self) -> bool:
         """Double the random-encounter threshold until the current floor ends."""
 
-        if (
-            getattr(getattr(self, "current_map", None), "profile", None)
-            != "dungeon"
-            or getattr(self, "field_fade_active", False)
-        ):
+        if getattr(
+            getattr(self, "current_map", None), "profile", None
+        ) != "dungeon" or getattr(self, "field_fade_active", False):
             return False
         self.field_fade_active = True
         self.field_fade_pulse_frame = 0
@@ -1115,7 +1122,7 @@ class Game:
 
     def _build_main_windows(
         self,
-        selected_command: str = "item",
+        selected_command: str = "heal",
         *,
         animate: bool = True,
     ) -> None:
@@ -1155,7 +1162,7 @@ class Game:
             48,
             0,
             16,
-            27,
+            31,
             command_texts,
             opened=not animate,
         )
@@ -1172,9 +1179,9 @@ class Game:
         self.sort_source_cursor: WindowCursor | None = None
         self.info_window = windows.create(
             48,
-            27,
+            31,
             16,
-            27,
+            26,
             self._main_info_window_texts(),
             opened=not animate,
         )
@@ -1292,14 +1299,12 @@ class Game:
         npc_character_actors = tuple(
             actor
             for actor in actors
-            if actor.kind in ("stationary", "roaming")
-            and actor.sprite_source == "npc"
+            if actor.kind in ("stationary", "roaming") and actor.sprite_source == "npc"
         )
         pc_character_actors = tuple(
             actor
             for actor in actors
-            if actor.kind in ("stationary", "roaming")
-            and actor.sprite_source == "pc"
+            if actor.kind in ("stationary", "roaming") and actor.sprite_source == "pc"
         )
         treasure_actors = tuple(actor for actor in actors if actor.kind == "treasure")
         self.field_prop_image = None
@@ -1327,9 +1332,9 @@ class Game:
                     f"{FIELD_ACTOR_CHARACTER_SET_WIDTH}px、高さ"
                     f"{FIELD_ACTOR_CHARACTER_SET_HEIGHT}pxの倍数である必要があります。"
                 )
-            character_capacity = (
-                entry.width // FIELD_ACTOR_CHARACTER_SET_WIDTH
-            ) * (entry.height // FIELD_ACTOR_CHARACTER_SET_HEIGHT)
+            character_capacity = (entry.width // FIELD_ACTOR_CHARACTER_SET_WIDTH) * (
+                entry.height // FIELD_ACTOR_CHARACTER_SET_HEIGHT
+            )
             if (
                 max(actor.sprite_index for actor in npc_character_actors)
                 >= character_capacity
@@ -1365,9 +1370,7 @@ class Game:
                 actor.sprite_index for actor in pc_character_actors
             ]
             if uses_player_character_image:
-                required_sprite_indices.append(
-                    self.party[0].definition.battle_sprite
-                )
+                required_sprite_indices.append(self.party[0].definition.battle_sprite)
             for sprite_index in required_sprite_indices:
                 source_x = (
                     sprite_index % FIELD_PLAYER_CHARACTER_SETS_PER_ROW
@@ -1383,9 +1386,7 @@ class Game:
                         f"{FIELD_PLAYER_CHARACTER_ASSET_ID}にsprite_index "
                         f"{sprite_index}が参照する画像セットがありません。"
                     )
-            character_image = self.images.image(
-                FIELD_PLAYER_CHARACTER_ASSET_ID
-            )
+            character_image = self.images.image(FIELD_PLAYER_CHARACTER_ASSET_ID)
             if pc_character_actors:
                 self.field_actor_pc_character_image = character_image
             if uses_player_character_image:
@@ -1749,28 +1750,28 @@ class Game:
         """Build menu information from the current shared save state."""
 
         return (
-            self.localized_texts.create(self.localized["menu.info.gold"], 2, 2),
-            WindowText(pad(self.save_data.gold, 6), 2, 5),
+            self.localized_texts.create(self.localized["menu.info.gold"], 2, 1),
+            WindowText(pad(self.save_data.gold, 6), 2, 4),
             self.localized_texts.create(
                 self.localized["menu.info.experience"],
                 2,
-                8,
+                7,
             ),
-            WindowText(pad(self.save_data.experience, 6), 2, 11),
+            WindowText(pad(self.save_data.experience, 6), 2, 10),
             self.localized_texts.create(
                 self.localized["menu.info.difficulty"],
                 2,
-                14,
+                13,
             ),
             self.localized_texts.create(
                 self.localized[DIFFICULTY_TEXT_KEYS[self.save_data.difficulty]],
                 4,
-                17,
+                16,
             ),
             self.localized_texts.create(
                 self.localized["menu.info.play_time"],
                 2,
-                20,
+                19,
             ),
             WindowText(
                 "　"
@@ -1780,7 +1781,7 @@ class Game:
                     include_seconds=False,
                 ),
                 2,
-                23,
+                22,
             ),
         )
 
@@ -2004,6 +2005,11 @@ class Game:
         if self.debug_screen is None:
             return
         self.party = self.debug_screen.party
+        save_data = getattr(self, "save_data", None)
+        if isinstance(save_data, SaveData):
+            save_data.auto_recovery = valid_config_for_party(
+                save_data.auto_recovery, self.party
+            )
         character_states = getattr(self, "character_states", {})
         character_states.update(
             (member.definition.key, member) for member in self.party
@@ -2137,6 +2143,29 @@ class Game:
             on_invalid_action=self.alert.start,
         )
 
+    def _start_auto_recovery(self) -> None:
+        self.command_cursor.active = False
+        self.save_data.auto_recovery = valid_config_for_party(
+            self.save_data.auto_recovery, self.party
+        )
+        self.auto_recovery_screen = AutoRecoveryOverlay(
+            party=self.party,
+            spells=self.spells,
+            items=self.items,
+            inventory=self.inventory_system,
+            save_data=self.save_data,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            faces=self.faces,
+            palette_shifter=self.palette_shifter,
+        )
+
+    def _finish_auto_recovery(self) -> None:
+        self.auto_recovery_screen = None
+        self._refresh_party_window_texts()
+        self.command_cursor.active = True
+
     def _finish_item(self) -> None:
         self.item_screen = None
         self.command_cursor.active = True
@@ -2188,10 +2217,14 @@ class Game:
             items=self.items,
             logs=self.save_data.logs,
             mission_message_ids=tuple(
-                mission.message_id for mission in self.event_catalog.missions
-                if mission.condition is None or evaluate_condition(
-                    mission.condition, save_data=self.save_data,
-                    party=self.party_system, inventory=self.inventory_system,
+                mission.message_id
+                for mission in self.event_catalog.missions
+                if mission.condition is None
+                or evaluate_condition(
+                    mission.condition,
+                    save_data=self.save_data,
+                    party=self.party_system,
+                    inventory=self.inventory_system,
                 )
             ),
             settings=self.settings,
@@ -2234,6 +2267,7 @@ class Game:
         )
         if change in (
             GameScreenChange.SHOW_FIELD,
+            GameScreenChange.OPEN_RECOVERY,
             GameScreenChange.OPEN_ITEM,
             GameScreenChange.OPEN_SPELL,
             GameScreenChange.OPEN_EQUIPMENT,
@@ -2267,6 +2301,10 @@ class Game:
             self._restart_main_windows_for_fade_in()
         elif change is GameScreenChange.OPEN_ITEM:
             self._start_item()
+        elif change is GameScreenChange.OPEN_RECOVERY:
+            self._start_auto_recovery()
+        elif change is GameScreenChange.CLOSE_RECOVERY:
+            self._finish_auto_recovery()
         elif change is GameScreenChange.CLOSE_ITEM:
             self._finish_item()
         elif change is GameScreenChange.OPEN_SPELL:
@@ -2515,6 +2553,9 @@ class Game:
                 raise RuntimeError("loaded game has incomplete staged field state")
             self.save_data = loaded.save_data
             self.party = loaded.active_party
+            self.save_data.auto_recovery = valid_config_for_party(
+                self.save_data.auto_recovery, self.party
+            )
             self.character_states = loaded.character_states
             self.inventory_system = loaded.inventory
             self.current_map = self.pending_loaded_map
@@ -2522,7 +2563,9 @@ class Game:
             self.field = self.pending_loaded_field
             self.field_renderer = self.pending_loaded_renderer
             self.current_save_slot = (
-                self.pending_load_slot if self.pending_load_slot != AUTO_SAVE_SLOT else None
+                self.pending_load_slot
+                if self.pending_load_slot != AUTO_SAVE_SLOT
+                else None
             )
             self.shop_system = ShopSystem(
                 shops=self.shops,
@@ -2564,17 +2607,16 @@ class Game:
         self.bgm.play(self.current_map.bgm_id)
         if is_new_game:
             self._start_field_event(NEW_GAME_EVENT_ID)
-        elif (
-            self.settings.in_game_hints_enabled
-            and not getattr(
-                self,
-                "_load_mission_hint_shown_this_launch",
-                False,
-            )
+        elif self.settings.in_game_hints_enabled and not getattr(
+            self,
+            "_load_mission_hint_shown_this_launch",
+            False,
         ):
             self.hint_overlay = HintOverlay(
                 text_key="hint.load.mission",
-                settings=self.settings, texts=self.texts, fonts=self.fonts,
+                settings=self.settings,
+                texts=self.texts,
+                fonts=self.fonts,
             )
             self._load_mission_hint_shown_this_launch = True
 
@@ -2895,6 +2937,11 @@ class Game:
             effect = runner.advance()
             self.party = self.party_system.active_party
             self.character_states = self.party_system.character_states
+            save_data = getattr(self, "save_data", None)
+            if isinstance(save_data, SaveData):
+                save_data.auto_recovery = valid_config_for_party(
+                    save_data.auto_recovery, self.party
+                )
             if effect is None:
                 if runner.is_complete:
                     self._restore_event_stationary_actor_facing()
@@ -3271,9 +3318,17 @@ class Game:
             and all(
                 getattr(self, attribute, None) is None
                 for attribute in (
-                    "start_screen", "shop_screen", "battle_scene", "game_menu",
-                    "encounter_transition", "battle_return_fade", "pending_screen_change",
-                    "event_runner", "event_message", "treasure_message", "field_condition_message",
+                    "start_screen",
+                    "shop_screen",
+                    "battle_scene",
+                    "game_menu",
+                    "encounter_transition",
+                    "battle_return_fade",
+                    "pending_screen_change",
+                    "event_runner",
+                    "event_message",
+                    "treasure_message",
+                    "field_condition_message",
                     "hint_overlay",
                 )
             )
@@ -3329,7 +3384,9 @@ class Game:
         ):
             return False
         self.game_menu = GameMenuOverlay(
-            settings=self.settings, texts=self.texts, fonts=self.fonts,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
         )
         self.bgm.pause()
         return True
@@ -3350,9 +3407,8 @@ class Game:
             self._update_encounter_transition()
             return
         hint_overlay = getattr(self, "hint_overlay", None)
-        if (
-            hint_overlay is not None
-            and not getattr(getattr(self, "fade", None), "is_active", False)
+        if hint_overlay is not None and not getattr(
+            getattr(self, "fade", None), "is_active", False
         ):
             if hint_overlay.update(input_state):
                 self.hint_overlay = None
@@ -3407,6 +3463,11 @@ class Game:
                 self._update_field(input_state)
             return
         item_screen = getattr(self, "item_screen", None)
+        auto_recovery_screen = getattr(self, "auto_recovery_screen", None)
+        if auto_recovery_screen is not None:
+            if auto_recovery_screen.update(input_state):
+                self._begin_screen_change(GameScreenChange.CLOSE_RECOVERY)
+            return
         if item_screen is not None:
             if item_screen.update(input_state):
                 self._begin_screen_change(GameScreenChange.CLOSE_ITEM)
@@ -3508,6 +3569,9 @@ class Game:
         if input_state.cancel.triggered:
             self._begin_screen_change(GameScreenChange.SHOW_FIELD)
             return
+        if input_state.confirm.triggered and self.command_cursor.selected_key == "heal":
+            self._begin_screen_change(GameScreenChange.OPEN_RECOVERY)
+            return
         if input_state.navigation is Direction.LEFT:
             self.command_cursor.select_key("sort")
             self._start_sort()
@@ -3589,6 +3653,10 @@ class Game:
                 self._draw_field_screen()
                 return
             item_screen = getattr(self, "item_screen", None)
+            auto_recovery_screen = getattr(self, "auto_recovery_screen", None)
+            if auto_recovery_screen is not None:
+                auto_recovery_screen.draw()
+                return
             if item_screen is not None:
                 item_screen.draw()
                 return

@@ -28,7 +28,6 @@ from rendering import PaletteShifter
 from resources import TRANSPARENT_INDEX, FontResources, play_se
 from spell import (
     SPELL_PROFICIENCY_BY_TYPE,
-    SPELL_TYPE_ICON_TAGS,
     Spell,
     SpellAction,
     SpellType,
@@ -50,6 +49,14 @@ from ui import (
     pad,
 )
 from ui.teleport_menu import TeleportMenuOverlay, TeleportTarget
+from ui.spell_proficiency import (
+    PROFICIENCY_ANIMATION_FRAME_COUNT,
+    PROFICIENCY_TEXT_X,
+    PROFICIENCY_TEXT_Y,
+    PROFICIENCY_WINDOW_SIZE_GRID,
+    displayed_proficiency_total,
+    spell_proficiency_text,
+)
 
 FACES_IMAGE_ID = "faces/faces"
 MEMBER_WINDOW_GRID = (0, 0, 28, 12)
@@ -75,10 +82,7 @@ SPELL_CURSOR_X = (2, 22, 42)
 SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
 HEALING_SE_ID = "spell_healing1"
-PROFICIENCY_ANIMATION_FRAME_COUNT = 6
-PROFICIENCY_WINDOW_GRID = (50, 38, 14, 7)
-PROFICIENCY_TEXT_X = 2
-PROFICIENCY_TEXT_Y = 2
+PROFICIENCY_WINDOW_GRID = (50, 38, *PROFICIENCY_WINDOW_SIZE_GRID)
 
 
 @dataclass
@@ -431,11 +435,6 @@ class SpellMenuOverlay:
                 font_spans=placement.font_spans,
             )
 
-    @staticmethod
-    def _proficiency_display(total: int) -> str:
-        level, progress = divmod(total, 100)
-        return f"{pad(level, 1, fill='0')}－{pad(progress, 2, fill='0')}"
-
     def _displayed_proficiency_total(self) -> int | None:
         spell = self.selected_spell
         if spell is None:
@@ -448,11 +447,7 @@ class SpellMenuOverlay:
             proficiency = self.member.proficiency(kind)
             return proficiency.level * 100 + proficiency.progress
         growth = animation.growth
-        return growth.before_total + (
-            (growth.after_total - growth.before_total)
-            * animation.frame
-            // PROFICIENCY_ANIMATION_FRAME_COUNT
-        )
+        return displayed_proficiency_total(growth, animation.frame)
 
     def _refresh_proficiency_window(self) -> None:
         self.proficiency_window.clear_texts()
@@ -460,9 +455,8 @@ class SpellMenuOverlay:
         total = self._displayed_proficiency_total()
         if spell is None or total is None:
             return
-        icon = SPELL_TYPE_ICON_TAGS.get(spell.type, "")
         self.proficiency_window.add_text(
-            f"{icon}{self._proficiency_display(total)}",
+            spell_proficiency_text(spell.type, total),
             PROFICIENCY_TEXT_X,
             PROFICIENCY_TEXT_Y,
         )
