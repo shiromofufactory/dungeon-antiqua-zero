@@ -226,11 +226,11 @@ class AutoRecoveryTest(unittest.TestCase):
         )
         self.assertEqual(
             [text.x for text in overlay.party_window.texts if "／" in text.text],
-            [11, 11, 28, 28, 45, 45, 11, 11, 28, 28, 45, 45],
+            [10, 10, 27, 27, 44, 44, 10, 10, 27, 27, 44, 44],
         )
         self.assertEqual(
             [text.x for text in overlay.party_window.texts if text.text in ("ＨＰ", "ＭＰ")],
-            [5, 5, 5, 5],
+            [4, 4, 4, 4],
         )
         self.assertEqual(
             sum(text.text == "ＨＰ" for text in overlay.party_window.texts), 2
@@ -258,8 +258,8 @@ class AutoRecoveryTest(unittest.TestCase):
                 overlay.draw()
         self.assertEqual(
             [(call.kwargs["x"], call.kwargs["y"]) for call in draw_face.call_args_list],
-            [(56, 112), (124, 112), (192, 112),
-             (56, 176), (124, 176), (192, 176)],
+            [(52, 112), (120, 112), (188, 112),
+             (52, 176), (120, 176), (188, 176)],
         )
 
     def test_result_shows_only_items_actually_used(self) -> None:
@@ -331,18 +331,18 @@ class AutoRecoveryTest(unittest.TestCase):
         )
         self.assertEqual(
             [text.x for text in overlay.party_window.texts if text.text in ("ＨＰ", "ＭＰ")],
-            [13, 13],
+            [12, 12],
         )
         self.assertEqual(
             [text.x for text in overlay.party_window.texts if "／" in text.text],
-            [19, 19, 36, 36],
+            [18, 18, 35, 35],
         )
         with patch.object(overlay.settings_window, "draw"), patch.object(overlay.guide_window, "draw"), patch.object(overlay.party_window, "draw"):
             with patch("ui.auto_recovery.draw_member_face_at") as draw_face:
                 overlay.draw()
         self.assertEqual(
             [(call.kwargs["x"], call.kwargs["y"]) for call in draw_face.call_args_list],
-            [(88, 112), (156, 112)],
+            [(84, 112), (152, 112)],
         )
 
     def test_overlay_colors_only_changed_current_hp_and_mp(self) -> None:
@@ -399,7 +399,7 @@ class AutoRecoveryTest(unittest.TestCase):
         self.assertIsNotNone(overlay.result)
         growth = overlay.result.proficiency_growths[1]
         window = overlay.proficiency_windows[1]
-        self.assertEqual((window.x, window.y, window.width, window.height), (36, 29, 14, 7))
+        self.assertEqual((window.x, window.y, window.width, window.height), (35, 29, 14, 7))
         self.assertEqual(
             window.texts[0].text,
             spell_proficiency_text(SpellType.SACRED, growth.before_total),
@@ -442,7 +442,7 @@ class AutoRecoveryTest(unittest.TestCase):
         overlay._start_proficiency_animation()
         self.assertEqual(
             [(window.x, window.y) for window in overlay.proficiency_windows.values()],
-            [(28, 29), (45, 45)],
+            [(27, 29), (44, 45)],
         )
         self.assertEqual(
             [window.texts[0].text for window in overlay.proficiency_windows.values()],
