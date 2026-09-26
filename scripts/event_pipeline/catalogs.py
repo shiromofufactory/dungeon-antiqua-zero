@@ -37,6 +37,18 @@ def _se_ids(path: Path) -> set[str]:
     return set(records)
 
 
+def _tall_first_monster_keys(path: Path) -> set[str]:
+    records = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        raise ValueError(f"{path}のルートは配列である必要があります。")
+    return {
+        record["name_en"] for record in records
+        if isinstance(record, dict)
+        and isinstance(record.get("name_en"), str)
+        and (record.get("width"), record.get("height")) == (64, 96)
+    }
+
+
 def reference_catalogs(
     content_root: Path,
     *,
@@ -54,6 +66,12 @@ def reference_catalogs(
         "item_keys": _record_keys(content_root / "data" / "items.json", "name_en"),
         "shop_keys": _record_keys(
             content_root / "data" / "shops.json", "shop_key"
+        ),
+        "monster_keys": _record_keys(
+            content_root / "data" / "monsters.json", "name_en"
+        ),
+        "tall_first_monster_keys": _tall_first_monster_keys(
+            content_root / "data" / "monsters.json"
         ),
         "flag_ids": (
             _record_keys(flag_path, "flag_id")

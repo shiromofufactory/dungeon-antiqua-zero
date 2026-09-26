@@ -17,6 +17,7 @@ const COMMAND_OPTIONS = [
   ["take_item", "take_item"],
   ["recover_party", "パーティ全快"],
   ["open_shop", "ショップを開く"],
+  ["start_battle", "イベントバトル開始"],
   ["play_se", "play_se"],
   ["change_bgm", "change_bgm"],
   ["move_party", "move_party"],
@@ -44,6 +45,7 @@ const state = {
   timer: null,
   revision: 0,
   pendingActorEventId: null,
+  commandDraft: null,
 };
 let draggedCommand = null;
 let draggedListItem = null;
@@ -282,6 +284,7 @@ function commit(change) {
 
 function restore(value) {
   const restored = JSON.parse(value);
+  state.commandDraft = null;
   state.data = restored.data;
   state.flags = restored.flags;
   state.messages = restored.messages;
@@ -666,6 +669,12 @@ function renderCommand(command, path, listPath, index) {
     fields = '<p class="command-description full">パーティ全員のHP・MP・状態異常を全て回復します。</p>';
   } else if (type === "open_shop") {
     fields = field("ショップID", `<select ${attr("shop_key")}>${options(state.catalogs.shop_keys || [], command.shop_key)}</select>`, true);
+  } else if (type === "start_battle") {
+    fields = field("バトルID", `<input ${attr("battle_id")} value="${esc(command.battle_id || "")}" placeholder="例: shrine_guard">`, true)
+      + `<div class="full"><label>敵編成（1〜5体）</label>${(command.monster_keys || []).map((key, monsterIndex) => `
+        <div class="add-row"><select data-battle-monster-index="${monsterIndex}" data-command-path="${esc(path)}">${options(state.catalogs.monster_keys || [], key)}</select>
+        <button class="danger icon" data-action="remove-battle-monster" data-command-path="${esc(path)}" data-index="${monsterIndex}">削除</button></div>
+      `).join("")}<button data-action="add-battle-monster" data-command-path="${esc(path)}" ${(command.monster_keys || []).length >= 5 ? "disabled" : ""}>敵を追加</button></div>`;
   } else if (type === "move_party" || type === "move_actor") {
     fields = (type === "move_actor" ? field("actor ID", `<select ${attr("actor_id")}>${options(state.catalogs.actor_ids || [], command.actor_id)}</select>`) : "")
       + field("方向", `<select ${attr("direction")}>${options(["up", "right", "down", "left"], command.direction)}</select>`)
@@ -676,9 +685,21 @@ function renderCommand(command, path, listPath, index) {
     fields = '<p class="command-description full">ここでイベント全体を終了し、後続のコマンドを実行しません。</p>';
   }
   const label = COMMAND_OPTIONS.find(([value]) => value === type)?.[1] || type;
+  const typeOptions = (COMMAND_OPTIONS.some(([value]) => value === type)
+    ? "" : `<option value="${esc(type)}" selected>未対応: ${esc(type)}</option>`)
+    + COMMAND_OPTIONS.map(([value, name]) =>
+    `<option value="${value}" ${value === type ? "selected" : ""}>${name}</option>`,
+  ).join("");
   return `<article class="command" data-command-path="${esc(path)}">
     <div class="command-head"><div class="command-title"><span class="drag-handle" draggable="true" role="button" aria-label="${esc(label)}を移動" title="ドラッグして移動" data-command-drag data-list-path="${esc(listPath)}" data-index="${index}">⠿</span><code>${index + 1}. ${esc(label)}</code></div><button class="danger icon" data-action="delete-command" data-list-path="${esc(listPath)}" data-index="${index}">削除</button></div>
-    <div class="command-fields">${fields}</div>
+    <div class="command-fields">${field("コマンド", `<select data-command-type="${esc(path)}">${typeOptions}</select>`, true)}${fields}</div>
+  </article>`;
+}
+
+function renderCommandDraft(listPath, index) {
+  return `<article class="command command-draft">
+    <div class="command-head"><code>${index + 1}. 新しいコマンド</code><button class="icon" data-action="cancel-command-draft">キャンセル</button></div>
+    <div class="command-fields">${field("コマンド", `<select data-draft-command="${esc(listPath)}"><option value="" selected>コマンドを選択</option>${COMMAND_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select>`, true)}</div>
   </article>`;
 }
 
@@ -695,11 +716,13 @@ function renderCommandList(commands, listPath, emptyMessage) {
   const content = commands.map((command, index) =>
     `${renderDropZone(listPath, index)}${renderCommand(command, commandPath(listPath, index), listPath, index)}`,
   ).join("");
-  return `<div class="commands" data-command-list="${esc(listPath)}">${content}${renderDropZone(listPath, commands.length, commands.length ? "" : emptyMessage)}</div>`;
+  const draft = state.commandDraft?.list === commands ? renderCommandDraft(listPath, commands.length) : "";
+  return `<div class="commands" data-command-list="${esc(listPath)}">${content}${renderDropZone(listPath, commands.length, commands.length || draft ? "" : emptyMessage)}${draft}</div>`;
 }
 
 function addCommand(listPath = "") {
-  return `<div class="add-row"><select data-new-command="${esc(listPath)}">${COMMAND_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select><button data-action="add-command" data-list-path="${esc(listPath)}">コマンドを追加</button></div>`;
+  const pending = state.commandDraft?.list === listAt(listPath);
+  return `<div class="add-row"><button data-action="add-command" data-list-path="${esc(listPath)}" ${pending ? "disabled" : ""}>コマンド追加</button></div>`;
 }
 
 function renderEventEditor() {
@@ -712,6 +735,7 @@ function renderEventEditor() {
   $("event-editor").className = "";
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("イベントID", `<input data-event-field="id" value="${esc(event.id)}">`)}${field("制作メモ", `<input data-event-field="note" value="${esc(event.note || "")}">`)}<button class="danger" data-action="delete-event">イベントを削除</button></div>
+    <div class="event-meta">${field("バトル開始時に発動", `<input type="checkbox" data-event-battle-enabled ${event.battle_start_id !== undefined ? "checked" : ""}>`)}${event.battle_start_id !== undefined ? field("対象バトルID", `<input data-event-field="battle_start_id" value="${esc(event.battle_start_id)}" placeholder="開始コマンドと同じID">`) : ""}</div>
     <div class="heading"><h2>${esc(state.data.namespace)}.${esc(event.id)}</h2><span class="pill">${event.commands.length} commands</span></div>
     ${renderCommandList(event.commands, "", "コマンドはありません。")}
     ${addCommand()}
@@ -814,6 +838,7 @@ function render() {
 function addEvent(linkToPendingActor = false) {
   let createdEvent = null;
   commit(() => {
+    state.commandDraft = null;
     createdEvent = {id: uniqueId("event", state.data.events), note: "", commands: []};
     state.data.events.push(createdEvent);
     state.selectedEvent = state.data.events.length - 1;
@@ -841,10 +866,41 @@ function defaultCommand(type) {
   if (type === "change_bgm") return one("bgm_id", state.catalogs.bgm_ids);
   if (type === "recover_party") return {command: type};
   if (type === "open_shop") return one("shop_key", state.catalogs.shop_keys);
+  if (type === "start_battle") return {command: type, battle_id: "battle_1", monster_keys: [state.catalogs.monster_keys?.[0] || ""]};
   if (type === "move_party") return {command: type, direction: "down", steps: 1};
   if (type === "move_actor") return {command: type, actor_id: state.catalogs.actor_ids?.[0] || "", direction: "down", steps: 1};
   if (type === "end_event") return {command: type};
   return {command: "branch", condition: defaultCondition(), then: [], else: []};
+}
+
+function openCommandDraft(listPath) {
+  state.commandDraft = {list: listAt(listPath)};
+  render();
+  document.querySelector(`select[data-draft-command="${CSS.escape(listPath)}"]`)?.focus();
+}
+
+function cancelCommandDraft() {
+  state.commandDraft = null;
+  render();
+}
+
+function selectDraftCommand(listPath, type) {
+  if (!COMMAND_OPTIONS.some(([value]) => value === type)) return;
+  const list = listAt(listPath);
+  if (state.commandDraft?.list !== list) return;
+  commit(() => {
+    list.push(defaultCommand(type));
+    state.commandDraft = null;
+  });
+}
+
+function changeCommandType(path, type) {
+  if (!COMMAND_OPTIONS.some(([value]) => value === type)) return;
+  const parts = path.split("/");
+  const index = Number(parts.pop());
+  const list = listAt(parts.join("/"));
+  if (!list[index] || list[index].command === type) return;
+  commit(() => { list[index] = defaultCommand(type); });
 }
 
 function uniqueId(base, records, fieldName = "id") {
@@ -912,6 +968,7 @@ async function save() {
 function applyDocument(payload, selectedEventId = null, selectedListTab = "event") {
   clearTimeout(state.timer);
   state.revision += 1;
+  state.commandDraft = null;
   state.data = payload.data;
   state.flags = payload.flags;
   state.messages = payload.messages;
@@ -1018,11 +1075,13 @@ document.body.addEventListener("click", (event) => {
   } else if (action === "add-event") {
     addEvent();
   } else if (action === "select-event") {
+    state.commandDraft = null;
     state.selectedEvent = Number(target.dataset.index);
     state.mode = "event";
     render();
   } else if (action === "delete-event") {
     commit(() => {
+      state.commandDraft = null;
       const [deleted] = state.data.events.splice(state.selectedEvent, 1);
       if (deleted?.id === state.pendingActorEventId) state.pendingActorEventId = null;
     });
@@ -1071,12 +1130,15 @@ document.body.addEventListener("click", (event) => {
     });
     $("face-picker-dialog").close();
   } else if (action === "add-command") {
-    const path = target.dataset.listPath;
-    const selector = `select[data-new-command="${CSS.escape(path)}"]`;
-    const type = document.querySelector(selector).value;
-    commit(() => listAt(path).push(defaultCommand(type)));
+    openCommandDraft(target.dataset.listPath);
+  } else if (action === "cancel-command-draft") {
+    cancelCommandDraft();
   } else if (action === "delete-command") {
     commit(() => listAt(target.dataset.listPath).splice(Number(target.dataset.index), 1));
+  } else if (action === "add-battle-monster") {
+    commit(() => commandAt(target.dataset.commandPath).monster_keys.push(state.catalogs.monster_keys?.[0] || ""));
+  } else if (action === "remove-battle-monster") {
+    commit(() => commandAt(target.dataset.commandPath).monster_keys.splice(Number(target.dataset.index), 1));
   } else if (action === "add-condition") {
     commit(() => conditionAt(commandAt(target.dataset.commandPath), target.dataset.conditionPath).conditions.push(defaultCondition()));
   } else if (action === "delete-condition") {
@@ -1098,6 +1160,17 @@ $("event-editor").addEventListener("change", (event) => {
       }
       eventRecord[target.dataset.eventField] = target.value;
     });
+  } else if (target.dataset.eventBattleEnabled !== undefined) {
+    commit(() => {
+      if (target.checked) currentEvent().battle_start_id = "battle_1";
+      else delete currentEvent().battle_start_id;
+    });
+  } else if (target.dataset.battleMonsterIndex !== undefined) {
+    commit(() => { commandAt(target.dataset.commandPath).monster_keys[Number(target.dataset.battleMonsterIndex)] = target.value; });
+  } else if (target.dataset.draftCommand !== undefined) {
+    selectDraftCommand(target.dataset.draftCommand, target.value);
+  } else if (target.dataset.commandType !== undefined) {
+    changeCommandType(target.dataset.commandType, target.value);
   } else if (target.dataset.messageField) {
     commit(() => {
       const fieldName = target.dataset.messageField;

@@ -1652,10 +1652,11 @@ def _record_for_key(
 
 @dataclass(frozen=True)
 class BattleEncounter:
-    """Immutable monster lineup supplied by an encounter source or test fixture."""
+    """Immutable lineup and rules supplied by an encounter source or test fixture."""
 
     monster_keys: tuple[str, ...]
     surprise_enabled: bool = False
+    escape_command_enabled: bool = True
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.monster_keys) <= len(MONSTER_POSITIONS):
@@ -1666,6 +1667,8 @@ class BattleEncounter:
             raise TypeError("battle encounter monster keys must be non-empty strings")
         if not isinstance(self.surprise_enabled, bool):
             raise TypeError("surprise_enabled must be a boolean")
+        if not isinstance(self.escape_command_enabled, bool):
+            raise TypeError("escape_command_enabled must be a boolean")
 
 
 def _battle_start_front_monster_indexes(
@@ -2501,6 +2504,11 @@ class BattleScene:
             if command is None:
                 return
             if (
+                command.selected_key is BattleGlobalCommand.ESCAPE
+                and not self.encounter.escape_command_enabled
+            ):
+                return
+            if (
                 isinstance(command.selected_key, BattleGlobalCommand)
                 and self._command_memory_enabled
             ):
@@ -2889,27 +2897,48 @@ class BattleScene:
             BattleGlobalCommand.ESCAPE,
             BattleGlobalCommand.AUTO,
         )
+        escape_enabled = self.encounter.escape_command_enabled
         for row_index, command in enumerate(commands):
-            self.global_command_window.add_text(
-                self.texts.text(
-                    f"battle.command.{command.value}",
-                    self.localizer,
-                ),
-                GLOBAL_COMMAND_TEXT_X,
-                COMMAND_ROW_Y[row_index],
+            label = self.texts.text(
+                f"battle.command.{command.value}",
+                self.localizer,
             )
+            if command is BattleGlobalCommand.ESCAPE and not escape_enabled:
+                self.global_command_window.add_text(
+                    label,
+                    GLOBAL_COMMAND_TEXT_X,
+                    COMMAND_ROW_Y[row_index],
+                    color=DISABLED_COLOR,
+                )
+            else:
+                self.global_command_window.add_text(
+                    label,
+                    GLOBAL_COMMAND_TEXT_X,
+                    COMMAND_ROW_Y[row_index],
+                )
         self.global_command_cursor = self.global_command_window.set_cursor(
             tuple(
                 CursorTarget(
                     GLOBAL_COMMAND_CURSOR_X,
                     COMMAND_ROW_Y[row_index],
                     key=command,
+                    selectable=(
+                        command is not BattleGlobalCommand.ESCAPE
+                        or escape_enabled
+                    ),
                 )
                 for row_index, command in enumerate(commands)
             )
         )
         remembered = getattr(self, "last_global_command", None)
-        if self._command_memory_enabled and remembered is not None:
+        if (
+            self._command_memory_enabled
+            and remembered is not None
+            and (
+                remembered is not BattleGlobalCommand.ESCAPE
+                or escape_enabled
+            )
+        ):
             self.global_command_cursor.select_key(remembered)
 
     def _begin_auto_battle(self) -> None:
@@ -8015,9 +8044,12 @@ class BattleScene:
             return
         if memory.global_command is not None:
             self.last_global_command = BattleGlobalCommand(memory.global_command)
-            self.initial_global_command_pending = self.last_global_command in (
-                BattleGlobalCommand.AUTO,
-                BattleGlobalCommand.ESCAPE,
+            self.initial_global_command_pending = (
+                self.last_global_command is BattleGlobalCommand.AUTO
+                or (
+                    self.last_global_command is BattleGlobalCommand.ESCAPE
+                    and self.encounter.escape_command_enabled
+                )
             )
         for index, member in enumerate(self.party):
             key = member.definition.key

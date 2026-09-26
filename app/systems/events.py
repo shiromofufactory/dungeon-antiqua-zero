@@ -55,6 +55,12 @@ class OpenShopEffect:
 
 
 @dataclass(frozen=True)
+class StartBattleEffect:
+    battle_id: str
+    monster_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class MovePartyEffect:
     direction: Direction
     steps: int
@@ -72,6 +78,7 @@ EventEffect = (
     | PlaySeEffect
     | ChangeBgmEffect
     | OpenShopEffect
+    | StartBattleEffect
     | MovePartyEffect
     | MoveActorEffect
 )
@@ -215,6 +222,11 @@ class EventRunner:
             if command_type == "open_shop":
                 self._require_field(command_type)
                 return OpenShopEffect(str(command["shop_key"]))
+            if command_type == "start_battle":
+                self._require_field(command_type)
+                return StartBattleEffect(
+                    str(command["battle_id"]), tuple(command["monster_keys"])
+                )
             if command_type == "move_party":
                 self._require_field(command_type)
                 return MovePartyEffect(self._direction(command["direction"]), int(command["steps"]))
@@ -256,4 +268,5 @@ __all__ = [
     "MovePartyEffect",
     "OpenShopEffect",
     "PlaySeEffect",
+    "StartBattleEffect",
 ]

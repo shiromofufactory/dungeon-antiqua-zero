@@ -287,8 +287,9 @@ from rendering import (
     MonsterDeathAnimation,
 )
 from resources import ImageResources, load_record_array
+from scenes.battle import BattleEncounter
 from ui import CursorTarget, Window, WindowCursor
-from ui import DEFAULT_TEXT_COLOR
+from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 
 
 def _character_shadow_call(x: int, y: int):
@@ -8806,6 +8807,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_global_escape_command_starts_confirmation(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.encounter = BattleEncounter(("Coyote",))
         mock.phase = BattleMockPhase.GLOBAL_COMMAND
         mock.input_reader = Mock()
         mock.input_reader.poll.return_value = InputState(
@@ -8836,6 +8838,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_global_command_menu_has_fight_escape_and_auto(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.encounter = BattleEncounter(("Coyote",))
         mock.global_command_window = Mock()
         mock.texts = Mock()
         mock.localizer = object()
@@ -8863,6 +8866,23 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
         self.assertIs(mock.global_command_cursor, new_cursor)
+
+    def test_event_battle_escape_is_drawn_disabled(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.encounter = BattleEncounter(("Coyote",), escape_command_enabled=False)
+        mock.global_command_window = Mock()
+        mock.texts = Mock()
+        mock.localizer = object()
+        mock.texts.text.side_effect = lambda key, _localizer: key
+
+        mock._refresh_global_command_options()
+
+        self.assertEqual(
+            mock.global_command_window.add_text.call_args_list[1],
+            call("battle.command.escape", 4, 5, color=DISABLED_COLOR),
+        )
+        targets = mock.global_command_window.set_cursor.call_args.args[0]
+        self.assertFalse(targets[1].selectable)
 
     def test_auto_battle_starts_cancellable_planning_before_any_action(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

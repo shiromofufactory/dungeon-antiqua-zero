@@ -181,11 +181,14 @@ def _validate_command_list(
     flag_ids: set[str],
     character_keys: set[str],
     item_keys: set[str],
+    monster_keys: set[str],
+    tall_first_monster_keys: set[str],
     shop_keys: set[str],
     message_ids: set[str],
     bgm_ids: set[str],
     se_ids: set[str],
     depth: int = 0,
+    battle_context: bool = False,
 ) -> None:
     if not isinstance(value, list):
         _diagnostic(diagnostics, "error", "invalid_commands", path, "commandsは配列で指定してください。")
@@ -198,6 +201,10 @@ def _validate_command_list(
             _diagnostic(diagnostics, "error", "invalid_command", command_path, "commandはobjectで指定してください。")
             continue
         command_type = command.get("command")
+        if battle_context and command_type in {
+            "join_party", "leave_party", "open_shop", "move_party", "move_actor", "start_battle"
+        }:
+            _diagnostic(diagnostics, "error", "field_only_battle_command", f"{command_path}.command", f"戦闘開始イベントでは使用できないコマンドです: {command_type}")
         if command_type == "set_flag":
             _known_fields(command, {"command", "flag_id"}, diagnostics, command_path)
             flag_id = command.get("flag_id")
@@ -227,7 +234,7 @@ def _validate_command_list(
                 branch = command.get(branch_name)
                 if branch_name == "else" and branch == []:
                     continue
-                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1)
+                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, monster_keys=monster_keys, tall_first_monster_keys=tall_first_monster_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context)
         elif command_type == "end_event":
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
@@ -252,6 +259,20 @@ def _validate_command_list(
             shop_key = command.get("shop_key")
             if not isinstance(shop_key, str) or shop_key not in shop_keys:
                 _diagnostic(diagnostics, "error", "unknown_shop", f"{command_path}.shop_key", f"存在しないショップです: {shop_key}")
+        elif command_type == "start_battle":
+            _known_fields(command, {"command", "battle_id", "monster_keys"}, diagnostics, command_path)
+            battle_id = command.get("battle_id")
+            if not isinstance(battle_id, str) or LOCAL_ID_PATTERN.fullmatch(battle_id) is None:
+                _diagnostic(diagnostics, "error", "invalid_battle_id", f"{command_path}.battle_id", "バトルIDはlower_snake_caseで指定してください。")
+            lineup = command.get("monster_keys")
+            if not isinstance(lineup, list) or not 1 <= len(lineup) <= 5:
+                _diagnostic(diagnostics, "error", "invalid_monster_lineup", f"{command_path}.monster_keys", "敵は1〜5体指定してください。")
+            else:
+                if len(lineup) == 5 and lineup[0] in tall_first_monster_keys:
+                    _diagnostic(diagnostics, "error", "oversized_monster_lineup", f"{command_path}.monster_keys", "先頭が64×96のモンスターの場合、敵は4体までです。")
+                for monster_index, key in enumerate(lineup):
+                    if not isinstance(key, str) or key not in monster_keys:
+                        _diagnostic(diagnostics, "error", "unknown_monster", f"{command_path}.monster_keys[{monster_index}]", f"存在しないモンスターです: {key}")
         elif command_type == "move_party":
             _known_fields(command, {"command", "direction", "steps"}, diagnostics, command_path)
             _validate_movement(command, diagnostics, command_path)
@@ -282,6 +303,8 @@ def validate_event_sources(
     flag_ids: Iterable[str] = (),
     character_keys: Iterable[str] = (),
     item_keys: Iterable[str] = (),
+    monster_keys: Iterable[str] = (),
+    tall_first_monster_keys: Iterable[str] = (),
     shop_keys: Iterable[str] = (),
     message_ids: Iterable[str] = (),
     bgm_ids: Iterable[str] = (),
@@ -293,6 +316,8 @@ def validate_event_sources(
         raise TypeError("event sources must be a mapping")
     characters = set(character_keys)
     items = set(item_keys)
+    monsters = set(monster_keys)
+    tall_monsters = set(tall_first_monster_keys)
     shops = set(shop_keys)
     messages = set(message_ids)
     bgms = set(bgm_ids)
@@ -300,6 +325,7 @@ def validate_event_sources(
     diagnostics: list[EventDiagnostic] = []
     flags = set(flag_ids)
     event_ids: set[str] = set()
+    battle_start_ids: set[str] = set()
 
     for filename, source in sources.items():
         root_path = filename
@@ -346,14 +372,23 @@ def validate_event_sources(
             path = f"{filename}.events[{index}]"
             if not isinstance(event, Mapping):
                 continue
-            _known_fields(event, {"id", "note", "commands"}, diagnostics, path)
+            _known_fields(event, {"id", "note", "commands", "battle_start_id"}, diagnostics, path)
             if "note" in event and not isinstance(event.get("note"), str):
                 _diagnostic(diagnostics, "error", "invalid_note", f"{path}.note", "noteは文字列で指定してください。")
+            if "battle_start_id" in event:
+                battle_id = event["battle_start_id"]
+                if not isinstance(battle_id, str) or LOCAL_ID_PATTERN.fullmatch(battle_id) is None:
+                    _diagnostic(diagnostics, "error", "invalid_battle_id", f"{path}.battle_start_id", "バトルIDはlower_snake_caseで指定してください。")
+                elif battle_id in battle_start_ids:
+                    _diagnostic(diagnostics, "error", "duplicate_battle_start_id", f"{path}.battle_start_id", f"バトル開始イベントが重複しています: {battle_id}")
+                else:
+                    battle_start_ids.add(battle_id)
             _validate_command_list(
                 event.get("commands"), diagnostics, f"{path}.commands",
-                flag_ids=flags, character_keys=characters, item_keys=items,
+                flag_ids=flags, character_keys=characters, item_keys=items, monster_keys=monsters, tall_first_monster_keys=tall_monsters,
                 shop_keys=shops,
                 message_ids=messages, bgm_ids=bgms, se_ids=sounds,
+                battle_context="battle_start_id" in event,
             )
     return diagnostics
 
@@ -376,12 +411,15 @@ def compile_event_sources(
         raise EventSourceError(errors[0].message)
     flag_ids = sorted(set(catalogs.get("flag_ids", ())))
     events: dict[str, dict[str, object]] = {}
+    battle_start_events: dict[str, str] = {}
     for filename in sorted(sources):
         source = sources[filename]
         namespace = source["namespace"]
         for event in source["events"]:
             full_id = f"{namespace}.{event['id']}"
             events[full_id] = {"commands": event["commands"]}
+            if "battle_start_id" in event:
+                battle_start_events[event["battle_start_id"]] = full_id
     canonical = json.dumps(
         {"sources": sources, "flags": flag_ids, "missions": mission_values},
         ensure_ascii=False,
@@ -397,6 +435,7 @@ def compile_event_sources(
             for mission in mission_values
         ],
         "events": {key: events[key] for key in sorted(events)},
+        "battle_start_events": {key: battle_start_events[key] for key in sorted(battle_start_events)},
     }
 
 

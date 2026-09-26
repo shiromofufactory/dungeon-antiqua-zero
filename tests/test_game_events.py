@@ -15,12 +15,14 @@ from resources import (
     MapTreasureContents,
 )
 from rendering import FadeThroughBlack
+from scenes.battle import BattleResult
 from state import SaveData, Settings
 from systems import (
     InventorySystem,
     MessageEffect,
     MovePartyEffect,
     OpenShopEffect,
+    StartBattleEffect,
     TreasureSystem,
 )
 
@@ -97,6 +99,49 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    def test_named_battle_suspends_field_event_until_result(self) -> None:
+        game = Game.__new__(Game)
+        runner = Mock()
+        effect = StartBattleEffect("shrine_guard", ("SLIME",))
+        game.event_runner = runner
+        game.event_effect = effect
+        game.suspended_field_event = None
+        game._begin_random_encounter = Mock()
+        game._continue_event = Mock()
+
+        game._begin_event_battle(effect)
+
+        self.assertEqual(game.pending_event_battle_id, "shrine_guard")
+        self.assertEqual(game.pending_event_battle_encounter.monster_keys, ("SLIME",))
+        self.assertFalse(game.pending_event_battle_encounter.escape_command_enabled)
+        self.assertIsNone(game.event_runner)
+        self.assertIsNone(game.event_effect)
+        game._begin_random_encounter.assert_called_once_with()
+
+        game._resume_event_after_battle(BattleResult.VICTORY)
+
+        runner.complete_effect.assert_called_once_with(effect)
+        self.assertIs(game.event_runner, runner)
+        game._continue_event.assert_called_once_with()
+
+    def test_named_battle_event_starts_at_first_party_command(self) -> None:
+        game = Game.__new__(Game)
+        game.battle_scene = Mock(is_party_command_ready=True, result=None)
+        game.pending_first_party_turn_hint = True
+        game.pending_event_battle_id = "shrine_guard"
+        game.event_catalog = Mock()
+        game.event_catalog.battle_start_event.return_value = "sample.guard_opens"
+        game._start_battle_event = Mock()
+        game._show_hint_once = Mock()
+
+        self.assertTrue(game._update_battle_scene(InputState()))
+
+        game.battle_scene.update.assert_called_once_with(InputState())
+        game._start_battle_event.assert_called_once_with("sample.guard_opens")
+        game._show_hint_once.assert_not_called()
+        self.assertIsNone(game.pending_event_battle_id)
+        self.assertFalse(game.pending_first_party_turn_hint)
+
     @patch("game.MessageOverlay")
     def test_touching_treasure_opens_it_before_normal_movement(
         self,

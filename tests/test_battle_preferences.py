@@ -14,6 +14,7 @@ from input import InputButton, InputState
 from localization import Localizer
 from scenes.battle import (
     BattleCharacter,
+    BattleEncounter,
     BattleGlobalCommand,
     BattleItemCandidate,
     BattlePhase,
@@ -29,11 +30,14 @@ from tests.test_auto_battle import AutoBattleFixtures
 
 
 class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
-    def scene(self, settings=None, memory=None, party=None):
+    def scene(self, settings=None, memory=None, party=None, encounter=None):
         settings = Settings() if settings is None else settings
         scene = BattleScene.__new__(BattleScene)
         scene.settings = settings
         scene.party = self.party if party is None else party
+        scene.encounter = (
+            BattleEncounter(("Coyote",)) if encounter is None else encounter
+        )
         scene.active_party_index = 0
         scene.command_memory = BattleCommandMemory() if memory is None else memory
         scene.last_command_by_party_index = {}
@@ -53,6 +57,40 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         scene._restore_command_memory()
         scene._refresh_global_command_options()
         return scene
+
+    def test_event_battle_disables_escape_and_skips_remembered_escape(self):
+        memory = BattleCommandMemory(global_command="escape")
+        scene = self.scene(
+            memory=memory,
+            encounter=BattleEncounter(("Coyote",), escape_command_enabled=False),
+        )
+
+        self.assertFalse(scene.initial_global_command_pending)
+        self.assertEqual(
+            scene.global_command_cursor.selected_key, BattleGlobalCommand.FIGHT
+        )
+        self.assertEqual(memory.global_command, "escape")
+        targets = scene.global_command_cursor.targets
+        self.assertEqual([target.selectable for target in targets], [True, False, True])
+        with self.assertRaises(ValueError):
+            scene.global_command_cursor.select_key(BattleGlobalCommand.ESCAPE)
+        scene.global_command_cursor.select_key(BattleGlobalCommand.AUTO)
+        self.assertEqual(
+            scene.global_command_cursor.selected_key, BattleGlobalCommand.AUTO
+        )
+
+    def test_event_battle_ignores_escape_confirmation(self):
+        scene = self.scene(
+            encounter=BattleEncounter(("Coyote",), escape_command_enabled=False)
+        )
+        scene.global_command_cursor = Mock(selected_key=BattleGlobalCommand.ESCAPE)
+
+        scene._update_global_command_selection(
+            InputState(confirm=InputButton(triggered=True))
+        )
+
+        scene._begin_escape_confirmation.assert_not_called()
+        self.assertIsNone(scene.command_memory.global_command)
 
     def test_each_global_command_is_remembered_only_after_confirmation(self):
         for command in BattleGlobalCommand:

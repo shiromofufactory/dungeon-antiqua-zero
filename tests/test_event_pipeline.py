@@ -10,6 +10,8 @@ CATALOGS = {
     "flag_ids": {"story.met_alvan"},
     "character_keys": {"Fiora", "Alvan"},
     "item_keys": {"POTION"},
+    "monster_keys": {"SLIME"},
+    "tall_first_monster_keys": {"TREANT"},
     "shop_keys": {"FAIRY_HAMLET_ITEMS"},
     "message_ids": {"sample.greeting"},
     "bgm_ids": {"field/world"},
@@ -49,6 +51,78 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_compiles_event_battle_and_start_trigger(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [{
+            "command": "start_battle",
+            "battle_id": "shrine_guard",
+            "monster_keys": ["SLIME", "SLIME"],
+        }]
+        source["events"].append({
+            "id": "guard_opens",
+            "battle_start_id": "shrine_guard",
+            "commands": [{"command": "set_flag", "flag_id": "story.met_alvan"}],
+        })
+
+        compiled = compile_event_sources({"sample": source}, **CATALOGS)
+
+        self.assertEqual(compiled["battle_start_events"], {
+            "shrine_guard": "sample.guard_opens"
+        })
+        self.assertEqual(
+            compiled["events"]["sample.greeting"]["commands"][0]["monster_keys"],
+            ["SLIME", "SLIME"],
+        )
+
+    def test_rejects_duplicate_battle_trigger_and_unknown_monster(self) -> None:
+        source = sample_source()
+        source["events"][0]["battle_start_id"] = "shrine_guard"
+        source["events"][0]["commands"] = [{
+            "command": "start_battle",
+            "battle_id": "shrine_guard",
+            "monster_keys": ["MISSING"],
+        }]
+        source["events"].append({
+            "id": "again", "battle_start_id": "shrine_guard", "commands": []
+        })
+
+        codes = {item.code for item in validate_event_sources(
+            {"sample": source}, **CATALOGS
+        )}
+
+        self.assertIn("duplicate_battle_start_id", codes)
+        self.assertIn("unknown_monster", codes)
+
+    def test_rejects_field_command_nested_in_battle_start_event(self) -> None:
+        source = sample_source()
+        source["events"][0]["battle_start_id"] = "shrine_guard"
+        source["events"][0]["commands"] = [{
+            "command": "branch",
+            "condition": {"type": "flag_set", "flag_id": "story.met_alvan"},
+            "then": [{"command": "start_battle", "battle_id": "again", "monster_keys": ["SLIME"]}],
+            "else": [],
+        }]
+
+        codes = {item.code for item in validate_event_sources(
+            {"sample": source}, **CATALOGS
+        )}
+
+        self.assertIn("field_only_battle_command", codes)
+
+    def test_rejects_five_monsters_after_tall_first_monster(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [{
+            "command": "start_battle", "battle_id": "forest_guard",
+            "monster_keys": ["TREANT", "SLIME", "SLIME", "SLIME", "SLIME"],
+        }]
+        catalogs = {**CATALOGS, "monster_keys": {"TREANT", "SLIME"}}
+
+        codes = {item.code for item in validate_event_sources(
+            {"sample": source}, **catalogs
+        )}
+
+        self.assertIn("oversized_monster_lineup", codes)
+
     def test_validates_and_compiles_fully_qualified_ids(self) -> None:
         sources = {"sample": sample_source()}
 

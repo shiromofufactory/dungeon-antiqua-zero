@@ -38,6 +38,7 @@ from .events import (
     MovePartyEffect,
     OpenShopEffect,
     PlaySeEffect,
+    StartBattleEffect,
 )
 from .party import PartySystem, PartySystemError
 from .save import (
@@ -108,6 +109,7 @@ __all__ = [
     "PartySystem",
     "PartySystemError",
     "PlaySeEffect",
+    "StartBattleEffect",
     "LoadedGameState",
     "LOW_DANGER_MAX_ENCOUNTER_MONSTERS",
     "SAVE_DIRECTORY",

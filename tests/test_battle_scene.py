@@ -49,6 +49,11 @@ class BattleEncounterTest(unittest.TestCase):
 
         self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
         self.assertFalse(encounter.surprise_enabled)
+        self.assertTrue(encounter.escape_command_enabled)
+
+    def test_encounter_requires_boolean_escape_setting(self) -> None:
+        with self.assertRaises(TypeError):
+            BattleEncounter(("Coyote",), escape_command_enabled=None)
 
     def test_battle_start_promotes_every_monster_when_all_are_rear(self) -> None:
         self.assertEqual(

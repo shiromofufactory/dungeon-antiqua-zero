@@ -14,6 +14,30 @@ from tools.event_editor.server import EventEditorApplication, create_server
 
 
 class EventEditorServerTest(unittest.TestCase):
+    def test_saves_named_battle_and_battle_start_event(self) -> None:
+        data = {
+            "format_version": 1,
+            "namespace": "sample",
+            "events": [
+                {"id": "begin", "commands": [{
+                    "command": "start_battle",
+                    "battle_id": "shrine_guard",
+                    "monster_keys": ["SLIME"],
+                }]},
+                {"id": "opening", "battle_start_id": "shrine_guard", "commands": [
+                    {"command": "message", "message_id": "sample.hello"}
+                ]},
+            ],
+        }
+
+        result = self.post_json("/api/save", data)
+
+        self.assertTrue(result["saved"])
+        compiled = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(compiled["battle_start_events"], {
+            "shrine_guard": "sample.opening"
+        })
+
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -30,6 +54,9 @@ class EventEditorServerTest(unittest.TestCase):
         (data_root / "shops.json").write_text(
             json.dumps([{"shop_key": "FAIRY_HAMLET_ITEMS"}]),
             encoding="utf-8",
+        )
+        (data_root / "monsters.json").write_text(
+            json.dumps([{"name_en": "SLIME"}]), encoding="utf-8"
         )
         events_root = self.content_root / "events"
         events_root.mkdir(parents=True)

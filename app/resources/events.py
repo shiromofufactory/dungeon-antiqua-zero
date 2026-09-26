@@ -137,6 +137,17 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 command.get("shop_key"), str
             ) or not command["shop_key"]:
                 return False
+        elif command_type == "start_battle":
+            lineup = command.get("monster_keys")
+            if (
+                set(command) != {"command", "battle_id", "monster_keys"}
+                or not isinstance(command.get("battle_id"), str)
+                or LOCAL_ID_PATTERN.fullmatch(command["battle_id"]) is None
+                or not isinstance(lineup, list)
+                or not 1 <= len(lineup) <= 5
+                or not all(isinstance(key, str) and key for key in lineup)
+            ):
+                return False
         elif command_type in ("move_party", "move_actor"):
             fields = {"command", "direction", "steps"}
             if command_type == "move_actor":
@@ -179,6 +190,7 @@ class EventCatalog:
         *,
         flag_ids: frozenset[str] = frozenset(),
         missions: tuple[MissionDefinition, ...] = (),
+        battle_start_events: Mapping[str, str] | None = None,
     ) -> None:
         normalized = {} if events is None else dict(events)
         if not all(
@@ -200,6 +212,15 @@ class EventCatalog:
         self._missions = missions
         self._events = MappingProxyType(normalized)
         self._flag_ids = flag_ids
+        triggers = {} if battle_start_events is None else dict(battle_start_events)
+        if not all(
+            isinstance(battle_id, str)
+            and LOCAL_ID_PATTERN.fullmatch(battle_id) is not None
+            and event_id in normalized
+            for battle_id, event_id in triggers.items()
+        ):
+            raise TypeError("battle start events must reference known events")
+        self._battle_start_events = MappingProxyType(triggers)
 
     @property
     def missions(self) -> tuple[MissionDefinition, ...]:
@@ -212,6 +233,9 @@ class EventCatalog:
     @property
     def flag_ids(self) -> frozenset[str]:
         return self._flag_ids
+
+    def battle_start_event(self, battle_id: str) -> str | None:
+        return self._battle_start_events.get(battle_id)
 
     def event(self, event_id: str) -> EventDefinition:
         if not isinstance(event_id, str) or EVENT_ID_PATTERN.fullmatch(event_id) is None:
@@ -239,7 +263,7 @@ class EventCatalog:
     def from_document(cls, document: object) -> EventCatalog:
         if not isinstance(document, dict):
             raise EventResourceError("イベントJSONのルートが不正です。")
-        if set(document) - {"missions"} != {"format_version", "source_sha256", "flags", "events"}:
+        if set(document) - {"missions", "battle_start_events"} != {"format_version", "source_sha256", "flags", "events"}:
             raise EventResourceError("イベントJSONのルート属性が不正です。")
         if document.get("format_version") != EVENT_FORMAT_VERSION:
             raise EventResourceError("イベントJSONのformat_versionが不正です。")
@@ -295,7 +319,16 @@ class EventCatalog:
             missions.append(MissionDefinition(
                 mission_id, message_id, _freeze(mission.get("condition"))
             ))
-        return cls(loaded, flag_ids=frozenset(flag_values), missions=tuple(missions))
+        battle_start_events = document.get("battle_start_events", {})
+        if not isinstance(battle_start_events, dict) or not all(
+            isinstance(battle_id, str)
+            and LOCAL_ID_PATTERN.fullmatch(battle_id) is not None
+            and isinstance(event_id, str)
+            and event_id in loaded
+            for battle_id, event_id in battle_start_events.items()
+        ):
+            raise EventResourceError("バトル開始イベントの定義が不正です。")
+        return cls(loaded, flag_ids=frozenset(flag_values), missions=tuple(missions), battle_start_events=battle_start_events)
 
 
 __all__ = [

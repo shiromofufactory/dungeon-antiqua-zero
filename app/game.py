@@ -146,6 +146,7 @@ from systems import (
     OpenShopEffect,
     PartySystem,
     PlaySeEffect,
+    StartBattleEffect,
     SaveRepository,
     SaveSlotSummary,
     SaveSystemError,
@@ -611,6 +612,9 @@ class Game:
         self.shop_screen: ShopOverlay | None = None
         self.battle_scene: BattleScene | None = None
         self.pending_first_party_turn_hint = False
+        self.pending_event_battle_encounter: BattleEncounter | None = None
+        self.pending_event_battle_id: str | None = None
+        self.suspended_field_event: tuple[EventRunner, StartBattleEffect] | None = None
         self.pending_shop = None
         self.shop_return_to_debug = False
         self.debug_screen: DebugMenuOverlay | None = None
@@ -893,8 +897,10 @@ class Game:
             return
         self.encounter_transition = None
         self.encounter_snapshot = None
+        event_encounter = getattr(self, "pending_event_battle_encounter", None)
+        self.pending_event_battle_encounter = None
         self.battle_scene = self._build_battle_scene(
-            self._create_random_battle_encounter()
+            event_encounter or self._create_random_battle_encounter()
         )
         self.pending_first_party_turn_hint = True
 
@@ -916,6 +922,66 @@ class Game:
             formation.monster_keys,
             surprise_enabled=True,
         )
+
+    def _begin_event_battle(self, effect: StartBattleEffect) -> None:
+        """Suspend the field event while its named battle runs."""
+
+        runner = self.event_runner
+        if runner is None or getattr(self, "suspended_field_event", None) is not None:
+            raise RuntimeError("an event battle is already active")
+        encounter = BattleEncounter(effect.monster_keys, escape_command_enabled=False)
+        self.pending_event_battle_encounter = encounter
+        self.pending_event_battle_id = effect.battle_id
+        self.suspended_field_event = (runner, effect)
+        self.event_runner = None
+        self.event_effect = None
+        self._begin_random_encounter()
+
+    def _start_battle_event(self, event_id: str) -> None:
+        """Run the event at the first playable party command of this battle."""
+
+        try:
+            self.party_system.replace(
+                self.party, character_states=self.character_states
+            )
+            self.event_runner = EventRunner.from_catalog(
+                self.event_catalog,
+                event_id,
+                context=EventContext.BATTLE,
+                save_data=self.save_data,
+                party=self.party_system,
+                inventory=self.inventory_system,
+            )
+            self.last_event_error = None
+            self._continue_event()
+        except (
+            KeyError, EventRuntimeError, EventMessageDataError,
+            AudioResourceError, ValueError,
+        ) as error:
+            self._abort_event(error)
+
+    def _resume_event_after_battle(self, result: BattleResult | None) -> None:
+        """Continue the initiating event after the battle return transition."""
+
+        self.pending_event_battle_id = None
+        suspended = getattr(self, "suspended_field_event", None)
+        self.suspended_field_event = None
+        if suspended is None:
+            return
+        if result is BattleResult.DEFEAT:
+            self._restore_event_stationary_actor_facing()
+            return
+        runner, effect = suspended
+        try:
+            runner.complete_effect(effect)
+            self.event_runner = runner
+            self.event_effect = None
+            self._continue_event()
+        except (
+            KeyError, EventRuntimeError, EventMessageDataError,
+            AudioResourceError, ValueError,
+        ) as error:
+            self._abort_event(error)
 
     def _show_hint_once(self, hint_id: str) -> bool:
         """Open one progression hint once per save after its trigger occurs."""
@@ -1026,6 +1092,7 @@ class Game:
             self.defeat_return_bgm_restart_pending = False
             if finished_result is BattleResult.DEFEAT:
                 self._show_hint_once(FIRST_DEFEAT_RESTART_HINT_ID)
+            self._resume_event_after_battle(finished_result)
 
     def _begin_defeat_return_message(self) -> None:
         """Show the fixed rescue message over the fully black screen."""
@@ -1051,7 +1118,16 @@ class Game:
             and battle_scene.is_party_command_ready
         ):
             self.pending_first_party_turn_hint = False
-            self._show_hint_once(FIRST_BATTLE_HINT_ID)
+            battle_id = getattr(self, "pending_event_battle_id", None)
+            self.pending_event_battle_id = None
+            event_id = (
+                self.event_catalog.battle_start_event(battle_id)
+                if battle_id is not None else None
+            )
+            if event_id is not None:
+                self._start_battle_event(event_id)
+            else:
+                self._show_hint_once(FIRST_BATTLE_HINT_ID)
         if battle_scene.phase is BattlePhase.RESULT:
             self._show_hint_once(FIRST_RESULT_HINT_ID)
         result = getattr(battle_scene, "result", None)
@@ -2944,7 +3020,9 @@ class Game:
                 )
             if effect is None:
                 if runner.is_complete:
-                    self._restore_event_stationary_actor_facing()
+                    battle_event_finished = runner.context is EventContext.BATTLE
+                    if not battle_event_finished:
+                        self._restore_event_stationary_actor_facing()
                     self.event_runner = None
                     self.event_effect = None
                     self.event_message = None
@@ -2953,6 +3031,8 @@ class Game:
                         self.selected_member_index,
                         len(self.party) - 1,
                     )
+                    if battle_event_finished:
+                        self._show_hint_once(FIRST_BATTLE_HINT_ID)
                 return
             self.event_effect = effect
             if isinstance(effect, PlaySeEffect):
@@ -2965,6 +3045,9 @@ class Game:
                 runner.complete_effect(effect)
                 self.event_effect = None
                 continue
+            if isinstance(effect, StartBattleEffect):
+                self._begin_event_battle(effect)
+                return
             if isinstance(effect, OpenShopEffect):
                 shop = next(
                     (shop for shop in self.shops if shop.key == effect.shop_key),
@@ -3416,6 +3499,10 @@ class Game:
         if getattr(self, "battle_return_fade", None) is not None:
             self._update_battle_return(input_state)
             return
+        runner = getattr(self, "event_runner", None)
+        if runner is not None and runner.context is EventContext.BATTLE:
+            self._update_event(input_state)
+            return
         if self._update_battle_scene(input_state):
             return
         if getattr(self, "_returning_to_start", False):
@@ -3637,6 +3724,9 @@ class Game:
             battle_scene = getattr(self, "battle_scene", None)
             if battle_scene is not None:
                 battle_scene.draw()
+                event_message = getattr(self, "event_message", None)
+                if event_message is not None:
+                    event_message.draw()
                 hint_overlay = getattr(self, "hint_overlay", None)
                 if hint_overlay is not None:
                     hint_overlay.draw()

@@ -21,6 +21,7 @@ from app.systems import (
     MovePartyEffect,
     OpenShopEffect,
     PartySystem,
+    StartBattleEffect,
 )
 
 
@@ -75,6 +76,28 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_start_battle_waits_and_then_continues(self) -> None:
+        runner = self.runner([
+            {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},
+            {"command": "set_flag", "flag_id": "sample.done"},
+        ])
+
+        effect = runner.advance()
+        self.assertEqual(effect, StartBattleEffect("guard", ("SLIME",)))
+        self.assertNotIn("sample.done", self.save_data.event_flags)
+        runner.complete_effect(effect)
+        self.assertIsNone(runner.advance())
+        self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_battle_start_trigger_resolves_event(self) -> None:
+        document = runtime_document([])
+        document["battle_start_events"] = {"guard": "sample.run"}
+
+        catalog = EventCatalog.from_document(document)
+
+        self.assertEqual(catalog.battle_start_event("guard"), "sample.run")
+        self.assertIsNone(catalog.battle_start_event("other"))
+
     def setUp(self) -> None:
         self.records = (
             character_record("Fiora", "MAIN"),
