@@ -18,6 +18,7 @@ LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 FULL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 CHARACTER_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9 _+!&'\-]*$")
 CARDINAL_DIRECTIONS = frozenset(("up", "right", "down", "left"))
+FLASH_COLORS = frozenset(("white",))
 
 
 class EventSourceError(ValueError):
@@ -259,6 +260,11 @@ def _validate_command_list(
             bgm_id = command.get("bgm_id")
             if not isinstance(bgm_id, str) or bgm_id not in bgm_ids:
                 _diagnostic(diagnostics, "error", "unknown_bgm", f"{command_path}.bgm_id", f"存在しないBGM IDです: {bgm_id}")
+        elif command_type == "flash_screen":
+            _known_fields(command, {"command", "color"}, diagnostics, command_path)
+            color = command.get("color")
+            if not isinstance(color, str) or color not in FLASH_COLORS:
+                _diagnostic(diagnostics, "error", "invalid_flash_color", f"{command_path}.color", "フラッシュ色はwhiteを指定してください。")
         elif command_type == "recover_party":
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "open_shop":

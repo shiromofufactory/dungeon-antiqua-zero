@@ -78,6 +78,17 @@ test('canceling a draft leaves the source and undo history untouched', () => {
   assert.equal(state.dirty, false);
 });
 
+test('flash command starts with the supported color', () => {
+  const { state, context } = editor();
+  context.openCommandDraft('');
+  context.selectDraftCommand('', 'flash_screen');
+
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {
+    command: 'flash_screen', color: 'white',
+  });
+  assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /data-command-field="color"/);
+});
+
 test('changing an existing command replaces its fields and undo restores them', () => {
   const { state, context } = editor();
   context.openCommandDraft('');

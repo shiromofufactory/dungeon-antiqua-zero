@@ -20,6 +20,7 @@ MESSAGE_ID_PATTERN = re.compile(
 )
 LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MOVEMENT_DIRECTIONS = frozenset(("up", "right", "down", "left"))
+FLASH_COLORS = frozenset(("white",))
 
 
 class EventResourceError(RuntimeError):
@@ -128,6 +129,14 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
             if set(command) != {"command", key} or not isinstance(
                 command.get(key), str
             ) or not command[key]:
+                return False
+        elif command_type == "flash_screen":
+            color = command.get("color")
+            if (
+                set(command) != {"command", "color"}
+                or not isinstance(color, str)
+                or color not in FLASH_COLORS
+            ):
                 return False
         elif command_type == "recover_party":
             if set(command) != {"command"}:

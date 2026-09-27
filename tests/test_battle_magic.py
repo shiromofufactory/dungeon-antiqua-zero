@@ -62,7 +62,7 @@ class ResolveSpellDamageTest(unittest.TestCase):
         self.assertEqual(resolve_spell_damage(**common, random_factor=0).damage, 24)
         self.assertEqual(resolve_spell_damage(**common, random_factor=1).damage, 30)
 
-    def test_da2_affinities_multiply_weakness_and_quarter_resistance(self) -> None:
+    def test_affinities_triple_weakness_and_third_resistance(self) -> None:
         common = {
             "intensity": 15,
             "spell_modifier": 10,
@@ -81,10 +81,10 @@ class ResolveSpellDamageTest(unittest.TestCase):
             target_resistances=frozenset((ResistanceType.FIRE,)),
         )
 
-        self.assertEqual((weak.damage, weak.affinity), (96, SpellAffinity.WEAK))
+        self.assertEqual((weak.damage, weak.affinity), (72, SpellAffinity.WEAK))
         self.assertEqual(
             (resist.damage, resist.affinity),
-            (6, SpellAffinity.RESIST),
+            (8, SpellAffinity.RESIST),
         )
 
     def test_resistance_takes_priority_when_both_affinities_are_registered(self) -> None:
@@ -98,7 +98,7 @@ class ResolveSpellDamageTest(unittest.TestCase):
             random_factor=0,
         )
 
-        self.assertEqual((result.damage, result.affinity), (6, SpellAffinity.RESIST))
+        self.assertEqual((result.damage, result.affinity), (8, SpellAffinity.RESIST))
 
     def test_death_magic_treats_shadow_as_da2_double_weakness(self) -> None:
         result = resolve_spell_damage(

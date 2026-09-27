@@ -5241,7 +5241,7 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_fire_damage_uses_member_modifier_and_da2_weakness(self) -> None:
+    def test_fire_damage_uses_member_modifier_and_triple_weakness(self) -> None:
         spell = load_mock_spells()["FIRE1"]
         definition = SpellEffectDefinition.from_record(
             spell.key,
@@ -5295,7 +5295,7 @@ class BattleScreenMockTest(unittest.TestCase):
             spell_level=actor.proficiency(ProficiencyKind.MYSTIC).level,
             internal_level=actor.internal_level,
         )
-        expected_damage = int(spell.intensity * modifier * 0.20 * 4)
+        expected_damage = int(spell.intensity * modifier * 0.20 * 3)
         result_frame = definition.total_frames - SPELL_RESULT_OVERLAP_FRAME_COUNT
         updates_until_result = max(1, result_frame)
         for _frame in range(updates_until_result):

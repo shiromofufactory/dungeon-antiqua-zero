@@ -93,9 +93,12 @@ from .palette import (
     mix_color,
 )
 from .spell_effect import SPELL_EFFECT_FLASH_PALETTE, SpellEffectRenderer
+from .screen_flash import FLASH_PHASE_FRAMES, ScreenFlash
 
 
 __all__ = [
+    "FLASH_PHASE_FRAMES",
+    "ScreenFlash",
     "CHARACTER_SHADOW_BANK",
     "CHARACTER_SHADOW_COLKEY",
     "CHARACTER_SHADOW_SIZE",

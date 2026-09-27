@@ -5607,9 +5607,7 @@ class BattleScene:
                 )
         for result in presentation.party_slow_results:
             member = self.party[result.target_index]
-            if result.success:
-                member.apply_slow()
-            else:
+            if not result.success or not member.apply_slow():
                 damage_popups.append(
                     BattleSpellDamagePopup(
                         result.popup_x,
@@ -8601,15 +8599,17 @@ class BattleScene:
         results: list[BattlePartySlowResult] = []
         for index in indexes:
             member = self.party[index]
-            resolution = resolve_status_spell(
-                spell_modifier=actor.magic,
-                rate=spell.rate,
-                target_spell_defense=member.battle_stats.spell_resistance,
-                attribute=spell.attribute,
-                target_weaknesses=frozenset(),
-                target_resistances=member.resistances,
-                success_roll=random.randint(0, 19),
-            )
+            success = False
+            if member.speed_modifier > MIN_SPEED_MODIFIER:
+                success = resolve_status_spell(
+                    spell_modifier=actor.magic,
+                    rate=spell.rate,
+                    target_spell_defense=member.battle_stats.spell_resistance,
+                    attribute=spell.attribute,
+                    target_weaknesses=frozenset(),
+                    target_resistances=member.resistances,
+                    success_roll=random.randint(0, 19),
+                ).success
             position = self._party_draw_position(index)
             if position is None:
                 continue
@@ -8617,7 +8617,7 @@ class BattleScene:
             results.append(
                 BattlePartySlowResult(
                     target_index=index,
-                    success=resolution.success,
+                    success=success,
                     popup_x=x + 6,
                     popup_y=y + 16,
                 )

@@ -51,6 +51,20 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_flash_screen_accepts_white_and_rejects_other_colors(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [{"command": "flash_screen", "color": "white"}]
+
+        self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+        self.assertEqual(
+            compile_event_sources({"sample": source}, **CATALOGS)["events"]["sample.greeting"]["commands"],
+            [{"command": "flash_screen", "color": "white"}],
+        )
+        source["events"][0]["commands"][0]["color"] = "red"
+        self.assertIn("invalid_flash_color", {
+            item.code for item in validate_event_sources({"sample": source}, **CATALOGS)
+        })
+
     def test_empty_then_with_commands_in_else_is_not_a_warning(self) -> None:
         source = sample_source()
 

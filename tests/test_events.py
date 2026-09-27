@@ -16,6 +16,7 @@ from app.systems import (
     EventContext,
     EventRunner,
     EventRuntimeError,
+    FlashScreenEffect,
     InventorySystem,
     MessageEffect,
     MovePartyEffect,
@@ -76,6 +77,25 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_flash_screen_waits_before_following_command(self) -> None:
+        runner = self.runner([
+            {"command": "flash_screen", "color": "white"},
+            {"command": "set_flag", "flag_id": "sample.done"},
+        ])
+
+        effect = runner.advance()
+        self.assertEqual(effect, FlashScreenEffect("white"))
+        self.assertIs(runner.advance(), effect)
+        self.assertNotIn("sample.done", self.save_data.event_flags)
+        runner.complete_effect(effect)
+        self.assertIsNone(runner.advance())
+        self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_runtime_loader_rejects_unknown_flash_color(self) -> None:
+        document = runtime_document([{"command": "flash_screen", "color": "red"}])
+        with self.assertRaises(EventResourceError):
+            EventCatalog.from_document(document)
+
     def test_empty_then_runs_else_only_while_flag_is_off(self) -> None:
         commands = [{
             "command": "branch",

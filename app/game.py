@@ -102,6 +102,7 @@ from rendering import (
     FadeEvent,
     FadePhase,
     FadeThroughBlack,
+    ScreenFlash,
     EncounterTransition,
     FIELD_ACTOR_CHARACTER_SET_HEIGHT,
     FIELD_ACTOR_CHARACTER_SET_WIDTH,
@@ -136,6 +137,7 @@ from systems import (
     EventContext,
     EventRunner,
     EventRuntimeError,
+    FlashScreenEffect,
     ENCOUNTER_THRESHOLD,
     EncounterSystem,
     InventorySystem,
@@ -566,6 +568,7 @@ class Game:
         self.field_party_annihilated_pending = False
         self.pending_treasure_close_actor_id: str | None = None
         self.event_move_remaining = 0
+        self.event_screen_flash: ScreenFlash | None = None
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
         self.event_resume_after_fade = False
@@ -3077,6 +3080,25 @@ class Game:
                 runner.complete_effect(effect)
                 self.event_effect = None
                 continue
+            if isinstance(effect, FlashScreenEffect):
+                if not self.settings.screen_flash_enabled:
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    continue
+                color = {"white": 0xFFFFFF}.get(effect.color)
+                if color is None:
+                    raise EventRuntimeError(
+                        runner.event_id,
+                        "effect",
+                        f"unsupported flash color: {effect.color}",
+                    )
+                self.event_screen_flash = ScreenFlash(color)
+                self.event_screen_flash.update()
+                self.palette_shifter.set_global_mix(
+                    base_rate=self.event_screen_flash.visible_rate,
+                    target_color=color,
+                )
+                return
             if isinstance(effect, StartBattleEffect):
                 self._begin_event_battle(effect)
                 return
@@ -3122,6 +3144,23 @@ class Game:
         if runner is None or effect is None:
             return
         try:
+            if isinstance(effect, FlashScreenEffect):
+                flash = self.event_screen_flash
+                if flash is None:
+                    raise EventRuntimeError(
+                        runner.event_id, "effect", "screen flash is not active"
+                    )
+                flash.update()
+                self.palette_shifter.set_global_mix(
+                    base_rate=flash.visible_rate,
+                    target_color=flash.target_color,
+                )
+                if not flash.is_active:
+                    self.event_screen_flash = None
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    self._continue_event()
+                return
             if isinstance(effect, MessageEffect):
                 if self.event_message is not None and self.event_message.update(
                     input_state
@@ -3180,6 +3219,11 @@ class Game:
             self._abort_event(error)
 
     def _abort_event(self, error: BaseException) -> None:
+        if getattr(self, "event_screen_flash", None) is not None:
+            self.event_screen_flash = None
+            self.palette_shifter.set_global_mix(
+                base_rate=1.0, target_color=0xFFFFFF
+            )
         self.last_event_error = str(error)
         print(f"イベントを中断しました: {error}", file=sys.stderr)
         self._restore_event_stationary_actor_facing()
@@ -3494,6 +3538,9 @@ class Game:
             or getattr(self, "battle_return_fade", None) is not None
             or getattr(self, "_returning_to_start", False)
             or getattr(getattr(self, "fade", None), "is_active", False) is True
+            or getattr(
+                getattr(self, "event_screen_flash", None), "is_active", False
+            ) is True
             or getattr(battle_scene, "is_transitioning", False) is True
         ):
             return False

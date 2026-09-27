@@ -101,6 +101,33 @@ class MonsterSpellTest(unittest.TestCase):
             actor_is_enemy=True,
         )
 
+    def test_second_slow_on_same_member_shows_miss(self) -> None:
+        actor = spellcaster(magic=7, spell_key="SLOW")
+        mock = spell_scene(actor)
+        spell = mock.spells["SLOW"]
+        target = mock.party[1]
+
+        with (
+            patch("scenes.battle.random.choice", return_value=1),
+            patch("scenes.battle.random.randint", return_value=0) as randint,
+        ):
+            self.assertTrue(mock._begin_monster_spell(actor, spell))
+            assert mock.action_presentation is not None
+            mock._apply_action_results(mock.action_presentation)
+            self.assertEqual(target.speed_modifier, -1)
+
+            self.assertTrue(mock._begin_monster_spell(actor, spell))
+            presentation = mock.action_presentation
+            assert presentation is not None
+            self.assertFalse(presentation.party_slow_results[0].success)
+            self.assertEqual(presentation.spell_effects, ())
+            mock._apply_action_results(presentation)
+            randint.assert_called_once_with(0, 19)
+
+        self.assertEqual(target.speed_modifier, -1)
+        self.assertEqual([popup.is_miss for popup in mock.spell_damage_popups], [True])
+        self.assertEqual(actor.state.mp, 8)
+
     def test_break_cancels_all_protection_then_applies_defense_down(self) -> None:
         actor = spellcaster(magic=7, spell_key="ARMOR BREAK")
         mock = spell_scene(actor)

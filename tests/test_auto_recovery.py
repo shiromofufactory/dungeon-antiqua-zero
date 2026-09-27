@@ -263,6 +263,34 @@ class AutoRecoveryTest(unittest.TestCase):
              (52, 176), (120, 176), (188, 176)],
         )
 
+    def test_confirm_on_setting_selects_execute_without_changing_value(self) -> None:
+        fonts = Mock()
+        fonts.baseline_offset_for.return_value = 0
+        save_data = SaveData()
+        overlay = AutoRecoveryOverlay(
+            party=self.party,
+            spells=self.spells,
+            items=self.items,
+            inventory=InventorySystem(self.items),
+            save_data=save_data,
+            settings=Settings(),
+            texts=self.texts,
+            fonts=fonts,
+            faces=Mock(),
+        )
+        original = save_data.auto_recovery
+        for key in ("threshold", "method", "healer"):
+            with self.subTest(key=key):
+                overlay.cursor.select_key(key)
+                overlay.update(InputState(confirm=InputButton(True, True)))
+                self.assertEqual(overlay.cursor.selected_key, "execute")
+                self.assertEqual(save_data.auto_recovery, original)
+                self.assertIn("せっていないように", overlay.guide_window.texts[0].text)
+
+        overlay.cursor.select_key("threshold")
+        overlay.update(InputState(navigation=Direction.RIGHT))
+        self.assertEqual(save_data.auto_recovery.threshold, 70)
+
     def test_result_shows_only_items_actually_used(self) -> None:
         fonts = Mock()
         fonts.baseline_offset_for.return_value = 0

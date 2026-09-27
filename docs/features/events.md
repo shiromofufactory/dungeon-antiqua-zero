@@ -311,6 +311,7 @@ npm run events:build
 | `message` | `message_id` | メッセージOverlayを閉じるまで待機 | field / battle |
 | `play_se` | `se_id` | SE再生を要求して同フレームで完了 | field / battle |
 | `change_bgm` | `bgm_id` | BGM切替要求が受理された時点で完了 | field / battle |
+| `flash_screen` | `color` | 画面全体の指定色フラッシュが終わるまで待機 | field / battle |
 | `recover_party` | なし | 活動パーティ全員のHP・MPを最大値へ戻し、全状態異常を解除 | field / battle |
 | `open_shop` | `shop_key` | 指定ショップを開き、退出してフィールドへ戻るまで待機 | fieldのみ |
 | `start_battle` | `battle_id`, `monster_keys` | 指定編成のイベントバトルを始め、帰還後に後続コマンドへ進む | fieldのみ |
@@ -379,6 +380,16 @@ npm run events:build
 - `se_id` も数値Sound番号ではなく安定IDとする。Pyxel Sound番号との対応は
   `app/audio/catalog.json` へ分離し、イベントエディタと本番コードが同じカタログを読む。
 - 音量は `Settings.bgm_volume` / `se_volume` を使い、イベント定義へ音量設定を持たせない。
+
+#### 画面フラッシュ
+
+```json
+{"command": "flash_screen", "color": "white"}
+```
+
+- `color` は将来の色追加を想定した安定した色名とし、現在は `white` のみ指定できる。
+- 6フレームで画面全体を白へ変化させ、続く6フレームで通常色へ戻す。完了後に後続コマンドを実行する。描画中のSceneとOverlayの両方へ適用し、BGM音量は変更しない。
+- 設定で画面フラッシュを軽減している場合は視覚効果を省き、後続コマンドへすぐ進む。
 
 #### パーティ全快とショップ
 

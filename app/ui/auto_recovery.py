@@ -374,7 +374,9 @@ class AutoRecoveryOverlay:
                 self._refresh()
                 self._start_proficiency_animation()
             else:
-                self._cycle(key, 1)
+                self.cursor.select_key("execute")
+                self._clear_result()
+                self._refresh()
             return False
         if self.settings_window.update(input_state.navigation):
             self._clear_result()

@@ -50,6 +50,11 @@ class ChangeBgmEffect:
 
 
 @dataclass(frozen=True)
+class FlashScreenEffect:
+    color: str
+
+
+@dataclass(frozen=True)
 class OpenShopEffect:
     shop_key: str
 
@@ -77,6 +82,7 @@ EventEffect = (
     MessageEffect
     | PlaySeEffect
     | ChangeBgmEffect
+    | FlashScreenEffect
     | OpenShopEffect
     | StartBattleEffect
     | MovePartyEffect
@@ -216,6 +222,8 @@ class EventRunner:
                 return PlaySeEffect(str(command["se_id"]))
             if command_type == "change_bgm":
                 return ChangeBgmEffect(str(command["bgm_id"]))
+            if command_type == "flash_screen":
+                return FlashScreenEffect(str(command["color"]))
             if command_type == "recover_party":
                 self.party.recover_all()
                 return None
@@ -263,6 +271,7 @@ __all__ = [
     "EventEffect",
     "EventRunner",
     "EventRuntimeError",
+    "FlashScreenEffect",
     "MessageEffect",
     "MoveActorEffect",
     "MovePartyEffect",

@@ -145,10 +145,10 @@ def resolve_spell_damage(
     multiplier = 1.0
     if attribute is not None and attribute in target_resistances:
         affinity = SpellAffinity.RESIST
-        multiplier = 0.25
+        multiplier = 1.0 / 3.0
     elif attribute is not None and attribute in target_weaknesses:
         affinity = SpellAffinity.WEAK
-        multiplier = 4.0
+        multiplier = 3.0
     elif attribute is ResistanceType.DEATH and target_is_shadow:
         affinity = SpellAffinity.WEAK
         multiplier = 2.0

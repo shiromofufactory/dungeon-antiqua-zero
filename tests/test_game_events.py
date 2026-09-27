@@ -21,6 +21,7 @@ from state import SaveData, Settings
 from systems import (
     InventorySystem,
     MessageEffect,
+    FlashScreenEffect,
     MovePartyEffect,
     OpenShopEffect,
     StartBattleEffect,
@@ -100,6 +101,54 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    def test_event_flash_restores_palette_before_resuming_commands(self) -> None:
+        game = Game.__new__(Game)
+        effect = FlashScreenEffect("white")
+        game.event_runner = Mock(advance=Mock(return_value=effect))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.settings = Settings()
+        game.palette_shifter = Mock()
+        game._continue_event()
+
+        self.assertIs(game.event_effect, effect)
+        game.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=5 / 6, target_color=0xFFFFFF,
+        )
+        game._continue_event = Mock()
+        for _ in range(5):
+            game._update_event(InputState())
+            game.event_runner.complete_effect.assert_not_called()
+        game.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=0.0, target_color=0xFFFFFF,
+        )
+        for _ in range(5):
+            game._update_event(InputState())
+            game.event_runner.complete_effect.assert_not_called()
+        game._update_event(InputState())
+
+        self.assertIsNone(game.event_screen_flash)
+        self.assertIsNone(game.event_effect)
+        game.palette_shifter.set_global_mix.assert_called_with(
+            base_rate=1.0, target_color=0xFFFFFF,
+        )
+        game.event_runner.complete_effect.assert_called_once_with(effect)
+        game._continue_event.assert_called_once_with()
+
+    def test_reduced_screen_flash_setting_skips_visual_effect(self) -> None:
+        game = Game.__new__(Game)
+        effect = FlashScreenEffect("white")
+        runner = Mock(advance=Mock(side_effect=[effect, None]), is_complete=False)
+        game.event_runner = runner
+        game.party_system = Mock(active_party=(), character_states={})
+        game.settings = Settings(screen_flash_enabled=False)
+        game.palette_shifter = Mock()
+
+        game._continue_event()
+
+        self.assertIs(game.event_runner, runner)
+        runner.complete_effect.assert_called_once_with(effect)
+        game.palette_shifter.set_global_mix.assert_not_called()
+
     def test_completed_flag_branch_does_not_pause_held_step_movement(self) -> None:
         trigger = MapEventTrigger(
             "floor", "sample.run", frozenset(("step",)),

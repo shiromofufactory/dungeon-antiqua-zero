@@ -763,6 +763,9 @@ SceneやOverlayごとに独自のフェード速度計算を持たせない。
 基準パレットだけでなく `dimmed` など登録済みの派生パレットも不変の通常色から同じ割合で
 黒へ混合し、局所的な `pyxel.pal()` と画面全体フェードを合成できるようにする。
 フェードの進行やパレット更新を `draw()` で行わず、完了時は通常色へ厳密に復元する。
+イベントの全画面フラッシュは `rendering.screen_flash.ScreenFlash` がフレーム進行を持ち、
+`Game` が `PaletteShifter.set_global_mix()` へ指定色を適用する。イベントRunnerは効果の完了まで
+待機し、色名の検証はイベント生成処理と本番loaderで行う。
 
 ## OverlayとUI
 
