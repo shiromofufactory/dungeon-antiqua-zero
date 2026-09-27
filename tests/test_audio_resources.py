@@ -177,6 +177,8 @@ class BgmPlayerTest(unittest.TestCase):
         self.assertEqual(se_channel_and_sound("battle_weapon_slash"), (0, 11))
         self.assertEqual(se_channel_and_sound("battle_weapon_blunt"), (0, 29))
         self.assertEqual(se_channel_and_sound("result_increment"), (1, 2))
+        self.assertEqual(se_channel_and_sound("save_complete"), (1, 6))
+        self.assertEqual(se_channel_and_sound("auto_equip_complete"), (1, 6))
         with self.assertRaises(AudioResourceError):
             play_se("missing", pyxel_api=pyxel)
         with self.assertRaises(AudioResourceError):

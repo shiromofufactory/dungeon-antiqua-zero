@@ -13,7 +13,7 @@ if __package__ == "ui":
     from localization import Localizer, ascii_to_fullwidth, format_number
     from member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
     from rendering import MONOCHROME_PALETTE, PaletteShifter
-    from resources import FontResources, TRANSPARENT_INDEX
+    from resources import FontResources, TRANSPARENT_INDEX, play_se
     from state import Language, Settings
     from systems import SAVE_SLOT_COUNT, SaveSlotSummary
     from text_catalog import TextCatalog
@@ -22,7 +22,7 @@ else:
     from ..localization import Localizer, ascii_to_fullwidth, format_number
     from ..member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
     from ..rendering import MONOCHROME_PALETTE, PaletteShifter
-    from ..resources import FontResources, TRANSPARENT_INDEX
+    from ..resources import FontResources, TRANSPARENT_INDEX, play_se
     from ..state import Language, Settings
     from ..systems import SAVE_SLOT_COUNT, SaveSlotSummary
     from ..text_catalog import TextCatalog
@@ -61,6 +61,7 @@ SAVE_CONFIRM_TEXT_X = 5
 SAVE_CONFIRM_CURSOR_X = 3
 SAVE_CONFIRM_YES_Y = 2
 SAVE_CONFIRM_NO_Y = 5
+SAVE_COMPLETE_SE_ID = "save_complete"
 
 SAVE_TEXT_KEYS = (
     "save.select_slot",
@@ -363,6 +364,7 @@ class SaveMenuOverlay:
         self.summaries = tuple(replaced)
         self.current_slot = self.selected_slot
         self._build_windows(message_key="save.complete")
+        play_se(SAVE_COMPLETE_SE_ID)
 
     def update(self, input_state: InputState) -> bool:
         """Update save selection and return whether the overlay should close."""

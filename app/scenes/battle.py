@@ -11009,6 +11009,8 @@ class BattleScene:
     def _draw_target_affinity_indicators(self) -> None:
         """Blink learned WEAK/RESIST markers during enemy target selection."""
 
+        if getattr(self, "auto_battle_active", False):
+            return
         phase = getattr(self, "phase", None)
         if (
             phase not in (BattlePhase.TARGET, BattlePhase.ACTION_TARGET)

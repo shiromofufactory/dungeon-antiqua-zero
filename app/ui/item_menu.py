@@ -57,10 +57,8 @@ ITEM_INFO_Y = 2
 ITEM_INFO_ROW_HEIGHT = 3
 ITEM_INFO_MAX_ROWS = 12
 ITEM_SUMMARY_VALUE_X = 13
-ITEM_SUMMARY_COUNT_LABEL_Y = 2
-ITEM_SUMMARY_COUNT_VALUE_Y = 5
-ITEM_SUMMARY_RECORDED_LABEL_Y = 8
-ITEM_SUMMARY_RECORDED_VALUE_Y = 11
+ITEM_SUMMARY_RECORDED_LABEL_Y = 2
+ITEM_SUMMARY_RECORDED_VALUE_Y = 5
 DROP_CONFIRM_WINDOW_GRID = (0, 0, 64, 10)
 DROP_CONFIRM_CHOICE_WINDOW_GRID = (52, 0, 12, 10)
 DROP_CONFIRM_TEXT_X = 4
@@ -389,59 +387,27 @@ class ItemMenuOverlay:
         self._refresh_windows()
 
     def _item_summary_texts(self) -> tuple[WindowText, ...]:
-        count_label = self.texts.text("item.inventory.count", self.localizer)
         recorded_label = self.texts.text("item.recorded.count", self.localizer)
-        if not count_label or not recorded_label:
+        if not recorded_label:
             raise ItemMenuDataError("アイテム集計用テキストが見つかりません")
-
-        placements: list[WindowText] = []
-        owned_count = sum(self.item_counts.values())
-        if owned_count:
-            placements.extend(
-                (
-                    self.localized_texts.create(
-                        count_label,
-                        ITEM_INFO_X,
-                        ITEM_SUMMARY_COUNT_LABEL_Y,
-                    ),
-                    self.localized_texts.create(
-                        pad(owned_count, 3),
-                        ITEM_SUMMARY_VALUE_X,
-                        ITEM_SUMMARY_COUNT_VALUE_Y,
-                    ),
-                )
-            )
 
         recorded_count = self.inventory_system.recorded_count
         catalog_count = self.inventory_system.catalog_count
         recorded_total = (
             pad(catalog_count, 3) if recorded_count == catalog_count else "　？？"
         )
-        recorded_label_y = (
-            ITEM_SUMMARY_RECORDED_LABEL_Y
-            if owned_count
-            else ITEM_SUMMARY_COUNT_LABEL_Y
+        return (
+            self.localized_texts.create(
+                recorded_label,
+                ITEM_INFO_X,
+                ITEM_SUMMARY_RECORDED_LABEL_Y,
+            ),
+            self.localized_texts.create(
+                f"{pad(recorded_count, 3)}／{recorded_total}",
+                ITEM_SUMMARY_VALUE_X,
+                ITEM_SUMMARY_RECORDED_VALUE_Y,
+            ),
         )
-        recorded_value_y = (
-            ITEM_SUMMARY_RECORDED_VALUE_Y
-            if owned_count
-            else ITEM_SUMMARY_COUNT_VALUE_Y
-        )
-        placements.extend(
-            (
-                self.localized_texts.create(
-                    recorded_label,
-                    ITEM_INFO_X,
-                    recorded_label_y,
-                ),
-                self.localized_texts.create(
-                    f"{pad(recorded_count, 3)}／{recorded_total}",
-                    ITEM_SUMMARY_VALUE_X,
-                    recorded_value_y,
-                ),
-            )
-        )
-        return tuple(placements)
 
     def _change_category(self, distance: int) -> None:
         if distance not in (-1, 1):

@@ -390,7 +390,7 @@ class SpellMenuTest(unittest.TestCase):
         mock.update(InputState())
         self.assertEqual(
             mock.proficiency_window.texts[0].text,
-            "%SACRED%%COL_POSITIVE%２%COL_END%－０２",
+            "%SACRED%%COL_POSITIVE%２－０２%COL_END%",
         )
         level_up_jingle.assert_called_once_with()
         play_se.assert_called_once_with("spell_healing1")
@@ -406,7 +406,7 @@ class SpellMenuTest(unittest.TestCase):
         level_up_jingle.assert_called_once_with()
         self.assertEqual(
             mock.proficiency_window.texts[0].text,
-            "%SACRED%%COL_POSITIVE%２%COL_END%－０２",
+            "%SACRED%%COL_POSITIVE%２－０２%COL_END%",
         )
 
     def test_healing_with_no_valid_target_reports_an_error(self) -> None:

@@ -5,6 +5,10 @@
       "channel": 1,
       "sound": 7
     },
+    "auto_equip_complete": {
+      "channel": 1,
+      "sound": 6
+    },
     "battle_hit": {
       "channel": 0,
       "sound": 12
@@ -52,6 +56,10 @@
     "result_increment": {
       "channel": 1,
       "sound": 2
+    },
+    "save_complete": {
+      "channel": 1,
+      "sound": 6
     },
     "teleport": {
       "channel": 0,

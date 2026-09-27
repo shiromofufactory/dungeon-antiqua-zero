@@ -33,6 +33,7 @@ def equipment(
     *,
     attack: int = 0,
     hit: int = 0,
+    reach: int = 0,
     defense: int = 0,
     special: str = "",
 ) -> Item:
@@ -45,6 +46,7 @@ def equipment(
             "price": 100,
             "atk": attack,
             "hit": hit,
+            "reach": reach,
             "dfc": defense,
             "eva": 0,
             "rst": 0,
@@ -213,6 +215,22 @@ class InventorySystemTest(unittest.TestCase):
         self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), spear)
         self.assertIsNone(actor.equipment.item_at(EquipmentSlot.LEFT))
         self.assertEqual(inventory.quantity(shield), 1)
+
+    def test_front_row_auto_equip_does_not_penalize_reach_two_weapon(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=105, reach=1)
+        spear = equipment(
+            "BRONZE SPEAR", "TWO_HANDS", "SPEAR", attack=12, hit=95, reach=2
+        )
+        actor = member(initial={EquipmentSlot.RIGHT: dagger})
+        inventory = InventorySystem(
+            {dagger.key: dagger, spear.key: spear}, {spear.key: 1}
+        )
+
+        self.assertTrue(actor.is_front_row)
+        self.assertTrue(inventory.auto_equip(actor))
+        self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), spear)
+        self.assertEqual(inventory.quantity(dagger), 1)
+        self.assertEqual(inventory.quantity(spear), 0)
 
     def test_left_hand_weapon_requires_dual_wield(self) -> None:
         dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=100)

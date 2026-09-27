@@ -345,6 +345,38 @@ class BattleMonsterRecordTest(unittest.TestCase):
             ],
         )
 
+    def test_auto_battle_hides_target_affinities_but_keeps_hit_popups(self) -> None:
+        scene = self._target_scene()
+        scene.monster_record_system.reveal_affinity(
+            "Fire Weak", ResistanceType.FIRE
+        )
+        scene.monster_record_system.reveal_affinity(
+            "Fire Resist", ResistanceType.FIRE
+        )
+        scene._monster_draw_x = Mock(side_effect=(4, 68))
+
+        with (
+            patch("scenes.battle.pyxel.frame_count", 0),
+            patch("scenes.battle.pyxel.blt") as blt,
+        ):
+            scene.auto_battle_active = True
+            scene._draw_target_affinity_indicators()
+            blt.assert_not_called()
+            scene.affinity_popups = (
+                SimpleNamespace(x=10, y=20, affinity=SpellAffinity.WEAK),
+            )
+            scene._draw_affinity_popups()
+            blt.assert_called_once()
+            blt.reset_mock()
+
+            scene.auto_battle_active = False
+            scene._draw_target_affinity_indicators()
+
+        self.assertEqual(
+            [draw.args[4] for draw in blt.call_args_list],
+            [WEAK_ICON_SOURCE_Y, RESIST_ICON_SOURCE_Y],
+        )
+
     def test_target_affinity_uses_da2_blink_timing(self) -> None:
         scene = self._target_scene()
         scene.monster_record_system.reveal_affinity(

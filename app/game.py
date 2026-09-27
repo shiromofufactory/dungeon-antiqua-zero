@@ -1595,7 +1595,8 @@ class Game:
         self._reset_field_actors()
         if target_map.map_id != previous_map_id:
             self._reset_field_fade()
-        self.bgm.play(target_map.bgm_id)
+        if self.bgm.current_id != target_map.bgm_id:
+            self.bgm.play(target_map.bgm_id)
         self.pending_target_map = None
         self.pending_target_arrival = None
         self._refresh_site_name_label(force=True)
@@ -2358,10 +2359,9 @@ class Game:
             fade = FadeThroughBlack(frame_count)
             self.fade = fade
         self.pending_screen_change = change
-        self.fade_bgm = change in (
-            GameScreenChange.CHANGE_MAP,
-            GameScreenChange.TELEPORT,
-            GameScreenChange.START_GAME,
+        self.fade_bgm = change is GameScreenChange.START_GAME or (
+            change in (GameScreenChange.CHANGE_MAP, GameScreenChange.TELEPORT)
+            and self.bgm.current_id != self.pending_target_map.bgm_id
         )
         if change in (
             GameScreenChange.SHOW_FIELD,
@@ -2395,6 +2395,7 @@ class Game:
             self.menu_member_selected = False
             self._refresh_party_window_texts()
             self._refresh_info_window_texts()
+            self.command_cursor.select_key(MENU_COMMANDS[0][0])
             self.command_cursor.active = True
             self._restart_main_windows_for_fade_in()
         elif change is GameScreenChange.OPEN_ITEM:

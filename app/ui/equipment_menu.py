@@ -22,7 +22,7 @@ from member import (
     ProficiencyKind,
 )
 from resistance import ResistanceType
-from resources import TRANSPARENT_INDEX, FontResources
+from resources import TRANSPARENT_INDEX, FontResources, play_se
 from spell import Spell
 from state import Language, Settings
 from systems import InventorySystem
@@ -85,6 +85,7 @@ MAIN_TEXT_X = 4
 MAIN_CURSOR_X = 2
 AUTO_Y = 29
 AUTO_KEY = "auto"
+AUTO_EQUIP_SE_ID = "auto_equip_complete"
 
 STAT_Y = {
     "attack": 35,
@@ -731,6 +732,7 @@ class EquipmentMenuOverlay:
                 if self.selected_main_key == AUTO_KEY:
                     self.inventory_system.auto_equip(self.member)
                     self._rebuild()
+                    play_se(AUTO_EQUIP_SE_ID)
                 else:
                     self._enter_item_selection()
             return False

@@ -916,7 +916,7 @@ class GameTest(unittest.TestCase):
         mock.input_reader.poll.return_value = InputState(
             menu=InputButton(triggered=True, held=True)
         )
-        mock.command_cursor = Mock(active=False)
+        mock.command_cursor = Mock(selected_key="save", active=False)
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.showing_field = True
         mock.selected_member_index = 1
@@ -940,6 +940,7 @@ class GameTest(unittest.TestCase):
         self.assertFalse(mock.showing_field)
         self.assertEqual(mock.selected_member_index, 0)
         self.assertFalse(mock.menu_member_selected)
+        mock.command_cursor.select_key.assert_called_once_with("heal")
         self.assertTrue(mock.command_cursor.active)
         self.assertIsNone(mock.pending_screen_change)
         mock._refresh_party_window_texts.assert_called_once_with()
@@ -1635,7 +1636,7 @@ class GameTest(unittest.TestCase):
             True,
             "sample_town",
         )
-        target_map = Mock()
+        target_map = Mock(bgm_id="da3-field")
         target_map.arrival_point.return_value = arrival
         mock = Game.__new__(Game)
         mock.save_data = SaveData(visited_site_ids={"sample_town"})
@@ -1648,6 +1649,7 @@ class GameTest(unittest.TestCase):
         mock.pending_target_arrival = None
         mock.pending_screen_change = None
         mock.fade = FadeThroughBlack()
+        mock.bgm = Mock(current_id="da3-town")
 
         started = mock._start_debug_teleport("sample_town")
 
@@ -1677,7 +1679,7 @@ class GameTest(unittest.TestCase):
             True,
             "sample_town",
         )
-        target_map = Mock()
+        target_map = Mock(bgm_id="da3-field")
         target_map.arrival_point.return_value = arrival
         mock = Game.__new__(Game)
         mock.save_data = SaveData(visited_site_ids={"sample_town"})
@@ -1690,6 +1692,7 @@ class GameTest(unittest.TestCase):
         mock.pending_target_arrival = None
         mock.pending_screen_change = None
         mock.fade = FadeThroughBlack()
+        mock.bgm = Mock(current_id="da3-town")
 
         self.assertTrue(mock._start_field_teleport("sample_town"))
 
@@ -2955,7 +2958,9 @@ class GameTest(unittest.TestCase):
                 mock = Game.__new__(Game)
                 mock.fade = FadeThroughBlack(frame_count)
                 mock.pending_screen_change = None
+                mock.pending_target_map = Mock(bgm_id="destination")
                 mock.bgm = Mock()
+                mock.bgm.current_id = "source"
                 mock.palette_shifter = Mock(base_colors=(0x000000,))
                 mock._apply_pending_screen_change = Mock(
                     side_effect=lambda: mock.bgm.play("destination")
@@ -2985,6 +2990,48 @@ class GameTest(unittest.TestCase):
                     mock.bgm.set_fade_rate.call_count,
                     frame_count + 1,
                 )
+
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
+    def test_same_bgm_map_change_keeps_playback_untouched(
+        self,
+        field_movement_class: Mock,
+        field_renderer_class: Mock,
+    ) -> None:
+        for change in (
+            GameScreenChange.CHANGE_MAP,
+            GameScreenChange.TELEPORT,
+        ):
+            with self.subTest(change=change):
+                target_map = Mock(map_id="destination", bgm_id="shared", sites=())
+                arrival = MapArrivalPoint(
+                    "entrance", MapCell(1, 2), "down", False, None,
+                )
+                mock = Game.__new__(Game)
+                mock.fade = FadeThroughBlack(SITE_MAP_FADE_FRAME_COUNT)
+                mock.pending_screen_change = None
+                mock.pending_target_map = target_map
+                mock.pending_target_arrival = arrival
+                mock.current_map = Mock(map_id="source", bgm_id="shared")
+                mock.world_map = object()
+                mock.party = ()
+                mock.bgm = Mock(current_id="shared")
+                mock.palette_shifter = Mock(base_colors=(0x000000,))
+                mock._reset_field_actors = Mock()
+                mock._reset_field_fade = Mock()
+                mock._refresh_site_name_label = Mock()
+                mock._apply_pending_screen_change = Mock(
+                    side_effect=mock._apply_pending_map_destination
+                )
+
+                mock._begin_screen_change(change)
+                for _frame in range(SITE_MAP_FADE_FRAME_COUNT * 2):
+                    mock._update_fade()
+
+                self.assertIs(mock.current_map, target_map)
+                mock.bgm.play.assert_not_called()
+                mock.bgm.set_fade_rate.assert_not_called()
+                self.assertFalse(mock.fade_bgm)
 
     def test_menu_change_does_not_fade_bgm(self) -> None:
         mock = Game.__new__(Game)

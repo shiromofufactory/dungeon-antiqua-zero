@@ -399,7 +399,7 @@ class InventorySystem:
         base = item.attack * item.hit
         ranged = item.reach >= 2
         if member.is_front_row:
-            return -1 if ranged else base
+            return base
         if ranged:
             return base + 2000
         return base * (1 + len(item.resistances)) / 60

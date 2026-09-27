@@ -17,10 +17,10 @@ def spell_proficiency_text(
 ) -> str:
     level, progress = divmod(total, 100)
     icon = SPELL_TYPE_ICON_TAGS.get(spell_type, "")
-    level_text = pad(level, 1, fill="0")
+    numbers = f"{pad(level, 1, fill='0')}－{pad(progress, 2, fill='0')}"
     if previous_total is not None and level > previous_total // 100:
-        level_text = f"%COL_POSITIVE%{level_text}%COL_END%"
-    return f"{icon}{level_text}－{pad(progress, 2, fill='0')}"
+        return f"{icon}%COL_POSITIVE%{numbers}%COL_END%"
+    return f"{icon}{numbers}"
 
 
 def displayed_proficiency_total(

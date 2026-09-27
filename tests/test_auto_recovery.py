@@ -502,7 +502,7 @@ class AutoRecoveryTest(unittest.TestCase):
         for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
             overlay.update(InputState())
         self.assertIn(
-            "%COL_POSITIVE%２%COL_END%",
+            "%SACRED%%COL_POSITIVE%２－０１%COL_END%",
             overlay.proficiency_windows[1].texts[0].text,
         )
         self.assertIsNotNone(overlay.spell_learned_popup)

@@ -42,8 +42,6 @@ from ui.item_menu import (
     ITEM_INFO_ROW_HEIGHT,
     ITEM_LIST_WINDOW_GRID,
     ITEM_ROW_HEIGHT,
-    ITEM_SUMMARY_COUNT_LABEL_Y,
-    ITEM_SUMMARY_COUNT_VALUE_Y,
     ITEM_SUMMARY_RECORDED_LABEL_Y,
     ITEM_SUMMARY_RECORDED_VALUE_Y,
     ITEM_SUMMARY_VALUE_X,
@@ -128,8 +126,6 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(
             [text.text for text in mock.item_info_window.texts],
             [
-                "アイテムしょじすう：",
-                "１２３",
                 "きろくずみ：",
                 "１２３／１２３",
             ],
@@ -140,8 +136,6 @@ class ItemMenuTest(unittest.TestCase):
                 for text in mock.item_info_window.texts
             ],
             [
-                (ITEM_INFO_X, ITEM_SUMMARY_COUNT_LABEL_Y),
-                (ITEM_SUMMARY_VALUE_X, ITEM_SUMMARY_COUNT_VALUE_Y),
                 (ITEM_INFO_X, ITEM_SUMMARY_RECORDED_LABEL_Y),
                 (ITEM_SUMMARY_VALUE_X, ITEM_SUMMARY_RECORDED_VALUE_Y),
             ],
@@ -787,7 +781,7 @@ class ItemMenuTest(unittest.TestCase):
         self.assertIs(mock.category, ItemCategory.INDEX)
         self.assertIn(discarded, mock.category_items)
 
-    def test_category_summary_updates_owned_count_but_keeps_recorded_count(self) -> None:
+    def test_category_summary_shows_only_recorded_count_after_item_drop(self) -> None:
         mock = ItemMenuHarness()
         mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -799,8 +793,6 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(
             [text.text for text in mock.item_info_window.texts],
             [
-                "アイテムしょじすう：",
-                "１２２",
                 "きろくずみ：",
                 "１２３／１２３",
             ],
@@ -815,14 +807,12 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(
             [text.text for text in mock.item_info_window.texts],
             [
-                "アイテムしょじすう：",
-                "　　１",
                 "きろくずみ：",
                 "　　１／　？？",
             ],
         )
 
-    def test_recorded_summary_moves_up_when_inventory_is_empty(self) -> None:
+    def test_recorded_summary_stays_at_top_when_inventory_is_empty(self) -> None:
         items = ItemMenuHarness().items
         inventory = InventorySystem(items, recorded_keys=tuple(items)[:3])
         mock = ItemMenuHarness(items=items, inventory_system=inventory)
@@ -830,8 +820,8 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(
             [(text.text, text.y) for text in mock.item_info_window.texts],
             [
-                ("きろくずみ：", ITEM_SUMMARY_COUNT_LABEL_Y),
-                ("　　３／　？？", ITEM_SUMMARY_COUNT_VALUE_Y),
+                ("きろくずみ：", ITEM_SUMMARY_RECORDED_LABEL_Y),
+                ("　　３／　？？", ITEM_SUMMARY_RECORDED_VALUE_Y),
             ],
         )
 
@@ -891,7 +881,7 @@ class ItemMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
         self.assertEqual(
             mock.item_info_window.texts[0].text,
-            "アイテムしょじすう：",
+            "きろくずみ：",
         )
         self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))
 

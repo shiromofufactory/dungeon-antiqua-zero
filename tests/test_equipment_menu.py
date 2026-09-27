@@ -670,6 +670,18 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertEqual(mock.member_index, 5)
         self.assertEqual(mock.member.definition.key, "Dain")
 
+    @patch("ui.equipment_menu.play_se")
+    def test_auto_equipment_plays_save_sound_when_executed(self, play_se: Mock) -> None:
+        mock = self.build_mock()
+        mock.selected_main_key = AUTO_KEY
+        mock._rebuild()
+        mock.inventory_system.auto_equip = Mock(return_value=False)
+
+        mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
+
+        mock.inventory_system.auto_equip.assert_called_once_with(mock.member)
+        play_se.assert_called_once_with("auto_equip_complete")
+
     def test_reserve_replaces_formation_text(self) -> None:
         mock = self.build_mock(member_index=5)
         placed = {(text.x, text.y): text for text in mock.main_window.texts}

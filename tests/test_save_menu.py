@@ -246,7 +246,10 @@ class SaveMenuOverlayTest(unittest.TestCase):
             [1, 2, 3],
         )
 
-    def test_empty_slot_saves_immediately_and_refreshes_preview(self) -> None:
+    @patch("app.ui.save_menu.play_se")
+    def test_empty_slot_saves_immediately_and_refreshes_preview(
+        self, play_se: Mock
+    ) -> None:
         on_save = Mock(
             return_value=SaveSlotSummary(
                 1,
@@ -269,8 +272,12 @@ class SaveMenuOverlayTest(unittest.TestCase):
             PARTY_CHARACTER_KEYS,
         )
         self.assertEqual(overlay.message_window.texts[0].text, "セーブしました")
+        play_se.assert_called_once_with("save_complete")
 
-    def test_occupied_other_slot_requires_overwrite_confirmation(self) -> None:
+    @patch("app.ui.save_menu.play_se")
+    def test_occupied_other_slot_requires_overwrite_confirmation(
+        self, play_se: Mock
+    ) -> None:
         on_save = Mock(
             return_value=SaveSlotSummary(
                 1,
@@ -288,12 +295,23 @@ class SaveMenuOverlayTest(unittest.TestCase):
         self.assertTrue(overlay.confirmation_window.is_open)
         self.assertFalse(overlay.confirmation_window.is_animating)
         on_save.assert_not_called()
+        play_se.assert_not_called()
 
         overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
 
         on_save.assert_called_once_with(1)
         self.assertIsNone(overlay.confirmation_cursor)
         self.assertEqual(overlay.current_slot, 1)
+        play_se.assert_called_once_with("save_complete")
+
+    @patch("app.ui.save_menu.play_se")
+    def test_failed_save_does_not_play_complete_sound(self, play_se: Mock) -> None:
+        overlay = self.create_overlay(on_save=Mock(return_value=None))
+
+        overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
+
+        self.assertEqual(overlay.message_window.texts[0].text, "セーブに　しっぱいしました")
+        play_se.assert_not_called()
 
     @patch("app.ui.save_menu.pyxel.blt")
     @patch("app.ui.window.Window.draw")
