@@ -208,6 +208,16 @@ def validate_map_source(
         )
     if not _valid_id(data.get("map_id")):
         _diagnostic(diagnostics, "error", "invalid_id", "map_id", "マップIDはlower_snake_caseで指定してください。")
+    parent_id = data.get("area_parent_id")
+    if parent_id is not None and (not _valid_id(parent_id) or parent_id == data.get("map_id")):
+        _diagnostic(diagnostics, "error", "invalid_area_parent", "area_parent_id", "親マップIDは自身と異なるlower_snake_caseで指定してください。")
+    elif parent_id is not None and _valid_id(data.get("map_id")) and not data["map_id"].startswith(f"{parent_id}_"):
+        _diagnostic(diagnostics, "error", "invalid_area_id", "map_id", "追加エリアのマップIDは親マップIDとエリアIDを連結してください。")
+    area_name = data.get("area_name")
+    if area_name is not None and (not isinstance(area_name, str) or not area_name.strip()):
+        _diagnostic(diagnostics, "error", "invalid_area_name", "area_name", "エリア名を入力してください。")
+    if parent_id is not None and area_name is None:
+        _diagnostic(diagnostics, "error", "missing_area_name", "area_name", "追加エリアにはエリア名が必要です。")
     if data.get("tileset_id") != tileset.get("tileset_id"):
         _diagnostic(diagnostics, "error", "tileset_mismatch", "tileset_id", "起動時に読み込んだタイルセットIDと一致しません。")
 
@@ -1401,6 +1411,28 @@ def validate_map_links(
                 f"{map_id}.sites[{index}].id",
                 f"拠点IDはマップ{', '.join(other_maps)}でも使用されています: {site_id}",
             )
+    return diagnostics
+
+
+def validate_area_groups(
+    sources: Mapping[str, Mapping[str, Any]],
+) -> list[Diagnostic]:
+    """Check that every area uses its logical map's shared settings."""
+
+    diagnostics: list[Diagnostic] = []
+    for map_id, source in sources.items():
+        parent_id = source.get("area_parent_id")
+        if parent_id is None:
+            continue
+        if not _valid_id(parent_id) or parent_id == map_id:
+            continue
+        parent = sources.get(parent_id)
+        if parent is None or parent.get("area_parent_id") is not None:
+            _diagnostic(diagnostics, "error", "missing_area_parent", f"{map_id}.area_parent_id", f"親マップが見つかりません: {parent_id}")
+            continue
+        for field in ("profile", "tileset_id", "bgm_id"):
+            if source.get(field) != parent.get(field):
+                _diagnostic(diagnostics, "error", "area_shared_setting_mismatch", f"{map_id}.{field}", f"{field}は親マップ{parent_id}と一致させてください。")
     return diagnostics
 
 

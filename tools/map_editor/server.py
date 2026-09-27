@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -26,6 +27,7 @@ from scripts.map_pipeline import (
     save_compiled_map,
     save_map_source,
     validate_map_links,
+    validate_area_groups,
     validate_map_event_links,
     validate_map_source,
     validate_tileset,
@@ -173,6 +175,8 @@ class MapEditorApplication:
                         "profile": source.get("profile"),
                         "tileset_id": source.get("tileset_id"),
                         "size": source.get("size"),
+                        "area_parent_id": source.get("area_parent_id"),
+                        "area_name": source.get("area_name"),
                     }
                 )
         if not catalog and not self.source_path.is_file():
@@ -256,12 +260,74 @@ class MapEditorApplication:
             loaded[current_id] = current
         return loaded
 
+    def sources_with_arrival_renames(
+        self,
+        data: Mapping[str, Any],
+        arrival_id_renames: object | None,
+    ) -> tuple[dict[str, Mapping[str, Any]], dict[str, dict[str, Any]]]:
+        sources = self.map_sources(data)
+        if arrival_id_renames is None:
+            return sources, {}
+        if not isinstance(arrival_id_renames, Mapping):
+            raise ValueError("到着地点IDの変更履歴が不正です。")
+        if not arrival_id_renames:
+            return sources, {}
+        map_id = data.get("map_id")
+        if not isinstance(map_id, str):
+            raise ValueError("マップIDが不正です。")
+        original, is_new = self.load_source_by_id(map_id)
+        if is_new:
+            raise ValueError("未保存マップの到着地点ID変更履歴は指定できません。")
+        original_ids = {
+            arrival.get("id") for arrival in original.get("arrival_points", [])
+            if isinstance(arrival, Mapping)
+        }
+        arrival_points = data.get("arrival_points")
+        if not isinstance(arrival_points, list):
+            raise ValueError("到着地点の一覧が不正です。")
+        current_ids = {
+            arrival.get("id") for arrival in arrival_points
+            if isinstance(arrival, Mapping)
+        }
+        for old_id, new_id in arrival_id_renames.items():
+            if (
+                not isinstance(old_id, str) or not isinstance(new_id, str)
+                or not _valid_id(old_id) or not _valid_id(new_id)
+                or old_id not in original_ids or new_id not in current_ids
+            ):
+                raise ValueError("到着地点IDの変更履歴が現在のマップと一致しません。")
+        updates: dict[str, dict[str, Any]] = {}
+        for source_id, source in sources.items():
+            sites = source.get("sites")
+            if not isinstance(sites, list):
+                continue
+            if not any(
+                isinstance(site, Mapping)
+                and isinstance(site.get("destination"), Mapping)
+                and site["destination"].get("map_id") == map_id
+                and site["destination"].get("arrival_id") in arrival_id_renames
+                for site in sites
+            ):
+                continue
+            updated = deepcopy(source)
+            for site in updated["sites"]:
+                destination = site.get("destination") if isinstance(site, dict) else None
+                if isinstance(destination, dict) and destination.get("map_id") == map_id:
+                    old_id = destination.get("arrival_id")
+                    if old_id in arrival_id_renames:
+                        destination["arrival_id"] = arrival_id_renames[old_id]
+            sources[source_id] = updated
+            if source_id != map_id:
+                updates[source_id] = updated
+        return sources, updates
+
     def destination_options(
         self,
         current: Mapping[str, Any],
     ) -> list[dict[str, object]]:
-        return [
-            {
+        options = []
+        for map_id, source in sorted(self.map_sources(current).items()):
+            option = {
                 "map_id": map_id,
                 "arrival_ids": [
                     arrival.get("id")
@@ -270,8 +336,12 @@ class MapEditorApplication:
                     and isinstance(arrival.get("id"), str)
                 ],
             }
-            for map_id, source in sorted(self.map_sources(current).items())
-        ]
+            if source.get("area_parent_id"):
+                option["label"] = f"{source['area_parent_id']} / {source.get('area_name', map_id)}"
+            elif source.get("area_name"):
+                option["label"] = f"{map_id} / {source['area_name']}"
+            options.append(option)
+        return options
 
     def site_options(self, current: Mapping[str, Any]) -> list[str]:
         return sorted(
@@ -408,9 +478,13 @@ class MapEditorApplication:
         self,
         data: object,
         site_names_ja: object | None = None,
+        arrival_id_renames: object | None = None,
     ) -> tuple[list[dict[str, str]], dict[str, Any] | None, dict[str, Any] | None]:
         if not isinstance(data, dict) or not isinstance(data.get("tileset_id"), str):
             issue = Diagnostic("error", "invalid_tileset_id", "tileset_id", "タイルセットIDが不正です。")
+            return [issue.as_dict()], None, None
+        if not isinstance(data.get("map_id"), str):
+            issue = Diagnostic("error", "invalid_map_id", "map_id", "マップIDが不正です。")
             return [issue.as_dict()], None, None
         try:
             tileset = self.load_tileset(data["tileset_id"])
@@ -418,23 +492,36 @@ class MapEditorApplication:
         except (OSError, ValueError) as error:
             issue = Diagnostic("error", "missing_tileset", "tileset_id", str(error))
             return [issue.as_dict()], None, None
+        try:
+            sources, _updates = self.sources_with_arrival_renames(data, arrival_id_renames)
+        except ValueError as error:
+            issue = Diagnostic("error", "invalid_arrival_renames", "arrival_points", str(error))
+            return [issue.as_dict()], None, None
+        current = sources[data["map_id"]]
         tileset_diagnostics, image_info = validate_tileset(tileset, image_path, self.palette_path)
         map_diagnostics = validate_map_source(
-            data,
+            current,
             tileset,
             bgm_ids=self.bgm_options(),
             item_keys=self.item_keys(),
         )
         link_diagnostics = (
-            validate_map_links(self.map_sources(data))
+            validate_map_links(sources)
             if isinstance(data, dict)
             else []
+        )
+        area_diagnostics = (
+            [
+                item for item in validate_area_groups(sources)
+                if item.path.startswith(f"{data.get('map_id')}.")
+            ]
+            if isinstance(data, dict) else []
         )
         event_link_diagnostics = (
             [
                 item
                 for item in validate_map_event_links(
-                    self.map_sources(data), self.event_definitions()
+                    sources, self.event_definitions()
                 )
                 if item.path.startswith(f"{data.get('map_id')}.")
             ]
@@ -448,6 +535,7 @@ class MapEditorApplication:
             *tileset_diagnostics,
             *map_diagnostics,
             *link_diagnostics,
+            *area_diagnostics,
             *event_link_diagnostics,
             *name_diagnostics,
         ]
@@ -459,14 +547,14 @@ class MapEditorApplication:
         if not tileset_has_errors:
             try:
                 resolved = resolve_map(
-                    data,
+                    current,
                     tileset,
                     permitted_error_codes=PREVIEW_PERMITTED_MAP_ERROR_CODES,
                 )
             except ValueError as error:
                 if has_errors:
                     preview_data = {
-                        **data,
+                        **current,
                         "sites": [],
                         "arrival_points": [],
                         "actors": [],
@@ -588,6 +676,33 @@ class MapEditorApplication:
         data = initial_map_source(map_id, tileset, profile, width, height)
         return self._document_payload(data, is_new=True)
 
+    def create_area_document_payload(
+        self, parent_id: str, area_name: str, width: int, height: int,
+    ) -> dict[str, Any]:
+        if not isinstance(parent_id, str) or not _valid_id(parent_id):
+            raise ValueError("親マップIDはlower_snake_caseで指定してください。")
+        if not isinstance(area_name, str) or not area_name.strip():
+            raise ValueError("エリア名を入力してください。")
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in (width, height)):
+            raise ValueError("エリア寸法が不正です。")
+        parent, is_new = self.load_source_by_id(parent_id)
+        if is_new or parent.get("area_parent_id") is not None:
+            raise ValueError("保存済みの親マップを指定してください。")
+        for _attempt in range(10):
+            map_id = f"{parent_id}_area_{secrets.token_hex(6)}"
+            if not self.source_path_for(map_id).exists():
+                break
+        else:
+            raise ValueError("重複しないエリアIDを生成できませんでした。")
+        tileset = self.load_tileset(parent["tileset_id"])
+        data = initial_map_source(map_id, tileset, parent["profile"], width, height)
+        data["area_parent_id"] = parent_id
+        data["area_name"] = area_name.strip()
+        data["bgm_id"] = parent["bgm_id"]
+        if parent["profile"] == "dungeon":
+            data["random_encounter"] = dict(parent["random_encounter"])
+        return self._document_payload(data, is_new=True)
+
     def change_tileset_document_payload(
         self,
         map_id: str,
@@ -600,6 +715,8 @@ class MapEditorApplication:
             raise ValueError("未保存マップのタイルセットは新規作成画面で選択してください。")
         if source.get("tileset_id") == tileset_id:
             raise ValueError("現在と異なるタイルセットを選択してください。")
+        if source.get("area_parent_id") is not None:
+            raise ValueError("マップチップは親マップから変更してください。")
         tileset = self.load_tileset(tileset_id)
         if source.get("profile") != tileset.get("profile"):
             raise ValueError("マップとタイルセットのprofileが一致していません。")
@@ -612,6 +729,8 @@ class MapEditorApplication:
             height,
         )
         reset_source["bgm_id"] = source["bgm_id"]
+        if "area_name" in source:
+            reset_source["area_name"] = source["area_name"]
         if source.get("profile") == "dungeon":
             reset_source["random_encounter"] = dict(source["random_encounter"])
         payload = self._document_payload(reset_source, is_new=False)
@@ -631,6 +750,8 @@ class MapEditorApplication:
         for other_id, source in self.map_sources(target).items():
             if other_id == map_id:
                 continue
+            if source.get("area_parent_id") == map_id:
+                blockers.add(f"{other_id}がこのマップのエリア")
             for site in source.get("sites", []):
                 if not isinstance(site, Mapping):
                     continue
@@ -676,13 +797,46 @@ class MapEditorApplication:
         self,
         data: object,
         site_names_ja: object,
+        arrival_id_renames: object | None = None,
     ) -> dict[str, Any]:
-        diagnostics, image_info, resolved = self.validate(data, site_names_ja)
+        diagnostics, image_info, resolved = self.validate(data, site_names_ja, arrival_id_renames)
         if any(item["severity"] == "error" for item in diagnostics) or not isinstance(data, dict):
             return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
+        sources, reference_updates = self.sources_with_arrival_renames(data, arrival_id_renames)
+        data = sources[data["map_id"]]
         tileset = self.load_tileset(data["tileset_id"])
+        updates = dict(reference_updates)
+        if data.get("area_parent_id") is None:
+            for child_id, original in sources.items():
+                if original.get("area_parent_id") != data["map_id"]:
+                    continue
+                child = dict(original)
+                if child.get("tileset_id") != data["tileset_id"]:
+                    child = initial_map_source(child_id, tileset, data["profile"], *original["size"])
+                    child["area_parent_id"] = data["map_id"]
+                    child["area_name"] = original["area_name"]
+                    if "random_encounter" in original and data["profile"] == "dungeon":
+                        child["random_encounter"] = dict(original["random_encounter"])
+                child["bgm_id"] = data["bgm_id"]
+                child_issues = validate_map_source(child, tileset, bgm_ids=self.bgm_options(), item_keys=self.item_keys())
+                if any(item.severity == "error" for item in child_issues):
+                    diagnostics.extend(item.as_dict() for item in child_issues)
+                    return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
+                if child != original:
+                    updates[child_id] = child
         try:
             compiled = compile_map(data, tileset, self.source_image(tileset), self.palette_path)
+            compiled_updates = []
+            for update in updates.values():
+                update_tileset = self.load_tileset(update["tileset_id"])
+                update_issues = validate_map_source(update, update_tileset, bgm_ids=self.bgm_options(), item_keys=self.item_keys())
+                if any(item.severity == "error" for item in update_issues):
+                    diagnostics.extend(item.as_dict() for item in update_issues)
+                    return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
+                compiled_updates.append((
+                    update,
+                    compile_map(update, update_tileset, self.source_image(update_tileset), self.palette_path),
+                ))
         except (OSError, ValueError) as error:
             diagnostics.append(Diagnostic("error", "compile_failed", "$", str(error)).as_dict())
             return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
@@ -691,6 +845,9 @@ class MapEditorApplication:
         runtime_path = self.runtime_path_for(map_id)
         save_map_source(source_path, data)
         save_compiled_map(runtime_path, compiled)
+        for update, update_compiled in compiled_updates:
+            save_map_source(self.source_path_for(update["map_id"]), update)
+            save_compiled_map(self.runtime_path_for(update["map_id"]), update_compiled)
         self._save_site_names(data, site_names_ja)
         return {
             "saved": True,
@@ -698,6 +855,7 @@ class MapEditorApplication:
             "image_info": image_info,
             "resolved": resolved,
             "source_hash": compiled.runtime["source_hash"],
+            **({"data": data} if arrival_id_renames else {}),
         }
 
     def _save_site_names(
@@ -875,6 +1033,7 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                 "/api/resolve",
                 "/api/save",
                 "/api/create",
+                "/api/create-area",
                 "/api/change-tileset",
                 "/api/delete",
             ):
@@ -913,6 +1072,13 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                         payload.get("width"),
                         payload.get("height"),
                     )
+                elif parsed.path == "/api/create-area":
+                    if not isinstance(payload, dict):
+                        raise ValueError("新規エリアの設定が不正です。")
+                    response = application.create_area_document_payload(
+                        payload.get("parent_id"), payload.get("area_name"),
+                        payload.get("width"), payload.get("height"),
+                    )
                 elif parsed.path == "/api/change-tileset":
                     if not isinstance(payload, dict):
                         raise ValueError("タイルセット変更の設定が不正です。")
@@ -925,11 +1091,15 @@ def make_handler(application: MapEditorApplication) -> type[BaseHTTPRequestHandl
                         raise ValueError("削除対象マップが不正です。")
                     response = application.delete_map(payload.get("map_id"))
                 elif parsed.path == "/api/save":
-                    response = application.save(data, site_names_ja)
+                    response = application.save(
+                        data, site_names_ja,
+                        payload.get("arrival_id_renames") if isinstance(payload, dict) else None,
+                    )
                 else:
                     diagnostics, image_info, resolved = application.validate(
                         data,
                         site_names_ja,
+                        payload.get("arrival_id_renames") if isinstance(payload, dict) else None,
                     )
                     response = {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
                 self._send_json(response)

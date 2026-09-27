@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from PIL import Image
 
-from scripts.map_pipeline import initial_worldmap_tileset, save_tileset
+from scripts.map_pipeline import initial_worldmap_tileset, load_map_source, save_tileset
 from tools.editor.server import create_server, make_handler
 from tools.event_editor.server import EventEditorApplication
 from tools.map_editor.server import MapEditorApplication
@@ -304,6 +304,63 @@ class EditorServerTest(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             self.get_json("/event/api/document")
         self.assertEqual(context.exception.code, 403)
+
+    def test_creates_area_through_unified_map_editor(self) -> None:
+        root = self.get_json("/map/api/document?token=shared-token")["data"]
+        saved = self.post_json(
+            "/map/api/save", {"data": root, "site_names_ja": {}},
+            "X-Map-Editor-Token",
+        )
+        self.assertTrue(saved["saved"])
+        area = self.post_json(
+            "/map/api/create-area",
+            {"parent_id": "test_world", "area_name": "地下2階", "width": 20, "height": 18},
+            "X-Map-Editor-Token",
+        )["data"]
+        self.assertRegex(area["map_id"], r"^test_world_area_[0-9a-f]{12}$")
+        self.assertEqual(area["area_parent_id"], "test_world")
+        self.assertEqual(area["area_name"], "地下2階")
+        self.assertEqual(area["size"], [20, 18])
+
+    def test_renames_arrival_references_through_unified_map_editor(self) -> None:
+        root = self.get_json("/map/api/document?token=shared-token")["data"]
+        root["grounds"][2][2] = "plain"
+        self.assertTrue(self.post_json(
+            "/map/api/save", {"data": root, "site_names_ja": {}},
+            "X-Map-Editor-Token",
+        )["saved"])
+        area = self.post_json(
+            "/map/api/create-area",
+            {"parent_id": "test_world", "area_name": "地下2階", "width": 16, "height": 15},
+            "X-Map-Editor-Token",
+        )["data"]
+        area["grounds"][2][2] = "plain"
+        area["arrival_points"] = [{
+            "id": "from_a", "position": [2, 2], "facing": "up",
+            "teleport_enabled": False, "site_id": None,
+        }]
+        self.assertTrue(self.post_json(
+            "/map/api/save", {"data": area, "site_names_ja": {}},
+            "X-Map-Editor-Token",
+        )["saved"])
+        root["sites"] = [{
+            "id": "stairs_1", "anchor": {"kind": "cell", "position": [2, 2]},
+            "entrance_offsets": [[0, 0]],
+            "destination": {"map_id": area["map_id"], "arrival_id": "from_a"},
+        }]
+        self.assertTrue(self.post_json(
+            "/map/api/save", {"data": root, "site_names_ja": {"stairs_1": "階段"}},
+            "X-Map-Editor-Token",
+        )["saved"])
+        area["arrival_points"][0]["id"] = "from_b"
+        result = self.post_json(
+            "/map/api/save",
+            {"data": area, "site_names_ja": {}, "arrival_id_renames": {"from_a": "from_b"}},
+            "X-Map-Editor-Token",
+        )
+        self.assertTrue(result["saved"], result["diagnostics"])
+        saved_root = load_map_source(self.map_application.source_path_for("test_world"))
+        self.assertEqual(saved_root["sites"][0]["destination"]["arrival_id"], "from_b")
 
     def test_routes_validate_requests_to_the_selected_editor(self) -> None:
         map_payload = self.get_json("/map/api/document?token=shared-token")

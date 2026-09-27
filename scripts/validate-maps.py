@@ -14,6 +14,7 @@ from map_pipeline import (
     resolve_source_image,
     validate_map_source,
     validate_map_links,
+    validate_area_groups,
     validate_map_event_links,
     validate_tileset,
 )
@@ -139,6 +140,7 @@ def main() -> int:
             if isinstance(map_id, str):
                 all_sources[map_id] = source
         link_diagnostics = validate_map_links(all_sources)
+        link_diagnostics.extend(validate_area_groups(all_sources))
         event_sources = load_event_sources(content_root)
         event_catalog = compile_event_sources(
             event_sources,

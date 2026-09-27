@@ -143,6 +143,9 @@ function navigation(editor, dirty = true) {
     const mapStart = source.indexOf('byId("map-select").addEventListener("change"');
     const mapEnd = source.indexOf('\n});', mapStart);
     vm.runInContext(source.slice(mapStart, mapEnd + '\n});'.length), context);
+    const areaStart = source.indexOf('byId("area-select").addEventListener("change"');
+    const areaEnd = source.indexOf('\n});', areaStart);
+    vm.runInContext(source.slice(areaStart, areaEnd + '\n});'.length), context);
   }
   if (editor === "mapchip_metadata") {
     const tilesetStart = source.indexOf('byId("tileset-select").addEventListener("change"');
@@ -163,6 +166,7 @@ function navigation(editor, dirty = true) {
   return { context, state, dialog, buttons, assignments, clickLink, clickChoice, loadedMaps, loadedTilesets, messages,
     saves: () => saves, discardedDrafts: () => discardedDrafts, selectorRenders: () => selectorRenders,
     changeMap: (mapId) => callbacks.get("map-select:change")({ target: { value: mapId } }),
+    changeArea: (mapId) => callbacks.get("area-select:change")({ target: { value: mapId } }),
     changeTileset: (tilesetId) => callbacks.get("tileset-select:change")({ target: { value: tilesetId } }) };
 }
 
@@ -265,6 +269,36 @@ test("map switch: dirty selection prompts and focuses save, cancel restores curr
   assert.equal(app.state.dirty, true);
   assert.equal(app.context.pendingMapNavigationId, null);
   assert.equal(app.dialog.open, false);
+});
+
+test("area switch saves before loading the selected area", async () => {
+  const app = navigation("map_editor");
+  app.changeArea("current_b2");
+  assert.equal(app.dialog.open, true);
+  assert.equal(app.context.pendingMapNavigationId, "current_b2");
+  await app.context.handleNavigationChoice("save");
+  assert.equal(app.saves(), 1);
+  assert.deepEqual(app.loadedMaps, ["current_b2"]);
+});
+
+test("area actor events use the parent map namespace", () => {
+  const source = readFileSync(new URL("../tools/map_editor/static/app.js", import.meta.url), "utf8");
+  const helper = source.match(/^const logicalMapId = .*$/m)?.[0];
+  assert.ok(helper);
+  const start = source.indexOf("function openNewActorEvent(");
+  const end = source.indexOf("\nfunction ", start + 1);
+  let destination;
+  const state = { data: { map_id: "cave_b2", area_parent_id: "cave" }, siteNamesJa: {}, dirty: true };
+  const context = vm.createContext({
+    state, editorRoute: "map", crypto: { randomUUID: () => "draft" },
+    currentActor: () => ({ id: "guide" }),
+    sessionStorage: { setItem() {} },
+    editorUrl: (_editor, parameters) => { destination = parameters; return "/event/"; },
+    window: { location: { assign() {} } },
+  });
+  vm.runInContext(`${helper}\n${source.slice(start, end)}`, context);
+  context.openNewActorEvent();
+  assert.equal(destination.namespace, "cave");
 });
 
 test("map switch: save completes before loading the requested map", async () => {

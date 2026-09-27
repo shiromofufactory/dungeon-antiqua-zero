@@ -48,6 +48,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
 }
 
@@ -57,8 +58,8 @@
 }
 
 .app-header .editor-context select {
-  width: min(220px, 22vw);
-  min-width: 130px;
+  width: min(170px, 16vw);
+  min-width: 110px;
 }
 
 .app-header > .toolbar,

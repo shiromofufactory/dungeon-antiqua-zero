@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -103,6 +104,129 @@ class MapEditorServerTest(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=2)
         self.temporary.cleanup()
+
+    def test_areas_keep_independent_layouts_and_share_parent_bgm(self) -> None:
+        root = self.application.document_payload()["data"]
+        self.assertTrue(self.application.save(root, {})["saved"])
+        area = self.post_payload("/api/create-area", {
+            "parent_id": "test_world",
+            "area_name": "地下2階", "width": 20, "height": 18,
+        })["data"]
+        area_map_id = area["map_id"]
+        self.assertRegex(area_map_id, r"^test_world_area_[0-9a-f]{12}$")
+        self.assertEqual(area["size"], [20, 18])
+        self.assertEqual(area["area_parent_id"], "test_world")
+        self.assertTrue(self.application.save(area, {})["saved"])
+        self.assertIn(f"{area_map_id}がこのマップのエリア", self.application.map_delete_blockers("test_world"))
+        area["bgm_id"] = "da3-town"
+        self.assertIn(
+            "area_shared_setting_mismatch",
+            {issue["code"] for issue in self.application.validate(area)[0]},
+        )
+        root["bgm_id"] = "da3-town"
+        self.assertTrue(self.application.save(root, {})["saved"])
+        self.assertEqual(
+            load_map_source(self.application.source_path_for(area_map_id))["bgm_id"],
+            "da3-town",
+        )
+        alternate = initial_worldmap_tileset()
+        alternate["tileset_id"] = "world_alt"
+        save_tileset(self.application.content_root / "maps" / "tilesets" / "world_alt.json", alternate)
+        reset = self.application.change_tileset_document_payload("test_world", "world_alt")["data"]
+        self.assertTrue(self.application.save(reset, {})["saved"])
+        saved_area = load_map_source(self.application.source_path_for(area_map_id))
+        self.assertEqual(saved_area["tileset_id"], "world_alt")
+        self.assertEqual(saved_area["size"], [20, 18])
+        self.assertEqual(saved_area["area_name"], "地下2階")
+
+    def test_new_area_id_retries_when_generated_id_is_already_saved(self) -> None:
+        root = self.application.document_payload()["data"]
+        self.assertTrue(self.application.save(root, {})["saved"])
+        with patch("tools.map_editor.server.secrets.token_hex", return_value="012345abcdef"):
+            first = self.application.create_area_document_payload(
+                "test_world", "地下1階", 16, 15,
+            )["data"]
+        self.assertEqual(first["map_id"], "test_world_area_012345abcdef")
+        self.assertTrue(self.application.save(first, {})["saved"])
+        with patch(
+            "tools.map_editor.server.secrets.token_hex",
+            side_effect=["012345abcdef", "fedcba543210"],
+        ):
+            second = self.application.create_area_document_payload(
+                "test_world", "地下2階", 16, 15,
+            )["data"]
+        self.assertEqual(second["map_id"], "test_world_area_fedcba543210")
+
+    def test_dungeon_area_encounters_are_independent(self) -> None:
+        tileset = initial_tileset(
+            "cave", "mapchips/village", "dungeon", "floor", "passable",
+        )
+        save_tileset(self.application.content_root / "maps" / "tilesets" / "cave.json", tileset)
+        root = initial_map_source("cave", tileset, "dungeon", 16, 15)
+        self.assertTrue(self.application.save(root, {})["saved"])
+        area = self.application.create_area_document_payload(
+            "cave", "地下2階", 32, 20,
+        )["data"]
+        area_map_id = area["map_id"]
+        area["random_encounter"]["danger"] = "high"
+        self.assertTrue(self.application.save(area, {})["saved"])
+        self.assertEqual(load_map_source(self.application.source_path_for("cave"))["random_encounter"]["danger"], "low")
+        self.assertEqual(load_map_source(self.application.source_path_for(area_map_id))["random_encounter"]["danger"], "high")
+        runtime = json.loads(self.application.runtime_path_for(area_map_id).read_text(encoding="utf-8"))
+        self.assertEqual(runtime["map_id"], area_map_id)
+        self.assertEqual(runtime["size"], [32, 20])
+        self.assertEqual(runtime["random_encounter"]["danger"], "high")
+        self.assertEqual(runtime["bgm_id"], root["bgm_id"])
+
+    def test_renaming_area_arrival_updates_source_and_compiled_move_sources(self) -> None:
+        tileset = self.application.load_tileset("village")
+        parent = initial_map_source("sample_village", tileset, "town", 16, 15)
+        self.assertTrue(self.application.save(parent, {})["saved"])
+        area = self.application.create_area_document_payload(
+            "sample_village", "地下2階", 16, 15,
+        )["data"]
+        area["arrival_points"] = [{
+            "id": "from_a", "position": [3, 2], "facing": "up",
+            "teleport_enabled": False, "site_id": None,
+        }]
+        self.assertTrue(self.application.save(area, {})["saved"])
+        for index, position in enumerate(([2, 2], [4, 2]), start=1):
+            parent["sites"].append({
+                "id": f"stairs_{index}",
+                "anchor": {"kind": "cell", "position": position},
+                "entrance_offsets": [[0, 0]],
+                "destination": {"map_id": area["map_id"], "arrival_id": "from_a"},
+            })
+        self.assertTrue(self.application.save(parent, {})["saved"])
+
+        renamed = load_map_source(self.application.source_path_for(area["map_id"]))
+        renamed["arrival_points"][0]["id"] = "from_b"
+        body = {"data": renamed, "site_names_ja": {}, "arrival_id_renames": {"from_a": "from_b"}}
+        rejected = self.post_payload("/api/save", {
+            **body, "arrival_id_renames": {"missing_id": "from_b"},
+        })
+        self.assertFalse(rejected["saved"])
+        self.assertEqual(
+            load_map_source(self.application.source_path_for("sample_village"))["sites"][0]["destination"]["arrival_id"],
+            "from_a",
+        )
+        unresolved = self.post_payload("/api/resolve", {"data": renamed, "site_names_ja": {}})
+        self.assertIn("missing_destination_arrival", {item["code"] for item in unresolved["diagnostics"]})
+        preview = self.post_payload("/api/resolve", body)
+        self.assertNotIn("missing_destination_arrival", {item["code"] for item in preview["diagnostics"]})
+        result = self.post_payload("/api/save", body)
+        self.assertTrue(result["saved"], result["diagnostics"])
+        saved_parent = load_map_source(self.application.source_path_for("sample_village"))
+        runtime_parent = json.loads(self.application.runtime_path_for("sample_village").read_text(encoding="utf-8"))
+        for source in (saved_parent, runtime_parent):
+            self.assertEqual(
+                [site["destination"]["arrival_id"] for site in source["sites"]],
+                ["from_b", "from_b"],
+            )
+        self.assertEqual(
+            load_map_source(self.application.source_path_for(area["map_id"]))["arrival_points"][0]["id"],
+            "from_b",
+        )
 
     def get_json(self, path: str, headers: dict[str, str] | None = None) -> dict:
         request = Request(f"{self.base_url}{path}", headers=headers or {})
@@ -423,10 +547,10 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('state.pointerDrag.kind === "range_selection"', script)
         self.assertIn('state.pointerDrag.kind === "bulk"', script)
         self.assertIn("drawRangeSelection(context, scale)", script)
-        self.assertIn("function clearBulkSelectionWithEscape(event)", script)
+        self.assertIn("function rightClickWithEscape(event)", script)
         self.assertIn('event.key !== "Escape"', script)
         self.assertIn('document.querySelector("dialog[open]")', script)
-        self.assertIn("if (clearBulkSelectionWithEscape(event)) return", script)
+        self.assertIn("if (rightClickWithEscape(event)) return", script)
 
     def test_tab_change_clears_other_selections_and_object_trigger_has_own_tool(self) -> None:
         script = self.get_text("/app.js")

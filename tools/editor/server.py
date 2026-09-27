@@ -392,6 +392,15 @@ def make_handler(
                     payload.get("width"),
                     payload.get("height"),
                 )
+            if path == "/api/create-area":
+                if not isinstance(payload, dict):
+                    raise ValueError("新規エリアの設定が不正です。")
+                return map_application.create_area_document_payload(
+                    payload.get("parent_id"),
+                    payload.get("area_name"),
+                    payload.get("width"),
+                    payload.get("height"),
+                )
             if path == "/api/change-tileset":
                 if not isinstance(payload, dict):
                     raise ValueError("タイルセット変更の設定が不正です。")
@@ -410,9 +419,13 @@ def make_handler(
                 else None
             )
             if path == "/api/save":
-                return map_application.save(data, site_names_ja)
+                return map_application.save(
+                    data, site_names_ja,
+                    payload.get("arrival_id_renames") if isinstance(payload, dict) else None,
+                )
             diagnostics, image_info, resolved = map_application.validate(
-                data, site_names_ja
+                data, site_names_ja,
+                payload.get("arrival_id_renames") if isinstance(payload, dict) else None,
             )
             return {
                 "saved": False,
@@ -461,7 +474,7 @@ def make_handler(
             allowed_paths = {"/api/validate", "/api/save"}
             if editor == "map":
                 allowed_paths.update(
-                    ("/api/resolve", "/api/create", "/api/change-tileset", "/api/delete")
+                    ("/api/resolve", "/api/create", "/api/create-area", "/api/change-tileset", "/api/delete")
                 )
             elif editor == "tileset":
                 allowed_paths.update(("/api/create", "/api/delete"))

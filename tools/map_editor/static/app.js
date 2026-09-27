@@ -45,6 +45,8 @@ const state = {
   selectedInstanceId: null,
   selectedSiteId: null,
   selectedArrivalId: null,
+  savedArrivalIds: new Set(),
+  arrivalIdRenames: {},
   selectedActorId: null,
   selectedTriggerId: null,
   bulkSelection: [],
@@ -88,6 +90,7 @@ const escapeHtml = (value) => String(value)
   .replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;");
+const logicalMapId = (data = state.data) => data?.area_parent_id || data?.map_id;
 
 function editorApiPath(path) {
   return editorRoute ? `/${editorRoute}${path}` : path;
@@ -111,6 +114,7 @@ function configureEditorNavigation() {
     link.href = editorUrl(link.dataset.editorLink, {
       map: state.data?.map_id,
       tileset: state.data?.tileset_id,
+      namespace: logicalMapId(),
     });
   });
 }
@@ -171,7 +175,7 @@ function openNewActorEvent() {
     return;
   }
   const url = editorUrl("event", {
-    namespace: state.data.map_id,
+    namespace: logicalMapId(),
     new_actor_event: draftId,
   });
   state.dirty = false;
@@ -249,21 +253,30 @@ function renderMapSelector() {
       profile: state.data.profile,
       tileset_id: state.data.tileset_id,
       size: state.data.size,
+      area_parent_id: state.data.area_parent_id,
+      area_name: state.data.area_name,
     };
     const index = records.findIndex((item) => item.map_id === state.data.map_id);
     if (index === -1) records.push({ ...current, is_new: true });
     else if (state.dirty) records[index] = { ...records[index], ...current, dirty: true };
   }
   records.sort((left, right) => left.map_id.localeCompare(right.map_id));
-  select.innerHTML = records.map((item) => {
+  const roots = records.filter((item) => !item.area_parent_id);
+  select.innerHTML = roots.map((item) => {
     const suffix = item.is_new ? "（未保存）" : `${item.profile} / ${item.tileset_id}${item.dirty ? "（未保存）" : ""}`;
-    return `<option value="${escapeHtml(item.map_id)}" ${item.map_id === state.data?.map_id ? "selected" : ""}>${escapeHtml(item.map_id)} — ${escapeHtml(suffix)}</option>`;
+    return `<option value="${escapeHtml(item.map_id)}" ${item.map_id === logicalMapId() ? "selected" : ""}>${escapeHtml(item.map_id)} — ${escapeHtml(suffix)}</option>`;
   }).join("");
-  select.disabled = records.length === 0;
+  select.disabled = roots.length === 0;
+  const areaSelect = byId("area-select");
+  const rootId = logicalMapId();
+  const areas = records.filter((item) => item.map_id === rootId || item.area_parent_id === rootId);
+  areaSelect.innerHTML = areas.map((item) => `<option value="${escapeHtml(item.map_id)}" ${item.map_id === state.data?.map_id ? "selected" : ""}>${escapeHtml(item.area_name || (item.map_id === rootId ? "メイン" : item.map_id))}${item.dirty || item.is_new ? "（未保存）" : ""}</option>`).join("");
+  areaSelect.disabled = areas.length < 2;
   const persisted = state.data && state.mapCatalog.some((item) => item.map_id === state.data.map_id);
   const alternatives = state.tilesetCatalog.filter((item) => item.profile === state.data?.profile && item.tileset_id !== state.data?.tileset_id);
-  byId("change-map-tileset-button").disabled = !persisted || alternatives.length === 0;
+  byId("change-map-tileset-button").disabled = !persisted || !!state.data?.area_parent_id || alternatives.length === 0;
   byId("delete-map-button").disabled = !persisted || state.data?.map_id === "worldmap";
+  byId("new-area-button").disabled = !state.mapCatalog.some((item) => item.map_id === rootId);
 }
 
 function loadLastMapId() {
@@ -303,6 +316,8 @@ function applyDocumentPayload(payload) {
   state.selectedInstanceId = null;
   state.selectedSiteId = null;
   state.selectedArrivalId = null;
+  state.savedArrivalIds = new Set(payload.is_new ? [] : (payload.data.arrival_points || []).map((arrival) => arrival.id));
+  state.arrivalIdRenames = {};
   state.selectedActorId = null;
   state.selectedTriggerId = null;
   state.bulkSelection = [];
@@ -449,13 +464,14 @@ function redo() {
 }
 
 function changeSnapshot() {
-  return JSON.stringify({ data: state.data, siteNamesJa: state.siteNamesJa });
+  return JSON.stringify({ data: state.data, siteNamesJa: state.siteNamesJa, arrivalIdRenames: state.arrivalIdRenames });
 }
 
 function restoreChangeSnapshot(snapshot) {
   const value = JSON.parse(snapshot);
   state.data = value.data;
   state.siteNamesJa = value.siteNamesJa;
+  state.arrivalIdRenames = value.arrivalIdRenames || {};
   state.siteNameEditing = false;
 }
 
@@ -934,19 +950,20 @@ function bulkSelectionSummary() {
 function availableDestinations() {
   const options = state.destinationOptions.map((option) => ({
     map_id: option.map_id,
+    label: option.label || option.map_id,
     arrival_ids: [...option.arrival_ids],
   }));
   const current = options.find((option) => option.map_id === state.data.map_id);
   const arrivalIds = state.data.arrival_points.map((arrival) => arrival.id);
   if (current) current.arrival_ids = arrivalIds;
-  else options.push({ map_id: state.data.map_id, arrival_ids: arrivalIds });
+  else options.push({ map_id: state.data.map_id, label: state.data.area_name ? `${logicalMapId()} / ${state.data.area_name}` : state.data.map_id, arrival_ids: arrivalIds });
   return options.sort((left, right) => left.map_id.localeCompare(right.map_id));
 }
 
 function destinationMapOptions(selected) {
-  const mapIds = availableDestinations().map((option) => option.map_id);
-  if (selected && !mapIds.includes(selected)) mapIds.push(selected);
-  return `<option value="" ${selected ? "" : "selected"}>選択してください</option>` + mapIds.map((mapId) => `<option value="${escapeHtml(mapId)}" ${selected === mapId ? "selected" : ""}>${escapeHtml(mapId)}${availableDestinations().some((option) => option.map_id === mapId) ? "" : "（未作成）"}</option>`).join("");
+  const options = availableDestinations();
+  if (selected && !options.some((option) => option.map_id === selected)) options.push({ map_id: selected, label: `${selected}（未作成）` });
+  return `<option value="" ${selected ? "" : "selected"}>選択してください</option>` + options.map((option) => `<option value="${escapeHtml(option.map_id)}" ${selected === option.map_id ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("");
 }
 
 function destinationArrivalOptions(mapId, selected) {
@@ -1060,7 +1077,7 @@ function renderInspector() {
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>イベント</label><select data-trigger-field="event_id">${eventIdOptions(trigger.event_id)}</select></div>
           <div class="field full"><label>発火方法</label><div class="row">${["step","touch"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
-        </div><div class="row between" style="margin-top:9px"><div class="row"><button class="button ghost small" data-action="edit-trigger-offsets">対象セルを編集</button>${editorRoute ? `<button class="button secondary small" data-action="open-trigger-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
+        </div><div class="row between" style="margin-top:9px"><div class="row">${editorRoute ? `<button class="button secondary small" data-action="open-trigger-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-trigger">triggerを削除</button></div>` : `<div class="empty-state">トリガーを選択してください。</div>`}
     </div>`;
   const bgmOptions = [...new Set([...state.bgmOptions, state.data.bgm_id])]
     .filter(Boolean)
@@ -1073,7 +1090,8 @@ function renderInspector() {
     <div class="section">
       <div class="section-title"><h2>マップ設定</h2><span class="subtle">${escapeHtml(state.data.profile)} / ${escapeHtml(state.data.tileset_id)}</span></div>
       <div class="form-grid">
-        <div class="field full"><label>BGM</label><select data-map-field="bgm_id">${bgmOptions}</select></div>
+        <div class="field full"><label>エリア名</label><input data-map-field="area_name" type="text" value="${escapeHtml(state.data.area_name || "")}" placeholder="例：地下1階"></div>
+        <div class="field full"><label>BGM</label><select data-map-field="bgm_id" ${state.data.area_parent_id ? "disabled" : ""}>${bgmOptions}</select></div>
         ${encounterSettings}
         <div class="field"><label>幅</label><input id="map-width" type="number" min="${MIN_MAP_WIDTH}" max="512" value="${width}"></div>
         <div class="field"><label>高さ</label><input id="map-height" type="number" min="${MIN_MAP_HEIGHT}" max="512" value="${height}"></div>
@@ -1101,6 +1119,7 @@ function renderIssues() {
 
 function renderAll() {
   if (!state.data) return;
+  renderMapSelector();
   normalizeSelections();
   clearSelectionsOutsideTab(state.tab);
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === state.tab));
@@ -1110,7 +1129,7 @@ function renderAll() {
   byId("ground-only-control").hidden = state.tab !== "ground";
   byId("animation-toggle").textContent = state.paused ? "再生" : "一時停止";
   byId("zoom-label").textContent = `${state.zoom}×`;
-  byId("map-title").textContent = state.data.map_id;
+  byId("map-title").textContent = state.data.area_name ? `${logicalMapId()} / ${state.data.area_name}` : state.data.map_id;
   byId("map-summary").textContent = `${state.data.size[0]}×${state.data.size[1]} cells · ${state.data.objects.length} objects · ${state.data.sites.length} sites · ${state.data.event_triggers.length} triggers`;
   renderPalette();
   renderInspector();
@@ -1425,18 +1444,6 @@ function drawMap(now) {
       if (cell.draw_group !== "object") continue;
       drawMapObjectCell(context, cell, scale, now);
     }
-    if (state.showCollision && !groundOnly) {
-      context.fillStyle = "rgba(239,91,80,.32)";
-      context.strokeStyle = "rgba(255,130,118,.9)";
-      context.lineWidth = Math.max(1, state.zoom);
-      state.resolved.collision.forEach((blocked, index) => {
-        if (!blocked) return;
-        const x = (index % width) * scale;
-        const y = Math.floor(index / width) * scale;
-        context.fillRect(x, y, scale, scale);
-        context.strokeRect(x + .5, y + .5, scale - 1, scale - 1);
-      });
-    }
   }
   if (!groundOnly) drawActorsAndYSortedObjects(context, scale, now);
   if (state.resolved && !groundOnly) {
@@ -1448,6 +1455,18 @@ function drawMap(now) {
   if (!groundOnly) drawTabCellHighlights(context, scale);
   if (!groundOnly && state.tab !== "object") for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
     drawObjectOutline(context, selected, scale);
+  }
+  if (state.resolved && state.showCollision && !groundOnly) {
+    context.fillStyle = "rgba(255,32,32,.28)";
+    context.strokeStyle = "#ff2020";
+    context.lineWidth = Math.max(1, state.zoom);
+    state.resolved.collision.forEach((blocked, index) => {
+      if (!blocked) return;
+      const x = (index % width) * scale;
+      const y = Math.floor(index / width) * scale;
+      context.fillRect(x, y, scale, scale);
+      context.strokeRect(x + .5, y + .5, scale - 1, scale - 1);
+    });
   }
   if (!groundOnly) {
     drawTravelMarkers(context, scale);
@@ -1491,11 +1510,10 @@ function updateToolStatus() {
     byId("tool-status").textContent = `${labels[state.travelTool] || labels.select} / ${rangeHint}`;
   } else {
     const labels = {
-      select: "actorまたはtriggerを選択",
+      select: currentTrigger() ? "Shift＋左クリック: trigger対象セルを追加・解除" : "actorまたはtriggerを選択",
       create_actor: "actorを置くセルを選択",
       create_trigger: "triggerの基準セルを選択",
       create_object_trigger: "triggerを設定するobjectを選択",
-      trigger_offsets: "trigger対象セルをクリックして追加・解除",
     };
     byId("tool-status").textContent = `${labels[state.eventTool] || labels.select} / ${rangeHint}`;
   }
@@ -1830,14 +1848,12 @@ function deleteBulkSelection() {
   });
 }
 
-function clearBulkSelectionWithEscape(event) {
-  if (event.key !== "Escape" || !state.bulkSelection.length || state.pointerDrag || state.pointerStroke) return false;
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName) || event.target.isContentEditable) return false;
-  if (document.querySelector("dialog[open]")) return false;
+function rightClickWithEscape(event) {
+  if (event.key !== "Escape") return false;
   event.preventDefault();
-  clearBulkSelection();
-  renderAll();
-  showToast("範囲選択を解除しました。");
+  if (event.repeat || state.pointerDrag || state.pointerStroke || document.querySelector("dialog[open]")) return true;
+  const cell = state.hoveredCell;
+  if (cell && !state.bulkSelection.some((item) => bulkItemOccupiesCell(item, cell))) selectAnyAt(cell);
   return true;
 }
 
@@ -2144,6 +2160,17 @@ function selectAnyAt(cell) {
   return candidate;
 }
 
+function toggleTriggerOffset(cell) {
+  const offset = triggerOffsetForCell(currentTrigger(), cell);
+  if (!offset) return;
+  commit(() => {
+    const trigger = currentTrigger();
+    const index = trigger.offsets.findIndex((item) => item[0] === offset[0] && item[1] === offset[1]);
+    if (index >= 0 && trigger.offsets.length > 1) trigger.offsets.splice(index, 1);
+    else if (index < 0) trigger.offsets.push(offset);
+  });
+}
+
 function handleEventCell(cell) {
   if (state.eventTool === "create_actor") return createActor(cell);
   if (state.eventTool === "create_trigger") return addAnchoredTrigger({ kind: "cell", position: [...cell] });
@@ -2154,17 +2181,6 @@ function handleEventCell(cell) {
       return;
     }
     return addAnchoredTrigger({ kind: "object", object_id: instance.id });
-  }
-  if (state.eventTool === "trigger_offsets" && currentTrigger()) {
-    const offset = triggerOffsetForCell(currentTrigger(), cell);
-    if (!offset) return;
-    commit(() => {
-      const trigger = currentTrigger();
-      const index = trigger.offsets.findIndex((item) => item[0] === offset[0] && item[1] === offset[1]);
-      if (index >= 0 && trigger.offsets.length > 1) trigger.offsets.splice(index, 1);
-      else if (index < 0) trigger.offsets.push(offset);
-    });
-    return;
   }
   selectEventAt(cell);
 }
@@ -2532,10 +2548,6 @@ function handleInspectorAction(element) {
     state.selectedTriggerId = null;
     state.eventTool = "select";
   });
-  else if (action === "edit-trigger-offsets") {
-    state.eventTool = "trigger_offsets";
-    renderAll();
-  }
   else if (action === "open-trigger-event" && currentTrigger()) {
     const [namespace, eventId] = currentTrigger().event_id.split(".", 2);
     const url = editorUrl("event", { namespace, event: eventId });
@@ -2591,6 +2603,12 @@ function updateArrivalField(path, value) {
   commit(() => {
     if (path === "id") {
       const previousId = arrival.id;
+      const originalId = Object.keys(state.arrivalIdRenames).find((id) => state.arrivalIdRenames[id] === previousId)
+        || (state.savedArrivalIds.has(previousId) ? previousId : null);
+      if (originalId) {
+        if (originalId === value) delete state.arrivalIdRenames[originalId];
+        else state.arrivalIdRenames[originalId] = value;
+      }
       arrival.id = value;
       state.selectedArrivalId = value;
       for (const site of state.data.sites) {
@@ -2684,7 +2702,7 @@ function scheduleResolution(delay = 70) {
   const revision = ++state.resolveRevision;
   state.resolveTimer = window.setTimeout(async () => {
     try {
-      const result = await api("/api/resolve", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
+      const result = await api("/api/resolve", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa, arrival_id_renames: state.arrivalIdRenames }) });
       if (revision !== state.resolveRevision) return;
       applyValidationResult(result);
       renderIssues();
@@ -2699,9 +2717,12 @@ async function save() {
   if (!canSave()) return false;
   updateSaveState("dirty", "保存・生成中…");
   try {
-    const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa }) });
+    const result = await api("/api/save", { method: "POST", body: JSON.stringify({ data: state.data, site_names_ja: state.siteNamesJa, arrival_id_renames: state.arrivalIdRenames }) });
     applyValidationResult(result);
     if (result.saved) {
+      state.data = result.data || state.data;
+      state.savedArrivalIds = new Set(state.data.arrival_points.map((arrival) => arrival.id));
+      state.arrivalIdRenames = {};
       state.dirty = false;
       state.history = [];
       state.future = [];
@@ -2711,9 +2732,14 @@ async function save() {
         profile: state.data.profile,
         tileset_id: state.data.tileset_id,
         size: state.data.size,
+        area_parent_id: state.data.area_parent_id,
+        area_name: state.data.area_name,
       };
       if (existing) Object.assign(existing, record, { is_new: false });
       else state.mapCatalog.push(record);
+      if (!state.data.area_parent_id) for (const item of state.mapCatalog) {
+        if (item.area_parent_id === state.data.map_id) item.tileset_id = state.data.tileset_id;
+      }
       saveLastMapId();
       showToast("制作用マップを保存し、ゲーム用データを生成しました。");
     } else {
@@ -2752,6 +2778,9 @@ async function initialize() {
 }
 
 byId("map-select").addEventListener("change", (event) => {
+  requestMapSwitch(event.target.value);
+});
+byId("area-select").addEventListener("change", (event) => {
   requestMapSwitch(event.target.value);
 });
 byId("editor-switch").addEventListener("click", (event) => {
@@ -2798,6 +2827,34 @@ byId("new-map-form").addEventListener("submit", async (event) => {
     showToast(error.message, true);
   }
 });
+byId("new-area-button").addEventListener("click", () => {
+  if (state.dirty && !window.confirm("未保存の変更を破棄して新規エリアを作成しますか？")) return;
+  byId("new-area-name").value = "";
+  byId("new-area-width").value = String(state.data.size[0]);
+  byId("new-area-height").value = String(state.data.size[1]);
+  byId("new-area-dialog").showModal();
+});
+byId("new-area-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget || event.target.dataset.action === "close-new-area-dialog") byId("new-area-dialog").close();
+});
+byId("new-area-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await api("/api/create-area", {
+      method: "POST",
+      body: JSON.stringify({
+        parent_id: logicalMapId(),
+        area_name: byId("new-area-name").value.trim(),
+        width: Number(byId("new-area-width").value),
+        height: Number(byId("new-area-height").value),
+      }),
+    });
+    byId("new-area-dialog").close();
+    applyDocumentPayload(payload);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
 byId("change-map-tileset-button").addEventListener("click", () => {
   if (state.dirty) {
     showToast("先に現在の変更を保存してください。", true);
@@ -2812,7 +2869,7 @@ byId("change-map-tileset-dialog").addEventListener("click", (event) => {
 });
 byId("change-map-tileset-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!window.confirm(`マップ ${state.data.map_id} の内容をすべてクリアしてマップチップを変更しますか？`)) return;
+  if (!window.confirm(`マップ ${state.data.map_id} の全エリアの配置をクリアしてマップチップを変更しますか？`)) return;
   try {
     const payload = await api("/api/change-tileset", {
       method: "POST",
@@ -2880,6 +2937,11 @@ byId("inspector-content").addEventListener("change", (event) => {
   if (event.target.id === "resize-horizontal") state.resizeHorizontal = event.target.value;
   else if (event.target.id === "resize-vertical") state.resizeVertical = event.target.value;
   else if (event.target.dataset.mapField === "bgm_id") commit(() => { state.data.bgm_id = event.target.value; });
+  else if (event.target.dataset.mapField === "area_name") commit(() => {
+    const name = event.target.value.trim();
+    if (name || state.data.area_parent_id) state.data.area_name = name;
+    else delete state.data.area_name;
+  });
   else if (event.target.dataset.siteNameJa) {
     state.siteNameEditing = false;
     renderPalette();
@@ -2931,6 +2993,10 @@ mapCanvas.addEventListener("pointerdown", (event) => {
     return;
   }
   if (event.button !== 0) return;
+  if (event.shiftKey && state.tab === "event" && currentTrigger()) {
+    toggleTriggerOffset(cell);
+    return;
+  }
   if (beginBulkDrag(event, cell)) return;
   if (state.tab === "object" && state.objectLayer === "all") {
     beginRangeSelection(event, cell);
@@ -3029,7 +3095,7 @@ mapCanvas.addEventListener("pointerleave", () => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (clearBulkSelectionWithEscape(event)) return;
+  if (rightClickWithEscape(event)) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); save(); }
   else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
   else if ((event.key === "Delete" || event.key === "Backspace") && state.bulkSelection.length && !["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
@@ -3053,6 +3119,7 @@ window.addEventListener("keydown", (event) => {
     handleInspectorAction({ dataset: { action: "delete-actor" } });
   }
 });
+document.addEventListener("cancel", (event) => event.preventDefault(), true);
 window.addEventListener("beforeunload", (event) => {
   if (state.dirty) { event.preventDefault(); event.returnValue = ""; }
 });

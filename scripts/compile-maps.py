@@ -16,6 +16,7 @@ from map_pipeline import (
     save_compiled_map,
     validate_map_source,
     validate_map_links,
+    validate_area_groups,
     validate_map_event_links,
     validate_tileset,
 )
@@ -74,6 +75,7 @@ def main() -> int:
             item
             for item in (
                 *validate_map_links(all_sources),
+                *validate_area_groups(all_sources),
                 *validate_map_event_links(all_sources, event_catalog["events"]),
             )
             if item.severity == "error"
