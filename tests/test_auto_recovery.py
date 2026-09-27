@@ -9,6 +9,7 @@ from field import FieldPosition
 from game_data import load_spells
 from input import Direction, InputButton, InputState
 from member import ProficiencyKind
+from resources import FontResources
 from spell import SpellType
 from state import AutoRecoveryConfig, AutoRecoveryMethod, Language, SaveData, Settings
 from systems.auto_recovery import (
@@ -448,6 +449,42 @@ class AutoRecoveryTest(unittest.TestCase):
             [window.texts[0].text for window in overlay.proficiency_windows.values()],
             ["%SACRED%１－８４", "%SACRED%１－９６"],
         )
+
+    def test_level_growth_stays_green_and_announces_new_spell(self) -> None:
+        level_up_jingle = Mock()
+        overlay = AutoRecoveryOverlay(
+            party=self.party,
+            spells=self.spells,
+            items=self.items,
+            inventory=InventorySystem(self.items),
+            save_data=SaveData(),
+            settings=Settings(),
+            texts=self.texts,
+            fonts=FontResources(),
+            faces=Mock(),
+            on_spell_level_up=level_up_jingle,
+        )
+        overlay.result = RecoveryResult(
+            actions=1,
+            proficiency_growths={
+                1: MenuSpellProficiencyGrowth(ProficiencyKind.SACRED, 196, 201)
+            },
+        )
+        overlay._start_proficiency_animation()
+        for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
+            overlay.update(InputState())
+        self.assertIn(
+            "%COL_POSITIVE%２%COL_END%",
+            overlay.proficiency_windows[1].texts[0].text,
+        )
+        self.assertIsNotNone(overlay.spell_learned_popup)
+        self.assertEqual(overlay.spell_learned_popup.window.y, 18)
+        level_up_jingle.assert_called_once_with()
+        confirm = InputState(confirm=InputButton(True, True))
+        self.assertFalse(overlay.update(confirm))
+        self.assertIsNone(overlay.spell_learned_popup)
+        self.assertIn(1, overlay.proficiency_windows)
+        level_up_jingle.assert_called_once_with()
 
 
 if __name__ == "__main__":

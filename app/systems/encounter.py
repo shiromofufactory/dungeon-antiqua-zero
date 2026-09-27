@@ -112,6 +112,7 @@ class EncounterSystem:
             raise ValueError("monster level must be from 1 to 9")
 
         keys: list[str] = []
+        selected_keys: set[str] = set()
         current_level = monster_level
         maximum_monsters = (
             MAX_ENCOUNTER_MONSTERS
@@ -119,10 +120,14 @@ class EncounterSystem:
             else LOW_DANGER_MAX_ENCOUNTER_MONSTERS
         )
         while True:
-            weighted_pool = self._weighted_pool(
-                monsters,
-                settings,
-                current_level,
+            weighted_pool = tuple(
+                (monster, weight)
+                for monster, weight in self._weighted_pool(
+                    monsters,
+                    settings,
+                    current_level,
+                )
+                if monster.key not in selected_keys
             )
             if not weighted_pool:
                 if not keys:
@@ -140,6 +145,7 @@ class EncounterSystem:
                 break
 
             keys.extend((selected.key,) * occurrence)
+            selected_keys.add(selected.key)
 
             remaining = maximum_monsters - len(keys)
             if remaining < self._random.randint(1, maximum_monsters):

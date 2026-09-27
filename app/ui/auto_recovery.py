@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from collections.abc import Mapping
+from collections.abc import Callable
 
 from input import Direction, InputState
 from item import Item
@@ -39,6 +40,7 @@ from ui.spell_proficiency import (
     displayed_proficiency_total,
     spell_proficiency_text,
 )
+from ui.spell_learned import SpellLearnedPopup, newly_learned_spells
 
 SETTINGS_WINDOW_GRID = (0, 0, 64, 16)
 GUIDE_WINDOW_GRID = (0, 16, 64, 10)
@@ -73,12 +75,16 @@ class AutoRecoveryOverlay:
         fonts: FontResources,
         faces: object,
         palette_shifter: PaletteShifter | None = None,
+        on_spell_level_up: Callable[[], None] | None = None,
     ) -> None:
         self.party = party
         self.spells = spells
         self.items = items
         self.inventory = inventory
         self.save_data = save_data
+        self.settings = settings
+        self.fonts = fonts
+        self.on_spell_level_up = on_spell_level_up
         self.localizer = Localizer(settings.language)
         self.texts = texts
         self.faces = faces
@@ -102,6 +108,7 @@ class AutoRecoveryOverlay:
         self.result: RecoveryResult | None = None
         self.proficiency_windows: dict[int, Window] = {}
         self._proficiency_frame: int | None = None
+        self.spell_learned_popup: SpellLearnedPopup | None = None
         self.save_data.auto_recovery = valid_config_for_party(
             self.save_data.auto_recovery, self.party
         )
@@ -236,7 +243,11 @@ class AutoRecoveryOverlay:
             total = displayed_proficiency_total(growth, self._proficiency_frame)
             window.clear_texts()
             window.add_text(
-                spell_proficiency_text(SpellType.SACRED, total),
+                spell_proficiency_text(
+                    SpellType.SACRED,
+                    total,
+                    previous_total=growth.before_total,
+                ),
                 PROFICIENCY_TEXT_X,
                 PROFICIENCY_TEXT_Y,
             )
@@ -264,6 +275,29 @@ class AutoRecoveryOverlay:
         self.result = None
         self.proficiency_windows.clear()
         self._proficiency_frame = None
+        self.spell_learned_popup = None
+
+    def _show_learned_spells(self) -> None:
+        if self.result is None:
+            return
+        notices = tuple(
+            (self.party[index], spell)
+            for index, growth in sorted(self.result.proficiency_growths.items())
+            for spell in newly_learned_spells(
+                growth.kind,
+                growth.before_total // 100,
+                growth.after_total // 100,
+                self.spells.values(),
+            )
+        )
+        if notices:
+            self.spell_learned_popup = SpellLearnedPopup(
+                notices,
+                settings=self.settings,
+                texts=self.texts,
+                fonts=self.fonts,
+                center_y_grid=GUIDE_WINDOW_GRID[1] + GUIDE_WINDOW_GRID[3] // 2,
+            )
 
     def _cycle(self, key: str, direction: int) -> None:
         config = self.save_data.auto_recovery
@@ -296,12 +330,27 @@ class AutoRecoveryOverlay:
     def update(self, input_state: InputState) -> bool:
         """Return True when the user closes the overlay."""
 
+        if self.spell_learned_popup is not None:
+            if self.spell_learned_popup.update(input_state):
+                self.spell_learned_popup = None
+            return False
         if self._proficiency_frame is not None:
             if self._proficiency_frame < PROFICIENCY_ANIMATION_FRAME_COUNT:
                 self._proficiency_frame += 1
                 self._refresh_proficiency_windows()
+                if (
+                    self._proficiency_frame == PROFICIENCY_ANIMATION_FRAME_COUNT
+                    and self.result is not None
+                    and any(
+                        growth.after_total // 100 > growth.before_total // 100
+                        for growth in self.result.proficiency_growths.values()
+                    )
+                    and self.on_spell_level_up is not None
+                ):
+                    self.on_spell_level_up()
             else:
                 self._proficiency_frame = None
+                self._show_learned_spells()
             return False
         if input_state.cancel.triggered:
             return True
@@ -351,6 +400,8 @@ class AutoRecoveryOverlay:
             )
         for window in self.proficiency_windows.values():
             window.draw()
+        if self.spell_learned_popup is not None:
+            self.spell_learned_popup.draw()
 
 
 __all__ = ["AutoRecoveryOverlay"]

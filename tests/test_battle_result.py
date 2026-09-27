@@ -11,12 +11,14 @@ from tools.screen_mocks._fixtures import (
     load_mock_skills,
 )
 from tools.screen_mocks.battle_result import build_result_party
+from game_data import load_spells
 
 from input import InputButton, InputState
 from member import EquipmentSlot, ProficiencyKind
 from resources import FontResources
 from state import SaveData, Settings
 from systems import BattleProgression, EnemyProgressionData
+from text_catalog import TextCatalog
 from ui.battle_result import (
     RESULT_AILMENT_SPRITE_SOURCE_X,
     RESULT_ANIMATION_FRAME_COUNT,
@@ -80,6 +82,44 @@ class BattleResultOverlayTest(unittest.TestCase):
         self.assertTrue(
             self.overlay.update(InputState(confirm=InputButton(triggered=True)))
         )
+
+    def test_new_spell_notices_precede_result_completion(self) -> None:
+        before = self.overlay.growth.before[0]
+        after = self.overlay.growth.after[0]
+        old = before.proficiencies[ProficiencyKind.SACRED]
+        new = replace(old, level=3, progress=0)
+        before_proficiencies = dict(before.proficiencies)
+        after_proficiencies = dict(after.proficiencies)
+        before_proficiencies[ProficiencyKind.SACRED] = replace(old, level=1)
+        after_proficiencies[ProficiencyKind.SACRED] = new
+        growth = replace(
+            self.overlay.growth,
+            before=(replace(before, proficiencies=before_proficiencies),),
+            after=(replace(after, proficiencies=after_proficiencies),),
+        )
+        overlay = BattleResultOverlay(
+            party=self.party,
+            growth=growth,
+            settings=Settings(),
+            fonts=FontResources(),
+            character_sprites=object(),
+            spells=tuple(load_spells().values()),
+            texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
+        )
+        self.assertIsNotNone(overlay.spell_learned_popup)
+        self.assertEqual(len(overlay.spell_learned_popup.notices), 2)
+        self.assertEqual(
+            tuple(spell.key for _, spell in overlay.spell_learned_popup.notices),
+            ("PROTECTION", "CURE"),
+        )
+        for _frame in range(RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT):
+            self.assertFalse(overlay.update(InputState()))
+        confirm = InputState(confirm=InputButton(triggered=True))
+        self.assertFalse(overlay.update(confirm))
+        self.assertIsNotNone(overlay.spell_learned_popup)
+        self.assertFalse(overlay.update(confirm))
+        self.assertIsNone(overlay.spell_learned_popup)
+        self.assertTrue(overlay.update(confirm))
 
     def test_marks_level_and_max_hp_growth_with_positive_color(self) -> None:
         for _frame in range(

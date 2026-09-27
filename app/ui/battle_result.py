@@ -10,7 +10,9 @@ from input import InputState
 from localization import Localizer
 from member import EquipmentSlot, Member, ProficiencyKind
 from resources import FontResources, TRANSPARENT_INDEX, play_se
+from spell import Spell
 from state import Language, Settings
+from text_catalog import TextCatalog
 from systems.battle_progression import (
     BattleGrowthResult,
     MemberGrowthSnapshot,
@@ -18,6 +20,7 @@ from systems.battle_progression import (
 )
 
 from .localized_text import LocalizedWindowTextFactory
+from .spell_learned import SpellLearnedPopup, newly_learned_spells
 from .text_format import pad
 from .window import Window, WindowFactory, WindowText
 
@@ -112,6 +115,8 @@ class BattleResultOverlay:
         settings: Settings,
         fonts: FontResources,
         character_sprites: object,
+        spells: tuple[Spell, ...] = (),
+        texts: TextCatalog | None = None,
     ) -> None:
         if not party or len(party) > 6:
             raise ValueError("result party must contain from 1 to 6 members")
@@ -133,6 +138,22 @@ class BattleResultOverlay:
             for index in range(len(party))
         )
         self._refresh()
+        learned = tuple(
+            (member, spell)
+            for index, member in enumerate(party)
+            for kind in SPELL_PROFICIENCY_ORDER
+            for spell in newly_learned_spells(
+                kind,
+                growth.before[index].proficiencies[kind].level,
+                growth.after[index].proficiencies[kind].level,
+                spells,
+            )
+        )
+        self.spell_learned_popup = (
+            SpellLearnedPopup(learned, settings=settings, texts=texts, fonts=fonts)
+            if learned and texts is not None
+            else None
+        )
 
     @property
     def animation_complete(self) -> bool:
@@ -157,6 +178,10 @@ class BattleResultOverlay:
             )
             if after != before:
                 play_se(RESULT_INCREMENT_SE_ID)
+            return False
+        if self.spell_learned_popup is not None:
+            if self.spell_learned_popup.update(input_state):
+                self.spell_learned_popup = None
             return False
         return input_state.confirm.triggered
 
@@ -304,6 +329,8 @@ class BattleResultOverlay:
                 *source,
                 TRANSPARENT_INDEX,
             )
+        if self.animation_complete and self.spell_learned_popup is not None:
+            self.spell_learned_popup.draw()
 
 
 def _interpolated_proficiency(

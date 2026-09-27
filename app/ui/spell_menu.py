@@ -57,6 +57,7 @@ from ui.spell_proficiency import (
     displayed_proficiency_total,
     spell_proficiency_text,
 )
+from ui.spell_learned import SpellLearnedPopup, newly_learned_spells
 
 FACES_IMAGE_ID = "faces/faces"
 MEMBER_WINDOW_GRID = (0, 0, 28, 12)
@@ -127,6 +128,7 @@ class SpellMenuOverlay:
         teleport_targets: Iterable[TeleportTarget] = (),
         on_field_teleport: Callable[[str], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
+        on_spell_level_up: Callable[[], None] | None = None,
     ) -> None:
         """Build a DA2-style spell view from menu-owned state."""
 
@@ -174,8 +176,13 @@ class SpellMenuOverlay:
         self.teleport_targets = registered_teleports
         self.on_field_teleport = on_field_teleport
         self.on_invalid_action = on_invalid_action
+        self.on_spell_level_up = on_spell_level_up
         self.phase = SpellSelectionPhase.CASTER
         self._proficiency_animation: _ProficiencyAnimation | None = None
+        self._level_growth_before: dict[
+            tuple[str, ProficiencyKind], int
+        ] = {}
+        self.spell_learned_popup: SpellLearnedPopup | None = None
         self.teleport_menu: TeleportMenuOverlay | None = None
         self._spells_by_position = self._index_spells()
         self.member_index = (
@@ -456,7 +463,13 @@ class SpellMenuOverlay:
         if spell is None or total is None:
             return
         self.proficiency_window.add_text(
-            spell_proficiency_text(spell.type, total),
+            spell_proficiency_text(
+                spell.type,
+                total,
+                previous_total=self._level_growth_before.get(
+                    (self.member.definition.key, SPELL_PROFICIENCY_BY_TYPE[spell.type])
+                ),
+            ),
             PROFICIENCY_TEXT_X,
             PROFICIENCY_TEXT_Y,
         )
@@ -599,6 +612,10 @@ class SpellMenuOverlay:
         spell: Spell,
         preferred_target_index: int | None,
     ) -> None:
+        if growth.after_total // 100 > growth.before_total // 100:
+            self._level_growth_before[
+                (self.member.definition.key, growth.kind)
+            ] = growth.before_total
         self._proficiency_animation = _ProficiencyAnimation(
             growth,
             spell,
@@ -617,6 +634,12 @@ class SpellMenuOverlay:
             return
         if animation.frame >= PROFICIENCY_ANIMATION_FRAME_COUNT:
             self._proficiency_animation = None
+            learned = newly_learned_spells(
+                animation.growth.kind,
+                animation.growth.before_total // 100,
+                animation.growth.after_total // 100,
+                self.spells.values(),
+            )
             if animation.preferred_target_index is None:
                 self.phase = SpellSelectionPhase.SPELL
                 self._build_windows()
@@ -628,9 +651,23 @@ class SpellMenuOverlay:
                     animation.spell,
                     animation.preferred_target_index,
                 )
+            if learned:
+                self.spell_learned_popup = SpellLearnedPopup(
+                    ((self.member, learned_spell) for learned_spell in learned),
+                    settings=self.settings,
+                    texts=self.texts,
+                    fonts=self.fonts,
+                )
             return
         animation.frame += 1
         self._refresh_proficiency_window()
+        if (
+            animation.frame == PROFICIENCY_ANIMATION_FRAME_COUNT
+            and animation.growth.after_total // 100
+            > animation.growth.before_total // 100
+            and self.on_spell_level_up is not None
+        ):
+            self.on_spell_level_up()
 
     def _open_field_teleport(self, spell: Spell) -> bool:
         """Open the shared provisional destination selector for TELEPORT."""
@@ -751,6 +788,11 @@ class SpellMenuOverlay:
     def update(self, input_state: InputState) -> bool:
         """Update selection and report whether the menu should be restored."""
 
+        if self.spell_learned_popup is not None:
+            if self.spell_learned_popup.update(input_state):
+                self.spell_learned_popup = None
+            return False
+
         if self.teleport_menu is not None:
             if self.teleport_menu.update(input_state):
                 self.teleport_menu = None
@@ -826,6 +868,8 @@ class SpellMenuOverlay:
             self.spell_cursor.draw()
         if self.phase is SpellSelectionPhase.TARGET:
             self.member_cursor.draw()
+        if self.spell_learned_popup is not None:
+            self.spell_learned_popup.draw()
 
 
 __all__ = [

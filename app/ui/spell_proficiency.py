@@ -12,10 +12,15 @@ PROFICIENCY_TEXT_X = 2
 PROFICIENCY_TEXT_Y = 2
 
 
-def spell_proficiency_text(spell_type: SpellType, total: int) -> str:
+def spell_proficiency_text(
+    spell_type: SpellType, total: int, *, previous_total: int | None = None
+) -> str:
     level, progress = divmod(total, 100)
     icon = SPELL_TYPE_ICON_TAGS.get(spell_type, "")
-    return f"{icon}{pad(level, 1, fill='0')}－{pad(progress, 2, fill='0')}"
+    level_text = pad(level, 1, fill="0")
+    if previous_total is not None and level > previous_total // 100:
+        level_text = f"%COL_POSITIVE%{level_text}%COL_END%"
+    return f"{icon}{level_text}－{pad(progress, 2, fill='0')}"
 
 
 def displayed_proficiency_total(

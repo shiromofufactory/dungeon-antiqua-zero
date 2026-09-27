@@ -231,7 +231,7 @@ class EncounterSystemTest(unittest.TestCase):
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
         formation = system.generate_formation(
-            (monster("Pack", max_occ=4),),
+            (monster("Pack", max_occ=4), monster("Other", max_occ=2)),
             encounter_settings(),
             monster_level=3,
         )
@@ -246,7 +246,7 @@ class EncounterSystemTest(unittest.TestCase):
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
         formation = system.generate_formation(
-            (monster("Pack", max_occ=4),),
+            (monster("Pack", max_occ=5), monster("Other", max_occ=3)),
             encounter_settings(danger="low"),
             monster_level=3,
         )
@@ -269,6 +269,39 @@ class EncounterSystemTest(unittest.TestCase):
         self.assertEqual(formation.monster_keys, ("Pack", "Pack"))
         self.assertEqual(random_source.randrange_calls, [2])
 
+    def test_later_group_does_not_select_an_existing_monster_key(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1, 0),
+            randint_values=(3, 1, 2, 5),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Boar", max_occ=3), monster("Other", max_occ=2)),
+            encounter_settings(),
+            monster_level=3,
+        )
+
+        self.assertEqual(
+            formation.monster_keys,
+            ("Boar", "Boar", "Boar", "Other", "Other"),
+        )
+
+    def test_stops_when_only_the_selected_monster_remains(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1),
+            randint_values=(3, 1),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Boar", max_occ=3),),
+            encounter_settings(),
+            monster_level=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Boar",) * 3)
+
     def test_level_reduction_does_not_go_below_one(self) -> None:
         random_source = ScriptedRandom(
             randrange_values=(0, 0, 0),
@@ -277,12 +310,12 @@ class EncounterSystemTest(unittest.TestCase):
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
         formation = system.generate_formation(
-            (monster("Level 1", lv=1),),
+            (monster("Level 1", lv=1), monster("Other Level 1", lv=1)),
             encounter_settings(),
             monster_level=1,
         )
 
-        self.assertEqual(formation.monster_keys, ("Level 1", "Level 1"))
+        self.assertEqual(formation.monster_keys, ("Level 1", "Other Level 1"))
 
     def test_pool_does_not_add_the_same_monster_key_twice(self) -> None:
         duplicate = monster("Duplicate")

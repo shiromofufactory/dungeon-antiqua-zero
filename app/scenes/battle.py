@@ -6875,6 +6875,8 @@ class BattleScene:
             settings=self.settings,
             fonts=self.fonts,
             character_sprites=self.character_sprites,
+            spells=tuple(self.spells.values()),
+            texts=self.texts,
         )
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
@@ -6979,6 +6981,8 @@ class BattleScene:
             settings=self.settings,
             fonts=self.fonts,
             character_sprites=self.character_sprites,
+            spells=tuple(self.spells.values()),
+            texts=self.texts,
         )
         self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.result_transition_fade.start()

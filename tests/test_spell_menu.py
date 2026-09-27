@@ -363,7 +363,10 @@ class SpellMenuTest(unittest.TestCase):
         _random_value: Mock,
         play_se: Mock,
     ) -> None:
-        mock = SpellMenuHarness(member_index=1)
+        level_up_jingle = Mock()
+        mock = SpellMenuHarness(
+            member_index=1, on_spell_level_up=level_up_jingle
+        )
         target = mock.party[0]
         target.hp = 1
         sacred = mock.member.proficiency(ProficiencyKind.SACRED)
@@ -385,13 +388,26 @@ class SpellMenuTest(unittest.TestCase):
 
         self.assertNotEqual(mock.proficiency_window.texts[0].text, "%SACRED%２－０２")
         mock.update(InputState())
-        self.assertEqual(mock.proficiency_window.texts[0].text, "%SACRED%２－０２")
+        self.assertEqual(
+            mock.proficiency_window.texts[0].text,
+            "%SACRED%%COL_POSITIVE%２%COL_END%－０２",
+        )
+        level_up_jingle.assert_called_once_with()
         play_se.assert_called_once_with("spell_healing1")
 
         mock.update(InputState())
         self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
         self.assertEqual(mock.member_cursor.selected_key, 0)
         self.assertIn(mock.proficiency_window, mock.windows)
+        self.assertIsNotNone(mock.spell_learned_popup)
+        self.assertIn("プロテクション", mock.spell_learned_popup.window.texts[0].text)
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertIsNone(mock.spell_learned_popup)
+        level_up_jingle.assert_called_once_with()
+        self.assertEqual(
+            mock.proficiency_window.texts[0].text,
+            "%SACRED%%COL_POSITIVE%２%COL_END%－０２",
+        )
 
     def test_healing_with_no_valid_target_reports_an_error(self) -> None:
         invalid_action = Mock()

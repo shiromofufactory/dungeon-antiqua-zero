@@ -120,6 +120,7 @@ class SpellMenuHarness(SpellMenuOverlay):
         on_field_fade: Callable[[], bool] | None = None,
         teleport_targets: Iterable[TeleportTarget] = (),
         on_field_teleport: Callable[[str], bool] | None = None,
+        on_spell_level_up: Callable[[], None] | None = None,
     ) -> None:
         if party is None:
             items = load_test_items()
@@ -143,6 +144,7 @@ class SpellMenuHarness(SpellMenuOverlay):
             on_field_fade=on_field_fade,
             teleport_targets=teleport_targets,
             on_field_teleport=on_field_teleport,
+            on_spell_level_up=on_spell_level_up,
         )
 
 

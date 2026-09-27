@@ -2250,7 +2250,11 @@ class Game:
             fonts=self.fonts,
             faces=self.faces,
             palette_shifter=self.palette_shifter,
+            on_spell_level_up=self._play_field_spell_level_up_jingle,
         )
+
+    def _play_field_spell_level_up_jingle(self) -> None:
+        self.bgm.play_once_then("da3-lvup", self.current_map.bgm_id)
 
     def _finish_auto_recovery(self) -> None:
         self.auto_recovery_screen = None
@@ -2534,6 +2538,7 @@ class Game:
             teleport_targets=self._teleport_targets(),
             on_field_teleport=self._start_field_teleport,
             on_invalid_action=self.alert.start,
+            on_spell_level_up=self._play_field_spell_level_up_jingle,
         )
         if member_index is None:
             self.selected_member_index = self.spell_screen.member_index

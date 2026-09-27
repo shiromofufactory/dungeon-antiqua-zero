@@ -3089,10 +3089,22 @@ class GameTest(unittest.TestCase):
             teleport_targets=(),
             on_field_teleport=mock._start_field_teleport,
             on_invalid_action=mock.alert.start,
+            on_spell_level_up=mock._play_field_spell_level_up_jingle,
         )
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)
         self.assertIsNone(mock.pending_screen_change)
         mock.command_window.update.assert_not_called()
+
+    def test_field_spell_level_up_jingle_resumes_current_map_bgm(self) -> None:
+        mock = Game.__new__(Game)
+        mock.bgm = Mock()
+        mock.current_map = Mock(bgm_id="field-theme")
+
+        mock._play_field_spell_level_up_jingle()
+
+        mock.bgm.play_once_then.assert_called_once_with(
+            "da3-lvup", "field-theme"
+        )
 
     @patch("game.SpellMenuOverlay")
     def test_first_spell_screen_in_menu_uses_automatic_caster_selection(
