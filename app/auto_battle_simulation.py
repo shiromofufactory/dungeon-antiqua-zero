@@ -347,6 +347,8 @@ class BattleForecast:
         if not actor.spec.weapons:
             return ()
         enemies = self.enemies()
+        if command is BattleCommand.IAI:
+            return tuple(enemy.spec.number for enemy in enemies)
         indexes = selectable_attack_target_indexes(
             attacker_is_front_row=actor.front,
             weapon_reach=member_attack_reach(actor),
@@ -455,6 +457,10 @@ class BattleForecast:
                     AutoAction(command, (n,))
                     for n in self.attack_targets(actor, command)
                 )
+            elif command is BattleCommand.IAI:
+                targets = self.attack_targets(actor, command)
+                if targets:
+                    actions.append(AutoAction(command, targets))
             elif command is BattleCommand.IDENTIFY:
                 actions.extend(
                     AutoAction(command, (a.spec.number,)) for a in self.enemies()
@@ -603,6 +609,8 @@ class BattleForecast:
     def delay(self, actor: ForecastActor, action: AutoAction) -> float:
         if action.command is BattleCommand.AIM:
             return -16.0
+        if action.command is BattleCommand.IAI:
+            return -32.0
         if action.spell_key:
             spell = self.spells[action.spell_key]
             if spell.type is SpellType.ITEM:
@@ -797,7 +805,19 @@ class BattleForecast:
 
     def physical_results(self, actor, target, action, case=None):
         results = []
-        for hand, weapon in enumerate(actor.spec.weapons):
+        weapons = (
+            actor.spec.weapons[:1]
+            if action.command is BattleCommand.IAI
+            else actor.spec.weapons
+        )
+        for hand, weapon in enumerate(weapons):
+            attack = weapon.attack
+            if action.command is BattleCommand.IAI:
+                if weapon.iai_attack is None:
+                    raise ValueError("Iai requires a right-hand katana attack value")
+                attack = weapon.iai_attack
+            elif action.command is BattleCommand.FOCUS:
+                attack *= 2
             effective = (
                 weapon.attribute is not None
                 and weapon.attribute in target.spec.weaknesses
@@ -805,8 +825,7 @@ class BattleForecast:
             )
             results.append(
                 resolve_physical_attack(
-                    attack=weapon.attack
-                    * (2 if action.command is BattleCommand.FOCUS else 1),
+                    attack=attack,
                     hit=weapon.hit,
                     target_defense=target.defense,
                     target_evasion=target.evasion,
@@ -828,7 +847,11 @@ class BattleForecast:
         return results
 
     def physical(self, actor, action):
-        target = self.actors[action.targets[0]]
+        for number in action.targets:
+            self._physical_target(actor, self.actors[number], action)
+        actor.hidden = False
+
+    def _physical_target(self, actor, target, action):
         # Live execution resolves both hands before applying either result.
         results = self.physical_results(actor, target, action)
         hidden = actor.hidden
@@ -873,7 +896,6 @@ class BattleForecast:
                 ).success
                 if successful and target.is_alive:
                     self.apply_extra(actor, target, effect)
-        actor.hidden = False
 
     def apply_extra(self, actor, target, effect):
         if effect is AdditionalEffect.DEATH:
@@ -1066,6 +1088,7 @@ class BattleForecast:
             BattleCommand.ATTACK,
             BattleCommand.AMBUSH,
             BattleCommand.AIM,
+            BattleCommand.IAI,
         ):
             self.physical(actor, action)
         elif action.command is BattleCommand.FOCUS:

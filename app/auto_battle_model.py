@@ -70,6 +70,7 @@ class AutoWeapon:
     power_hit: bool = False
     attribute: ResistanceType | None = None
     effect: AdditionalEffect | None = None
+    iai_attack: int | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,16 @@ class AutoCombatant:
                         else None
                     ),
                     effect=weapon.additional_effect,
+                    iai_attack=(
+                        member_physical_attack(
+                            attack * 60 // 100,
+                            member.adjusted_abilities.strength,
+                            member.weapon_level(weapon),
+                            member.internal_level,
+                        )
+                        if slot is EquipmentSlot.RIGHT and weapon.subtype == "KATANA"
+                        else None
+                    ),
                 )
             )
         armor = member.equipment.armor_items()

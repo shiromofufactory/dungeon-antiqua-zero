@@ -35,6 +35,7 @@ from battle_commands import (
     BattleCommandContext,
     BattleCommandOption,
     member_can_attack,
+    member_can_iai,
     member_attack_reach,
     resolve_battle_commands,
     selectable_attack_target_indexes,
@@ -518,6 +519,8 @@ FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT = 18
 ATTACK_LANDING_GUARD_FRAME_COUNT = 6
 AIM_HIT_VALUE_BONUS = 100
 AIM_GAUGE_ADJUSTMENT = -16.0
+IAI_GAUGE_ADJUSTMENT = -32.0
+IAI_TARGET_STAGGER_FRAME_COUNT = 2
 AIM_GUARD_WAIT_FRAME_COUNT = 12
 AIM_RETICLE_START_DISTANCE = 32
 AIM_RETICLE_END_DISTANCE = 8
@@ -1081,6 +1084,7 @@ class BattleAttackStrike:
     is_weak: bool = False
     additional_effects: tuple[AdditionalEffect, ...] = ()
     sound_effect_id: str = ATTACK_SLASH_SE_ID
+    target_index: int | None = None
     damage_applied: bool = False
     affinity_popup_started: bool = False
 
@@ -1163,9 +1167,11 @@ class BattleAttackPresentation:
     target_side: str = "enemy"
     is_aimed: bool = False
     is_focused: bool = False
+    is_iai: bool = False
     elapsed_frame: int = 0
     return_started: bool = False
     progression_recorded: bool = False
+    sound_played: bool = False
 
     def __post_init__(self) -> None:
         if not self.strikes:
@@ -1244,6 +1250,19 @@ class BattleAttackPresentation:
             if strike.damage_applied and 0 <= popup_frame < CRITICAL_MARKER_FRAME_COUNT:
                 return strike
         return None
+
+    def visible_result_strikes(self) -> tuple[BattleAttackStrike, ...]:
+        """Expose simultaneous Iai results while retaining dual-wield priority."""
+
+        if not self.is_iai:
+            latest = self.latest_result_strike()
+            return () if latest is None else (latest,)
+        return tuple(
+            strike for strike in self.strikes
+            if strike.damage_applied
+            and 0 <= strike.damage_popup_elapsed_frame(self.elapsed_frame)
+            < CRITICAL_MARKER_FRAME_COUNT
+        )
 
 
 @dataclass
@@ -2469,6 +2488,8 @@ class BattleScene:
                     self._begin_attack_target_selection(command=BattleCommand.AMBUSH)
                 elif command == BattleCommand.AIM:
                     self._begin_attack_target_selection(command=BattleCommand.AIM)
+                elif command == BattleCommand.IAI:
+                    self._begin_attack_target_selection(command=BattleCommand.IAI)
                 elif command == BattleCommand.FOCUS:
                     self._begin_attack_target_selection(command=BattleCommand.FOCUS)
                 elif command == BattleCommand.SPELL:
@@ -3106,11 +3127,13 @@ class BattleScene:
             BattleCommand.ATTACK,
             BattleCommand.AMBUSH,
             BattleCommand.AIM,
+            BattleCommand.IAI,
             BattleCommand.FOCUS,
         ):
             self._begin_attack_target_selection(command=command)
-            self.selected_target_index = action.targets[0] - 5
-            self.target_cursor.select_key(self.selected_target_index)
+            if command is not BattleCommand.IAI:
+                self.selected_target_index = action.targets[0] - 5
+                self.target_cursor.select_key(self.selected_target_index)
         elif command is BattleCommand.IDENTIFY:
             self._begin_identify_target_selection()
             self.selected_target_index = action.targets[0] - 5
@@ -4789,8 +4812,9 @@ class BattleScene:
         *,
         defeated_enemy: bool = False,
         critical: bool = False,
+        right_hand_only: bool = False,
     ) -> None:
-        """Record both equipped hands for one physical command action."""
+        """Record the physical command's equipped attacking hands."""
 
         if not hasattr(self, "progression") or not hasattr(self, "party"):
             return
@@ -4799,7 +4823,10 @@ class BattleScene:
             return
         weapons = tuple(
             weapon
-            for slot in (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
+            for slot in (
+                (EquipmentSlot.RIGHT,)
+                if right_hand_only else (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
+            )
             if (weapon := member.equipment.weapon_at(slot)) is not None
         )
         if weapons:
@@ -6124,9 +6151,10 @@ class BattleScene:
             BattleCommand.ATTACK,
             BattleCommand.AMBUSH,
             BattleCommand.AIM,
+            BattleCommand.IAI,
             BattleCommand.FOCUS,
         ):
-            raise ValueError("attack target selection requires attack, aim, or focus")
+            raise ValueError("attack target selection requires a physical command")
         selectable = self._active_member_attack_targets(command=command)
         if not selectable:
             return False
@@ -6134,7 +6162,9 @@ class BattleScene:
         self.selected_command = command
         self.selectable_target_indexes = selectable
         # DA2 starts enemy selection at the last selectable monster.
-        self.selected_target_index = selectable[-1]
+        self.selected_target_index = (
+            None if command is BattleCommand.IAI else selectable[-1]
+        )
         self.phase = BattlePhase.TARGET
         if command is not BattleCommand.FOCUS:
             self._begin_action_motion(
@@ -6142,8 +6172,17 @@ class BattleScene:
                 jump=getattr(self, "auto_battle_active", False),
             )
         self.command_cursor.active = False
-        self.target_cursor.active = True
-        self.target_cursor.select_key(self.selected_target_index)
+        self.target_cursor.active = command is not BattleCommand.IAI
+        if self.selected_target_index is not None:
+            self.target_cursor.select_key(self.selected_target_index)
+        if command is BattleCommand.IAI:
+            target_positions = tuple(
+                target for target in self.target_cursor.targets
+                if target.key in selectable
+            )
+            self.all_target_cursors = self._make_all_target_cursors(
+                self.target_window, target_positions
+            )
         self._refresh_monster_name_colors()
         return True
 
@@ -6167,6 +6206,7 @@ class BattleScene:
             self._begin_action_return()
             self.command_cursor.active = True
             self.target_cursor.active = False
+            self.all_target_cursors = ()
             return
 
         if input_state.confirm.triggered:
@@ -6178,10 +6218,14 @@ class BattleScene:
                 self._begin_attack_presentation()
             return
 
-        navigation = input_state.navigation
-        if navigation is not None:
-            self._move_target(navigation)
-        self.target_cursor.update()
+        if self.selected_command is BattleCommand.IAI:
+            for cursor in self.all_target_cursors:
+                cursor.update()
+        else:
+            navigation = input_state.navigation
+            if navigation is not None:
+                self._move_target(navigation)
+            self.target_cursor.update()
 
     def _begin_identify_presentation(self) -> bool:
         """Start DA2's twelve-frame Identify effect at ZERO's frame rate."""
@@ -6289,6 +6333,9 @@ class BattleScene:
 
     def _begin_attack_presentation(self) -> bool:
         """Resolve each equipped hand and start its authored attack sequence."""
+
+        if self.selected_command is BattleCommand.IAI:
+            return self._begin_iai_presentation()
 
         index = self.selected_target_index
         if (
@@ -6477,6 +6524,123 @@ class BattleScene:
         self._refresh_monster_name_colors()
         return True
 
+    def _begin_iai_presentation(self) -> bool:
+        """Strike every living monster with the right-hand katana at once."""
+
+        party_index = self.active_party_index
+        if party_index is None:
+            return False
+        member = self.party[party_index]
+        if not member_can_iai(member):
+            return False
+        targets = tuple(
+            index for index in self.selectable_target_indexes
+            if self.monsters[index].is_alive
+        )
+        if not targets:
+            return False
+        weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+        stats = member.battle_stats
+        attack = member_physical_attack(
+            weapon_attack=stats.attack_right * 60 // 100,
+            strength=member.adjusted_abilities.strength,
+            weapon_level=member.weapon_level(weapon),
+            internal_level=member.internal_level,
+        )
+        hidden = party_index in getattr(self, "hidden_party_indexes", set())
+        power_hit = member.has_skill("Power Hit")
+        weapon_power_hit = weapon.special is ItemSpecial.POWER_HIT
+        attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(weapon.attack_attribute)
+        strikes: list[BattleAttackStrike] = []
+        records = getattr(self, "monster_record_system", None)
+        final_hit_start_frame = (
+            ATTACK_POSE_RAISE_FRAME_COUNT
+            + (len(targets) - 1) * IAI_TARGET_STAGGER_FRAME_COUNT
+        )
+        for target_order, index in enumerate(targets):
+            monster = self.monsters[index]
+            effective = bool(
+                attribute is not None
+                and attribute in monster.weaknesses
+                and attribute not in monster.resistances
+            )
+            result = resolve_physical_attack(
+                attack=attack,
+                hit=stats.hit_right.total,
+                target_defense=monster.effective_defense,
+                target_evasion=monster.combat_stats.evasion,
+                hit_roll=random.randint(0, 99),
+                target_incapacitated=monster.state.sleeping > 0,
+                attacker_hidden=hidden,
+                attacker_has_power_hit=power_hit,
+                weapon_has_power_hit=weapon_power_hit,
+                weapon_effective=effective,
+                critical_rate_scale=(
+                    1.5 if member.uses_two_handed_weapon(weapon) else 1.0
+                ),
+                critical_roll=(
+                    random.randint(0, 99)
+                    if (
+                        monster.state.sleeping > 0
+                        or hidden
+                        or power_hit
+                        or weapon_power_hit
+                        or effective
+                    )
+                    else None
+                ),
+            )
+            strikes.append(
+                BattleAttackStrike(
+                    damage=result.damage,
+                    poses=attack_sequence(
+                        getattr(self, "attack_poses", {}),
+                        weapon.weapon_img,
+                        branches=("5", "6"),
+                    ),
+                    effect_row=ATTACK_EFFECT_ROW_BY_SUBTYPE.get(weapon.subtype),
+                    motion_start_frame=0,
+                    hit_start_frame=(
+                        ATTACK_POSE_RAISE_FRAME_COUNT
+                        + target_order * IAI_TARGET_STAGGER_FRAME_COUNT
+                    ),
+                    pose_change_frame=final_hit_start_frame,
+                    is_hit=result.hit,
+                    is_critical=getattr(result, "critical", False),
+                    is_weak=effective,
+                    additional_effects=self._resolve_member_attack_additional_effects(
+                        member,
+                        weapon,
+                        monster,
+                        result,
+                        attacker_hidden=hidden,
+                        weapon_effective=effective,
+                    ),
+                    sound_effect_id=ATTACK_SE_ID_BY_SUBTYPE.get(
+                        weapon.subtype, ATTACK_SLASH_SE_ID
+                    ),
+                    target_index=index,
+                )
+            )
+            if records is not None:
+                records.reveal_profile(monster.key)
+                if attribute is not None:
+                    records.reveal_affinity(monster.key, attribute)
+        self.attack_presentation = BattleAttackPresentation(
+            target_index=targets[0],
+            strikes=tuple(strikes),
+            is_iai=True,
+        )
+        self.phase = BattlePhase.ATTACK_PRESENTATION
+        self.action_gauge_adjustment = IAI_GAUGE_ADJUSTMENT
+        self.target_cursor.active = False
+        self.all_target_cursors = ()
+        self.command_window.close_immediately()
+        if hidden:
+            self.hidden_party_indexes.discard(party_index)
+        self._refresh_monster_name_colors()
+        return True
+
     @staticmethod
     def _effect_candidates_for_member_attack(
         member: Member,
@@ -6588,12 +6752,25 @@ class BattleScene:
         if self._action_forward_jump_in_progress():
             return
         presentation.elapsed_frame += 1
+        if (
+            presentation.is_iai
+            and not presentation.sound_played
+            and presentation.elapsed_frame >= presentation.strikes[-1].hit_start_frame
+        ):
+            play_se(presentation.strikes[-1].sound_effect_id)
+            presentation.sound_played = True
         targets_enemy = presentation.target_side == "enemy"
         monster = (
             self.monsters[presentation.target_index] if targets_enemy else None
         )
         member = self.party[presentation.target_index] if not targets_enemy else None
         for strike in presentation.strikes:
+            strike_target_index = (
+                presentation.target_index
+                if strike.target_index is None else strike.target_index
+            )
+            if targets_enemy:
+                monster = self.monsters[strike_target_index]
             if (
                 not strike.damage_applied
                 and strike.hit_elapsed_frame(presentation.elapsed_frame) >= 0
@@ -6603,10 +6780,10 @@ class BattleScene:
                         monster.state.take_damage(strike.damage)
                         observations = getattr(self, "auto_battle_observations", None)
                         if observations is not None:
-                            observations.damage(presentation.target_index, strike.damage)
+                            observations.damage(strike_target_index, strike.damage)
                         strike.additional_effects = (
                             self._apply_additional_effects_to_monster(
-                                presentation.target_index,
+                                strike_target_index,
                                 strike.additional_effects,
                             )
                         )
@@ -6620,7 +6797,8 @@ class BattleScene:
                             )
                         )
                         self._refresh_party_hp_text(presentation.target_index)
-                    play_se(strike.sound_effect_id)
+                    if not presentation.is_iai:
+                        play_se(strike.sound_effect_id)
                 strike.damage_applied = True
             if (
                 strike.is_hit
@@ -6630,9 +6808,9 @@ class BattleScene:
                 and not strike.affinity_popup_started
                 and strike.damage_popup_elapsed_frame(presentation.elapsed_frame) >= 0
             ):
-                _base_x, base_y = self._monster_base_position(presentation.target_index)
+                _base_x, base_y = self._monster_base_position(strike_target_index)
                 center_x = (
-                    self._monster_draw_x(presentation.target_index) + monster.width // 2
+                    self._monster_draw_x(strike_target_index) + monster.width // 2
                 )
                 affinity_popups = getattr(self, "affinity_popups", None)
                 if affinity_popups is None:
@@ -6651,20 +6829,38 @@ class BattleScene:
         ):
             party_index = getattr(self, "action_party_index", None)
             if party_index is not None and monster is not None:
+                target_indexes = tuple(
+                    dict.fromkeys(
+                        presentation.target_index
+                        if strike.target_index is None else strike.target_index
+                        for strike in presentation.strikes
+                    )
+                )
                 self._record_equipped_weapon_action(
                     party_index,
-                    (getattr(monster, "level", 1),),
-                    defeated_enemy=not monster.is_alive,
+                    tuple(
+                        getattr(self.monsters[index], "level", 1)
+                        for index in target_indexes
+                    ),
+                    defeated_enemy=any(
+                        not self.monsters[index].is_alive
+                        for index in target_indexes
+                    ),
                     critical=any(strike.is_critical for strike in presentation.strikes),
+                    **({"right_hand_only": True} if presentation.is_iai else {}),
                 )
             presentation.progression_recorded = True
         return_wait_frames = (
-            FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT
-            if presentation.is_focused
+            0
+            if presentation.is_iai
             else (
-                JUMP_ATTACK_RETURN_WAIT_FRAME_COUNT
-                if getattr(self, "action_forward_jump", False)
-                else 0
+                FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT
+                if presentation.is_focused
+                else (
+                    JUMP_ATTACK_RETURN_WAIT_FRAME_COUNT
+                    if getattr(self, "action_forward_jump", False)
+                    else 0
+                )
             )
         )
         if (
@@ -6674,9 +6870,24 @@ class BattleScene:
         ):
             presentation.return_started = True
             self._begin_action_return(
-                jump=not getattr(self, "action_forward_jump", False),
+                jump=presentation.is_iai
+                or not getattr(self, "action_forward_jump", False),
             )
         if not presentation.return_started or not presentation.result_complete:
+            return
+        if presentation.is_iai:
+            defeated = tuple(
+                index
+                for index in dict.fromkeys(
+                    strike.target_index for strike in presentation.strikes
+                )
+                if index is not None and not self.monsters[index].is_alive
+            )
+            self.attack_presentation = None
+            if defeated:
+                self._begin_monster_deaths(defeated)
+            else:
+                self._complete_current_turn()
             return
         target_index = presentation.target_index
         target_is_alive = (
@@ -7988,6 +8199,14 @@ class BattleScene:
         if self.active_party_index is None:
             return ()
         actor = self.party[self.active_party_index]
+        if command is BattleCommand.IAI:
+            if not member_can_iai(actor):
+                return ()
+            return tuple(
+                index
+                for index, monster in enumerate(self.monsters)
+                if monster.is_alive
+            )
         if not member_can_attack(actor):
             return ()
         return selectable_attack_target_indexes(
@@ -9476,7 +9695,24 @@ class BattleScene:
         if settings is None or settings.screen_flash_enabled:
             return
         presentation = getattr(self, "attack_presentation", None)
-        if self._party_attack_smash_marker_visible(presentation):
+        if (
+            presentation is not None
+            and presentation.is_iai
+            and self.phase is BattlePhase.ATTACK_PRESENTATION
+        ):
+            for strike in presentation.visible_result_strikes():
+                if not (strike.is_hit and strike.is_critical and not strike.is_weak):
+                    continue
+                index = strike.target_index
+                monster = self.monsters[index]
+                _target_x, target_y = self._monster_base_position(index)
+                self._draw_critical_marker(
+                    self._monster_draw_x(index)
+                    + monster.width // 2
+                    - CRITICAL_MARKER_WIDTH // 2,
+                    target_y + 20,
+                )
+        elif self._party_attack_smash_marker_visible(presentation):
             if getattr(presentation, "target_side", "enemy") == "ally":
                 position = self._party_draw_position(presentation.target_index)
                 if position is not None:
@@ -9529,6 +9765,60 @@ class BattleScene:
         """Draw STUN or defense-down text over the affected monster."""
 
         presentation = getattr(self, "attack_presentation", None)
+        if (
+            presentation is not None
+            and presentation.is_iai
+            and self.phase is BattlePhase.ATTACK_PRESENTATION
+        ):
+            for result in presentation.visible_result_strikes():
+                if not result.is_hit or result.is_weak:
+                    continue
+                if (
+                    not self.settings.screen_flash_enabled
+                    and result.is_critical
+                ):
+                    continue
+                index = result.target_index
+                monster = self.monsters[index]
+                if not monster.is_alive:
+                    continue
+                effect = next(
+                    (
+                        candidate
+                        for candidate in (
+                            AdditionalEffect.STUN,
+                            AdditionalEffect.DEFENSE_DOWN,
+                        )
+                        if candidate in result.additional_effects
+                        and (
+                            (
+                                candidate is AdditionalEffect.STUN
+                                and monster.state.stunned
+                            )
+                            or (
+                                candidate is AdditionalEffect.DEFENSE_DOWN
+                                and monster.state.defense_modifier < 0
+                            )
+                        )
+                    ),
+                    None,
+                )
+                if effect is None:
+                    continue
+                _target_x, target_y = self._monster_base_position(index)
+                source_x, source_y = ADDITIONAL_EFFECT_MARKER_SOURCE[effect]
+                pyxel.blt(
+                    self._monster_draw_x(index) + monster.width // 2
+                    - CRITICAL_MARKER_WIDTH // 2,
+                    target_y + 20,
+                    0,
+                    source_x,
+                    source_y,
+                    ADDITIONAL_EFFECT_MARKER_WIDTH,
+                    ADDITIONAL_EFFECT_MARKER_HEIGHT,
+                    TRANSPARENT_INDEX,
+                )
+            return
         strike = (
             presentation.latest_result_strike() if presentation is not None else None
         )
@@ -9622,6 +9912,24 @@ class BattleScene:
             TRANSPARENT_INDEX,
         )
 
+    def _party_attack_pose(self, index: int) -> AttackPoseDefinition | None:
+        presentation = getattr(self, "attack_presentation", None)
+        if (
+            self._party_member_is_dead(index)
+            or self.phase is not BattlePhase.ATTACK_PRESENTATION
+            or index != getattr(self, "action_party_index", None)
+            or presentation is None
+            or self._action_forward_jump_in_progress()
+        ):
+            return None
+        if (
+            getattr(presentation, "is_iai", False)
+            and self.action_returning
+            and self.action_offset_x > 0
+        ):
+            return presentation.strikes[-1].poses[-1]
+        return presentation.pose
+
     def _draw_party(self) -> None:
         for index, visual in enumerate(self.party_visuals):
             if index in getattr(self, "escaped_party_indexes", ()):
@@ -9699,17 +10007,7 @@ class BattleScene:
                 self, "escape_actor_index", None
             )
             width = self._party_sprite_width(index, is_escaping=is_escaping)
-            attack_pose = (
-                attack_presentation.pose
-                if (
-                    not self._party_member_is_dead(index)
-                    and self.phase is BattlePhase.ATTACK_PRESENTATION
-                    and index == getattr(self, "action_party_index", None)
-                    and attack_presentation is not None
-                    and not self._action_forward_jump_in_progress()
-                )
-                else None
-            )
+            attack_pose = self._party_attack_pose(index)
             sprite_source_x = (
                 attack_pose.character_pose * PARTY_SPRITE_WIDTH
                 if attack_pose is not None
@@ -10149,11 +10447,12 @@ class BattleScene:
             or presentation is None
         ):
             return
-        anchor_x, anchor_y = self._spell_effect_anchor(
-            getattr(presentation, "target_side", "enemy"),
-            presentation.target_index,
-        )
         for strike in presentation.strikes:
+            anchor_x, anchor_y = self._spell_effect_anchor(
+                getattr(presentation, "target_side", "enemy"),
+                presentation.target_index
+                if strike.target_index is None else strike.target_index,
+            )
             hit_elapsed_frame = strike.hit_elapsed_frame(presentation.elapsed_frame)
             if (
                 not strike.is_hit
@@ -10312,23 +10611,23 @@ class BattleScene:
             or presentation is None
         ):
             return
-        if getattr(presentation, "target_side", "enemy") == "ally":
-            position = self._party_draw_position(presentation.target_index)
-            if position is None:
-                return
-            target_x, target_y = position
-            anchor_x = target_x + 14
-            result_y = target_y + 16
-        else:
-            monster = self.monsters[presentation.target_index]
-            _target_x, target_y = self._monster_base_position(
-                presentation.target_index
-            )
-            anchor_x = (
-                self._monster_draw_x(presentation.target_index) + monster.width // 2
-            )
-            result_y = target_y + monster.height - 8
         for strike in presentation.strikes:
+            target_index = (
+                presentation.target_index
+                if strike.target_index is None else strike.target_index
+            )
+            if getattr(presentation, "target_side", "enemy") == "ally":
+                position = self._party_draw_position(target_index)
+                if position is None:
+                    continue
+                target_x, target_y = position
+                anchor_x = target_x + 14
+                result_y = target_y + 16
+            else:
+                monster = self.monsters[target_index]
+                _target_x, target_y = self._monster_base_position(target_index)
+                anchor_x = self._monster_draw_x(target_index) + monster.width // 2
+                result_y = target_y + monster.height - 8
             if not strike.damage_applied:
                 continue
             offsets = (
@@ -10390,7 +10689,13 @@ class BattleScene:
                 self.phase is BattlePhase.ATTACK_PRESENTATION
                 and attack_presentation is not None
                 and getattr(attack_presentation, "target_side", "enemy") == "enemy"
-                and index == attack_presentation.target_index
+                and (
+                    index == attack_presentation.target_index
+                    or any(
+                        strike.target_index == index
+                        for strike in attack_presentation.strikes
+                    )
+                )
             )
             action_presentation = getattr(self, "action_presentation", None)
             is_spell_damage_target = (
@@ -11137,7 +11442,12 @@ class BattleScene:
 
     def _draw_target_cursor(self) -> None:
         if self.phase is BattlePhase.TARGET:
-            self.target_cursor.draw()
+            if getattr(self, "selected_command", None) is BattleCommand.IAI:
+                if pyxel.frame_count % 2 == 0:
+                    for cursor in self.all_target_cursors:
+                        cursor.draw()
+            else:
+                self.target_cursor.draw()
             return
         if self.phase is BattlePhase.COVER_TARGET:
             if self.party_target_cursor is not None:

@@ -31,7 +31,7 @@ from auto_battle_model import (
 from auto_battle_simulation import BattleForecast, ForecastActor, mp_cost
 from battle_commands import BattleCommand
 from battle_magic import member_spell_ability, resolve_healing
-from battle_physical import resolve_physical_attack
+from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import TimelineEntry, TimelineOrder
 from item import AdditionalEffect
 from member import EquipmentSlot
@@ -730,6 +730,59 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         actor = replace(self.specs[0], hidden=True, front=False)
         forecast = BattleForecast(self.snapshot(actor, self.enemy(front=False)), 0)
         self.assertIn(AutoAction(BattleCommand.AMBUSH, (5,)), forecast.candidates(0))
+
+    def test_iai_forecast_uses_all_enemies_right_hand_and_thirty_two_delay(self):
+        member = load_mock_party(
+            self.items,
+            load_mock_skills(),
+            character_keys=("Elika",),
+            internal_level=20,
+        )[0]
+        spec = AutoCombatant.from_member(member, 0, front=False, spells=())
+        enemies = (
+            self.enemy(number=5, front=False, max_hp=1000, hp=1000),
+            self.enemy(number=6, front=False, max_hp=1000, hp=1000),
+        )
+        forecast = BattleForecast(self.snapshot(spec, *enemies), 0)
+        action = AutoAction(BattleCommand.IAI, (5, 6))
+        self.assertIn(action, forecast.candidates(0))
+        self.assertEqual(forecast.delay(forecast.actors[0], action), -32.0)
+        expected_attack = member_physical_attack(
+            member.battle_stats.attack_right * 60 // 100,
+            member.adjusted_abilities.strength,
+            member.weapon_level(member.equipment.weapon_at(EquipmentSlot.RIGHT)),
+            member.internal_level,
+        )
+        self.assertEqual(spec.weapons[0].iai_attack, expected_attack)
+        with patch(
+            "auto_battle_simulation.resolve_physical_attack",
+            wraps=resolve_physical_attack,
+        ) as resolver:
+            forecast.execute(0, action)
+        self.assertEqual(
+            [call.kwargs["attack"] for call in resolver.call_args_list],
+            [expected_attack, expected_attack],
+        )
+        self.assertLess(forecast.actors[5].hp, 1000)
+        self.assertLess(forecast.actors[6].hp, 1000)
+
+    def test_auto_selects_iai_when_it_can_defeat_three_enemies(self):
+        member = load_mock_party(
+            self.items,
+            load_mock_skills(),
+            character_keys=("Elika",),
+            internal_level=20,
+        )[0]
+        spec = AutoCombatant.from_member(member, 0, front=True, spells=())
+        enemies = tuple(
+            self.enemy(number=5 + index, max_hp=60, hp=60, attack=5)
+            for index in range(3)
+        )
+        decision = decide_auto_battle(self.snapshot(spec, *enemies))
+        self.assertEqual(
+            decision.action,
+            AutoAction(BattleCommand.IAI, (5, 6, 7)),
+        )
 
     def test_only_three_visible_left_commands_are_available(self):
         actor = replace(

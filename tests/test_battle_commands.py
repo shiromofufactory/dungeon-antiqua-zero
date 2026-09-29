@@ -219,6 +219,27 @@ class BattleCommandRulesTest(unittest.TestCase):
         )
         self.assertFalse(focus.enabled)
 
+    def test_iai_requires_right_hand_katana_and_reaches_every_living_row(self) -> None:
+        skills = load_mock_skills()
+        items = load_mock_items()
+        member = self.party[0]
+        member.skills.append(skills["Iai"])
+        member.formation_row = FormationRow.BACK
+
+        def iai_enabled() -> bool:
+            options = resolve_battle_commands(member, self.party, self.monsters)
+            return next(option.enabled for option in options if option.command is BattleCommand.IAI)
+
+        self.assertFalse(iai_enabled())
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.RIGHT: items["KATANA"]}
+        )
+        self.assertTrue(iai_enabled())
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.RIGHT: None}
+        )
+        self.assertFalse(iai_enabled())
+
     def test_silence_disables_visible_spell_without_hiding_it(self) -> None:
         commands = resolve_battle_commands(
             self.party[0],

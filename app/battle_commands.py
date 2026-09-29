@@ -103,6 +103,13 @@ def member_can_attack(member: Member) -> bool:
     return member.equipment.weapon_at(EquipmentSlot.RIGHT) is not None
 
 
+def member_can_iai(member: Member) -> bool:
+    """Iai requires a katana in the right hand."""
+
+    weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+    return weapon is not None and weapon.subtype == "KATANA"
+
+
 def selectable_attack_target_indexes(
     *,
     attacker_is_front_row: bool,
@@ -245,8 +252,15 @@ def resolve_battle_commands(
             BattleCommandOption(
                 command,
                 enabled=(
-                    command not in (BattleCommand.AIM, BattleCommand.FOCUS)
-                    or bool(normal_attack_targets)
+                    (
+                        member_can_iai(member)
+                        and any(monster.is_alive for monster in monsters)
+                    )
+                    if command is BattleCommand.IAI
+                    else (
+                        command not in (BattleCommand.AIM, BattleCommand.FOCUS)
+                        or bool(normal_attack_targets)
+                    )
                 ),
             )
         )
@@ -277,6 +291,7 @@ __all__ = [
     "BattleTarget",
     "formation_change_enabled",
     "member_can_attack",
+    "member_can_iai",
     "member_attack_reach",
     "member_has_spell_aptitude",
     "resolve_battle_commands",
