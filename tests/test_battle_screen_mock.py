@@ -1735,10 +1735,13 @@ class BattleScreenMockTest(unittest.TestCase):
                 AttackWeaponSprite(10, -12, 7, "back", False, False),
                 AttackWeaponSprite(11, -11, 6, "front", True, True),
             ),
+            {"FAIRY": -3, "HUMAN": 2},
         )
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
-        mock.party_visuals = (SimpleNamespace(battle_sprite=1),)
+        mock.party_visuals = (
+            SimpleNamespace(battle_sprite=1, member=SimpleNamespace(definition=SimpleNamespace(race="FAIRY"))),
+        )
 
         with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
             mock._draw_attack_composite(0, 140, 64, pose)
@@ -1746,11 +1749,16 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             blt.call_args_list,
             [
-                call(128, 71, 0, 160, 32, 16, 16, 1),
+                call(128, 68, 0, 160, 32, 16, 16, 1),
                 call(140, 64, mock.character_sprites, 32, 32, 16, 32, 1),
-                call(129, 70, 0, 176, 32, -16, -16, 1),
+                call(129, 67, 0, 176, 32, -16, -16, 1),
             ],
         )
+        mock.party_visuals[0].member.definition.race = "HUMAN"
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_attack_composite(0, 140, 64, pose)
+        self.assertEqual(blt.call_args_list[0].args[1], 73)
+        self.assertEqual(blt.call_args_list[2].args[1], 72)
 
     def test_attack_return_uses_an_eight_frame_backward_jump(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

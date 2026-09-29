@@ -48,7 +48,7 @@ button { color: inherit; }
 .right-rail { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); min-width: 0; border-left: 1px solid var(--line); background: var(--panel); }
 .right-rail .panel { padding-inline: 16px; }
 .weapon-panel { border-right: 1px solid var(--line); }
-.preset-panel { min-width: 0; }
+.preset-panel { display: flex; flex-direction: column; align-self: start; position: sticky; top: 0; min-width: 0; height: calc(100dvh - 78px); min-height: 420px; }
 .panel-heading { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px; }
 .panel-heading h2, .preset-heading h2 { margin: 0 0 3px; font: 600 17px/1.2 Georgia, serif; }
 .panel-heading p { margin: 0; color: var(--muted); font-size: 11px; }
@@ -117,6 +117,13 @@ button { color: inherit; }
 .coordinate-grid legend { padding: 0 5px; color: var(--muted); font: 700 9px ui-monospace, monospace; letter-spacing: .12em; }
 .coordinate-grid label { flex: 1; display: flex; align-items: center; gap: 7px; color: var(--muted); font: 10px ui-monospace, monospace; }
 .coordinate-grid input, .preset-editor input, .preset-editor select { min-width: 0; width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); background: var(--panel-2); padding: 0 8px; font-family: ui-monospace, monospace; }
+.race-offsets { margin: 13px 0 0; padding: 10px 12px 12px; border: 1px solid var(--line); }
+.race-offsets legend { padding: 0 5px; color: var(--muted); font: 700 10px ui-monospace, monospace; }
+.race-offset-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+.race-offset-grid label { display: grid; grid-template-columns: minmax(0, 1fr) 62px; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.race-offset-grid label.active { color: var(--gold); }
+.race-offset-grid input { width: 100%; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); background: var(--panel-2); padding: 0 5px; font: 11px ui-monospace, monospace; }
+.race-offsets p { margin: 9px 0 0; color: var(--muted); font-size: 10px; }
 .layer-control { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 0; font-size: 12px; }
 
 .weapon-slot-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
@@ -140,7 +147,7 @@ button { color: inherit; }
 .preset-heading { display: flex; justify-content: space-between; align-items: end; }
 .preset-heading h2 { margin-top: 3px; }
 .preset-hint { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
-.preset-list { display: grid; gap: 7px; margin-top: 13px; padding-right: 3px; }
+.preset-list { display: grid; align-content: start; gap: 7px; flex: 1; min-height: 0; margin-top: 13px; padding-right: 3px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .preset-item { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; width: 100%; min-height: 54px; text-align: left; padding: 8px 10px 8px 6px; border: 1px solid var(--line-soft); border-radius: 3px; background: var(--panel-2); cursor: pointer; }
 .preset-item.active { border-color: var(--gold); background: #211d15; }
 .preset-item.dragging { opacity: .42; }
@@ -152,7 +159,7 @@ button { color: inherit; }
 .preset-copy { min-width: 0; }
 .preset-item strong { display: block; overflow: hidden; text-overflow: ellipsis; font: 700 10px ui-monospace, monospace; }
 .preset-item small { display: block; margin-top: 6px; color: var(--muted); font: 9px ui-monospace, monospace; }
-.preset-editor { display: grid; gap: 7px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }
+.preset-editor { display: grid; flex: none; gap: 7px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }
 .preset-editor label { color: var(--muted); font-size: 11px; }
 .preset-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .preset-field { display: grid; gap: 5px; min-width: 0; }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import re
@@ -15,6 +15,7 @@ WEAPON_IMG_PATTERN = re.compile(r"[A-Z0-9]+(?:-[A-Z0-9]+)*\Z")
 BRANCH_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 MIN_POSITION = -128
 MAX_POSITION = 128
+RACE_KEYS = ("FAIRY", "HUMAN", "DRAGONEWT", "ELF", "DWARF", "ROBOT")
 
 
 class AttackPoseDataError(ValueError):
@@ -89,6 +90,10 @@ class AttackPoseDefinition:
     branch: str
     character_pose: int
     weapons: tuple[AttackWeaponSprite, ...]
+    race_y_offsets: Mapping[str, int] | None = None
+
+    def weapon_y_offset(self, race: str) -> int:
+        return (self.race_y_offsets or {}).get(race, 0)
 
     @classmethod
     def from_record(cls, record: object) -> AttackPoseDefinition:
@@ -117,6 +122,16 @@ class AttackPoseDefinition:
             raise AttackPoseDataError(
                 f"attack pose.character_pose must be from 0 to 8: {pose_id}"
             )
+        race_y_offsets = record.get("race_y_offsets", {})
+        if not isinstance(race_y_offsets, Mapping) or any(
+            race not in RACE_KEYS
+            or not _integer(offset)
+            or not MIN_POSITION <= offset <= MAX_POSITION
+            for race, offset in race_y_offsets.items()
+        ):
+            raise AttackPoseDataError(
+                f"attack pose.race_y_offsets must contain supported races and integer offsets: {pose_id}"
+            )
         weapon_records = record.get("weapons")
         if not isinstance(weapon_records, list) or not 1 <= len(weapon_records) <= 2:
             raise AttackPoseDataError(
@@ -131,6 +146,7 @@ class AttackPoseDefinition:
                 AttackWeaponSprite.from_record(weapon, pose_id=pose_id)
                 for weapon in weapon_records
             ),
+            MappingProxyType(dict(race_y_offsets)),
         )
 
     def to_record(self) -> dict[str, object]:
@@ -140,6 +156,7 @@ class AttackPoseDefinition:
             "branch": self.branch,
             "character_pose": self.character_pose,
             "weapons": [weapon.to_record() for weapon in self.weapons],
+            **({"race_y_offsets": dict(self.race_y_offsets)} if self.race_y_offsets else {}),
         }
 
 
@@ -207,11 +224,16 @@ def attack_sequence(
 def throwing_projectile_sequence(
     poses: Mapping[str, AttackPoseDefinition],
     weapon_img: str,
+    *,
+    race: str = "",
 ) -> tuple[AttackWeaponSprite, ...]:
     """Return the authored branch-2/3 weapon sprites used during a throw."""
 
     return tuple(
-        pose.weapons[0]
+        replace(
+            pose.weapons[0],
+            position_y=pose.weapons[0].position_y + pose.weapon_y_offset(race),
+        )
         for pose in attack_sequence(
             poses,
             weapon_img,

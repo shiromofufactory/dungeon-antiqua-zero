@@ -138,6 +138,28 @@ class AttackPoseTest(unittest.TestCase):
             (10, 12),
         )
 
+    def test_race_y_offsets_round_trip_and_adjust_projectile_start(self) -> None:
+        source = document()
+        source["poses"][0]["race_y_offsets"] = {"FAIRY": -4, "HUMAN": 2}
+        poses = parse_attack_poses(source)
+        pose = poses["SPEAR-1_2"]
+
+        self.assertEqual(pose.weapon_y_offset("FAIRY"), -4)
+        self.assertEqual(pose.weapon_y_offset("HUMAN"), 2)
+        self.assertEqual(pose.weapon_y_offset("ELF"), 0)
+        self.assertEqual(pose.to_record()["race_y_offsets"], {"FAIRY": -4, "HUMAN": 2})
+        self.assertEqual(throwing_projectile_sequence(poses, "SPEAR-1", race="FAIRY")[0].position_y, 2)
+        self.assertEqual(throwing_projectile_sequence(poses, "SPEAR-1", race="HUMAN")[0].position_y, 8)
+        self.assertEqual(throwing_projectile_sequence(poses, "SPEAR-1")[0].position_y, 6)
+
+    def test_rejects_invalid_race_y_offset(self) -> None:
+        for offsets in ({"UNKNOWN": 1}, {"FAIRY": True}, {"HUMAN": 129}, []):
+            with self.subTest(offsets=offsets):
+                source = document()
+                source["poses"][0]["race_y_offsets"] = offsets
+                with self.assertRaisesRegex(AttackPoseDataError, "race_y_offsets"):
+                    parse_attack_poses(source)
+
     def test_loads_json_from_runtime_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "attack_poses.json"

@@ -8,6 +8,7 @@ const state = {
   token: new URLSearchParams(location.search).get("token") || "",
   data: null,
   characters: [],
+  races: [],
   weaponImgOptions: [],
   characterImage: null,
   weaponImage: null,
@@ -25,6 +26,8 @@ const state = {
 const byId = (id) => document.getElementById(id);
 const currentPose = () => state.data.poses[state.selectedPose];
 const currentWeapon = () => currentPose().weapons[state.selectedWeapon];
+const selectedRace = () => state.characters[state.selectedCharacter].race;
+const weaponYOffset = () => currentPose().race_y_offsets?.[selectedRace()] || 0;
 const deepCopy = (value) => JSON.parse(JSON.stringify(value));
 
 function newWeapon() {
@@ -107,6 +110,7 @@ function renderCharacters() {
     button.addEventListener("click", () => {
       state.selectedCharacter = index;
       renderCharacters();
+      renderRaceOffsets();
       renderPoses();
       drawMain();
     });
@@ -204,7 +208,7 @@ function drawChecker(context) {
 }
 
 function drawWeapon(context, weapon) {
-  const position = [state.viewOrigin[0] + weapon.position[0], state.viewOrigin[1] + weapon.position[1]];
+  const position = [state.viewOrigin[0] + weapon.position[0], state.viewOrigin[1] + weapon.position[1] + weaponYOffset()];
   context.save();
   context.translate(
     position[0] + (weapon.flip_x ? 16 : 0),
@@ -233,7 +237,7 @@ function drawMain() {
     const weaponIndex = Number(state.moveTarget.slice(-1));
     const weapon = pose.weapons[weaponIndex];
     if (weapon) {
-      const position = [state.viewOrigin[0] + weapon.position[0], state.viewOrigin[1] + weapon.position[1]];
+      const position = [state.viewOrigin[0] + weapon.position[0], state.viewOrigin[1] + weapon.position[1] + weaponYOffset()];
       context.strokeStyle = weaponIndex === 0 ? "#e1b85b" : "#71a9d2";
       context.lineWidth = 0.5;
       context.strokeRect(position[0] - 0.25, position[1] - 0.25, WEAPON_SIZE[0] + 0.5, WEAPON_SIZE[1] + 0.5);
@@ -255,6 +259,45 @@ function renderControls() {
     const active = weapon[button.dataset.flip];
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function renderRaceOffsets() {
+  const container = byId("race-offset-grid");
+  container.replaceChildren();
+  state.races.forEach(({ key, name }) => {
+    const label = document.createElement("label");
+    label.classList.toggle("active", key === selectedRace());
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "-128";
+    input.max = "128";
+    input.step = "1";
+    input.value = currentPose().race_y_offsets?.[key] ?? 0;
+    input.setAttribute("aria-label", `${name}の武器Y補正`);
+    input.addEventListener("change", () => {
+      const raw = input.value.trim();
+      const value = Number(raw);
+      if (!raw || !Number.isInteger(value) || value < -128 || value > 128) {
+        input.value = currentPose().race_y_offsets?.[key] ?? 0;
+        showToast("種族別Y補正は-128〜128の整数で入力してください。");
+        return;
+      }
+      if (value === (currentPose().race_y_offsets?.[key] ?? 0)) return;
+      if (value === 0) {
+        delete currentPose().race_y_offsets[key];
+        if (!Object.keys(currentPose().race_y_offsets).length) delete currentPose().race_y_offsets;
+      } else {
+        currentPose().race_y_offsets ||= {};
+        currentPose().race_y_offsets[key] = value;
+      }
+      setDirty();
+      drawMain();
+    });
+    label.append(nameSpan, input);
+    container.append(label);
   });
 }
 
@@ -376,6 +419,7 @@ function renderAll() {
   renderWeaponSlots();
   renderWeapons();
   renderControls();
+  renderRaceOffsets();
   renderPresetList();
   drawMain();
 }
@@ -571,7 +615,12 @@ async function saveDocument() {
     return;
   }
   setDirty(false);
-  showToast("attack_poses.json を保存しました");
+  if (!result.compiled) {
+    byId("save-state").textContent = "ゲーム用データ未更新";
+    showToast(result.error || "正本は保存しましたが、ゲーム用データを更新できませんでした");
+    return;
+  }
+  showToast("攻撃ポーズを保存し、ゲーム用データを更新しました");
 }
 
 async function initialize() {
@@ -581,6 +630,7 @@ async function initialize() {
     if (!response.ok) throw new Error(payload.error || "データを読み込めませんでした。");
     state.data = payload.data;
     state.characters = payload.characters;
+    state.races = payload.races;
     state.weaponImgOptions = payload.weapon_img_options;
     [state.characterImage, state.weaponImage] = await Promise.all([
       loadImage(payload.character_image_url), loadImage(payload.weapon_image_url),

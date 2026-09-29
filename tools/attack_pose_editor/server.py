@@ -20,6 +20,13 @@ import zipfile
 
 from PIL import Image
 
+from app.attack_pose import (
+    ATTACK_POSE_FORMAT_VERSION,
+    AttackPoseDataError,
+    RACE_KEYS,
+    parse_attack_poses,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -27,7 +34,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8769
 MAX_REQUEST_BYTES = 1024 * 1024
 TRANSPARENT_INDEX = 1
-CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan")
+CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan", "Elika")
 WEAPON_IMG_PATTERN = re.compile(r"[A-Z0-9]+(?:-[A-Z0-9]+)*\Z")
 BRANCH_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 MIME_TYPES = {
@@ -133,6 +140,13 @@ def validate_document(
         character_pose = pose.get("character_pose")
         if not _integer(character_pose) or not 0 <= character_pose <= 8:
             error("invalid_character_pose", f"{path}.character_pose", "キャラポーズは0〜8で指定してください。")
+        race_y_offsets = pose.get("race_y_offsets", {})
+        if not isinstance(race_y_offsets, dict):
+            error("invalid_race_y_offsets", f"{path}.race_y_offsets", "種族別Y補正はobjectで指定してください。")
+        else:
+            for race, offset in race_y_offsets.items():
+                if race not in RACE_KEYS or not _integer(offset) or not -128 <= offset <= 128:
+                    error("invalid_race_y_offset", f"{path}.race_y_offsets.{race}", "種族別Y補正は対応する種族の-128〜128の整数で指定してください。")
         weapons = pose.get("weapons")
         if not isinstance(weapons, list) or not 1 <= len(weapons) <= 2:
             error("invalid_weapons", f"{path}.weapons", "武器は1〜2件の配列で指定してください。")
@@ -204,8 +218,8 @@ def weapon_strip_png(resource_path: Path, palette_path: Path) -> bytes:
 
 def character_sheet_png(path: Path) -> bytes:
     with Image.open(path) as source:
-        if source.width < 160 or source.height < 96:
-            raise ValueError("ch_battle.gifに3人分の10ポーズがありません。")
+        if source.width < 160 or source.height < 128:
+            raise ValueError("ch_battle.gifに4人分の10ポーズがありません。")
         image = source.convert("RGBA")
     output = io.BytesIO()
     image.save(output, format="PNG")
@@ -223,11 +237,13 @@ class AttackPoseApplication:
         self.content_root = content_root.resolve()
         self.app_root = app_root.resolve()
         self.source_path = (self.content_root / "battle" / "attack_poses.json").resolve()
+        self.generated_path = (self.app_root / "effects" / "attack_poses.json").resolve()
         expected_root = (self.content_root / "battle").resolve()
         if expected_root not in self.source_path.parents:
             raise ValueError("保存先がcontent/battle外です。")
         self.character_path = self.content_root / "images" / "characters" / "ch_battle.gif"
         self.character_data_path = self.content_root / "data" / "characters.json"
+        self.text_data_path = self.content_root / "data" / "texts.json"
         self.item_data_path = self.content_root / "data" / "items.json"
         self.resource_path = self.app_root / "assets.pyxres"
         self.palette_path = self.app_root / "assets.pyxpal"
@@ -250,12 +266,30 @@ class AttackPoseApplication:
             battle_sprite = record.get("battle_sprite")
             if not _integer(battle_sprite) or battle_sprite < 0:
                 raise ValueError(f"{key}.battle_spriteが不正です。")
+            race = record.get("race")
+            if race not in RACE_KEYS:
+                raise ValueError(f"{key}.raceが不正です。")
             catalog.append({
                 "key": key,
                 "name": record.get("name_ja", key),
                 "battle_sprite": battle_sprite,
+                "race": race,
             })
         return catalog
+
+    def race_catalog(self) -> list[dict[str, str]]:
+        records = json.loads(self.text_data_path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            raise ValueError("texts.jsonのルートが配列ではありません。")
+        labels = {
+            record.get("text_key"): record.get("text_ja")
+            for record in records
+            if isinstance(record, dict)
+        }
+        return [
+            {"key": race, "name": labels.get(f"race.{race}") or race}
+            for race in RACE_KEYS
+        ]
 
     def weapon_img_catalog(self) -> list[str]:
         records = json.loads(self.item_data_path.read_text(encoding="utf-8"))
@@ -294,6 +328,7 @@ class AttackPoseApplication:
         return {
             "data": data,
             "characters": self.character_catalog(),
+            "races": self.race_catalog(),
             "weapon_img_options": self.weapon_img_catalog(),
             "character_image_url": f"/api/characters.png?token={self.token}",
             "weapon_image_url": f"/api/weapons.png?token={self.token}",
@@ -308,6 +343,17 @@ class AttackPoseApplication:
         issues = self.validate(data)
         if issues or not isinstance(data, dict):
             return {"saved": False, "diagnostics": issues}
+        try:
+            poses = parse_attack_poses(data)
+        except AttackPoseDataError as error:
+            return {"saved": False, "diagnostics": [{
+                "severity": "error", "code": "invalid_attack_pose", "path": "poses",
+                "message": str(error),
+            }]}
+        generated = {
+            "format_version": ATTACK_POSE_FORMAT_VERSION,
+            "poses": [pose.to_record() for pose in poses.values()],
+        }
         self.source_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self.source_path.with_suffix(".json.tmp")
         temporary_path.write_text(
@@ -315,7 +361,28 @@ class AttackPoseApplication:
             encoding="utf-8",
         )
         temporary_path.replace(self.source_path)
-        return {"saved": True, "diagnostics": [], "source_path": str(self.source_path)}
+        try:
+            self.generated_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_generated_path = self.generated_path.with_suffix(".json.tmp")
+            temporary_generated_path.write_text(
+                json.dumps(generated, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary_generated_path.replace(self.generated_path)
+        except OSError as error:
+            return {
+                "saved": True,
+                "compiled": False,
+                "diagnostics": [],
+                "error": f"正本は保存しましたが、ゲーム用データを更新できませんでした: {error}",
+                "source_path": str(self.source_path),
+            }
+        return {
+            "saved": True,
+            "compiled": True,
+            "diagnostics": [],
+            "source_path": str(self.source_path),
+        }
 
 
 def create_handler(application: AttackPoseApplication) -> type[BaseHTTPRequestHandler]:

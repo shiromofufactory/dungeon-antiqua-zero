@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "python3 -B app/main.py",
+    "start": "npm run attack-poses:build && python3 -B app/main.py",
     "sync": "node scripts/sync-content.mjs",
     "get-data": "npm --prefix content run get-data && npm run sync",
     "put-data": "npm --prefix content run put-data",

@@ -47,6 +47,7 @@ npm run spell-effects:build
 戦闘用キャラクターの静止ポーズと武器画像を重ね、通常攻撃の振り上げ・振り下ろしを調整する
 ローカルWebツールである。詳細仕様は
 [`docs/features/attack-pose-editor.md`](../docs/features/attack-pose-editor.md)を参照する。
+保存時にゲーム用データも更新する。`npm start` では起動前に正本から再生成する。
 
 ```sh
 npm run attack-pose-editor

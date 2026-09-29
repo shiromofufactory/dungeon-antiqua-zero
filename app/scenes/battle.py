@@ -6352,6 +6352,7 @@ class BattleScene:
                 throwing_projectile_sequence(
                     getattr(self, "attack_poses", {}),
                     weapon.weapon_img,
+                    race=self.party[self.active_party_index].definition.race,
                 )
                 if weapon.subtype == "THROWING" and pose_branches == ("1", "2")
                 else ()
@@ -7651,6 +7652,7 @@ class BattleScene:
                 throwing_projectile_sequence(
                     getattr(self, "attack_poses", {}),
                     weapon.weapon_img,
+                    race=self.party[actor_index].definition.race,
                 )
                 if weapon.subtype == "THROWING" and pose_branches == ("1", "2")
                 else ()
@@ -9772,6 +9774,9 @@ class BattleScene:
     ) -> None:
         """Draw authored back weapons, character pose, then front weapons."""
 
+        race = self.party_visuals[index].member.definition.race
+        weapon_y_offset = pose.weapon_y_offset(race)
+
         def draw_weapon(weapon: AttackWeaponSprite) -> None:
             width = (
                 -ATTACK_WEAPON_SPRITE_SIZE
@@ -9785,7 +9790,7 @@ class BattleScene:
             )
             pyxel.blt(
                 x + weapon.position_x,
-                y + weapon.position_y,
+                y + weapon.position_y + weapon_y_offset,
                 0,
                 weapon.image * ATTACK_WEAPON_SPRITE_SIZE,
                 ATTACK_WEAPON_SPRITE_Y,
