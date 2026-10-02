@@ -940,6 +940,98 @@ class ItemMenuTest(unittest.TestCase):
             all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
         )
 
+    def test_mana_drop_shows_mp_and_restores_only_a_valid_target(self) -> None:
+        items = ItemMenuHarness().items
+        item = items["MANA DROP"]
+        inventory = InventorySystem(items, {item.key: 2, "POTION": 1})
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
+        party = mock.party_panel.party
+        party[2].mp = 2
+        party[3].hp = 0
+        party[3].mp = 0
+        self.select_item(mock, item.key)
+
+        self.assertEqual(mock.party_window.texts[4].text, "ＭＰ　　２")
+        self.assertEqual(mock.party_window.texts[5].text, "／　３０")
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 2)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 1, 3, 4)))
+        self.assertEqual(inventory.quantity(item), 2)
+        mock.member_cursor.select_key(3)
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(inventory.quantity(item), 2)
+        mock.member_cursor.select_key(2)
+
+        with (
+            patch("ui.item_menu.random.random", return_value=0.5),
+            patch("ui.item_menu.play_se") as play_se,
+        ):
+            mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(party[2].mp, 27)
+        self.assertEqual(party[2].hp, party[2].max_hp)
+        self.assertEqual(inventory.quantity(item), 1)
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.selected_item.key, item.key)
+        self.assertEqual(mock.item_cursor.selected_key, item.key)
+        self.assertEqual(mock.party_window.texts[4].text, "ＭＰ　２７")
+        play_se.assert_called_once_with(HEALING_SE_ID)
+
+        mock.update(InputState(cancel=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.item_cursor.selected_key, item.key)
+        self.assertEqual(mock.party_window.texts[4].text, "ＭＰ　２７")
+        mock.update(InputState(cancel=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
+        self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.select_item(mock, "POTION")
+        self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))
+
+    def test_mana_drop_caps_mp_and_consumes_its_last_copy(self) -> None:
+        items = ItemMenuHarness().items
+        item = items["MANA DROP"]
+        inventory = InventorySystem(items, {item.key: 1, "POTION": 1})
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
+        target = mock.party_panel.party[2]
+        target.mp = target.max_mp - 1
+        self.select_item(mock, item.key)
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        with (
+            patch("ui.item_menu.random.random", return_value=0.5),
+            patch("ui.item_menu.play_se"),
+        ):
+            mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(target.mp, target.max_mp)
+        self.assertEqual(inventory.quantity(item), 0)
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.item_cursor.selected_key, "POTION")
+        self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))
+
+    def test_mana_drop_requires_missing_mp_and_a_spell_user(self) -> None:
+        invalid_action = Mock()
+        mock = ItemMenuHarness(on_invalid_action=invalid_action)
+        self.select_item(mock, "MANA DROP")
+
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 1)
+        invalid_action.assert_called_once_with()
+
+        party = mock.party_panel.party
+        party[4].max_mp = 10
+        party[4].mp = 0
+        mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 1)
+        self.assertEqual(invalid_action.call_count, 2)
+
     def test_divine_tear_revives_a_dead_field_party_member_at_full_hp(self) -> None:
         mock = ItemMenuHarness()
         item = mock.items["DIVINE TEAR"]

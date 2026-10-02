@@ -31,6 +31,7 @@ from scenes.battle import (
     BattleScene,
 )
 from attack_pose import load_attack_poses
+from game import MenuAlertEffect
 from member import FormationRow
 from monster import MonsterDataError
 from rendering import SpellEffectRenderer
@@ -101,6 +102,7 @@ class BattleTestApp(BattleScene):
 
     def __init__(self) -> None:
         palette_shifter = initialize_screen_mock("Dungeon Antiqua ZERO Battle Test")
+        self.alert = MenuAlertEffect()
         self.input_reader = create_mock_input_reader()
         bgm = BgmPlayer()
         resources = ImageResources()
@@ -149,6 +151,7 @@ class BattleTestApp(BattleScene):
             result_party=party,
             return_bgm_id="da3-field",
             fonts=fonts,
+            on_invalid_action=self.alert.start,
         )
         pyxel.run(self.update, self.draw)
 
@@ -158,12 +161,26 @@ class BattleTestApp(BattleScene):
         bgm = getattr(self, "bgm", None)
         if bgm is not None:
             bgm.update()
+        alert = getattr(self, "alert", None)
+        if alert is not None:
+            alert.update()
         super().update(self.input_reader.poll())
         if getattr(self, "result", None) in (
             BattleResult.VICTORY,
             BattleResult.ESCAPED,
         ):
             pyxel.quit()
+
+    def draw(self) -> None:
+        alert = getattr(self, "alert", None)
+        if alert is None:
+            super().draw()
+            return
+        pyxel.camera(alert.camera_x, 0)
+        try:
+            super().draw()
+        finally:
+            pyxel.camera()
 
     def _restart_battle(self) -> None:
         self._restart_battle_mock()

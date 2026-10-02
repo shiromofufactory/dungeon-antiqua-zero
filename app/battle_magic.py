@@ -285,9 +285,32 @@ def resolve_healing(
     if intensity == 0:
         return HealingResult(max_hp - current_hp, cures_ailments=True)
 
+    return HealingResult(
+        resolve_recovery_amount(
+            intensity=intensity,
+            ability=ability,
+            random_factor=random_factor,
+        )
+    )
+
+
+def resolve_recovery_amount(
+    *, intensity: int, ability: int, random_factor: float
+) -> int:
+    """Return DA2's shared HP/MP recovery roll before applying a cap."""
+
+    intensity = _nonnegative_integer(intensity, "intensity")
+    ability = _nonnegative_integer(ability, "ability")
+    if isinstance(random_factor, bool) or not isinstance(
+        random_factor, (int, float)
+    ):
+        raise TypeError("random_factor must be a number")
+    if not 0 <= random_factor <= 1:
+        raise ValueError("random_factor must be from 0.0 to 1.0")
+    if intensity == 0:
+        return 0
     rate = DA2_MINIMUM_HEAL_RATE + random_factor * DA2_HEAL_RATE_RANGE
-    amount = int(intensity * ability / 10 * rate + 1)
-    return HealingResult(amount)
+    return int(intensity * ability / 10 * rate + 1)
 
 
 __all__ = [
@@ -307,6 +330,7 @@ __all__ = [
     "member_spell_modifier",
     "poison_tick_damage",
     "resolve_healing",
+    "resolve_recovery_amount",
     "resolve_spell_damage",
     "resolve_status_spell",
     "spell_cast_delay",

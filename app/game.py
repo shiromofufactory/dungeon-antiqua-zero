@@ -694,6 +694,7 @@ class Game:
             return_bgm_id=self.current_map.bgm_id,
             encounter=encounter,
             command_memory=memory,
+            on_invalid_action=self.alert.start,
         )
 
     def _advance_random_encounter(self) -> bool:

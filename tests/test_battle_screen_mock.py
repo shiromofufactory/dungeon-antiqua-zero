@@ -4903,6 +4903,9 @@ class BattleScreenMockTest(unittest.TestCase):
                         )
                 mock.party = (member,)
                 mock.active_party_index = 0
+                mock.selected_party_target_index = 0
+                mock.selectable_party_target_indexes = (0,)
+                member.hp -= 1
                 mock.spells = spells
                 mock.pending_spell = spells[key] if item_key is None else None
                 mock.pending_item_candidate = None
@@ -5151,6 +5154,46 @@ class BattleScreenMockTest(unittest.TestCase):
             result = mock._resolve_healing_results(spell, (0,))[0]
 
         self.assertEqual(result.amount, 61)
+
+    def test_mana_drop_restores_mp_with_da2_roll_and_actual_popup(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["MANA DROP"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion"),
+        )
+        target = mock.party[1]
+        target.mp = target.max_mp - 1
+        before_hp = target.hp
+        mock.active_party_index = 0
+        mock.action_targets_enemy = False
+        mock.action_targets_all = False
+        mock.selected_party_target_index = 1
+        mock.spell_effects = {}
+        mock._party_draw_position = Mock(return_value=(100, 80))
+        mock.target_cursor = Mock(active=False)
+        mock.party_target_cursor = Mock(active=True)
+        mock.all_target_cursors = ()
+        mock._refresh_monster_name_colors = Mock()
+        mock._refresh_party_hp_text = Mock()
+        mock.healing_popups = []
+
+        with patch("scenes.battle.random.random", return_value=0.5):
+            self.assertTrue(mock._begin_action_presentation(spell))
+
+        presentation = mock.action_presentation
+        self.assertEqual(presentation.mana_results[0].amount, 25)
+        self.assertEqual(target.mp, target.max_mp - 1)
+        mock._apply_action_results(presentation)
+
+        self.assertEqual(target.mp, target.max_mp)
+        self.assertEqual(target.hp, before_hp)
+        self.assertEqual(mock.healing_popups[0].amount, 1)
+        mock._refresh_party_hp_text.assert_called_once_with(1)
+        mock._apply_action_results(presentation)
+        self.assertEqual(len(mock.healing_popups), 1)
 
     def test_unregistered_heal_effect_still_recovers_then_returns(self) -> None:
         items = load_mock_items()
@@ -5507,7 +5550,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(target.confused, 0)
         self.assertTrue(target.stunned)
 
-    def test_revive_targets_only_dead_members_still_in_the_battle(self) -> None:
+    def test_revive_cursor_visits_living_and_dead_members_still_in_battle(self) -> None:
         spell = load_mock_spells()["REVIVE1"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -5522,7 +5565,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(
             mock._selectable_party_indexes_for_spell(spell),
-            (1,),
+            (0, 1),
         )
 
     def test_revive_restores_hp_and_reinserts_member_into_timeline(self) -> None:
@@ -5596,7 +5639,7 @@ class BattleScreenMockTest(unittest.TestCase):
             [call(0, 19), call(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)],
         )
 
-    def test_spell_targeting_excludes_unchangeable_haste_and_cure(self) -> None:
+    def test_cure_cursor_visits_healthy_members_but_haste_skips_maximum(self) -> None:
         spells = load_mock_spells()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
@@ -5617,7 +5660,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._selectable_party_indexes_for_spell(spells["HASTE"]), (1,)
         )
         self.assertEqual(
-            mock._selectable_party_indexes_for_spell(spells["CURE"]), (1,)
+            mock._selectable_party_indexes_for_spell(spells["CURE"]), (0, 1)
         )
         self.assertEqual(
             mock._selectable_enemy_indexes_for_spell(spells["SILENCE"]),
@@ -6628,6 +6671,10 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.pending_item_candidate = BattleItemCandidate(potion)
         mock.pending_spell = None
         mock.spells = load_mock_spells()
+        mock.party = load_mock_party(items, load_mock_skills())
+        mock.party[0].hp -= 1
+        mock.selected_party_target_index = 0
+        mock.selectable_party_target_indexes = (0,)
         mock._begin_action_presentation = Mock(return_value=True)
         mock._complete_current_turn = Mock()
 
@@ -6723,6 +6770,188 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(mock.action_targets_all)
         self.assertEqual(mock.selected_target_index, 1)
         self.assertTrue(mock.target_cursor.active)
+
+    def test_mana_drop_targeting_shows_mp_and_cancel_restores_hp(self) -> None:
+        items = load_mock_items()
+        spell = load_mock_spells()["MANA DROP"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=("Fiora", "Cerion", "Alvan", "Ragna"),
+        )
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in mock.party
+        )
+        mock.party[1].hp = 0
+        mock.party[1].mp = 0
+        mock.party[2].mp = 2
+        mock.party[3].max_mp = 10
+        mock.party[3].mp = 0
+        mock.active_party_index = 0
+        mock.hidden_party_indexes = set()
+        mock.escaped_party_indexes = set()
+        mock.target_cursor = Mock(active=False)
+        mock.party_target_window = Window(0, 0, 64, 60, transparent=True)
+        mock._party_sprite_x = Mock(return_value=160)
+        mock.item_window = Mock()
+        mock.item_guide_window = Mock()
+        mock._close_spell_windows = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._refresh_item_options = Mock()
+        mock.spells = load_mock_spells()
+        from systems import InventorySystem
+
+        mock.inventory_system = InventorySystem(items, {"MANA DROP": 1})
+        mock.party_status_windows = []
+        mock.party_status_texts = []
+        for index, member in enumerate(mock.party):
+            window = Window(52, 16 + index * 7, 7, 5, transparent=True)
+            name = window.add_text(member.definition.key, 0, 0)
+            points = window.add_text(
+                ascii_to_fullwidth(f"{member.hp:3d}/{member.max_hp:3d}"),
+                0,
+                4,
+            )
+            mock.party_status_windows.append(window)
+            mock.party_status_texts.append((name, points))
+
+        self.assertEqual(mock._selectable_party_indexes_for_spell(spell), (0, 2, 3))
+        self.assertTrue(
+            mock._begin_action_target_selection(
+                spell,
+                item_candidate=BattleItemCandidate(items["MANA DROP"]),
+            )
+        )
+        self.assertEqual(mock.selected_party_target_index, 0)
+        self.assertTrue(mock._move_party_target(Direction.DOWN))
+        self.assertEqual(mock.selected_party_target_index, 2)
+        self.assertTrue(mock.party_status_shows_mp)
+        self.assertEqual(
+            mock.party_status_texts[2][1].text,
+            ascii_to_fullwidth(f"{2:3d}/{mock.party[2].max_mp:3d}"),
+        )
+
+        mock._cancel_action_target_selection()
+
+        self.assertFalse(mock.party_status_shows_mp)
+        self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 1)
+        self.assertEqual(
+            mock.party_status_texts[2][1].text,
+            ascii_to_fullwidth(f"{mock.party[2].hp:3d}/{mock.party[2].max_hp:3d}"),
+        )
+
+        mock._show_item_use_message = Mock()
+        mock._record_action_target_information = Mock()
+        mock._begin_action_presentation = Mock(return_value=True)
+        self.assertTrue(
+            mock._begin_action_target_selection(
+                spell,
+                item_candidate=BattleItemCandidate(items["MANA DROP"]),
+            )
+        )
+        self.assertTrue(mock._move_party_target(Direction.DOWN))
+        self.assertTrue(mock._confirm_action_target_selection())
+        self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 0)
+        mock._begin_action_presentation.assert_called_once_with(spell)
+
+        mock._clear_action_motion_state = Mock()
+        mock._start_timeline_animation = Mock()
+        mock.command_guide_window = Mock()
+        mock._complete_current_turn()
+
+        self.assertFalse(mock.party_status_shows_mp)
+        self.assertEqual(
+            mock.party_status_texts[2][1].text,
+            ascii_to_fullwidth(f"{mock.party[2].hp:3d}/{mock.party[2].max_hp:3d}"),
+        )
+
+    def test_mana_drop_cursor_visits_full_mp_and_no_spell_members(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=("Fiora", "Ragna"),
+        )
+        mock.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in mock.party
+        )
+        mock.hidden_party_indexes = set()
+        mock.escaped_party_indexes = set()
+        self.assertEqual(
+            mock._selectable_party_indexes_for_spell(load_mock_spells()["MANA DROP"]),
+            (0, 1),
+        )
+
+    def test_unneeded_single_target_recovery_alerts_without_spending_cost(self) -> None:
+        items = load_mock_items()
+        spells = load_mock_spells()
+        for spell_key in ("HEALING1", "MANA DROP", "CURE", "REVIVE1"):
+            for use_item in (False, True):
+                with self.subTest(spell=spell_key, item=use_item):
+                    mock = BattleScreenMock.__new__(BattleScreenMock)
+                    mock.party = load_mock_party(
+                        items,
+                        load_mock_skills(),
+                        character_keys=("Fiora", "Cerion"),
+                        internal_level=MAX_INTERNAL_LEVEL,
+                    )
+                    mock.party[0].mp = mock.party[0].max_mp
+                    mock.active_party_index = 0
+                    mock.selected_party_target_index = 0
+                    mock.selectable_party_target_indexes = (0, 1)
+                    mock.phase = BattleMockPhase.ACTION_TARGET
+                    mock.on_invalid_action = Mock()
+                    mock._begin_action_presentation = Mock()
+                    mock._commit_item_use = Mock(return_value=True)
+                    mock.spells = spells
+                    spell = spells[spell_key]
+                    mock.pending_spell = None if use_item else spell
+                    mock.pending_item_candidate = (
+                        BattleItemCandidate(
+                            replace(items["POTION"], use_spell_key=spell_key)
+                        )
+                        if use_item
+                        else None
+                    )
+                    before_mp = mock.party[0].mp
+
+                    self.assertFalse(mock._confirm_action_target_selection())
+
+                    mock.on_invalid_action.assert_called_once_with()
+                    mock._commit_item_use.assert_not_called()
+                    mock._begin_action_presentation.assert_not_called()
+                    self.assertEqual(mock.party[0].mp, before_mp)
+                    self.assertIs(mock.phase, BattleMockPhase.ACTION_TARGET)
+                    self.assertEqual(mock.selected_party_target_index, 0)
+
+    def test_recovery_allows_eligible_selected_target(self) -> None:
+        spells = load_mock_spells()
+        for spell_key in ("HEALING1", "MANA DROP", "CURE", "REVIVE1"):
+            with self.subTest(spell=spell_key):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = load_mock_party(
+                    load_mock_items(),
+                    load_mock_skills(),
+                    character_keys=("Fiora", "Cerion"),
+                    internal_level=MAX_INTERNAL_LEVEL,
+                )
+                target = mock.party[1]
+                if spell_key == "HEALING1":
+                    target.hp -= 1
+                elif spell_key == "MANA DROP":
+                    target.mp -= 1
+                elif spell_key == "CURE":
+                    target.poisoned = True
+                else:
+                    target.hp = 0
+                mock.selected_party_target_index = 1
+                mock.selectable_party_target_indexes = (0, 1)
+
+                self.assertTrue(
+                    mock._selected_party_target_can_receive_spell(spells[spell_key])
+                )
 
     def test_magnifier_selects_an_enemy_without_requiring_identify_skill(self) -> None:
         spell = load_mock_spells()["IDENTIFY"]

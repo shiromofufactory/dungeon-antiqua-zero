@@ -7,7 +7,11 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 
-from battle_magic import DA2_DEFAULT_ITEM_SPELL_ABILITY, resolve_healing
+from battle_magic import (
+    DA2_DEFAULT_ITEM_SPELL_ABILITY,
+    resolve_healing,
+    resolve_recovery_amount,
+)
 from input import InputState
 from item import Item, ItemEquipType
 from item_detail import item_detail_lines
@@ -70,7 +74,7 @@ DROP_CONFIRM_NO_Y = 5
 HEALING_SE_ID = "spell_healing1"
 TELEPORT_RING_KEY = "TELEPORT RING"
 FIELD_USE_ITEM_KEYS = frozenset(
-    ("POTION", "DIVINE TEAR", "DARK CHRISM", TELEPORT_RING_KEY)
+    ("POTION", "MANA DROP", "DIVINE TEAR", "DARK CHRISM", TELEPORT_RING_KEY)
 )
 
 
@@ -290,6 +294,7 @@ class ItemMenuOverlay:
             faces=self.faces,
             palette_shifter=self.palette_shifter,
             cursor_active=self.phase is ItemSelectionPhase.TARGET,
+            show_mp=self._show_mp_for_selected_item(),
         )
         self.party_window = self.party_panel.window
         self.member_cursor = self.party_panel.cursor
@@ -352,9 +357,8 @@ class ItemMenuOverlay:
             active=self.phase is ItemSelectionPhase.ITEM,
         )
         selected = self.selected_item
-        if selected is not None and self.item_cursor.active:
-            while self.item_cursor.selected_key != selected.key:
-                self.item_cursor.move_down()
+        if selected is not None:
+            self.item_cursor.select_key(selected.key)
         info_texts: tuple[WindowText, ...] = ()
         if (
             self.phase is ItemSelectionPhase.CATEGORY
@@ -385,6 +389,17 @@ class ItemMenuOverlay:
             info_texts,
         )
         self._refresh_windows()
+        if self.party_panel.show_mp != self._show_mp_for_selected_item():
+            self._build_party_panel()
+
+    def _show_mp_for_selected_item(self) -> bool:
+        return (
+            self.category is ItemCategory.USE
+            and self.phase in (ItemSelectionPhase.ITEM, ItemSelectionPhase.TARGET)
+            and self.selected_item is not None
+            and self.selected_item.use_spell_key in self.spells
+            and self.spells[self.selected_item.use_spell_key].action is SpellAction.MANA
+        )
 
     def _item_summary_texts(self) -> tuple[WindowText, ...]:
         recorded_label = self.texts.text("item.recorded.count", self.localizer)
@@ -503,6 +518,7 @@ class ItemMenuOverlay:
             or spell.action
             not in (
                 SpellAction.HEAL,
+                SpellAction.MANA,
                 SpellAction.REVIVE,
                 SpellAction.FADE,
                 SpellAction.TELEPORT,
@@ -533,6 +549,8 @@ class ItemMenuOverlay:
             return target.is_dead
         if target.hp <= 0:
             return False
+        if spell.action is SpellAction.MANA:
+            return target.can_receive_mana
         if target.hp < target.max_hp:
             return True
         return spell.intensity == 0 and self._has_curable_ailment(target)
@@ -637,6 +655,13 @@ class ItemMenuOverlay:
             target = self.party_panel.party[index]
             if spell.action is SpellAction.REVIVE:
                 target.revive(spell.intensity)
+            elif spell.action is SpellAction.MANA:
+                amount = resolve_recovery_amount(
+                    intensity=spell.intensity,
+                    ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
+                    random_factor=random.random(),
+                )
+                target.mp = min(target.mp + amount, target.max_mp)
             else:
                 result = resolve_healing(
                     intensity=spell.intensity,

@@ -48,6 +48,7 @@ from battle_magic import (
     member_spell_modifier,
     poison_tick_damage,
     resolve_healing,
+    resolve_recovery_amount,
     resolve_spell_damage,
     resolve_status_spell,
     spell_cast_delay,
@@ -761,6 +762,16 @@ class BattleHealingResult:
     popup_y: int
 
 
+@dataclass(frozen=True)
+class BattleManaResult:
+    """A resolved MANA value waiting for its DA2-timed application."""
+
+    target_index: int
+    amount: int
+    popup_x: int
+    popup_y: int
+
+
 @dataclass
 class BattleHealingPopup:
     """One non-blocking recovery number animated with DA2's offsets."""
@@ -994,6 +1005,7 @@ class BattleActionPresentation:
 
     spell_effects: tuple[BattleTargetSpellEffect, ...]
     healing_results: tuple[BattleHealingResult, ...] = ()
+    mana_results: tuple[BattleManaResult, ...] = ()
     damage_results: tuple[BattleSpellDamageResult, ...] = ()
     sleep_results: tuple[BattleSleepResult, ...] = ()
     confuse_results: tuple[BattleConfuseResult, ...] = ()
@@ -1744,6 +1756,7 @@ class BattleScene:
         result_party: tuple[Member, ...],
         return_bgm_id: str,
         command_memory: BattleCommandMemory | None = None,
+        on_invalid_action: Callable[[], None] | None = None,
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -1774,6 +1787,7 @@ class BattleScene:
             ),
             spell_effects=load_spell_effects(APP_ROOT / "effects" / "spells.json"),
             command_memory=command_memory,
+            on_invalid_action=on_invalid_action,
         )
 
     def __init__(
@@ -1804,6 +1818,7 @@ class BattleScene:
         return_bgm_id: str | None = None,
         fonts: FontResources | None = None,
         command_memory: BattleCommandMemory | None = None,
+        on_invalid_action: Callable[[], None] | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
@@ -1825,10 +1840,13 @@ class BattleScene:
             raise TypeError("reset_party_on_restart must be a boolean")
         if not isinstance(reset_inventory_on_restart, bool):
             raise TypeError("reset_inventory_on_restart must be a boolean")
+        if on_invalid_action is not None and not callable(on_invalid_action):
+            raise TypeError("on_invalid_action must be callable or None")
 
         self.restart_enabled = restart_enabled
         self.reset_party_on_restart = reset_party_on_restart
         self.reset_inventory_on_restart = reset_inventory_on_restart
+        self.on_invalid_action = on_invalid_action
         self.settings = settings
         self.fonts = FontResources() if fonts is None else fonts
         self.window_factory = windows
@@ -2168,6 +2186,7 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
+        self.party_status_shows_mp = False
         self.action_presentation: BattleActionPresentation | None = None
         self.fade_escape_transition: MosaicFadeOut | None = None
         self.fade_escape_snapshot = None
@@ -2684,6 +2703,7 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        self.party_status_shows_mp = False
         self.action_presentation = None
         self.healing_popups.clear()
         self.spell_damage_popups.clear()
@@ -4463,6 +4483,11 @@ class BattleScene:
 
         self.pending_item_candidate = item_candidate
         self.pending_spell = spell if item_candidate is None else None
+        self.party_status_shows_mp = (
+            item_candidate is not None and spell.action is SpellAction.MANA
+        )
+        if self.party_status_shows_mp:
+            self._refresh_all_party_hp_texts()
         self.action_targets_enemy = spell.to_enemy
         self.action_targets_all = spell.to_all
         self.selected_command = (
@@ -4504,7 +4529,7 @@ class BattleScene:
         return indexes
 
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
-        """Return ally targets that can still receive the spell."""
+        """Return allies the target cursor can visit for this spell."""
 
         if spell.action in (SpellAction.FADE, SpellAction.TELEPORT):
             active_index = getattr(self, "active_party_index", None)
@@ -4523,7 +4548,7 @@ class BattleScene:
             return tuple(
                 index
                 for index in range(party_count)
-                if index not in escaped and self._party_member_is_dead(index)
+                if index not in escaped
             )
         hidden = getattr(self, "hidden_party_indexes", set())
         indexes = tuple(
@@ -4544,13 +4569,31 @@ class BattleScene:
                 for index in indexes
                 if self.party[index].speed_modifier < MAX_SPEED_MODIFIER
             )
-        if spell.action is SpellAction.CURE:
-            return tuple(
-                index
-                for index in indexes
-                if self.party[index].has_curable_ailment
-            )
         return indexes
+
+    def _selected_party_target_can_receive_spell(self, spell: Spell) -> bool:
+        """Check single-target recovery before paying an item or spell cost."""
+
+        if spell.to_enemy or spell.to_all or spell.action not in (
+            SpellAction.HEAL,
+            SpellAction.MANA,
+            SpellAction.CURE,
+            SpellAction.REVIVE,
+        ):
+            return True
+        index = getattr(self, "selected_party_target_index", None)
+        if index is None or index not in getattr(
+            self, "selectable_party_target_indexes", ()
+        ):
+            return False
+        target = self.party[index]
+        if spell.action is SpellAction.HEAL:
+            return target.is_alive and target.hp < target.max_hp
+        if spell.action is SpellAction.MANA:
+            return target.can_receive_mana
+        if spell.action is SpellAction.CURE:
+            return target.is_alive and target.has_curable_ailment
+        return target.is_dead
 
     @staticmethod
     def _make_all_target_cursors(
@@ -4617,15 +4660,20 @@ class BattleScene:
 
         item_candidate = self.pending_item_candidate
         spell = self.pending_spell
-        effect_spell = spell
+        use_spell_key = item_candidate.item.use_spell_key if item_candidate else None
+        effect_spell = (
+            getattr(self, "spells", {}).get(use_spell_key)
+            if use_spell_key
+            else spell
+        )
+        if effect_spell is not None and not self._selected_party_target_can_receive_spell(
+            effect_spell
+        ):
+            if getattr(self, "on_invalid_action", None) is not None:
+                self.on_invalid_action()
+            return False
         gauge_adjustment = 0.0
         if item_candidate is not None:
-            use_spell_key = item_candidate.item.use_spell_key
-            effect_spell = (
-                getattr(self, "spells", {}).get(use_spell_key)
-                if use_spell_key
-                else None
-            )
             if item_candidate.item.equip_type is not ItemEquipType.ITEM:
                 gauge_adjustment = self._spell_gauge_adjustment(effect_spell)
             if not self._commit_item_use(item_candidate):
@@ -4870,6 +4918,7 @@ class BattleScene:
             return False
 
         healing_results = self._resolve_healing_results(spell, indexes)
+        mana_results = self._resolve_mana_results(spell, indexes)
         damage_results = self._resolve_spell_damage_results(spell, indexes)
         sleep_results = self._resolve_sleep_results(spell, indexes)
         confuse_results = self._resolve_confuse_results(spell, indexes)
@@ -4920,6 +4969,7 @@ class BattleScene:
         self.action_presentation = BattleActionPresentation(
             tuple(effects),
             healing_results=healing_results,
+            mana_results=mana_results,
             damage_results=damage_results,
             sleep_results=sleep_results,
             confuse_results=confuse_results,
@@ -5034,6 +5084,37 @@ class BattleScene:
                     target_index=index,
                     amount=resolution.amount,
                     cures_ailments=resolution.cures_ailments,
+                    popup_x=x + 6,
+                    popup_y=y + 16,
+                )
+            )
+        return tuple(results)
+
+    def _resolve_mana_results(
+        self,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleManaResult, ...]:
+        """Resolve DA2's fixed-ability MP recovery before applying it."""
+
+        if spell.action is not SpellAction.MANA:
+            return ()
+        if spell.to_enemy:
+            raise BattleDataError("MANA spells must target allies")
+        results: list[BattleManaResult] = []
+        for index in indexes:
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
+            results.append(
+                BattleManaResult(
+                    target_index=index,
+                    amount=resolve_recovery_amount(
+                        intensity=spell.intensity,
+                        ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
+                        random_factor=random.random(),
+                    ),
                     popup_x=x + 6,
                     popup_y=y + 16,
                 )
@@ -5506,6 +5587,19 @@ class BattleScene:
                         result.popup_x,
                         result.popup_y,
                         result.amount,
+                    )
+                )
+        for result in presentation.mana_results:
+            member = self.party[result.target_index]
+            restored = min(result.amount, member.max_mp - member.mp)
+            member.mp += restored
+            self._refresh_party_hp_text(result.target_index)
+            if restored > 0:
+                popups.append(
+                    BattleHealingPopup(
+                        result.popup_x,
+                        result.popup_y,
+                        restored,
                     )
                 )
         damage_popups = getattr(self, "spell_damage_popups", None)
@@ -6112,6 +6206,9 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        if getattr(self, "party_status_shows_mp", False):
+            self.party_status_shows_mp = False
+            self._refresh_all_party_hp_texts()
         self.target_cursor.active = False
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
@@ -7368,6 +7465,9 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        if getattr(self, "party_status_shows_mp", False):
+            self.party_status_shows_mp = False
+            self._refresh_all_party_hp_texts()
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
         self.action_presentation = None
@@ -9413,9 +9513,12 @@ class BattleScene:
         window = self.party_status_windows[index]
         name_text, hp_text = self.party_status_texts[index]
         member = self.party[index]
+        show_mp = getattr(self, "party_status_shows_mp", False)
+        current = member.mp if show_mp else member.hp
+        maximum = member.max_mp if show_mp else member.max_hp
         window.remove_text(hp_text)
         hp_text = window.add_text(
-            ascii_to_fullwidth(f"{member.hp:3d}/{member.max_hp:3d}"),
+            ascii_to_fullwidth(f"{current:3d}/{maximum:3d}"),
             hp_text.x,
             hp_text.y,
             color=hp_text.color,

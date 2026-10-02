@@ -1110,6 +1110,14 @@ class Member:
         return not self.is_alive
 
     @property
+    def can_receive_mana(self) -> bool:
+        """Match DA2's eligible targets for MP recovery items."""
+
+        return self.is_alive and self.mp < self.max_mp and any(
+            self.proficiency(kind).level > 0 for kind in SPELL_PROFICIENCY_KINDS
+        )
+
+    @property
     def is_dying(self) -> bool:
         """Return DA2's near-death state, including poison at any HP."""
 

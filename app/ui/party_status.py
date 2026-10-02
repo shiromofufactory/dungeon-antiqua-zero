@@ -89,12 +89,16 @@ class PartyStatusPanel:
         faces: object,
         palette_shifter: PaletteShifter | None = None,
         cursor_active: bool = False,
+        show_mp: bool = False,
     ) -> None:
         if not party:
             raise ValueError("party must contain at least one member")
+        if not isinstance(show_mp, bool):
+            raise TypeError("show_mp must be a boolean")
         self.party = party[:BATTLE_PARTY_MEMBER_COUNT]
         self.faces = faces
         self.palette_shifter = palette_shifter
+        self.show_mp = show_mp
         self.window = window_factory.create(
             *PARTY_WINDOW_GRID,
             self._party_texts(localizer, texts, text_factory),
@@ -118,21 +122,22 @@ class PartyStatusPanel:
         texts: TextCatalog,
         text_factory: LocalizedWindowTextFactory,
     ) -> tuple[WindowText, ...]:
-        hp_label = texts.text("menu.member.hp", localizer)
-        if not hp_label:
-            raise ValueError("menu.member.hp must not be empty")
+        label_key = "menu.member.mp" if self.show_mp else "menu.member.hp"
+        label = texts.text(label_key, localizer)
+        if not label:
+            raise ValueError(f"{label_key} must not be empty")
         placements: list[WindowText] = []
         for index, member in enumerate(self.party):
             x = PARTY_TEXT_X + index * PARTY_COLUMN_WIDTH
             placements.extend(
                 (
                     text_factory.create(
-                        f"{hp_label}{pad(member.hp, 3)}",
+                        f"{label}{pad(member.mp if self.show_mp else member.hp, 3)}",
                         x,
                         PARTY_HP_Y,
                     ),
                     text_factory.create(
-                        f"／{pad(member.max_hp, 3)}",
+                        f"／{pad(member.max_mp if self.show_mp else member.max_hp, 3)}",
                         x + 2,
                         PARTY_MAX_HP_Y,
                     ),
