@@ -30,6 +30,8 @@ from rendering import (
 )
 from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
+    BATTLE_BGM_ID,
+    BATTLE_BOSS_BGM_ID,
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
     MONSTER_POSITIONS,
@@ -351,6 +353,25 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
 
 
 class BattleSceneIntegrationTest(unittest.TestCase):
+    def test_battle_bgm_depends_only_on_first_monster_boss_flag(self) -> None:
+        for boss_flags, expected_bgm in (
+            ((False, False), BATTLE_BGM_ID),
+            ((True, False), BATTLE_BOSS_BGM_ID),
+            ((False, True), BATTLE_BGM_ID),
+        ):
+            with self.subTest(boss_flags=boss_flags):
+                scene = BattleScene.__new__(BattleScene)
+                scene.monsters = tuple(
+                    SimpleNamespace(is_boss=is_boss) for is_boss in boss_flags
+                )
+                scene.bgm = Mock()
+
+                scene._restart_battle_bgm()
+
+                scene.bgm.stop.assert_called_once_with()
+                scene.bgm.set_fade_rate.assert_called_once_with(1.0)
+                scene.bgm.play.assert_called_once_with(expected_bgm)
+
     def test_skips_result_when_no_growth_was_recorded(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         scene.phase = BattlePhase.VICTORY_SUMMARY

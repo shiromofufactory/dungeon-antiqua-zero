@@ -57,6 +57,8 @@ from monster_ai import (
     MonsterAction,
     MonsterActionChoice,
     MonsterSpellAction,
+    reinforcement_arrives,
+    reinforcement_target,
     select_monster_action,
 )
 from battle_speed import MAX_SPEED_MODIFIER, MIN_SPEED_MODIFIER, modified_agility
@@ -182,6 +184,7 @@ SCREEN_HEIGHT = 240
 BACKGROUND_IMAGE_ID = "background/bg_nector"
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
+BATTLE_BOSS_BGM_ID = "da3-battle2"
 BATTLE_WIN_BGM_ID = "da3-win"
 BATTLE_LEVEL_UP_BGM_ID = "da3-lvup"
 BATTLE_HIT_SE_ID = "battle_hit"
@@ -276,6 +279,7 @@ MONSTER_ENTRANCE_FRAME_COUNTS = tuple(
     step_count * FPS // DA2_REFERENCE_FPS
     for step_count in DA2_MONSTER_ENTRANCE_SLIDE_STEPS
 )
+REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT = 12
 PARTY_ENTRANCE_FRAME_COUNT = 10
 PARTY_ENTRANCE_STAGGER_FRAME_COUNT = 2
 PARTY_ENTRANCE_START_X = SCREEN_WIDTH
@@ -1917,6 +1921,9 @@ class BattleScene:
             monster_records,
             label="monster",
         )
+        self.monster_records_by_key = monsters_by_key
+        self.monster_image_resources = resources
+        self.monster_window_factory = windows
         self.monster_book_number_by_key = {
             key: number for number, key in enumerate(monsters_by_key, start=1)
         }
@@ -1943,6 +1950,10 @@ class BattleScene:
             )
             for index, key in enumerate(encounter.monster_keys)
         )
+        self.initial_monsters = self.monsters
+        self.reinforcement_entrance_frames: dict[int, int] = {}
+        self._reinforcement_waiting_actor: BattleMonster | None = None
+        self._reinforcement_post_entrance_wait_frames = 0
         for monster in self.monsters:
             unknown_spell_keys = tuple(
                 key for key in monster.spell_keys if key not in self.spells
@@ -2390,6 +2401,7 @@ class BattleScene:
         if getattr(self, "restart_enabled", True) and input_state.menu.triggered:
             self._restart_battle()
             return
+        self._update_reinforcement_entrances()
         battle_popup = getattr(self, "battle_popup", None)
         if battle_popup is not None:
             battle_popup.update()
@@ -2599,6 +2611,18 @@ class BattleScene:
         self.auto_battle_observations = AutoBattleObservations()
         self.auto_battle_log = []
         self.auto_battle_sequence = 0
+        self.reinforcement_entrance_frames.clear()
+        self._reinforcement_waiting_actor = None
+        self._reinforcement_post_entrance_wait_frames = 0
+
+        if len(self.monsters) > len(self.initial_monsters):
+            initial_count = len(self.initial_monsters)
+            self.monsters = self.initial_monsters
+            self.monster_slot_indexes = self.monster_slot_indexes[:initial_count]
+            self.monster_positions = self.monster_positions[:initial_count]
+            self.monster_name_windows = self.monster_name_windows[:initial_count]
+            self.monster_name_texts = self.monster_name_texts[:initial_count]
+            self._refresh_monster_target_cursor()
 
         self._release_transient_action_palettes()
         self._restart_battle_bgm()
@@ -2865,7 +2889,8 @@ class BattleScene:
 
         self.bgm.stop()
         self.bgm.set_fade_rate(1.0)
-        self.bgm.play(BATTLE_BGM_ID)
+        bgm_id = BATTLE_BOSS_BGM_ID if self.monsters[0].is_boss else BATTLE_BGM_ID
+        self.bgm.play(bgm_id)
 
     def _close_spell_windows(self) -> None:
         """Hide and clear the battle spell-selection windows."""
@@ -8627,6 +8652,21 @@ class BattleScene:
             if not self._begin_confused_monster_action(actor):
                 self._start_timeline_animation()
             return
+        if getattr(self, "_reinforcement_waiting_actor", None) is actor:
+            if self.reinforcement_entrance_frames:
+                return
+            if (
+                self._reinforcement_post_entrance_wait_frames
+                < REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT
+            ):
+                self._reinforcement_post_entrance_wait_frames += 1
+                return
+            self._reinforcement_waiting_actor = None
+            self._reinforcement_post_entrance_wait_frames = 0
+        elif self._attempt_monster_reinforcement(actor):
+            self._reinforcement_waiting_actor = actor
+            self._reinforcement_post_entrance_wait_frames = 0
+            return
         action = self._select_monster_action(actor)
         turn_was_silenced = actor.state.elapse_silence_turn()
         if action is None:
@@ -8656,6 +8696,123 @@ class BattleScene:
                 self._start_timeline_animation()
             return
         self._begin_standard_monster_attack(actor)
+
+    def _attempt_monster_reinforcement(self, actor: BattleMonster) -> bool:
+        """Add one ally before the actor's ordinary action without a message."""
+
+        if MonsterSpecialAction.REINFORCE not in actor.special_actions:
+            return False
+        living_count = sum(monster.is_alive for monster in self.monsters)
+        if not reinforcement_arrives(living_count):
+            return False
+        available_slots = (
+            TALL_FIRST_MONSTER_SLOT_INDEXES
+            if (self.monsters[0].width, self.monsters[0].height)
+            == TALL_FIRST_MONSTER_SIZE
+            else tuple(range(len(MONSTER_POSITIONS)))
+        )
+        occupied_slots = {
+            slot
+            for monster, slot in zip(self.monsters, self.monster_slot_indexes)
+            if monster.is_alive
+        }
+        slot = next(
+            (slot for slot in available_slots if slot not in occupied_slots),
+            None,
+        )
+        if slot is None:
+            return False
+
+        caller = self.monster_definitions_by_key[actor.key]
+        target = reinforcement_target(
+            caller,
+            tuple(self.monster_definitions_by_key.values()),
+        )
+        record = self.monster_records_by_key[target.key]
+        monster = BattleMonster.from_record(
+            record,
+            is_front_row=slot >= 2,
+        )
+        index = len(self.monsters)
+        self.monsters += (monster,)
+        self.monster_slot_indexes += (slot,)
+        self.reinforcement_entrance_frames[index] = 0
+        position = MONSTER_POSITIONS[slot]
+        self.monster_positions += (position,)
+        self.monster_images[target.key] = self.monster_image_resources.image(
+            target.image_resource_id
+        )
+        name_x, name_y = self._monster_name_window_grid_position(
+            monster, *position
+        )
+        window = self.monster_window_factory.create(
+            name_x, name_y, 20, 4, transparent=True
+        )
+        name_text = window.add_text(
+            monster.display_name(self.localizer),
+            0,
+            0,
+            color=RESERVE_MEMBER_TEXT_COLOR,
+        )
+        self.monster_name_windows.append(window)
+        self.monster_name_texts.append(name_text)
+        self.monster_record_system.register_encounter((target.key,))
+        progression_index = self.progression.register_enemy(
+            EnemyProgressionData(
+                monster.level,
+                monster.early_appear,
+                monster.max_occurrence,
+                monster.gold,
+                monster.key,
+                monster.treasure_item_key,
+                monster.treasure_rate,
+            )
+        )
+        if progression_index != index:
+            raise RuntimeError("reinforcement progression index is out of sync")
+        agility = self._actor_agility(monster)
+        self._timeline_order = insert_timeline_actor(
+            self._timeline_order,
+            monster,
+            agility=agility,
+            gauge=min(float(agility), GAUGE_READY_VALUE),
+        )
+        self.timeline = self._timeline_order.actors
+        self._refresh_monster_target_cursor()
+        return True
+
+    def _update_reinforcement_entrances(self) -> None:
+        """Advance each arriving monster's slide in update, never in draw."""
+
+        frames = getattr(self, "reinforcement_entrance_frames", None)
+        if not frames:
+            return
+        for index, elapsed in tuple(frames.items()):
+            duration = MONSTER_ENTRANCE_FRAME_COUNTS[
+                self._monster_slot_index(index)
+            ]
+            if elapsed + 1 >= duration:
+                del frames[index]
+            else:
+                frames[index] = elapsed + 1
+
+    def _refresh_monster_target_cursor(self) -> None:
+        """Keep cursor identities unique when a dead display slot is reused."""
+
+        self.target_cursor = self.target_window.set_cursor(
+            tuple(
+                CursorTarget(
+                    (x + 8) // 4,
+                    (y + 16) // 4,
+                    key=index,
+                )
+                for index, (monster, (x, y)) in enumerate(
+                    zip(self.monsters, self.monster_positions)
+                )
+                if monster.is_alive
+            ),
+            active=False,
+        )
 
     def _monster_index(self, actor: BattleMonster) -> int:
         """Distinguish equal-valued monsters by their encounter identity."""
@@ -11530,12 +11687,18 @@ class BattleScene:
             self, "monster_escape_actor_index", None
         ):
             return self._monster_escape_x(index), target_y
-        if self.phase is not BattlePhase.ENTRANCE:
-            return target_x, target_y
-
         slot_index = self._monster_slot_index(index)
+        reinforcement_frame = getattr(
+            self, "reinforcement_entrance_frames", {}
+        ).get(index)
+        if reinforcement_frame is not None:
+            elapsed = reinforcement_frame
+        elif self.phase is BattlePhase.ENTRANCE:
+            elapsed = self.entrance_animation_frame
+        else:
+            return target_x, target_y
         duration = MONSTER_ENTRANCE_FRAME_COUNTS[slot_index]
-        elapsed = min(self.entrance_animation_frame, duration)
+        elapsed = min(elapsed, duration)
         remaining = duration - elapsed
         initial_offset = (
             DA2_MONSTER_ENTRANCE_SLIDE_STEPS[slot_index]

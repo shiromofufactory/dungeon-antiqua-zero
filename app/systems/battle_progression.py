@@ -201,6 +201,18 @@ class BattleProgression:
         self._spell_uses: dict[str, dict[ProficiencyKind, _SpellUse]] = {}
         self._settled = False
 
+    def register_enemy(self, enemy: EnemyProgressionData) -> int:
+        """Keep a reinforcement's reward record under a new battle identity."""
+
+        if not isinstance(enemy, EnemyProgressionData):
+            raise TypeError("enemy must be EnemyProgressionData")
+        if self._settled:
+            raise RuntimeError("cannot register an enemy after settlement")
+        index = len(self.enemies)
+        self.enemies += (enemy,)
+        self._enemy_action_counts.append(0)
+        return index
+
     def record_enemy_action(self, enemy_index: int) -> None:
         """Count one actual enemy action; idle rear turns never call this."""
 

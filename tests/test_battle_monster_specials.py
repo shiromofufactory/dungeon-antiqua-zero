@@ -30,12 +30,32 @@ from tools.screen_mocks.battle import (
     BattleMonsterChargePresentation,
     BattleScreenMock,
     BattleMockMonster,
+    BattleScene,
     monster_charge_approach_distance,
     monster_charge_approach_frame_count,
 )
 from battle_physical import member_physical_attack
+from battle_timeline import TimelineEntry, TimelineOrder
+from localization import Localizer
 from member import EquipmentSlot
-from monster import MonsterBattleState, MonsterCombatStats, MonsterSpecialAction
+from monster import (
+    MonsterBattleState,
+    MonsterCombatStats,
+    MonsterDefinition,
+    MonsterSpecialAction,
+)
+from monster_ai import MonsterAction
+from resources import load_record_array
+from scenes.battle import (
+    DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
+    DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
+    MONSTER_ENTRANCE_FRAME_COUNTS,
+    REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT,
+    BattleMonster,
+    BattlePhase,
+)
+from state import Language
+from systems import BattleProgression, EnemyProgressionData
 from ui import Window
 
 
@@ -54,6 +74,158 @@ def charge_monster(*, is_front_row: bool = True) -> BattleMockMonster:
         special_actions=(MonsterSpecialAction.CHARGE,),
         combat_stats=MonsterCombatStats(attack=10, hit=100, defense=0, evasion=0),
     )
+
+
+class MonsterReinforcementTest(unittest.TestCase):
+    def test_reinforcement_waits_twelve_frames_after_entrance(self) -> None:
+        actor = charge_monster()
+        actor.special_actions = (MonsterSpecialAction.REINFORCE,)
+        scene = BattleScene.__new__(BattleScene)
+        scene.command_window = Mock()
+        scene.monster_charge_presentation = None
+        scene.monster_escape_actor_index = None
+        scene.monster_attack_target_index = None
+        scene.monster_blink_frames_remaining = 0
+        scene.monster_confused_action_pending = False
+        scene.monsters = (actor,)
+        scene.monster_slot_indexes = (0, 2)
+        scene.timeline = (actor,)
+        scene.progression = Mock()
+        scene.reinforcement_entrance_frames = {}
+        events: list[str] = []
+
+        def summon(_actor: BattleMonster) -> bool:
+            events.append("reinforcement")
+            scene.reinforcement_entrance_frames[1] = 0
+            return True
+
+        scene._attempt_monster_reinforcement = Mock(side_effect=summon)
+        scene._select_monster_action = Mock(
+            side_effect=lambda _actor: events.append("select") or MonsterAction.ATTACK
+        )
+        scene._begin_standard_monster_attack = Mock(
+            side_effect=lambda _actor: events.append("attack")
+        )
+
+        scene._update_monster_action()
+
+        self.assertEqual(events, ["reinforcement"])
+        scene.progression.record_enemy_action.assert_not_called()
+        for _ in range(MONSTER_ENTRANCE_FRAME_COUNTS[2] - 1):
+            scene._update_reinforcement_entrances()
+            scene._update_monster_action()
+        self.assertEqual(events, ["reinforcement"])
+        scene._attempt_monster_reinforcement.assert_called_once_with(actor)
+        scene.progression.record_enemy_action.assert_not_called()
+
+        scene._update_reinforcement_entrances()
+        scene._update_monster_action()
+        self.assertEqual(events, ["reinforcement"])
+        self.assertEqual(scene._reinforcement_post_entrance_wait_frames, 1)
+
+        for _ in range(REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT - 1):
+            scene._update_monster_action()
+        self.assertEqual(events, ["reinforcement"])
+        self.assertEqual(
+            scene._reinforcement_post_entrance_wait_frames,
+            REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT,
+        )
+        scene._attempt_monster_reinforcement.assert_called_once_with(actor)
+        scene.progression.record_enemy_action.assert_not_called()
+
+        scene._update_monster_action()
+
+        self.assertEqual(events, ["reinforcement", "select", "attack"])
+        scene.progression.record_enemy_action.assert_called_once_with(0)
+        self.assertIsNone(scene._reinforcement_waiting_actor)
+        self.assertEqual(scene._reinforcement_post_entrance_wait_frames, 0)
+
+    def test_reinforcement_reuses_dead_slot_with_new_reward_and_timeline_identity(
+        self,
+    ) -> None:
+        records = {
+            record["name_en"]: record
+            for record in load_record_array("monsters.json")
+            if record["name_en"] in ("Treant", "Spirit")
+        }
+        treant = BattleMonster.from_record(records["Treant"], is_front_row=False)
+        fallen = BattleMonster.from_record(records["Spirit"], is_front_row=True)
+        fallen.state.defeat()
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = (treant, fallen)
+        scene.monster_slot_indexes = (0, 2)
+        scene.monster_positions = (MONSTER_POSITIONS[0], MONSTER_POSITIONS[2])
+        scene.reinforcement_entrance_frames = {}
+        scene.monster_definitions_by_key = {
+            key: MonsterDefinition.from_record(record)
+            for key, record in records.items()
+        }
+        scene.monster_records_by_key = records
+        scene.monster_image_resources = Mock()
+        scene.monster_window_factory = Mock()
+        scene.monster_name_windows = []
+        scene.monster_name_texts = []
+        scene.monster_images = {"Treant": Mock()}
+        scene.localizer = Localizer(Language.JAPANESE)
+        scene.monster_record_system = Mock()
+        scene.target_window = Mock()
+        scene._timeline_order = TimelineOrder(
+            (TimelineEntry(treant, treant.agility, 64),)
+        )
+        scene.timeline = scene._timeline_order.actors
+        scene.progression = BattleProgression(
+            tuple(
+                EnemyProgressionData(
+                    monster.level, monster.early_appear,
+                    monster.max_occurrence, monster.gold,
+                    monster.key, monster.treasure_item_key, monster.treasure_rate,
+                )
+                for monster in scene.monsters
+            )
+        )
+        scene.progression.record_enemy_defeat(1)
+
+        with patch("scenes.battle.reinforcement_arrives", return_value=True):
+            self.assertTrue(scene._attempt_monster_reinforcement(treant))
+
+        self.assertEqual(len(scene.monsters), 3)
+        self.assertEqual(scene.monsters[2].key, "Spirit")
+        self.assertIsNot(scene.monsters[2], fallen)
+        self.assertEqual(scene.monster_slot_indexes, (0, 2, 2))
+        self.assertEqual(scene.monster_positions[2], MONSTER_POSITIONS[2])
+        self.assertEqual(scene.reinforcement_entrance_frames, {2: 0})
+        self.assertEqual(scene.progression.enemies[2].monster_key, "Spirit")
+        self.assertIs(scene.timeline[0], treant)
+        self.assertIn(scene.monsters[2], scene.timeline)
+        scene.monster_record_system.register_encounter.assert_called_once_with(
+            ("Spirit",)
+        )
+        targets = scene.target_window.set_cursor.call_args.args[0]
+        self.assertEqual({target.key for target in targets}, {0, 2})
+
+        scene.phase = BattlePhase.MONSTER_ACTION
+        scene.monster_charge_presentation = None
+        scene.monster_escape_actor_index = None
+        duration = MONSTER_ENTRANCE_FRAME_COUNTS[2]
+        initial_x = (
+            MONSTER_POSITIONS[2][0]
+            - DA2_MONSTER_ENTRANCE_SLIDE_STEPS[2]
+            * DA2_MONSTER_ENTRANCE_STEP_DISTANCE
+        )
+        self.assertEqual(scene._monster_draw_position(2)[0], initial_x)
+        self.assertEqual(scene._monster_draw_position(2)[0], initial_x)
+        self.assertEqual(scene.reinforcement_entrance_frames[2], 0)
+
+        for _ in range(duration // 2):
+            scene._update_reinforcement_entrances()
+        halfway_x = scene._monster_draw_position(2)[0]
+        self.assertLess(initial_x, halfway_x)
+        self.assertLess(halfway_x, MONSTER_POSITIONS[2][0])
+
+        for _ in range(duration - duration // 2):
+            scene._update_reinforcement_entrances()
+        self.assertEqual(scene._monster_draw_position(2), MONSTER_POSITIONS[2])
+        self.assertNotIn(2, scene.reinforcement_entrance_frames)
 
 
 class MonsterChargePresentationTest(unittest.TestCase):

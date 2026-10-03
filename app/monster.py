@@ -59,6 +59,7 @@ class MonsterSpecialAction(StrEnum):
 
     ESCAPE = "逃"
     CHARGE = "突"
+    REINFORCE = "援"
 
 
 def monster_spell_keys_from_record(

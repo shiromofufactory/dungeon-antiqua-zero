@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 if __package__ == "":
-    from monster import MonsterSpecialAction
+    from monster import MonsterDefinition, MonsterSpecialAction
 else:
-    from .monster import MonsterSpecialAction
+    from .monster import MonsterDefinition, MonsterSpecialAction
 
 
 class MonsterAction(StrEnum):
@@ -34,6 +34,35 @@ class MonsterSpellAction:
 
 
 MonsterActionChoice = MonsterAction | MonsterSpellAction
+
+
+def reinforcement_target(
+    caller: MonsterDefinition,
+    definitions: Sequence[MonsterDefinition],
+) -> MonsterDefinition:
+    """Pick the strongest lower-level monster of the caller's tribe."""
+
+    candidates = (
+        definition
+        for definition in definitions
+        if definition.tribe is caller.tribe and definition.level < caller.level
+    )
+    return max(candidates, key=lambda definition: definition.level, default=caller)
+
+
+def reinforcement_arrives(living_monster_count: int) -> bool:
+    """Use ZERO's 0..2 roll for one actionable monster turn."""
+
+    if (
+        isinstance(living_monster_count, bool)
+        or not isinstance(living_monster_count, int)
+        or living_monster_count < 1
+    ):
+        raise ValueError("living_monster_count must be a positive integer")
+    return (
+        living_monster_count < 3
+        and 3 - living_monster_count > random.randint(0, 2)
+    )
 
 
 def monster_action_candidates(
@@ -129,6 +158,8 @@ __all__ = [
     "MonsterAction",
     "MonsterActionChoice",
     "MonsterSpellAction",
+    "reinforcement_arrives",
+    "reinforcement_target",
     "monster_action_candidates",
     "select_monster_action",
 ]

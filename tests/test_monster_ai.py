@@ -7,18 +7,30 @@ from tools._bootstrap import APP_ROOT  # noqa: F401 - add app to sys.path
 
 from monster import (
     MonsterDataError,
+    MonsterDefinition,
     MonsterSpecialAction,
     monster_spell_keys_from_record,
     monster_special_actions_from_record,
 )
-from monster_ai import MonsterAction, MonsterSpellAction, select_monster_action
+from monster_ai import (
+    MonsterAction,
+    MonsterSpellAction,
+    reinforcement_arrives,
+    reinforcement_target,
+    select_monster_action,
+)
+from resources import load_record_array
 
 
 class MonsterSpecialActionDataTest(unittest.TestCase):
     def test_parses_each_one_character_action_at_the_data_boundary(self) -> None:
         self.assertEqual(
-            monster_special_actions_from_record({"special": "逃突"}),
-            (MonsterSpecialAction.ESCAPE, MonsterSpecialAction.CHARGE),
+            monster_special_actions_from_record({"special": "逃突援"}),
+            (
+                MonsterSpecialAction.ESCAPE,
+                MonsterSpecialAction.CHARGE,
+                MonsterSpecialAction.REINFORCE,
+            ),
         )
 
     def test_rejects_unknown_duplicate_or_multiline_actions(self) -> None:
@@ -43,6 +55,43 @@ class MonsterSpecialActionDataTest(unittest.TestCase):
             with self.subTest(spells=spells):
                 with self.assertRaises(MonsterDataError):
                     monster_spell_keys_from_record({"spells": spells})
+
+
+class MonsterReinforcementRuleTest(unittest.TestCase):
+    def test_treant_calls_highest_lower_level_animated_monster(self) -> None:
+        definitions = tuple(
+            MonsterDefinition.from_record(record)
+            for record in load_record_array("monsters.json")
+        )
+        treant = next(monster for monster in definitions if monster.key == "Treant")
+
+        self.assertEqual(reinforcement_target(treant, definitions).key, "Spirit")
+
+    def test_falls_back_to_caller_without_lower_level_same_tribe(self) -> None:
+        definitions = tuple(
+            MonsterDefinition.from_record(record)
+            for record in load_record_array("monsters.json")
+        )
+        spirit = next(monster for monster in definitions if monster.key == "Spirit")
+
+        self.assertIs(reinforcement_target(spirit, definitions), spirit)
+
+    def test_arrival_roll_uses_living_monster_count(self) -> None:
+        for living_count, roll, expected in (
+            (1, 0, True),
+            (1, 1, True),
+            (1, 2, False),
+            (2, 0, True),
+            (2, 1, False),
+            (3, 0, False),
+        ):
+            with self.subTest(living_count=living_count, roll=roll):
+                with patch("monster_ai.random.randint", return_value=roll) as rng:
+                    self.assertIs(reinforcement_arrives(living_count), expected)
+                if living_count < 3:
+                    rng.assert_called_once_with(0, 2)
+                else:
+                    rng.assert_not_called()
 
 
 class MonsterActionSelectionTest(unittest.TestCase):

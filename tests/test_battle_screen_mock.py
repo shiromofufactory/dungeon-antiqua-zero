@@ -7195,6 +7195,7 @@ class BattleScreenMockTest(unittest.TestCase):
     ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.bgm = Mock()
+        mock.monsters = (SimpleNamespace(is_boss=False),)
 
         mock._restart_battle_bgm()
 

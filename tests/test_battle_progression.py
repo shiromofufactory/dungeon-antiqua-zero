@@ -80,6 +80,21 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertEqual(enemy.experience(0), 36)
         self.assertEqual(progression.rewards(), (43, 25))
 
+    def test_reinforcement_keeps_earlier_enemy_reward_identity(self) -> None:
+        first = EnemyProgressionData(4, 0, 1, 25)
+        reinforcement = EnemyProgressionData(2, 0, 1, 10)
+        progression = BattleProgression((first,))
+        progression.record_enemy_defeat(0)
+
+        self.assertEqual(progression.register_enemy(reinforcement), 1)
+        progression.record_enemy_action(1)
+        progression.record_enemy_defeat(1)
+
+        self.assertEqual(
+            progression.rewards(),
+            (first.experience(0) + reinforcement.experience(1), 35),
+        )
+
     def test_escaped_enemy_gives_neither_experience_nor_gold(self) -> None:
         progression = BattleProgression(
             (
