@@ -171,7 +171,9 @@ tools/
 `content/images` はゲームとスタッフポータルで共有するPNG/GIF画像の正本である。`app/images` は `npm run images:build` で作るGit管理対象外の実行時データであり、直接編集しない。画像のパレット変換はビルド時に行い、実行時は生成済みの1ピクセル1バイトのパレット番号を読み込む。
 
 現段階のBGM変換元WAVは `tools/audio_wav` に置き、`npm run audio:build` で
-`app/audio` の同名OGGへ変換する。ゲームと再生確認ツールはWAVを直接読まず、生成済みOGGを
+`app/audio` の同名OGGと `output/mp3` の視聴用MP3へ変換する。変換状態はGit管理外の
+`output/.audio-cache` に置き、変換元と設定が変わらない出力を再生成しない。
+ゲームと再生確認ツールはWAVを直接読まず、生成済みOGGを
 `app.resources.audio.BgmPlayer` から読む。スタッフ共有や納品用マスターの運用が必要になった
 時点で `content/audio` への移管と同期手順を別途定める。
 
@@ -382,6 +384,8 @@ Rendererは背面の `object`、通常の `object_y_sorted` とキャラクタ�
 
 - `tools/audio_wav`: 現段階の変換元WAV
 - `app/audio`: `npm run audio:build` で生成するゲーム用Ogg Vorbis
+- `output/mp3`: 同じコマンドで生成する視聴用MP3
+- `output/.audio-cache`: 形式別の変換状態（Git管理対象外）
 - `app/resources/audio.py`: BGM IDの解決、PCM読込、音量、再生状態
 - Pyxelチャンネル2: BGM専用チャンネル
 

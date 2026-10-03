@@ -16,8 +16,9 @@ set -euo pipefail
 # WAV の内容と変換設定が前回と同じで、出力が残っていれば再生成しない。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/audio_wav"
-OUT_DIR="$SCRIPT_DIR/../output/mp3"
+SRC_DIR="${AUDIO_SOURCE_DIR:-$SCRIPT_DIR/audio_wav}"
+OUT_DIR="${AUDIO_MP3_DIR:-$SCRIPT_DIR/../output/mp3}"
+STATE_DIR="${AUDIO_CACHE_DIR:-$SCRIPT_DIR/../output/.audio-cache}/mp3"
 
 LOOPS=2          # 完全再生する周回数
 FADE=2           # フェードアウト秒数
@@ -41,15 +42,24 @@ LEAD_IN_TRACKS=(
 
 DATE="$(date +%Y%m%d)"   # 実行日を全ファイル共通で使う
 
-mkdir -p "$OUT_DIR"
+if [[ ! -d "$SRC_DIR" ]]; then
+  echo "wav ディレクトリが見つからない: $SRC_DIR" >&2
+  exit 1
+fi
+mkdir -p "$OUT_DIR" "$STATE_DIR"
 
-shopt -s nullglob
 found=0
-for src in "$SRC_DIR"/*.wav; do
+while IFS= read -r -d '' src; do
   found=1
-  name="$(basename "${src%.wav}")"
+  relative="${src#"$SRC_DIR"/}"
+  name="${relative%.*}"
   out="$OUT_DIR/${name}_${DATE}.mp3"
-  state="$OUT_DIR/.${name}.make-loop-mp3.state"
+  state="$STATE_DIR/${name}.state"
+  legacy_state="$OUT_DIR/.${name}.make-loop-mp3.state"
+  mkdir -p "$(dirname "$out")" "$(dirname "$state")"
+  if [[ ! -f "$state" && -f "$legacy_state" ]]; then
+    mv "$legacy_state" "$state"
+  fi
 
   mode=loop
   for no_loop_name in "${NO_LOOP_TRACKS[@]}"; do
@@ -93,8 +103,8 @@ for src in "$SRC_DIR"/*.wav; do
     continue
   fi
 
-  tmp_out="$(mktemp "$OUT_DIR/.${name}.XXXXXX")"
-  tmp_state="$(mktemp "$OUT_DIR/.${name}.state.XXXXXX")"
+  tmp_out="$(mktemp "$(dirname "$out")/.${name##*/}.XXXXXX")"
+  tmp_state="$(mktemp "$(dirname "$state")/.${name##*/}.state.XXXXXX")"
   trap 'rm -f "${tmp_out:-}" "${tmp_state:-}"' EXIT
 
   if [[ "$mode" == plain ]]; then
@@ -124,10 +134,10 @@ for src in "$SRC_DIR"/*.wav; do
   fi
 
   mv -f "$tmp_out" "$out"
-  printf '%s\n%s\n' "$fingerprint" "$(basename "$out")" > "$tmp_state"
+  printf '%s\n%s\n' "$fingerprint" "${name}_${DATE}.mp3" > "$tmp_state"
   mv -f "$tmp_state" "$state"
   trap - EXIT
-done
+done < <(find "$SRC_DIR" -type f -iname '*.wav' -print0 | sort -z)
 
 if [ "$found" -eq 0 ]; then
   echo "wav が見つからない: $SRC_DIR" >&2
