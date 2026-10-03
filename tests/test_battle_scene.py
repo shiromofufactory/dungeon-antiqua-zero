@@ -468,6 +468,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.settings = Settings()
         scene.fonts = object()
         scene.character_sprites = object()
+        scene.spells = {}
+        scene.texts = object()
         scene.bgm = Mock()
         scene.return_bgm_id = "da3-field"
         scene.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
@@ -557,7 +559,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
     def test_monster_death_records_the_drop_candidate_order(self) -> None:
         scene = BattleScene.__new__(BattleScene)
         scene.monsters = (
-            SimpleNamespace(is_alive=False, is_front_row=True),
+            SimpleNamespace(is_alive=False, is_front_row=True, is_boss=False),
         )
         scene.progression = Mock()
         scene.target_cursor = Mock()
@@ -692,6 +694,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.texts = object()
         game.items = object()
         game.spells = object()
+        game.alert = Mock()
         game.inventory_system = object()
         game.character_records = object()
         game.party = tuple(object() for _index in range(6))
@@ -708,6 +711,10 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertIs(create.call_args.kwargs["save_data"], game.save_data)
         self.assertEqual(create.call_args.kwargs["return_bgm_id"], "da3-field")
         self.assertIs(create.call_args.kwargs["encounter"], encounter)
+        self.assertIs(
+            create.call_args.kwargs["on_invalid_action"],
+            game.alert.start,
+        )
 
     def test_game_advances_encounters_only_on_dungeon_steps(self) -> None:
         game = Game.__new__(Game)

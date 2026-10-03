@@ -189,6 +189,7 @@ BATTLE_WIN_BGM_ID = "da3-win"
 BATTLE_LEVEL_UP_BGM_ID = "da3-lvup"
 BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
+BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT = 12
 BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
 BATTLE_FOCUS_SE_ID = "battle_focus"
@@ -482,7 +483,7 @@ HIDE_REFERENCE_OFFSETS = (
     (50, -10),
     (60, -9),
 )
-COMMAND_GUIDE_DELAY_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
+COMMAND_GUIDE_DELAY_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
 FORMATION_SPRITE_STEP_X = 16
 PARTY_SPRITE_WIDTH = 16
 NEAR_DEATH_SPRITE_SOURCE_X = 16 * 6
@@ -508,7 +509,7 @@ ATTACK_POSE_SWING_FRAME_COUNT = 8
 ATTACK_MOTION_FRAME_COUNT = (
     ATTACK_POSE_RAISE_FRAME_COUNT + ATTACK_POSE_SWING_FRAME_COUNT
 )
-THROWING_PROJECTILE_SPEED = 16
+THROWING_PROJECTILE_SPEED = 12
 THROWING_PROJECTILE_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
 DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT = 3
 ATTACK_HIT_PATTERN_COUNT = 3
@@ -680,6 +681,7 @@ class BattlePhase(StrEnum):
     """Interactive phases implemented by the battle scene."""
 
     ENTRANCE = "entrance"
+    BOSS_INTRO = "boss_intro"
     SURPRISE_NOTICE = "surprise_notice"
     SURPRISE_PREVENTED = "surprise_prevented"
     INITIAL = "initial"
@@ -2173,6 +2175,7 @@ class BattleScene:
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.monster_death_animation: MonsterDeathAnimation | None = None
+        self.monster_death_delay_frames_remaining = 0
         self.dying_monster_indexes: tuple[int, ...] = ()
         self.monster_death_from_timeline_head = False
         self.entrance_animation_frame = 0
@@ -2391,7 +2394,10 @@ class BattleScene:
             self.input_device = input_state.device
             self._update_result(input_state)
             return
-        input_state = self._apply_confirm_repeat(input_state)
+        if getattr(self, "phase", None) is BattlePhase.BOSS_INTRO:
+            self.confirm_hold_frame_count = 0
+        else:
+            input_state = self._apply_confirm_repeat(input_state)
         self.input_device = input_state.device
         self._refresh_input_guide()
         if getattr(self, "result", None) is not None:
@@ -2423,6 +2429,9 @@ class BattleScene:
             self._hide_command_guide()
         if self.phase is BattlePhase.ENTRANCE:
             self._update_entrance_animation()
+            return
+        if self.phase is BattlePhase.BOSS_INTRO:
+            self._update_boss_intro(input_state)
             return
         if self.phase is BattlePhase.SURPRISE_NOTICE:
             self._update_surprise_notice()
@@ -2512,6 +2521,13 @@ class BattleScene:
             elif self.command_window.is_open:
                 command = self.command_cursor.selected_key
                 if isinstance(command, BattleCommand):
+                    options = getattr(self, "_command_options", None)
+                    if options is not None and not any(
+                        option.command is command and option.enabled
+                        for option in options
+                    ):
+                        self._notify_invalid_action()
+                        return
                     self._remember_active_command(command)
                 if command == BattleCommand.ATTACK:
                     self._begin_attack_target_selection()
@@ -2584,6 +2600,7 @@ class BattleScene:
                 command.selected_key is BattleGlobalCommand.ESCAPE
                 and not self.encounter.escape_command_enabled
             ):
+                self._notify_invalid_action()
                 return
             if (
                 isinstance(command.selected_key, BattleGlobalCommand)
@@ -2601,6 +2618,13 @@ class BattleScene:
                 self._begin_auto_battle()
                 return
         self.global_command_window.update(input_state.navigation)
+
+    def _notify_invalid_action(self) -> None:
+        """Play the battle's shared alert for an unavailable selection."""
+
+        callback = getattr(self, "on_invalid_action", None)
+        if callback is not None:
+            callback()
 
     def _restart_battle(self) -> None:
         """Initialize or explicitly restart this scene and replay its entrance."""
@@ -2699,6 +2723,7 @@ class BattleScene:
         self.fade_escape_snapshot = None
         self.fade_escape_bgm_fade_frame = 0
         self.monster_death_animation = None
+        self.monster_death_delay_frames_remaining = 0
         self.dying_monster_indexes = ()
         self.monster_death_from_timeline_head = False
         self.entrance_animation_frame = 0
@@ -2911,9 +2936,21 @@ class BattleScene:
         self.entrance_animation_frame += 1
         if self.entrance_animation_frame >= BATTLE_ENTRANCE_FRAME_COUNT:
             self.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT
+            if self.monsters[0].is_boss:
+                self.phase = BattlePhase.BOSS_INTRO
+                return
             if self._show_surprise_notice():
                 return
             self._activate_timeline_head()
+
+    def _update_boss_intro(self, input_state: InputState) -> None:
+        """Hold the completed entrance with enemy names until acknowledged."""
+
+        if not (input_state.confirm.triggered or input_state.cancel.triggered):
+            return
+        if self._show_surprise_notice():
+            return
+        self._activate_timeline_head()
 
     def _update_surprise_prevented(self, input_state: InputState) -> None:
         """Wait for acknowledgement before activating the first actor."""
@@ -3015,10 +3052,6 @@ class BattleScene:
                     GLOBAL_COMMAND_CURSOR_X,
                     COMMAND_ROW_Y[row_index],
                     key=command,
-                    selectable=(
-                        command is not BattleGlobalCommand.ESCAPE
-                        or escape_enabled
-                    ),
                 )
                 for row_index, command in enumerate(commands)
             )
@@ -4157,7 +4190,7 @@ class BattleScene:
 
     @property
     def selected_spell(self) -> Spell | None:
-        """Return the currently selected battle spell, if one is selectable."""
+        """Return the battle spell under the cursor, if any."""
 
         cursor = self.spell_cursor
         if cursor is None or not isinstance(cursor.selected_key, str):
@@ -4176,6 +4209,7 @@ class BattleScene:
 
         candidates = self._active_member_spell_candidates()
         if not candidates:
+            self._notify_invalid_action()
             return False
         self.phase = BattlePhase.SPELL
         self.selected_command = BattleCommand.SPELL
@@ -4266,7 +4300,6 @@ class BattleScene:
                     SPELL_CURSOR_X,
                     y,
                     key=spell.key,
-                    selectable=available,
                 )
             )
         self.spell_cursor = self.spell_window.set_cursor(tuple(targets))
@@ -4364,13 +4397,8 @@ class BattleScene:
         current = self.selected_spell
         if current is None or self.active_party_index is None:
             return False
-        member = self.party[self.active_party_index]
         if direction.dy:
-            candidates = tuple(
-                spell
-                for spell in self._spell_candidates_for_type(current.type)
-                if member.mp >= spell.mp
-            )
+            candidates = self._spell_candidates_for_type(current.type)
             if not candidates:
                 return False
             target = candidates[
@@ -4383,11 +4411,7 @@ class BattleScene:
                 spell_type = SPELL_TYPE_ORDER[
                     (column + direction.dx * step) % len(SPELL_TYPE_ORDER)
                 ]
-                candidates = tuple(
-                    spell
-                    for spell in self._spell_candidates_for_type(spell_type)
-                    if member.mp >= spell.mp
-                )
+                candidates = self._spell_candidates_for_type(spell_type)
                 if not candidates:
                     continue
                 target = next(
@@ -4436,7 +4460,10 @@ class BattleScene:
             return False
         spell = self.selected_spell
         member = self.party[self.active_party_index]
-        if spell is None or member.mp < spell.mp:
+        if spell is None:
+            return False
+        if member.mp < spell.mp:
+            self._notify_invalid_action()
             return False
         started = self._begin_action_target_selection(spell)
         if started and self._command_memory_enabled:
@@ -7069,11 +7096,22 @@ class BattleScene:
         self.dying_monster_indexes = dying_indexes
         self.monster_death_from_timeline_head = from_timeline_head
         self.monster_death_animation = MonsterDeathAnimation()
+        self.monster_death_delay_frames_remaining = (
+            BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT
+            if any(self.monsters[index].is_boss for index in dying_indexes)
+            else 0
+        )
         self.target_cursor.active = False
         self.command_window.close_immediately()
+        if not self.monster_death_delay_frames_remaining:
+            self._start_monster_death_effect()
+        return True
+
+    def _start_monster_death_effect(self) -> None:
+        """Apply the initial death tint and play its sound once."""
+
         self._sync_monster_death_palette()
         play_se(BATTLE_MONSTER_DEATH_SE_ID)
-        return True
 
     def _update_monster_death_animation(self) -> None:
         """Advance the death effect, remove its actor, and finish the turn."""
@@ -7081,6 +7119,11 @@ class BattleScene:
         animation = self.monster_death_animation
         if animation is None:
             raise RuntimeError("monster death phase requires an animation")
+        if getattr(self, "monster_death_delay_frames_remaining", 0):
+            self.monster_death_delay_frames_remaining -= 1
+            if not self.monster_death_delay_frames_remaining:
+                self._start_monster_death_effect()
+            return
         animation.update()
         if not animation.is_finished:
             self._sync_monster_death_palette()
@@ -7102,6 +7145,7 @@ class BattleScene:
                 )
             self.timeline = self._timeline_order.actors
         self.monster_death_animation = None
+        self.monster_death_delay_frames_remaining = 0
         self.dying_monster_indexes = ()
         self.monster_death_from_timeline_head = False
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
@@ -7885,10 +7929,14 @@ class BattleScene:
                 self._start_timeline_animation()
                 return
             self.phase = BattlePhase.MONSTER_ACTION
-            self.blinking_monster_index = next(
-                index for index, monster in enumerate(self.monsters) if monster is actor
-            )
-            self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
+            if self._attempt_monster_reinforcement(actor):
+                self._reinforcement_waiting_actor = actor
+                self._reinforcement_post_entrance_wait_frames = 0
+                self.blinking_monster_index = None
+                self.monster_blink_frames_remaining = 0
+            else:
+                self.blinking_monster_index = self._monster_index(actor)
+                self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
         self._refresh_party_text_colors()
 
     def _begin_confused_party_action(self, actor_index: int) -> bool:
@@ -8368,6 +8416,7 @@ class BattleScene:
 
     def _refresh_command_options(self) -> None:
         options = self._active_member_command_options()
+        self._command_options = options
         right_start = next(
             (
                 index
@@ -8410,7 +8459,6 @@ class BattleScene:
                     cursor_x,
                     cursor_y,
                     key=option.command,
-                    selectable=option.enabled,
                 )
                 for option, _, _, _, cursor_x, cursor_y in placements
             )
@@ -8472,13 +8520,17 @@ class BattleScene:
 
         if not hasattr(self, "party"):
             return
+        options = self._active_member_command_options()
         active_index = getattr(self, "active_party_index", None)
         remembered_command = (
             getattr(self, "last_command_by_party_index", {}).get(active_index)
             if self._command_memory_enabled
             else None
         )
-        if remembered_command is not None:
+        if remembered_command is not None and any(
+            option.command == remembered_command and option.enabled
+            for option in options
+        ):
             try:
                 self.command_cursor.select_key(remembered_command)
             except ValueError:
@@ -8487,7 +8539,6 @@ class BattleScene:
                 pass
             else:
                 return
-        options = self._active_member_command_options()
         attack = next(
             (
                 option
@@ -8636,23 +8687,9 @@ class BattleScene:
             ):
                 self._finish_monster_attack()
             return
-        if self.monster_blink_frames_remaining > 0:
-            self.monster_blink_frames_remaining -= 1
-        if self.monster_blink_frames_remaining > 0:
-            return
         actor = self.timeline[0]
-        if not isinstance(actor, BattleMonster):
-            self._start_timeline_animation()
-            return
-        if getattr(self, "monster_confused_action_pending", False):
-            self.monster_confused_action_pending = False
-            self.blinking_monster_index = None
-            if hasattr(self, "progression"):
-                self.progression.record_enemy_action(self._monster_index(actor))
-            if not self._begin_confused_monster_action(actor):
-                self._start_timeline_animation()
-            return
-        if getattr(self, "_reinforcement_waiting_actor", None) is actor:
+        waiting_actor = getattr(self, "_reinforcement_waiting_actor", None)
+        if waiting_actor is not None and waiting_actor is actor:
             if self.reinforcement_entrance_frames:
                 return
             if (
@@ -8663,9 +8700,23 @@ class BattleScene:
                 return
             self._reinforcement_waiting_actor = None
             self._reinforcement_post_entrance_wait_frames = 0
-        elif self._attempt_monster_reinforcement(actor):
-            self._reinforcement_waiting_actor = actor
-            self._reinforcement_post_entrance_wait_frames = 0
+            self.blinking_monster_index = self._monster_index(actor)
+            self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
+            return
+        if self.monster_blink_frames_remaining > 0:
+            self.monster_blink_frames_remaining -= 1
+        if self.monster_blink_frames_remaining > 0:
+            return
+        if not isinstance(actor, BattleMonster):
+            self._start_timeline_animation()
+            return
+        if getattr(self, "monster_confused_action_pending", False):
+            self.monster_confused_action_pending = False
+            self.blinking_monster_index = None
+            if hasattr(self, "progression"):
+                self.progression.record_enemy_action(self._monster_index(actor))
+            if not self._begin_confused_monster_action(actor):
+                self._start_timeline_animation()
             return
         action = self._select_monster_action(actor)
         turn_was_silenced = actor.state.elapse_silence_turn()
@@ -8736,6 +8787,7 @@ class BattleScene:
         index = len(self.monsters)
         self.monsters += (monster,)
         self.monster_slot_indexes += (slot,)
+        self._refresh_monster_rows_from_slots()
         self.reinforcement_entrance_frames[index] = 0
         position = MONSTER_POSITIONS[slot]
         self.monster_positions += (position,)
@@ -8780,6 +8832,23 @@ class BattleScene:
         self.timeline = self._timeline_order.actors
         self._refresh_monster_target_cursor()
         return True
+
+    def _refresh_monster_rows_from_slots(self) -> None:
+        """Restore slot rows when reinforcements refill an empty front line."""
+
+        front_slot_occupied = any(
+            existing.is_alive and existing_slot >= 2
+            for existing, existing_slot in zip(
+                self.monsters, self.monster_slot_indexes
+            )
+        )
+        for existing, existing_slot in zip(
+            self.monsters, self.monster_slot_indexes
+        ):
+            if existing.is_alive:
+                existing.is_front_row = (
+                    existing_slot >= 2 if front_slot_occupied else True
+                )
 
     def _update_reinforcement_entrances(self) -> None:
         """Advance each arriving monster's slide in update, never in draw."""
@@ -10985,7 +11054,9 @@ class BattleScene:
             ):
                 continue
             x, y = self._monster_draw_position(index)
-            if not is_dying:
+            if not is_dying or getattr(
+                self, "monster_death_delay_frames_remaining", 0
+            ):
                 if self.phase is BattlePhase.ACTION_PRESENTATION:
                     self._draw_spell_effect_target(
                         "enemy",
@@ -11964,7 +12035,7 @@ class BattleScene:
             window.draw()
         global_command_window = getattr(self, "global_command_window", None)
         show_monster_names = (
-            self.phase is BattlePhase.TARGET
+            self.phase in (BattlePhase.BOSS_INTRO, BattlePhase.TARGET)
             or (self.phase is BattlePhase.ACTION_TARGET and self.action_targets_enemy)
             or (self.phase is BattlePhase.INITIAL and self.command_window.is_closed)
             or (

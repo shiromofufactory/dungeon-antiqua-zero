@@ -43,12 +43,14 @@ from monster import (
     MonsterCombatStats,
     MonsterDefinition,
     MonsterSpecialAction,
+    promote_rear_monsters_if_front_empty,
 )
 from monster_ai import MonsterAction
 from resources import load_record_array
 from scenes.battle import (
     DA2_MONSTER_ENTRANCE_SLIDE_STEPS,
     DA2_MONSTER_ENTRANCE_STEP_DISTANCE,
+    MONSTER_BLINK_FRAME_COUNT,
     MONSTER_ENTRANCE_FRAME_COUNTS,
     REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT,
     BattleMonster,
@@ -90,8 +92,16 @@ class MonsterReinforcementTest(unittest.TestCase):
         scene.monsters = (actor,)
         scene.monster_slot_indexes = (0, 2)
         scene.timeline = (actor,)
+        scene.command_cursor = Mock()
         scene.progression = Mock()
         scene.reinforcement_entrance_frames = {}
+        scene._remove_defeated_party_from_timeline = Mock()
+        scene._party_is_defeated = Mock(return_value=False)
+        scene._prune_surprise_pending_party = Mock(return_value=False)
+        scene._begin_front_promotion_if_needed = Mock(return_value=False)
+        scene._apply_turn_start_hp_change = Mock(return_value=False)
+        scene._monster_can_attempt_action = Mock(return_value=True)
+        scene._refresh_party_text_colors = Mock()
         events: list[str] = []
 
         def summon(_actor: BattleMonster) -> bool:
@@ -107,13 +117,17 @@ class MonsterReinforcementTest(unittest.TestCase):
             side_effect=lambda _actor: events.append("attack")
         )
 
-        scene._update_monster_action()
+        scene._activate_timeline_head()
 
         self.assertEqual(events, ["reinforcement"])
+        self.assertIs(scene.phase, BattlePhase.MONSTER_ACTION)
+        self.assertIsNone(scene.blinking_monster_index)
+        self.assertEqual(scene.monster_blink_frames_remaining, 0)
         scene.progression.record_enemy_action.assert_not_called()
         for _ in range(MONSTER_ENTRANCE_FRAME_COUNTS[2] - 1):
             scene._update_reinforcement_entrances()
             scene._update_monster_action()
+            self.assertIsNone(scene.blinking_monster_index)
         self.assertEqual(events, ["reinforcement"])
         scene._attempt_monster_reinforcement.assert_called_once_with(actor)
         scene.progression.record_enemy_action.assert_not_called()
@@ -122,9 +136,11 @@ class MonsterReinforcementTest(unittest.TestCase):
         scene._update_monster_action()
         self.assertEqual(events, ["reinforcement"])
         self.assertEqual(scene._reinforcement_post_entrance_wait_frames, 1)
+        self.assertIsNone(scene.blinking_monster_index)
 
         for _ in range(REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT - 1):
             scene._update_monster_action()
+            self.assertIsNone(scene.blinking_monster_index)
         self.assertEqual(events, ["reinforcement"])
         self.assertEqual(
             scene._reinforcement_post_entrance_wait_frames,
@@ -132,6 +148,17 @@ class MonsterReinforcementTest(unittest.TestCase):
         )
         scene._attempt_monster_reinforcement.assert_called_once_with(actor)
         scene.progression.record_enemy_action.assert_not_called()
+
+        scene._update_monster_action()
+
+        self.assertEqual(events, ["reinforcement"])
+        self.assertEqual(scene.blinking_monster_index, 0)
+        self.assertEqual(scene.monster_blink_frames_remaining, MONSTER_BLINK_FRAME_COUNT)
+
+        for _ in range(MONSTER_BLINK_FRAME_COUNT - 1):
+            scene._update_monster_action()
+        self.assertEqual(events, ["reinforcement"])
+        self.assertEqual(scene.monster_blink_frames_remaining, 1)
 
         scene._update_monster_action()
 
@@ -151,6 +178,8 @@ class MonsterReinforcementTest(unittest.TestCase):
         treant = BattleMonster.from_record(records["Treant"], is_front_row=False)
         fallen = BattleMonster.from_record(records["Spirit"], is_front_row=True)
         fallen.state.defeat()
+        self.assertTrue(promote_rear_monsters_if_front_empty((treant, fallen)))
+        self.assertTrue(treant.is_front_row)
         scene = BattleScene.__new__(BattleScene)
         scene.monsters = (treant, fallen)
         scene.monster_slot_indexes = (0, 2)
@@ -191,6 +220,8 @@ class MonsterReinforcementTest(unittest.TestCase):
         self.assertEqual(len(scene.monsters), 3)
         self.assertEqual(scene.monsters[2].key, "Spirit")
         self.assertIsNot(scene.monsters[2], fallen)
+        self.assertFalse(treant.is_front_row)
+        self.assertTrue(scene.monsters[2].is_front_row)
         self.assertEqual(scene.monster_slot_indexes, (0, 2, 2))
         self.assertEqual(scene.monster_positions[2], MONSTER_POSITIONS[2])
         self.assertEqual(scene.reinforcement_entrance_frames, {2: 0})
@@ -226,6 +257,26 @@ class MonsterReinforcementTest(unittest.TestCase):
             scene._update_reinforcement_entrances()
         self.assertEqual(scene._monster_draw_position(2), MONSTER_POSITIONS[2])
         self.assertNotIn(2, scene.reinforcement_entrance_frames)
+
+    def test_reinforcement_recalculates_rows_when_front_slot_becomes_occupied(
+        self,
+    ) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        rear_monster = SimpleNamespace(is_alive=True, is_front_row=True)
+        reinforcement = SimpleNamespace(is_alive=True, is_front_row=False)
+        scene.monsters = (rear_monster, reinforcement)
+        scene.monster_slot_indexes = (0, 1)
+
+        scene._refresh_monster_rows_from_slots()
+
+        self.assertTrue(rear_monster.is_front_row)
+        self.assertTrue(reinforcement.is_front_row)
+
+        scene.monster_slot_indexes = (0, 2)
+        scene._refresh_monster_rows_from_slots()
+
+        self.assertFalse(rear_monster.is_front_row)
+        self.assertTrue(reinforcement.is_front_row)
 
 
 class MonsterChargePresentationTest(unittest.TestCase):

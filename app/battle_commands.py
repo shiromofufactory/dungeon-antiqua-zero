@@ -72,7 +72,7 @@ class BattleCommandContext:
 
 @dataclass(frozen=True)
 class BattleCommandOption:
-    """One visible battle command and whether the cursor may select it."""
+    """One visible battle command and whether confirmation may execute it."""
 
     command: BattleCommand
     enabled: bool = True

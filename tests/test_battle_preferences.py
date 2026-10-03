@@ -71,9 +71,12 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         )
         self.assertEqual(memory.global_command, "escape")
         targets = scene.global_command_cursor.targets
-        self.assertEqual([target.selectable for target in targets], [True, False, True])
-        with self.assertRaises(ValueError):
-            scene.global_command_cursor.select_key(BattleGlobalCommand.ESCAPE)
+        self.assertEqual([target.selectable for target in targets], [True, True, True])
+        self.assertTrue(scene.global_command_cursor.move_down())
+        self.assertEqual(
+            scene.global_command_cursor.selected_key,
+            BattleGlobalCommand.ESCAPE,
+        )
         scene.global_command_cursor.select_key(BattleGlobalCommand.AUTO)
         self.assertEqual(
             scene.global_command_cursor.selected_key, BattleGlobalCommand.AUTO
@@ -83,14 +86,20 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         scene = self.scene(
             encounter=BattleEncounter(("Coyote",), escape_command_enabled=False)
         )
-        scene.global_command_cursor = Mock(selected_key=BattleGlobalCommand.ESCAPE)
+        scene.global_command_cursor.select_key(BattleGlobalCommand.ESCAPE)
+        scene.on_invalid_action = Mock()
 
         scene._update_global_command_selection(
             InputState(confirm=InputButton(triggered=True))
         )
 
+        scene.on_invalid_action.assert_called_once_with()
         scene._begin_escape_confirmation.assert_not_called()
         self.assertIsNone(scene.command_memory.global_command)
+        self.assertEqual(
+            scene.global_command_cursor.selected_key,
+            BattleGlobalCommand.ESCAPE,
+        )
 
     def test_each_global_command_is_remembered_only_after_confirmation(self):
         for command in BattleGlobalCommand:
@@ -192,6 +201,7 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         enemy.state.consume_stun.return_value = False
         enemy.state.elapse_sleep_turn.return_value = False
         scene._monster_can_attempt_action = Mock(return_value=True)
+        scene._attempt_monster_reinforcement = Mock(return_value=False)
         scene.monsters = (enemy,)
         scene.timeline = (enemy,)
         scene._activate_timeline_head()

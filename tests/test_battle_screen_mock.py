@@ -39,6 +39,7 @@ from tools.screen_mocks.battle import (
     AIM_RETICLE_START_FRAME,
     AIM_RETICLE_START_DISTANCE,
     BATTLE_ENTRANCE_FRAME_COUNT,
+    BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_BGM_ID,
     BATTLE_ESCAPE_SE_ID,
     BATTLE_FOCUS_SE_ID,
@@ -46,6 +47,7 @@ from tools.screen_mocks.battle import (
     BATTLE_HIT_SE_ID,
     BATTLE_IDENTIFY_SE_ID,
     BATTLE_MONSTER_DEATH_SE_ID,
+    BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT,
     BATTLE_MOCK_MONSTER_KEYS,
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
     BATTLE_TEST_PARTY,
@@ -995,9 +997,26 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._update_entrance_animation.assert_called_once_with()
         mock.command_window.open.assert_not_called()
 
+    def test_boss_intro_does_not_repeat_a_button_held_during_entrance(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.BOSS_INTRO
+        mock.confirm_hold_frame_count = BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=False, held=True)
+        )
+        mock._update_boss_intro = Mock()
+
+        mock.update()
+
+        mock._update_boss_intro.assert_called_once()
+        self.assertFalse(mock._update_boss_intro.call_args.args[0].confirm.triggered)
+        self.assertEqual(mock.confirm_hold_frame_count, 0)
+
     def test_entrance_fades_in_then_activates_first_timeline_actor(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.ENTRANCE
+        mock.monsters = (SimpleNamespace(is_boss=False),)
         mock.entrance_animation_frame = 0
         mock.entrance_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         mock.entrance_fade.start_fade_in()
@@ -1031,6 +1050,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self,
     ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (SimpleNamespace(is_boss=False),)
         mock.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT - 1
         mock.entrance_fade = Mock(is_active=False)
         mock.palette_shifter = Mock()
@@ -1045,6 +1065,64 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock._show_surprise_notice.assert_called_once_with()
         mock._activate_timeline_head.assert_not_called()
+
+    def test_boss_entrance_waits_with_names_before_first_action(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.monsters = (
+            SimpleNamespace(is_boss=True),
+            SimpleNamespace(is_boss=False),
+        )
+        mock.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT - 1
+        mock.entrance_fade = Mock(is_active=False)
+        mock._show_surprise_notice = Mock(return_value=False)
+        mock._activate_timeline_head = Mock()
+
+        mock._update_entrance_animation()
+
+        self.assertIs(mock.phase, BattleMockPhase.BOSS_INTRO)
+        mock._show_surprise_notice.assert_not_called()
+        mock._activate_timeline_head.assert_not_called()
+
+        mock._update_boss_intro(InputState())
+        self.assertIs(mock.phase, BattleMockPhase.BOSS_INTRO)
+        mock._activate_timeline_head.assert_not_called()
+
+        mock._update_boss_intro(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+        mock._show_surprise_notice.assert_called_once_with()
+        mock._activate_timeline_head.assert_called_once_with()
+
+    def test_boss_intro_cancel_acknowledges_before_surprise_notice(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.BOSS_INTRO
+        mock._show_surprise_notice = Mock(return_value=True)
+        mock._activate_timeline_head = Mock()
+
+        mock._update_boss_intro(
+            InputState(cancel=InputButton(triggered=True, held=True))
+        )
+
+        mock._show_surprise_notice.assert_called_once_with()
+        mock._activate_timeline_head.assert_not_called()
+
+    def test_only_first_monster_marks_boss_intro(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.ENTRANCE
+        mock.monsters = (
+            SimpleNamespace(is_boss=False),
+            SimpleNamespace(is_boss=True),
+        )
+        mock.entrance_animation_frame = BATTLE_ENTRANCE_FRAME_COUNT - 1
+        mock.entrance_fade = Mock(is_active=False)
+        mock._show_surprise_notice = Mock(return_value=False)
+        mock._activate_timeline_head = Mock()
+
+        mock._update_entrance_animation()
+
+        mock._activate_timeline_head.assert_called_once_with()
+        self.assertIs(mock.phase, BattleMockPhase.ENTRANCE)
 
     def test_surprise_prevention_notice_waits_for_acknowledgement(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -3740,6 +3818,73 @@ class BattleScreenMockTest(unittest.TestCase):
         with palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
             pass
 
+    def test_boss_death_holds_normal_image_for_twelve_frames(self) -> None:
+        boss = _damage_test_monster(0, hp=1)
+        boss.is_boss = True
+        boss.state.defeat()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (boss,)
+        mock.monster_images = {boss.key: object()}
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        mock.target_cursor = Mock()
+        mock.command_window = Mock()
+        mock.palette_shifter = Mock()
+        mock._sync_monster_death_palette = Mock()
+
+        with patch("scenes.battle.play_se") as play_se:
+            self.assertTrue(mock._begin_monster_death(0))
+            self.assertEqual(
+                mock.monster_death_delay_frames_remaining,
+                BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT,
+            )
+            mock._sync_monster_death_palette.assert_not_called()
+            play_se.assert_not_called()
+
+            with (
+                patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                patch("tools.screen_mocks.battle.pyxel.dither") as dither,
+            ):
+                mock._draw_monsters()
+            blt.assert_called_once()
+            dither.assert_not_called()
+            mock.palette_shifter.shifted.assert_not_called()
+
+            for _frame in range(BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT - 1):
+                mock._update_monster_death_animation()
+            self.assertEqual(mock.monster_death_animation.elapsed_frames, 0)
+            mock._sync_monster_death_palette.assert_not_called()
+            play_se.assert_not_called()
+
+            mock._update_monster_death_animation()
+            self.assertEqual(mock.monster_death_delay_frames_remaining, 0)
+            self.assertEqual(mock.monster_death_animation.elapsed_frames, 0)
+            mock._sync_monster_death_palette.assert_called_once_with()
+            play_se.assert_called_once_with(BATTLE_MONSTER_DEATH_SE_ID)
+
+            mock._update_monster_death_animation()
+            self.assertEqual(mock.monster_death_animation.elapsed_frames, 1)
+
+    def test_mixed_simultaneous_defeat_waits_for_boss(self) -> None:
+        normal = _damage_test_monster(0, hp=1)
+        boss = _damage_test_monster(1, hp=1)
+        boss.is_boss = True
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (normal, boss)
+        mock.target_cursor = Mock()
+        mock.command_window = Mock()
+        mock._sync_monster_death_palette = Mock()
+
+        with patch("scenes.battle.play_se") as play_se:
+            self.assertTrue(mock._begin_monster_deaths((0, 1)))
+
+        self.assertEqual(mock.dying_monster_indexes, (0, 1))
+        self.assertEqual(
+            mock.monster_death_delay_frames_remaining,
+            BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT,
+        )
+        play_se.assert_not_called()
+
     def test_poison_death_of_timeline_head_removes_head_after_death_effect(self) -> None:
         dying = _damage_test_monster(0, hp=1)
         dying.state.poisoned = True
@@ -4741,6 +4886,46 @@ class BattleScreenMockTest(unittest.TestCase):
             [target.key for target in mock.spell_cursor.targets],
             ["HEALING1", "PROTECTION", "CURE", "SILENCE"],
         )
+
+    def test_unaffordable_spells_remain_navigable_and_alert_on_confirm(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(
+            items,
+            load_mock_skills(),
+            character_keys=BATTLE_MOCK_PARTY_CHARACTER_KEYS,
+            internal_level=MAX_INTERNAL_LEVEL,
+        )
+        mock.party[0].mp = 1
+        mock.active_party_index = 0
+        spells = load_mock_spells()
+        mock.spell_candidates = tuple(
+            spells[key] for key in ("FIRE1", "SLOW", "HEALING1", "PROTECTION")
+        )
+        mock.spell_type = spells["FIRE1"].type
+        mock.spell_scroll_offset = 0
+        mock.spell_cursor = None
+        mock.spell_window = Window(*SPELL_WINDOW_GRID)
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.phase = BattleMockPhase.SPELL
+        mock._refresh_spell_guide = Mock()
+        mock._begin_action_target_selection = Mock()
+        mock.on_invalid_action = Mock()
+
+        mock._refresh_spell_options()
+
+        self.assertEqual(mock.selected_spell.key, "FIRE1")
+        self.assertTrue(all(target.selectable for target in mock.spell_cursor.targets))
+        self.assertTrue(mock._move_spell(Direction.DOWN))
+        self.assertEqual(mock.selected_spell.key, "SLOW")
+        self.assertTrue(mock._move_spell(Direction.RIGHT))
+        self.assertEqual(mock.selected_spell.key, "PROTECTION")
+
+        self.assertFalse(mock._use_selected_spell())
+        self.assertEqual(mock.party[0].mp, 1)
+        self.assertIs(mock.phase, BattleMockPhase.SPELL)
+        mock.on_invalid_action.assert_called_once_with()
+        mock._begin_action_target_selection.assert_not_called()
 
     def test_spell_mp_window_overlays_the_guide_bottom_right(self) -> None:
         items = load_mock_items()
@@ -8678,7 +8863,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock.command_window.add_text.call_args_list,
         )
 
-    def test_disabled_formation_is_grey_and_not_selectable(self) -> None:
+    def test_disabled_formation_is_grey_but_cursor_selectable(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.command_window = Mock()
         self._mock_command_labels(mock)
@@ -8704,7 +8889,31 @@ class BattleScreenMockTest(unittest.TestCase):
         formation = next(
             target for target in targets if target.key is BattleCommand.FORMATION
         )
-        self.assertFalse(formation.selectable)
+        self.assertTrue(formation.selectable)
+
+    def test_disabled_member_command_alerts_without_confirming_action(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.input_reader = Mock()
+        mock.input_reader.poll.return_value = InputState(
+            confirm=InputButton(triggered=True, held=True)
+        )
+        mock.command_cursor = Mock(selected_key=BattleCommand.ATTACK)
+        mock.command_window = Mock(is_closed=False, is_open=True)
+        mock._command_options = (
+            BattleCommandOption(BattleCommand.ATTACK, enabled=False),
+            BattleCommandOption(BattleCommand.DEFEND),
+        )
+        mock.on_invalid_action = Mock()
+        mock._remember_active_command = Mock()
+        mock._begin_attack_target_selection = Mock()
+
+        mock.update()
+
+        mock.on_invalid_action.assert_called_once_with()
+        mock._remember_active_command.assert_not_called()
+        mock._begin_attack_target_selection.assert_not_called()
+        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
 
     def test_each_command_uses_a_battle_text_key(self) -> None:
         self.assertEqual(
@@ -8783,10 +8992,15 @@ class BattleScreenMockTest(unittest.TestCase):
             return_value=("line one", "line two", "line three", "line four")
         )
 
-        for _frame in range(COMMAND_GUIDE_DELAY_FRAME_COUNT):
+        for _frame in range(COMMAND_GUIDE_DELAY_FRAME_COUNT - 1):
             mock._update_command_guide()
 
-        self.assertEqual(COMMAND_GUIDE_DELAY_FRAME_COUNT, 30)
+        self.assertEqual(COMMAND_GUIDE_DELAY_FRAME_COUNT, 60)
+        self.assertFalse(mock.command_guide_visible)
+        mock.command_guide_window.open_immediately.assert_not_called()
+
+        mock._update_command_guide()
+
         self.assertIs(mock.command_guide_command, BattleCommand.ATTACK)
         self.assertTrue(mock.command_guide_visible)
         mock.command_guide_window.add_text.assert_has_calls(
@@ -9120,7 +9334,7 @@ class BattleScreenMockTest(unittest.TestCase):
             call("battle.command.escape", 4, 5, color=DISABLED_COLOR),
         )
         targets = mock.global_command_window.set_cursor.call_args.args[0]
-        self.assertFalse(targets[1].selectable)
+        self.assertTrue(targets[1].selectable)
 
     def test_auto_battle_starts_cancellable_planning_before_any_action(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -9288,6 +9502,24 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._select_initial_member_command()
 
         self.assertEqual(mock.last_command_by_party_index, {})
+        mock.command_cursor.select_key.assert_not_called()
+
+    def test_disabled_remembered_member_command_uses_initial_choice(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (object(),)
+        mock.active_party_index = 0
+        mock.command_cursor = Mock()
+        mock.last_command_by_party_index = {0: BattleCommand.SPELL}
+        mock._active_member_command_options = Mock(
+            return_value=(
+                BattleCommandOption(BattleCommand.ATTACK),
+                BattleCommandOption(BattleCommand.SPELL, enabled=False),
+                BattleCommandOption(BattleCommand.DEFEND),
+            )
+        )
+
+        mock._select_initial_member_command()
+
         mock.command_cursor.select_key.assert_not_called()
 
     def test_item_selection_restores_the_active_members_last_item(self) -> None:
@@ -9773,6 +10005,12 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = Mock(is_closed=False)
         mock.global_command_window = Mock(is_closed=True, is_open=False)
 
+        mock.phase = BattleMockPhase.BOSS_INTRO
+        mock._draw_windows()
+        monster_name.draw.assert_called_once_with()
+        self.assertTrue(mock.global_command_window.is_closed)
+
+        monster_name.reset_mock()
         mock.phase = BattleMockPhase.COMMAND
         mock._draw_windows()
         monster_name.draw.assert_not_called()
