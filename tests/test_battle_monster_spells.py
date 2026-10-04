@@ -20,7 +20,7 @@ from tools.screen_mocks.battle import (
 from monster import MonsterBattleState, MonsterCombatStats
 from monster_ai import MonsterSpellAction
 from battle_magic import resolve_spell_damage, SpellAffinity
-from member import Member
+from member import Member, FormationRow
 from resistance import ResistanceType
 
 
@@ -392,6 +392,130 @@ class MonsterDamageSpellTest(unittest.TestCase):
                 self.assertEqual(tuple(m.hp for m in scene.party), hp)
                 self.assertEqual(actor.state.mp, 2)
                 self.assertEqual(scene.action_presentation.party_damage_results, ())
+
+
+class IntelligentMonsterSpellTest(unittest.TestCase):
+    def scene(self, key, *, intelligence=1):
+        actor = spellcaster(magic=17, spell_key=key, max_mp=12)
+        actor.intelligence = intelligence
+        return actor, spell_scene(actor)
+
+    def test_int_one_filters_silence_and_insufficient_mp_but_int_zero_keeps_spells(self):
+        for intelligence in (0, 1):
+            for condition in ("silence", "mp"):
+                with self.subTest(intelligence=intelligence, condition=condition):
+                    actor, scene = self.scene("FIRE1", intelligence=intelligence)
+                    if condition == "silence":
+                        actor.state.apply_silence(1)
+                    else:
+                        actor.state.mp = 1
+                    self.assertEqual(scene._targetable_monster_spell_keys(actor),
+                                     ("FIRE1",) if intelligence == 0 else ())
+
+    def test_all_target_debuff_is_kept_if_any_member_is_effective(self):
+        for key in ("SLOW", "SLEEP", "SILENCE"):
+            actor, scene = self.scene(key)
+            scene.spells[key] = replace(scene.spells[key], to_all=True)
+            scene._member_can_cast_spells = Mock(return_value=True)
+            for member in scene.party:
+                member.speed_modifier = -1
+                member.sleeping = 2
+                member.silenced = 4
+            with self.subTest(spell=key):
+                self.assertEqual(scene._targetable_monster_spell_keys(actor), ())
+                scene.party[1].speed_modifier = 0
+                scene.party[1].sleeping = 0
+                scene.party[1].silenced = 0
+                self.assertEqual(scene._targetable_monster_spell_keys(actor), (key,))
+                # DA2 still applies the full spell to everyone, not just the effective member.
+                self.assertEqual(scene._monster_spell_candidate_targets[key], (0, 1))
+
+    def test_silence_excludes_party_without_any_caster(self):
+        actor, scene = self.scene("SILENCE")
+        scene._member_can_cast_spells = Mock(return_value=False)
+        self.assertEqual(scene._targetable_monster_spell_keys(actor), ())
+
+    def test_break_random_target_is_checked_before_candidate_inclusion_and_retained(self):
+        actor, scene = self.scene("ARMOR BREAK")
+        scene.party[0].formation_row = FormationRow.FRONT
+        scene.party[1].formation_row = FormationRow.BACK
+        with patch("scenes.battle.random.choice", return_value=1) as choose:
+            self.assertEqual(scene._targetable_monster_spell_keys(actor), ())
+            choose.assert_called_once_with((0, 1))
+        scene.party[0].protection_level = -1
+        with patch("scenes.battle.random.choice", return_value=0):
+            self.assertEqual(scene._targetable_monster_spell_keys(actor), ())
+        scene.party[0].protection_level = 0
+        with patch("scenes.battle.random.choice", return_value=0) as choose:
+            self.assertEqual(scene._targetable_monster_spell_keys(actor), ("ARMOR BREAK",))
+            scene._begin_monster_spell(actor, scene.spells["ARMOR BREAK"])
+            choose.assert_called_once_with((0, 1))
+        self.assertEqual(scene.action_presentation.party_break_results[0].target_index, 0)
+
+    def test_silence_applies_four_to_six_turns_only_to_casters_and_respects_resistance(self):
+        actor, scene = self.scene("SILENCE")
+        scene._member_can_cast_spells = Mock(side_effect=lambda member: member is scene.party[1])
+        with patch("scenes.battle.random.randint", side_effect=(0, 6)):
+            scene._begin_monster_spell(actor, scene.spells["SILENCE"])
+        scene._apply_action_results(scene.action_presentation)
+        self.assertEqual(tuple(m.silenced for m in scene.party), (0, 6))
+        self.assertEqual([p.is_miss for p in scene.spell_damage_popups], [True])
+        actor, scene = self.scene("SILENCE")
+        scene._member_can_cast_spells = Mock(return_value=True)
+        with patch.object(Member, "resistances", new_callable=PropertyMock,
+                          return_value=frozenset({ResistanceType.SILENCE})):
+            scene._begin_monster_spell(actor, scene.spells["SILENCE"])
+        scene._apply_action_results(scene.action_presentation)
+        self.assertEqual(tuple(m.silenced for m in scene.party), (0, 0))
+
+    def test_member_silence_survives_damage_and_cure_and_clears_on_death_or_battle_exit(self):
+        actor, scene = self.scene("SILENCE")
+        member = scene.party[0]
+        member.apply_silence(6)
+        member.apply_silence(4)
+        member.take_damage(1)
+        member.cure_ailments()
+        self.assertEqual(member.silenced, 6)
+        for remaining in range(5, -1, -1):
+            self.assertTrue(member.elapse_silence_turn())
+            self.assertEqual(member.silenced, remaining)
+        self.assertFalse(member.elapse_silence_turn())
+        member.apply_silence(4)
+        member.clear_temporary_battle_conditions()
+        self.assertEqual(member.silenced, 0)
+        member.apply_silence(4)
+        member.take_damage(member.hp)
+        self.assertEqual(member.silenced, 0)
+
+    def test_member_silence_decrements_when_turn_returns_to_timeline(self):
+        from scenes.battle import BattleCharacter
+        from battle_timeline import TimelineEntry, TimelineOrder
+
+        _, scene = self.scene("SILENCE")
+        member = scene.party[0]
+        visual = BattleCharacter(member, 0, 0, 0)
+        scene._timeline_order = TimelineOrder((TimelineEntry(visual, 10, 64),))
+        scene.command_cursor = Mock()
+        scene.command_window = Mock()
+        scene._refresh_party_text_colors = Mock()
+        member.apply_silence(1)
+        member.apply_sleep(2)
+        scene._start_timeline_animation()
+        self.assertEqual(member.silenced, 0)
+
+    def test_silenced_member_spell_fails_without_mp_use(self):
+        actor, scene = self.scene("SILENCE")
+        scene.active_party_index = 1
+        member = scene.party[1]
+        member.apply_silence(1)
+        scene.pending_spell = scene.spells["FIRE1"]
+        scene.pending_item_candidate = None
+        scene._selected_party_target_can_receive_spell = Mock(return_value=True)
+        mp = member.mp
+        self.assertTrue(scene._confirm_action_target_selection())
+        self.assertEqual(member.mp, mp)
+        self.assertEqual(scene.action_presentation.party_damage_results, ())
+        scene._show_monster_spell_sealed_message.assert_called_once_with(actor_is_enemy=False)
 
 
 if __name__ == "__main__":

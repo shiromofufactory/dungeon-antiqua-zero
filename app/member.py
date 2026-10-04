@@ -731,6 +731,7 @@ class Member:
     formation_row: FormationRow = FormationRow.FRONT
     poisoned: bool = False
     paralyzed: bool = False
+    silenced: int = 0
     sleeping: int = 0
     confused: int = 0
     stunned: bool = False
@@ -822,7 +823,7 @@ class Member:
         for name in ("poisoned", "paralyzed", "stunned"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a boolean")
-        for name in ("sleeping", "confused"):
+        for name in ("sleeping", "confused", "silenced"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")
@@ -1197,6 +1198,7 @@ class Member:
         self.paralyzed = False
         self.sleeping = 0
         self.confused = 0
+        self.silenced = 0
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
@@ -1217,6 +1219,7 @@ class Member:
             self.paralyzed = False
             self.sleeping = 0
             self.confused = 0
+            self.silenced = 0
             self.stunned = False
         return self.hp - old_hp
 
@@ -1312,6 +1315,24 @@ class Member:
         self.confused -= 1
         return True
 
+    def apply_silence(self, turns: int) -> bool:
+        """Keep the longer DA2 silence duration; damage does not remove it."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("silence turns must be an integer")
+        if turns <= 0:
+            raise ValueError("silence turns must be positive")
+        if not self.is_alive:
+            return False
+        previous = self.silenced
+        self.silenced = max(previous, turns)
+        return self.silenced != previous
+
+    def elapse_silence_turn(self) -> bool:
+        active = self.silenced > 0
+        self.silenced = max(0, self.silenced - 1)
+        return active
+
     def elapse_sleep_turn(self) -> bool:
         """Consume one sleeping action and report whether it was skipped."""
 
@@ -1398,6 +1419,7 @@ class Member:
 
         self.sleeping = 0
         self.confused = 0
+        self.silenced = 0
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
@@ -1412,6 +1434,7 @@ class Member:
         self.paralyzed = False
         self.sleeping = 0
         self.confused = 0
+        self.silenced = 0
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
@@ -1425,6 +1448,7 @@ class Member:
         self.paralyzed = False
         self.sleeping = 0
         self.confused = 0
+        self.silenced = 0
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
 if __package__ == "":
     from monster import MonsterDefinition, MonsterSpecialAction
+    from spell import Spell, SpellAction
 else:
     from .monster import MonsterDefinition, MonsterSpecialAction
+    from .spell import Spell, SpellAction
 
 
 class MonsterAction(StrEnum):
@@ -35,6 +37,55 @@ class MonsterSpellAction:
 
 
 MonsterActionChoice = MonsterAction | MonsterSpellAction
+
+
+@dataclass(frozen=True)
+class MonsterSpellTarget:
+    index: int
+    front: bool
+    actionable: bool
+    can_cast: bool
+    silenced: int
+    speed: int
+    protection: int
+
+
+def monster_spell_candidate_targets(
+    spell: Spell, targets: Sequence[MonsterSpellTarget], *,
+    intelligence: int, silenced: bool, mp: int,
+    choose: Callable[[tuple[int, ...]], int] = random.choice,
+) -> tuple[int, ...]:
+    """DA2 Int=1 eligibility, retaining its random-before-check BREAK target."""
+
+    indexes = tuple(target.index for target in targets)
+    if not indexes or intelligence <= 0:
+        return indexes
+    if silenced or mp < spell.mp:
+        return ()
+    if not spell.to_enemy:
+        return indexes
+    if spell.action is SpellAction.BREAK:
+        selected = choose(indexes)
+        target = next(target for target in targets if target.index == selected)
+        return (selected,) if target.front and target.protection >= 0 else ()
+    if spell.action is SpellAction.SLOW and not spell.to_all:
+        selected = choose(indexes)
+        target = next(target for target in targets if target.index == selected)
+        return (selected,) if target.speed >= 0 else ()
+    if spell.to_all:
+        if spell.action is SpellAction.SLEEP:
+            effective = any(target.actionable for target in targets)
+        elif spell.action is SpellAction.SILENCE:
+            effective = any(target.can_cast and not target.silenced for target in targets)
+        elif spell.action is SpellAction.SLOW:
+            effective = any(target.speed >= 0 for target in targets)
+        elif spell.action is SpellAction.PURGE:
+            effective = any(target.protection > 0 or target.speed > 0 for target in targets)
+        else:
+            effective = True
+        if not effective:
+            return ()
+    return indexes
 
 
 def reinforcement_target(
@@ -172,6 +223,8 @@ __all__ = [
     "MonsterAction",
     "MonsterActionChoice",
     "MonsterSpellAction",
+    "MonsterSpellTarget",
+    "monster_spell_candidate_targets",
     "reinforcement_arrives",
     "reinforcement_target",
     "monster_action_candidates",

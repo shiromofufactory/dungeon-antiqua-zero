@@ -104,6 +104,14 @@
     "spell_confusion": {
       "channel": 1,
       "sound": 35
+    },
+    "spell_freeze1": {
+      "channel": 1,
+      "sound": 36
+    },
+    "spell_silence": {
+      "channel": 1,
+      "sound": 21
     }
   }
 }

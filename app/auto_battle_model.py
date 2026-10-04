@@ -94,6 +94,7 @@ class AutoCombatant:
     front: bool = True
     alive: bool = True
     agility: int = 1
+    intelligence: int = 0
     magic: int = 0
     internal_level: int = 1
     defense: int = 0
@@ -230,6 +231,7 @@ class AutoCombatant:
             resistances=member.resistances,
             poisoned=member.poisoned,
             sleeping=member.sleeping,
+            silenced=member.silenced,
             paralyzed=member.paralyzed,
             confused=member.confused,
             stunned=member.stunned,

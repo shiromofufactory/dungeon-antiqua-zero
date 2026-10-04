@@ -988,6 +988,59 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(target.hp, max(0, hp - expected.damage))
                 self.assertLess(target.hp, hp)
 
+    def test_int_one_silenced_or_mp_empty_monster_does_not_choose_spell(self):
+        spell = self.spells["FIRE1"]
+        for intelligence in (0, 1):
+            for condition in ("silenced", "mp"):
+                with self.subTest(intelligence=intelligence, condition=condition):
+                    enemy = self.enemy(front=False, spells=(spell,), intelligence=intelligence,
+                                       magic=10, max_mp=10,
+                                       mp=0 if condition == "mp" else 10,
+                                       silenced=4 if condition == "silenced" else 0)
+                    forecast = BattleForecast(self.snapshot(self.specs[0], enemy), 0)
+                    forecast.roll = Mock(return_value=0.0)
+                    actor = forecast.actors[5]
+                    hp = forecast.actors[0].hp
+                    forecast.enemy_turn(actor)
+                    self.assertEqual(forecast.actors[0].hp, hp)
+                    self.assertEqual(actor.mp, enemy.mp)
+
+    def test_enemy_silence_and_ally_spell_blocking_are_forecast(self):
+        spell = self.spells["SILENCE"]
+        enemy = self.enemy(front=False, spells=(spell,), intelligence=1,
+                           magic=17, max_mp=10, mp=10)
+        ally = replace(self.specs[1], number=0, spells=(self.spells["FIRE1"],))
+        forecast = BattleForecast(self.snapshot(ally, enemy), 0)
+        forecast.roll = Mock(return_value=0.0)
+        forecast.enemy_turn(forecast.actors[5])
+        target = forecast.actors[0]
+        self.assertEqual(target.silenced, 4)
+        self.assertEqual(forecast.actors[5].mp, 10 - spell.mp)
+        mp = target.mp
+        enemy_hp = forecast.actors[5].hp
+        forecast.execute(0, AutoAction(BattleCommand.SPELL, (5,), "FIRE1"))
+        self.assertEqual(target.mp, mp)
+        self.assertEqual(forecast.actors[5].hp, enemy_hp)
+        self.assertEqual(target.silenced, 3)
+
+    def test_int_one_break_and_single_slow_skip_invalid_preselected_target(self):
+        for key, changes in (
+            ("ARMOR BREAK", {"front": False}),
+            ("ARMOR BREAK", {"protection": -1}),
+            ("SLOW", {"speed": -1}),
+        ):
+            with self.subTest(spell=key, changes=changes):
+                spell = self.spells[key]
+                ally = replace(self.specs[0], **changes)
+                enemy = self.enemy(front=False, spells=(spell,), intelligence=1,
+                                   magic=17, max_mp=10, mp=10)
+                forecast = BattleForecast(self.snapshot(ally, enemy), 0)
+                forecast.roll = Mock(return_value=0.0)
+                forecast.enemy_turn(forecast.actors[5])
+                self.assertEqual(forecast.actors[5].mp, 10)
+                self.assertEqual(forecast.actors[0].protection, ally.protection)
+                self.assertEqual(forecast.actors[0].speed, ally.speed)
+
     def test_observations_accumulate_presented_amounts_including_overkill(self):
         observations = AutoBattleObservations()
         observations.damage(0, 40)
@@ -1101,6 +1154,45 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
 
 
 class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
+    def test_target_cursors_hidden_during_auto_and_restored_for_manual(self):
+        from scenes.battle import BattlePhase, BattleScene
+
+        cases = (
+            (BattlePhase.TARGET, BattleCommand.ATTACK, False, True, "enemy"),
+            (BattlePhase.TARGET, BattleCommand.IAI, True, True, "all"),
+            (BattlePhase.COVER_TARGET, BattleCommand.COVER, False, False, "party"),
+            (BattlePhase.ACTION_TARGET, BattleCommand.SPELL, False, True, "enemy"),
+            (BattlePhase.ACTION_TARGET, BattleCommand.SPELL, False, False, "party"),
+            (BattlePhase.ACTION_TARGET, BattleCommand.SPELL, True, True, "all"),
+            (BattlePhase.ACTION_TARGET, BattleCommand.SPELL, True, False, "all"),
+        )
+        for phase, command, all_targets, enemy_targets, visible in cases:
+            with self.subTest(phase=phase, command=command, visible=visible,
+                              all_targets=all_targets, enemy_targets=enemy_targets):
+                scene = BattleScene.__new__(BattleScene)
+                scene.phase = phase
+                scene.selected_command = command
+                scene.action_targets_all = all_targets
+                scene.action_targets_enemy = enemy_targets
+                cursors = {key: Mock() for key in ("enemy", "party", "all")}
+                scene.target_cursor = cursors["enemy"]
+                scene.party_target_cursor = cursors["party"]
+                scene.all_target_cursors = (cursors["all"],)
+
+                with patch("scenes.battle.pyxel") as px:
+                    px.frame_count = 0
+                    scene.auto_battle_active = True
+                    scene._draw_target_cursor()
+                    for cursor in cursors.values():
+                        cursor.draw.assert_not_called()
+
+                    scene.auto_battle_active = False
+                    scene._draw_target_cursor()
+                    cursors[visible].draw.assert_called_once()
+                    for key, cursor in cursors.items():
+                        if key != visible:
+                            cursor.draw.assert_not_called()
+
     def test_snapshot_masks_actual_hp_and_unrevealed_affinities(self):
         from resources import load_record_array
         from scenes.battle import BattleMonster, BattleScene

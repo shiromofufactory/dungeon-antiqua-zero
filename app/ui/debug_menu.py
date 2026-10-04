@@ -42,6 +42,7 @@ from ui.teleport_menu import (
 DEBUG_WINDOW_GRID = (2, 2, 60, 56)
 DEBUG_ROW_HEIGHT = 3
 MAIN_ITEM_KEYS = (
+    "encounter",
     "party_level",
     "gold",
     "members",
@@ -49,7 +50,6 @@ MAIN_ITEM_KEYS = (
     "items",
     "teleport",
     "shop",
-    "encounter",
 )
 MAIN_FIRST_Y = 9
 MAIN_ROWS = tuple(
@@ -360,7 +360,7 @@ class DebugMenuOverlay:
             y,
         )
 
-    def _build_main_window(self, selected_key: str = "party_level") -> None:
+    def _build_main_window(self, selected_key: str = "encounter") -> None:
         values = {
             "party_level": format_number(self.editor.baseline_level),
             "gold": format_number(self.save_data.gold),

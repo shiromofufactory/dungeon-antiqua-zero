@@ -83,6 +83,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         return InputState(cancel=InputButton(triggered=True, held=True))
 
     def test_enters_level_on_da2_style_keypad_and_rebuilds_party(self) -> None:
+        self.screen.main_cursor.select_key("party_level")
         self.screen.update(self.confirm())
         self.assertIs(self.screen.phase, DebugMenuPhase.NUMBER)
 
@@ -142,7 +143,8 @@ class DebugMenuOverlayTest(unittest.TestCase):
         target_y = [target.y for target in self.screen.main_cursor.targets]
 
         self.assertEqual(len(target_y), 8)
-        self.assertEqual(self.screen.main_cursor.targets[-1].key, "encounter")
+        self.assertEqual(self.screen.main_cursor.targets[0].key, "encounter")
+        self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
         self.assertTrue(
             all(
                 next_y - current_y == 3
@@ -154,6 +156,9 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.screen.main_cursor.select_key("encounter")
         self.screen.update(self.confirm())
         menu = self.screen.encounter_menu
+        self.assertEqual(menu.cursor.targets[0].key, "start")
+        self.assertEqual(menu.cursor.selected_key, "start")
+        menu.cursor.select_key("monster_level")
         self.assertEqual(menu.state.settings.monster_level, 1)
         menu.update(InputState(navigation=Direction.LEFT))
         self.assertEqual(menu.state.settings.monster_level, "dynamic")

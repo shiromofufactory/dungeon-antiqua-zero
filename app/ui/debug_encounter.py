@@ -46,11 +46,14 @@ class DebugEncounterOverlay:
         self.alert = alert
         self._build_window()
 
-    def _build_window(self, selected_key: str = "monster_level") -> None:
-        placements = [self.texts.create(DEBUG_TEXT.encounter_settings, 4, 3)]
-        targets = []
+    def _build_window(self, selected_key: str = "start") -> None:
+        placements = [
+            self.texts.create(DEBUG_TEXT.encounter_settings, 4, 3),
+            self.texts.create(DEBUG_TEXT.encounter_start, 6, 9),
+        ]
+        targets = [CursorTarget(4, 9, key="start")]
         for index, key in enumerate(ENCOUNTER_OPTIONS):
-            y = 9 + index * 3
+            y = 12 + index * 3
             value = getattr(self.state.settings, key)
             if isinstance(value, bool):
                 display = DEBUG_TEXT.condition_on if value else DEBUG_TEXT.condition_off
@@ -66,11 +69,9 @@ class DebugEncounterOverlay:
             ))
             targets.append(CursorTarget(4, y, key=key))
         placements.extend((
-            self.texts.create(DEBUG_TEXT.encounter_start, 6, 33),
             self.texts.create(DEBUG_TEXT.encounter_change_guide, 4, 45),
             self.guide,
         ))
-        targets.append(CursorTarget(4, 33, key="start"))
         self.window = self.windows.create(2, 2, 60, 56, tuple(placements), opened=True)
         self.cursor = self.window.set_cursor(tuple(targets))
         self.cursor.select_key(selected_key)

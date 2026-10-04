@@ -49,7 +49,7 @@ if __package__:
     from .item import AdditionalEffect, ItemEquipType, ItemSpecial
     from .member import EquipmentSlot
     from .monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
-    from .monster_ai import MonsterAction, MonsterSpellAction, monster_action_candidates
+    from .monster_ai import MonsterAction, MonsterSpellAction, MonsterSpellTarget, monster_spell_candidate_targets, monster_action_candidates
     from .resistance import ResistanceType
     from .spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 else:
@@ -96,7 +96,7 @@ else:
     from item import AdditionalEffect, ItemEquipType, ItemSpecial
     from member import EquipmentSlot
     from monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
-    from monster_ai import MonsterAction, MonsterSpellAction, monster_action_candidates
+    from monster_ai import MonsterAction, MonsterSpellAction, MonsterSpellTarget, monster_spell_candidate_targets, monster_action_candidates
     from resistance import ResistanceType
     from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 
@@ -119,7 +119,7 @@ ALLY_SPELL_ACTIONS = frozenset(
     )
 )
 ENEMY_SPELL_ACTIONS = frozenset(
-    (SpellAction.SLEEP, SpellAction.CONFUSE, SpellAction.SLOW, SpellAction.BREAK)
+    (SpellAction.SLEEP, SpellAction.CONFUSE, SpellAction.SLOW, SpellAction.BREAK, SpellAction.SILENCE)
 )
 RECOVERY_ACTIONS = frozenset(
     (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE, SpellAction.MANA)
@@ -919,7 +919,6 @@ class BattleForecast:
             target.paralyzed = True
         elif (
             effect is AdditionalEffect.SILENCE
-            and target.spec.enemy
             and target.spec.spells
         ):
             target.silenced = max(
@@ -1082,6 +1081,9 @@ class BattleForecast:
         actor = self.actors[number]
         delay = self.delay(actor, action)
         cost = self.cost(actor, action)
+        if action.command is BattleCommand.SPELL and actor.silenced:
+            self.advance(actor, 0)
+            return 0.0, actor.agility
         if action.command is BattleCommand.SPELL:
             actor.mp -= self.spells[action.spell_key].mp
         if action.command in (
@@ -1150,9 +1152,30 @@ class BattleForecast:
                 else 0
             )
             escape = physical > actor.spec.attack * (1 + self.roll(actor, 0, 14))
-        spell_keys = tuple(
-            s.key for s in actor.spec.spells if self.spell_targets(actor, s)
-        )
+        spell_targets = {}
+        for spell in actor.spec.spells:
+            indexes = self.spell_targets(actor, spell)
+            if spell.to_enemy:
+                states = tuple(
+                    MonsterSpellTarget(
+                        n, self.actors[n].front,
+                        not (self.actors[n].sleeping or self.actors[n].paralyzed
+                             or self.actors[n].confused),
+                        bool(self.actors[n].spec.spells), self.actors[n].silenced,
+                        self.actors[n].speed, self.actors[n].protection,
+                    )
+                    for n in indexes
+                )
+                indexes = monster_spell_candidate_targets(
+                    spell, states, intelligence=actor.spec.intelligence,
+                    silenced=bool(actor.silenced), mp=actor.mp,
+                    choose=lambda values: values[int(self.roll(actor, 0, 15) * len(values))],
+                )
+            elif actor.spec.intelligence > 0 and (actor.silenced or actor.mp < spell.mp):
+                indexes = ()
+            if indexes:
+                spell_targets[spell.key] = indexes
+        spell_keys = tuple(spell_targets)
         candidates = monster_action_candidates(
             special_actions=actor.spec.special_actions,
             is_front_row=actor.front,
@@ -1176,8 +1199,8 @@ class BattleForecast:
             spell = self.spells[action.spell_key]
             if not silenced and actor.mp >= spell.mp:
                 actor.mp -= spell.mp
-                targets = self.spell_targets(actor, spell)
-                if not spell.to_all:
+                targets = spell_targets[spell.key]
+                if not spell.to_all and len(targets) > 1:
                     targets = (targets[int(self.roll(actor, 0, 1) * len(targets))],)
                 if spell.to_enemy and spell.action is SpellAction.DAMAGE:
                     for n in targets:
@@ -1216,6 +1239,8 @@ class BattleForecast:
                                     target,
                                     AdditionalEffect.CONFUSE,
                                 )
+                            elif spell.action is SpellAction.SILENCE:
+                                self.apply_extra(actor, target, AdditionalEffect.SILENCE)
                             elif spell.action is SpellAction.SLOW:
                                 target.speed = 0 if target.speed > 0 else -1
                             else:
@@ -1457,6 +1482,8 @@ class BattleForecast:
                 a.hidden = False
 
     def advance(self, actor, delay):
+        if not actor.spec.enemy:
+            actor.silenced = max(0, actor.silenced - 1)
         key = (
             self.order,
             actor.agility,

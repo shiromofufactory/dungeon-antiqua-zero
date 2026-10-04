@@ -57,6 +57,8 @@ from monster_ai import (
     MonsterAction,
     MonsterActionChoice,
     MonsterSpellAction,
+    MonsterSpellTarget,
+    monster_spell_candidate_targets,
     reinforcement_arrives,
     reinforcement_target,
     select_monster_action,
@@ -439,6 +441,7 @@ STUN_ICON_SIZE = 8
 STUN_MONSTER_OFFSET_X = 32
 PARTY_CONDITION_ICON_OFFSET_X = 12
 PARTY_CONDITION_ICON_FIELDS = (
+    "silenced",
     "poisoned",
     "sleeping",
     "confused",
@@ -919,6 +922,11 @@ class BattlePartySleepResult:
 
 
 @dataclass(frozen=True)
+class BattlePartySilenceResult(BattlePartySleepResult):
+    """Resolved monster SILENCE result waiting for application to a member."""
+
+
+@dataclass(frozen=True)
 class BattlePartyConfuseResult:
     """Resolved monster CONFUSE result waiting for application to a member."""
 
@@ -1024,6 +1032,7 @@ class BattleActionPresentation:
     revive_results: tuple[BattleReviveResult, ...] = ()
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_damage_results: tuple[BattleSpellDamageResult, ...] = ()
+    party_silence_results: tuple[BattlePartySilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_confuse_results: tuple[BattlePartyConfuseResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
@@ -3138,6 +3147,7 @@ class BattleScene:
                     front=monster.is_front_row,
                     agility=monster.agility,
                     magic=monster.magic,
+                    intelligence=monster.intelligence,
                     defense=monster.combat_stats.defense,
                     evasion=monster.combat_stats.evasion,
                     spell_defense=monster.combat_stats.spell_resistance,
@@ -4751,6 +4761,13 @@ class BattleScene:
             if self.active_party_index is None:
                 return False
             member = self.party[self.active_party_index]
+            if member.silenced:
+                self.action_presentation = BattleActionPresentation(
+                    (), post_effect_wait_frame_count=MONSTER_SPELL_FAILURE_FRAME_COUNT,
+                )
+                self.phase = BattlePhase.ACTION_PRESENTATION
+                self._show_monster_spell_sealed_message(actor_is_enemy=False)
+                return True
             if member.mp < spell.mp:
                 return False
             gauge_adjustment = self._spell_gauge_adjustment(spell)
@@ -5761,6 +5778,14 @@ class BattleScene:
                 BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage)
             )
 
+        for result in presentation.party_silence_results:
+            if result.success:
+                self.party[result.target_index].apply_silence(result.turns)
+            else:
+                damage_popups.append(
+                    BattleSpellDamagePopup(result.popup_x, result.popup_y, 0, is_miss=True)
+                )
+
         for result in presentation.party_sleep_results:
             member = self.party[result.target_index]
             if result.success:
@@ -5935,7 +5960,7 @@ class BattleScene:
             align_left=True,
         )
 
-    def _show_monster_spell_sealed_message(self) -> None:
+    def _show_monster_spell_sealed_message(self, *, actor_is_enemy: bool = True) -> None:
         """Show DA2's sealed-spell result on the enemy side."""
 
         if (
@@ -5946,7 +5971,7 @@ class BattleScene:
         self._show_battle_popup(
             self.texts.text("battle.monster.spell_sealed", self.localizer),
             MONSTER_SPELL_FAILURE_FRAME_COUNT,
-            align_left=True,
+            align_left=actor_is_enemy,
         )
 
     def _show_battle_popup(
@@ -7580,6 +7605,8 @@ class BattleScene:
 
     def _start_timeline_animation(self) -> None:
         actor = self._timeline_order.entries[0].actor
+        if isinstance(actor, BattleCharacter) and isinstance(actor.member, Member):
+            actor.member.elapse_silence_turn()
         self.timeline_advance = complete_timeline_action(
             self._timeline_order,
             current_agility=self._actor_agility(actor),
@@ -8365,7 +8392,7 @@ class BattleScene:
             return True
         if self._monster_attack_target_indexes(actor):
             return True
-        if self._targetable_monster_spell_keys(actor):
+        if any(self._monster_spell_target_indexes(self.spells[key]) for key in actor.spell_keys):
             return True
         if MonsterSpecialAction.CHARGE in actor.special_actions:
             return bool(self._monster_charge_target_indexes())
@@ -8412,6 +8439,7 @@ class BattleScene:
             active_party,
             self.monsters,
             context=BattleCommandContext(
+                silenced=bool(getattr(self.party[self.active_party_index], "silenced", 0)),
                 item_available=bool(self._active_member_item_candidates()),
                 actor_hidden=(
                     self.active_party_index
@@ -8962,10 +8990,42 @@ class BattleScene:
     ) -> tuple[str, ...]:
         """Return learned spells that currently have a living target side."""
 
-        return tuple(
-            key
-            for key in actor.spell_keys
-            if self._monster_spell_target_indexes(self.spells[key])
+        self._monster_spell_candidate_targets = {}
+        for key in actor.spell_keys:
+            targets = self._eligible_monster_spell_targets(actor, self.spells[key])
+            if targets:
+                self._monster_spell_candidate_targets[key] = targets
+        return tuple(self._monster_spell_candidate_targets)
+
+    def _member_can_cast_spells(self, member: Member) -> bool:
+        return any(
+            spell.type is not SpellType.ITEM and spell.on_battle and spell.is_learned_by(member)
+            for spell in self.spells.values()
+        )
+
+    def _eligible_monster_spell_targets(self, actor: BattleMonster, spell: Spell) -> tuple[int, ...]:
+        indexes = self._monster_spell_target_indexes(spell)
+        if actor.intelligence <= 0:
+            return indexes
+        if not spell.to_enemy:
+            return () if actor.state.silenced or actor.state.mp < spell.mp else indexes
+        targets = tuple(
+            MonsterSpellTarget(
+                index=index,
+                front=self.party[index].formation_row is FormationRow.FRONT,
+                actionable=not (self.party[index].sleeping or self.party[index].paralyzed
+                                or self.party[index].confused),
+                can_cast=self._member_can_cast_spells(self.party[index]),
+                silenced=self.party[index].silenced,
+                speed=self.party[index].speed_modifier,
+                protection=self.party[index].protection_level,
+            )
+            for index in indexes
+        )
+        return monster_spell_candidate_targets(
+            spell, targets, intelligence=actor.intelligence,
+            silenced=bool(actor.state.silenced), mp=actor.state.mp,
+            choose=random.choice,
         )
 
     def _monster_spell_target_indexes(self, spell: Spell) -> tuple[int, ...]:
@@ -9015,11 +9075,15 @@ class BattleScene:
         if observations is not None:
             observations.spend_mp(self._monster_index(actor), spell.mp)
 
-        indexes = candidates if spell.to_all else (random.choice(candidates),)
+        planned = getattr(self, "_monster_spell_candidate_targets", {}).pop(spell.key, None)
+        if actor.intelligence > 0 and planned is not None:
+            candidates = planned
+        indexes = candidates if spell.to_all or len(candidates) == 1 else (random.choice(candidates),)
         target_side = "ally" if spell.to_enemy else "enemy"
         party_damage_results = self._resolve_monster_spell_damage_results(
             actor, spell, indexes,
         )
+        party_silence_results = self._resolve_monster_silence_results(actor, spell, indexes)
         party_sleep_results = self._resolve_monster_sleep_results(
             actor,
             spell,
@@ -9041,7 +9105,8 @@ class BattleScene:
             indexes,
         )
         status_results = (
-            party_sleep_results
+            party_silence_results
+            or party_sleep_results
             or party_confuse_results
             or party_slow_results
             or party_break_results
@@ -9075,6 +9140,7 @@ class BattleScene:
         self.action_presentation = BattleActionPresentation(
             tuple(effects),
             party_damage_results=party_damage_results,
+            party_silence_results=party_silence_results,
             party_sleep_results=party_sleep_results,
             party_confuse_results=party_confuse_results,
             party_slow_results=party_slow_results,
@@ -9144,6 +9210,31 @@ class BattleScene:
                     affinity_y=y - 8,
                 )
             )
+        return tuple(results)
+
+    def _resolve_monster_silence_results(self, actor, spell, indexes):
+        if spell.action is not SpellAction.SILENCE or not spell.to_enemy:
+            return ()
+        results = []
+        for index in indexes:
+            member = self.party[index]
+            success = False
+            if self._member_can_cast_spells(member):
+                success = resolve_status_spell(
+                    spell_modifier=actor.magic, rate=spell.rate,
+                    target_spell_defense=member.battle_stats.spell_resistance,
+                    attribute=spell.attribute, target_weaknesses=frozenset(),
+                    target_resistances=member.resistances,
+                    success_roll=random.randint(0, 19),
+                ).success
+            position = self._party_draw_position(index)
+            if position is not None:
+                x, y = position
+                results.append(BattlePartySilenceResult(
+                    index, success,
+                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS) if success else 0,
+                    x + 6, y + 16,
+                ))
         return tuple(results)
 
     def _resolve_monster_sleep_results(
@@ -11466,6 +11557,14 @@ class BattleScene:
     def _draw_silence_icons(self) -> None:
         """Draw DA2's silence marker beside silenced monsters."""
 
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if not getattr(visual.member, "silenced", 0):
+                continue
+            position = self._party_condition_icon_position(index, "silenced")
+            if position is not None:
+                x, y = position
+                pyxel.blt(x, y, 0, SILENCE_ICON_SOURCE_X, SILENCE_ICON_SOURCE_Y,
+                          SILENCE_ICON_SIZE, SILENCE_ICON_SIZE, TRANSPARENT_INDEX)
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.silenced:
                 continue
@@ -11884,6 +11983,8 @@ class BattleScene:
         return target_x - initial_offset * remaining // duration, target_y
 
     def _draw_target_cursor(self) -> None:
+        if getattr(self, "auto_battle_active", False):
+            return
         if self.phase is BattlePhase.TARGET:
             if getattr(self, "selected_command", None) is BattleCommand.IAI:
                 if pyxel.frame_count % 2 == 0:
