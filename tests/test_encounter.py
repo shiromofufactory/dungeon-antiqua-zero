@@ -329,6 +329,54 @@ class EncounterSystemTest(unittest.TestCase):
 
         self.assertEqual(tuple(item.key for item, _weight in pool), ("Duplicate",))
 
+    def test_undead_or_goblin_group_excludes_human_and_mage_groups(self) -> None:
+        for selected_tribe in ("UNDEAD", "GOBLIN"):
+            with self.subTest(selected_tribe=selected_tribe):
+                random_source = ScriptedRandom(
+                    randrange_values=(0, 1, 0),
+                    randint_values=(1, 1, 1, 5),
+                )
+                system = EncounterSystem(
+                    random_source=random_source  # type: ignore[arg-type]
+                )
+
+                formation = system.generate_formation(
+                    (
+                        monster("Selected", tribe=selected_tribe),
+                        monster("Human", tribe="HUMAN"),
+                        monster("Mage", tribe="MAGE"),
+                        monster("Other"),
+                    ),
+                    encounter_settings(),
+                    monster_level=3,
+                )
+
+                self.assertEqual(formation.monster_keys, ("Selected", "Other"))
+
+    def test_human_or_mage_group_excludes_undead_and_goblin_groups(self) -> None:
+        for selected_tribe in ("HUMAN", "MAGE"):
+            with self.subTest(selected_tribe=selected_tribe):
+                random_source = ScriptedRandom(
+                    randrange_values=(0, 1, 0),
+                    randint_values=(1, 1, 1, 5),
+                )
+                system = EncounterSystem(
+                    random_source=random_source  # type: ignore[arg-type]
+                )
+
+                formation = system.generate_formation(
+                    (
+                        monster("Selected", tribe=selected_tribe),
+                        monster("Undead", tribe="UNDEAD"),
+                        monster("Goblin", tribe="GOBLIN"),
+                        monster("Other"),
+                    ),
+                    encounter_settings(),
+                    monster_level=3,
+                )
+
+                self.assertEqual(formation.monster_keys, ("Selected", "Other"))
+
     def test_species_switches_and_large_animal_off_follow_map_filters(self) -> None:
         system = EncounterSystem()
         settings = encounter_settings(

@@ -33,6 +33,9 @@
 - `allow_demons == false` では `DEMON`、`allow_humans == false` では `HUMAN` と `MAGE`、
   `allow_giants == false` では `GIANT` を候補から外す。`allow_large_animals == false` では
   `large_animal == 1` を候補から外し、`true` では通常候補と同じ条件で含める。
+- `UNDEAD` または `GOBLIN` のモンスターを編成へ加えた後は、以後の母集団から `HUMAN` と
+  `MAGE` を除く。逆に `HUMAN` または `MAGE` を編成へ加えた後は、以後の母集団から
+  `UNDEAD` と `GOBLIN` を除く。これらの組み合わせを同じ敵パーティへ混在させない。
 - 傾向が `yang` なら `weakness` に `炎` を含む候補、`yin` なら `冷` を含む候補を外す。
   `neutral` では両者を候補に残すが、炎または冷弱点を持つ各候補の抽選重みを通常候補の
   1/2とする。両方の弱点を持つ候補も重みは1/2とする。

@@ -24,6 +24,10 @@ ENCOUNTER_STEP_MAX = 4
 ENCOUNTER_THRESHOLD = 120
 LOW_DANGER_MAX_ENCOUNTER_MONSTERS = 4
 MAX_ENCOUNTER_MONSTERS = 5
+UNDEAD_GOBLIN_TRIBES = frozenset(
+    (MonsterTribe.UNDEAD, MonsterTribe.GOBLIN)
+)
+HUMAN_MAGE_TRIBES = frozenset((MonsterTribe.HUMAN, MonsterTribe.MAGE))
 
 
 class EncounterGenerationError(RuntimeError):
@@ -113,6 +117,7 @@ class EncounterSystem:
 
         keys: list[str] = []
         selected_keys: set[str] = set()
+        excluded_tribes: set[MonsterTribe] = set()
         current_level = monster_level
         maximum_monsters = (
             MAX_ENCOUNTER_MONSTERS
@@ -126,6 +131,7 @@ class EncounterSystem:
                     monsters,
                     settings,
                     current_level,
+                    excluded_tribes=frozenset(excluded_tribes),
                 )
                 if monster.key not in selected_keys
             )
@@ -146,6 +152,10 @@ class EncounterSystem:
 
             keys.extend((selected.key,) * occurrence)
             selected_keys.add(selected.key)
+            if selected.tribe in UNDEAD_GOBLIN_TRIBES:
+                excluded_tribes.update(HUMAN_MAGE_TRIBES)
+            elif selected.tribe in HUMAN_MAGE_TRIBES:
+                excluded_tribes.update(UNDEAD_GOBLIN_TRIBES)
 
             remaining = maximum_monsters - len(keys)
             if remaining < self._random.randint(1, maximum_monsters):
@@ -160,6 +170,8 @@ class EncounterSystem:
         monsters: tuple[MonsterDefinition, ...],
         settings: MapRandomEncounter,
         monster_level: int,
+        *,
+        excluded_tribes: frozenset[MonsterTribe] = frozenset(),
     ) -> tuple[tuple[MonsterDefinition, int], ...]:
         pool: list[tuple[MonsterDefinition, int]] = []
         included_keys: set[str] = set()
@@ -173,6 +185,8 @@ class EncounterSystem:
             if not (level_matches or early_matches):
                 continue
             if monster.key in included_keys:
+                continue
+            if monster.tribe in excluded_tribes:
                 continue
             if not settings.allow_demons and monster.tribe is MonsterTribe.DEMON:
                 continue
