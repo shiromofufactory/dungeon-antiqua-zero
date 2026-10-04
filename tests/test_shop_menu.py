@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
@@ -60,6 +61,7 @@ from ui.shop import (
     ShopPhase,
 )
 from input import Direction, InputButton, InputState
+from member import EquipmentSlot
 from resources import FontResources
 from state import SaveData, Settings
 from systems import MAX_GOLD, InventorySystem, ShopSystem
@@ -490,11 +492,61 @@ class ShopMenuTest(unittest.TestCase):
         ):
             self.screen.party_panel.draw(self.items["DAGGER"])
 
-        draw_text.assert_called_once()
-        self.assertEqual(draw_text.call_args.args[2], "Ｅ")
+        equipped_calls = [call for call in draw_text.call_args_list if call.args[2] == "Ｅ"]
+        self.assertEqual(len(equipped_calls), 1)
         self.assertIs(
-            draw_text.call_args.args[4],
+            equipped_calls[0].args[4],
             self.screen.party_panel.japanese_font,
+        )
+
+    def test_npc_fixed_slots_suppress_all_equipment_comparisons(self) -> None:
+        npc = self.party[2]
+        for slot, item_key, stat in (
+            (EquipmentSlot.RIGHT, "DAGGER", "attack"),
+            (EquipmentSlot.BODY, "LEATHER ARMOR", "defense"),
+        ):
+            current = npc.equipment.item_at(slot)
+            self.assertIsNotNone(current)
+            for difference in (-1, 0, 1):
+                with self.subTest(slot=slot, difference=difference):
+                    item = replace(
+                        self.items[item_key],
+                        **{stat: getattr(current, stat) + difference},
+                    )
+                    self.assertIs(
+                        ShopPartyPanel.marker_for(npc, item),
+                        ShopEquipmentMarker.FIXED,
+                    )
+            self.assertIs(
+                ShopPartyPanel.marker_for(npc, current),
+                ShopEquipmentMarker.EQUIPPED,
+            )
+
+    def test_npc_empty_and_added_equipment_slots_allow_comparison(self) -> None:
+        npc = self.party[2]
+        cap = self.items["LEATHER CAP"]
+        self.assertIs(
+            ShopPartyPanel.marker_for(npc, cap), ShopEquipmentMarker.UP
+        )
+        npc.equipment = npc.equipment.replaced({EquipmentSlot.HEAD: cap})
+        self.assertIs(
+            ShopPartyPanel.marker_for(npc, replace(cap, key="TEST CAP", defense=0)),
+            ShopEquipmentMarker.DOWN,
+        )
+        self.assertIsNone(ShopPartyPanel.marker_for(npc, self.items["POTION"]))
+
+    def test_fixed_marker_draws_japanese_dash_without_arrow(self) -> None:
+        with (
+            patch("ui.shop_party.pyxel.blt") as draw_image,
+            patch("ui.shop_party.pyxel.text") as draw_text,
+        ):
+            self.screen.party_panel._draw_marker(ShopEquipmentMarker.FIXED, 7)
+
+        draw_image.assert_not_called()
+        draw_text.assert_called_once()
+        self.assertEqual(draw_text.call_args.args[2], "ー")
+        self.assertIs(
+            draw_text.call_args.args[4], self.screen.party_panel.japanese_font
         )
 
     def test_item_counts_are_right_aligned_without_moving_one_digit_count(

@@ -13,7 +13,6 @@ from resources import FontResources, TRANSPARENT_INDEX
 from state import Language
 from ui import DEFAULT_TEXT_COLOR, Window, WindowFactory
 
-
 SHOP_PARTY_WINDOW_GRID = (0, 47, 64, 13)
 SHOP_PARTY_MEMBER_COUNT = 6
 SHOP_PARTY_FACE_SIZE = 32
@@ -32,6 +31,7 @@ SHOP_PARTY_ICON_COLKEY = 1
 
 class ShopEquipmentMarker(StrEnum):
     EQUIPPED = "equipped"
+    FIXED = "fixed"
     UP = "up"
     DOWN = "down"
 
@@ -64,13 +64,9 @@ class ShopPartyPanel:
         if item is None or not item.is_equipment:
             return None
         if any(
-            equipped.key == item.key
-            for equipped in member.equipment.equipped_items()
+            equipped.key == item.key for equipped in member.equipment.equipped_items()
         ):
             return ShopEquipmentMarker.EQUIPPED
-        if not member.can_equip(item):
-            return None
-
         slot = {
             ItemEquipType.RIGHT: EquipmentSlot.RIGHT,
             ItemEquipType.TWO_HANDS: EquipmentSlot.RIGHT,
@@ -79,6 +75,10 @@ class ShopPartyPanel:
             ItemEquipType.BODY: EquipmentSlot.BODY,
             ItemEquipType.ARM: EquipmentSlot.ARM,
         }[item.equip_type]
+        if member.is_equipment_fixed(slot):
+            return ShopEquipmentMarker.FIXED
+        if not member.can_equip(item):
+            return None
         equipped = member.equipment.item_at(slot)
         if item.equip_type in (ItemEquipType.RIGHT, ItemEquipType.TWO_HANDS):
             current_value = 0 if equipped is None else equipped.attack
@@ -129,11 +129,11 @@ class ShopPartyPanel:
         marker: ShopEquipmentMarker | None,
         face_x: int,
     ) -> None:
-        if marker is ShopEquipmentMarker.EQUIPPED:
+        if marker in (ShopEquipmentMarker.EQUIPPED, ShopEquipmentMarker.FIXED):
             pyxel.text(
                 face_x + SHOP_PARTY_E_RIGHT_OFFSET,
                 SHOP_PARTY_ICON_Y - 3,
-                "Ｅ",
+                "Ｅ" if marker is ShopEquipmentMarker.EQUIPPED else "－",
                 DEFAULT_TEXT_COLOR,
                 self.japanese_font,
             )

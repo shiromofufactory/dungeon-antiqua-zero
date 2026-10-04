@@ -112,6 +112,10 @@
     "spell_silence": {
       "channel": 1,
       "sound": 21
+    },
+    "spell_haste": {
+      "channel": 1,
+      "sound": 37
     }
   }
 }

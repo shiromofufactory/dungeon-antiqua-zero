@@ -11470,7 +11470,7 @@ class BattleScene:
             )
 
     def _draw_speed_modifier_icons(self) -> None:
-        """Draw DA2's animated defense-down, HASTE, and SLOW markers."""
+        """Draw DA2's animated defense and speed modifier markers."""
 
         for index, visual in enumerate(getattr(self, "party_visuals", ())):
             member = visual.member
@@ -11524,13 +11524,18 @@ class BattleScene:
             )
         for index, monster in enumerate(getattr(self, "monsters", ())):
             modifier = monster.state.speed_modifier
-            defense_down = monster.state.defense_modifier < 0
-            if not monster.is_alive or (modifier == 0 and not defense_down):
+            defense_modifier = monster.state.defense_modifier
+            if not monster.is_alive or (modifier == 0 and defense_modifier == 0):
                 continue
             _base_x, y = self._monster_base_position(index)
-            if defense_down:
+            if defense_modifier:
+                defense_interval = (
+                    DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT
+                    if defense_modifier < 0
+                    else PROTECTION_ICON_PATTERN_FRAME_COUNTS[defense_modifier - 1]
+                )
                 defense_pattern = (
-                    pyxel.frame_count // DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT
+                    pyxel.frame_count // defense_interval
                 ) % PROTECTION_ICON_PATTERN_COUNT
                 pyxel.blt(
                     self._monster_draw_x(index) + monster.width - 24,
@@ -11538,7 +11543,9 @@ class BattleScene:
                     0,
                     PROTECTION_ICON_SOURCE_X
                     + defense_pattern * PROTECTION_ICON_SIZE,
-                    DEFENSE_DOWN_ICON_SOURCE_Y,
+                    DEFENSE_DOWN_ICON_SOURCE_Y
+                    if defense_modifier < 0
+                    else PROTECTION_ICON_SOURCE_Y,
                     PROTECTION_ICON_SIZE,
                     PROTECTION_ICON_SIZE,
                     TRANSPARENT_INDEX,
@@ -11559,7 +11566,7 @@ class BattleScene:
             pyxel.blt(
                 self._monster_draw_x(index)
                 + monster.width
-                - (16 if defense_down else 24),
+                - (16 if defense_modifier else 24),
                 y + monster.height,
                 0,
                 SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE,

@@ -6316,6 +6316,44 @@ class BattleScreenMockTest(unittest.TestCase):
             1,
         )
 
+    def test_monster_protection_and_speed_icons_share_da2_row(self) -> None:
+        for defense in (1, 2):
+            for speed in (-1, 0, 1, 2):
+                with self.subTest(defense=defense, speed=speed):
+                    monster = _damage_test_monster()
+                    monster.state.defense_modifier = defense
+                    monster.state.speed_modifier = speed
+                    mock = BattleScreenMock.__new__(BattleScreenMock)
+                    mock.monsters = (monster,)
+                    mock._monster_draw_x = Mock(return_value=4)
+                    frame = PROTECTION_ICON_PATTERN_FRAME_COUNTS[defense - 1]
+                    with (
+                        patch("tools.screen_mocks.battle.pyxel.frame_count", frame),
+                        patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                    ):
+                        mock._draw_speed_modifier_icons()
+                    x = 4 + monster.width - 24
+                    y = MONSTER_POSITIONS[0][1] + monster.height
+                    expected = [call(x, y, 0, 72, 128, 8, 8, 1)]
+                    if speed:
+                        interval = (
+                            SLOW_ICON_PATTERN_FRAME_COUNT
+                            if speed < 0
+                            else HASTE_ICON_PATTERN_FRAME_COUNTS[speed - 1]
+                        )
+                        expected.append(call(
+                            x + 8, y, 0,
+                            SPEED_ICON_SOURCE_X + (frame // interval % 4) * 8,
+                            SPEED_ICON_NEGATIVE_SOURCE_Y
+                            if speed < 0 else SPEED_ICON_POSITIVE_SOURCE_Y,
+                            8, 8, 1,
+                        ))
+                    self.assertEqual(blt.call_args_list, expected)
+                    monster.state.hp = 0
+                    with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+                        mock._draw_speed_modifier_icons()
+                    blt.assert_not_called()
+
     def test_slow_icon_uses_da2_bank_zero_animation_below_monster(self) -> None:
         self.assertEqual((SPEED_ICON_SOURCE_X, SPEED_ICON_NEGATIVE_SOURCE_Y), (96, 136))
         self.assertEqual(SPEED_ICON_TRANSPARENT_INDEX, 1)
