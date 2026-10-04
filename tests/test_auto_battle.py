@@ -913,6 +913,26 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         enemy.damage(1)
         self.assertEqual(enemy.sleeping, 0)
 
+    def test_enemy_turn_healing_matches_poison_net_change_and_caps_hp(self):
+        for healing, poisoned, weak, hp, expected in (
+            (1, False, False, 10, 18),
+            (1, False, False, 119, 120),
+            (1, True, False, 10, 10),
+            (1, True, True, 40, 33),
+            (-1, True, False, 10, 0),
+        ):
+            with self.subTest(healing=healing, poisoned=poisoned, weak=weak, hp=hp):
+                spec = self.enemy(
+                    hp=hp, healing=healing, poisoned=poisoned, sleeping=2,
+                    weaknesses=frozenset((ResistanceType.POISON,)) if weak else frozenset(),
+                )
+                forecast = BattleForecast(self.snapshot(self.specs[0], spec), 0)
+                enemy = forecast.actors[5]
+                forecast.prepare_turn(enemy)
+                self.assertEqual(enemy.hp, expected)
+                if expected:
+                    self.assertEqual(enemy.sleeping, 1)
+
     def test_confused_forecast_actors_attack_their_own_side(self):
         forecast = BattleForecast(
             self.snapshot(self.specs[0], self.specs[1], self.enemy(), self.enemy(6)),
@@ -1205,7 +1225,9 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             for r in load_record_array("monsters.json", APP_ROOT / "data")
             if r["name_en"] == "Giant Spider"
         )
-        scene.monsters = (BattleMonster.from_record(record, is_front_row=True),)
+        scene.monsters = (
+            BattleMonster.from_record({**record, "healing": 2}, is_front_row=True),
+        )
         scene.party = self.party[:1]
         scene.party_visuals = (Mock(member=scene.party[0]),)
         scene.active_party_index = 0
@@ -1247,6 +1269,7 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         self.assertFalse(enemy.resistances)
         self.assertFalse(enemy.weaknesses)
         self.assertEqual(enemy.net_damage, 33)
+        self.assertEqual(enemy.healing, 2)
         self.assertEqual(enemy.mp, max(0, scene.monsters[0].max_mp - 3))
         scene.save_data.monster_records["Giant Spider"] = {"profile"}
         self.assertIsNotNone(scene._auto_battle_snapshot().combatants[-1].max_hp)

@@ -10,6 +10,7 @@ from input import InputState
 from localization import Localizer
 from member import EquipmentSlot, Member, ProficiencyKind
 from resources import FontResources, TRANSPARENT_INDEX, play_se
+from rendering.victory_pose import VICTORY_MOTION_LIMIT, victory_sprite_source_x
 from spell import Spell
 from state import Language, Settings
 from text_catalog import TextCatalog
@@ -65,12 +66,17 @@ def result_window_grid(member_index: int) -> tuple[int, int, int, int]:
     )
 
 
-def member_battle_sprite_region(member: Member) -> tuple[int, int, int, int] | None:
+def member_battle_sprite_region(
+    member: Member, *, victory_frame: int | None = None,
+) -> tuple[int, int, int, int] | None:
     if member.definition.key in MISSING_RESULT_SPRITE_CHARACTER_KEYS:
         return None
     if member.is_dead:
         source_x = RESULT_DEAD_SPRITE_SOURCE_X
         width = RESULT_DEAD_SPRITE_WIDTH
+    elif victory_frame is not None:
+        source_x = victory_sprite_source_x(victory_frame)
+        width = RESULT_CHARACTER_SPRITE_WIDTH
     elif member.paralyzed or member.poisoned:
         source_x = RESULT_AILMENT_SPRITE_SOURCE_X
         width = RESULT_CHARACTER_SPRITE_WIDTH
@@ -127,6 +133,17 @@ class BattleResultOverlay:
         self.character_sprites = character_sprites
         self.frame = 0
         self.wait_frame = 0
+        self.victory_motion_frame = 0
+        self.celebrating_members = tuple(
+            new.internal_level > old.internal_level
+            or new.max_hp > old.max_hp
+            or new.max_mp > old.max_mp
+            or any(
+                new.proficiencies[kind].level > old.proficiencies[kind].level
+                for kind in ProficiencyKind
+            )
+            for old, new in zip(growth.before, growth.after)
+        )
         self.localizer = Localizer(settings.language)
         self.localized_texts = LocalizedWindowTextFactory.from_language(
             fonts,
@@ -179,6 +196,9 @@ class BattleResultOverlay:
             if after != before:
                 play_se(RESULT_INCREMENT_SE_ID)
             return False
+        self.victory_motion_frame = min(
+            self.victory_motion_frame + 1, VICTORY_MOTION_LIMIT
+        )
         if self.spell_learned_popup is not None:
             if self.spell_learned_popup.update(input_state):
                 self.spell_learned_popup = None
@@ -318,7 +338,14 @@ class BattleResultOverlay:
         for window in self.windows:
             window.draw()
         for index, member in enumerate(self.party):
-            source = member_battle_sprite_region(member)
+            source = member_battle_sprite_region(
+                member,
+                victory_frame=(
+                    self.victory_motion_frame
+                    if self.animation_complete and self.celebrating_members[index]
+                    else None
+                ),
+            )
             if source is None:
                 continue
             window_x, window_y, _width, _height = result_window_grid(index)

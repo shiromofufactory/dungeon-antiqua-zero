@@ -177,6 +177,11 @@ from ui import (
     tagged_text_width,
 )
 from item_detail import ItemDetailContext, item_detail_lines
+from rendering.victory_pose import (
+    VICTORY_MOTION_LIMIT,
+    VICTORY_SPRITE_SOURCE_X,
+    victory_sprite_source_x,
+)
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 FPS = 60
@@ -501,10 +506,6 @@ MONSTER_SPELL_FAILURE_FRAME_COUNT = 12 * FPS // DA2_REFERENCE_FPS
 FOCUS_PRESENTATION_FRAME_COUNT = 36
 FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
-VICTORY_SPRITE_SOURCE_X = 16 * 8
-VICTORY_MOTION_LIMIT = 70
-VICTORY_MOTION_PERIOD = 40
-VICTORY_MOTION_VISIBLE_FRAMES = 20
 SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
 SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
@@ -3165,6 +3166,7 @@ class BattleScene:
                     shadow=monster.is_shadow if "profile" in fields else False,
                     boss=monster.is_boss,
                     poisoned=monster.state.poisoned,
+                    healing=monster.combat_stats.healing,
                     sleeping=monster.state.sleeping,
                     silenced=monster.state.silenced,
                     stunned=monster.state.stunned,
@@ -8332,28 +8334,44 @@ class BattleScene:
                 return True
             return False
 
-        if not actor.state.poisoned:
+        if not actor.is_alive:
             return False
-        weak_to_poison = ResistanceType.POISON in actor.weaknesses
-        damage = poison_tick_damage(
-            max_hp=actor.state.max_hp,
-            weak_to_poison=weak_to_poison,
+        poison_damage = (
+            poison_tick_damage(
+                max_hp=actor.state.max_hp,
+                weak_to_poison=ResistanceType.POISON in actor.weaknesses,
+            )
+            if actor.state.poisoned
+            else 0
         )
-        actor.state.take_poison_damage(damage)
+        hp_change = battle_healing_amount(
+            max_hp=actor.state.max_hp,
+            healing=actor.combat_stats.healing,
+        ) - poison_damage
+        if hp_change == 0:
+            return False
         monster_index = next(
             index for index, monster in enumerate(self.monsters) if monster is actor
         )
         observations = getattr(self, "auto_battle_observations", None)
-        if observations is not None:
-            observations.damage(monster_index, damage)
         _base_x, y = self._monster_base_position(monster_index)
-        damage_popups.append(
-            BattleSpellDamagePopup(
-                self._monster_draw_x(monster_index) + actor.width // 2,
-                y + actor.height - 8,
-                damage,
-            )
-        )
+        popup_x = self._monster_draw_x(monster_index) + actor.width // 2
+        popup_y = y + actor.height - 8
+        if hp_change > 0:
+            recovered = actor.state.apply_healing(hp_change)
+            if observations is not None:
+                observations.damage(monster_index, -recovered)
+            healing_popups = getattr(self, "healing_popups", None)
+            if healing_popups is None:
+                healing_popups = []
+                self.healing_popups = healing_popups
+            healing_popups.append(BattleHealingPopup(popup_x, popup_y, hp_change))
+        else:
+            damage = -hp_change
+            actor.state.take_poison_damage(damage)
+            if observations is not None:
+                observations.damage(monster_index, damage)
+            damage_popups.append(BattleSpellDamagePopup(popup_x, popup_y, damage))
         if not actor.is_alive:
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
@@ -10829,10 +10847,7 @@ class BattleScene:
             BattlePhase.VICTORY_SUMMARY,
             BattlePhase.RESULT_TRANSITION,
         ):
-            motion_visible = (
-                self.victory_motion_frame + VICTORY_MOTION_VISIBLE_FRAMES + 10
-            ) % VICTORY_MOTION_PERIOD < VICTORY_MOTION_VISIBLE_FRAMES
-            return VICTORY_SPRITE_SOURCE_X if motion_visible else 0
+            return victory_sprite_source_x(self.victory_motion_frame)
         if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
             self, "escape_actor_index", None
         ):

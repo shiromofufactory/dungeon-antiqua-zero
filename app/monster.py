@@ -253,13 +253,14 @@ class MonsterDefinition:
 
 @dataclass(frozen=True)
 class MonsterCombatStats:
-    """Immutable physical and spell-defense values from monster master data."""
+    """Immutable combat and automatic recovery values from monster master data."""
 
     attack: int
     hit: int
     defense: int
     evasion: int
     spell_resistance: int = 0
+    healing: int = 0
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MonsterCombatStats:
@@ -285,6 +286,10 @@ class MonsterCombatStats:
             ] = value
         if values["spell_resistance"] > 100:
             raise MonsterDataError("monster.resistance must not exceed 100")
+        healing = record.get("healing", 0)
+        if isinstance(healing, bool) or not isinstance(healing, int):
+            raise MonsterDataError("monster.healing must be an integer")
+        values["healing"] = healing
         return cls(**values)
 
 
@@ -400,6 +405,20 @@ class MonsterBattleState:
             self.defense_modifier = 0
             self.speed_modifier = 0
         return previous - self.hp
+
+    def apply_healing(self, amount: int) -> int:
+        """Recover living monsters up to max HP without changing ailments."""
+
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise TypeError("healing amount must be an integer")
+        if amount < 0:
+            raise ValueError("healing amount must not be negative")
+        if not self.is_alive:
+            return 0
+        previous = self.hp
+        assert previous is not None
+        self.hp = min(self.max_hp, previous + amount)
+        return self.hp - previous
 
     def apply_sleep(self, turns: int) -> None:
         """Apply DA2's non-shortening sleep duration and clear confusion."""

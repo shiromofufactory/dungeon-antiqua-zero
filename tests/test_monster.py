@@ -14,6 +14,19 @@ from app.resources import load_record_array
 
 
 class MonsterCombatStatsTest(unittest.TestCase):
+    def test_healing_defaults_to_zero_and_accepts_signed_integers(self) -> None:
+        record = dict(attack=1, hit=100, defense=0, evasion=0, resistance=0)
+        self.assertEqual(MonsterCombatStats.from_record(record).healing, 0)
+        for healing in (-2, 0, 3):
+            self.assertEqual(
+                MonsterCombatStats.from_record({**record, "healing": healing}).healing,
+                healing,
+            )
+        for healing in (None, True, 1.5, "1"):
+            with self.subTest(healing=healing):
+                with self.assertRaisesRegex(MonsterDataError, "healing"):
+                    MonsterCombatStats.from_record({**record, "healing": healing})
+
     def test_required_values_are_loaded_without_deriving_evasion(self) -> None:
         stats = MonsterCombatStats.from_record(
             {
@@ -69,6 +82,15 @@ class MonsterSpellDefinitionTest(unittest.TestCase):
 
 
 class MonsterBattleStateTest(unittest.TestCase):
+    def test_healing_caps_hp_preserves_ailments_and_does_not_revive(self) -> None:
+        state = MonsterBattleState(max_hp=10, hp=8, sleeping=2, confused=2)
+        self.assertEqual(state.apply_healing(5), 2)
+        self.assertEqual(state.hp, 10)
+        self.assertEqual((state.sleeping, state.confused), (2, 2))
+        state.defeat()
+        self.assertEqual(state.apply_healing(5), 0)
+        self.assertEqual(state.hp, 0)
+
     def test_master_values_initialize_current_and_max_hp_mp(self) -> None:
         state = MonsterBattleState.from_record({"mhp": 12, "mmp": 5})
 

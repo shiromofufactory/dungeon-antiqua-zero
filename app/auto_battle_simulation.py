@@ -1425,10 +1425,8 @@ class BattleForecast:
             if actor.poisoned
             else 0
         )
-        recovery = (
-            battle_healing_amount(max_hp=actor.max_hp, healing=actor.spec.healing)
-            if not actor.spec.enemy
-            else 0
+        recovery = battle_healing_amount(
+            max_hp=actor.max_hp, healing=actor.spec.healing
         )
         delta = recovery - poison
         if delta < 0:

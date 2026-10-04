@@ -16,6 +16,7 @@ from game_data import load_spells
 from input import InputButton, InputState
 from member import EquipmentSlot, ProficiencyKind
 from resources import FontResources
+from rendering.victory_pose import VICTORY_MOTION_LIMIT, VICTORY_SPRITE_SOURCE_X
 from state import SaveData, Settings
 from systems import BattleProgression, EnemyProgressionData
 from text_catalog import TextCatalog
@@ -237,6 +238,55 @@ class BattleResultOverlayTest(unittest.TestCase):
             member_battle_sprite_region(member),
             (RESULT_DEAD_SPRITE_SOURCE_X, sprite_y, RESULT_DEAD_SPRITE_WIDTH, 32),
         )
+
+    def test_celebrates_only_members_with_stat_or_level_growth(self) -> None:
+        before = self.overlay.growth.before[0]
+        proficiency = before.proficiencies[ProficiencyKind.KNIFE]
+        for field in ("internal_level", "max_hp", "max_mp", "hp", "mp", "progress", "level", "unchanged"):
+            with self.subTest(field=field):
+                after = before
+                if field in ("progress", "level"):
+                    proficiencies = dict(before.proficiencies)
+                    proficiencies[ProficiencyKind.KNIFE] = replace(
+                        proficiency, **{field: getattr(proficiency, field) + 1}
+                    )
+                    after = replace(before, proficiencies=proficiencies)
+                elif field != "unchanged":
+                    after = replace(before, **{field: getattr(before, field) + 1})
+                overlay = BattleResultOverlay(
+                    party=self.party,
+                    growth=replace(self.overlay.growth, before=(before,), after=(after,)),
+                    settings=Settings(), fonts=FontResources(), character_sprites=object(),
+                )
+                self.assertEqual(
+                    overlay.celebrating_members,
+                    (field in ("internal_level", "max_hp", "max_mp", "level"),),
+                )
+
+    def test_growth_pose_starts_after_interpolation_and_stops_after_seventy_frames(self) -> None:
+        with patch("ui.battle_result.pyxel.cls"), patch("ui.battle_result.pyxel.blt") as blt, patch.object(type(self.overlay.windows[0]), "draw"):
+            self.overlay.draw()
+            self.assertEqual(blt.call_args.args[3], 0)
+            for _ in range(RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT):
+                self.overlay.update(InputState())
+                self.assertEqual(self.overlay.victory_motion_frame, 0)
+            for frame in range(1, VICTORY_MOTION_LIMIT + 1):
+                self.overlay.update(InputState())
+                self.overlay.draw()
+                expected = VICTORY_SPRITE_SOURCE_X if 10 <= frame < 30 or 50 <= frame < 70 else 0
+                self.assertEqual(blt.call_args.args[3], expected)
+            for _ in range(40):
+                self.overlay.update(InputState())
+            self.overlay.draw()
+            self.assertEqual(self.overlay.victory_motion_frame, 70)
+            self.assertEqual(blt.call_args.args[3], 0)
+
+    def test_growth_pose_overrides_ailments_but_keeps_death_pose(self) -> None:
+        member = self.party[0]
+        member.poisoned = member.paralyzed = True
+        self.assertEqual(member_battle_sprite_region(member, victory_frame=10)[0], VICTORY_SPRITE_SOURCE_X)
+        member.hp = 0
+        self.assertEqual(member_battle_sprite_region(member, victory_frame=10)[0], RESULT_DEAD_SPRITE_SOURCE_X)
 
 
 if __name__ == "__main__":
