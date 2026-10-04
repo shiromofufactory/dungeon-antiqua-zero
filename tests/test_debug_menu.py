@@ -141,13 +141,60 @@ class DebugMenuOverlayTest(unittest.TestCase):
     def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
         target_y = [target.y for target in self.screen.main_cursor.targets]
 
-        self.assertEqual(len(target_y), 7)
+        self.assertEqual(len(target_y), 8)
+        self.assertEqual(self.screen.main_cursor.targets[-1].key, "encounter")
         self.assertTrue(
             all(
                 next_y - current_y == 3
                 for current_y, next_y in pairwise(target_y)
             )
         )
+
+    def test_encounter_options_wrap_and_persist_after_cancel_and_reopen(self) -> None:
+        self.screen.main_cursor.select_key("encounter")
+        self.screen.update(self.confirm())
+        menu = self.screen.encounter_menu
+        self.assertEqual(menu.state.settings.monster_level, 1)
+        menu.update(InputState(navigation=Direction.LEFT))
+        self.assertEqual(menu.state.settings.monster_level, "dynamic")
+        menu.update(InputState(navigation=Direction.RIGHT))
+        self.assertEqual(menu.state.settings.monster_level, 1)
+        for _ in range(8):
+            menu.update(self.confirm())
+        self.assertEqual(menu.state.settings.monster_level, 9)
+        for key, expected in (
+            ("danger", "high"), ("polarity", "yin"),
+            ("allow_demons", True), ("allow_humans", True),
+            ("allow_giants", True), ("allow_large_animals", False),
+        ):
+            menu.cursor.select_key(key)
+            menu.update(self.confirm())
+            self.assertEqual(getattr(menu.state.settings, key), expected)
+        retained = menu.state.settings
+        self.screen.update(self.cancel())
+        self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+        self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
+        self.screen.update(self.confirm())
+        self.assertEqual(self.screen.encounter_menu.state.settings, retained)
+        # A new debug overlay uses the same Game-owned session state.
+        other = DebugMenuOverlay(
+            editor=self.editor, inventory_system=self.inventory,
+            save_data=self.save_data, settings=Settings(),
+            fonts=FontResources(), alert=self.alert,
+            encounter_state=self.screen.encounter_state,
+        )
+        self.assertIs(other.encounter_state.settings, retained)
+
+    def test_encounter_start_passes_settings_and_alerts_on_empty_pool(self) -> None:
+        callback = Mock(return_value=False)
+        self.screen.on_encounter = callback
+        self.screen.main_cursor.select_key("encounter")
+        self.screen.update(self.confirm())
+        self.screen.encounter_menu.cursor.select_key("start")
+        self.screen.update(self.confirm())
+        callback.assert_called_once_with(self.screen.encounter_state.settings)
+        self.alert.start.assert_called_once_with()
+        self.assertIs(self.screen.phase, DebugMenuPhase.ENCOUNTER)
 
     def test_item_warehouse_acquires_one_without_consuming_its_catalog(self) -> None:
         item = self.inventory.catalog_items[0]

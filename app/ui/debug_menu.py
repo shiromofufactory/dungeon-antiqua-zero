@@ -31,6 +31,8 @@ from ui import (
     input_icon_tag,
 )
 from ui.debug_text import DEBUG_TEXT
+from resources.maps import MapRandomEncounter
+from ui.debug_encounter import DebugEncounterOverlay, DebugEncounterState
 from ui.teleport_menu import (
     TeleportMenuLabels,
     TeleportMenuOverlay,
@@ -47,6 +49,7 @@ MAIN_ITEM_KEYS = (
     "items",
     "teleport",
     "shop",
+    "encounter",
 )
 MAIN_FIRST_Y = 9
 MAIN_ROWS = tuple(
@@ -111,6 +114,7 @@ class DebugMenuPhase(Enum):
     ITEMS = auto()
     TELEPORT = auto()
     SHOP = auto()
+    ENCOUNTER = auto()
     NUMBER = auto()
 
 
@@ -203,6 +207,8 @@ class DebugMenuOverlay:
         on_teleport: Callable[[str], bool] | None = None,
         shop_targets: Iterable[DebugShopTarget] = (),
         on_shop: Callable[[str], bool] | None = None,
+        encounter_state: DebugEncounterState | None = None,
+        on_encounter: Callable[[MapRandomEncounter], bool] | None = None,
     ) -> None:
         if not isinstance(editor, DebugPartyEditor):
             raise TypeError("editor must be a DebugPartyEditor")
@@ -250,6 +256,9 @@ class DebugMenuOverlay:
         self.on_teleport = on_teleport
         self.shop_targets = registered_shops
         self.on_shop = on_shop
+        self.encounter_state = encounter_state or DebugEncounterState()
+        self.on_encounter = on_encounter
+        self.encounter_menu: DebugEncounterOverlay | None = None
         self.localizer = Localizer(settings.language)
         self.debug_texts = LocalizedWindowTextFactory.from_language(
             fonts,
@@ -360,6 +369,7 @@ class DebugMenuOverlay:
             "items": self._item_count_text(),
             "teleport": self._teleport_count_text(),
             "shop": self._shop_count_text(),
+            "encounter": "",
         }
         labels = {
             "party_level": DEBUG_TEXT.party_level,
@@ -369,6 +379,7 @@ class DebugMenuOverlay:
             "items": DEBUG_TEXT.items,
             "teleport": DEBUG_TEXT.teleport,
             "shop": DEBUG_TEXT.shop,
+            "encounter": DEBUG_TEXT.encounter,
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.title, 4, 3)
@@ -377,7 +388,7 @@ class DebugMenuOverlay:
             placements.extend(
                 (
                     self.debug_texts.create(labels[key], MAIN_LABEL_X, y),
-                    self.debug_texts.create("：", 31, y),
+                    self.debug_texts.create("" if key == "encounter" else "：", 31, y),
                     self.debug_texts.create(values[key], MAIN_VALUE_X, y),
                 )
             )
@@ -1212,6 +1223,12 @@ class DebugMenuOverlay:
         if self.phase is DebugMenuPhase.NUMBER:
             self._update_numeric(input_state)
             return False
+        if self.phase is DebugMenuPhase.ENCOUNTER:
+            if self.encounter_menu.update(input_state):
+                self.encounter_menu = None
+                self.phase = DebugMenuPhase.MAIN
+                self._build_main_window(selected_key="encounter")
+            return False
         if self.phase is DebugMenuPhase.ITEMS:
             self._update_items(input_state)
             return False
@@ -1267,6 +1284,13 @@ class DebugMenuOverlay:
                 self._open_teleport()
             elif key == "shop":
                 self._open_shops()
+            elif key == "encounter":
+                self.encounter_menu = DebugEncounterOverlay(
+                    state=self.encounter_state, texts=self.debug_texts,
+                    windows=self.windows, guide=self._guide_text(),
+                    on_start=self.on_encounter, alert=self.alert,
+                )
+                self.phase = DebugMenuPhase.ENCOUNTER
             elif isinstance(key, str) and key in ("party_level", "gold"):
                 self._open_numeric(key)
             else:
@@ -1276,6 +1300,9 @@ class DebugMenuOverlay:
         return False
 
     def draw(self) -> None:
+        if self.phase is DebugMenuPhase.ENCOUNTER:
+            self.encounter_menu.draw()
+            return
         if self.phase is DebugMenuPhase.NUMBER and self.numeric_window is not None:
             self.numeric_window.draw()
         elif self.phase is DebugMenuPhase.MEMBERS and self.member_window is not None:

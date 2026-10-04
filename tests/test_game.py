@@ -3267,6 +3267,63 @@ class GameTest(unittest.TestCase):
             ),
         )
 
+    def test_debug_encounter_stages_generated_battle_and_closes_menu(self) -> None:
+        from scenes.battle import BattleEncounter
+        from resources.maps import MapRandomEncounter
+        mock = Game.__new__(Game)
+        settings = MapRandomEncounter(9, "high", "yin", True, True, True, True)
+        encounter = BattleEncounter(("SLIME",), surprise_enabled=True)
+        mock._create_random_battle_encounter = Mock(return_value=encounter)
+        mock._finish_debug_menu = Mock()
+        mock._begin_random_encounter = Mock()
+        mock.showing_field = False
+        self.assertTrue(mock._start_debug_encounter(settings))
+        mock._create_random_battle_encounter.assert_called_once_with(settings)
+        mock._finish_debug_menu.assert_called_once_with(resume_settings=False)
+        self.assertIs(mock.pending_debug_battle_encounter, encounter)
+        self.assertTrue(mock.showing_field)
+        mock._begin_random_encounter.assert_called_once_with()
+
+    def test_debug_encounter_uses_requested_settings_and_dynamic_level(self) -> None:
+        from resources.maps import MapRandomEncounter
+        mock = Game.__new__(Game)
+        mock.monsters = (Mock(),)
+        mock.encounter_system = Mock()
+        mock.encounter_system.dynamic_monster_level.return_value = 3
+        mock.encounter_system.generate_formation.return_value.monster_keys = ("SLIME",)
+        settings = MapRandomEncounter("dynamic", "high", "yin", True, False, True, False)
+        result = mock._create_random_battle_encounter(settings)
+        mock.encounter_system.generate_formation.assert_called_once_with(
+            mock.monsters, settings, monster_level=3,
+        )
+        self.assertEqual(result.monster_keys, ("SLIME",))
+        self.assertTrue(result.surprise_enabled)
+
+    def test_debug_encounter_transition_uses_prepared_formation(self) -> None:
+        from scenes.battle import BattleEncounter
+        mock = Game.__new__(Game)
+        encounter = BattleEncounter(("SLIME",), surprise_enabled=True)
+        mock.pending_debug_battle_encounter = encounter
+        mock.encounter_transition = Mock(is_finished=True)
+        mock.palette_shifter = Mock()
+        mock._build_battle_scene = Mock()
+        mock._create_random_battle_encounter = Mock()
+        mock._update_encounter_transition()
+        mock._build_battle_scene.assert_called_once_with(encounter)
+        mock._create_random_battle_encounter.assert_not_called()
+        self.assertIsNone(mock.pending_debug_battle_encounter)
+        self.assertIsNone(mock.encounter_transition)
+
+    def test_debug_encounter_empty_pool_keeps_menu_open(self) -> None:
+        from systems.encounter import EncounterGenerationError
+        mock = Game.__new__(Game)
+        mock._create_random_battle_encounter = Mock(side_effect=EncounterGenerationError())
+        mock._finish_debug_menu = Mock()
+        mock._begin_random_encounter = Mock()
+        self.assertFalse(mock._start_debug_encounter(Mock()))
+        mock._finish_debug_menu.assert_not_called()
+        mock._begin_random_encounter.assert_not_called()
+
     def test_debug_shop_stages_selected_shop_for_fade_transition(self) -> None:
         mock = Game.__new__(Game)
         selected_shop = Mock(key="TEST_SHOP")

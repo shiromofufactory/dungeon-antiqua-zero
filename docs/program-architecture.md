@@ -1410,6 +1410,11 @@ Scene切り替えはTransitionとして調停する。拠点名Windowやフェ�
 `ShopOverlay` で店を開く。ショップ終了時はデバッグ画面を破棄せず、選択中だったショップ一覧へ
 戻す。フィールドSceneはこの開発用ショップ選択を知らない。
 
+デバッグエンカウントは `ui/debug_encounter.py` が設定画面と `DebugEncounterState` を所有する。
+Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受けて通常の `EncounterSystem` と
+遭遇Transitionへ接続する。設定はSaveData／Settingsへ含めない。詳細は
+[エンカウント仕様](./features/encounters.md#デバッグエンカウント)を参照する。
+
 パーティをまたぐデバッグ操作はPyxel非依存の `systems.debug.DebugPartyEditor` が担当する。
 フィオラを必須とし、フィオラを含むパーティ総数を1〜6名に制限する。
 指定したパーティLVをフィオラの内部LVとし、

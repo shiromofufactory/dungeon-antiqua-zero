@@ -25,6 +25,9 @@ from game_data import (
 from ui.debug_menu import DebugMenuOverlay, DebugShopTarget
 from ui.auto_recovery import AutoRecoveryOverlay
 from ui.debug_text import DEBUG_TEXT
+from ui.debug_encounter import DebugEncounterState
+from resources.maps import MapRandomEncounter
+from systems.encounter import EncounterGenerationError
 from ui.teleport_menu import TeleportTarget
 from ui.game_menu import GameMenuAction, GameMenuOverlay
 from ui.field_menu_guide import FieldMenuGuide
@@ -593,6 +596,10 @@ class Game:
         self.animate_main_windows_with_fade = False
         self.showing_field = False
         self.encounter_system = EncounterSystem()
+        self.debug_encounter_state = getattr(
+            self, "debug_encounter_state", DebugEncounterState(),
+        )
+        self.pending_debug_battle_encounter: BattleEncounter | None = None
         self.field_fade_active = False
         self.field_fade_pulse_frame = 0
         self.encounter_transition: EncounterTransition | None = None
@@ -903,8 +910,10 @@ class Game:
         self.encounter_snapshot = None
         event_encounter = getattr(self, "pending_event_battle_encounter", None)
         self.pending_event_battle_encounter = None
+        debug_encounter = getattr(self, "pending_debug_battle_encounter", None)
+        self.pending_debug_battle_encounter = None
         self.battle_scene = self._build_battle_scene(
-            event_encounter or self._create_random_battle_encounter()
+            event_encounter or debug_encounter or self._create_random_battle_encounter()
         )
         battle_id = getattr(self, "pending_event_battle_id", None)
         if (
@@ -914,10 +923,13 @@ class Game:
             self.battle_scene.defer_first_party_command()
         self.pending_first_party_turn_hint = True
 
-    def _create_random_battle_encounter(self) -> BattleEncounter:
+    def _create_random_battle_encounter(
+        self, settings: MapRandomEncounter | None = None,
+    ) -> BattleEncounter:
         """Resolve the map level and convert its generated formation for battle."""
 
-        settings = self.current_map.random_encounter
+        if settings is None:
+            settings = self.current_map.random_encounter
         if settings is None:
             raise RuntimeError("current dungeon has no random encounter settings")
         monster_level = settings.monster_level
@@ -2067,6 +2079,8 @@ class Game:
             on_teleport=self._start_debug_teleport,
             shop_targets=self._debug_shop_targets(),
             on_shop=self._start_debug_shop,
+            encounter_state=self.debug_encounter_state,
+            on_encounter=self._start_debug_encounter,
         )
 
     def _teleport_targets(self) -> tuple[TeleportTarget, ...]:
@@ -2122,6 +2136,19 @@ class Game:
             self.selected_member_index,
             len(self.party) - 1,
         )
+
+    def _start_debug_encounter(self, settings: MapRandomEncounter) -> bool:
+        """Validate a random formation before closing the debug UI for battle."""
+
+        try:
+            encounter = self._create_random_battle_encounter(settings)
+        except EncounterGenerationError:
+            return False
+        self._finish_debug_menu(resume_settings=False)
+        self.showing_field = True
+        self.pending_debug_battle_encounter = encounter
+        self._begin_random_encounter()
+        return True
 
     def _start_debug_shop(self, shop_key: str) -> bool:
         """Stage a debug-selected shop and open the production shop overlay."""
