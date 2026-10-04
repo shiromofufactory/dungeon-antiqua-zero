@@ -264,5 +264,47 @@ class MonsterActionSelectionTest(unittest.TestCase):
             )
 
 
+class MonsterCallRuleTest(unittest.TestCase):
+    def choose(self, *, slot=0, intelligence=0):
+        return select_monster_action(
+            special_actions=(MonsterSpecialAction.CALL,),
+            is_front_row=True, can_attack=True, can_charge=False,
+            party_actual_attacks=(), monster_attack=10,
+            call_slot=slot, intelligence=intelligence,
+        )
+
+    def test_low_intelligence_uses_three_of_four_gate_then_equal_candidates(self):
+        for roll in range(4):
+            with (
+                self.subTest(roll=roll),
+                patch("monster_ai.random.randint", return_value=roll) as rng,
+                patch("monster_ai.random.choice", return_value=MonsterAction.CALL) as choice,
+            ):
+                action = self.choose()
+                rng.assert_called_once_with(0, 3)
+                if roll:
+                    self.assertIs(action, MonsterAction.CALL)
+                    choice.assert_called_once_with([MonsterAction.CALL, MonsterAction.ATTACK])
+                else:
+                    self.assertIs(action, MonsterAction.ATTACK)
+                    choice.assert_not_called()
+
+    def test_full_formation_never_rolls_or_calls(self):
+        with patch("monster_ai.random.randint") as rng:
+            self.assertIs(self.choose(slot=None), MonsterAction.ATTACK)
+            rng.assert_not_called()
+
+    def test_da2_high_intelligence_prioritizes_first_two_empty_slots(self):
+        for slot in range(5):
+            with self.subTest(slot=slot), patch("monster_ai.random.randint") as rng:
+                expected = MonsterAction.CALL if slot <= 1 else MonsterAction.ATTACK
+                self.assertIs(self.choose(slot=slot, intelligence=2), expected)
+                rng.assert_not_called()
+
+    def test_call_data_key_is_supported(self):
+        self.assertEqual(monster_special_actions_from_record({"special": "呼"}),
+                         (MonsterSpecialAction.CALL,))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -963,15 +963,30 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         )
         self.assertIsNone(forecast.actors[0].focus)
 
-    def test_enemy_unsupported_spell_spends_mp_without_applying_fake_effect(self):
-        spell = self.spells["FIRE1"]
-        enemy = self.enemy(front=False, spells=(spell,), max_mp=10, mp=10)
-        forecast = BattleForecast(self.snapshot(self.specs[0], enemy), 0)
-        forecast.execute(0, AutoAction(BattleCommand.DEFEND))
-        hp = forecast.actors[0].hp
-        forecast.enemy_turn(forecast.actors[5])
-        self.assertEqual(forecast.actors[5].mp, 10 - spell.mp)
-        self.assertEqual(forecast.actors[0].hp, hp)
+    def test_enemy_damage_spell_forecast_uses_same_rule_as_live_battle(self):
+        from battle_magic import resolve_spell_damage
+
+        for key in ("FIRE1", "FREEZE1"):
+            with self.subTest(spell=key):
+                spell = self.spells[key]
+                enemy = self.enemy(front=False, spells=(spell,), magic=10,
+                                   max_mp=10, mp=10)
+                forecast = BattleForecast(self.snapshot(self.specs[0], enemy), 0)
+                forecast.roll = Mock(return_value=0.0)
+                target = forecast.actors[0]
+                hp = target.hp
+                expected = resolve_spell_damage(
+                    intensity=spell.intensity, spell_modifier=10,
+                    target_spell_defense=target.spec.spell_defense,
+                    attribute=spell.attribute,
+                    target_weaknesses=target.spec.weaknesses,
+                    target_resistances=target.spec.resistances,
+                    random_factor=0.0,
+                )
+                forecast.enemy_turn(forecast.actors[5])
+                self.assertEqual(forecast.actors[5].mp, 10 - spell.mp)
+                self.assertEqual(target.hp, max(0, hp - expected.damage))
+                self.assertLess(target.hp, hp)
 
     def test_observations_accumulate_presented_amounts_including_overkill(self):
         observations = AutoBattleObservations()

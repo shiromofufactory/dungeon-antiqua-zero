@@ -167,9 +167,13 @@ class MonsterReinforcementTest(unittest.TestCase):
         self.assertIsNone(scene._reinforcement_waiting_actor)
         self.assertEqual(scene._reinforcement_post_entrance_wait_frames, 0)
 
-    def test_reinforcement_reuses_dead_slot_with_new_reward_and_timeline_identity(
-        self,
-    ) -> None:
+    def test_reinforcement_reuses_dead_slot_with_new_reward_and_timeline_identity(self):
+        self.check_ally_insertion(same_monster=False)
+
+    def test_call_registers_same_kind_with_independent_reward_and_timeline(self):
+        self.check_ally_insertion(same_monster=True)
+
+    def check_ally_insertion(self, *, same_monster: bool) -> None:
         records = {
             record["name_en"]: record
             for record in load_record_array("monsters.json")
@@ -214,22 +218,26 @@ class MonsterReinforcementTest(unittest.TestCase):
         )
         scene.progression.record_enemy_defeat(1)
 
-        with patch("scenes.battle.reinforcement_arrives", return_value=True):
-            self.assertTrue(scene._attempt_monster_reinforcement(treant))
+        if same_monster:
+            self.assertTrue(scene._add_monster_ally(treant, same_monster=True))
+        else:
+            with patch("scenes.battle.reinforcement_arrives", return_value=True):
+                self.assertTrue(scene._attempt_monster_reinforcement(treant))
+        expected_key = "Treant" if same_monster else "Spirit"
 
         self.assertEqual(len(scene.monsters), 3)
-        self.assertEqual(scene.monsters[2].key, "Spirit")
+        self.assertEqual(scene.monsters[2].key, expected_key)
         self.assertIsNot(scene.monsters[2], fallen)
         self.assertFalse(treant.is_front_row)
         self.assertTrue(scene.monsters[2].is_front_row)
         self.assertEqual(scene.monster_slot_indexes, (0, 2, 2))
         self.assertEqual(scene.monster_positions[2], MONSTER_POSITIONS[2])
         self.assertEqual(scene.reinforcement_entrance_frames, {2: 0})
-        self.assertEqual(scene.progression.enemies[2].monster_key, "Spirit")
+        self.assertEqual(scene.progression.enemies[2].monster_key, expected_key)
         self.assertIs(scene.timeline[0], treant)
         self.assertIn(scene.monsters[2], scene.timeline)
         scene.monster_record_system.register_encounter.assert_called_once_with(
-            ("Spirit",)
+            (expected_key,)
         )
         targets = scene.target_window.set_cursor.call_args.args[0]
         self.assertEqual({target.key for target in targets}, {0, 2})
@@ -277,6 +285,48 @@ class MonsterReinforcementTest(unittest.TestCase):
 
         self.assertFalse(rear_monster.is_front_row)
         self.assertTrue(reinforcement.is_front_row)
+
+
+class MonsterCallTurnTest(unittest.TestCase):
+    def test_call_waits_for_arrival_then_consumes_turn_without_attacking(self):
+        actor = charge_monster()
+        actor.special_actions = (MonsterSpecialAction.CALL,)
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = scene.timeline = (actor,)
+        scene.command_window = Mock()
+        scene.monster_charge_presentation = None
+        scene.monster_escape_actor_index = None
+        scene.monster_attack_target_index = None
+        scene.monster_blink_frames_remaining = 0
+        scene.monster_confused_action_pending = False
+        scene.reinforcement_entrance_frames = {}
+        scene.progression = Mock()
+        scene._select_monster_action = Mock(return_value=MonsterAction.CALL)
+        scene._show_monster_action_message = Mock()
+        scene._start_timeline_animation = Mock()
+        scene._begin_standard_monster_attack = Mock()
+
+        def add(_actor, *, same_monster):
+            self.assertIs(_actor, actor)
+            self.assertTrue(same_monster)
+            scene.reinforcement_entrance_frames[1] = 0
+            return True
+
+        scene._add_monster_ally = Mock(side_effect=add)
+        scene._update_monster_action()
+        scene._show_monster_action_message.assert_called_once_with("battle.monster.call")
+        scene.progression.record_enemy_action.assert_called_once_with(0)
+        scene._update_monster_action()
+        scene._start_timeline_animation.assert_not_called()
+        scene.reinforcement_entrance_frames.clear()
+        for _ in range(REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT):
+            scene._update_monster_action()
+            scene._start_timeline_animation.assert_not_called()
+        scene._update_monster_action()
+        scene._start_timeline_animation.assert_called_once_with()
+        scene._select_monster_action.assert_called_once_with(actor)
+        scene._begin_standard_monster_attack.assert_not_called()
+        self.assertFalse(scene._monster_call_pending)
 
 
 class MonsterChargePresentationTest(unittest.TestCase):

@@ -1023,6 +1023,7 @@ class BattleActionPresentation:
     cure_results: tuple[BattleCureResult, ...] = ()
     revive_results: tuple[BattleReviveResult, ...] = ()
     silence_results: tuple[BattleSilenceResult, ...] = ()
+    party_damage_results: tuple[BattleSpellDamageResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_confuse_results: tuple[BattlePartyConfuseResult, ...] = ()
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
@@ -1954,6 +1955,7 @@ class BattleScene:
         )
         self.initial_monsters = self.monsters
         self.reinforcement_entrance_frames: dict[int, int] = {}
+        self._monster_call_pending = False
         self._reinforcement_waiting_actor: BattleMonster | None = None
         self._reinforcement_post_entrance_wait_frames = 0
         for monster in self.monsters:
@@ -2637,6 +2639,7 @@ class BattleScene:
         self.auto_battle_sequence = 0
         self.reinforcement_entrance_frames.clear()
         self._reinforcement_waiting_actor = None
+        self._monster_call_pending = False
         self._reinforcement_post_entrance_wait_frames = 0
 
         if len(self.monsters) > len(self.initial_monsters):
@@ -5752,6 +5755,12 @@ class BattleScene:
                     )
                 )
 
+        for result in presentation.party_damage_results:
+            self._apply_monster_attack_damage(result.target_index, result.damage)
+            damage_popups.append(
+                BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage)
+            )
+
         for result in presentation.party_sleep_results:
             member = self.party[result.target_index]
             if result.success:
@@ -8703,6 +8712,19 @@ class BattleScene:
             self.blinking_monster_index = self._monster_index(actor)
             self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
             return
+        if getattr(self, "_monster_call_pending", False):
+            if self.reinforcement_entrance_frames:
+                return
+            if (
+                self._reinforcement_post_entrance_wait_frames
+                < REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT
+            ):
+                self._reinforcement_post_entrance_wait_frames += 1
+                return
+            self._monster_call_pending = False
+            self._reinforcement_post_entrance_wait_frames = 0
+            self._start_timeline_animation()
+            return
         if self.monster_blink_frames_remaining > 0:
             self.monster_blink_frames_remaining -= 1
         if self.monster_blink_frames_remaining > 0:
@@ -8734,6 +8756,12 @@ class BattleScene:
         if action is MonsterAction.ESCAPE:
             self._begin_monster_escape(actor)
             return
+        if action is MonsterAction.CALL:
+            self._show_monster_action_message("battle.monster.call")
+            self._add_monster_ally(actor, same_monster=True)
+            self._monster_call_pending = True
+            self._reinforcement_post_entrance_wait_frames = 0
+            return
         if action is MonsterAction.CHARGE:
             self._begin_monster_charge(actor)
             return
@@ -8756,6 +8784,11 @@ class BattleScene:
         living_count = sum(monster.is_alive for monster in self.monsters)
         if not reinforcement_arrives(living_count):
             return False
+        return self._add_monster_ally(actor, same_monster=False)
+
+    def _monster_ally_slot(self) -> int | None:
+        """Find the first unoccupied display slot, including defeated slots."""
+
         available_slots = (
             TALL_FIRST_MONSTER_SLOT_INDEXES
             if (self.monsters[0].width, self.monsters[0].height)
@@ -8771,11 +8804,16 @@ class BattleScene:
             (slot for slot in available_slots if slot not in occupied_slots),
             None,
         )
+        return slot
+
+    def _add_monster_ally(self, actor: BattleMonster, *, same_monster: bool) -> bool:
+        """Register a new ally with independent timeline and reward identity."""
+
+        slot = self._monster_ally_slot()
         if slot is None:
             return False
-
         caller = self.monster_definitions_by_key[actor.key]
-        target = reinforcement_target(
+        target = caller if same_monster else reinforcement_target(
             caller,
             tuple(self.monster_definitions_by_key.values()),
         )
@@ -8911,6 +8949,11 @@ class BattleScene:
             party_actual_attacks=party_attacks,
             monster_attack=actor.combat_stats.attack,
             spell_keys=self._targetable_monster_spell_keys(actor),
+            call_slot=(
+                self._monster_ally_slot()
+                if MonsterSpecialAction.CALL in actor.special_actions else None
+            ),
+            intelligence=actor.intelligence,
         )
 
     def _targetable_monster_spell_keys(
@@ -8974,6 +9017,9 @@ class BattleScene:
 
         indexes = candidates if spell.to_all else (random.choice(candidates),)
         target_side = "ally" if spell.to_enemy else "enemy"
+        party_damage_results = self._resolve_monster_spell_damage_results(
+            actor, spell, indexes,
+        )
         party_sleep_results = self._resolve_monster_sleep_results(
             actor,
             spell,
@@ -9028,6 +9074,7 @@ class BattleScene:
         )
         self.action_presentation = BattleActionPresentation(
             tuple(effects),
+            party_damage_results=party_damage_results,
             party_sleep_results=party_sleep_results,
             party_confuse_results=party_confuse_results,
             party_slow_results=party_slow_results,
@@ -9038,6 +9085,15 @@ class BattleScene:
             ),
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
+        affinity_popups = getattr(self, "affinity_popups", None)
+        if affinity_popups is None:
+            affinity_popups = []
+            self.affinity_popups = affinity_popups
+        affinity_popups.extend(
+            BattleAffinityPopup(result.affinity_x, result.affinity_y, result.affinity)
+            for result in party_damage_results
+            if result.affinity is not SpellAffinity.NORMAL
+        )
         self._show_spell_cast_message(spell, actor_is_enemy=True)
 
         if effects:
@@ -9050,6 +9106,45 @@ class BattleScene:
             self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
             self.spell_effect_renderer.prepare(first_player)
         return True
+
+    def _resolve_monster_spell_damage_results(
+        self,
+        actor: BattleMonster,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattleSpellDamageResult, ...]:
+        """Resolve enemy DAMAGE with the same rule as player offensive magic."""
+
+        if spell.action is not SpellAction.DAMAGE or not spell.to_enemy:
+            return ()
+        results: list[BattleSpellDamageResult] = []
+        for index in indexes:
+            member = self.party[index]
+            resolution = resolve_spell_damage(
+                intensity=spell.intensity,
+                spell_modifier=actor.magic,
+                target_spell_defense=member.battle_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=frozenset(),
+                target_resistances=member.resistances,
+                random_factor=random.random(),
+            )
+            position = self._party_draw_position(index)
+            if position is None:
+                continue
+            x, y = position
+            results.append(
+                BattleSpellDamageResult(
+                    target_index=index,
+                    damage=resolution.damage,
+                    affinity=resolution.affinity,
+                    popup_x=x + 6,
+                    popup_y=y + 16,
+                    affinity_x=x + 8 - AFFINITY_ICON_WIDTH // 2,
+                    affinity_y=y - 8,
+                )
+            )
+        return tuple(results)
 
     def _resolve_monster_sleep_results(
         self,
@@ -10665,6 +10760,17 @@ class BattleScene:
             self, "active_party_index", None
         ):
             return DEFEND_SPRITE_SOURCE_X
+        presentation = getattr(self, "action_presentation", None)
+        if (
+            self.phase is BattlePhase.ACTION_PRESENTATION
+            and presentation is not None
+            and presentation.results_applied
+            and any(
+                result.target_index == index and result.damage > 0
+                for result in presentation.party_damage_results
+            )
+        ):
+            return MONSTER_DAMAGE_SPRITE_SOURCE_X
         if (
             self.phase is BattlePhase.MONSTER_ACTION
             and index == getattr(self, "monster_attack_target_index", None)

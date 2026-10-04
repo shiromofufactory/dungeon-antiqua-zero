@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 from tools._bootstrap import APP_ROOT  # noqa: F401 - add app to sys.path
 from tools.screen_mocks._fixtures import (
@@ -18,6 +19,9 @@ from tools.screen_mocks.battle import (
 )
 from monster import MonsterBattleState, MonsterCombatStats
 from monster_ai import MonsterSpellAction
+from battle_magic import resolve_spell_damage, SpellAffinity
+from member import Member
+from resistance import ResistanceType
 
 
 def spellcaster(
@@ -64,6 +68,7 @@ def spell_scene(actor: BattleMockMonster) -> BattleScreenMock:
     mock._party_draw_position = Mock(
         side_effect=lambda index: (188, 64 + index * 28)
     )
+    mock._refresh_party_hp_text = Mock()
     mock._show_spell_cast_message = Mock()
     mock._show_monster_spell_mp_lack_message = Mock()
     mock._show_monster_spell_sealed_message = Mock()
@@ -261,6 +266,132 @@ class MonsterSpellTest(unittest.TestCase):
         mock._monster_attack_target_indexes = Mock(return_value=())
 
         self.assertTrue(mock._monster_can_attempt_action(actor))
+
+
+class MonsterDamageSpellTest(unittest.TestCase):
+    def test_fire_and_freeze_use_shared_damage_rule_and_apply_once_at_result_time(self):
+        for key in ("FIRE1", "FREEZE1"):
+            with self.subTest(spell=key):
+                actor = spellcaster(magic=2, spell_key=key)
+                scene = spell_scene(actor)
+                spell = scene.spells[key]
+                target = scene.party[1]
+                hp = target.hp
+                target.apply_sleep(2)
+                expected = resolve_spell_damage(
+                    intensity=spell.intensity, spell_modifier=actor.magic,
+                    target_spell_defense=target.battle_stats.spell_resistance,
+                    attribute=spell.attribute, target_weaknesses=frozenset(),
+                    target_resistances=target.resistances, random_factor=0.5,
+                )
+                with (
+                    patch("scenes.battle.random.choice", return_value=1),
+                    patch("scenes.battle.random.random", return_value=0.5),
+                ):
+                    scene._begin_monster_spell(actor, spell)
+                presentation = scene.action_presentation
+                self.assertEqual(target.hp, hp)
+                self.assertEqual(presentation.party_damage_results[0].damage, expected.damage)
+                self.assertEqual(actor.state.mp, actor.state.max_mp - spell.mp)
+                scene._update_action_presentation()
+                self.assertEqual(target.hp, max(0, hp - expected.damage))
+                self.assertEqual(target.sleeping, 0)
+                scene._refresh_party_hp_text.assert_called_once_with(1)
+                self.assertEqual(scene.spell_damage_popups[0].damage, expected.damage)
+                scene._apply_action_results(presentation)
+                self.assertEqual(len(scene.spell_damage_popups), 1)
+                self.assertEqual(target.hp, max(0, hp - expected.damage))
+
+    def test_damage_waits_for_presentation_result_frame(self):
+        actor = spellcaster(magic=3, spell_key="FIRE1")
+        scene = spell_scene(actor)
+        with patch("scenes.battle.random.choice", return_value=0):
+            scene._begin_monster_spell(actor, scene.spells["FIRE1"])
+        scene.action_presentation.result_start_frame = 3
+        hp = scene.party[0].hp
+        for _ in range(2):
+            scene._update_action_presentation()
+            self.assertEqual(scene.party[0].hp, hp)
+            self.assertEqual(scene.spell_damage_popups, [])
+        scene._update_action_presentation()
+        self.assertLess(scene.party[0].hp, hp)
+        self.assertEqual(len(scene.spell_damage_popups), 1)
+
+    def test_all_targets_exclude_dead_hidden_and_escaped_members(self):
+        actor = spellcaster(magic=3, spell_key="FIRE1")
+        for excluded in ("dead", "hidden", "escaped", None):
+            with self.subTest(excluded=excluded):
+                scene = spell_scene(actor)
+                if excluded == "dead":
+                    scene.party[1].hp = 0
+                elif excluded == "hidden":
+                    scene.hidden_party_indexes.add(1)
+                elif excluded == "escaped":
+                    scene.escaped_party_indexes.add(1)
+                with patch("scenes.battle.random.random", return_value=0.5) as roll:
+                    scene._begin_monster_spell(actor, replace(scene.spells["FIRE1"], to_all=True))
+                results = scene.action_presentation.party_damage_results
+                self.assertEqual(tuple(r.target_index for r in results), (0, 1) if excluded is None else (0,))
+                self.assertEqual(roll.call_count, len(results))
+
+    def test_elemental_resistance_reduces_damage_and_displays_affinity(self):
+        actor = spellcaster(magic=8, spell_key="FREEZE1")
+        scene = spell_scene(actor)
+        with (
+            patch.object(Member, "resistances", new_callable=PropertyMock,
+                         return_value=frozenset({ResistanceType.FREEZE})),
+            patch("scenes.battle.random.choice", return_value=0),
+            patch("scenes.battle.random.random", return_value=0.5),
+        ):
+            scene._begin_monster_spell(actor, scene.spells["FREEZE1"])
+        result = scene.action_presentation.party_damage_results[0]
+        self.assertIs(result.affinity, SpellAffinity.RESIST)
+        self.assertEqual(len(scene.affinity_popups), 1)
+        self.assertIs(scene.affinity_popups[0].affinity, SpellAffinity.RESIST)
+        normal = resolve_spell_damage(
+            intensity=40, spell_modifier=8,
+            target_spell_defense=scene.party[0].battle_stats.spell_resistance,
+            attribute=ResistanceType.FREEZE, target_weaknesses=frozenset(),
+            target_resistances=frozenset(), random_factor=0.5,
+        )
+        self.assertLess(result.damage, normal.damage)
+
+    def test_lethal_damage_clears_conditions_and_interrupts_focus(self):
+        actor = spellcaster(magic=99, spell_key="FREEZE1")
+        scene = spell_scene(actor)
+        target = scene.party[0]
+        target.apply_confusion(3)
+        scene.focused_target_by_party_index = {0: 0}
+        with patch("scenes.battle.random.choice", return_value=0):
+            scene._begin_monster_spell(actor, scene.spells["FREEZE1"])
+        scene._apply_action_results(scene.action_presentation)
+        self.assertEqual(target.hp, 0)
+        self.assertEqual(target.confused, 0)
+        self.assertNotIn(0, scene.focused_target_by_party_index)
+
+    def test_zero_damage_keeps_conditions_and_hp(self):
+        actor = spellcaster(magic=0, spell_key="FIRE1")
+        scene = spell_scene(actor)
+        target = scene.party[0]
+        target.apply_sleep(2)
+        hp = target.hp
+        with patch("scenes.battle.random.choice", return_value=0):
+            scene._begin_monster_spell(actor, scene.spells["FIRE1"])
+        scene._apply_action_results(scene.action_presentation)
+        self.assertEqual((target.hp, target.sleeping), (hp, 2))
+        self.assertEqual(scene.spell_damage_popups[0].damage, 0)
+
+    def test_mp_shortage_and_silence_prevent_damage_and_mp_consumption(self):
+        for silenced in (False, True):
+            with self.subTest(silenced=silenced):
+                actor = spellcaster(magic=99, spell_key="FREEZE1", max_mp=2)
+                scene = spell_scene(actor)
+                hp = tuple(m.hp for m in scene.party)
+                scene._begin_monster_spell(actor, scene.spells["FREEZE1"], silenced=silenced)
+                scene._apply_action_results(scene.action_presentation)
+                self.assertEqual(tuple(m.hp for m in scene.party), hp)
+                self.assertEqual(actor.state.mp, 2)
+                self.assertEqual(scene.action_presentation.party_damage_results, ())
 
 
 if __name__ == "__main__":

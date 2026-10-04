@@ -1179,6 +1179,20 @@ class BattleForecast:
                 targets = self.spell_targets(actor, spell)
                 if not spell.to_all:
                     targets = (targets[int(self.roll(actor, 0, 1) * len(targets))],)
+                if spell.to_enemy and spell.action is SpellAction.DAMAGE:
+                    for n in targets:
+                        target = self.actors[n]
+                        result = resolve_spell_damage(
+                            intensity=spell.intensity,
+                            spell_modifier=actor.spec.magic,
+                            target_spell_defense=target.spec.spell_defense,
+                            attribute=spell.attribute,
+                            target_weaknesses=target.spec.weaknesses,
+                            target_resistances=target.spec.resistances,
+                            random_factor=self.roll(actor, target.spec.number, 5),
+                        )
+                        target.damage(result.damage)
+                        target.interrupt_focus()
                 if spell.to_enemy and spell.action in ENEMY_SPELL_ACTIONS:
                     for n in targets:
                         target = self.actors[n]

@@ -19,6 +19,7 @@ class MonsterAction(StrEnum):
     ATTACK = "attack"
     ESCAPE = "escape"
     CHARGE = "charge"
+    CALL = "call"
     IDLE = "idle"
 
 
@@ -68,7 +69,7 @@ def reinforcement_arrives(living_monster_count: int) -> bool:
 def monster_action_candidates(
     *, special_actions: Sequence[MonsterSpecialAction], is_front_row: bool,
     can_attack: bool, can_charge: bool, spell_keys: Sequence[str],
-    escape_eligible: bool,
+    escape_eligible: bool, call_eligible: bool = False,
 ) -> tuple[MonsterActionChoice, ...]:
     """Share candidate construction between live AI and deterministic forecasts."""
 
@@ -77,6 +78,8 @@ def monster_action_candidates(
         candidates.append(MonsterAction.ESCAPE)
     if MonsterSpecialAction.CHARGE in special_actions and can_charge:
         candidates.append(MonsterAction.CHARGE)
+    if MonsterSpecialAction.CALL in special_actions and call_eligible:
+        candidates.append(MonsterAction.CALL)
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     if is_front_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
@@ -94,8 +97,10 @@ def select_monster_action(
     party_actual_attacks: Sequence[int],
     monster_attack: int,
     spell_keys: Sequence[str] = (),
+    call_slot: int | None = None,
+    intelligence: int = 0,
 ) -> MonsterActionChoice | None:
-    """Choose one DA2-style candidate, including ZERO's charge action.
+    """Choose one DA2-style candidate, including call and ZERO's charge.
 
     Escape retains DA2's two-stage eligibility check: a 50% gate, followed
     by comparing one random living member's actual attack against the
@@ -103,7 +108,9 @@ def select_monster_action(
     Eligible specials and each learned spell are then chosen with the same
     weight as a normal attack. A rear-row monster receives one idle candidate
     instead of a normal attack. This basic routine deliberately does not
-    inspect MP or silence state.
+    inspect MP or silence state. Call uses a 3/4 candidate gate below
+    intelligence 2; at intelligence 2 or higher it is forced only when the
+    first available slot is 0 or 1, following DA2's priority rule.
     """
 
     if not isinstance(is_front_row, bool):
@@ -141,10 +148,17 @@ def select_monster_action(
         member_attack = random.choice(tuple(party_actual_attacks))
         if member_attack > monster_attack * random.uniform(1.0, 2.0):
             escape_eligible = True
+    call_eligible = False
+    if MonsterSpecialAction.CALL in specials and call_slot is not None:
+        if intelligence >= 2:
+            if call_slot <= 1:
+                return MonsterAction.CALL
+        else:
+            call_eligible = random.randint(0, 3) > 0
     candidates = monster_action_candidates(
         special_actions=specials, is_front_row=is_front_row,
         can_attack=can_attack, can_charge=can_charge, spell_keys=spell_keys,
-        escape_eligible=escape_eligible,
+        escape_eligible=escape_eligible, call_eligible=call_eligible,
     )
 
     if not candidates:

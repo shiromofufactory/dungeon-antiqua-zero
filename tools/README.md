@@ -102,6 +102,42 @@ npm run tools:image-viewer -- --list
 
 操作は矢印キーでパン、`N`または`Tab`で次の画像、`P`で前の画像、`Q`または`Esc`で終了する。透過色1は市松模様として確認できる。
 
+## 不足モンスター画像の仮版
+
+`content/data/monsters.json` の `image_id` と `content/images/monsters` のPNG/GIFを
+照合し、不足分だけを番号入りの球体PNGとして生成する。Pillowが必要
+（`requirements-tools.txt`）。
+
+```sh
+python3 -B scripts/generate-monster-placeholders.py --check
+python3 -B scripts/generate-monster-placeholders.py
+npm run image-build
+```
+
+画像寸法はJSONの `width` / `height` に従い、球体は短辺に収まる円形とする。
+本番の `app/assets.pyxpal` をそのまま使用し、背景は透過番号1（`#FF0080`）、
+番号は白字・黒縁のピクセル文字で中央に描く。PNG自体に透過指定は付けず、背景を
+パレット番号1の色で塗る。ゲーム描画時の `colkey=1` で透過させる。
+半透明やパレット外色は使わない。
+
+| tribe | 球体の色 | パレット番号（陰影4段階） |
+| --- | --- | --- |
+| ANIMAL | 緑 | 22–25 |
+| UNDEAD | 灰 | 2–5 |
+| GOBLIN | 黄緑 | 26–29 |
+| HUMAN | 肌色 | 38–41 |
+| MAGE | 紫 | 58–61 |
+| GIANT | 橙 | 42–45 |
+| DRAGON | 赤 | 46–49 |
+| ANIMATED | 青 | 10–13 |
+| DEMON | 赤紫 | 54–57 |
+
+既存画像は仮版も含めて上書きしない。生成PNGにはテキストメタ情報
+`da0_placeholder=monster-sphere-v1`、`image_id`、`tribe` を付ける。
+本画像がPNGの場合は同じファイルを置き換え、GIFの場合は対応する仮PNGを削除してから
+追加する（同じ画像IDのPNG/GIFを併存させない）。置き換え後は `npm run image-build` で
+実行時画像へ反映する。共有JSON・Sheets・ゲーム本体の描画処理は変更しない。
+
 ## Map Production Editor
 
 マップチップメタデータ、マップ、イベントの3画面は、単一のローカルWebサーバーと認証セッションで
