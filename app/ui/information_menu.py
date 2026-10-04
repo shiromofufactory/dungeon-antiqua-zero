@@ -203,66 +203,73 @@ def monster_detail_texts(
             DEFAULT_TEXT_COLOR,
         ),
     ]
-    if not fully_identified:
-        lines.extend(
-            (
-                ("", DEFAULT_TEXT_COLOR),
-                (texts.text("monster_book.unidentified", localizer), NEGATIVE_COLOR),
-            )
+    treasure_known = bool(
+        {
+            MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+            MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
+        }.intersection(revealed_fields)
+    )
+    if treasure_known:
+        try:
+            treasure_name = items[
+                monster.treasure_item_key
+            ].localized_name(localizer)
+        except KeyError as error:
+            raise InformationMenuDataError(
+                "モンスターのお宝がアイテムデータにありません: "
+                f"{monster.key}: {monster.treasure_item_key}"
+            ) from error
+        treasure = formatted(
+            "monster_book.treasure",
+            ITEM=treasure_name,
         )
     else:
-        treasure_known = bool(
-            {
-                MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
-                MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
-            }.intersection(revealed_fields)
-        )
-        if treasure_known:
-            try:
-                treasure_name = items[
-                    monster.treasure_item_key
-                ].localized_name(localizer)
-            except KeyError as error:
-                raise InformationMenuDataError(
-                    "モンスターのお宝がアイテムデータにありません: "
-                    f"{monster.key}: {monster.treasure_item_key}"
-                ) from error
-            treasure = formatted(
-                "monster_book.treasure",
-                ITEM=treasure_name,
-            )
-        else:
-            treasure = texts.text("monster_book.treasure_unknown", localizer)
-        lines.extend(
+        treasure = texts.text("monster_book.treasure_unknown", localizer)
+    lines.extend(
+        (
+            (treasure, DEFAULT_TEXT_COLOR),
             (
-                (treasure, DEFAULT_TEXT_COLOR),
-                (
-                    texts.text("monster_book.tolerance", localizer),
-                    DEFAULT_TEXT_COLOR,
-                ),
-                (
-                    monster_affinity_icon_row(monster.resistances),
-                    DEFAULT_TEXT_COLOR,
-                ),
-                (
-                    texts.text("monster_book.weakness", localizer),
-                    DEFAULT_TEXT_COLOR,
-                ),
-                (
-                    monster_affinity_icon_row(monster.weaknesses),
-                    DEFAULT_TEXT_COLOR,
-                ),
-            )
+                texts.text("monster_book.tolerance", localizer),
+                DEFAULT_TEXT_COLOR,
+            ),
+            (
+                monster_affinity_icon_row(monster.resistances),
+                DEFAULT_TEXT_COLOR,
+            ),
+            (
+                texts.text("monster_book.weakness", localizer),
+                DEFAULT_TEXT_COLOR,
+            ),
+            (
+                monster_affinity_icon_row(monster.weaknesses),
+                DEFAULT_TEXT_COLOR,
+            ),
         )
-    return tuple(
-        text_factory.create(
-            text,
-            text_x,
-            first_y + index * row_height,
-            color=color,
-        )
-        for index, (text, color) in enumerate(lines)
     )
+    if not fully_identified:
+        lines.append(
+            (texts.text("monster_book.unidentified", localizer), NEGATIVE_COLOR)
+        )
+    result: list[WindowText] = []
+    affinity_rows = {8: monster.resistances, 10: monster.weaknesses}
+    for index, (text, color) in enumerate(lines):
+        y = first_y + index * row_height
+        if index in affinity_rows and not fully_identified:
+            # Keep each 8px slot fixed even when the language font is wider.
+            for slot, resistance in enumerate(MONSTER_BOOK_ICON_TYPES):
+                if resistance.value not in revealed_fields:
+                    continue
+                tag = resistance.value
+                if resistance not in affinity_rows[index]:
+                    tag += "_DISABLED"
+                result.append(
+                    text_factory.create(
+                        f"%{tag}%", text_x + 2 + slot * 2, y, color=color,
+                    )
+                )
+        else:
+            result.append(text_factory.create(text, text_x, y, color=color))
+    return tuple(result)
 
 
 class InformationMenuOverlay:

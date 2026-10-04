@@ -696,6 +696,39 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertEqual(game.save_data.logs[0]["message_id"], "sample.new")
         self.assertEqual(game.save_data.logs[-1]["message_id"], "sample.old18")
 
+    @patch("game.EventMessageOverlay")
+    def test_repeated_message_moves_to_front_without_evicting_other_logs(
+        self, _event_message_overlay: Mock,
+    ) -> None:
+        game = Game.__new__(Game)
+        effect = MessageEffect("sample.old5")
+        game.event_runner = Mock(advance=Mock(return_value=effect))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.settings = Settings()
+        game.event_messages = Mock()
+        game.fonts = Mock()
+        game.faces = Mock()
+        game.character_face_positions = {}
+        logs = [
+            {"message_id": f"sample.old{index}", "arguments": {}}
+            for index in range(20)
+        ]
+        game.save_data = SaveData(logs=list(logs))
+        game._continue_event()
+        self.assertEqual(game.save_data.logs, [logs[5]] + logs[:5] + logs[6:])
+        game._continue_event()
+        self.assertEqual(len(game.save_data.logs), 20)
+        self.assertEqual(game.save_data.logs[-1], logs[-1])
+
+        # Remove all old duplicates, while preserving different arguments.
+        game.save_data.logs = [logs[5], logs[0], logs[5], {
+            "message_id": "sample.old5", "arguments": {"VALUE": 1},
+        }]
+        game._continue_event()
+        self.assertEqual(game.save_data.logs, [logs[5], logs[0], {
+            "message_id": "sample.old5", "arguments": {"VALUE": 1},
+        }])
+
     def test_closing_event_shop_defers_event_resume_until_fade_finishes(self) -> None:
         game = Game.__new__(Game)
         effect = OpenShopEffect("FAIRY_HAMLET_ITEMS")

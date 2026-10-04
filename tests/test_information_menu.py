@@ -416,7 +416,49 @@ class InformationMenuOverlayTest(unittest.TestCase):
         self.assertIn("？？？？", detail[4])
         self.assertIn("？？？？", detail[5])
         self.assertIn("しきべつ　されていません", detail)
-        self.assertFalse(any("おたから" in text for text in detail))
+        self.assertIn("おたから：？？？？", detail)
+        self.assertIn("%FIRE_DISABLED%", detail)
+        self.assertFalse(any("%FREEZE" in text for text in detail))
+
+    def test_partial_affinities_keep_fixed_slots_in_every_language(self) -> None:
+        monster = next(
+            monster for monster in load_monsters()
+            if ResistanceType.FIRE in monster.weaknesses
+        )
+        for language in Language:
+            with self.subTest(language=language):
+                overlay = self.create_overlay(
+                    {monster.key: {"FIRE", "DARK"}}, language=language,
+                )
+                self.open_monster_book(overlay)
+                icons = [
+                    text for text in overlay.monster_detail_window.texts
+                    if text.text.startswith("%")
+                ]
+                self.assertEqual(len(icons), 4)
+                self.assertEqual([text.x for text in icons], [4, 8, 4, 8])
+                for text, resistance in zip(icons, (
+                    ResistanceType.FIRE, ResistanceType.DARK,
+                    ResistanceType.FIRE, ResistanceType.DARK,
+                )):
+                    affinities = monster.resistances if text.y == 26 else monster.weaknesses
+                    suffix = "" if resistance in affinities else "_DISABLED"
+                    self.assertEqual(text.text, f"%{resistance.value}{suffix}%")
+
+    def test_unidentified_monster_shows_known_treasure(self) -> None:
+        monster = load_monsters()[0]
+        for flag in (
+            MONSTER_TREASURE_IDENTIFIED_FIELD_KEY,
+            MONSTER_TREASURE_ACQUIRED_FIELD_KEY,
+        ):
+            with self.subTest(flag=flag):
+                overlay = self.create_overlay({monster.key: {flag}})
+                self.open_monster_book(overlay)
+                detail = [text.text for text in overlay.monster_detail_window.texts]
+                treasure = overlay.items[monster.treasure_item_key].localized_name(overlay.localizer)
+                self.assertIn(f"おたから：{treasure}", detail)
+                self.assertIn("？？？？", detail[4])
+                self.assertFalse(any(text.startswith("%") for text in detail))
 
     def test_complete_record_shows_level_stats_affinities_and_unknown_treasure(
         self,

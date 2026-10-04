@@ -3155,9 +3155,11 @@ class Game:
                     faces=self.faces,
                     face_positions=self.character_face_positions,
                 )
-                self.save_data.logs.insert(
-                    0, {"message_id": effect.message_id, "arguments": {}}
-                )
+                entry = {"message_id": effect.message_id, "arguments": {}}
+                self.save_data.logs[:] = [
+                    log for log in self.save_data.logs if log != entry
+                ]
+                self.save_data.logs.insert(0, entry)
                 del self.save_data.logs[20:]
                 return
             if isinstance(effect, (MovePartyEffect, MoveActorEffect)):
