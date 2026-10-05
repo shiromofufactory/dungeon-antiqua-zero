@@ -144,6 +144,29 @@ class MapResourcesTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_preview_names_use_site_destinations_and_area_parents_without_atlases(self) -> None:
+        resources = MapResources(self.maps_dir, pyxel_api=self.pyxel)
+        world = resources.map("test_map")
+        for map_id, runtime in (
+            ("town_floor", {"area_parent_id": "sample_town"}),
+            ("sample_town_area_previous", {}),
+            ("unknown_floor", {"area_parent_id": "unknown_dungeon"}),
+            ("broken_map", []),
+        ):
+            (self.maps_dir / f"{map_id}.json").write_text(json.dumps(runtime))
+        (self.maps_dir / "bad_json.json").write_text("{")
+
+        keys = resources.location_text_keys(world)
+
+        self.assertEqual(keys["test_map"], "location.worldmap")
+        self.assertEqual(keys["sample_town"], "location.sample_town")
+        self.assertEqual(keys["town_floor"], "location.sample_town")
+        self.assertEqual(keys["sample_town_area_previous"], "location.sample_town")
+        self.assertEqual(keys["unknown_floor"], "location.unknown_dungeon")
+        self.assertNotIn("broken_map", keys)
+        self.assertNotIn("bad_json", keys)
+        self.assertEqual(len(self.pyxel.images), 1)
+
     def test_loads_atlas_collision_objects_and_animation(self) -> None:
         resources = MapResources(self.maps_dir, pyxel_api=self.pyxel)
 
@@ -243,6 +266,20 @@ class MapResourcesTest(unittest.TestCase):
         self.assertEqual(loaded.random_encounter.danger, "low")
         self.assertEqual(loaded.random_encounter.polarity, "neutral")
         self.assertTrue(loaded.random_encounter.allow_demons)
+        self.assertTrue(loaded.random_encounter.enabled)
+
+        self.runtime["random_encounter"]["enabled"] = False
+        self._write_runtime()
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.assertFalse(loaded.random_encounter.enabled)
+        self.assertEqual(loaded.random_encounter.monster_level, "dynamic")
+        for enabled in (0, "false", None):
+            with self.subTest(enabled=enabled):
+                self.runtime["random_encounter"]["enabled"] = enabled
+                self._write_runtime()
+                with self.assertRaisesRegex(MapResourceError, "random_encounter.enabled"):
+                    MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.runtime["random_encounter"]["enabled"] = True
 
         self.runtime["random_encounter"].update(
             {"monster_level": 9, "danger": "high", "polarity": "yin"}

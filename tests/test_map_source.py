@@ -55,6 +55,15 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(first["sites"], [])
         self.assertEqual(first["arrival_points"], [])
 
+    def test_preserves_area_parent_for_runtime_location_names(self) -> None:
+        source = initial_map_source("test_world_area_a", self.tileset, "world", 16, 15)
+        source["area_parent_id"] = "test_world"
+        source["area_name"] = "追加エリア"
+
+        compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
+
+        self.assertEqual(compiled.runtime["area_parent_id"], "test_world")
+
     def test_requires_at_least_one_screen_and_uses_first_ground_as_town_edge(self) -> None:
         town_tileset = initial_tileset(
             "village",
@@ -258,6 +267,7 @@ class MapSourceTest(unittest.TestCase):
         self.assertEqual(
             source["random_encounter"],
             {
+                "enabled": True,
                 "monster_level": "dynamic",
                 "danger": "low",
                 "polarity": "neutral",
@@ -296,6 +306,22 @@ class MapSourceTest(unittest.TestCase):
             compiled.runtime["random_encounter"],
             source["random_encounter"],
         )
+
+        source["random_encounter"]["enabled"] = False
+        compiled = compile_map(
+            source, dungeon_tileset, self.image_path, self.palette_path,
+        )
+        self.assertEqual(
+            compiled.runtime["random_encounter"], source["random_encounter"],
+        )
+        self.assertFalse(resolve_map(source, dungeon_tileset)["random_encounter"]["enabled"])
+        for enabled in (0, "false", None):
+            with self.subTest(enabled=enabled):
+                source["random_encounter"]["enabled"] = enabled
+                self.assertIn(
+                    "invalid_encounter_enabled",
+                    {item.code for item in validate_map_source(source, dungeon_tileset)},
+                )
 
         source["random_encounter"] = {
             "monster_level": 0,

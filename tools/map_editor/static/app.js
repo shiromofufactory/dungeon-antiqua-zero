@@ -27,6 +27,7 @@ const state = {
   destinationOptions: [],
   siteOptions: [],
   eventOptions: [],
+  eventNotes: {},
   itemOptions: [],
   bgmOptions: [],
   actorAssets: {},
@@ -269,8 +270,11 @@ function renderMapSelector() {
   select.disabled = roots.length === 0;
   const areaSelect = byId("area-select");
   const rootId = logicalMapId();
-  const areas = records.filter((item) => item.map_id === rootId || item.area_parent_id === rootId);
-  areaSelect.innerHTML = areas.map((item) => `<option value="${escapeHtml(item.map_id)}" ${item.map_id === state.data?.map_id ? "selected" : ""}>${escapeHtml(item.area_name || (item.map_id === rootId ? "メイン" : item.map_id))}${item.dirty || item.is_new ? "（未保存）" : ""}</option>`).join("");
+  const areaName = (item) => item.area_name || (item.map_id === rootId ? "メイン" : item.map_id);
+  const areas = records.filter((item) => item.map_id === rootId || item.area_parent_id === rootId)
+    .sort((left, right) => areaName(left).localeCompare(areaName(right), "ja", { numeric: true })
+      || left.map_id.localeCompare(right.map_id));
+  areaSelect.innerHTML = areas.map((item) => `<option value="${escapeHtml(item.map_id)}" ${item.map_id === state.data?.map_id ? "selected" : ""}>${escapeHtml(areaName(item))}${item.dirty || item.is_new ? "（未保存）" : ""}</option>`).join("");
   areaSelect.disabled = areas.length < 2;
   const persisted = state.data && state.mapCatalog.some((item) => item.map_id === state.data.map_id);
   const alternatives = state.tilesetCatalog.filter((item) => item.profile === state.data?.profile && item.tileset_id !== state.data?.tileset_id);
@@ -303,6 +307,7 @@ function applyDocumentPayload(payload) {
   state.destinationOptions = payload.destination_options;
   state.siteOptions = payload.site_options;
   state.eventOptions = payload.event_options;
+  state.eventNotes = payload.event_notes || {};
   state.itemOptions = payload.item_options || [];
   state.bgmOptions = payload.bgm_options || [];
   state.actorAssets = payload.actor_assets || {};
@@ -797,7 +802,7 @@ function renderPalette() {
           <button class="button small ${state.groundTool === "brush" ? "secondary" : "ghost"}" type="button" data-action="select-ground-tool" data-tool="brush" aria-pressed="${state.groundTool === "brush"}">ブラシ</button>
           <button class="button small ${state.groundTool === "rectangle" ? "secondary" : "ghost"}" type="button" data-action="select-ground-tool" data-tool="rectangle" aria-pressed="${state.groundTool === "rectangle"}">矩形塗り</button>
         </div>
-        <p class="subtle" style="margin-bottom:9px">${state.groundTool === "rectangle" ? "左ドラッグした矩形をまとめて塗ります。" : "左ドラッグで通過したセルを塗ります。"}</p>
+        <p class="subtle" style="margin-bottom:9px">${state.groundTool === "rectangle" ? "左ドラッグした矩形をまとめて塗ります。" : "左ドラッグで通過したセルを塗ります。"}外周はベース地面のみ塗れます。</p>
         <div class="palette-list">${state.tileset.grounds.map((ground, index) => `
           <button class="palette-item ${ground.id === state.groundId ? "active" : ""}" type="button" data-action="select-ground" data-id="${escapeHtml(ground.id)}">
             <canvas data-ground-thumb="${index}" width="48" height="48"></canvas><span>${escapeHtml(ground.id)}</span>
@@ -849,7 +854,7 @@ function renderPalette() {
       <div class="section">
         <div class="section-title"><h2>トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
         <div class="travel-list">${standaloneTriggers().map((trigger) => `
-          <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / ${trigger.activations.join(", ")}</button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
+          <button class="travel-item ${trigger.id === state.selectedTriggerId ? "active" : ""}" type="button" data-action="select-trigger" data-id="${escapeHtml(trigger.id)}"><strong>${escapeHtml(trigger.event_id)}</strong><span class="event-note">${escapeHtml(eventNote(trigger.event_id) || "メモなし")}</span></button>`).join("") || `<div class="empty-state">トリガーがありません。</div>`}</div>
         <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="prepare-cell-trigger">セルtrigger</button><button class="button ghost small" type="button" data-action="prepare-object-trigger" ${state.data.objects.length ? "" : "disabled"}>object trigger</button></div>
       </div>`;
   }
@@ -900,10 +905,18 @@ function standaloneTriggers() {
   return state.data?.event_triggers?.filter((trigger) => trigger.anchor?.kind !== "actor") || [];
 }
 
+function eventNote(eventId) {
+  return state.eventNotes?.[eventId]?.trim() || "";
+}
+
 function eventIdOptions(selected) {
   const ids = [...state.eventOptions];
   if (selected && !ids.includes(selected)) ids.push(selected);
-  return `<option value="" ${selected ? "" : "selected"}>イベントを選択</option>` + ids.map((id) => `<option value="${escapeHtml(id)}" ${id === selected ? "selected" : ""}>${escapeHtml(id)}${state.eventOptions.includes(id) ? "" : "（未定義）"}</option>`).join("");
+  return `<option value="" ${selected ? "" : "selected"}>イベントを選択</option>` + ids.map((id) => {
+    const characters = Array.from(eventNote(id).replace(/\s+/g, " "));
+    const summary = characters.slice(0, 20).join("") + (characters.length > 20 ? "…" : "");
+    return `<option value="${escapeHtml(id)}" ${id === selected ? "selected" : ""}>${escapeHtml(id)}${summary ? ` — ${escapeHtml(summary)}` : ""}${state.eventOptions.includes(id) ? "" : "（未定義）"}</option>`;
+  }).join("");
 }
 
 function treasureItemOptions(selected) {
@@ -955,9 +968,13 @@ function availableDestinations() {
   }));
   const current = options.find((option) => option.map_id === state.data.map_id);
   const arrivalIds = state.data.arrival_points.map((arrival) => arrival.id);
-  if (current) current.arrival_ids = arrivalIds;
-  else options.push({ map_id: state.data.map_id, label: state.data.area_name ? `${logicalMapId()} / ${state.data.area_name}` : state.data.map_id, arrival_ids: arrivalIds });
-  return options.sort((left, right) => left.map_id.localeCompare(right.map_id));
+  const currentLabel = state.data.area_name ? `${logicalMapId()} / ${state.data.area_name}` : state.data.map_id;
+  if (current) {
+    current.arrival_ids = arrivalIds;
+    current.label = currentLabel;
+  } else options.push({ map_id: state.data.map_id, label: currentLabel, arrival_ids: arrivalIds });
+  return options.sort((left, right) => left.label.localeCompare(right.label, "ja", { numeric: true })
+    || left.map_id.localeCompare(right.map_id));
 }
 
 function destinationMapOptions(selected) {
@@ -1073,7 +1090,7 @@ function renderInspector() {
     </div>
     <div class="section">
       <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
-      ${trigger ? `<div class="instance-card"><strong>${escapeHtml(trigger.event_id)}</strong>anchor: ${escapeHtml(trigger.anchor.kind)} / 対象 ${trigger.offsets.length}セル</div>
+      ${trigger ? `<div class="instance-card"><strong>${escapeHtml(trigger.event_id)}</strong><span class="event-note">${escapeHtml(eventNote(trigger.event_id) || "メモなし")}</span></div>
         <div class="form-grid" style="margin-top:9px">
           <div class="field full"><label>イベント</label><select data-trigger-field="event_id">${eventIdOptions(trigger.event_id)}</select></div>
           <div class="field full"><label>発火方法</label><div class="row">${["step","touch"].map(value => `<label><input type="checkbox" data-trigger-activation="${value}" ${trigger.activations.includes(value) ? "checked" : ""}> ${value}</label>`).join("")}</div></div>
@@ -1858,6 +1875,9 @@ function rightClickWithEscape(event) {
 }
 
 function paintGround(x, y) {
+  const [width, height] = state.data.size;
+  const isEdge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+  if (isEdge && state.groundId !== state.tileset.grounds[0].id) return false;
   if (state.data.grounds[y][x] === state.groundId) return false;
   state.data.grounds[y][x] = state.groundId;
   return true;
@@ -2469,6 +2489,7 @@ function resizeMap() {
 function openRandomEncounterDialog() {
   if (state.data?.profile !== "dungeon") return;
   const settings = state.data.random_encounter;
+  byId("encounter-enabled").value = String(settings.enabled !== false);
   byId("encounter-monster-level").value = String(settings.monster_level);
   byId("encounter-danger").value = settings.danger;
   byId("encounter-polarity").value = settings.polarity;
@@ -2476,7 +2497,17 @@ function openRandomEncounterDialog() {
   byId("encounter-allow-humans").checked = settings.allow_humans;
   byId("encounter-allow-giants").checked = settings.allow_giants;
   byId("encounter-allow-large-animals").checked = settings.allow_large_animals;
+  updateRandomEncounterControls();
   byId("random-encounter-dialog").showModal();
+}
+
+function updateRandomEncounterControls() {
+  const disabled = byId("encounter-enabled").value === "false";
+  for (const id of [
+    "encounter-monster-level", "encounter-danger", "encounter-polarity",
+    "encounter-allow-demons", "encounter-allow-humans", "encounter-allow-giants",
+    "encounter-allow-large-animals",
+  ]) byId(id).disabled = disabled;
 }
 
 function handleInspectorAction(element) {
@@ -2882,6 +2913,7 @@ byId("change-map-tileset-form").addEventListener("submit", async (event) => {
     showToast(error.message, true);
   }
 });
+byId("encounter-enabled").addEventListener("change", updateRandomEncounterControls);
 byId("random-encounter-dialog").addEventListener("click", (event) => {
   if (event.target === event.currentTarget || event.target.dataset.action === "close-random-encounter-dialog") byId("random-encounter-dialog").close();
 });
@@ -2889,6 +2921,7 @@ byId("random-encounter-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const monsterLevelValue = byId("encounter-monster-level").value;
   const nextSettings = {
+    enabled: byId("encounter-enabled").value === "true",
     monster_level: monsterLevelValue === "dynamic" ? "dynamic" : Number(monsterLevelValue),
     danger: byId("encounter-danger").value,
     polarity: byId("encounter-polarity").value,

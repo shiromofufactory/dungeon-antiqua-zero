@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../tools/event_editor/static/app.js', import.meta.url), 'utf8');
-const names = ['snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize', 'currentFlag', 'currentMission', 'currentEvent', 'currentMessage', 'listForKind', 'moveListItem', 'commandAt', 'conditionAt', 'defaultCondition', 'newMissionMessage', 'uniqueId', 'requestBody', 'renderMissionEditor', 'renderCondition', 'field', 'options', 'fullFlags', 'messageIds', 'renderMessagePreview'];
+const names = ['snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize', 'currentFlag', 'currentMission', 'currentEvent', 'currentMessage', 'listForKind', 'moveListItem', 'commandAt', 'conditionAt', 'defaultCondition', 'newMissionMessage', 'uniqueId', 'requestBody', 'renderMissionEditor', 'renderCondition', 'field', 'options', 'noteSummary', 'flagOptions', 'fullFlags', 'messageIds', 'renderMessagePreview'];
 const declarations = names.map((name) => {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1);

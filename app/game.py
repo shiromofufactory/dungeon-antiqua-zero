@@ -647,6 +647,7 @@ class Game:
         self.start_screen: StartMenuOverlay | None = StartMenuOverlay(
             summaries=self.save_repository.summaries(),
             autosave_summary=self.save_repository.summary(AUTO_SAVE_SLOT),
+            location_text_keys=self.map_resources.location_text_keys(self.world_map),
             settings=self.settings,
             texts=self.texts,
             fonts=self.fonts,
@@ -709,6 +710,9 @@ class Game:
 
         current_map = getattr(self, "current_map", None)
         if getattr(current_map, "profile", None) != "dungeon":
+            return False
+        settings = current_map.random_encounter
+        if settings is None or not settings.enabled:
             return False
         threshold = ENCOUNTER_THRESHOLD * (
             FIELD_FADE_ENCOUNTER_MULTIPLIER
@@ -2580,6 +2584,7 @@ class Game:
         self.command_cursor.active = False
         self.save_screen = SaveMenuOverlay(
             summaries=self.save_repository.summaries(),
+            location_text_keys=self.map_resources.location_text_keys(self.world_map),
             current_slot=self.current_save_slot,
             settings=self.settings,
             texts=self.texts,

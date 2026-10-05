@@ -288,6 +288,7 @@ class SaveSystemTest(unittest.TestCase):
                 ("Fiora", "Cerion"),
             )
             self.assertEqual(summary.dead_character_keys, ())
+            self.assertEqual(summary.map_id, "worldmap")
             self.assertEqual(
                 json.loads(repository.slot_path(SAVE_SLOT_COUNT).read_text()),
                 document,
@@ -299,6 +300,27 @@ class SaveSystemTest(unittest.TestCase):
             self.assertEqual(len(summaries), SAVE_SLOT_COUNT)
             self.assertFalse(summaries[0].occupied)
             self.assertEqual(summaries[-1], summary)
+
+    def test_preview_reads_legacy_locations_and_tolerates_invalid_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            for version in (1, 2):
+                document = self.save_document()
+                document["format_version"] = version
+                for location in (
+                    {"map_id": "forest_nector"},
+                    None, {}, {"map_id": ""}, {"map_id": 123},
+                ):
+                    with self.subTest(version=version, location=location):
+                        document["location"] = location
+                        repository.slot_path(1).write_text(json.dumps(document))
+                        summary = repository.summary(1)
+                        self.assertTrue(summary.occupied)
+                        self.assertEqual(summary.party_character_keys, ("Fiora", "Cerion"))
+                        self.assertEqual(
+                            summary.map_id,
+                            "forest_nector" if location == {"map_id": "forest_nector"} else None,
+                        )
 
     def test_autosave_uses_slot_zero_and_cannot_be_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

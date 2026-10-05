@@ -106,6 +106,7 @@ input[type="number"], input[type="text"], select { width: 100%; min-width: 0; pa
 .map-resource-action-buttons { margin-top: 10px; }
 .instance-card { padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font-size: 12px; }
 .instance-card strong { display: block; margin-bottom: 3px; color: var(--accent); }
+.event-note { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty-state { padding: 17px 10px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 7px; font-size: 12px; }
 .issues-heading { display: flex; align-items: center; justify-content: space-between; padding: 13px 12px 0; border-top: 1px solid var(--line); }
 .issues { padding: 8px 12px 14px; }

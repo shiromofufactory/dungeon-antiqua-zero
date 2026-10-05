@@ -13,7 +13,7 @@ if __package__ == "ui":
     from localization import Localizer, ascii_to_fullwidth, format_number
     from member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
     from rendering import MONOCHROME_PALETTE, PaletteShifter
-    from resources import FontResources, TRANSPARENT_INDEX, play_se
+    from resources import FontResources, FontRole, TRANSPARENT_INDEX, play_se
     from state import Language, Settings
     from systems import SAVE_SLOT_COUNT, SaveSlotSummary
     from text_catalog import TextCatalog
@@ -22,7 +22,7 @@ else:
     from ..localization import Localizer, ascii_to_fullwidth, format_number
     from ..member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
     from ..rendering import MONOCHROME_PALETTE, PaletteShifter
-    from ..resources import FontResources, TRANSPARENT_INDEX, play_se
+    from ..resources import FontResources, FontRole, TRANSPARENT_INDEX, play_se
     from ..state import Language, Settings
     from ..systems import SAVE_SLOT_COUNT, SaveSlotSummary
     from ..text_catalog import TextCatalog
@@ -36,10 +36,12 @@ from .shop_party import (
 from .text_layout import right_aligned_grid_x
 from .window import (
     DEFAULT_TEXT_COLOR,
+    TEXT_GRID_X,
     CursorTarget,
     Window,
     WindowCursor,
     WindowFactory,
+    WindowText,
 )
 
 SAVE_VISIBLE_SLOT_COUNT = 3
@@ -47,12 +49,14 @@ SAVE_MESSAGE_WINDOW_GRID = (0, 0, 64, 6)
 SAVE_SLOT_WINDOW_GRID = (0, 6, 64, 18)
 SAVE_SLOT_WINDOW_HEIGHT = SAVE_SLOT_WINDOW_GRID[3]
 SAVE_SLOT_TEXT_Y = 2
-SAVE_SLOT_TEXT_X = 6
-SAVE_SLOT_DATE_RIGHT_X = 60
-SAVE_SLOT_CURSOR_X = 4
+SAVE_SLOT_TEXT_X = 4
+SAVE_SLOT_DATE_Y = 5
+SAVE_SLOT_LOCATION_RIGHT_X = 60
+SAVE_SLOT_LOCATION_Y = 2
+SAVE_SLOT_CURSOR_X = 2
 SAVE_FACE_COUNT = BATTLE_PARTY_MEMBER_COUNT
 SAVE_FACE_COLUMN_WIDTH = SHOP_PARTY_COLUMN_WIDTH
-SAVE_FACE_Y_OFFSET = 7
+SAVE_FACE_Y_OFFSET = 8
 SAVE_FACE_SIZE = SHOP_PARTY_FACE_SIZE
 SAVE_FACE_ROW_WIDTH = SAVE_FACE_SIZE + (SAVE_FACE_COUNT - 1) * SAVE_FACE_COLUMN_WIDTH
 SAVE_FACE_FIRST_X = (SAVE_SLOT_WINDOW_GRID[2] * 4 - SAVE_FACE_ROW_WIDTH) // 2
@@ -94,6 +98,49 @@ def format_saved_at(value: str | None) -> str:
     return timestamp.strftime("%Y/%m/%d %H:%M")
 
 
+def save_location_text(
+    summary: SaveSlotSummary,
+    *,
+    location_text_keys: Mapping[str, str],
+    texts: TextCatalog,
+    localizer: Localizer,
+    text_factory: LocalizedWindowTextFactory,
+    slot_label: WindowText,
+) -> WindowText | None:
+    """Place a saved map's localized name beside its slot label."""
+
+    if not summary.occupied or summary.map_id is None:
+        return None
+    name = texts.text(
+        location_text_keys.get(summary.map_id, f"location.{summary.map_id}"),
+        localizer,
+        default=summary.map_id,
+    )
+    placement = text_factory.create(name, 0, SAVE_SLOT_LOCATION_Y)
+    label_right = slot_label.x * TEXT_GRID_X + slot_label.font.text_width(slot_label.text)
+    max_width = SAVE_SLOT_LOCATION_RIGHT_X * TEXT_GRID_X - label_right - 8
+    if placement.font.text_width(placement.text) > max_width:
+        shortened = placement.text
+        suffix = "．．．"
+        while placement.font.text_width(shortened + suffix) > max_width:
+            shortened = shortened[:-1]
+        placement = replace(placement, text=shortened + suffix)
+    x = right_aligned_grid_x(
+        placement.text,
+        reference_text="",
+        reference_x=SAVE_SLOT_LOCATION_RIGHT_X,
+        font=placement.font,
+    )
+    return replace(
+        placement,
+        x=x,
+        pixel_offset_x=(
+            (SAVE_SLOT_LOCATION_RIGHT_X - x) * TEXT_GRID_X
+            - placement.font.text_width(placement.text)
+        ),
+    )
+
+
 class SaveMenuOverlay:
     """Select and write manual save slots without restoring game state."""
 
@@ -107,6 +154,7 @@ class SaveMenuOverlay:
         fonts: FontResources,
         faces: object,
         face_positions: Mapping[str, FacePosition],
+        location_text_keys: Mapping[str, str] | None = None,
         palette_shifter: PaletteShifter | None = None,
         on_save: Callable[[int], SaveSlotSummary | None],
         on_invalid_action: Callable[[], None] | None = None,
@@ -141,6 +189,7 @@ class SaveMenuOverlay:
         self.fonts = fonts
         self.faces = faces
         self.face_positions = dict(face_positions)
+        self.location_text_keys = dict(location_text_keys or {})
         self.palette_shifter = palette_shifter
         self.on_save = on_save
         self.on_invalid_action = on_invalid_action
@@ -154,9 +203,14 @@ class SaveMenuOverlay:
             fonts,
             settings.language,
         )
-        self.date_text_factory = LocalizedWindowTextFactory.from_language(
+        self.location_text_factory = LocalizedWindowTextFactory.from_language(
             fonts,
-            Language.JAPANESE,
+            settings.language,
+            role=FontRole.LARGE,
+        )
+        self.date_text_factory = LocalizedWindowTextFactory(
+            font=fonts.font_for(Language.ENGLISH),
+            baseline_offset=fonts.baseline_offset_for(Language.ENGLISH),
         )
         self.window_factory = WindowFactory(fonts.font_for(Language.JAPANESE))
         self.selected_slot = self._initial_slot()
@@ -227,25 +281,25 @@ class SaveMenuOverlay:
             if saved_at:
                 date_text = self.date_text_factory.create(
                     ascii_to_fullwidth(saved_at),
-                    0,
-                    SAVE_SLOT_TEXT_Y,
+                    SAVE_SLOT_TEXT_X,
+                    SAVE_SLOT_DATE_Y,
                     color=(
                         POSITIVE_COLOR
                         if summary.slot == latest_slot
                         else DEFAULT_TEXT_COLOR
                     ),
                 )
-                slot_texts.append(
-                    replace(
-                        date_text,
-                        x=right_aligned_grid_x(
-                            date_text.text,
-                            reference_text="",
-                            reference_x=SAVE_SLOT_DATE_RIGHT_X,
-                            font=date_text.font,
-                        ),
-                    )
-                )
+                slot_texts.append(date_text)
+            location_text = save_location_text(
+                summary,
+                location_text_keys=self.location_text_keys,
+                texts=self.texts,
+                localizer=self.localizer,
+                text_factory=self.location_text_factory,
+                slot_label=slot_texts[0],
+            )
+            if location_text is not None:
+                slot_texts.append(location_text)
             x, first_y, width, height = SAVE_SLOT_WINDOW_GRID
             slot_window = self.window_factory.create(
                 x,
@@ -457,10 +511,13 @@ __all__ = [
     "SAVE_FACE_SIZE",
     "SAVE_MESSAGE_WINDOW_GRID",
     "SAVE_SLOT_COUNT",
-    "SAVE_SLOT_DATE_RIGHT_X",
+    "SAVE_SLOT_DATE_Y",
+    "SAVE_SLOT_LOCATION_RIGHT_X",
+    "SAVE_SLOT_LOCATION_Y",
     "SAVE_SLOT_WINDOW_GRID",
     "SAVE_VISIBLE_SLOT_COUNT",
     "SaveMenuDataError",
     "SaveMenuOverlay",
     "format_saved_at",
+    "save_location_text",
 ]

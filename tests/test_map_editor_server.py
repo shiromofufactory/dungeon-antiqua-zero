@@ -169,14 +169,21 @@ class MapEditorServerTest(unittest.TestCase):
         )["data"]
         area_map_id = area["map_id"]
         area["random_encounter"]["danger"] = "high"
+        area["random_encounter"]["enabled"] = False
         self.assertTrue(self.application.save(area, {})["saved"])
+        self.assertTrue(load_map_source(self.application.source_path_for("cave"))["random_encounter"]["enabled"])
+        self.assertFalse(load_map_source(self.application.source_path_for(area_map_id))["random_encounter"]["enabled"])
         self.assertEqual(load_map_source(self.application.source_path_for("cave"))["random_encounter"]["danger"], "low")
         self.assertEqual(load_map_source(self.application.source_path_for(area_map_id))["random_encounter"]["danger"], "high")
         runtime = json.loads(self.application.runtime_path_for(area_map_id).read_text(encoding="utf-8"))
         self.assertEqual(runtime["map_id"], area_map_id)
         self.assertEqual(runtime["size"], [32, 20])
         self.assertEqual(runtime["random_encounter"]["danger"], "high")
+        self.assertFalse(runtime["random_encounter"]["enabled"])
         self.assertEqual(runtime["bgm_id"], root["bgm_id"])
+        root["random_encounter"]["danger"] = "high"
+        self.assertTrue(self.application.save(root, {})["saved"])
+        self.assertFalse(load_map_source(self.application.source_path_for(area_map_id))["random_encounter"]["enabled"])
 
     def test_renaming_area_arrival_updates_source_and_compiled_move_sources(self) -> None:
         tileset = self.application.load_tileset("village")
@@ -348,6 +355,8 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn('id="ground-only-toggle"', page)
         self.assertIn('data-map-field="bgm_id"', script)
         self.assertIn('id="random-encounter-dialog"', page)
+        self.assertIn('id="encounter-enabled"', page)
+        self.assertIn('value="false">エンカウントなし</option>', page)
         self.assertIn('id="encounter-monster-level"', page)
         self.assertIn('id="encounter-danger"', page)
         self.assertIn('id="encounter-polarity"', page)

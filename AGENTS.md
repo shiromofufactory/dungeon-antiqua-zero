@@ -118,8 +118,10 @@
 - 強制割り込みゲームメニューは `python3 -B -m unittest tests.test_game_menu tests.test_input tests.test_audio_resources` で停止・復帰・BGM保持を回帰検証する。
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。
 - フィールド待機時の操作ナビは `python3 -B -m unittest tests.test_field_menu_guide` で待機時間・入力種別・表示抑止を回帰検証する。
+- フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。
+- マップエディタの地面外周保護・矩形塗り・Undoは `node --test tests/test_map_editor_grounds.mjs` で回帰検証する。
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。
 - マップチップエディタのオブジェクト一覧・レイヤー絞り込み・新規作成・並び替えは `node --test tests/test_mapchip_objects.mjs` で回帰検証する。
 - ビルドや配布物の生成は、ユーザーが依頼した範囲でのみ行う。

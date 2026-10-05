@@ -31,7 +31,7 @@ HUMAN_MAGE_TRIBES = frozenset((MonsterTribe.HUMAN, MonsterTribe.MAGE))
 
 
 class EncounterGenerationError(RuntimeError):
-    """Raised when map settings leave no monster for the first formation group."""
+    """Raised when encounters are disabled or the first group has no candidate."""
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,8 @@ class EncounterSystem:
 
         if not isinstance(settings, MapRandomEncounter):
             raise TypeError("encounter settings must be a MapRandomEncounter")
+        if not settings.enabled:
+            raise EncounterGenerationError("random encounters are disabled")
         if not monsters or not all(
             isinstance(monster, MonsterDefinition) for monster in monsters
         ):

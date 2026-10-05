@@ -81,6 +81,7 @@ from resources import (
     MapResourceError,
     MapArrivalPoint,
     MapDestination,
+    MapRandomEncounter,
     WorldSite,
 )
 from rendering import (
@@ -93,7 +94,7 @@ from rendering import (
 )
 from scenes import BattlePhase, BattleResult
 from state import DisplayMode, Language, SaveData, Settings
-from systems import AUTO_SAVE_SLOT, InventorySystem, SaveSystemError
+from systems import AUTO_SAVE_SLOT, EncounterSystem, InventorySystem, SaveSystemError
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
@@ -108,6 +109,36 @@ from world_sites import WorldSiteCatalog
 
 
 class GameTest(unittest.TestCase):
+    def test_disabled_floor_preserves_encounter_count_and_enabled_floor_resumes(self) -> None:
+        game = Game.__new__(Game)
+        random_source = Mock()
+        random_source.randint.return_value = 1
+        game.encounter_system = EncounterSystem(random_source=random_source)
+        game._begin_random_encounter = Mock()
+        options = {
+            "monster_level": "dynamic", "danger": "low", "polarity": "neutral",
+            "allow_demons": False, "allow_humans": False,
+            "allow_giants": False, "allow_large_animals": False,
+        }
+        game.current_map = Mock(
+            profile="dungeon", random_encounter=MapRandomEncounter(**options, enabled=False),
+        )
+        for count, fade_active in ((119, False), (240, True)):
+            with self.subTest(count=count, fade_active=fade_active):
+                game.save_data = SaveData(encounter_count=count)
+                game.field_fade_active = fade_active
+                self.assertFalse(game._advance_random_encounter())
+                self.assertEqual(game.save_data.encounter_count, count)
+                random_source.randint.assert_not_called()
+                game._begin_random_encounter.assert_not_called()
+
+        game.current_map.random_encounter = MapRandomEncounter(**options)
+        game.save_data.encounter_count = 119
+        game.field_fade_active = False
+        self.assertTrue(game._advance_random_encounter())
+        self.assertEqual(game.save_data.encounter_count, 0)
+        game._begin_random_encounter.assert_called_once_with()
+
     def test_field_fade_activates_once_on_a_dungeon_floor(self) -> None:
         game = Game.__new__(Game)
         game.current_map = Mock(profile="dungeon")
@@ -2434,6 +2465,8 @@ class GameTest(unittest.TestCase):
         mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock.save_repository = Mock()
         mock.current_save_slot = None
+        mock.map_resources = Mock()
+        mock.world_map = Mock()
         mock.settings = Settings()
         mock.texts = Mock()
         mock.fonts = Mock()
@@ -2452,6 +2485,7 @@ class GameTest(unittest.TestCase):
 
         save_screen_class.assert_called_once_with(
             summaries=mock.save_repository.summaries.return_value,
+            location_text_keys=mock.map_resources.location_text_keys.return_value,
             current_slot=None,
             settings=mock.settings,
             texts=mock.texts,

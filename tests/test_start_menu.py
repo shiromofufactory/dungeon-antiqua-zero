@@ -9,6 +9,7 @@ from tools._bootstrap import APP_ROOT
 from app.input import Direction, InputButton, InputState
 from app.member import FacePosition
 from app.rendering import MONOCHROME_PALETTE
+from app.resources import FontRole
 from app.state import Language, Settings
 from app.systems import AUTO_SAVE_SLOT, SAVE_SLOT_COUNT, SaveSlotSummary
 from app.text_catalog import TextCatalog
@@ -46,12 +47,17 @@ class StartMenuOverlayTest(unittest.TestCase):
         fonts = Mock()
         japanese_font = Mock()
         japanese_font.text_width.side_effect = lambda text: len(text) * 8
+        japanese_large_font = Mock()
+        japanese_large_font.text_width.side_effect = lambda text: len(text) * 12
         other_font = Mock()
         other_font.text_width.side_effect = lambda text: len(text) * 6
-        fonts.font_for.side_effect = lambda language: (
-            japanese_font if language is Language.JAPANESE else other_font
+        fonts.font_for.side_effect = lambda language, role=FontRole.STANDARD: (
+            (japanese_large_font if role is FontRole.LARGE else japanese_font)
+            if language is Language.JAPANESE else other_font
         )
-        fonts.baseline_offset_for.return_value = 0
+        fonts.baseline_offset_for.side_effect = lambda language, role=FontRole.STANDARD: (
+            3 if language is Language.ENGLISH else 0
+        )
         return StartMenuOverlay(
             summaries=summaries() if slot_summaries is None else slot_summaries,
             autosave_summary=autosave_summary,
@@ -64,6 +70,7 @@ class StartMenuOverlayTest(unittest.TestCase):
                 "Cerion": FacePosition(32, 0),
             },
             palette_shifter=palette_shifter,
+            location_text_keys={"faily_village": "location.fairy_village"},
             on_new_game=Mock() if on_new_game is None else on_new_game,
             on_load=Mock(return_value=True) if on_load is None else on_load,
             on_delete=Mock(return_value=True) if on_delete is None else on_delete,
@@ -152,6 +159,41 @@ class StartMenuOverlayTest(unittest.TestCase):
 
         self.assertEqual(overlay.mode, "main")
         invalid.assert_called_once_with()
+
+    @patch("app.ui.start_menu.pyxel.blt")
+    @patch("app.ui.window.Window.draw")
+    def test_load_locations_include_autosave_and_faces_are_lowered(
+        self, _draw_window: Mock, blt: Mock,
+    ) -> None:
+        slots = list(summaries(1))
+        slots[0] = replace(slots[0], map_id="faily_village")
+        overlay = self.create_overlay(
+            tuple(slots),
+            autosave_summary=SaveSlotSummary(
+                AUTO_SAVE_SLOT, True, "2026-09-25T12:34:56+09:00", ("Fiora",),
+                map_id="worldmap",
+            ),
+        )
+
+        overlay.draw()
+
+        self.assertEqual(overlay.slot_windows[0].texts[-1].text, "ワールドマップ")
+        self.assertEqual(overlay.slot_windows[1].texts[-1].text, "妖精の里")
+        self.assertEqual(overlay.slot_windows[0].texts[-1].y, 2)
+        self.assertIs(
+            overlay.slot_windows[1].texts[-1].font, overlay.location_text_factory.font
+        )
+        for window in overlay.slot_windows[:2]:
+            self.assertEqual(window.texts[1].x, window.texts[0].x)
+            self.assertEqual((window.texts[0].x, window.texts[0].y), (4, 2))
+            self.assertEqual((window.texts[1].x, window.texts[1].y), (4, 5))
+            self.assertIs(window.texts[1].font, overlay.fonts.font_for(Language.ENGLISH))
+            self.assertEqual(window.texts[1].baseline_offset, 3)
+        self.assertEqual(
+            (overlay.slot_cursor.targets[0].x, overlay.slot_cursor.targets[0].y),
+            (2, 2),
+        )
+        self.assertEqual([item.args[1] for item in blt.call_args_list], [56, 128, 128])
 
     def test_english_slot_label_uses_standard_english_font(self) -> None:
         overlay = self.create_overlay(language=Language.ENGLISH)

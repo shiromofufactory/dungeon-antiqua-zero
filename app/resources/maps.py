@@ -138,6 +138,7 @@ class MapRandomEncounter:
     allow_humans: bool
     allow_giants: bool
     allow_large_animals: bool
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -304,6 +305,33 @@ class MapResources:
             )
         return matches[0]
 
+    def location_text_keys(self, world_map: CompiledMap) -> dict[str, str]:
+        """Resolve preview names from world sites and area parents, without atlases."""
+
+        keys = {world_map.map_id: "location.worldmap"}
+        for site in world_map.sites:
+            if site.destination.map_id != world_map.map_id:
+                keys.setdefault(site.destination.map_id, site.name_text_key)
+        for map_id in self.map_ids():
+            try:
+                runtime = json.loads(
+                    (self.maps_dir / f"{map_id}.json").read_text(encoding="utf-8")
+                )
+            except (OSError, UnicodeError, ValueError):
+                continue
+            if not isinstance(runtime, dict):
+                continue
+            parent_id = runtime.get("area_parent_id")
+            if parent_id is None:
+                # Older compiled maps omitted the parent; generated area IDs
+                # still retain the documented <parent>_area_<id> relation.
+                legacy_parent, separator, _area_id = map_id.rpartition("_area_")
+                if separator and legacy_parent in keys:
+                    parent_id = legacy_parent
+            if isinstance(parent_id, str) and MAP_ID_PATTERN.fullmatch(parent_id):
+                keys[map_id] = keys.get(parent_id, f"location.{parent_id}")
+        return keys
+
     def _load(self, map_id: str) -> CompiledMap:
         runtime_path = self.maps_dir / f"{map_id}.json"
         try:
@@ -458,6 +486,11 @@ class MapResources:
             raise MapResourceError(
                 "dungeonマップのrandom_encounterが不正です。"
             )
+        encounter_enabled = value.get("enabled", True)
+        if not isinstance(encounter_enabled, bool):
+            raise MapResourceError(
+                "マップJSONのrandom_encounter.enabledはbooleanである必要があります。"
+            )
         monster_level = value.get("monster_level")
         if monster_level != "dynamic" and not (
             isinstance(monster_level, int)
@@ -491,6 +524,7 @@ class MapResources:
                 )
             filters[field] = enabled
         return MapRandomEncounter(
+            enabled=encounter_enabled,
             monster_level=monster_level,
             danger=danger,
             polarity=polarity,

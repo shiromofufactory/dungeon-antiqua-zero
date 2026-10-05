@@ -69,6 +69,7 @@ class SaveSlotSummary:
     saved_at: str | None = None
     party_character_keys: tuple[str, ...] = ()
     dead_character_keys: tuple[str, ...] = ()
+    map_id: str | None = None
 
     def __post_init__(self) -> None:
         _validate_slot(self.slot, allow_auto=True)
@@ -98,10 +99,15 @@ class SaveSlotSummary:
             raise ValueError("dead_character_keys must not contain duplicates")
         if not set(self.dead_character_keys).issubset(self.party_character_keys):
             raise ValueError("dead_character_keys must belong to the active party")
+        if self.map_id is not None and (
+            not isinstance(self.map_id, str) or not self.map_id
+        ):
+            raise TypeError("map_id must be a non-empty string or None")
         if not self.occupied and (
             self.saved_at is not None
             or self.party_character_keys
             or self.dead_character_keys
+            or self.map_id is not None
         ):
             raise ValueError("an empty save slot cannot contain preview values")
 
@@ -1010,12 +1016,15 @@ class SaveRepository:
             and isinstance(character_states.get(key), Mapping)
             and character_states[key].get("hp") == 0
         )
+        location = document.get("location")
+        map_id = location.get("map_id") if isinstance(location, Mapping) else None
         return SaveSlotSummary(
             slot,
             True,
             saved_at,
             tuple(active_keys),
             dead_keys,
+            map_id=map_id if isinstance(map_id, str) and map_id else None,
         )
 
 

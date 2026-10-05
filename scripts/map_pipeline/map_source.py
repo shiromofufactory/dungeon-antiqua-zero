@@ -44,6 +44,7 @@ DEFAULT_BGM_IDS = {
     "town": "da3-town",
 }
 DEFAULT_RANDOM_ENCOUNTER = {
+    "enabled": True,
     "monster_level": "dynamic",
     "danger": "low",
     "polarity": "neutral",
@@ -255,6 +256,14 @@ def validate_map_source(
                 "dungeonマップにはランダムエンカウント設定が必要です。",
             )
         else:
+            if not isinstance(random_encounter.get("enabled", True), bool):
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "invalid_encounter_enabled",
+                    "random_encounter.enabled",
+                    "エンカウントの有無はbooleanで指定してください。",
+                )
             monster_level = random_encounter.get("monster_level")
             if monster_level != "dynamic" and not (
                 _is_int(monster_level) and 1 <= monster_level <= 9
@@ -1903,6 +1912,8 @@ def compile_map(
     }
     if data["profile"] == "dungeon":
         runtime["random_encounter"] = dict(data["random_encounter"])
+    if data.get("area_parent_id") is not None:
+        runtime["area_parent_id"] = data["area_parent_id"]
     return CompiledMap(runtime=runtime, atlas=bytes(bundle))
 
 

@@ -585,12 +585,17 @@ class MapEditorApplication:
         )
         site_names_ja = self.site_names_ja(data)
         diagnostics, image_info, resolved = self.validate(data, site_names_ja)
+        events = self.event_definitions()
         return {
             "data": data,
             "site_names_ja": site_names_ja,
             "destination_options": self.destination_options(data),
             "site_options": self.site_options(data),
-            "event_options": self.event_options(),
+            "event_options": sorted(events),
+            "event_notes": {
+                event_id: event.get("note") if isinstance(event.get("note"), str) else ""
+                for event_id, event in events.items()
+            },
             "item_options": self.item_options(),
             "bgm_options": self.bgm_options(),
             "tileset": tileset,

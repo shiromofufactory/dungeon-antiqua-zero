@@ -128,6 +128,19 @@ def dungeon_map(
 
 
 class EncounterSystemTest(unittest.TestCase):
+    def test_disabled_random_encounters_do_not_generate_or_draw_random_values(self) -> None:
+        random_source = ScriptedRandom(randrange_values=(), randint_values=())
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(EncounterGenerationError, "disabled"):
+            system.generate_formation(
+                (monster("Level 3"),), encounter_settings(enabled=False),
+                monster_level=3,
+            )
+
+        self.assertEqual(random_source.randrange_calls, [])
+        self.assertEqual(random_source.randint_calls, [])
+
     def test_adds_da1_random_amount_and_resets_at_fixed_threshold(self) -> None:
         random_source = FixedRandom(4)
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]

@@ -9,6 +9,7 @@ from tools._bootstrap import APP_ROOT
 from app.input import Direction, InputButton, InputState
 from app.member import FacePosition
 from app.rendering import MONOCHROME_PALETTE
+from app.resources import FontRole
 from app.state import Language, Settings
 from app.systems import SaveSlotSummary
 from app.text_catalog import TextCatalog
@@ -21,7 +22,7 @@ from app.ui.save_menu import (
     SAVE_FACE_SIZE,
     SAVE_MESSAGE_WINDOW_GRID,
     SAVE_SLOT_COUNT,
-    SAVE_SLOT_DATE_RIGHT_X,
+    SAVE_SLOT_LOCATION_RIGHT_X,
     SAVE_SLOT_WINDOW_GRID,
     SAVE_VISIBLE_SLOT_COUNT,
     SaveMenuOverlay,
@@ -32,6 +33,18 @@ from app.ui.window import DEFAULT_TEXT_COLOR
 
 SAVE_TEXTS = TextCatalog.from_records(
     [
+        {
+            "text_key": "location.worldmap",
+            "text_ja": "ワールドマップ",
+            "text_en": "World Map",
+            "text_zhcn": "世界地图",
+        },
+        {
+            "text_key": "location.nectar_forest",
+            "text_ja": "ネクターの森",
+            "text_en": "Nectar Forest",
+            "text_zhcn": "花蜜森林",
+        },
         {
             "text_key": "save.select_slot",
             "text_ja": "セーブスロットを せんたくしてください",
@@ -112,14 +125,18 @@ class SaveMenuOverlayTest(unittest.TestCase):
         fonts = Mock()
         japanese_font = Mock()
         japanese_font.text_width.side_effect = lambda text: len(text) * 8
+        japanese_large_font = Mock()
+        japanese_large_font.text_width.side_effect = lambda text: len(text) * 12
         other_font = Mock()
         other_font.text_width.side_effect = lambda text: len(text) * 6
-        fonts.font_for.side_effect = lambda selected_language: (
-            japanese_font
+        fonts.font_for.side_effect = lambda selected_language, role=FontRole.STANDARD: (
+            (japanese_large_font if role is FontRole.LARGE else japanese_font)
             if selected_language is Language.JAPANESE
             else other_font
         )
-        fonts.baseline_offset_for.return_value = 0
+        fonts.baseline_offset_for.side_effect = lambda language, role=FontRole.STANDARD: (
+            3 if language is Language.ENGLISH else 0
+        )
         return SaveMenuOverlay(
             summaries=summaries() if slot_summaries is None else slot_summaries,
             current_slot=current_slot,
@@ -136,6 +153,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
                 "Dain": FacePosition(160, 0),
             },
             palette_shifter=palette_shifter,
+            location_text_keys={"forest_nector": "location.nectar_forest"},
             on_save=Mock() if on_save is None else on_save,
         )
 
@@ -190,7 +208,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
         self.assertIsNot(slot_text.font, overlay.text_factory.wide_font)
         self.assertEqual(slot_text.font_spans, ())
 
-    def test_dates_are_right_aligned_and_only_latest_is_positive(self) -> None:
+    def test_dates_are_below_slot_labels_and_only_latest_is_positive(self) -> None:
         overlay = self.create_overlay(
             summaries(1, 2),
             current_slot=1,
@@ -204,12 +222,17 @@ class SaveMenuOverlayTest(unittest.TestCase):
             )
             date_texts.append(date_text)
             self.assertIs(date_text.font, overlay.date_text_factory.font)
-            self.assertIsNot(date_text.font, overlay.text_factory.font)
+            self.assertIs(date_text.font, overlay.fonts.font_for(Language.ENGLISH))
+            self.assertEqual(date_text.baseline_offset, 3)
             self.assertEqual(date_text.font_spans, ())
-            self.assertEqual(
-                date_text.x * 4 + date_text.font.text_width(date_text.text),
-                SAVE_SLOT_DATE_RIGHT_X * 4,
-            )
+            self.assertEqual(date_text.x, slot_window.texts[0].x)
+            self.assertEqual(date_text.y, slot_window.texts[0].y + 3)
+            self.assertEqual((slot_window.texts[0].x, slot_window.texts[0].y), (4, 2))
+            self.assertEqual((date_text.x, date_text.y), (4, 5))
+        self.assertEqual(
+            (overlay.slot_cursor.targets[0].x, overlay.slot_cursor.targets[0].y),
+            (2, 2),
+        )
         self.assertEqual(
             [date_text.color for date_text in date_texts],
             [DEFAULT_TEXT_COLOR, POSITIVE_COLOR],
@@ -234,6 +257,50 @@ class SaveMenuOverlayTest(unittest.TestCase):
         self.assertIs(overlay.slot_windows[1].cursor, overlay.slot_cursor)
         self.assertIsNone(overlay.slot_windows[2].cursor)
 
+    def test_saved_locations_use_current_language_beside_the_slot_label(self) -> None:
+        slots = list(summaries(1, 2))
+        slots[0] = replace(slots[0], map_id="worldmap")
+        slots[1] = replace(slots[1], map_id="forest_nector")
+        for language, expected in (
+            (Language.JAPANESE, ("ワールドマップ", "ネクターの森")),
+            (Language.ENGLISH, ("Ｗｏｒｌｄ　Ｍａｐ", "Ｎｅｃｔａｒ　Ｆｏｒｅｓｔ")),
+            (Language.SIMPLIFIED_CHINESE, ("世界地图", "花蜜森林")),
+        ):
+            with self.subTest(language=language):
+                overlay = self.create_overlay(
+                    tuple(slots), current_slot=1, language=language
+                )
+                for window, name in zip(overlay.slot_windows, expected):
+                    location = window.texts[-1]
+                    self.assertEqual(location.text, name)
+                    self.assertEqual(location.y, 2)
+                    self.assertIs(location.font, overlay.location_text_factory.font)
+                    if language is Language.JAPANESE:
+                        self.assertIsNot(location.font, overlay.text_factory.font)
+                        self.assertEqual(location.font.text_width("森"), 12)
+                    self.assertEqual(
+                        location.x * 4
+                        + location.pixel_offset_x
+                        + location.font.text_width(location.text),
+                        SAVE_SLOT_LOCATION_RIGHT_X * 4,
+                    )
+                    self.assertEqual(location.color, DEFAULT_TEXT_COLOR)
+                self.assertEqual(len(overlay.slot_windows[2].texts), 1)
+
+    def test_unknown_long_map_id_keeps_the_slot_preview_inside_the_window(self) -> None:
+        slots = list(summaries(1))
+        slots[0] = replace(slots[0], map_id="removed_dungeon_area_" + "a" * 40)
+
+        overlay = self.create_overlay(tuple(slots), current_slot=1)
+        location = overlay.slot_windows[0].texts[-1]
+
+        self.assertTrue(location.text.endswith("．．．"))
+        label = overlay.slot_windows[0].texts[0]
+        self.assertGreaterEqual(
+            location.x * 4 + location.pixel_offset_x,
+            label.x * 4 + label.font.text_width(label.text) + 8,
+        )
+
     def test_vertical_selection_scrolls_and_wraps(self) -> None:
         overlay = self.create_overlay(current_slot=SAVE_SLOT_COUNT)
 
@@ -256,6 +323,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
                 True,
                 "2026-09-04T12:34:56+09:00",
                 PARTY_CHARACTER_KEYS,
+                map_id="worldmap",
             )
         )
         overlay = self.create_overlay(on_save=on_save)
@@ -272,6 +340,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
             PARTY_CHARACTER_KEYS,
         )
         self.assertEqual(overlay.message_window.texts[0].text, "セーブしました")
+        self.assertEqual(overlay.slot_windows[0].texts[-1].text, "ワールドマップ")
         play_se.assert_called_once_with("save_complete")
 
     @patch("app.ui.save_menu.play_se")
@@ -351,7 +420,7 @@ class SaveMenuOverlayTest(unittest.TestCase):
         )
         self.assertEqual(
             [call.args[1] for call in blt.call_args_list],
-            [52] * SAVE_FACE_COUNT + [196] * SAVE_FACE_COUNT,
+            [56] * SAVE_FACE_COUNT + [200] * SAVE_FACE_COUNT,
         )
         self.assertTrue(
             all(

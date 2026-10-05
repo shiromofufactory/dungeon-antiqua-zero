@@ -46,7 +46,6 @@ const state = {
   timer: null,
   revision: 0,
   pendingActorEventId: null,
-  commandDraft: null,
 };
 let draggedCommand = null;
 let draggedListItem = null;
@@ -285,7 +284,6 @@ function commit(change) {
 
 function restore(value) {
   const restored = JSON.parse(value);
-  state.commandDraft = null;
   state.data = restored.data;
   state.flags = restored.flags;
   state.messages = restored.messages;
@@ -443,11 +441,23 @@ function renderFacePickerControl(message) {
   return `<div class="face-picker-control"><button type="button" data-action="open-face-picker">顔を選択</button>${preview}</div>`;
 }
 
-function options(values, selected, empty = "選択してください") {
+function noteSummary(note) {
+  const characters = Array.from((note || "").replace(/\s+/g, " ").trim());
+  return characters.slice(0, 20).join("") + (characters.length > 20 ? "…" : "");
+}
+
+function flagOptions(selected) {
+  return options(fullFlags(), selected, "選択してください", (id) => {
+    const summary = noteSummary(state.flags.find((flag) => flag.flag_id === id)?.note);
+    return summary ? `${id} — ${summary}` : id;
+  });
+}
+
+function options(values, selected, empty = "選択してください", label = (value) => value) {
   const all = [...values];
   if (selected && !all.includes(selected)) all.push(selected);
   return `<option value="" ${selected ? "" : "selected"}>${empty}</option>`
-    + all.map((value) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(value)}${values.includes(value) ? "" : "（不明）"}</option>`).join("");
+    + all.map((value) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label(value))}${values.includes(value) ? "" : "（不明）"}</option>`).join("");
 }
 
 function renderNamespaceControls() {
@@ -527,7 +537,7 @@ function renderLists() {
       <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(flag.flag_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="flag" data-index="${index}">⠿</span>
       <button type="button" class="list-item-select" data-action="select-flag" data-index="${index}">
         <strong>${esc(flag.flag_id)}</strong>
-        <small>${esc(flag.note || "メモなし")}</small>
+        <small>${esc(noteSummary(flag.note) || "メモなし")}</small>
       </button>
     </div>
   `).join("") + (state.flags.length ? renderListDropZone("flag", state.flags.length) : '<div class="empty">フラグはありません。</div>');
@@ -628,7 +638,7 @@ function renderCondition(condition, commandPath, path) {
   const type = condition?.type || "flag_set";
   let fields = "";
   if (type === "flag_set") {
-    fields = field("フラグ", `<select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="flag_id">${options(fullFlags(), condition.flag_id)}</select>`, true);
+    fields = field("フラグ", `<select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="flag_id">${flagOptions(condition.flag_id)}</select>`, true);
   } else if (type === "member_in_party") {
     fields = field("メンバー", `<select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="character_key">${options(state.catalogs.character_keys || [], condition.character_key)}</select>`, true);
   } else if (type === "item_at_least") {
@@ -653,7 +663,7 @@ function renderCommand(command, path, listPath, index) {
   let fields = "";
   const attr = (name) => `data-command-path="${path}" data-command-field="${name}"`;
   if (type === "set_flag") {
-    fields = field("フラグ", `<select ${attr("flag_id")}>${options(fullFlags(), command.flag_id)}</select>`, true);
+    fields = field("フラグ", `<select ${attr("flag_id")}>${flagOptions(command.flag_id)}</select>`, true);
   } else if (type === "join_party" || type === "leave_party") {
     fields = field("キャラクター", `<select ${attr("character_key")}>${options(state.catalogs.character_keys || [], command.character_key)}</select>`, true);
   } else if (type === "give_item" || type === "take_item") {
@@ -699,13 +709,6 @@ function renderCommand(command, path, listPath, index) {
   </article>`;
 }
 
-function renderCommandDraft(listPath, index) {
-  return `<article class="command command-draft">
-    <div class="command-head"><code>${index + 1}. 新しいコマンド</code><button class="icon" data-action="cancel-command-draft">キャンセル</button></div>
-    <div class="command-fields">${field("コマンド", `<select data-draft-command="${esc(listPath)}"><option value="" selected>コマンドを選択</option>${COMMAND_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select>`, true)}</div>
-  </article>`;
-}
-
 function renderBranch(commands, parentPath, name) {
   const path = `${parentPath}/${name}`;
   return `<div class="branch"><h3>${name}</h3>${renderCommandList(commands, path, "コマンドなし")}${addCommand(path)}</div>`;
@@ -719,13 +722,11 @@ function renderCommandList(commands, listPath, emptyMessage) {
   const content = commands.map((command, index) =>
     `${renderDropZone(listPath, index)}${renderCommand(command, commandPath(listPath, index), listPath, index)}`,
   ).join("");
-  const draft = state.commandDraft?.list === commands ? renderCommandDraft(listPath, commands.length) : "";
-  return `<div class="commands" data-command-list="${esc(listPath)}">${content}${renderDropZone(listPath, commands.length, commands.length || draft ? "" : emptyMessage)}${draft}</div>`;
+  return `<div class="commands" data-command-list="${esc(listPath)}">${content}${renderDropZone(listPath, commands.length, commands.length ? "" : emptyMessage)}</div>`;
 }
 
 function addCommand(listPath = "") {
-  const pending = state.commandDraft?.list === listAt(listPath);
-  return `<div class="add-row"><button data-action="add-command" data-list-path="${esc(listPath)}" ${pending ? "disabled" : ""}>コマンド追加</button></div>`;
+  return `<div class="add-row"><button data-action="add-command" data-list-path="${esc(listPath)}">コマンド追加</button></div>`;
 }
 
 function renderEventEditor() {
@@ -841,7 +842,6 @@ function render() {
 function addEvent(linkToPendingActor = false) {
   let createdEvent = null;
   commit(() => {
-    state.commandDraft = null;
     createdEvent = {id: uniqueId("event", state.data.events), note: "", commands: []};
     state.data.events.push(createdEvent);
     state.selectedEvent = state.data.events.length - 1;
@@ -877,25 +877,11 @@ function defaultCommand(type) {
   return {command: "branch", condition: defaultCondition(), then: [], else: []};
 }
 
-function openCommandDraft(listPath) {
-  state.commandDraft = {list: listAt(listPath)};
-  render();
-  document.querySelector(`select[data-draft-command="${CSS.escape(listPath)}"]`)?.focus();
-}
-
-function cancelCommandDraft() {
-  state.commandDraft = null;
-  render();
-}
-
-function selectDraftCommand(listPath, type) {
-  if (!COMMAND_OPTIONS.some(([value]) => value === type)) return;
+function addDefaultCommand(listPath) {
   const list = listAt(listPath);
-  if (state.commandDraft?.list !== list) return;
-  commit(() => {
-    list.push(defaultCommand(type));
-    state.commandDraft = null;
-  });
+  const path = commandPath(listPath, list.length);
+  commit(() => { list.push(defaultCommand("message")); });
+  document.querySelector(`select[data-command-type="${CSS.escape(path)}"]`)?.focus();
 }
 
 function changeCommandType(path, type) {
@@ -972,7 +958,6 @@ async function save() {
 function applyDocument(payload, selectedEventId = null, selectedListTab = "event") {
   clearTimeout(state.timer);
   state.revision += 1;
-  state.commandDraft = null;
   state.data = payload.data;
   state.flags = payload.flags;
   state.messages = payload.messages;
@@ -1079,13 +1064,11 @@ document.body.addEventListener("click", (event) => {
   } else if (action === "add-event") {
     addEvent();
   } else if (action === "select-event") {
-    state.commandDraft = null;
     state.selectedEvent = Number(target.dataset.index);
     state.mode = "event";
     render();
   } else if (action === "delete-event") {
     commit(() => {
-      state.commandDraft = null;
       const [deleted] = state.data.events.splice(state.selectedEvent, 1);
       if (deleted?.id === state.pendingActorEventId) state.pendingActorEventId = null;
     });
@@ -1134,9 +1117,7 @@ document.body.addEventListener("click", (event) => {
     });
     $("face-picker-dialog").close();
   } else if (action === "add-command") {
-    openCommandDraft(target.dataset.listPath);
-  } else if (action === "cancel-command-draft") {
-    cancelCommandDraft();
+    addDefaultCommand(target.dataset.listPath);
   } else if (action === "delete-command") {
     commit(() => listAt(target.dataset.listPath).splice(Number(target.dataset.index), 1));
   } else if (action === "add-battle-monster") {
@@ -1171,8 +1152,6 @@ $("event-editor").addEventListener("change", (event) => {
     });
   } else if (target.dataset.battleMonsterIndex !== undefined) {
     commit(() => { commandAt(target.dataset.commandPath).monster_keys[Number(target.dataset.battleMonsterIndex)] = target.value; });
-  } else if (target.dataset.draftCommand !== undefined) {
-    selectDraftCommand(target.dataset.draftCommand, target.value);
   } else if (target.dataset.commandType !== undefined) {
     changeCommandType(target.dataset.commandType, target.value);
   } else if (target.dataset.messageField) {
