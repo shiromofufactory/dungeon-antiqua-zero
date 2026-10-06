@@ -16,13 +16,17 @@ from app.systems import (
     EventContext,
     EventRunner,
     EventRuntimeError,
+    FaceActorEffect,
+    FacePartyEffect,
     FlashScreenEffect,
     InventorySystem,
     MessageEffect,
+    ItemReceivedEffect,
     MovePartyEffect,
     OpenShopEffect,
     PartySystem,
     StartBattleEffect,
+    WaitEffect,
 )
 
 
@@ -77,6 +81,117 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_give_item_adds_all_items_once_before_waiting_for_notification(self) -> None:
+        for context in EventContext:
+            with self.subTest(context=context):
+                self.inventory = InventorySystem(self.items)
+                self.save_data.event_flags.clear()
+                runner = self.runner([
+                    {"command": "give_item", "item_key": "POTION", "quantity": 3, "show_message": True},
+                    {"command": "set_flag", "flag_id": "sample.done"},
+                ])
+                runner.context = context
+                effect = runner.advance()
+                self.assertEqual(effect, ItemReceivedEffect("POTION"))
+                self.assertEqual(self.inventory.quantity("POTION"), 3)
+                self.assertIs(runner.advance(), effect)
+                self.assertEqual(self.inventory.quantity("POTION"), 3)
+                self.assertNotIn("sample.done", self.save_data.event_flags)
+                runner.complete_effect(effect)
+                self.assertIsNone(runner.advance())
+                self.assertEqual(self.inventory.quantity("POTION"), 3)
+                self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_give_item_without_notification_finishes_immediately(self) -> None:
+        for option in ({}, {"show_message": False}):
+            with self.subTest(option=option):
+                runner = self.runner([{"command": "give_item", "item_key": "POTION", "quantity": 2, **option}])
+                self.assertIsNone(runner.advance())
+                self.assertTrue(runner.is_complete)
+
+    def test_give_item_over_capacity_never_emits_a_success_notification(self) -> None:
+        self.inventory.add("POTION", 98)
+        runner = self.runner([
+            {"command": "give_item", "item_key": "POTION", "quantity": 2, "show_message": True},
+            {"command": "set_flag", "flag_id": "sample.done"},
+        ])
+        with self.assertRaisesRegex(EventRuntimeError, "item capacity exceeded"):
+            runner.advance()
+        self.assertEqual(self.inventory.quantity("POTION"), 98)
+        self.assertNotIn("sample.done", self.save_data.event_flags)
+
+    def test_runtime_loader_requires_boolean_give_item_message_option(self) -> None:
+        for value in (None, 0, 1, "on", "false"):
+            with self.subTest(value=value), self.assertRaises(EventResourceError):
+                EventCatalog.from_document(runtime_document([{
+                    "command": "give_item", "item_key": "POTION", "quantity": 1, "show_message": value,
+                }]))
+        with self.assertRaises(EventResourceError):
+            EventCatalog.from_document(runtime_document([{
+                "command": "take_item", "item_key": "POTION", "quantity": 1, "show_message": True,
+            }]))
+
+    def test_wait_delays_following_command_in_field_and_battle_events(self) -> None:
+        for context in EventContext:
+            with self.subTest(context=context):
+                self.save_data.event_flags.clear()
+                runner = self.runner([
+                    {"command": "wait", "frames": 12},
+                    {"command": "set_flag", "flag_id": "sample.done"},
+                ])
+                runner.context = context
+                effect = runner.advance()
+                self.assertEqual(effect, WaitEffect(12))
+                self.assertIs(runner.advance(), effect)
+                self.assertNotIn("sample.done", self.save_data.event_flags)
+                runner.complete_effect(effect)
+                self.assertIsNone(runner.advance())
+                self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_runtime_loader_rejects_invalid_wait_frames(self) -> None:
+        for frames in (None, 0, -6, 1, 7, 6.0, True, "6"):
+            with self.subTest(frames=frames), self.assertRaises(EventResourceError):
+                EventCatalog.from_document(runtime_document([{"command": "wait", "frames": frames}]))
+        for command in ({"command": "wait"}, {"command": "wait", "frames": 6, "steps": 1}):
+            with self.subTest(command=command), self.assertRaises(EventResourceError):
+                EventCatalog.from_document(runtime_document([command]))
+
+    def test_facing_effects_run_in_order_before_the_following_command(self) -> None:
+        runner = self.runner([
+            {"command": "face_party", "direction": "right"},
+            {"command": "face_actor", "actor_id": "elder", "direction": "up"},
+            {"command": "set_flag", "flag_id": "sample.done"},
+        ])
+        for expected in (FacePartyEffect(Direction.RIGHT), FaceActorEffect("elder", Direction.UP)):
+            effect = runner.advance()
+            self.assertEqual(effect, expected)
+            self.assertIs(runner.advance(), effect)
+            self.assertNotIn("sample.done", self.save_data.event_flags)
+            runner.complete_effect(effect)
+        self.assertIsNone(runner.advance())
+        self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_facing_commands_reject_battle_context(self) -> None:
+        for command in (
+            {"command": "face_party", "direction": "left"},
+            {"command": "face_actor", "actor_id": "elder", "direction": "down"},
+        ):
+            with self.subTest(command=command):
+                runner = self.runner([command])
+                runner.context = EventContext.BATTLE
+                with self.assertRaisesRegex(EventRuntimeError, "only available in field"):
+                    runner.advance()
+
+    def test_runtime_loader_rejects_invalid_facing_commands(self) -> None:
+        for command in (
+            {"command": "face_party", "direction": "north"},
+            {"command": "face_party", "direction": "up", "steps": 1},
+            {"command": "face_actor", "direction": "up"},
+            {"command": "face_actor", "actor_id": "Bad ID", "direction": "up"},
+        ):
+            with self.subTest(command=command), self.assertRaises(EventResourceError):
+                EventCatalog.from_document(runtime_document([command]))
+
     def test_flash_screen_waits_before_following_command(self) -> None:
         runner = self.runner([
             {"command": "flash_screen", "color": "white"},

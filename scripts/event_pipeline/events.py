@@ -203,7 +203,8 @@ def _validate_command_list(
             continue
         command_type = command.get("command")
         if battle_context and command_type in {
-            "join_party", "leave_party", "open_shop", "move_party", "move_actor", "start_battle"
+            "join_party", "leave_party", "open_shop", "move_party", "move_actor",
+            "face_party", "face_actor", "start_battle"
         }:
             _diagnostic(diagnostics, "error", "field_only_battle_command", f"{command_path}.command", f"戦闘開始イベントでは使用できないコマンドです: {command_type}")
         if command_type == "set_flag":
@@ -219,7 +220,12 @@ def _validate_command_list(
             elif command_type == "leave_party" and key == "Fiora":
                 _diagnostic(diagnostics, "error", "cannot_remove_fiora", f"{command_path}.character_key", "フィオラをパーティから外すことはできません。")
         elif command_type in ("give_item", "take_item"):
-            _known_fields(command, {"command", "item_key", "quantity"}, diagnostics, command_path)
+            fields = {"command", "item_key", "quantity"}
+            if command_type == "give_item":
+                fields.add("show_message")
+                if "show_message" in command and not isinstance(command["show_message"], bool):
+                    _diagnostic(diagnostics, "error", "invalid_show_message", f"{command_path}.show_message", "show_messageはtrueまたはfalseで指定してください。")
+            _known_fields(command, fields, diagnostics, command_path)
             key = command.get("item_key")
             if not isinstance(key, str) or key not in item_keys:
                 _diagnostic(diagnostics, "error", "unknown_item", f"{command_path}.item_key", f"存在しないアイテムです: {key}")
@@ -265,6 +271,11 @@ def _validate_command_list(
             color = command.get("color")
             if not isinstance(color, str) or color not in FLASH_COLORS:
                 _diagnostic(diagnostics, "error", "invalid_flash_color", f"{command_path}.color", "フラッシュ色はwhiteを指定してください。")
+        elif command_type == "wait":
+            _known_fields(command, {"command", "frames"}, diagnostics, command_path)
+            frames = command.get("frames")
+            if not _is_positive_int(frames) or frames % 6 != 0:
+                _diagnostic(diagnostics, "error", "invalid_wait_frames", f"{command_path}.frames", "framesは6以上の6の倍数の整数で指定してください。")
         elif command_type == "recover_party":
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "open_shop":
@@ -286,28 +297,22 @@ def _validate_command_list(
                 for monster_index, key in enumerate(lineup):
                     if not isinstance(key, str) or key not in monster_keys:
                         _diagnostic(diagnostics, "error", "unknown_monster", f"{command_path}.monster_keys[{monster_index}]", f"存在しないモンスターです: {key}")
-        elif command_type == "move_party":
-            _known_fields(command, {"command", "direction", "steps"}, diagnostics, command_path)
-            _validate_movement(command, diagnostics, command_path)
-        elif command_type == "move_actor":
-            _known_fields(command, {"command", "actor_id", "direction", "steps"}, diagnostics, command_path)
-            actor_id = command.get("actor_id")
-            if not isinstance(actor_id, str) or LOCAL_ID_PATTERN.fullmatch(actor_id) is None:
-                _diagnostic(diagnostics, "error", "invalid_actor_id", f"{command_path}.actor_id", "actor IDはlower_snake_caseで指定してください。")
-            _validate_movement(command, diagnostics, command_path)
+        elif command_type in ("move_party", "move_actor", "face_party", "face_actor"):
+            fields = {"command", "direction"}
+            if command_type in ("move_party", "move_actor"):
+                fields.add("steps")
+            if command_type in ("move_actor", "face_actor"):
+                fields.add("actor_id")
+                actor_id = command.get("actor_id")
+                if not isinstance(actor_id, str) or LOCAL_ID_PATTERN.fullmatch(actor_id) is None:
+                    _diagnostic(diagnostics, "error", "invalid_actor_id", f"{command_path}.actor_id", "actor IDはlower_snake_caseで指定してください。")
+            _known_fields(command, fields, diagnostics, command_path)
+            if command.get("direction") not in CARDINAL_DIRECTIONS:
+                _diagnostic(diagnostics, "error", "invalid_direction", f"{command_path}.direction", "directionはup、right、down、leftのいずれかです。")
+            if "steps" in fields and not _is_positive_int(command.get("steps"), maximum=255):
+                _diagnostic(diagnostics, "error", "invalid_steps", f"{command_path}.steps", "stepsは1から255までの整数で指定してください。")
         else:
             _diagnostic(diagnostics, "error", "unknown_command", f"{command_path}.command", f"未対応のcommandです: {command_type}")
-
-
-def _validate_movement(
-    command: Mapping[str, object],
-    diagnostics: list[EventDiagnostic],
-    path: str,
-) -> None:
-    if command.get("direction") not in CARDINAL_DIRECTIONS:
-        _diagnostic(diagnostics, "error", "invalid_direction", f"{path}.direction", "directionはup、right、down、leftのいずれかです。")
-    if not _is_positive_int(command.get("steps"), maximum=255):
-        _diagnostic(diagnostics, "error", "invalid_steps", f"{path}.steps", "stepsは1から255までの整数で指定してください。")
 
 
 def validate_event_sources(

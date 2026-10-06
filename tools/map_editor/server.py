@@ -32,7 +32,7 @@ from scripts.map_pipeline import (
     validate_map_source,
     validate_tileset,
 )
-from scripts.event_pipeline import load_event_sources
+from scripts.event_pipeline import event_flag_ids, load_event_flags, load_event_sources
 from scripts.map_pipeline.tileset import Diagnostic
 
 
@@ -504,6 +504,7 @@ class MapEditorApplication:
             tileset,
             bgm_ids=self.bgm_options(),
             item_keys=self.item_keys(),
+            flag_ids=event_flag_ids(load_event_flags(self.content_root)),
         )
         link_diagnostics = (
             validate_map_links(sources)
@@ -592,6 +593,7 @@ class MapEditorApplication:
             "destination_options": self.destination_options(data),
             "site_options": self.site_options(data),
             "event_options": sorted(events),
+            "flag_options": load_event_flags(self.content_root),
             "event_notes": {
                 event_id: event.get("note") if isinstance(event.get("note"), str) else ""
                 for event_id, event in events.items()
@@ -823,7 +825,10 @@ class MapEditorApplication:
                     if "random_encounter" in original and data["profile"] == "dungeon":
                         child["random_encounter"] = dict(original["random_encounter"])
                 child["bgm_id"] = data["bgm_id"]
-                child_issues = validate_map_source(child, tileset, bgm_ids=self.bgm_options(), item_keys=self.item_keys())
+                child_issues = validate_map_source(
+                    child, tileset, bgm_ids=self.bgm_options(), item_keys=self.item_keys(),
+                    flag_ids=event_flag_ids(load_event_flags(self.content_root)),
+                )
                 if any(item.severity == "error" for item in child_issues):
                     diagnostics.extend(item.as_dict() for item in child_issues)
                     return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}
@@ -834,7 +839,10 @@ class MapEditorApplication:
             compiled_updates = []
             for update in updates.values():
                 update_tileset = self.load_tileset(update["tileset_id"])
-                update_issues = validate_map_source(update, update_tileset, bgm_ids=self.bgm_options(), item_keys=self.item_keys())
+                update_issues = validate_map_source(
+                    update, update_tileset, bgm_ids=self.bgm_options(), item_keys=self.item_keys(),
+                    flag_ids=event_flag_ids(load_event_flags(self.content_root)),
+                )
                 if any(item.severity == "error" for item in update_issues):
                     diagnostics.extend(item.as_dict() for item in update_issues)
                     return {"saved": False, "diagnostics": diagnostics, "image_info": image_info, "resolved": resolved}

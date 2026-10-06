@@ -14,6 +14,48 @@ from tools.event_editor.server import EventEditorApplication, create_server
 
 
 class EventEditorServerTest(unittest.TestCase):
+    def test_give_item_saves_message_toggle_and_rejects_nonboolean_setting(self) -> None:
+        command = {"command": "give_item", "item_key": "POTION", "quantity": 3, "show_message": True}
+        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "receive", "commands": [command]}]}
+        for enabled in (True, False):
+            command["show_message"] = enabled
+            self.assertTrue(self.post_json("/api/save", data)["saved"])
+            compiled = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+            self.assertEqual(compiled["events"]["sample.receive"]["commands"], [command])
+        runtime_before = self.application.runtime_path.read_bytes()
+        command["show_message"] = "on"
+        result = self.post_json("/api/save", data)
+        self.assertFalse(result["saved"])
+        self.assertIn("invalid_show_message", {item["code"] for item in result["diagnostics"]})
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
+    def test_wait_saves_integer_frames_and_invalid_duration_keeps_last_generation(self) -> None:
+        command = {"command": "wait", "frames": 12}
+        data = {"format_version": 1, "namespace": "sample", "events": [{
+            "id": "pause", "commands": [command],
+        }]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["events"]["sample.pause"]["commands"], [command])
+        command["frames"] = 7
+        result = self.post_json("/api/save", data)
+        self.assertFalse(result["saved"])
+        self.assertIn("invalid_wait_frames", {item["code"] for item in result["diagnostics"]})
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
+    def test_saves_facing_commands_and_generates_runtime_document(self) -> None:
+        commands = [
+            {"command": "face_party", "direction": "right"},
+            {"command": "face_actor", "actor_id": "elder", "direction": "up"},
+        ]
+        data = {"format_version": 1, "namespace": "sample", "events": [{
+            "id": "turn", "commands": commands,
+        }]}
+        result = self.post_json("/api/save", data)
+        self.assertTrue(result["saved"])
+        compiled = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(compiled["events"]["sample.turn"]["commands"], commands)
+
     def test_validates_empty_then_with_else_without_warning(self) -> None:
         data = {
             "format_version": 1,

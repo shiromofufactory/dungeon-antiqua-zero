@@ -37,6 +37,7 @@ ACTOR_KINDS = frozenset(("prop", "stationary", "roaming", "treasure"))
 ACTOR_SPRITE_SOURCES = frozenset(("npc", "pc"))
 TREASURE_CONTENT_TYPES = frozenset(("gold", "item"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
+FLAG_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 DEFAULT_BGM_IDS = {
     "world": "da3-field",
@@ -193,6 +194,7 @@ def validate_map_source(
     *,
     bgm_ids: Iterable[str] | None = None,
     item_keys: Iterable[str] | None = None,
+    flag_ids: Iterable[str] | None = None,
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     if not isinstance(data, dict):
@@ -396,12 +398,26 @@ def validate_map_source(
     placements: set[tuple[str, frozenset[tuple[int, int]]]] = set()
     valid_instances: list[tuple[int, Mapping[str, Any]]] = []
     object_origins: dict[str, tuple[int, int]] = {}
+    known_flags = None if flag_ids is None else set(flag_ids)
     for index, instance in enumerate(instances):
         path = f"objects[{index}]"
         if not isinstance(instance, dict):
             _diagnostic(diagnostics, "error", "invalid_object_instance", path, "オブジェクト実体はobjectで指定してください。")
             continue
         instance_id = instance.get("id")
+        if "visibility_condition" in instance:
+            condition = instance["visibility_condition"]
+            condition_path = f"{path}.visibility_condition"
+            if (
+                not isinstance(condition, dict)
+                or set(condition) != {"flag_id", "value"}
+                or not isinstance(condition.get("flag_id"), str)
+                or FLAG_ID_PATTERN.fullmatch(condition["flag_id"]) is None
+                or not isinstance(condition.get("value"), bool)
+            ):
+                _diagnostic(diagnostics, "error", "invalid_object_visibility_condition", condition_path, "表示条件はflag_idとbooleanのvalueだけで指定してください。")
+            elif known_flags is not None and condition["flag_id"] not in known_flags:
+                _diagnostic(diagnostics, "error", "unknown_flag", f"{condition_path}.flag_id", f"宣言されていないフラグです: {condition['flag_id']}")
         unique_instance_id = False
         if not _valid_id(instance_id):
             _diagnostic(diagnostics, "error", "invalid_id", f"{path}.id", "実体IDはlower_snake_caseで指定してください。")
@@ -1118,6 +1134,8 @@ def _validate_sites(
                 "移動先はdestinationだけで指定してください。",
             )
 
+        if profile != "world" and isinstance(site.get("anchor"), dict) and site["anchor"].get("kind") == "object":
+            _diagnostic(diagnostics, "error", "invalid_exit_anchor", f"{path}.anchor", "移動口にはセルアンカーを指定してください。")
         anchor_origin = _validate_site_anchor(
             site.get("anchor"),
             diagnostics,
@@ -1489,7 +1507,7 @@ def validate_map_event_links(
             if not isinstance(event_id, str) or event_id not in events:
                 continue
             commands = events[event_id].get("commands")
-            for actor_id in _moved_actor_ids(commands):
+            for actor_id in _controlled_actor_ids(commands):
                 link = (map_id, event_id, actor_id)
                 if actor_id in actor_kinds:
                     if actor_kinds[actor_id] in ("prop", "treasure") and link not in checked_actor_links:
@@ -1499,7 +1517,7 @@ def validate_map_event_links(
                             "error",
                             "immovable_event_actor",
                             f"{map_id}.event_triggers[{index}].event_id",
-                            f"イベント{event_id}は固定actorを移動できません: {actor_id}",
+                            f"イベント{event_id}は固定actorの移動や向き変更ができません: {actor_id}",
                         )
                     continue
                 if link in checked_actor_links:
@@ -1515,20 +1533,20 @@ def validate_map_event_links(
     return diagnostics
 
 
-def _moved_actor_ids(commands: object) -> set[str]:
+def _controlled_actor_ids(commands: object) -> set[str]:
     actor_ids: set[str] = set()
     if not isinstance(commands, (list, tuple)):
         return actor_ids
     for command in commands:
         if not isinstance(command, Mapping):
             continue
-        if command.get("command") == "move_actor" and isinstance(
+        if command.get("command") in ("move_actor", "face_actor") and isinstance(
             command.get("actor_id"), str
         ):
             actor_ids.add(command["actor_id"])
         if command.get("command") == "branch":
-            actor_ids.update(_moved_actor_ids(command.get("then")))
-            actor_ids.update(_moved_actor_ids(command.get("else")))
+            actor_ids.update(_controlled_actor_ids(command.get("then")))
+            actor_ids.update(_controlled_actor_ids(command.get("else")))
     return actor_ids
 
 
@@ -1602,6 +1620,8 @@ def _resolve_event_triggers(
                     for offset in trigger["offsets"]
                 ],
             }
+            if anchor["kind"] == "object" and "visibility_condition" in instances[anchor["object_id"]]:
+                target["object_id"] = anchor["object_id"]
         resolved.append(
             {
                 "id": trigger["id"],
@@ -1667,6 +1687,7 @@ def resolve_map(
     )
     object_cells: list[dict[str, Any]] = []
     collision = [grounds_by_id[data["grounds"][y][x]]["collision"] == "blocked" for y in range(height) for x in range(width)]
+    ground_collision = list(collision)
     interact_through = [False] * (width * height)
     for instance in sorted_instances:
         definition = definitions[instance["definition_id"]]
@@ -1685,6 +1706,7 @@ def resolve_map(
                     "object_y_sorted",
                 ),
                 "collision": cell["collision"],
+                "interact_through": definition.get("interact_through") is True,
             }
             if "tile" in cell:
                 resolved_cell.update({"choice_id": None, "frame_interval": 1, "frames": [cell["tile"]]})
@@ -1715,11 +1737,28 @@ def resolve_map(
             ],
             "destination": dict(site["destination"]),
         })
+        if site["anchor"]["kind"] == "object" and "visibility_condition" in instances_by_id[site["anchor"]["object_id"]]:
+            resolved_sites[-1]["object_id"] = site["anchor"]["object_id"]
+
+    conditions = {instance["id"]: dict(instance["visibility_condition"]) for instance in data["objects"] if "visibility_condition" in instance}
+    conditional_positions = {tuple(cell["position"]) for cell in object_cells if cell["instance_id"] in conditions}
+    conditional_cells = []
+    cells_by_position: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for cell in object_cells:
+        position = tuple(cell["position"])
+        if position in conditional_positions:
+            cells_by_position.setdefault(position, []).append({
+                "instance_id": cell["instance_id"], "collision": cell["collision"], "interact_through": cell["interact_through"],
+            })
+    for (x, y), cells in sorted(cells_by_position.items()):
+        conditional_cells.append({"position": [x, y], "ground_blocked": ground_collision[y * width + x], "objects": cells})
 
     resolved = {
         "size": [width, height],
         "ground_cells": ground_cells,
         "object_cells": object_cells,
+        "object_conditions": conditions,
+        "conditional_cells": conditional_cells,
         "collision": collision,
         "interact_through": interact_through,
         "sites": resolved_sites,
@@ -1912,6 +1951,9 @@ def compile_map(
     }
     if data["profile"] == "dungeon":
         runtime["random_encounter"] = dict(data["random_encounter"])
+    if resolved["object_conditions"]:
+        runtime["object_conditions"] = resolved["object_conditions"]
+        runtime["conditional_cells"] = resolved["conditional_cells"]
     if data.get("area_parent_id") is not None:
         runtime["area_parent_id"] = data["area_parent_id"]
     return CompiledMap(runtime=runtime, atlas=bytes(bundle))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 import random
 
@@ -233,6 +234,8 @@ class EncounterSystem:
     def defeat_return(
         map_data: CompiledMap,
         origin: FieldPosition,
+        *,
+        event_flags: Collection[str] = (),
     ) -> DungeonExitReturn | None:
         """Resolve the nearest outward site and a non-trigger cell beside it."""
 
@@ -260,7 +263,7 @@ class EncounterSystem:
                         exit_cell.y - direction.dy,
                     )
                     if (landing.x, landing.y) in exit_cells or map_data.is_blocked(
-                        landing.x, landing.y
+                        landing.x, landing.y, event_flags=event_flags
                     ):
                         continue
                     landing_distance = abs(landing.x - origin.x) + abs(

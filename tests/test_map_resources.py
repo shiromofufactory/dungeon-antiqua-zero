@@ -144,6 +144,19 @@ class MapResourcesTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_rejects_invalid_visibility_conditions_and_cell_effects(self) -> None:
+        for condition in (None, {}, {"flag_id": "story.open", "value": 1}, {"flag_id": "Bad", "value": False}, {"flag_id": "story.open", "value": True, "conditions": []}):
+            with self.subTest(condition=condition):
+                self.runtime["object_conditions"] = {"tree_1": condition}
+                self._write_runtime()
+                with self.assertRaises(MapResourceError):
+                    MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.runtime["object_conditions"] = {"tree_1": {"flag_id": "story.open", "value": True}}
+        self.runtime["conditional_cells"] = [{"position": [1, 1], "ground_blocked": False, "objects": [{"instance_id": "tree_1", "collision": "invalid", "interact_through": False}]}]
+        self._write_runtime()
+        with self.assertRaises(MapResourceError):
+            MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
     def test_preview_names_use_site_destinations_and_area_parents_without_atlases(self) -> None:
         resources = MapResources(self.maps_dir, pyxel_api=self.pyxel)
         world = resources.map("test_map")

@@ -40,6 +40,11 @@ class MessageEffect:
 
 
 @dataclass(frozen=True)
+class ItemReceivedEffect:
+    item_key: str
+
+
+@dataclass(frozen=True)
 class PlaySeEffect:
     se_id: str
 
@@ -55,6 +60,11 @@ class FlashScreenEffect:
 
 
 @dataclass(frozen=True)
+class WaitEffect:
+    frames: int
+
+
+@dataclass(frozen=True)
 class OpenShopEffect:
     shop_key: str
 
@@ -63,6 +73,17 @@ class OpenShopEffect:
 class StartBattleEffect:
     battle_id: str
     monster_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FacePartyEffect:
+    direction: Direction
+
+
+@dataclass(frozen=True)
+class FaceActorEffect:
+    actor_id: str
+    direction: Direction
 
 
 @dataclass(frozen=True)
@@ -80,11 +101,15 @@ class MoveActorEffect:
 
 EventEffect = (
     MessageEffect
+    | ItemReceivedEffect
     | PlaySeEffect
     | ChangeBgmEffect
     | FlashScreenEffect
+    | WaitEffect
     | OpenShopEffect
     | StartBattleEffect
+    | FacePartyEffect
+    | FaceActorEffect
     | MovePartyEffect
     | MoveActorEffect
 )
@@ -199,6 +224,8 @@ class EventRunner:
                     members=self.party.character_states.values(),
                 ):
                     raise EventRuntimeError(self.event_id, path, "item capacity exceeded")
+                if command.get("show_message", False):
+                    return ItemReceivedEffect(str(command["item_key"]))
                 return None
             if command_type == "take_item":
                 if not self.inventory.remove(
@@ -224,6 +251,8 @@ class EventRunner:
                 return ChangeBgmEffect(str(command["bgm_id"]))
             if command_type == "flash_screen":
                 return FlashScreenEffect(str(command["color"]))
+            if command_type == "wait":
+                return WaitEffect(int(command["frames"]))
             if command_type == "recover_party":
                 self.party.recover_all()
                 return None
@@ -235,6 +264,12 @@ class EventRunner:
                 return StartBattleEffect(
                     str(command["battle_id"]), tuple(command["monster_keys"])
                 )
+            if command_type == "face_party":
+                self._require_field(command_type)
+                return FacePartyEffect(self._direction(command["direction"]))
+            if command_type == "face_actor":
+                self._require_field(command_type)
+                return FaceActorEffect(str(command["actor_id"]), self._direction(command["direction"]))
             if command_type == "move_party":
                 self._require_field(command_type)
                 return MovePartyEffect(self._direction(command["direction"]), int(command["steps"]))
@@ -271,11 +306,15 @@ __all__ = [
     "EventEffect",
     "EventRunner",
     "EventRuntimeError",
+    "FaceActorEffect",
+    "FacePartyEffect",
     "FlashScreenEffect",
     "MessageEffect",
+    "ItemReceivedEffect",
     "MoveActorEffect",
     "MovePartyEffect",
     "OpenShopEffect",
     "PlaySeEffect",
     "StartBattleEffect",
+    "WaitEffect",
 ]

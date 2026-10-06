@@ -172,6 +172,7 @@ class FieldRenderer:
             camera_y,
             frame_count,
             draw_groups=("object",),
+            event_flags=field.event_flags,
         )
         characters: list[
             tuple[int, FieldMovement, str, int, Any | None, bool, int, bool]
@@ -226,6 +227,8 @@ class FieldRenderer:
         tile_size = self.map_data.tile_size
         for indexed_tiles in self._y_sorted_object_instances:
             first_index, first_tile = indexed_tiles[0]
+            if not self.map_data.is_object_visible(first_tile.instance_id, field.event_flags):
+                continue
             depth_items.append(
                 (
                     first_tile.sort_y * tile_size,
@@ -304,6 +307,7 @@ class FieldRenderer:
             camera_y,
             frame_count,
             draw_groups=("object_overlay",),
+            event_flags=field.event_flags,
         )
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:
@@ -350,9 +354,12 @@ class FieldRenderer:
         frame_count: int,
         *,
         draw_groups: tuple[str, ...],
+        event_flags: Collection[str] = (),
     ) -> None:
         for index, object_tile in enumerate(self.map_data.object_tiles):
             if object_tile.draw_group not in draw_groups:
+                continue
+            if not self.map_data.is_object_visible(object_tile.instance_id, event_flags):
                 continue
             self._draw_object_tile(
                 index,

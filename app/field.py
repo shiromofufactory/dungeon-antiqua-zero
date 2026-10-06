@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import random
 from types import MappingProxyType
-from typing import Iterable, Mapping
+from typing import Collection, Iterable, Mapping
 
 if __package__:
     from .input import Direction
@@ -39,6 +39,7 @@ class FieldMovement:
         speed: int | None = None,
         facing: Direction = Direction.DOWN,
         allow_blocked_start: bool = False,
+        event_flags: Collection[str] = (),
     ) -> None:
         if not isinstance(map_data, CompiledMap):
             raise TypeError("field map data must be a CompiledMap")
@@ -58,16 +59,17 @@ class FieldMovement:
         if not isinstance(allow_blocked_start, bool):
             raise TypeError("allow_blocked_start must be a boolean")
         if start is None:
-            start = self._nearest_passable_position(map_data)
+            start = self._nearest_passable_position(map_data, event_flags)
         if not isinstance(start, FieldPosition):
             raise TypeError("field start must be a FieldPosition")
-        start_is_blocked = map_data.is_blocked(start.x, start.y)
+        start_is_blocked = map_data.is_blocked(start.x, start.y, event_flags=event_flags)
         if not (0 <= start.x < map_data.width and 0 <= start.y < map_data.height):
             raise ValueError("field start must be within the map bounds")
         if start_is_blocked and not allow_blocked_start:
             raise ValueError("field start must be on a passable map cell")
 
         self.map_data = map_data
+        self.event_flags = event_flags
         self.position = start
         self.speed = speed
         self.facing = facing
@@ -79,14 +81,16 @@ class FieldMovement:
         self._arrived_position: FieldPosition | None = None
 
     @staticmethod
-    def _nearest_passable_position(map_data: CompiledMap) -> FieldPosition:
+    def _nearest_passable_position(
+        map_data: CompiledMap, event_flags: Collection[str] = ()
+    ) -> FieldPosition:
         center_x = map_data.width // 2
         center_y = map_data.height // 2
         candidates = (
             (abs(x - center_x) + abs(y - center_y), y, x)
             for y in range(map_data.height)
             for x in range(map_data.width)
-            if not map_data.is_blocked(x, y)
+            if not map_data.is_blocked(x, y, event_flags=event_flags)
         )
         try:
             _distance, y, x = min(candidates)
@@ -141,6 +145,14 @@ class FieldMovement:
         self._walking_frame_count = 0
         self._arrived_position = None
 
+    def face(self, direction: Direction) -> None:
+        """Turn in place, cancelling any unfinished step."""
+
+        if not isinstance(direction, Direction):
+            raise TypeError("field facing must be a Direction")
+        self.stop()
+        self.facing = direction
+
     def update(
         self,
         direction: Direction | None,
@@ -164,7 +176,9 @@ class FieldMovement:
             self.facing = direction
             destination_x = self.position.x + direction.dx
             destination_y = self.position.y + direction.dy
-            if self.map_data.is_blocked(destination_x, destination_y) or FieldPosition(
+            if self.map_data.is_blocked(
+                destination_x, destination_y, event_flags=self.event_flags
+            ) or FieldPosition(
                 destination_x, destination_y
             ) in blocked_positions:
                 self._walking_frame_count = 0
@@ -215,6 +229,7 @@ class FieldActors:
         *,
         random_source: random.Random | None = None,
         opened_treasure_ids: Iterable[str] = (),
+        event_flags: Collection[str] = (),
     ) -> None:
         if not isinstance(map_data, CompiledMap):
             raise TypeError("field actors require a CompiledMap")
@@ -239,6 +254,7 @@ class FieldActors:
                         else Direction[actor.facing.upper()]
                     ),
                     allow_blocked_start=True,
+                    event_flags=event_flags,
                 ),
                 self._next_roam_wait() if actor.kind == "roaming" else 0,
                 2 if actor.kind == "treasure" and actor.id in opened_ids else 0,
@@ -293,6 +309,12 @@ class FieldActors:
 
     def stop(self, actor_id: str) -> None:
         self.actor(actor_id).movement.stop()
+
+    def face(self, actor_id: str, direction: Direction) -> None:
+        actor = self.actor(actor_id)
+        if actor.kind in ("prop", "treasure"):
+            raise ValueError("prop/treasure field actors cannot turn")
+        actor.movement.face(direction)
 
     def face_toward(
         self,

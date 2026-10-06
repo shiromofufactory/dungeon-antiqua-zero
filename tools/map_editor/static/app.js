@@ -27,6 +27,7 @@ const state = {
   destinationOptions: [],
   siteOptions: [],
   eventOptions: [],
+  flagOptions: [],
   eventNotes: {},
   itemOptions: [],
   bgmOptions: [],
@@ -307,6 +308,7 @@ function applyDocumentPayload(payload) {
   state.destinationOptions = payload.destination_options;
   state.siteOptions = payload.site_options;
   state.eventOptions = payload.event_options;
+  state.flagOptions = payload.flag_options || [];
   state.eventNotes = payload.event_notes || {};
   state.itemOptions = payload.item_options || [];
   state.bgmOptions = payload.bgm_options || [];
@@ -950,6 +952,23 @@ function siteNameTextKey(siteId) {
   return `location.${siteId}`;
 }
 
+function objectFlagOptions(selected) {
+  const flags = [...state.flagOptions];
+  if (selected && !flags.some((flag) => flag.flag_id === selected)) flags.push({ flag_id: selected, note: "未定義" });
+  return `<option value="">選択してください</option>` + flags.map((flag) =>
+    `<option value="${escapeHtml(flag.flag_id)}" ${selected === flag.flag_id ? "selected" : ""}>${escapeHtml(flag.flag_id)}${flag.note ? ` — ${escapeHtml(flag.note)}` : ""}</option>`
+  ).join("");
+}
+
+function objectVisibilityInspector(instance) {
+  const condition = instance.visibility_condition;
+  return `<div class="field" style="margin-top:9px"><label>表示条件</label>
+    <select data-object-field="visibility_enabled"><option value="false" ${condition ? "" : "selected"}>常に表示</option><option value="true" ${condition ? "selected" : ""} ${state.flagOptions.length || condition ? "" : "disabled"}>フラグで指定</option></select></div>
+    ${condition ? `<div class="field"><label>フラグ</label><select data-object-field="flag_id">${objectFlagOptions(condition.flag_id)}</select></div>
+    <div class="field"><label>表示する状態</label><select data-object-field="flag_value"><option value="true" ${condition.value === true ? "selected" : ""}>ONのとき</option><option value="false" ${condition.value === false ? "selected" : ""}>OFFのとき</option></select></div>` : ""}
+    ${state.flagOptions.length ? "" : `<div class="field-note">フラグはイベントエディタで登録してください。</div>`}`;
+}
+
 function bulkSelectionSummary() {
   const labels = { object: "オブジェクト", site: "拠点", arrival: "到着地点", actor: "actor", trigger: "トリガー" };
   const counts = new Map();
@@ -1031,10 +1050,11 @@ function renderInspector() {
       <div class="section-title"><h2>選択オブジェクト</h2><span class="subtle">配置数 ${state.data.objects.length}</span></div>
       ${instance ? `
         <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / ${escapeHtml(objectDrawGroupLabel(objectDefinition(instance)))}</div>
+        ${objectVisibilityInspector(instance)}
         <div class="row end" style="margin-top:9px">
           <button class="button danger small" type="button" data-action="delete-instance">配置を削除</button>
         </div>
-        <div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="${attachedSite ? "open-attached-site" : "attach-site"}">${attachedSite ? `${siteLabel} ${escapeHtml(attachedSite.id)} を編集` : `${siteLabel}として設定`}</button></div>`
+        ${isWorld ? `<div class="row" style="margin-top:9px"><button class="button secondary small" type="button" data-action="${attachedSite ? "open-attached-site" : "attach-site"}">${attachedSite ? `拠点 ${escapeHtml(attachedSite.id)} を編集` : "拠点として設定"}</button></div>` : ""}`
         : `<div class="empty-state">${state.objectLayer === "all" ? "全てモードでは範囲選択したオブジェクトの移動・削除だけができます。" : "マップ上の選択中レイヤーのオブジェクトを右クリックすると選択できます。"}</div>`}
     </div>`;
   const siteInspector = `
@@ -1964,6 +1984,7 @@ function defaultSite(siteId, anchor, entranceOffsets) {
 }
 
 function attachSiteToObject() {
+  if (state.data.profile !== "world") return;
   const instance = currentInstance();
   const definition = objectDefinition(instance);
   if (!instance || !definition || siteForObject(instance.id)) return;
@@ -2591,6 +2612,23 @@ function handleInspectorAction(element) {
   });
 }
 
+function updateObjectField(path, value) {
+  const instance = currentInstance();
+  if (!instance || state.objectLayer === "all" || !objectLayerEditable(objectDefinition(instance))) return;
+  if (path === "visibility_enabled") {
+    if (value === "true" && !state.flagOptions.length) return;
+    commit(() => {
+      if (value === "true") instance.visibility_condition = { flag_id: state.flagOptions[0].flag_id, value: true };
+      else delete instance.visibility_condition;
+    });
+  } else if (instance.visibility_condition) {
+    commit(() => {
+      if (path === "flag_id") instance.visibility_condition.flag_id = value;
+      else if (path === "flag_value") instance.visibility_condition.value = value === "true";
+    });
+  }
+}
+
 function updateSiteField(path, value) {
   const site = currentSite();
   if (!site) return;
@@ -2979,6 +3017,7 @@ byId("inspector-content").addEventListener("change", (event) => {
     state.siteNameEditing = false;
     renderPalette();
   }
+  else if (event.target.dataset.objectField) updateObjectField(event.target.dataset.objectField, event.target.value);
   else if (event.target.dataset.siteField) updateSiteField(event.target.dataset.siteField, event.target.value);
   else if (event.target.dataset.arrivalField) updateArrivalField(event.target.dataset.arrivalField, event.target.type === "checkbox" ? event.target.checked : event.target.value);
   else if (event.target.dataset.actorField) updateActorField(event.target.dataset.actorField, event.target.type === "checkbox" ? event.target.checked : event.target.value);

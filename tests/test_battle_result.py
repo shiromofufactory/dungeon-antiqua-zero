@@ -281,12 +281,24 @@ class BattleResultOverlayTest(unittest.TestCase):
             self.assertEqual(self.overlay.victory_motion_frame, 70)
             self.assertEqual(blt.call_args.args[3], 0)
 
-    def test_growth_pose_overrides_ailments_but_keeps_death_pose(self) -> None:
+    def test_growth_pose_overrides_poison_but_keeps_paralysis_and_death_poses(self) -> None:
         member = self.party[0]
-        member.poisoned = member.paralyzed = True
+        member.poisoned = True
         self.assertEqual(member_battle_sprite_region(member, victory_frame=10)[0], VICTORY_SPRITE_SOURCE_X)
+        member.paralyzed = True
+        for frame in (0, 10, 30, 50, 70):
+            with self.subTest(condition="paralysis", frame=frame):
+                self.assertEqual(
+                    member_battle_sprite_region(member, victory_frame=frame)[0],
+                    RESULT_AILMENT_SPRITE_SOURCE_X,
+                )
         member.hp = 0
-        self.assertEqual(member_battle_sprite_region(member, victory_frame=10)[0], RESULT_DEAD_SPRITE_SOURCE_X)
+        for frame in (0, 10, 30, 50, 70):
+            with self.subTest(condition="death", frame=frame):
+                self.assertEqual(
+                    member_battle_sprite_region(member, victory_frame=frame)[0],
+                    RESULT_DEAD_SPRITE_SOURCE_X,
+                )
 
 
 if __name__ == "__main__":

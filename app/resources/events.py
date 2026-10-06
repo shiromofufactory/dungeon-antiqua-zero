@@ -98,11 +98,15 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
             ) or not command["character_key"]:
                 return False
         elif command_type in ("give_item", "take_item"):
+            fields = {"command", "item_key", "quantity"}
+            if command_type == "give_item" and "show_message" in command:
+                fields.add("show_message")
             if (
-                set(command) != {"command", "item_key", "quantity"}
+                set(command) != fields
                 or not isinstance(command.get("item_key"), str)
                 or not command["item_key"]
                 or not _positive_integer(command.get("quantity"))
+                or ("show_message" in fields and not isinstance(command["show_message"], bool))
             ):
                 return False
         elif command_type == "branch":
@@ -138,6 +142,14 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or color not in FLASH_COLORS
             ):
                 return False
+        elif command_type == "wait":
+            frames = command.get("frames")
+            if (
+                set(command) != {"command", "frames"}
+                or not _positive_integer(frames)
+                or frames % 6 != 0
+            ):
+                return False
         elif command_type == "recover_party":
             if set(command) != {"command"}:
                 return False
@@ -157,17 +169,19 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or not all(isinstance(key, str) and key for key in lineup)
             ):
                 return False
-        elif command_type in ("move_party", "move_actor"):
-            fields = {"command", "direction", "steps"}
-            if command_type == "move_actor":
+        elif command_type in ("move_party", "move_actor", "face_party", "face_actor"):
+            fields = {"command", "direction"}
+            if command_type in ("move_party", "move_actor"):
+                fields.add("steps")
+            if command_type in ("move_actor", "face_actor"):
                 fields.add("actor_id")
             if (
                 set(command) != fields
                 or command.get("direction") not in MOVEMENT_DIRECTIONS
-                or not _positive_integer(command.get("steps"), maximum=255)
+                or ("steps" in fields and not _positive_integer(command.get("steps"), maximum=255))
             ):
                 return False
-            if command_type == "move_actor" and (
+            if command_type in ("move_actor", "face_actor") and (
                 not isinstance(command.get("actor_id"), str)
                 or LOCAL_ID_PATTERN.fullmatch(command["actor_id"]) is None
             ):

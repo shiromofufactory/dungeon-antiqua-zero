@@ -6,6 +6,10 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../tools/event_editor/static/app.js', import.meta.url), 'utf8');
 const optionStart = source.indexOf('const COMMAND_OPTIONS = [');
 const optionEnd = source.indexOf('];', optionStart) + 2;
+const changeHandlerStart = source.indexOf('$("event-editor").addEventListener("change",');
+const changeHandlerEnd = source.indexOf('\nfunction clearCommandDrag(', changeHandlerStart + 1);
+assert.notEqual(changeHandlerStart, -1);
+assert.notEqual(changeHandlerEnd, -1);
 const names = [
   'snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize',
   'currentEvent', 'commandAt', 'listAt', 'commandPath', 'fullFlags', 'messageIds',
@@ -31,14 +35,17 @@ function editor() {
     history: [], future: [], dirty: false,
   };
   let focused = 0;
+  const handlers = new Map();
   const context = vm.createContext({
     state, LIST_TABS: ['flag', 'event', 'mission', 'message'],
     document: { querySelector: () => ({ focus: () => { focused += 1; } }) },
+    $: () => ({ addEventListener: (event, handler) => handlers.set(event, handler) }),
     CSS: { escape: (value) => value },
     render() {}, schedule() {}, renderMessagePreview: () => '', esc: (value) => String(value ?? ''),
   });
   vm.runInContext(`${source.slice(optionStart, optionEnd)}\n${declarations}`, context);
-  return { state, context, focused: () => focused };
+  vm.runInContext(source.slice(changeHandlerStart, changeHandlerEnd), context);
+  return { state, context, handlers, focused: () => focused };
 }
 
 test('add button creates a message command with its fields and permits changing its type', () => {
@@ -86,6 +93,73 @@ test('flash command starts with the supported color', () => {
     command: 'flash_screen', color: 'white',
   });
   assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /data-command-field="color"/);
+});
+
+test('give item message toggle saves boolean ON/OFF and supports undo without a take-item option', () => {
+  const { state, context, handlers } = editor();
+  state.catalogs.item_keys = ['POTION'];
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'give_item');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {
+    command: 'give_item', item_key: 'POTION', quantity: 1, show_message: false,
+  });
+  handlers.get('change')({target: {dataset: {commandField: 'show_message', commandPath: '0'}, value: 'on', checked: true}});
+  assert.equal(JSON.parse(context.requestBody()).data.events[0].commands[0].show_message, true);
+  assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /type="checkbox"[^>]*data-command-field="show_message"[^>]*checked/);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].show_message, false);
+  context.redo();
+  handlers.get('change')({target: {dataset: {commandField: 'show_message', commandPath: '0'}, value: 'on', checked: false}});
+  assert.equal(JSON.parse(context.requestBody()).data.events[0].commands[0].show_message, false);
+  context.changeCommandType('0', 'take_item');
+  assert.doesNotMatch(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /data-command-field="show_message"/);
+  assert.equal('show_message' in state.data.events[0].commands[0], false);
+});
+
+test('wait uses a six-frame input and saves edited duration as an integer with undo', () => {
+  const { state, context, handlers } = editor();
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'wait');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {
+    command: 'wait', frames: 6,
+  });
+  const html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  assert.match(html, /type="number" min="6" step="6"/);
+  assert.match(html, /data-command-field="frames"/);
+  assert.doesNotMatch(html, /data-command-field="(?:steps|direction)"/);
+  handlers.get('change')({ target: { dataset: { commandField: 'frames', commandPath: '0' }, value: '18' } });
+  assert.equal(JSON.parse(context.requestBody()).data.events[0].commands[0].frames, 18);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].frames, 6);
+  context.redo();
+  assert.equal(state.data.events[0].commands[0].frames, 18);
+});
+
+test('facing commands select direction and actor without steps, with undo and redo', () => {
+  const { state, context } = editor();
+  state.catalogs.actor_ids = ['elder'];
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'face_party');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {
+    command: 'face_party', direction: 'down',
+  });
+  let html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  assert.match(html, /data-command-field="direction"/);
+  assert.doesNotMatch(html, /data-command-field="(?:actor_id|steps)"/);
+  context.changeCommandType('0', 'face_actor');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {
+    command: 'face_actor', actor_id: 'elder', direction: 'down',
+  });
+  html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  assert.match(html, /data-command-field="actor_id"/);
+  assert.match(html, /data-command-field="direction"/);
+  assert.doesNotMatch(html, /data-command-field="steps"/);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].command, 'face_party');
+  context.redo();
+  assert.equal(state.data.events[0].commands[0].command, 'face_actor');
+  context.changeCommandType('0', 'move_actor');
+  assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /data-command-field="steps"/);
 });
 
 test('changing an existing command replaces its fields and undo restores them', () => {

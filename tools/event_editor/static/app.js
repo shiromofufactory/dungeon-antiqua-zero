@@ -21,8 +21,11 @@ const COMMAND_OPTIONS = [
   ["play_se", "play_se"],
   ["change_bgm", "change_bgm"],
   ["flash_screen", "画面をフラッシュ"],
+  ["wait", "wait（待機）"],
   ["move_party", "move_party"],
   ["move_actor", "move_actor"],
+  ["face_party", "face_party（パーティの向き変更）"],
+  ["face_actor", "face_actor（actorの向き変更）"],
 ];
 let token = new URLSearchParams(location.search).get("token") || "";
 const editorRoute = location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
@@ -669,6 +672,9 @@ function renderCommand(command, path, listPath, index) {
   } else if (type === "give_item" || type === "take_item") {
     fields = field("アイテム", `<select ${attr("item_key")}>${options(state.catalogs.item_keys || [], command.item_key)}</select>`)
       + field("個数", `<input type="number" min="1" value="${Number(command.quantity) || 1}" ${attr("quantity")}>`);
+    if (type === "give_item") {
+      fields += field("入手メッセージを表示", `<input type="checkbox" ${attr("show_message")} ${command.show_message === true ? "checked" : ""}>`);
+    }
   } else if (type === "message") {
     fields = field("メッセージID", `<select ${attr("message_id")}>${options(messageIds(), command.message_id)}</select>`)
       + renderMessagePreview(command.message_id);
@@ -678,6 +684,8 @@ function renderCommand(command, path, listPath, index) {
     fields = field("BGM", `<select ${attr("bgm_id")}>${options(state.catalogs.bgm_ids || [], command.bgm_id)}</select>`, true);
   } else if (type === "flash_screen") {
     fields = field("色", `<select ${attr("color")}>${options(["white"], command.color)}</select>`, true);
+  } else if (type === "wait") {
+    fields = field("待機時間（フレーム・6フレーム単位）", `<input type="number" min="6" step="6" value="${Number(command.frames) || 6}" ${attr("frames")}>`, true);
   } else if (type === "recover_party") {
     fields = '<p class="command-description full">パーティ全員のHP・MP・状態異常を全て回復します。</p>';
   } else if (type === "open_shop") {
@@ -688,10 +696,12 @@ function renderCommand(command, path, listPath, index) {
         <div class="add-row"><select data-battle-monster-index="${monsterIndex}" data-command-path="${esc(path)}">${options(state.catalogs.monster_keys || [], key)}</select>
         <button class="danger icon" data-action="remove-battle-monster" data-command-path="${esc(path)}" data-index="${monsterIndex}">削除</button></div>
       `).join("")}<button data-action="add-battle-monster" data-command-path="${esc(path)}" ${(command.monster_keys || []).length >= 5 ? "disabled" : ""}>敵を追加</button></div>`;
-  } else if (type === "move_party" || type === "move_actor") {
-    fields = (type === "move_actor" ? field("actor ID", `<select ${attr("actor_id")}>${options(state.catalogs.actor_ids || [], command.actor_id)}</select>`) : "")
-      + field("方向", `<select ${attr("direction")}>${options(["up", "right", "down", "left"], command.direction)}</select>`)
-      + field("歩数", `<input type="number" min="1" max="255" value="${Number(command.steps) || 1}" ${attr("steps")}>`);
+  } else if (["move_party", "move_actor", "face_party", "face_actor"].includes(type)) {
+    fields = (type.endsWith("_actor") ? field("actor ID", `<select ${attr("actor_id")}>${options(state.catalogs.actor_ids || [], command.actor_id)}</select>`) : "")
+      + field("方向", `<select ${attr("direction")}>${options(["up", "right", "down", "left"], command.direction)}</select>`);
+    if (type.startsWith("move_")) {
+      fields += field("歩数", `<input type="number" min="1" max="255" value="${Number(command.steps) || 1}" ${attr("steps")}>`);
+    }
   } else if (type === "branch") {
     fields = `<div class="full">${renderCondition(command.condition, path, "condition")}${renderBranch(command.then, path, "then")}${renderBranch(command.else, path, "else")}</div>`;
   } else if (type === "end_event") {
@@ -863,16 +873,20 @@ function defaultCommand(type) {
   const one = (key, values) => ({command: type, [key]: values?.[0] || ""});
   if (type === "set_flag") return one("flag_id", fullFlags());
   if (type === "join_party" || type === "leave_party") return one("character_key", state.catalogs.character_keys);
-  if (type === "give_item" || type === "take_item") return {...one("item_key", state.catalogs.item_keys), quantity: 1};
+  if (type === "give_item") return {...one("item_key", state.catalogs.item_keys), quantity: 1, show_message: false};
+  if (type === "take_item") return {...one("item_key", state.catalogs.item_keys), quantity: 1};
   if (type === "message") return one("message_id", messageIds());
   if (type === "play_se") return one("se_id", state.catalogs.se_ids);
   if (type === "change_bgm") return one("bgm_id", state.catalogs.bgm_ids);
   if (type === "flash_screen") return {command: type, color: "white"};
+  if (type === "wait") return {command: type, frames: 6};
   if (type === "recover_party") return {command: type};
   if (type === "open_shop") return one("shop_key", state.catalogs.shop_keys);
   if (type === "start_battle") return {command: type, battle_id: "battle_1", monster_keys: [state.catalogs.monster_keys?.[0] || ""]};
   if (type === "move_party") return {command: type, direction: "down", steps: 1};
   if (type === "move_actor") return {command: type, actor_id: state.catalogs.actor_ids?.[0] || "", direction: "down", steps: 1};
+  if (type === "face_party") return {command: type, direction: "down"};
+  if (type === "face_actor") return {command: type, actor_id: state.catalogs.actor_ids?.[0] || "", direction: "down"};
   if (type === "end_event") return {command: type};
   return {command: "branch", condition: defaultCondition(), then: [], else: []};
 }
@@ -1165,7 +1179,8 @@ $("event-editor").addEventListener("change", (event) => {
     commit(() => {
       const command = commandAt(target.dataset.commandPath);
       const fieldName = target.dataset.commandField;
-      command[fieldName] = fieldName === "quantity" || fieldName === "steps"
+      command[fieldName] = fieldName === "show_message" ? target.checked
+        : ["quantity", "steps", "frames"].includes(fieldName)
         ? Number(target.value)
         : target.value;
     });

@@ -7218,6 +7218,8 @@ class BattleScene:
         ):
             self.result = BattleResult.VICTORY
             return
+        for member in self.result_party:
+            member.sleeping = 0
         hp_growth_ineligible = {
             member.definition.key
             for index, member in enumerate(self.party)
@@ -10847,6 +10849,8 @@ class BattleScene:
             BattlePhase.VICTORY_SUMMARY,
             BattlePhase.RESULT_TRANSITION,
         ):
+            if getattr(self.party_visuals[index].member, "paralyzed", False):
+                return NEAR_DEATH_SPRITE_SOURCE_X
             return victory_sprite_source_x(self.victory_motion_frame)
         if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
             self, "escape_actor_index", None

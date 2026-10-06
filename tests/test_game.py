@@ -364,6 +364,7 @@ class GameTest(unittest.TestCase):
         field_movement_class.assert_called_once_with(
             world_map,
             start=WORLD_MAP_START_POSITION,
+            event_flags=mock.save_data.event_flags,
         )
         field_renderer_class.assert_called_once_with(
             world_map,
@@ -1523,6 +1524,7 @@ class GameTest(unittest.TestCase):
             target_map,
             start=FieldPosition(4, 5),
             facing=Direction.LEFT,
+            event_flags=mock.save_data.event_flags,
         )
         field_renderer_class.assert_called_once_with(
             target_map,
@@ -1612,6 +1614,7 @@ class GameTest(unittest.TestCase):
             world_map,
             start=FieldPosition(8, 9),
             facing=Direction.DOWN,
+            event_flags=mock.save_data.event_flags,
         )
         field_renderer_class.assert_called_once_with(
             world_map,
@@ -1806,6 +1809,7 @@ class GameTest(unittest.TestCase):
         mock.pending_target_map = target_map
         mock.pending_target_arrival = arrival
         mock.pending_teleport_source = "debug"
+        mock.save_data = SaveData()
         mock.world_map = target_map
         mock.debug_screen = Mock(party=party)
         mock.party = ()
@@ -1826,6 +1830,7 @@ class GameTest(unittest.TestCase):
             target_map,
             start=FieldPosition(7, 8),
             facing=Direction.LEFT,
+            event_flags=mock.save_data.event_flags,
         )
         field_renderer_class.assert_called_once_with(
             target_map,
@@ -2678,6 +2683,7 @@ class GameTest(unittest.TestCase):
             start=FieldPosition(17, 39),
             facing=Direction.LEFT,
             allow_blocked_start=True,
+            event_flags=loaded.save_data.event_flags,
         )
         field_renderer_class.assert_called_once_with(
             target_map,
@@ -3047,6 +3053,7 @@ class GameTest(unittest.TestCase):
                 mock.pending_target_map = target_map
                 mock.pending_target_arrival = arrival
                 mock.current_map = Mock(map_id="source", bgm_id="shared")
+                mock.save_data = SaveData()
                 mock.world_map = object()
                 mock.party = ()
                 mock.bgm = Mock(current_id="shared")

@@ -13,6 +13,7 @@ from scripts.map_pipeline import (
     initial_tileset,
     initial_worldmap_tileset,
     resolve_map,
+    save_compiled_map,
     validate_map_event_links,
     validate_map_links,
     validate_map_source,
@@ -39,6 +40,76 @@ class MapSourceTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_object_visibility_rejects_other_conditions_and_undeclared_flags(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0}]
+        for condition in (None, {}, {"flag_id": "door_open", "value": 1}, {"flag_id": "door_open", "value": True, "type": "flag_set"}, {"flag_id": "Bad", "value": False}):
+            with self.subTest(condition=condition):
+                source["objects"][0]["visibility_condition"] = condition
+                codes = {issue.code for issue in validate_map_source(source, self.tileset)}
+                self.assertIn("invalid_object_visibility_condition", codes)
+        source["objects"][0]["visibility_condition"] = {"flag_id": "story.door_open", "value": False}
+        self.assertIn("unknown_flag", {issue.code for issue in validate_map_source(source, self.tileset, flag_ids=[])})
+        self.assertNotIn("unknown_flag", {issue.code for issue in validate_map_source(source, self.tileset, flag_ids=["story.door_open"])})
+
+    def test_compiled_visibility_updates_collision_interaction_and_trigger_without_reload(self) -> None:
+        from app.resources.maps import MapResources
+        from app.field import FieldMovement, FieldPosition
+        from app.input import Direction
+        from tests.test_map_resources import FakePyxel
+
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["grounds"][2][2] = "plain"
+        source["grounds"][2][3] = "plain"
+        self.tileset["objects"][0]["interact_through"] = True
+        source["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [3, 2], "order": 0, "visibility_condition": {"flag_id": "door_open", "value": False}}]
+        source["event_triggers"] = [{"id": "rock_touch", "event_id": "test_world.rock", "activations": ["touch"], "anchor": {"kind": "object", "object_id": "rock_1"}, "offsets": [[0, 0]]}]
+        compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
+        save_compiled_map(self.root / "test_world.json", compiled)
+        loaded = MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+        flags = set()
+        movement = FieldMovement(loaded, start=FieldPosition(2, 2), event_flags=flags)
+        self.assertTrue(loaded.is_object_visible("rock_1", flags))
+        self.assertTrue(loaded.is_blocked(3, 2, event_flags=flags))
+        self.assertTrue(loaded.allows_interaction_through(3, 2, event_flags=flags))
+        self.assertIsNotNone(loaded.event_trigger_at("touch", 3, 2, event_flags=flags))
+        movement.update(Direction.RIGHT)
+        self.assertFalse(movement.is_moving)
+        flags.add("door_open")
+        self.assertFalse(loaded.is_object_visible("rock_1", flags))
+        self.assertFalse(loaded.is_blocked(3, 2, event_flags=flags))
+        self.assertFalse(loaded.allows_interaction_through(3, 2, event_flags=flags))
+        self.assertIsNone(loaded.event_trigger_at("touch", 3, 2, event_flags=flags))
+        movement.update(Direction.RIGHT)
+        self.assertTrue(movement.is_moving)
+
+    def test_visibility_preserves_ground_and_other_object_collision_in_draw_order(self) -> None:
+        from app.resources.maps import MapResources
+        from tests.test_map_resources import FakePyxel
+
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        bridge = deepcopy(self.tileset["objects"][0])
+        bridge.update(id="bridge", default_draw_group="object_overlay")
+        bridge["cells"][0]["collision"] = "passable_override"
+        self.tileset["objects"].append(bridge)
+        source["objects"] = [
+            {"id": "rock_1", "definition_id": "rock", "origin": [3, 2], "order": 0},
+            {"id": "bridge_1", "definition_id": "bridge", "origin": [3, 2], "order": 1, "visibility_condition": {"flag_id": "bridge_ready", "value": True}},
+        ]
+        compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
+        save_compiled_map(self.root / "test_world.json", compiled)
+        loaded = MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+        self.assertTrue(loaded.is_blocked(3, 2))
+        self.assertFalse(loaded.is_blocked(3, 2, event_flags={"bridge_ready"}))
+        self.assertTrue(loaded.is_object_visible("rock_1"))
+
+    def test_facility_exits_require_cell_anchors(self) -> None:
+        self.tileset["profile"] = "town"
+        source = initial_map_source("test_town", self.tileset, "town", 16, 15)
+        source["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0}]
+        source["sites"] = [{"id": "exit", "anchor": {"kind": "object", "object_id": "rock_1"}, "entrance_offsets": [[1, 0]], "destination": {"map_id": "worldmap", "arrival_id": "entrance"}}]
+        self.assertIn("invalid_exit_anchor", {issue.code for issue in validate_map_source(source, self.tileset)})
 
     def test_initial_world_map_is_valid_and_resolves_deterministically(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
@@ -947,6 +1018,19 @@ class MapSourceTest(unittest.TestCase):
                 for item in validate_map_event_links({"test_world": source}, events)
             },
         )
+
+        events["sample.meeting"]["commands"][0]["then"] = [{
+            "command": "face_actor", "actor_id": "elder", "direction": "up",
+        }]
+        for kind in ("stationary", "roaming", "prop", "treasure"):
+            with self.subTest(facing_actor_kind=kind):
+                source["actors"][0]["kind"] = kind
+                codes = {item.code for item in validate_map_event_links({"test_world": source}, events)}
+                self.assertEqual("immovable_event_actor" in codes, kind in ("prop", "treasure"))
+        source["actors"] = []
+        self.assertIn("unknown_event_actor_id", {
+            item.code for item in validate_map_event_links({"test_world": source}, events)
+        })
 
     def test_rejects_non_sea_world_edge_and_duplicate_object_placement(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)

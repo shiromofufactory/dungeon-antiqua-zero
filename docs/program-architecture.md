@@ -469,6 +469,12 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
+配置オブジェクトの表示条件と条件付きセルの通行効果はマップ生成処理が展開し、
+`resources/maps.py` の不変な `CompiledMap` が現在のイベントフラグを明示的に受け取って評価する。
+GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、描画とトリガー判定にも
+同じ集合を渡す。マップリソースへSaveDataやGameの逆参照、可視状態の複製は持たせない。
+具体的な制作操作と適用範囲は [`features/map-editor.md`](./features/map-editor.md) を参照する。
+
 戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。逃走とフェードの確定では同Systemが経験値、Gold、お宝、最大HPを除外し、熟練度と最大MPだけを反映する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利・逃走演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 遭遇済みモンスター、開示済み属性、お宝取得済みの更新と照会は、Pyxel非依存の
@@ -1510,7 +1516,7 @@ Overlayがメッセージ定義から現在言語と顔を解決する。イベ�
 
 Sceneはトリガー検出、EventRunnerは条件評価とコマンド進行、既存のDomain Model／Systemは
 状態変更、Overlayはメッセージなどの入力待ちを担当する。RunnerはUIや具体的Sceneを直接参照せず、
-メッセージ、音声、移動、ショップ、ID付き戦闘開始をEventEffectとして呼び出し元へ返す。ショップは
+メッセージ、音声、時間待ち、移動、向き変更、ショップ、ID付き戦闘開始をEventEffectとして呼び出し元へ返す。ショップは
 既存のShopOverlayを開き、退出後にRunnerへ完了を返して後続コマンドを再開する。複雑なカットシーンや
 固有ギミックだけをPythonの個別ハンドラーにし、汎用コマンドで無理にすべてを表現することも、
 すべてをPythonの巨大な条件分岐に戻すことも避ける。

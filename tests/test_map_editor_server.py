@@ -105,6 +105,27 @@ class MapEditorServerTest(unittest.TestCase):
         self.thread.join(timeout=2)
         self.temporary.cleanup()
 
+    def test_object_visibility_flags_are_listed_validated_saved_and_compiled(self) -> None:
+        flags_path = self.application.content_root / "events" / "flags.json"
+        flags_path.parent.mkdir(parents=True, exist_ok=True)
+        flags = [{"flag_id": "story.open", "note": "扉が開いた"}]
+        flags_path.write_text(json.dumps(flags), encoding="utf-8")
+        tileset = self.application.load_tileset("worldmap")
+        tileset["objects"] = [{"id": "rock", "size": [1, 1], "default_draw_group": "object", "cells": [{"offset": [0, 0], "collision": "blocked", "tile": [0, 0]}]}]
+        save_tileset(self.application.content_root / "maps" / "tilesets" / "worldmap.json", tileset)
+        payload = self.application.document_payload()
+        self.assertEqual(payload["flag_options"], flags)
+        data = payload["data"]
+        data["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0, "visibility_condition": {"flag_id": "story.open", "value": False}}]
+        self.assertTrue(self.application.save(data, {})["saved"])
+        self.assertEqual(self.application.document_payload()["data"]["objects"], data["objects"])
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(runtime["object_conditions"]["rock_1"], {"flag_id": "story.open", "value": False})
+        data["objects"][0]["visibility_condition"]["flag_id"] = "story.missing"
+        diagnostics, _, _ = self.application.validate(data)
+        self.assertIn("unknown_flag", {issue["code"] for issue in diagnostics})
+        self.assertFalse(self.application.save(data, {})["saved"])
+
     def test_areas_keep_independent_layouts_and_share_parent_bgm(self) -> None:
         root = self.application.document_payload()["data"]
         self.assertTrue(self.application.save(root, {})["saved"])

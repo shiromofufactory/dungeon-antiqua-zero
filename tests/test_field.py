@@ -33,6 +33,7 @@ from app.resources.maps import (
     MapActor,
     MapCell,
     MapObjectTile,
+    MapObjectCondition,
     MapTreasureContents,
 )
 
@@ -232,6 +233,24 @@ class FieldMovementTest(unittest.TestCase):
 
         self.assertIs(actors.actor("elder").movement.facing, Direction.UP)
 
+    def test_explicit_facing_cancels_an_unfinished_roaming_step_without_changing_cell(self) -> None:
+        map_data = compiled_map(("000", "000", "000"))
+        object.__setattr__(map_data, "actors", (
+            MapActor("elder", MapCell(1, 1), "roaming", 0, "up"),
+        ))
+        actors = FieldActors(map_data)
+        actors.update("elder", Direction.RIGHT, party_position=FieldPosition(0, 0))
+        movement = actors.actor("elder").movement
+        self.assertTrue(movement.is_moving)
+
+        actors.face("elder", Direction.DOWN)
+
+        self.assertEqual(movement.position, FieldPosition(1, 1))
+        self.assertEqual((movement.offset_x, movement.offset_y), (0, 0))
+        self.assertFalse(movement.is_moving)
+        self.assertFalse(movement.is_walking)
+        self.assertIs(movement.facing, Direction.DOWN)
+
     def test_stationary_actor_faces_party_across_a_counter(self) -> None:
         map_data = compiled_map(("0000", "0000", "0000"))
         object.__setattr__(
@@ -261,6 +280,8 @@ class FieldMovementTest(unittest.TestCase):
                 Direction.RIGHT,
                 party_position=FieldPosition(0, 0),
             )
+        with self.assertRaisesRegex(ValueError, "prop"):
+            actors.face("chest", Direction.RIGHT)
 
         self.assertEqual(actors.actor("chest").movement.position, FieldPosition(1, 1))
 
@@ -331,6 +352,24 @@ class FieldMovementTest(unittest.TestCase):
 
 
 class FieldRendererTest(unittest.TestCase):
+    def test_visibility_gates_every_object_draw_group_and_reacts_to_flag_changes(self) -> None:
+        for group in ("object", "object_y_sorted", "object_foreground", "object_overlay"):
+            for value in (True, False):
+                with self.subTest(group=group, value=value):
+                    tile = MapObjectTile("rock", "rock", 1, 1, group, 0, 0, 1)
+                    map_data = compiled_map(("000", "000", "000"), objects=(tile,))
+                    object.__setattr__(map_data, "object_conditions", MappingProxyType({"rock": MapObjectCondition("story.rock", value)}))
+                    flags = set()
+                    field = FieldMovement(map_data, start=FieldPosition(0, 0), event_flags=flags)
+                    renderer = FieldRenderer(map_data, screen_width=48, screen_height=48, pyxel_api=Mock(frame_count=0))
+                    renderer._draw_object_tile = Mock()
+                    renderer.draw(field, draw_player=False)
+                    self.assertEqual(renderer._draw_object_tile.call_count, int(not value))
+                    flags.add("story.rock")
+                    renderer._draw_object_tile.reset_mock()
+                    renderer.draw(field, draw_player=False)
+                    self.assertEqual(renderer._draw_object_tile.call_count, int(value))
+
     def test_can_draw_field_layers_without_the_player(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="dungeon")
         field = FieldMovement(map_data, start=FieldPosition(1, 1))

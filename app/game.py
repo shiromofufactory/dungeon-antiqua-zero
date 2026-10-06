@@ -146,12 +146,16 @@ from systems import (
     InventorySystem,
     LoadedGameState,
     MessageEffect,
+    ItemReceivedEffect,
+    FaceActorEffect,
+    FacePartyEffect,
     MoveActorEffect,
     MovePartyEffect,
     OpenShopEffect,
     PartySystem,
     PlaySeEffect,
     StartBattleEffect,
+    WaitEffect,
     SaveRepository,
     SaveSlotSummary,
     SaveSystemError,
@@ -238,6 +242,7 @@ MENU_INFO_TEXT_KEYS = (
 MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
 TREASURE_GOLD_TEXT_KEY = "treasure.found_gold"
 TREASURE_ITEM_TEXT_KEY = "treasure.found_item"
+EVENT_ITEM_RECEIVED_TEXT_KEY = "event.received_item"
 TREASURE_CAPACITY_TEXT_KEY = "treasure.capacity_exceeded"
 TREASURE_OPEN_SE_ID = "treasure_open"
 FIELD_POISON_SE_ID = "field_poison"
@@ -550,6 +555,7 @@ class Game:
         self.field = FieldMovement(
             self.world_map,
             start=WORLD_MAP_START_POSITION,
+            event_flags=self.save_data.event_flags,
         )
         self.field_renderer = FieldRenderer(
             self.world_map,
@@ -565,12 +571,13 @@ class Game:
         self._reset_field_actors()
         self.event_runner: EventRunner | None = None
         self.event_effect = None
-        self.event_message: EventMessageOverlay | None = None
+        self.event_message: MessageOverlay | None = None
         self.treasure_message: MessageOverlay | None = None
         self.field_condition_message: MessageOverlay | None = None
         self.field_party_annihilated_pending = False
         self.pending_treasure_close_actor_id: str | None = None
         self.event_move_remaining = 0
+        self.event_wait_remaining = 0
         self.event_screen_flash: ScreenFlash | None = None
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
@@ -1197,12 +1204,14 @@ class Game:
             destination = self.encounter_system.defeat_return(
                 self.current_map,
                 self.field.position,
+                event_flags=self.save_data.event_flags,
             )
             if destination is not None:
                 self.field = FieldMovement(
                     self.current_map,
                     start=destination.position,
                     facing=destination.facing,
+                    event_flags=self.save_data.event_flags,
                 )
                 self._reset_field_actors()
         if getattr(self, "party", ()):
@@ -1351,6 +1360,12 @@ class Game:
             self._site_name_cache = None
             return
         site = catalog.nearby_site(position.x, position.y)
+        if (
+            site is not None
+            and site.object_id is not None
+            and not self.current_map.is_object_visible(site.object_id, self.save_data.event_flags)
+        ):
+            site = None
         cache = None if site is None else (site.id, self.settings.language)
         if not force and cache == getattr(self, "_site_name_cache", None):
             return
@@ -1399,6 +1414,7 @@ class Game:
             return
         self.field_actors = FieldActors(
             self.current_map,
+            event_flags=self.save_data.event_flags,
             opened_treasure_ids=(
                 treasure_id
                 for map_id, treasure_id in self.save_data.opened_treasures
@@ -1554,11 +1570,17 @@ class Game:
     def _handle_arrived_site(self) -> None:
         """Enter a site only after movement completes on an entrance cell."""
 
+        if getattr(self, "event_runner", None) is not None:
+            return
         arrived = getattr(self.field, "arrived_position", None)
         if not isinstance(arrived, FieldPosition):
             return
         site = self.current_sites.entrance_at(arrived.x, arrived.y)
         if site is None:
+            return
+        if site.object_id is not None and not self.current_map.is_object_visible(
+            site.object_id, self.save_data.event_flags
+        ):
             return
         if not self._stage_map_destination(site.destination):
             return
@@ -1603,6 +1625,7 @@ class Game:
             target_map,
             start=FieldPosition(arrival.position.x, arrival.position.y),
             facing=SITE_FACING_DIRECTIONS[arrival.facing],
+            event_flags=self.save_data.event_flags,
         )
         self.field_renderer = FieldRenderer(
             target_map,
@@ -2648,6 +2671,7 @@ class Game:
                 start=loaded.position,
                 facing=loaded.facing,
                 allow_blocked_start=True,
+                event_flags=loaded.save_data.event_flags,
             )
             target_renderer = FieldRenderer(
                 target_map,
@@ -3096,6 +3120,7 @@ class Game:
                     self.event_effect = None
                     self.event_message = None
                     self.event_move_remaining = 0
+                    self.event_wait_remaining = 0
                     self.selected_member_index = min(
                         self.selected_member_index,
                         len(self.party) - 1,
@@ -3104,6 +3129,28 @@ class Game:
                         self._show_hint_once(FIRST_BATTLE_HINT_ID)
                 return
             self.event_effect = effect
+            if isinstance(effect, WaitEffect):
+                self.event_wait_remaining = effect.frames
+                return
+            if isinstance(effect, FacePartyEffect):
+                self.field.face(effect.direction)
+                runner.complete_effect(effect)
+                self.event_effect = None
+                continue
+            if isinstance(effect, FaceActorEffect):
+                if self.field_actors is None:
+                    raise EventRuntimeError(
+                        runner.event_id,
+                        "effect",
+                        f"actor is not available: {effect.actor_id}",
+                    )
+                self.field_actors.face(effect.actor_id, effect.direction)
+                restore = getattr(self, "event_stationary_actor_facing_restore", None)
+                if restore is not None and restore[0] == effect.actor_id:
+                    self.event_stationary_actor_facing_restore = None
+                runner.complete_effect(effect)
+                self.event_effect = None
+                continue
             if isinstance(effect, PlaySeEffect):
                 play_se(effect.se_id)
                 runner.complete_effect(effect)
@@ -3151,6 +3198,19 @@ class Game:
                 self.shop_return_to_debug = False
                 self._begin_screen_change(GameScreenChange.OPEN_SHOP)
                 return
+            if isinstance(effect, ItemReceivedEffect):
+                localizer = Localizer(self.settings.language)
+                item = self.items[effect.item_key]
+                self.event_message = MessageOverlay(
+                    lines=(self.texts.formatted_text(
+                        EVENT_ITEM_RECEIVED_TEXT_KEY,
+                        localizer,
+                        {"ITEM": str(item.localized_name(localizer))},
+                    ),),
+                    settings=self.settings,
+                    fonts=self.fonts,
+                )
+                return
             if isinstance(effect, MessageEffect):
                 self.event_message = EventMessageOverlay(
                     message_id=effect.message_id,
@@ -3180,6 +3240,13 @@ class Game:
         if runner is None or effect is None:
             return
         try:
+            if isinstance(effect, WaitEffect):
+                self.event_wait_remaining -= 1
+                if self.event_wait_remaining == 0:
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    self._continue_event()
+                return
             if isinstance(effect, FlashScreenEffect):
                 flash = self.event_screen_flash
                 if flash is None:
@@ -3197,7 +3264,7 @@ class Game:
                     self.event_effect = None
                     self._continue_event()
                 return
-            if isinstance(effect, MessageEffect):
+            if isinstance(effect, (MessageEffect, ItemReceivedEffect)):
                 if self.event_message is not None and self.event_message.update(
                     input_state
                 ):
@@ -3267,6 +3334,7 @@ class Game:
         self.event_effect = None
         self.event_message = None
         self.event_move_remaining = 0
+        self.event_wait_remaining = 0
         self.event_resume_after_fade = False
         self.alert.start()
 
@@ -3304,6 +3372,10 @@ class Game:
         release_direction: Direction | None = None,
         release_confirm: bool = False,
     ) -> bool:
+        # Ignore arrivals before touching actor state: face_toward also stops
+        # walking, even when _start_field_event rejects a nested event.
+        if getattr(self, "event_runner", None) is not None:
+            return False
         current_map = getattr(self, "current_map", None)
         if not isinstance(current_map, CompiledMap):
             return False
@@ -3312,6 +3384,7 @@ class Game:
             x,
             y,
             actor_positions=self._actor_positions(),
+            event_flags=self.save_data.event_flags,
         )
         if trigger is None:
             return False
@@ -3442,7 +3515,9 @@ class Game:
                 return
             if self._try_field_trigger("interact", x, y, release_confirm=True):
                 return
-            if self.current_map.allows_interaction_through(x, y):
+            if self.current_map.allows_interaction_through(
+                x, y, event_flags=self.save_data.event_flags
+            ):
                 x += self.field.facing.dx
                 y += self.field.facing.dy
                 if self._try_open_treasure(x, y, release_confirm=True):

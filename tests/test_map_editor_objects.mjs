@@ -15,6 +15,7 @@ function editor() {
   const state = {
     tab: "object", objectLayer: "object_y_sorted", objectId: definitions[1].id,
     selectedInstanceId: null, bulkSelection: [], zoom: 1,
+    flagOptions: [{ flag_id: "story.open", note: "扉が開いた" }, { flag_id: "story.done", note: "完了" }],
     tileset: { objects: definitions, grounds: [] },
     data: {
       size: [16, 15],
@@ -41,6 +42,7 @@ function editor() {
     "mapSelectionCandidatesAt", "pointInCellRect", "rangeSelectionItems", "placeObject", "validObjectOrigin",
     "candidatePosition", "validBulkDelta", "drawMapObjectCell", "drawObjectOutline", "drawTabCellHighlights",
     "beginObjectDrag",
+    "updateObjectField", "objectVisibilityInspector", "objectFlagOptions", "attachSiteToObject",
   ]) {
     const start = source.indexOf(`function ${name}(`);
     assert.notEqual(start, -1, name);
@@ -61,6 +63,59 @@ test("object inspector omits manual draw-order controls but retains object detai
   assert.match(inspector, /instance\.origin/);
   assert.match(inspector, /objectDrawGroupLabel/);
   assert.match(inspector, /data-action="delete-instance"/);
+});
+
+test("visibility edits, removal and undo preserve the flag ID and boolean", () => {
+  const { context, state } = editor();
+  state.selectedInstanceId = "instance_1";
+  state.history = [];
+  state.future = [];
+  context.scheduleResolution = () => {};
+  for (const name of ["beginChange", "finishChange", "commit", "undo", "redo", "changeSnapshot", "restoreChangeSnapshot"]) {
+    const start = source.indexOf(`function ${name}(`);
+    const next = source.slice(start + 1).search(/\n(?:async )?function /);
+    vm.runInContext(source.slice(start, start + 1 + next), context);
+  }
+  const condition = () => JSON.parse(JSON.stringify(state.data.objects[1].visibility_condition ?? null));
+  context.updateObjectField("visibility_enabled", "true");
+  assert.deepEqual(condition(), { flag_id: "story.open", value: true });
+  context.updateObjectField("flag_value", "false");
+  context.updateObjectField("flag_id", "story.done");
+  assert.deepEqual(condition(), { flag_id: "story.done", value: false });
+  context.updateObjectField("visibility_enabled", "false");
+  assert.equal(condition(), null);
+  context.undo();
+  assert.deepEqual(condition(), { flag_id: "story.done", value: false });
+  context.redo();
+  assert.equal(condition(), null);
+});
+
+test("visibility controls offer only a declared flag and ON/OFF and explain empty catalogs", () => {
+  const { context, state } = editor();
+  const instance = state.data.objects[1];
+  instance.visibility_condition = { flag_id: "story.open", value: false };
+  const html = context.objectVisibilityInspector(instance);
+  assert.match(html, /data-object-field="flag_id"/);
+  assert.match(html, /story.open.*扉が開いた/);
+  assert.match(html, /value="false" selected>OFFのとき/);
+  assert.doesNotMatch(html, /member_in_party|item_at_least|condition-type/);
+  state.flagOptions = [];
+  delete instance.visibility_condition;
+  assert.match(context.objectVisibilityInspector(instance), /value="true"\s+disabled/);
+  assert.match(context.objectVisibilityInspector(instance), /イベントエディタで登録/);
+});
+
+test("facility objects cannot create an exit and the inspector limits attachment to world maps", () => {
+  const { context, state } = editor();
+  state.selectedInstanceId = "instance_1";
+  for (const profile of ["town", "dungeon"]) {
+    state.data.profile = profile;
+    context.attachSiteToObject();
+    assert.equal(state.data.sites.length, 0);
+  }
+  const inspector = source.slice(source.indexOf("function renderInspector("), source.indexOf("function renderIssues("));
+  assert.match(inspector, /isWorld \? `<div class="row"[^\n]+attach-site/);
+  assert.doesNotMatch(inspector, /\$\{siteLabel\}として設定|移動口として設定/);
 });
 
 test("layer selection restricts palette, hit testing and range selection", () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 import hashlib
 import json
@@ -28,6 +29,7 @@ MAP_EVENT_ACTIVATIONS = frozenset(("step", "touch", "interact"))
 MAP_ENCOUNTER_DANGERS = frozenset(("low", "high"))
 MAP_ENCOUNTER_POLARITIES = frozenset(("yang", "neutral", "yin"))
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
+FLAG_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 
 
 class MapResourceError(RuntimeError):
@@ -78,6 +80,28 @@ class MapCell:
 
 
 @dataclass(frozen=True)
+class MapObjectCondition:
+    flag_id: str
+    value: bool
+
+    def matches(self, event_flags: Collection[str]) -> bool:
+        return (self.flag_id in event_flags) == self.value
+
+
+@dataclass(frozen=True)
+class MapObjectCellEffect:
+    instance_id: str
+    collision: str
+    interact_through: bool
+
+
+@dataclass(frozen=True)
+class MapConditionalCell:
+    ground_blocked: bool
+    objects: tuple[MapObjectCellEffect, ...]
+
+
+@dataclass(frozen=True)
 class MapArrivalPoint:
     id: str
     position: MapCell
@@ -113,6 +137,7 @@ class MapEventTrigger:
     cells: tuple[MapCell, ...] = ()
     actor_id: str | None = None
     offsets: tuple[MapCell, ...] = ()
+    object_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +152,7 @@ class WorldSite:
     name_text_key: str
     entrance_cells: tuple[MapCell, ...]
     destination: MapDestination
+    object_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -168,23 +194,50 @@ class CompiledMap:
     bgm_id: str = "da3-field"
     interact_through_rows: tuple[str, ...] = ()
     random_encounter: MapRandomEncounter | None = None
+    object_conditions: Mapping[str, MapObjectCondition] = MappingProxyType({})
+    conditional_cells: Mapping[tuple[int, int], MapConditionalCell] = MappingProxyType({})
 
-    def is_blocked(self, x: int, y: int) -> bool:
+    def is_object_visible(self, instance_id: str | None, event_flags: Collection[str] = ()) -> bool:
+        if instance_id is None:
+            return True
+        condition = self.object_conditions.get(instance_id)
+        return condition is None or condition.matches(event_flags)
+
+    def is_blocked(self, x: int, y: int, *, event_flags: Collection[str] = ()) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
             raise TypeError("map x must be an integer")
         if not isinstance(y, int) or isinstance(y, bool):
             raise TypeError("map y must be an integer")
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return True
+        cell = self.conditional_cells.get((x, y))
+        if cell is not None:
+            blocked = cell.ground_blocked
+            for effect in cell.objects:
+                if self.is_object_visible(effect.instance_id, event_flags):
+                    if effect.collision == "blocked":
+                        blocked = True
+                    elif effect.collision == "passable_override":
+                        blocked = False
+            return blocked
         return self.collision_rows[y][x] == "1"
 
-    def allows_interaction_through(self, x: int, y: int) -> bool:
+    def allows_interaction_through(
+        self, x: int, y: int, *, event_flags: Collection[str] = ()
+    ) -> bool:
         if not isinstance(x, int) or isinstance(x, bool):
             raise TypeError("map x must be an integer")
         if not isinstance(y, int) or isinstance(y, bool):
             raise TypeError("map y must be an integer")
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return False
+        cell = self.conditional_cells.get((x, y))
+        if cell is not None:
+            return any(
+                effect.interact_through
+                and self.is_object_visible(effect.instance_id, event_flags)
+                for effect in cell.objects
+            )
         if not self.interact_through_rows:
             return False
         return self.interact_through_rows[y][x] == "1"
@@ -224,13 +277,14 @@ class CompiledMap:
         y: int,
         *,
         actor_positions: Mapping[str, MapCell] | None = None,
+        event_flags: Collection[str] = (),
     ) -> MapEventTrigger | None:
         """Return the sole trigger resolved for an activation and current cell."""
 
         if activation not in MAP_EVENT_ACTIVATIONS:
             raise ValueError(f"unsupported map event activation: {activation}")
         trigger = self.event_trigger_index.get(activation, {}).get((x, y))
-        if trigger is not None:
+        if trigger is not None and self.is_object_visible(trigger.object_id, event_flags):
             return trigger
         positions = {} if actor_positions is None else actor_positions
         for actor_id, triggers in self.actor_event_triggers.items():
@@ -422,6 +476,15 @@ class MapResources:
         event_triggers = self._event_triggers(
             runtime.get("event_triggers"), width, height, actors
         )
+        object_conditions = self._object_conditions(
+            runtime.get("object_conditions", {})
+        )
+        conditional_cells = self._conditional_cells(
+            runtime.get("conditional_cells", []), width, height, object_conditions
+        )
+        for target in (*sites, *event_triggers):
+            if target.object_id is not None and target.object_id not in object_conditions:
+                raise MapResourceError(f"表示条件付きオブジェクトが見つかりません: {target.object_id}")
         static_index: dict[str, dict[tuple[int, int], MapEventTrigger]] = {
             activation: {} for activation in MAP_EVENT_ACTIVATIONS
         }
@@ -469,7 +532,70 @@ class MapResources:
             bgm_id=bgm_id,
             interact_through_rows=interact_through_rows,
             random_encounter=random_encounter,
+            object_conditions=MappingProxyType(object_conditions),
+            conditional_cells=MappingProxyType(conditional_cells),
         )
+
+    @classmethod
+    def _object_conditions(cls, value: object) -> dict[str, MapObjectCondition]:
+        if not isinstance(value, dict):
+            raise MapResourceError("マップJSONのobject_conditionsはobjectである必要があります。")
+        loaded = {}
+        for instance_id, condition in value.items():
+            cls._stable_id(instance_id, "object_conditionsの実体ID")
+            if (
+                not isinstance(condition, dict)
+                or set(condition) != {"flag_id", "value"}
+                or not isinstance(condition.get("flag_id"), str)
+                or FLAG_ID_PATTERN.fullmatch(condition["flag_id"]) is None
+                or not isinstance(condition.get("value"), bool)
+            ):
+                raise MapResourceError(f"object_conditions.{instance_id}が不正です。")
+            loaded[instance_id] = MapObjectCondition(condition["flag_id"], condition["value"])
+        return loaded
+
+    @classmethod
+    def _conditional_cells(
+        cls,
+        value: object,
+        width: int,
+        height: int,
+        conditions: Mapping[str, MapObjectCondition],
+    ) -> dict[tuple[int, int], MapConditionalCell]:
+        if not isinstance(value, list):
+            raise MapResourceError("マップJSONのconditional_cellsは配列である必要があります。")
+        loaded = {}
+        for index, record in enumerate(value):
+            path = f"conditional_cells[{index}]"
+            if (
+                not isinstance(record, dict)
+                or set(record) != {"position", "ground_blocked", "objects"}
+                or not isinstance(record["ground_blocked"], bool)
+            ):
+                raise MapResourceError(f"{path}が不正です。")
+            cell = cls._map_cell(record["position"], width, height, f"{path}.position")
+            key = (cell.x, cell.y)
+            if key in loaded:
+                raise MapResourceError(f"{path}.positionが重複しています。")
+            if not isinstance(record["objects"], list) or not record["objects"]:
+                raise MapResourceError(f"{path}.objectsが不正です。")
+            effects = []
+            for effect in record["objects"]:
+                if (
+                    not isinstance(effect, dict)
+                    or set(effect) != {"instance_id", "collision", "interact_through"}
+                    or effect["collision"] not in ("passable", "blocked", "passable_override")
+                    or not isinstance(effect["interact_through"], bool)
+                ):
+                    raise MapResourceError(f"{path}.objectsが不正です。")
+                instance_id = cls._stable_id(effect["instance_id"], f"{path}.objects.instance_id")
+                effects.append(MapObjectCellEffect(
+                    instance_id, effect["collision"], effect["interact_through"]
+                ))
+            if not any(effect.instance_id in conditions for effect in effects):
+                raise MapResourceError(f"{path}に表示条件付きオブジェクトがありません。")
+            loaded[key] = MapConditionalCell(record["ground_blocked"], tuple(effects))
+        return loaded
 
     @staticmethod
     def _random_encounter(
@@ -777,6 +903,7 @@ class MapResources:
                     name_text_key=name_text_key,
                     entrance_cells=tuple(entrance_cells),
                     destination=destination,
+                    object_id=cls._optional_stable_id(record.get("object_id"), f"{path}.object_id"),
                 )
             )
         return tuple(loaded)
@@ -1040,6 +1167,7 @@ class MapResources:
                         event_id,
                         frozenset(activation_values),
                         cells=cells,
+                        object_id=cls._optional_stable_id(target.get("object_id"), f"{path}.target.object_id"),
                     )
                 )
             elif target.get("kind") == "actor":
@@ -1223,6 +1351,9 @@ __all__ = [
     "MAP_FACINGS",
     "MAP_TILE_SIZE",
     "MapObjectTile",
+    "MapObjectCondition",
+    "MapObjectCellEffect",
+    "MapConditionalCell",
     "MapRandomEncounter",
     "MapResourceError",
     "MapResources",

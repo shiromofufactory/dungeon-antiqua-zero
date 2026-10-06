@@ -74,10 +74,13 @@ def member_battle_sprite_region(
     if member.is_dead:
         source_x = RESULT_DEAD_SPRITE_SOURCE_X
         width = RESULT_DEAD_SPRITE_WIDTH
+    elif member.paralyzed:
+        source_x = RESULT_AILMENT_SPRITE_SOURCE_X
+        width = RESULT_CHARACTER_SPRITE_WIDTH
     elif victory_frame is not None:
         source_x = victory_sprite_source_x(victory_frame)
         width = RESULT_CHARACTER_SPRITE_WIDTH
-    elif member.paralyzed or member.poisoned:
+    elif member.poisoned:
         source_x = RESULT_AILMENT_SPRITE_SOURCE_X
         width = RESULT_CHARACTER_SPRITE_WIDTH
     else:

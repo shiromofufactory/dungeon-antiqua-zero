@@ -2,18 +2,21 @@ from __future__ import annotations
 
 from types import MappingProxyType, SimpleNamespace
 import unittest
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, Mock, call, patch
 
-from game import Game, GameScreenChange
+from game import EVENT_ITEM_RECEIVED_TEXT_KEY, Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
+from resources.maps import MapObjectCondition
 from resources import (
     CompiledMap,
     EventCatalog,
     MapActor,
     MapCell,
     MapEventTrigger,
+    MapDestination,
     MapTreasureContents,
+    WorldSite,
 )
 from rendering import FadeThroughBlack
 from scenes.battle import BattleEncounter, BattlePhase, BattleResult
@@ -21,10 +24,15 @@ from state import SaveData, Settings
 from systems import (
     InventorySystem,
     MessageEffect,
+    ItemReceivedEffect,
     FlashScreenEffect,
+    FaceActorEffect,
+    FacePartyEffect,
+    MoveActorEffect,
     MovePartyEffect,
     OpenShopEffect,
     StartBattleEffect,
+    WaitEffect,
     TreasureSystem,
 )
 
@@ -34,6 +42,7 @@ def compiled_map(
     *,
     actors: tuple[MapActor, ...] = (),
     width: int = 3,
+    height: int = 3,
     interact_through_rows: tuple[str, ...] = (),
 ) -> CompiledMap:
     static = {activation: {} for activation in ("step", "touch", "interact")}
@@ -47,13 +56,13 @@ def compiled_map(
         tileset_id="worldmap",
         tile_size=16,
         width=width,
-        height=3,
+        height=height,
         atlas=object(),
         atlas_columns=1,
         atlas_tile_count=1,
-        ground_tiles=(0,) * (width * 3),
+        ground_tiles=(0,) * (width * height),
         object_tiles=(),
-        collision_rows=("0" * width, "0" * width, "0" * width),
+        collision_rows=("0" * width,) * height,
         ground_animations=MappingProxyType({}),
         object_animations=MappingProxyType({}),
         actors=actors,
@@ -75,13 +84,16 @@ def game_for(
     *,
     actors: tuple[MapActor, ...] = (),
     width: int = 3,
+    height: int = 3,
     interact_through_rows: tuple[str, ...] = (),
 ) -> Game:
     game = Game.__new__(Game)
+    game.save_data = SaveData()
     game.current_map = compiled_map(
         trigger,
         actors=actors,
         width=width,
+        height=height,
         interact_through_rows=interact_through_rows,
     )
     game.field = FieldMovement(
@@ -89,6 +101,7 @@ def game_for(
         start=FieldPosition(1, 1),
         speed=16,
         facing=Direction.RIGHT,
+        event_flags=game.save_data.event_flags,
     )
     game.field_actors = FieldActors(game.current_map) if actors else None
     game.event_release_direction = None
@@ -101,6 +114,187 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    @patch("game.MessageOverlay")
+    def test_item_received_message_formats_name_only_and_waits_until_closed(self, overlay: Mock) -> None:
+        game = Game.__new__(Game)
+        effect = ItemReceivedEffect("POTION")
+        game.event_runner = Mock(advance=Mock(return_value=effect))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.settings = Settings()
+        game.fonts = Mock()
+        game.items = {"POTION": Mock(localized_name=Mock(return_value="ポーション"))}
+        game.texts = Mock(formatted_text=Mock(return_value="ポーションを　手に入れた！"))
+        game.save_data = SaveData()
+
+        game._continue_event()
+
+        game.texts.formatted_text.assert_called_once_with(EVENT_ITEM_RECEIVED_TEXT_KEY, ANY, {"ITEM": "ポーション"})
+        overlay.assert_called_once_with(lines=("ポーションを　手に入れた！",), settings=game.settings, fonts=game.fonts)
+        self.assertIs(game.event_message, overlay.return_value)
+        self.assertEqual(game.save_data.logs, [])
+        game._continue_event = Mock()
+        overlay.return_value.update.return_value = False
+        game._update_event(InputState())
+        game.event_runner.complete_effect.assert_not_called()
+        game._continue_event.assert_not_called()
+        overlay.return_value.update.return_value = True
+        game._update_event(InputState(confirm=InputButton(triggered=True, held=True)))
+        game.event_runner.complete_effect.assert_called_once_with(effect)
+        self.assertIsNone(game.event_effect)
+        self.assertIsNone(game.event_message)
+        game._continue_event.assert_called_once_with()
+
+    def test_wait_resumes_exactly_on_its_final_frame_without_input_skip(self) -> None:
+        for frames in (6, 12, 18):
+            with self.subTest(frames=frames):
+                game = Game.__new__(Game)
+                effect = WaitEffect(frames)
+                game.event_runner = Mock(advance=Mock(return_value=effect))
+                game.party_system = Mock(active_party=(), character_states={})
+                game._continue_event()
+                self.assertEqual(game.event_wait_remaining, frames)
+                game._continue_event = Mock()
+                input_state = InputState(
+                    confirm=InputButton(triggered=True, held=True),
+                    cancel=InputButton(triggered=True, held=True),
+                    held_direction=Direction.RIGHT,
+                )
+                for remaining in range(frames - 1, 0, -1):
+                    game._update_event(input_state)
+                    self.assertEqual(game.event_wait_remaining, remaining)
+                    game.event_runner.complete_effect.assert_not_called()
+                    game._continue_event.assert_not_called()
+                game._update_event(input_state)
+                self.assertEqual(game.event_wait_remaining, 0)
+                self.assertIsNone(game.event_effect)
+                game.event_runner.complete_effect.assert_called_once_with(effect)
+                game._continue_event.assert_called_once_with()
+
+    def test_consecutive_waits_have_no_extra_frame_between_them(self) -> None:
+        game = Game.__new__(Game)
+        effects = (WaitEffect(6), WaitEffect(12), MovePartyEffect(Direction.DOWN, 1))
+        game.event_runner = Mock(advance=Mock(side_effect=effects))
+        game.party_system = Mock(active_party=(), character_states={})
+        game._continue_event()
+        for _ in range(6):
+            game._update_event(InputState())
+        self.assertIs(game.event_effect, effects[1])
+        self.assertEqual(game.event_wait_remaining, 12)
+        for _ in range(12):
+            game._update_event(InputState())
+        self.assertIs(game.event_effect, effects[2])
+        self.assertEqual(game.event_wait_remaining, 0)
+        self.assertEqual(game.event_runner.complete_effect.call_args_list, [call(effects[0]), call(effects[1])])
+
+    def test_active_event_ignores_actor_trigger_without_stopping_controlled_movement(self) -> None:
+        trigger = MapEventTrigger(
+            "elder", "sample.meeting", frozenset(("touch", "interact")),
+            actor_id="elder", offsets=(MapCell(0, 0),),
+        )
+        game = game_for(trigger, actors=(MapActor("elder", MapCell(2, 1), "stationary", 0, "up"),))
+        game.event_runner = Mock()
+        game.field_actors.update("elder", Direction.UP, party_position=game.field.position)
+        movement = game.field_actors.actor("elder").movement
+        for activation in ("touch", "interact"):
+            self.assertFalse(game._try_field_trigger(activation, 2, 1))
+        self.assertTrue(movement.is_moving)
+        self.assertEqual(movement.offset_y, -2)
+        self.assertIs(movement.facing, Direction.UP)
+        game._start_field_event.assert_not_called()
+
+    def test_active_event_ignores_party_arrival_on_an_exit(self) -> None:
+        game = game_for(MapEventTrigger("floor", "sample.floor", frozenset(("step",)), cells=(MapCell(2, 1),)))
+        game.field.update(Direction.RIGHT)
+        game.event_runner = Mock()
+        game.current_sites = Mock()
+        game._stage_map_destination = Mock(return_value=True)
+
+        Game._handle_arrived_site(game)
+
+        game.current_sites.entrance_at.assert_not_called()
+        game._stage_map_destination.assert_not_called()
+        game._begin_screen_change.assert_not_called()
+
+    def test_actor_moves_thirteen_steps_across_an_exit_and_event_cell(self) -> None:
+        trigger = MapEventTrigger(
+            "flowers", "sample.flowers", frozenset(("step",)),
+            cells=(MapCell(17, 23),),
+        )
+        game = game_for(trigger, width=20, height=40, actors=(
+            MapActor("alvan", MapCell(17, 35), "stationary", 2, "up"),
+        ))
+        object.__setattr__(game.current_map, "sites", (
+            WorldSite("exit", "location.exit", (MapCell(17, 26),), MapDestination("next_map", "entrance")),
+        ))
+        game.field = FieldMovement(game.current_map, start=FieldPosition(17, 20))
+        runner = Mock()
+        effect = MoveActorEffect("alvan", Direction.UP, 13)
+        game.event_runner = runner
+        game.event_effect = effect
+        game.event_move_remaining = 13
+        game._continue_event = Mock()
+        game.input_reader = Mock(poll=Mock(return_value=InputState()))
+        game.alert = Mock()
+        game.showing_field = True
+        game._update_game_menu = Mock(return_value=False)
+        game._update_field_menu_guide = Mock()
+        game._update_battle_scene = Mock(return_value=False)
+        game._update_fade = Mock(return_value=False)
+        game._update_field_fade_pulse = Mock()
+        game._try_field_trigger = Mock(return_value=False)
+        game._advance_random_encounter = Mock()
+
+        for _ in range(13 * 8):
+            game.update()
+
+        self.assertEqual(game.field_actors.actor("alvan").movement.position, FieldPosition(17, 22))
+        self.assertEqual(game.event_move_remaining, 0)
+        self.assertFalse(game.field_actors.actor("alvan").movement.is_moving)
+        runner.complete_effect.assert_called_once_with(effect)
+        game._continue_event.assert_called_once_with()
+        game._handle_arrived_site.assert_not_called()
+        game._try_field_trigger.assert_not_called()
+        game._advance_random_encounter.assert_not_called()
+        game.alert.start.assert_not_called()
+
+    def test_facing_commands_apply_in_one_frame_and_keep_explicit_actor_facing(self) -> None:
+        trigger = MapEventTrigger("meeting", "sample.meeting", frozenset(("interact",)), cells=(MapCell(2, 1),))
+        game = game_for(trigger, actors=(MapActor("elder", MapCell(2, 1), "stationary", 0, "up"),))
+        party_effect = FacePartyEffect(Direction.DOWN)
+        actor_effect = FaceActorEffect("elder", Direction.LEFT)
+        runner = Mock(advance=Mock(side_effect=[party_effect, actor_effect, None]), is_complete=True)
+        game.event_runner = runner
+        game.party_system = Mock(active_party=(object(),), character_states={})
+        game.selected_member_index = 0
+        game.event_stationary_actor_facing_restore = ("elder", Direction.UP)
+
+        game._continue_event()
+
+        self.assertIs(game.field.facing, Direction.DOWN)
+        self.assertEqual(game.field.position, FieldPosition(1, 1))
+        self.assertIs(game.field_actors.actor("elder").movement.facing, Direction.LEFT)
+        self.assertEqual(game.field_actors.actor("elder").movement.position, FieldPosition(2, 1))
+        self.assertIsNone(game.event_stationary_actor_facing_restore)
+        self.assertIsNone(game.event_runner)
+        self.assertEqual(runner.complete_effect.call_args_list, [
+            call(party_effect), call(actor_effect),
+        ])
+
+    def test_hidden_object_trigger_stops_firing_when_its_flag_changes(self) -> None:
+        trigger = MapEventTrigger(
+            "rock_touch", "sample.rock", frozenset(("touch",)),
+            cells=(MapCell(2, 1),), object_id="rock",
+        )
+        game = game_for(trigger)
+        object.__setattr__(game.current_map, "object_conditions", MappingProxyType({
+            "rock": MapObjectCondition("story.open", False),
+        }))
+        self.assertTrue(game._try_field_trigger("touch", 2, 1))
+        game._start_field_event.reset_mock()
+        game.save_data.event_flags.add("story.open")
+        self.assertFalse(game._try_field_trigger("touch", 2, 1))
+        game._start_field_event.assert_not_called()
+
     def test_event_flash_restores_palette_before_resuming_commands(self) -> None:
         game = Game.__new__(Game)
         effect = FlashScreenEffect("white")

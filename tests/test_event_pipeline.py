@@ -51,6 +51,73 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_give_item_compiles_optional_boolean_message_setting(self) -> None:
+        source = sample_source()
+        for option in ({}, {"show_message": False}, {"show_message": True}):
+            with self.subTest(option=option):
+                command = {"command": "give_item", "item_key": "POTION", "quantity": 3, **option}
+                source["events"][0]["commands"] = [command]
+                self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+                self.assertEqual(compile_event_sources({"sample": source}, **CATALOGS)["events"]["sample.greeting"]["commands"], [command])
+
+    def test_give_item_rejects_nonboolean_message_option_and_take_item_option(self) -> None:
+        source = sample_source()
+        command = {"command": "give_item", "item_key": "POTION", "quantity": 1}
+        source["events"][0]["commands"] = [command]
+        for value in (None, 0, 1, "on", "false"):
+            with self.subTest(value=value):
+                command["show_message"] = value
+                self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {"invalid_show_message"})
+        command.update(command="take_item", show_message=True)
+        self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {"unknown_field"})
+
+    def test_wait_compiles_in_six_frame_units_in_field_and_battle_events(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [{"command": "wait", "frames": 6}, {"command": "wait", "frames": 12}]
+        for battle_start_id in (None, "guard"):
+            with self.subTest(battle_start_id=battle_start_id):
+                if battle_start_id is not None:
+                    source["events"][0]["battle_start_id"] = battle_start_id
+                self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+                compiled = compile_event_sources({"sample": source}, **CATALOGS)
+                self.assertEqual(compiled["events"]["sample.greeting"]["commands"], source["events"][0]["commands"])
+
+    def test_wait_rejects_missing_nonpositive_nonmultiple_and_noninteger_frames(self) -> None:
+        source = sample_source()
+        for frames in (None, 0, -6, 1, 7, 6.0, True, "6"):
+            with self.subTest(frames=frames):
+                source["events"][0]["commands"] = [{"command": "wait", "frames": frames}]
+                diagnostics = validate_event_sources({"sample": source}, **CATALOGS)
+                self.assertEqual([(item.code, item.path) for item in diagnostics], [
+                    ("invalid_wait_frames", "sample.events[0].commands[0].frames"),
+                ])
+        source["events"][0]["commands"] = [{"command": "wait"}]
+        self.assertIn("invalid_wait_frames", {item.code for item in validate_event_sources({"sample": source}, **CATALOGS)})
+
+    def test_facing_commands_compile_and_validate_field_only_attributes(self) -> None:
+        commands = [
+            {"command": "face_party", "direction": "right"},
+            {"command": "face_actor", "actor_id": "elder", "direction": "up"},
+        ]
+        source = sample_source()
+        source["events"][0]["commands"] = commands
+        compiled = compile_event_sources({"sample": source}, **CATALOGS)
+        self.assertEqual(compiled["events"]["sample.greeting"]["commands"], commands)
+        source["events"][0]["battle_start_id"] = "guard"
+        self.assertEqual([
+            item.code for item in validate_event_sources({"sample": source}, **CATALOGS)
+        ], ["field_only_battle_command"] * 2)
+
+    def test_facing_commands_reject_invalid_direction_actor_and_steps(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [
+            {"command": "face_party", "direction": "north", "steps": 1},
+            {"command": "face_actor", "actor_id": "Bad ID", "direction": "up"},
+        ]
+        self.assertEqual({
+            item.code for item in validate_event_sources({"sample": source}, **CATALOGS)
+        }, {"unknown_field", "invalid_direction", "invalid_actor_id"})
+
     def test_flash_screen_accepts_white_and_rejects_other_colors(self) -> None:
         source = sample_source()
         source["events"][0]["commands"] = [{"command": "flash_screen", "color": "white"}]

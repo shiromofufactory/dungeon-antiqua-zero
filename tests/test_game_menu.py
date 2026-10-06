@@ -10,6 +10,7 @@ from rendering import FadeThroughBlack
 from resources import FontResources
 from scenes import BattleScene
 from state import Language, Settings
+from systems import EventContext, WaitEffect
 from text_catalog import TextCatalog
 from ui.game_menu import GAME_MENU_LINE_STEP, GameMenuAction, GameMenuOverlay
 from ui.tagged_text import tagged_text_width
@@ -20,6 +21,23 @@ HOLD = InputButton(held=True)
 
 
 class GameMenuTest(unittest.TestCase):
+    def test_event_wait_timer_pauses_until_menu_resume_and_button_release(self) -> None:
+        game = self.game()
+        game.event_runner = Mock(context=EventContext.BATTLE)
+        game.event_effect = WaitEffect(12)
+        game.event_wait_remaining = 12
+        self.open(game)
+        for _ in range(20):
+            self.update(game)
+        self.assertEqual(game.event_wait_remaining, 12)
+        self.update(game, InputState(cancel=PRESS))
+        self.update(game, InputState(cancel=HOLD))
+        self.update(game)
+        self.assertEqual(game.event_wait_remaining, 12)
+        self.update(game)
+        self.assertEqual(game.event_wait_remaining, 11)
+        game.event_runner.complete_effect.assert_not_called()
+
     def game(self) -> Game:
         game = Game.__new__(Game)
         game.settings = Settings()

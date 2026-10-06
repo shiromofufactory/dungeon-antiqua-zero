@@ -6,7 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
-from tools.screen_mocks._fixtures import load_mock_items
+from tools.screen_mocks._fixtures import (
+    load_mock_items,
+    load_mock_party,
+    load_mock_skills,
+)
 
 from field import FieldPosition
 from game import (
@@ -18,6 +22,7 @@ from game import (
 from input import Direction, InputButton, InputState
 from localization import Localizer
 from member import FormationRow
+from resources import FontResources
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
@@ -34,6 +39,8 @@ from scenes.battle import (
     BATTLE_BOSS_BGM_ID,
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
     BATTLE_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT,
+    DEAD_SPRITE_SOURCE_X,
+    NEAR_DEATH_SPRITE_SOURCE_X,
     MONSTER_POSITIONS,
     MONSTER_DEATH_PALETTE,
     SPELL_EFFECT_FLASH_PALETTE,
@@ -45,7 +52,13 @@ from scenes.battle import (
     monster_slot_indexes,
 )
 from state import Language, SaveData, Settings
-from systems import DungeonExitReturn, EncounterAdvance, EncounterFormation
+from systems import (
+    BattleProgression,
+    DungeonExitReturn,
+    EncounterAdvance,
+    EncounterFormation,
+    EnemyProgressionData,
+)
 from text_catalog import TextCatalog
 from ui import LocalizedWindowTextFactory, POSITIVE_COLOR
 from ui.tagged_text import TextColor, split_tagged_text
@@ -353,6 +366,64 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
 
 
 class BattleSceneIntegrationTest(unittest.TestCase):
+    def test_victory_wakes_all_members_before_showing_summary(self) -> None:
+        party = load_mock_party(load_mock_items(), load_mock_skills())
+        for member in party:
+            member.sleeping = 2
+        party[1].poisoned = True
+        party[2].paralyzed = True
+        party[3].hp = 0
+        conditions_before = tuple(
+            (member.hp, member.poisoned, member.paralyzed) for member in party
+        )
+        scene = BattleScene.__new__(BattleScene)
+        scene.party = party[:5]
+        scene.result_party = party
+        scene.party_visuals = tuple(
+            SimpleNamespace(member=member) for member in scene.party
+        )
+        scene.monsters = ()
+        scene.escaped_party_indexes = {4}
+        scene.progression = BattleProgression((EnemyProgressionData(1, 0, 1, 0),))
+        scene.save_data = SaveData()
+        scene.inventory_system = None
+        scene.monster_record_system = None
+        scene.settings = Settings()
+        scene.localizer = Localizer.from_settings(scene.settings)
+        scene.fonts = FontResources()
+        scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        scene._play_victory_jingle = Mock()
+
+        scene._begin_victory_summary()
+
+        self.assertIs(scene.phase, BattlePhase.VICTORY_SUMMARY)
+        self.assertEqual(tuple(member.sleeping for member in party), (0,) * 6)
+        self.assertEqual(
+            tuple((member.hp, member.poisoned, member.paralyzed) for member in party),
+            conditions_before,
+        )
+        with patch("scenes.battle.pyxel.frame_count", 10), patch("scenes.battle.pyxel.blt") as blt:
+            scene._draw_sleeping_icons()
+        blt.assert_not_called()
+
+    def test_victory_poses_keep_paralysis_and_death_during_result_transition(self) -> None:
+        scene = BattleScene.__new__(BattleScene)
+        for phase in (BattlePhase.VICTORY_SUMMARY, BattlePhase.RESULT_TRANSITION):
+            scene.phase = phase
+            for frame, victory_pose in ((10, 128), (30, 0)):
+                scene.victory_motion_frame = frame
+                for hp, paralyzed, expected in (
+                    (10, False, victory_pose),
+                    (10, True, NEAR_DEATH_SPRITE_SOURCE_X),
+                    (0, False, DEAD_SPRITE_SOURCE_X),
+                    (0, True, DEAD_SPRITE_SOURCE_X),
+                ):
+                    with self.subTest(phase=phase, frame=frame, hp=hp, paralyzed=paralyzed):
+                        scene.party_visuals = (
+                            SimpleNamespace(member=SimpleNamespace(hp=hp, paralyzed=paralyzed)),
+                        )
+                        self.assertEqual(scene._party_sprite_source_x(0), expected)
+
     def test_battle_bgm_depends_only_on_first_monster_boss_flag(self) -> None:
         for boss_flags, expected_bgm in (
             ((False, False), BATTLE_BGM_ID),
