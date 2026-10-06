@@ -74,7 +74,7 @@ app/
 ├── item_detail.py            # メニュー・店・戦闘で共有するアイテム詳細表現
 ├── systems/
 │   ├── debug.py              # デバッグ時だけ使うパーティ状態の再生成
-│   ├── encounter.py          # 歩行加算、発生判定、全滅時の最寄り出口解決
+│   ├── encounter.py          # 歩行加算、発生判定、全滅時の親ダンジョンと出口解決
 │   ├── inventory.py          # 所持数、破棄、装備交換を含むアイテム操作
 │   ├── battle_progression.py # 戦闘実績、報酬、熟練度、HP・MP成長の確定
 │   ├── spell_progression.py  # メニュー呪文使用時の熟練度・最大MP成長
@@ -410,6 +410,10 @@ OGGが存在することを保存・生成前に確認する。
 `pyxel.play_pos()` の秒位置を退避し、ジングル終了後に `pyxel.play(..., sec=退避位置)` で再開する。
 Scene切り替え時も同じ次曲が予約済みならジングルを中断しない。別のジングルを明示的に再生した場合は
 現在のジングルへ割り込み、新しい予約へ置き換える。
+イベントのBGM停止は `BgmPlayer.fade_out_and_stop()` が音量補間と停止までのフレーム進行を
+所有する。Gameは停止要求を渡し、`is_fading_out` が偽になるまでEventRunnerを待機させる。
+停止要求は予約された次曲を解除し、新しい再生要求は進行中の停止フェードを解除する。
+具体的な時間と待機規則は [`features/events.md`](./features/events.md) を正本とする。
 
 現段階ではデスクトップ版のPyxel音声経路だけを対象とする。DA2のAndroid用HTML Audio、
 画面非表示からのモバイル復帰、曲長JSONは導入しない。現在位置はPyxelから曲内の秒数として取得
@@ -469,8 +473,11 @@ Application、編集中状態、保存、検証処理はそれぞれのモジュ
 検証、地面合成、ゲーム用データ生成は `scripts/map_pipeline/` 相当のPyxel非依存処理へ置く。
 両ツールで境界ルールや保存形式を別々に実装しない。
 
-配置オブジェクトの表示条件と条件付きセルの通行効果はマップ生成処理が展開し、
-`resources/maps.py` の不変な `CompiledMap` が現在のイベントフラグを明示的に受け取って評価する。
+配置オブジェクトの条件付きセルの通行効果はマップ生成処理が展開し、actorの表示条件は
+不変な `MapActor` に保持する。両者のフラグ条件は `resources/maps.py` の
+`MapVisibilityCondition` に統一し、不変な `CompiledMap` が現在のイベントフラグを
+明示的に受け取って評価する。FieldActorsは全actorの一時状態を保持し、表示中のactorだけを
+描画・衝突・トリガー座標・自律更新へ渡す。画像リソースは非表示actorの分も初期化時に読み込む。
 GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、描画とトリガー判定にも
 同じ集合を渡す。マップリソースへSaveDataやGameの逆参照、可視状態の複製は持たせない。
 具体的な制作操作と適用範囲は [`features/map-editor.md`](./features/map-editor.md) を参照する。
@@ -776,6 +783,12 @@ SceneやOverlayごとに独自のフェード速度計算を持たせない。
 イベントの全画面フラッシュは `rendering.screen_flash.ScreenFlash` がフレーム進行を持ち、
 `Game` が `PaletteShifter.set_global_mix()` へ指定色を適用する。イベントRunnerは効果の完了まで
 待機し、色名の検証はイベント生成処理と本番loaderで行う。
+イベントの明るさ変更と横揺れは `rendering.screen_effects` の `ScreenBrightness` と
+`ScreenShake` が補間値とフレーム進行を所有し、GameがEventEffectの完了をRunnerへ返す。
+明るさは `PaletteShifter.set_brightness()` で通常色からの変換へ合成し、
+`set_global_mix()` による一時的なフェードやフラッシュが終了しても維持する。
+横揺れはGameの描画カメラへ加算してSceneとOverlayへ適用し、Domain Modelの位置を変更しない。
+具体的な値、待機、初期化規則は [`features/events.md`](./features/events.md) を正本とする。
 
 ## OverlayとUI
 
@@ -1516,7 +1529,7 @@ Overlayがメッセージ定義から現在言語と顔を解決する。イベ�
 
 Sceneはトリガー検出、EventRunnerは条件評価とコマンド進行、既存のDomain Model／Systemは
 状態変更、Overlayはメッセージなどの入力待ちを担当する。RunnerはUIや具体的Sceneを直接参照せず、
-メッセージ、音声、時間待ち、移動、向き変更、ショップ、ID付き戦闘開始をEventEffectとして呼び出し元へ返す。ショップは
+メッセージ、音声、画面演出、時間待ち、移動、向き変更、ショップ、ID付き戦闘開始をEventEffectとして呼び出し元へ返す。ショップは
 既存のShopOverlayを開き、退出後にRunnerへ完了を返して後続コマンドを再開する。複雑なカットシーンや
 固有ギミックだけをPythonの個別ハンドラーにし、汎用コマンドで無理にすべてを表現することも、
 すべてをPythonの巨大な条件分岐に戻すことも避ける。

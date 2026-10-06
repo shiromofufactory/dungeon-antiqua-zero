@@ -960,12 +960,12 @@ function objectFlagOptions(selected) {
   ).join("");
 }
 
-function objectVisibilityInspector(instance) {
+function visibilityInspector(instance, kind = "object") {
   const condition = instance.visibility_condition;
   return `<div class="field" style="margin-top:9px"><label>表示条件</label>
-    <select data-object-field="visibility_enabled"><option value="false" ${condition ? "" : "selected"}>常に表示</option><option value="true" ${condition ? "selected" : ""} ${state.flagOptions.length || condition ? "" : "disabled"}>フラグで指定</option></select></div>
-    ${condition ? `<div class="field"><label>フラグ</label><select data-object-field="flag_id">${objectFlagOptions(condition.flag_id)}</select></div>
-    <div class="field"><label>表示する状態</label><select data-object-field="flag_value"><option value="true" ${condition.value === true ? "selected" : ""}>ONのとき</option><option value="false" ${condition.value === false ? "selected" : ""}>OFFのとき</option></select></div>` : ""}
+    <select data-${kind}-field="visibility_enabled"><option value="false" ${condition ? "" : "selected"}>常に表示</option><option value="true" ${condition ? "selected" : ""} ${state.flagOptions.length || condition ? "" : "disabled"}>フラグで指定</option></select></div>
+    ${condition ? `<div class="field"><label>フラグ</label><select data-${kind}-field="flag_id">${objectFlagOptions(condition.flag_id)}</select></div>
+    <div class="field"><label>表示する状態</label><select data-${kind}-field="flag_value"><option value="true" ${condition.value === true ? "selected" : ""}>ONのとき</option><option value="false" ${condition.value === false ? "selected" : ""}>OFFのとき</option></select></div>` : ""}
     ${state.flagOptions.length ? "" : `<div class="field-note">フラグはイベントエディタで登録してください。</div>`}`;
 }
 
@@ -1050,7 +1050,7 @@ function renderInspector() {
       <div class="section-title"><h2>選択オブジェクト</h2><span class="subtle">配置数 ${state.data.objects.length}</span></div>
       ${instance ? `
         <div class="instance-card"><strong>${escapeHtml(instance.definition_id)}</strong>ID: ${escapeHtml(instance.id)}<br>起点: ${instance.origin.join(", ")} / ${escapeHtml(objectDrawGroupLabel(objectDefinition(instance)))}</div>
-        ${objectVisibilityInspector(instance)}
+        ${visibilityInspector(instance)}
         <div class="row end" style="margin-top:9px">
           <button class="button danger small" type="button" data-action="delete-instance">配置を削除</button>
         </div>
@@ -1106,7 +1106,7 @@ function renderInspector() {
             : `<div class="field full"><label>スプライト</label><button class="button actor-sprite-select" type="button" data-action="open-actor-sprite-dialog"><canvas width="48" height="72" data-selected-actor-sprite></canvas><span class="actor-sprite-select-copy"><strong>${actorSpriteLabel(actor)}</strong><span>NPC・PC画像から選択</span></span></button></div>
                ${actor.kind === "prop" ? "" : `<div class="field full"><label>向き</label><select data-actor-field="facing">${facingOptions(actor.facing)}</select></div><div class="field full"><label><input type="checkbox" data-actor-field="floating" ${actor.floating ? "checked" : ""}> 浮遊</label></div>`}
                <div class="field full"><label>イベント</label><select data-actor-event-id="true">${eventIdOptions(linkedActorTrigger?.event_id || "")}</select><div class="field-note">touch・interactで自動的に起動します。</div></div>`}
-        </div><div class="row between" style="margin-top:9px"><div class="row">${actor.kind !== "treasure" && editorRoute ? `<button class="button secondary small" data-action="add-actor-event">イベントを追加</button>` : ""}${actor.kind !== "treasure" && editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
+        </div>${visibilityInspector(actor, "actor")}<div class="row between" style="margin-top:9px"><div class="row">${actor.kind !== "treasure" && editorRoute ? `<button class="button secondary small" data-action="add-actor-event">イベントを追加</button>` : ""}${actor.kind !== "treasure" && editorRoute && linkedActorTrigger?.event_id ? `<button class="button secondary small" data-action="open-actor-event">イベント本文を編集</button>` : ""}</div><button class="button danger small" data-action="delete-actor">actorを削除</button></div>` : `<div class="empty-state">actorを選択してください。</div>`}
     </div>
     <div class="section">
       <div class="section-title"><h2>選択トリガー</h2><span class="subtle">${standaloneTriggers().length}件</span></div>
@@ -2615,13 +2615,17 @@ function handleInspectorAction(element) {
 function updateObjectField(path, value) {
   const instance = currentInstance();
   if (!instance || state.objectLayer === "all" || !objectLayerEditable(objectDefinition(instance))) return;
+  updateVisibilityField(instance, path, value);
+}
+
+function updateVisibilityField(instance, path, value) {
   if (path === "visibility_enabled") {
     if (value === "true" && !state.flagOptions.length) return;
     commit(() => {
       if (value === "true") instance.visibility_condition = { flag_id: state.flagOptions[0].flag_id, value: true };
       else delete instance.visibility_condition;
     });
-  } else if (instance.visibility_condition) {
+  } else if (instance.visibility_condition && ["flag_id", "flag_value"].includes(path)) {
     commit(() => {
       if (path === "flag_id") instance.visibility_condition.flag_id = value;
       else if (path === "flag_value") instance.visibility_condition.value = value === "true";
@@ -2695,6 +2699,10 @@ function updateArrivalField(path, value) {
 function updateActorField(path, value) {
   const actor = currentActor();
   if (!actor) return;
+  if (["visibility_enabled", "flag_id", "flag_value"].includes(path)) {
+    updateVisibilityField(actor, path, value);
+    return;
+  }
   commit(() => {
     if (path === "id") {
       const previousId = actor.id;

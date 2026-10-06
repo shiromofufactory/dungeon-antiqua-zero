@@ -12,6 +12,7 @@ import pyxel
 
 BGM_CHANNEL = 2
 BGM_VOLUME_GAINS = (0.0, 0.2, 0.4, 0.6, 0.8)
+BGM_STOP_FADE_FRAMES = 30
 SE_CATALOG_PATH = Path(__file__).resolve().parents[1] / "audio" / "catalog.json"
 
 
@@ -125,6 +126,9 @@ class BgmPlayer:
         self._queued_start_sec = 0.0
         self._volume = 0
         self._fade_rate = 1.0
+        self._stop_fade_frames = 0
+        self._stop_fade_remaining = 0
+        self._stop_fade_start_rate = 1.0
         self._paused = False
         self._paused_sec: float | None = None
         self.set_volume(volume)
@@ -144,6 +148,10 @@ class BgmPlayer:
     @property
     def is_playing(self) -> bool:
         return self._current_id is not None
+
+    @property
+    def is_fading_out(self) -> bool:
+        return self._stop_fade_remaining > 0
 
     @property
     def available_ids(self) -> tuple[str, ...]:
@@ -194,12 +202,14 @@ class BgmPlayer:
         if start_sec < 0:
             raise ValueError("start_sec must not be negative")
         if self._current_id == bgm_id and self._loop == loop and start_sec == 0:
+            self._cancel_stop_fade()
             self._queued_id = None
             self._queued_start_sec = 0.0
             return False
 
         path = self._path_for(bgm_id)
         sound = self._load_sound(bgm_id, path)
+        self._cancel_stop_fade()
         self._pyxel.stop(self.channel)
         try:
             self._pyxel.play(
@@ -249,9 +259,18 @@ class BgmPlayer:
         return self.play(bgm_id)
 
     def update(self) -> bool:
-        """Finish one-shot state and start its queued BGM when present."""
+        """Advance a pending fade stop, or resolve a one-shot successor."""
 
         if self._paused:
+            return False
+        if self.is_fading_out:
+            self._stop_fade_remaining -= 1
+            self.set_fade_rate(
+                self._stop_fade_start_rate * self._stop_fade_remaining / self._stop_fade_frames
+            )
+            if self._stop_fade_remaining == 0:
+                self.stop()
+                return True
             return False
         if self._queued_id is None:
             if self._current_id is None or self._loop:
@@ -298,9 +317,31 @@ class BgmPlayer:
         self._paused = False
         self._paused_sec = None
 
+    def fade_out_and_stop(self, frames: int = BGM_STOP_FADE_FRAMES) -> bool:
+        """Fade the current track to silence and discard automatic successors."""
+
+        if type(frames) is not int or frames < 1:
+            raise ValueError("BGM stop fade frames must be a positive integer")
+        self._queued_id = None
+        self._queued_start_sec = 0.0
+        if not self.is_playing:
+            self.stop()
+            return False
+        self._stop_fade_frames = frames
+        self._stop_fade_remaining = frames
+        self._stop_fade_start_rate = self._fade_rate
+        return True
+
+    def _cancel_stop_fade(self) -> None:
+        if self._stop_fade_frames:
+            self._stop_fade_frames = 0
+            self._stop_fade_remaining = 0
+            self.set_fade_rate(1.0)
+
     def stop(self) -> bool:
         was_playing = self.is_playing
         self._pyxel.stop(self.channel)
+        self._cancel_stop_fade()
         self._active_sound = None
         self._current_id = None
         self._queued_id = None
@@ -362,6 +403,7 @@ class BgmPlayer:
 __all__ = [
     "BGM_CHANNEL",
     "BGM_VOLUME_GAINS",
+    "BGM_STOP_FADE_FRAMES",
     "SE_CATALOG_PATH",
     "AudioResourceError",
     "BgmPlayer",

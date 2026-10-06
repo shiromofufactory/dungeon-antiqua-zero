@@ -6,11 +6,11 @@ from unittest.mock import Mock, patch
 from tools._bootstrap import APP_ROOT
 from game import Game
 from input import Direction, InputButton, InputState
-from rendering import FadeThroughBlack
+from rendering import FadeThroughBlack, ScreenBrightness, ScreenShake
 from resources import FontResources
 from scenes import BattleScene
 from state import Language, Settings
-from systems import EventContext, WaitEffect
+from systems import ChangeBrightnessEffect, ShakeScreenEffect, EventContext, WaitEffect
 from text_catalog import TextCatalog
 from ui.game_menu import GAME_MENU_LINE_STEP, GameMenuAction, GameMenuOverlay
 from ui.tagged_text import tagged_text_width
@@ -21,6 +21,67 @@ HOLD = InputButton(held=True)
 
 
 class GameMenuTest(unittest.TestCase):
+    def test_bgm_stop_fade_pauses_in_game_menu_and_silence_survives_resume(self) -> None:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from resources.audio import BgmPlayer
+        from systems import StopBgmEffect
+        from tests.test_audio_resources import FakePyxel
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "da3-field.ogg").touch()
+            px = FakePyxel()
+            game = self.game()
+            game.bgm = BgmPlayer(root, pyxel_api=px)
+            game.bgm.play("da3-field")
+            game.party_system = Mock(active_party=(), character_states={})
+            game.event_runner = Mock(context=EventContext.BATTLE, advance=Mock(return_value=StopBgmEffect()))
+            game._continue_event()
+            game._continue_event = Mock()
+            self.open(game)
+            for _ in range(60):
+                self.update(game)
+            self.assertEqual(px.channels[2].gain, 0.6)
+            self.assertTrue(game.bgm.is_fading_out)
+            self.update(game, InputState(cancel=PRESS))
+            self.update(game, InputState(cancel=HOLD))
+            self.update(game)
+            for _ in range(29):
+                self.update(game)
+                self.assertTrue(game.bgm.is_fading_out)
+            self.update(game)
+            self.assertFalse(game.bgm.is_playing)
+            game._continue_event.assert_called_once_with()
+            self.open(game)
+            self.update(game, InputState(cancel=PRESS))
+            self.update(game)
+            self.assertEqual(len(px.play_calls), 2)  # Initial play and the interrupted fade's resume.
+            self.assertFalse(game.bgm.is_playing)
+
+    def test_event_screen_effects_pause_until_menu_resume_and_button_release(self) -> None:
+        for effect in (ChangeBrightnessEffect(25), ShakeScreenEffect(18)):
+            with self.subTest(effect=effect):
+                game = self.game()
+                game.palette_shifter = Mock()
+                game.event_runner = Mock(context=EventContext.BATTLE)
+                game.event_effect = effect
+                game.screen_brightness = ScreenBrightness()
+                game.screen_brightness.start(25)
+                game.event_screen_shake = ScreenShake(18)
+                self.open(game)
+                for _ in range(20):
+                    self.update(game)
+                self.assertEqual(game.screen_brightness.elapsed_frames, 0)
+                self.assertEqual(game.event_screen_shake.elapsed_frames, 0)
+                self.update(game, InputState(cancel=PRESS))
+                self.update(game, InputState(cancel=HOLD))
+                self.update(game)
+                self.update(game)
+                animation = game.screen_brightness if isinstance(effect, ChangeBrightnessEffect) else game.event_screen_shake
+                self.assertEqual(animation.elapsed_frames, 1)
+                game.event_runner.complete_effect.assert_not_called()
+
     def test_event_wait_timer_pauses_until_menu_resume_and_button_release(self) -> None:
         game = self.game()
         game.event_runner = Mock(context=EventContext.BATTLE)

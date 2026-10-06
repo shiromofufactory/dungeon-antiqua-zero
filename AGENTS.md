@@ -115,6 +115,8 @@
 - セーブ形式と戦闘コマンド記憶の永続化は `python3 -B -m unittest tests.test_save_system tests.test_battle_preferences tests.test_game` でスロット保存・ロード・旧形式互換を回帰検証する。
 - ミッションの検証・条件判定・情報メニュー表示は `python3 -B -m unittest tests.test_missions tests.test_information_menu tests.test_event_editor_server tests.test_editor_server`、エディタ操作は `node --test tests/test_mission_editor.mjs` で回帰検証する。
 - イベントコマンドの検証・実行・待機・ゲームメニュー中の停止は `python3 -B -m unittest tests.test_game tests.test_game_events tests.test_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu`、コマンドの編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
+- イベントの明るさ変更・横揺れは `python3 -B -m unittest tests.test_screen_effects tests.test_palette tests.test_game_events tests.test_game_menu` で補間・パレット合成・位置復元・割り込み停止を回帰検証する。
+- イベントのBGM停止は `python3 -B -m unittest tests.test_audio_resources tests.test_events tests.test_game_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu` でフェードアウト・予約解除・停止保持・次曲再生・割り込み停止を回帰検証する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。
 - 強制割り込みゲームメニューは `python3 -B -m unittest tests.test_game_menu tests.test_input tests.test_audio_resources` で停止・復帰・BGM保持を回帰検証する。
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。
@@ -122,6 +124,7 @@
 - フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。
+- actorのフラグ表示条件は `python3 -B -m unittest tests.test_actor_visibility tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_game tests.test_game_events`、エディタでの指定・解除・Undoは `node --test tests/test_map_editor_objects.mjs` で回帰検証する。
 - オブジェクトのフラグ表示条件は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_game tests.test_game_events` と `node --test tests/test_map_editor_objects.mjs` で保存・条件評価・通行・描画・トリガー・Undoを回帰検証する。
 - マップエディタの地面外周保護・矩形塗り・Undoは `node --test tests/test_map_editor_grounds.mjs` で回帰検証する。
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。

@@ -94,11 +94,14 @@ from .palette import (
 )
 from .spell_effect import SPELL_EFFECT_FLASH_PALETTE, SpellEffectRenderer
 from .screen_flash import FLASH_PHASE_FRAMES, ScreenFlash
+from .screen_effects import ScreenBrightness, ScreenShake
 
 
 __all__ = [
     "FLASH_PHASE_FRAMES",
     "ScreenFlash",
+    "ScreenBrightness",
+    "ScreenShake",
     "CHARACTER_SHADOW_BANK",
     "CHARACTER_SHADOW_COLKEY",
     "CHARACTER_SHADOW_SIZE",

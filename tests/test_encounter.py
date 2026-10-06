@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from types import MappingProxyType
 import unittest
+from unittest.mock import Mock
 
 from app.field import FieldPosition
 from app.input import Direction
@@ -23,6 +25,7 @@ from app.resources.maps import (
     MapCell,
     MapDestination,
     MapRandomEncounter,
+    MapResourceError,
     WorldSite,
 )
 from app.systems import (
@@ -553,18 +556,58 @@ class EncounterSystemTest(unittest.TestCase):
         destination = EncounterSystem.defeat_return(
             dungeon_map(sites=sites),
             FieldPosition(2, 2),
+            map_resources=Mock(map=Mock(return_value=Mock(profile="world"))),
         )
 
         self.assertIsNotNone(destination)
         assert destination is not None
         self.assertEqual(destination.position, FieldPosition(3, 3))
         self.assertIs(destination.facing, Direction.DOWN)
+        self.assertEqual(destination.map_id, "test_dungeon")
+
+    def test_deep_floor_returns_to_parent_entrance_and_ignores_stairs(self) -> None:
+        parent = dungeon_map(sites=(
+            WorldSite("stairs", "location.stairs", (MapCell(2, 2),),
+                      MapDestination("deep_floor", "stairs")),
+            WorldSite("entrance", "location.entrance", (MapCell(3, 4),),
+                      MapDestination("worldmap", "forest")),
+        ))
+        floor = replace(parent, map_id="deep_floor", area_parent_id=parent.map_id)
+        maps = {parent.map_id: parent, floor.map_id: floor,
+                "worldmap": replace(parent, map_id="worldmap", profile="world")}
+        destination = EncounterSystem.defeat_return(
+            floor, FieldPosition(2, 2),
+            map_resources=Mock(map=Mock(side_effect=maps.__getitem__)),
+        )
+        self.assertEqual(destination.map_id, parent.map_id)
+        self.assertEqual(destination.position, FieldPosition(3, 3))
+        self.assertIs(destination.facing, Direction.DOWN)
+
+    def test_parent_without_external_exit_does_not_return_to_stairs(self) -> None:
+        parent = dungeon_map(sites=(WorldSite(
+            "stairs", "location.stairs", (MapCell(3, 4),),
+            MapDestination("deep_floor", "stairs"),
+        ),))
+        floor = replace(parent, map_id="deep_floor", area_parent_id=parent.map_id)
+        maps = {parent.map_id: parent, floor.map_id: floor}
+        self.assertIsNone(EncounterSystem.defeat_return(
+            floor, FieldPosition(2, 2),
+            map_resources=Mock(map=Mock(side_effect=maps.__getitem__)),
+        ))
+
+    def test_missing_parent_keeps_current_position(self) -> None:
+        floor = replace(dungeon_map(), area_parent_id="missing_dungeon")
+        self.assertIsNone(EncounterSystem.defeat_return(
+            floor, FieldPosition(2, 2),
+            map_resources=Mock(map=Mock(side_effect=MapResourceError("missing"))),
+        ))
 
     def test_returns_none_when_map_has_no_usable_outward_exit(self) -> None:
         self.assertIsNone(
             EncounterSystem.defeat_return(
                 dungeon_map(),
                 FieldPosition(2, 2),
+                map_resources=Mock(),
             )
         )
 

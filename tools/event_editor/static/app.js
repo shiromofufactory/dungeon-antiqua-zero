@@ -20,7 +20,10 @@ const COMMAND_OPTIONS = [
   ["start_battle", "イベントバトル開始"],
   ["play_se", "play_se"],
   ["change_bgm", "change_bgm"],
+  ["stop_bgm", "stop_bgm（BGM停止）"],
   ["flash_screen", "画面をフラッシュ"],
+  ["change_brightness", "画面の明るさを変更"],
+  ["shake_screen", "画面を横揺れ"],
   ["wait", "wait（待機）"],
   ["move_party", "move_party"],
   ["move_actor", "move_actor"],
@@ -682,10 +685,15 @@ function renderCommand(command, path, listPath, index) {
     fields = field("SE", `<select ${attr("se_id")}>${options(state.catalogs.se_ids || [], command.se_id)}</select>`, true);
   } else if (type === "change_bgm") {
     fields = field("BGM", `<select ${attr("bgm_id")}>${options(state.catalogs.bgm_ids || [], command.bgm_id)}</select>`, true);
+  } else if (type === "stop_bgm") {
+    fields = '<p class="command-description full">BGMをフェードアウトして停止します。</p>';
   } else if (type === "flash_screen") {
     fields = field("色", `<select ${attr("color")}>${options(["white"], command.color)}</select>`, true);
-  } else if (type === "wait") {
-    fields = field("待機時間（フレーム・6フレーム単位）", `<input type="number" min="6" step="6" value="${Number(command.frames) || 6}" ${attr("frames")}>`, true);
+  } else if (type === "change_brightness") {
+    fields = field("明るさ", `<select ${attr("percent")}>${[0, 25, 50, 75, 100].map((value) => `<option value="${value}" ${command.percent === value ? "selected" : ""}>${value}%</option>`).join("")}</select>`, true);
+  } else if (type === "wait" || type === "shake_screen") {
+    const label = type === "wait" ? "待機時間" : "振動時間";
+    fields = field(`${label}（フレーム・6フレーム単位）`, `<input type="number" min="6" step="6" value="${Number(command.frames) || 6}" ${attr("frames")}>`, true);
   } else if (type === "recover_party") {
     fields = '<p class="command-description full">パーティ全員のHP・MP・状態異常を全て回復します。</p>';
   } else if (type === "open_shop") {
@@ -878,8 +886,10 @@ function defaultCommand(type) {
   if (type === "message") return one("message_id", messageIds());
   if (type === "play_se") return one("se_id", state.catalogs.se_ids);
   if (type === "change_bgm") return one("bgm_id", state.catalogs.bgm_ids);
+  if (type === "stop_bgm") return {command: type};
   if (type === "flash_screen") return {command: type, color: "white"};
-  if (type === "wait") return {command: type, frames: 6};
+  if (type === "change_brightness") return {command: type, percent: 100};
+  if (type === "wait" || type === "shake_screen") return {command: type, frames: 6};
   if (type === "recover_party") return {command: type};
   if (type === "open_shop") return one("shop_key", state.catalogs.shop_keys);
   if (type === "start_battle") return {command: type, battle_id: "battle_1", monster_keys: [state.catalogs.monster_keys?.[0] || ""]};
@@ -1180,7 +1190,7 @@ $("event-editor").addEventListener("change", (event) => {
       const command = commandAt(target.dataset.commandPath);
       const fieldName = target.dataset.commandField;
       command[fieldName] = fieldName === "show_message" ? target.checked
-        : ["quantity", "steps", "frames"].includes(fieldName)
+        : ["quantity", "steps", "frames", "percent"].includes(fieldName)
         ? Number(target.value)
         : target.value;
     });

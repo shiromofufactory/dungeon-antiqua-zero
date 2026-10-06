@@ -11,6 +11,7 @@ from battle_commands import BattleCommand
 from item import AttackAttribute
 from member import EquipmentSlot
 from resistance import ResistanceType
+from spell import SpellAction
 from scenes.battle import (
     AFFINITY_ICON_HEIGHT,
     AFFINITY_ICON_SOURCE_X,
@@ -21,6 +22,8 @@ from scenes.battle import (
     TARGET_AFFINITY_VISIBLE_FRAME_COUNT,
     TRANSPARENT_INDEX,
     WEAK_ICON_SOURCE_Y,
+    VOID_ICON_SOURCE_X,
+    VOID_ICON_SOURCE_Y,
     BattlePhase,
     BattleScene,
 )
@@ -43,7 +46,7 @@ def _monster(
 
 
 def _spell(attribute: ResistanceType | None) -> SimpleNamespace:
-    return SimpleNamespace(attribute=attribute)
+    return SimpleNamespace(attribute=attribute, action=SpellAction.DAMAGE)
 
 
 class BattleMonsterRecordTest(unittest.TestCase):
@@ -68,6 +71,36 @@ class BattleMonsterRecordTest(unittest.TestCase):
         )
         scene.monster_record_system = MonsterRecordSystem(SaveData())
         return scene
+
+    def test_void_overrides_known_affinity_for_spells_and_items(self) -> None:
+        for action, modifier_name in ((SpellAction.SLOW, "speed_modifier"),
+                                      (SpellAction.BREAK, "defense_modifier")):
+            for item in (False, True):
+                with self.subTest(action=action, item=item):
+                    scene = self._target_scene()
+                    spell = SimpleNamespace(action=action, attribute=ResistanceType.FIRE)
+                    scene.monsters[0].state = SimpleNamespace(**{modifier_name: -1})
+                    scene.monsters[1].state = SimpleNamespace(**{modifier_name: 0})
+                    scene.monster_record_system.reveal_affinity("Fire Weak", ResistanceType.FIRE)
+                    scene.pending_spell = spell
+                    if item:
+                        scene.pending_spell = None
+                        scene.pending_item_candidate = SimpleNamespace(
+                            item=SimpleNamespace(use_spell_key="effect"),
+                        )
+                        scene.spells = {"effect": spell}
+                    scene._monster_draw_x = Mock(return_value=4)
+                    with (patch("scenes.battle.pyxel.frame_count", 0),
+                          patch("scenes.battle.pyxel.blt") as blt):
+                        scene._draw_target_affinity_indicators()
+                    blt.assert_called_once_with(
+                        24, MONSTER_POSITIONS[0][1] + 20,
+                        0, VOID_ICON_SOURCE_X, VOID_ICON_SOURCE_Y, 24, 8, TRANSPARENT_INDEX,
+                    )
+                    with (patch("scenes.battle.pyxel.frame_count", TARGET_AFFINITY_VISIBLE_FRAME_COUNT),
+                          patch("scenes.battle.pyxel.blt") as blt):
+                        scene._draw_target_affinity_indicators()
+                    blt.assert_not_called()
 
     def test_confirmed_enemy_spell_records_only_its_actual_single_target(self) -> None:
         scene = self._target_scene()

@@ -32,7 +32,7 @@ function editor() {
     frameTile: (cell) => cell.draw_group, drawSourceTile: () => {},
     renderAll: () => {}, renderPalette: () => {}, renderInspector: () => {}, drawPaletteThumbs: () => {},
     drawMap: () => {}, updateToolStatus: () => {}, showToast: () => {}, performance: { now: () => 0 },
-    commit: (mutator) => mutator(), uniqueInstanceId: () => "new_instance",
+    ensureActorTrigger: () => {}, commit: (mutator) => mutator(), uniqueInstanceId: () => "new_instance",
   });
   for (const name of [
     "addPoint", "objectDefinition", "objectLayerEditable", "objectPlacementSignature", "objectPlacementConflict",
@@ -42,7 +42,7 @@ function editor() {
     "mapSelectionCandidatesAt", "pointInCellRect", "rangeSelectionItems", "placeObject", "validObjectOrigin",
     "candidatePosition", "validBulkDelta", "drawMapObjectCell", "drawObjectOutline", "drawTabCellHighlights",
     "beginObjectDrag",
-    "updateObjectField", "objectVisibilityInspector", "objectFlagOptions", "attachSiteToObject",
+    "updateObjectField", "updateVisibilityField", "updateActorField", "currentActor", "visibilityInspector", "objectFlagOptions", "attachSiteToObject",
   ]) {
     const start = source.indexOf(`function ${name}(`);
     assert.notEqual(start, -1, name);
@@ -94,15 +94,53 @@ test("visibility controls offer only a declared flag and ON/OFF and explain empt
   const { context, state } = editor();
   const instance = state.data.objects[1];
   instance.visibility_condition = { flag_id: "story.open", value: false };
-  const html = context.objectVisibilityInspector(instance);
+  const html = context.visibilityInspector(instance);
   assert.match(html, /data-object-field="flag_id"/);
   assert.match(html, /story.open.*扉が開いた/);
   assert.match(html, /value="false" selected>OFFのとき/);
   assert.doesNotMatch(html, /member_in_party|item_at_least|condition-type/);
   state.flagOptions = [];
   delete instance.visibility_condition;
-  assert.match(context.objectVisibilityInspector(instance), /value="true"\s+disabled/);
-  assert.match(context.objectVisibilityInspector(instance), /イベントエディタで登録/);
+  assert.match(context.visibilityInspector(instance), /value="true"\s+disabled/);
+  assert.match(context.visibilityInspector(instance), /イベントエディタで登録/);
+});
+
+test("all actor kinds can edit and remove flag conditions, preserve them on kind change, and undo", () => {
+  const { context, state } = editor();
+  state.selectedActorId = "elder";
+  state.history = [];
+  state.future = [];
+  context.scheduleResolution = () => {};
+  for (const name of ["beginChange", "finishChange", "commit", "undo", "redo", "changeSnapshot", "restoreChangeSnapshot"]) {
+    const start = source.indexOf(`function ${name}(`);
+    const next = source.slice(start + 1).search(/\n(?:async )?function /);
+    vm.runInContext(source.slice(start, start + 1 + next), context);
+  }
+  const actor = () => state.data.actors[0];
+  const condition = () => JSON.parse(JSON.stringify(actor().visibility_condition ?? null));
+  for (const kind of ["stationary", "roaming", "prop", "treasure"]) {
+    context.updateActorField("kind", kind);
+    context.updateActorField("visibility_enabled", "true");
+    context.updateActorField("flag_id", "story.done");
+    context.updateActorField("flag_value", "false");
+    assert.deepEqual(condition(), { flag_id: "story.done", value: false });
+    assert.match(context.visibilityInspector(actor(), "actor"), /data-actor-field="flag_value"/);
+    context.updateActorField("visibility_enabled", "false");
+    assert.equal(condition(), null);
+    context.undo();
+    assert.deepEqual(condition(), { flag_id: "story.done", value: false });
+    context.redo();
+    assert.equal(condition(), null);
+  }
+  context.updateActorField("visibility_enabled", "true");
+  context.updateActorField("kind", "roaming");
+  assert.deepEqual(condition(), { flag_id: "story.open", value: true });
+  delete actor().visibility_condition;
+  state.flagOptions = [];
+  context.updateActorField("visibility_enabled", "true");
+  assert.equal(condition(), null);
+  assert.match(context.visibilityInspector(actor(), "actor"), /value="true"\s+disabled/);
+  assert.match(source, /visibilityInspector\(actor, "actor"\)/);
 });
 
 test("facility objects cannot create an exit and the inspector limits attachment to world maps", () => {

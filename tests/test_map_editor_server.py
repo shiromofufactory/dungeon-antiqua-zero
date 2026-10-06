@@ -126,6 +126,23 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("unknown_flag", {issue["code"] for issue in diagnostics})
         self.assertFalse(self.application.save(data, {})["saved"])
 
+    def test_actor_visibility_is_validated_saved_and_compiled(self) -> None:
+        flags_path = self.application.content_root / "events" / "flags.json"
+        flags_path.parent.mkdir(parents=True, exist_ok=True)
+        flags_path.write_text(json.dumps([{"flag_id": "story.open", "note": "登場"}]), encoding="utf-8")
+        (flags_path.parent / "sample.json").write_text(json.dumps({"format_version": 1, "namespace": "sample", "events": [{"id": "talk", "commands": []}]}), encoding="utf-8")
+        data = self.application.document_payload()["data"]
+        data["actors"] = [{"id": "elder", "position": [2, 2], "kind": "stationary", "sprite_index": 0, "facing": "down", "visibility_condition": {"flag_id": "story.open", "value": True}}]
+        data["event_triggers"] = [{"id": "elder_talk", "event_id": "sample.talk", "activations": ["touch", "interact"], "anchor": {"kind": "actor", "actor_id": "elder"}, "offsets": [[0, 0]]}]
+        self.assertTrue(self.application.save(data, {})["saved"])
+        self.assertEqual(self.application.document_payload()["data"]["actors"], data["actors"])
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(runtime["actors"], data["actors"])
+        data["actors"][0]["visibility_condition"]["flag_id"] = "story.missing"
+        diagnostics, _, _ = self.application.validate(data)
+        self.assertIn("unknown_flag", {issue["code"] for issue in diagnostics})
+        self.assertFalse(self.application.save(data, {})["saved"])
+
     def test_areas_keep_independent_layouts_and_share_parent_bgm(self) -> None:
         root = self.application.document_payload()["data"]
         self.assertTrue(self.application.save(root, {})["saved"])

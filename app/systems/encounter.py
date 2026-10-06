@@ -11,13 +11,13 @@ if __package__ == "systems":
     from input import Direction
     from monster import MonsterDefinition, MonsterTribe
     from resistance import ResistanceType
-    from resources.maps import CompiledMap, MapRandomEncounter
+    from resources.maps import CompiledMap, MapRandomEncounter, MapResourceError, MapResources
 else:
     from ..field import FieldPosition
     from ..input import Direction
     from ..monster import MonsterDefinition, MonsterTribe
     from ..resistance import ResistanceType
-    from ..resources.maps import CompiledMap, MapRandomEncounter
+    from ..resources.maps import CompiledMap, MapRandomEncounter, MapResourceError, MapResources
 
 
 ENCOUNTER_STEP_MIN = 1
@@ -49,6 +49,7 @@ class DungeonExitReturn:
 
     position: FieldPosition
     facing: Direction
+    map_id: str
 
 
 @dataclass(frozen=True)
@@ -235,24 +236,37 @@ class EncounterSystem:
         map_data: CompiledMap,
         origin: FieldPosition,
         *,
+        map_resources: MapResources,
         event_flags: Collection[str] = (),
     ) -> DungeonExitReturn | None:
-        """Resolve the nearest outward site and a non-trigger cell beside it."""
+        """Return to the dungeon's parent map, beside an exit to the outside."""
 
         if not isinstance(map_data, CompiledMap):
             raise TypeError("defeat return requires a CompiledMap")
         if not isinstance(origin, FieldPosition):
             raise TypeError("defeat return origin must be a FieldPosition")
-        exit_cells = {
-            (cell.x, cell.y)
-            for site in map_data.sites
-            if site.destination.map_id != map_data.map_id
-            for cell in site.entrance_cells
-        }
-        candidates: list[tuple[int, int, str, int, int, int, DungeonExitReturn]] = []
+        if map_data.area_parent_id is not None:
+            try:
+                map_data = map_resources.map(map_data.area_parent_id)
+            except MapResourceError:
+                return None
+        exits = []
         for site in map_data.sites:
             if site.destination.map_id == map_data.map_id:
                 continue
+            try:
+                destination_map = map_resources.map(site.destination.map_id)
+            except MapResourceError:
+                continue
+            if destination_map.profile != "dungeon":
+                exits.append(site)
+        exit_cells = {
+            (cell.x, cell.y)
+            for site in map_data.sites
+            for cell in site.entrance_cells
+        }
+        candidates: list[tuple[int, int, str, int, int, int, DungeonExitReturn]] = []
+        for site in exits:
             for exit_cell in site.entrance_cells:
                 exit_distance = abs(exit_cell.x - origin.x) + abs(
                     exit_cell.y - origin.y
@@ -277,7 +291,7 @@ class EncounterSystem:
                             exit_cell.y,
                             exit_cell.x,
                             direction_index,
-                            DungeonExitReturn(landing, direction),
+                            DungeonExitReturn(landing, direction, map_data.map_id),
                         )
                     )
         if not candidates:

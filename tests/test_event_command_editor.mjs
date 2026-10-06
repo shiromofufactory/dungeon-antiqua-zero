@@ -95,6 +95,23 @@ test('flash command starts with the supported color', () => {
   assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /data-command-field="color"/);
 });
 
+test('BGM stop replaces track selection, saves without attributes and permits undo', () => {
+  const {state, context} = editor();
+  state.catalogs.bgm_ids = ['da3-field'];
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'change_bgm');
+  context.changeCommandType('0', 'stop_bgm');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {command:'stop_bgm'});
+  const html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  assert.match(html, /フェードアウトして停止/);
+  assert.doesNotMatch(html, /data-command-field="bgm_id"/);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].command, 'change_bgm');
+  assert.equal(state.data.events[0].commands[0].bgm_id, 'da3-field');
+  context.redo();
+  assert.equal(state.data.events[0].commands[0].command, 'stop_bgm');
+});
+
 test('give item message toggle saves boolean ON/OFF and supports undo without a take-item option', () => {
   const { state, context, handlers } = editor();
   state.catalogs.item_keys = ['POTION'];
@@ -133,6 +150,32 @@ test('wait uses a six-frame input and saves edited duration as an integer with u
   assert.equal(state.data.events[0].commands[0].frames, 6);
   context.redo();
   assert.equal(state.data.events[0].commands[0].frames, 18);
+});
+
+test('screen commands save numeric brightness and six-frame shake duration with undo', () => {
+  const { state, context, handlers } = editor();
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'change_brightness');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {command: 'change_brightness', percent: 100});
+  let html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  for (const percent of [0, 25, 50, 75, 100]) assert.match(html, new RegExp(`value="${percent}"[^>]*>${percent}%`));
+  handlers.get('change')({target: {dataset: {commandField: 'percent', commandPath: '0'}, value: '0'}});
+  assert.equal(JSON.parse(context.requestBody()).data.events[0].commands[0].percent, 0);
+  assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /value="0" selected>0%/);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].percent, 100);
+  context.redo();
+  assert.equal(state.data.events[0].commands[0].percent, 0);
+  context.changeCommandType('0', 'shake_screen');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {command: 'shake_screen', frames: 6});
+  html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  assert.match(html, /振動時間/);
+  assert.match(html, /type="number" min="6" step="6"/);
+  assert.doesNotMatch(html, /data-command-field="percent"/);
+  handlers.get('change')({target: {dataset: {commandField: 'frames', commandPath: '0'}, value: '18'}});
+  assert.equal(JSON.parse(context.requestBody()).data.events[0].commands[0].frames, 18);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].frames, 6);
 });
 
 test('facing commands select direction and actor without steps, with undo and redo', () => {

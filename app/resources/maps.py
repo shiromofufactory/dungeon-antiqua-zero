@@ -80,7 +80,7 @@ class MapCell:
 
 
 @dataclass(frozen=True)
-class MapObjectCondition:
+class MapVisibilityCondition:
     flag_id: str
     value: bool
 
@@ -127,6 +127,7 @@ class MapActor:
     contents: MapTreasureContents | None = None
     sprite_source: str = "npc"
     floating: bool = False
+    visibility_condition: MapVisibilityCondition | None = None
 
 
 @dataclass(frozen=True)
@@ -194,13 +195,19 @@ class CompiledMap:
     bgm_id: str = "da3-field"
     interact_through_rows: tuple[str, ...] = ()
     random_encounter: MapRandomEncounter | None = None
-    object_conditions: Mapping[str, MapObjectCondition] = MappingProxyType({})
+    object_conditions: Mapping[str, MapVisibilityCondition] = MappingProxyType({})
     conditional_cells: Mapping[tuple[int, int], MapConditionalCell] = MappingProxyType({})
+    area_parent_id: str | None = None
 
     def is_object_visible(self, instance_id: str | None, event_flags: Collection[str] = ()) -> bool:
         if instance_id is None:
             return True
         condition = self.object_conditions.get(instance_id)
+        return condition is None or condition.matches(event_flags)
+
+    def is_actor_visible(self, actor_id: str, event_flags: Collection[str] = ()) -> bool:
+        actor = next((actor for actor in self.actors if actor.id == actor_id), None)
+        condition = None if actor is None else actor.visibility_condition
         return condition is None or condition.matches(event_flags)
 
     def is_blocked(self, x: int, y: int, *, event_flags: Collection[str] = ()) -> bool:
@@ -288,6 +295,8 @@ class CompiledMap:
             return trigger
         positions = {} if actor_positions is None else actor_positions
         for actor_id, triggers in self.actor_event_triggers.items():
+            if not self.is_actor_visible(actor_id, event_flags):
+                continue
             actor_position = positions.get(actor_id)
             if actor_position is None:
                 continue
@@ -407,6 +416,16 @@ class MapResources:
             )
         if runtime.get("map_id") != map_id:
             raise MapResourceError("マップJSONのmap_idがファイル名と一致しません。")
+
+        area_parent_id = runtime.get("area_parent_id")
+        if area_parent_id is None:
+            legacy_parent, separator, _area_id = map_id.rpartition("_area_")
+            if separator:
+                area_parent_id = legacy_parent
+        if area_parent_id is not None:
+            area_parent_id = self._stable_id(area_parent_id, "area_parent_id")
+            if area_parent_id == map_id:
+                raise MapResourceError("マップJSONのarea_parent_idは自身と異なる必要があります。")
 
         profile = self._required_id(runtime, "profile")
         tileset_id = self._required_id(runtime, "tileset_id")
@@ -534,25 +553,30 @@ class MapResources:
             random_encounter=random_encounter,
             object_conditions=MappingProxyType(object_conditions),
             conditional_cells=MappingProxyType(conditional_cells),
+            area_parent_id=area_parent_id,
         )
 
     @classmethod
-    def _object_conditions(cls, value: object) -> dict[str, MapObjectCondition]:
+    def _object_conditions(cls, value: object) -> dict[str, MapVisibilityCondition]:
         if not isinstance(value, dict):
             raise MapResourceError("マップJSONのobject_conditionsはobjectである必要があります。")
         loaded = {}
         for instance_id, condition in value.items():
             cls._stable_id(instance_id, "object_conditionsの実体ID")
-            if (
-                not isinstance(condition, dict)
-                or set(condition) != {"flag_id", "value"}
-                or not isinstance(condition.get("flag_id"), str)
-                or FLAG_ID_PATTERN.fullmatch(condition["flag_id"]) is None
-                or not isinstance(condition.get("value"), bool)
-            ):
-                raise MapResourceError(f"object_conditions.{instance_id}が不正です。")
-            loaded[instance_id] = MapObjectCondition(condition["flag_id"], condition["value"])
+            loaded[instance_id] = cls._visibility_condition(condition, f"object_conditions.{instance_id}")
         return loaded
+
+    @staticmethod
+    def _visibility_condition(value: object, path: str) -> MapVisibilityCondition:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"flag_id", "value"}
+            or not isinstance(value.get("flag_id"), str)
+            or FLAG_ID_PATTERN.fullmatch(value["flag_id"]) is None
+            or not isinstance(value.get("value"), bool)
+        ):
+            raise MapResourceError(f"{path}が不正です。")
+        return MapVisibilityCondition(value["flag_id"], value["value"])
 
     @classmethod
     def _conditional_cells(
@@ -560,7 +584,7 @@ class MapResources:
         value: object,
         width: int,
         height: int,
-        conditions: Mapping[str, MapObjectCondition],
+        conditions: Mapping[str, MapVisibilityCondition],
     ) -> dict[tuple[int, int], MapConditionalCell]:
         if not isinstance(value, list):
             raise MapResourceError("マップJSONのconditional_cellsは配列である必要があります。")
@@ -1005,6 +1029,11 @@ class MapResources:
                     contents=cls._treasure_contents(record, path),
                     sprite_source=cls._actor_sprite_source(record, path),
                     floating=cls._actor_floating(record, path),
+                    visibility_condition=(
+                        cls._visibility_condition(record["visibility_condition"], f"{path}.visibility_condition")
+                        if "visibility_condition" in record
+                        else None
+                    ),
                 )
             )
         return tuple(loaded)
@@ -1351,7 +1380,7 @@ __all__ = [
     "MAP_FACINGS",
     "MAP_TILE_SIZE",
     "MapObjectTile",
-    "MapObjectCondition",
+    "MapVisibilityCondition",
     "MapObjectCellEffect",
     "MapConditionalCell",
     "MapRandomEncounter",

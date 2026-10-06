@@ -92,6 +92,7 @@ class PaletteShifter:
         self._variants: dict[str, _PaletteVariant] = {}
         self._global_base_rate = 1.0
         self._global_target_color = MIN_COLOR
+        self._brightness_rate = 1.0
 
     @property
     def base_colors(self) -> tuple[int, ...]:
@@ -102,16 +103,24 @@ class PaletteShifter:
         return self._global_base_rate
 
     def _globally_mixed(self, colors: Sequence[int]) -> tuple[int, ...]:
-        if self._global_base_rate == 1.0:
-            return tuple(colors)
-        return tuple(
-            mix_color(
-                color,
-                self._global_base_rate,
-                self._global_target_color,
+        if self._global_base_rate != 1.0:
+            colors = tuple(
+                mix_color(color, self._global_base_rate, self._global_target_color)
+                for color in colors
             )
-            for color in colors
-        )
+        if self._brightness_rate != 1.0:
+            colors = tuple(mix_color(color, self._brightness_rate, MIN_COLOR) for color in colors)
+        return tuple(colors)
+
+    def set_brightness(self, rate: float) -> None:
+        """Compose persistent brightness with transient fades and all variants."""
+
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)):
+            raise TypeError("brightness must be a number")
+        if not 0.0 <= rate <= 1.0:
+            raise ValueError("brightness must be from 0.0 to 1.0")
+        self._brightness_rate = float(rate)
+        self._refresh_colors()
 
     def define_variant(self, name: str, colors: Sequence[int]) -> None:
         """Add or replace one destination block for a named effect."""
@@ -215,6 +224,9 @@ class PaletteShifter:
         self._global_base_rate = float(base_rate)
         self._global_target_color = target_color
 
+        self._refresh_colors()
+
+    def _refresh_colors(self) -> None:
         base_count = len(self._base_colors)
         self._colors[:base_count] = list(self._globally_mixed(self._base_colors))
         for variant in self._variants.values():

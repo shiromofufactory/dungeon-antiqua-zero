@@ -7,6 +7,36 @@ from app.rendering.palette import PaletteShifter, grayscale_color, mix_color
 
 
 class PaletteShifterTest(unittest.TestCase):
+    def test_brightness_composes_with_fades_flash_and_variants_then_restores_exact_colors(self) -> None:
+        colors = [0x80C040]
+        shifter = PaletteShifter(colors, Mock())
+        shifter.define_mix("dimmed", base_rate=0.5, target_color=0)
+        shifter.set_brightness(0.5)
+        self.assertEqual(colors, [0x406020, 0x203010])
+        shifter.set_global_mix(base_rate=0.0, target_color=0xFFFFFF)
+        self.assertEqual(colors, [0x7F7F7F, 0x7F7F7F])
+        shifter.set_global_mix(base_rate=0.0, target_color=0)
+        self.assertEqual(colors, [0, 0])
+        shifter.set_global_mix(base_rate=1.0, target_color=0)
+        self.assertEqual(colors, [0x406020, 0x203010])
+        shifter.define_variant("new", (0x204060,))
+        self.assertEqual(colors[-1], 0x102030)
+        shifter.set_brightness(0.0)
+        self.assertEqual(colors, [0, 0, 0])
+        shifter.set_global_mix(base_rate=0.0, target_color=0xFFFFFF)
+        self.assertEqual(colors, [0, 0, 0])
+        shifter.set_global_mix(base_rate=1.0, target_color=0)
+        shifter.set_brightness(1.0)
+        self.assertEqual(colors, [0x80C040, 0x406020, 0x204060])
+
+    def test_brightness_rejects_invalid_rates_without_changing_colors(self) -> None:
+        colors = [0x80C040]
+        shifter = PaletteShifter(colors, Mock())
+        for rate in (True, "50", -0.1, 1.1, float("nan")):
+            with self.subTest(rate=rate), self.assertRaises((TypeError, ValueError)):
+                shifter.set_brightness(rate)
+        self.assertEqual(colors, [0x80C040])
+
     def test_grayscale_color_preserves_luminance_as_equal_channels(self) -> None:
         self.assertEqual(grayscale_color(0x80C040), 0x9E9E9E)
 

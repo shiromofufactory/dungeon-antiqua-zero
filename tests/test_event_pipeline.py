@@ -51,6 +51,36 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_bgm_stop_compiles_in_both_contexts_and_rejects_extra_fields(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [{"command": "stop_bgm"}]
+        for battle_start_id in (None, "guard"):
+            if battle_start_id is not None:
+                source["events"][0]["battle_start_id"] = battle_start_id
+            self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+            self.assertEqual(compile_event_sources({"sample": source}, **CATALOGS)["events"]["sample.greeting"]["commands"], [{"command": "stop_bgm"}])
+        source["events"][0]["commands"][0]["bgm_id"] = "field/world"
+        self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {"unknown_field"})
+
+    def test_screen_effects_compile_in_both_contexts_and_reject_invalid_values(self) -> None:
+        source = sample_source()
+        commands = [{"command": "change_brightness", "percent": value} for value in (0, 25, 50, 75, 100)]
+        commands += [{"command": "shake_screen", "frames": value} for value in (6, 12, 18)]
+        source["events"][0]["commands"] = commands
+        for battle_start_id in (None, "guard"):
+            if battle_start_id is not None:
+                source["events"][0]["battle_start_id"] = battle_start_id
+            self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+            self.assertEqual(compile_event_sources({"sample": source}, **CATALOGS)["events"]["sample.greeting"]["commands"], commands)
+        for command_type, field, values, code in (
+            ("change_brightness", "percent", (None, True, False, 0.0, 25.0, "50", -25, 26, 125), "invalid_brightness_percent"),
+            ("shake_screen", "frames", (None, True, 6.0, "6", 0, -6, 7), "invalid_shake_screen_frames"),
+        ):
+            for value in values:
+                with self.subTest(command=command_type, value=value):
+                    source["events"][0]["commands"] = [{"command": command_type, field: value}]
+                    self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {code})
+
     def test_give_item_compiles_optional_boolean_message_setting(self) -> None:
         source = sample_source()
         for option in ({}, {"show_message": False}, {"show_message": True}):

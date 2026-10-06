@@ -193,7 +193,7 @@ class FieldRenderer:
         if actors is not None:
             if actors.map_data is not self.map_data:
                 raise ValueError("field renderer and actors must use the same map data")
-            for actor in actors.actors:
+            for actor in actors.visible_actors:
                 if actor.kind == "prop":
                     image = prop_image
                 elif actor.kind == "treasure":

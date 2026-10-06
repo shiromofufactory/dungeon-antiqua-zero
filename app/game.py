@@ -106,6 +106,8 @@ from rendering import (
     FadePhase,
     FadeThroughBlack,
     ScreenFlash,
+    ScreenBrightness,
+    ScreenShake,
     EncounterTransition,
     FIELD_ACTOR_CHARACTER_SET_HEIGHT,
     FIELD_ACTOR_CHARACTER_SET_WIDTH,
@@ -135,6 +137,9 @@ from state import DisplayMode, Difficulty, Language, SaveData, Settings, SpellMo
 from systems import (
     AUTO_SAVE_SLOT,
     ChangeBgmEffect,
+    StopBgmEffect,
+    ChangeBrightnessEffect,
+    ShakeScreenEffect,
     DebugPartyEditor,
     DebugPartyError,
     EventContext,
@@ -484,6 +489,8 @@ class Game:
         )
         self.applied_screen_scale = settings.screen_scale
         self.palette_shifter = palette_shifter
+        self.screen_brightness = ScreenBrightness()
+        self.palette_shifter.set_brightness(self.screen_brightness.rate)
         self.input_reader = create_game_input_reader()
         self.alert = MenuAlertEffect()
         self.game_menu: GameMenuOverlay | None = None
@@ -579,6 +586,7 @@ class Game:
         self.event_move_remaining = 0
         self.event_wait_remaining = 0
         self.event_screen_flash: ScreenFlash | None = None
+        self.event_screen_shake: ScreenShake | None = None
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
         self.event_resume_after_fade = False
@@ -1204,9 +1212,19 @@ class Game:
             destination = self.encounter_system.defeat_return(
                 self.current_map,
                 self.field.position,
+                map_resources=self.map_resources,
                 event_flags=self.save_data.event_flags,
             )
             if destination is not None:
+                if destination.map_id != self.current_map.map_id:
+                    self.current_map = self.map_resources.map(destination.map_id)
+                    self.current_sites = WorldSiteCatalog(self.current_map.sites)
+                    self.field_renderer = FieldRenderer(
+                        self.current_map,
+                        screen_width=SCREEN_WIDTH,
+                        screen_height=SCREEN_HEIGHT,
+                    )
+                    self._reset_field_fade()
                 self.field = FieldMovement(
                     self.current_map,
                     start=destination.position,
@@ -1214,6 +1232,7 @@ class Game:
                     event_flags=self.save_data.event_flags,
                 )
                 self._reset_field_actors()
+                self._refresh_site_name_label(force=True)
         if getattr(self, "party", ()):
             self._promote_first_recoverable_member()
         self.battle_scene = None
@@ -3132,6 +3151,12 @@ class Game:
             if isinstance(effect, WaitEffect):
                 self.event_wait_remaining = effect.frames
                 return
+            if isinstance(effect, ChangeBrightnessEffect):
+                self.screen_brightness.start(effect.percent)
+                return
+            if isinstance(effect, ShakeScreenEffect):
+                self.event_screen_shake = ScreenShake(effect.frames)
+                return
             if isinstance(effect, FacePartyEffect):
                 self.field.face(effect.direction)
                 runner.complete_effect(effect)
@@ -3158,6 +3183,12 @@ class Game:
                 continue
             if isinstance(effect, ChangeBgmEffect):
                 self.bgm.play(effect.bgm_id)
+                runner.complete_effect(effect)
+                self.event_effect = None
+                continue
+            if isinstance(effect, StopBgmEffect):
+                if self.bgm.fade_out_and_stop():
+                    return
                 runner.complete_effect(effect)
                 self.event_effect = None
                 continue
@@ -3240,6 +3271,29 @@ class Game:
         if runner is None or effect is None:
             return
         try:
+            if isinstance(effect, StopBgmEffect):
+                if not self.bgm.is_fading_out:
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    self._continue_event()
+                return
+            if isinstance(effect, (ChangeBrightnessEffect, ShakeScreenEffect)):
+                animation = (
+                    self.screen_brightness
+                    if isinstance(effect, ChangeBrightnessEffect)
+                    else self.event_screen_shake
+                )
+                if animation is None:
+                    raise EventRuntimeError(runner.event_id, "effect", "screen effect is not active")
+                animation.update()
+                if isinstance(effect, ChangeBrightnessEffect):
+                    self.palette_shifter.set_brightness(self.screen_brightness.rate)
+                if not animation.is_active:
+                    self.event_screen_shake = None
+                    runner.complete_effect(effect)
+                    self.event_effect = None
+                    self._continue_event()
+                return
             if isinstance(effect, WaitEffect):
                 self.event_wait_remaining -= 1
                 if self.event_wait_remaining == 0:
@@ -3322,6 +3376,10 @@ class Game:
             self._abort_event(error)
 
     def _abort_event(self, error: BaseException) -> None:
+        self.event_screen_shake = None
+        brightness = getattr(self, "screen_brightness", None)
+        if brightness is not None:
+            brightness.stop()
         if getattr(self, "event_screen_flash", None) is not None:
             self.event_screen_flash = None
             self.palette_shifter.set_global_mix(
@@ -3897,7 +3955,8 @@ class Game:
             pyxel.camera()
             menu.draw()
             return
-        pyxel.camera(self.alert.camera_x, 0)
+        shake = getattr(self, "event_screen_shake", None)
+        pyxel.camera(self.alert.camera_x + (0 if shake is None else shake.camera_x), 0)
         try:
             if getattr(self, "encounter_transition", None) is not None:
                 self._draw_encounter_transition()

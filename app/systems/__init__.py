@@ -30,6 +30,9 @@ from .monster_records import (
 )
 from .events import (
     ChangeBgmEffect,
+    StopBgmEffect,
+    ChangeBrightnessEffect,
+    ShakeScreenEffect,
     EventContext,
     EventRunner,
     EventRuntimeError,
@@ -104,6 +107,9 @@ __all__ = [
     "MonsterRecordSystem",
     "MenuSpellProficiencyGrowth",
     "ChangeBgmEffect",
+    "StopBgmEffect",
+    "ChangeBrightnessEffect",
+    "ShakeScreenEffect",
     "EventContext",
     "EventRunner",
     "EventRuntimeError",

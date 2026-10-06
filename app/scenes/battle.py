@@ -393,6 +393,8 @@ WEAK_ICON_SOURCE_Y = 16
 RESIST_ICON_SOURCE_Y = 24
 AFFINITY_ICON_WIDTH = 24
 AFFINITY_ICON_HEIGHT = 8
+VOID_ICON_SOURCE_X = 208
+VOID_ICON_SOURCE_Y = 16
 AFFINITY_POPUP_FRAME_COUNT = len(DA2_DAMAGE_VERTICAL_OFFSETS) * FPS // DA2_REFERENCE_FPS
 TARGET_AFFINITY_BLINK_FRAME_COUNT = 15 * FPS // DA2_REFERENCE_FPS
 TARGET_AFFINITY_VISIBLE_FRAME_COUNT = 12 * FPS // DA2_REFERENCE_FPS
@@ -4576,24 +4578,20 @@ class BattleScene:
         return x - 8
 
     def _selectable_enemy_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
-        """Return living enemy targets that can still receive the spell."""
+        """Allow every living enemy, including targets marked VOID."""
 
-        indexes = tuple(
+        return tuple(
             index for index, monster in enumerate(self.monsters) if monster.is_alive
         )
+
+    def _enemy_spell_is_void(self, spell: Spell, index: int) -> bool:
+        """Identify redundant debuffs independently of cursor eligibility."""
+
         if spell.action is SpellAction.SLOW:
-            return tuple(
-                index
-                for index in indexes
-                if self.monsters[index].state.speed_modifier > MIN_SPEED_MODIFIER
-            )
+            return self.monsters[index].state.speed_modifier <= MIN_SPEED_MODIFIER
         if spell.action is SpellAction.BREAK:
-            return tuple(
-                index
-                for index in indexes
-                if self.monsters[index].state.defense_modifier >= 0
-            )
-        return indexes
+            return self.monsters[index].state.defense_modifier < 0
+        return False
 
     def _selectable_party_indexes_for_spell(self, spell: Spell) -> tuple[int, ...]:
         """Return allies the target cursor can visit for this spell."""
@@ -5223,21 +5221,23 @@ class BattleScene:
         results: list[BattleSlowResult] = []
         for index in indexes:
             monster = self.monsters[index]
-            resolution = resolve_status_spell(
-                spell_modifier=modifier,
-                rate=spell.rate,
-                target_spell_defense=monster.combat_stats.spell_resistance,
-                attribute=spell.attribute,
-                target_weaknesses=monster.weaknesses,
-                target_resistances=monster.resistances,
-                success_roll=random.randint(0, 19),
-            )
+            success = False
+            if not self._enemy_spell_is_void(spell, index):
+                success = resolve_status_spell(
+                    spell_modifier=modifier,
+                    rate=spell.rate,
+                    target_spell_defense=monster.combat_stats.spell_resistance,
+                    attribute=spell.attribute,
+                    target_weaknesses=monster.weaknesses,
+                    target_resistances=monster.resistances,
+                    success_roll=random.randint(0, 19),
+                ).success
             _base_x, base_y = self._monster_base_position(index)
             center_x = self._monster_draw_x(index) + monster.width // 2
             results.append(
                 BattleSlowResult(
                     target_index=index,
-                    success=resolution.success,
+                    success=success,
                     popup_x=center_x,
                     popup_y=base_y + monster.height - 8,
                 )
@@ -11531,6 +11531,8 @@ class BattleScene:
             defense_modifier = monster.state.defense_modifier
             if not monster.is_alive or (modifier == 0 and defense_modifier == 0):
                 continue
+            if self._monster_draw_position(index) != self._monster_base_position(index):
+                continue
             _base_x, y = self._monster_base_position(index)
             if defense_modifier:
                 defense_interval = (
@@ -11879,7 +11881,7 @@ class BattleScene:
             )
 
     def _draw_target_affinity_indicators(self) -> None:
-        """Blink learned WEAK/RESIST markers during enemy target selection."""
+        """Blink VOID or learned WEAK/RESIST markers during enemy selection."""
 
         if getattr(self, "auto_battle_active", False):
             return
@@ -11894,30 +11896,39 @@ class BattleScene:
             >= TARGET_AFFINITY_VISIBLE_FRAME_COUNT
         ):
             return
+        spell = None
+        if phase is BattlePhase.ACTION_TARGET:
+            spell = self.pending_spell
+            if spell is None and self.pending_item_candidate is not None:
+                spell = self.spells.get(self.pending_item_candidate.item.use_spell_key)
         for index in self.selectable_target_indexes:
-            affinities = self._target_affinities(index)
-            if not affinities:
-                continue
-            visible_frame = pyxel.frame_count % TARGET_AFFINITY_BLINK_FRAME_COUNT
-            affinity_index = min(
-                visible_frame * len(affinities) // TARGET_AFFINITY_VISIBLE_FRAME_COUNT,
-                len(affinities) - 1,
-            )
-            affinity = affinities[affinity_index]
+            if spell is not None and self._enemy_spell_is_void(spell, index):
+                source_x, source_y = VOID_ICON_SOURCE_X, VOID_ICON_SOURCE_Y
+            else:
+                affinities = self._target_affinities(index)
+                if not affinities:
+                    continue
+                visible_frame = pyxel.frame_count % TARGET_AFFINITY_BLINK_FRAME_COUNT
+                affinity_index = min(
+                    visible_frame * len(affinities) // TARGET_AFFINITY_VISIBLE_FRAME_COUNT,
+                    len(affinities) - 1,
+                )
+                affinity = affinities[affinity_index]
+                source_x = AFFINITY_ICON_SOURCE_X
+                source_y = (
+                    WEAK_ICON_SOURCE_Y
+                    if affinity is SpellAffinity.WEAK
+                    else RESIST_ICON_SOURCE_Y
+                )
             monster = self.monsters[index]
             _base_x, base_y = self._monster_base_position(index)
-            source_y = (
-                WEAK_ICON_SOURCE_Y
-                if affinity is SpellAffinity.WEAK
-                else RESIST_ICON_SOURCE_Y
-            )
             pyxel.blt(
                 self._monster_draw_x(index)
                 + monster.width // 2
                 - AFFINITY_ICON_WIDTH // 2,
                 base_y + 20,
                 0,
-                AFFINITY_ICON_SOURCE_X,
+                source_x,
                 source_y,
                 AFFINITY_ICON_WIDTH,
                 AFFINITY_ICON_HEIGHT,
@@ -11978,14 +11989,15 @@ class BattleScene:
 
     def _monster_draw_position(self, index: int) -> tuple[int, int]:
         target_x, target_y = self._monster_base_position(index)
+        phase = getattr(self, "phase", None)
         presentation = getattr(self, "monster_charge_presentation", None)
         if (
-            self.phase is BattlePhase.MONSTER_ACTION
+            phase is BattlePhase.MONSTER_ACTION
             and presentation is not None
             and index == presentation.actor_index
         ):
             return presentation.position()
-        if self.phase is BattlePhase.MONSTER_ACTION and index == getattr(
+        if phase is BattlePhase.MONSTER_ACTION and index == getattr(
             self, "monster_escape_actor_index", None
         ):
             return self._monster_escape_x(index), target_y
@@ -11995,7 +12007,7 @@ class BattleScene:
         ).get(index)
         if reinforcement_frame is not None:
             elapsed = reinforcement_frame
-        elif self.phase is BattlePhase.ENTRANCE:
+        elif phase is BattlePhase.ENTRANCE:
             elapsed = self.entrance_animation_frame
         else:
             return target_x, target_y

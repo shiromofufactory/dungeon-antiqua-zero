@@ -116,6 +116,10 @@
     "spell_haste": {
       "channel": 1,
       "sound": 37
+    },
+    "shake": {
+      "channel": 1,
+      "sound": 48
     }
   }
 }

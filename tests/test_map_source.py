@@ -41,6 +41,49 @@ class MapSourceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def test_actor_visibility_validates_all_kinds_and_survives_compilation(self) -> None:
+        from app.resources.maps import MapResources
+        from tests.test_map_resources import FakePyxel
+
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        for index, kind in enumerate(("prop", "stationary", "roaming", "treasure")):
+            actor = {
+                "id": kind, "position": [index + 1, 2], "kind": kind,
+                "visibility_condition": {"flag_id": "story.open", "value": index % 2 == 0},
+            }
+            if kind == "treasure":
+                actor["contents"] = {"type": "gold", "amount": 10}
+            else:
+                actor["sprite_index"] = 0
+                if kind != "prop":
+                    actor["facing"] = "down"
+            source["actors"].append(actor)
+            if kind != "treasure":
+                source["event_triggers"].append({"id": f"talk_{kind}", "event_id": "sample.talk", "activations": ["touch", "interact"], "anchor": {"kind": "actor", "actor_id": kind}, "offsets": [[0, 0]]})
+        diagnostics = validate_map_source(source, self.tileset, flag_ids=["story.open"])
+        self.assertEqual([issue for issue in diagnostics if issue.severity == "error"], [])
+        compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
+        self.assertEqual(compiled.runtime["actors"], source["actors"])
+        save_compiled_map(self.root / "test_world.json", compiled)
+        loaded = MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+        for index, actor in enumerate(loaded.actors):
+            self.assertEqual(loaded.is_actor_visible(actor.id), index % 2 != 0)
+            self.assertEqual(loaded.is_actor_visible(actor.id, {"story.open"}), index % 2 == 0)
+
+    def test_actor_visibility_rejects_invalid_conditions_and_undeclared_flags(self) -> None:
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        actor = {"id": "elder", "kind": "stationary", "position": [2, 2], "sprite_index": 0, "facing": "down"}
+        source["actors"] = [actor]
+        for condition in (None, {}, {"flag_id": "story.open", "value": 1}, {"flag_id": "story.open", "value": "false"}, {"flag_id": "story.open", "value": True, "type": "flag_set"}, {"flag_id": "Bad", "value": False}):
+            with self.subTest(condition=condition):
+                actor["visibility_condition"] = condition
+                diagnostics = validate_map_source(source, self.tileset, flag_ids=["story.open"])
+                self.assertIn("invalid_actor_visibility_condition", {issue.code for issue in diagnostics})
+        actor["visibility_condition"] = {"flag_id": "story.open", "value": False}
+        diagnostics = validate_map_source(source, self.tileset, flag_ids=[])
+        self.assertIn("unknown_flag", {issue.code for issue in diagnostics})
+        self.assertEqual(next(issue.path for issue in diagnostics if issue.code == "unknown_flag"), "actors[0].visibility_condition.flag_id")
+
     def test_object_visibility_rejects_other_conditions_and_undeclared_flags(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0}]

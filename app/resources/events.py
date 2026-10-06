@@ -117,7 +117,7 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or not _commands_are_valid(command.get("else"), depth=depth + 1)
             ):
                 return False
-        elif command_type == "end_event":
+        elif command_type in ("end_event", "stop_bgm"):
             if set(command) != {"command"}:
                 return False
         elif command_type == "message":
@@ -142,7 +142,15 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or color not in FLASH_COLORS
             ):
                 return False
-        elif command_type == "wait":
+        elif command_type == "change_brightness":
+            percent = command.get("percent")
+            if (
+                set(command) != {"command", "percent"}
+                or type(percent) is not int
+                or percent not in (0, 25, 50, 75, 100)
+            ):
+                return False
+        elif command_type in ("wait", "shake_screen"):
             frames = command.get("frames")
             if (
                 set(command) != {"command", "frames"}

@@ -405,19 +405,7 @@ def validate_map_source(
             _diagnostic(diagnostics, "error", "invalid_object_instance", path, "オブジェクト実体はobjectで指定してください。")
             continue
         instance_id = instance.get("id")
-        if "visibility_condition" in instance:
-            condition = instance["visibility_condition"]
-            condition_path = f"{path}.visibility_condition"
-            if (
-                not isinstance(condition, dict)
-                or set(condition) != {"flag_id", "value"}
-                or not isinstance(condition.get("flag_id"), str)
-                or FLAG_ID_PATTERN.fullmatch(condition["flag_id"]) is None
-                or not isinstance(condition.get("value"), bool)
-            ):
-                _diagnostic(diagnostics, "error", "invalid_object_visibility_condition", condition_path, "表示条件はflag_idとbooleanのvalueだけで指定してください。")
-            elif known_flags is not None and condition["flag_id"] not in known_flags:
-                _diagnostic(diagnostics, "error", "unknown_flag", f"{condition_path}.flag_id", f"宣言されていないフラグです: {condition['flag_id']}")
+        _validate_visibility_condition(instance, diagnostics, path, known_flags, "object")
         unique_instance_id = False
         if not _valid_id(instance_id):
             _diagnostic(diagnostics, "error", "invalid_id", f"{path}.id", "実体IDはlower_snake_caseで指定してください。")
@@ -529,6 +517,7 @@ def validate_map_source(
         width,
         height,
         None if item_keys is None else frozenset(item_keys),
+        known_flags,
     )
     actor_kinds = {
         actor.get("id"): actor.get("kind")
@@ -548,12 +537,36 @@ def validate_map_source(
     return diagnostics
 
 
+def _validate_visibility_condition(
+    record: Mapping[str, object],
+    diagnostics: list[Diagnostic],
+    path: str,
+    known_flags: set[str] | None,
+    owner: str,
+) -> None:
+    if "visibility_condition" not in record:
+        return
+    condition = record["visibility_condition"]
+    condition_path = f"{path}.visibility_condition"
+    if (
+        not isinstance(condition, dict)
+        or set(condition) != {"flag_id", "value"}
+        or not isinstance(condition.get("flag_id"), str)
+        or FLAG_ID_PATTERN.fullmatch(condition["flag_id"]) is None
+        or not isinstance(condition.get("value"), bool)
+    ):
+        _diagnostic(diagnostics, "error", f"invalid_{owner}_visibility_condition", condition_path, "表示条件はflag_idとbooleanのvalueだけで指定してください。")
+    elif known_flags is not None and condition["flag_id"] not in known_flags:
+        _diagnostic(diagnostics, "error", "unknown_flag", f"{condition_path}.flag_id", f"宣言されていないフラグです: {condition['flag_id']}")
+
+
 def _validate_actors(
     value: object,
     diagnostics: list[Diagnostic],
     width: int,
     height: int,
     item_keys: frozenset[str] | None,
+    known_flags: set[str] | None,
 ) -> dict[str, tuple[int, int]]:
     if not isinstance(value, list):
         _diagnostic(diagnostics, "error", "invalid_actors", "actors", "actorsは配列で指定してください。")
@@ -566,6 +579,7 @@ def _validate_actors(
             _diagnostic(diagnostics, "error", "invalid_actor", path, "actorはobjectで指定してください。")
             continue
         actor_id = actor.get("id")
+        _validate_visibility_condition(actor, diagnostics, path, known_flags, "actor")
         valid_actor_id = _valid_id(actor_id)
         if not valid_actor_id:
             _diagnostic(diagnostics, "error", "invalid_actor_id", f"{path}.id", "actor IDはlower_snake_caseで指定してください。")

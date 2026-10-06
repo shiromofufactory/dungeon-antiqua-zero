@@ -5977,20 +5977,38 @@ class BattleScreenMockTest(unittest.TestCase):
             [True],
         )
 
-    def test_slow_targeting_excludes_already_slowed_monsters(self) -> None:
+    def test_slow_targeting_includes_already_slowed_living_monsters(self) -> None:
         spell = load_mock_spells()["SLOW"]
         slowed = _damage_test_monster(0)
         slowed.state.speed_modifier = -1
         normal = _damage_test_monster(1)
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.monsters = (slowed, normal)
+        dead = _damage_test_monster(2)
+        dead.state.hp = 0
+        mock.monsters = (slowed, normal, dead)
 
         self.assertEqual(
             mock._selectable_enemy_indexes_for_spell(spell),
-            (1,),
+            (0, 1),
         )
 
-    def test_break_applies_da2_defense_formula_and_excludes_repeat_target(self) -> None:
+    def test_repeated_slow_is_selectable_but_misses_without_changing_speed(self) -> None:
+        spell = load_mock_spells()["SLOW"]
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(load_mock_items(), load_mock_skills())
+        mock.active_party_index = 0
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.monsters = (_damage_test_monster(),)
+        mock.monsters[0].state.speed_modifier = -1
+        mock.spell_damage_popups = []
+        with patch("scenes.battle.random.randint") as randint:
+            results = mock._resolve_slow_results(spell, (0,))
+        mock._apply_action_results(BattleActionPresentation((), slow_results=results))
+        self.assertEqual(mock.monsters[0].state.speed_modifier, -1)
+        self.assertEqual([popup.is_miss for popup in mock.spell_damage_popups], [True])
+        randint.assert_not_called()
+
+    def test_break_applies_da2_defense_formula_and_keeps_repeat_target(self) -> None:
         spell = load_mock_spells()["ARMOR BREAK"]
         target = _damage_test_monster(defense=20)
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -6014,9 +6032,15 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(spell.rate, 24)
         self.assertEqual(target.state.defense_modifier, -1)
         self.assertEqual(target.effective_defense, 5)
-        self.assertEqual(mock._selectable_enemy_indexes_for_spell(spell), ())
+        self.assertEqual(mock._selectable_enemy_indexes_for_spell(spell), (0,))
         self.assertEqual(mock.spell_damage_popups, [])
         randint.assert_called_once_with(0, 19)
+        with patch("scenes.battle.random.randint") as randint:
+            results = mock._resolve_break_results(spell, (0,))
+        mock._apply_action_results(BattleActionPresentation((), break_results=results))
+        self.assertEqual(target.state.defense_modifier, -1)
+        self.assertEqual([popup.is_miss for popup in mock.spell_damage_popups], [True])
+        randint.assert_not_called()
 
     def test_break_can_target_zero_defense_monster_but_always_misses(self) -> None:
         spell = load_mock_spells()["ARMOR BREAK"]
@@ -6383,6 +6407,32 @@ class BattleScreenMockTest(unittest.TestCase):
             SPEED_ICON_SIZE,
             SPEED_ICON_TRANSPARENT_INDEX,
         )
+
+    def test_monster_buff_icons_hide_during_charge_and_escape_then_return(self) -> None:
+        for motion in ("charge", "escape"):
+            with self.subTest(motion=motion):
+                monster = _damage_test_monster()
+                monster.state.speed_modifier = -1
+                monster.state.defense_modifier = 1
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.monsters = (monster,)
+                mock.phase = BattleMockPhase.MONSTER_ACTION
+                if motion == "charge":
+                    mock.monster_charge_presentation = SimpleNamespace(
+                        actor_index=0, position=lambda: (80, 34),
+                    )
+                else:
+                    mock.monster_escape_actor_index = 0
+                    mock.monster_escape_animation_frame = 20
+                with (
+                    patch("tools.screen_mocks.battle.pyxel.frame_count", 0),
+                    patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                ):
+                    mock._draw_speed_modifier_icons()
+                    blt.assert_not_called()
+                    mock.phase = BattleMockPhase.COMMAND
+                    mock._draw_speed_modifier_icons()
+                    self.assertEqual(blt.call_count, 2)
 
     def test_break_icon_uses_da2_negative_defense_animation_below_monster(
         self,

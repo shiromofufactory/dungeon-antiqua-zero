@@ -13,6 +13,9 @@ from app.member import (
 from app.resources.events import EventCatalog, EventResourceError
 from app.state import SaveData
 from app.systems import (
+    ChangeBrightnessEffect,
+    StopBgmEffect,
+    ShakeScreenEffect,
     EventContext,
     EventRunner,
     EventRuntimeError,
@@ -81,6 +84,55 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_bgm_stop_waits_for_audio_completion_before_following_commands(self) -> None:
+        for context in EventContext:
+            with self.subTest(context=context):
+                self.save_data.event_flags.clear()
+                runner = self.runner([
+                    {"command": "stop_bgm"},
+                    {"command": "set_flag", "flag_id": "sample.done"},
+                ])
+                runner.context = context
+                effect = runner.advance()
+                self.assertEqual(effect, StopBgmEffect())
+                self.assertIs(runner.advance(), effect)
+                self.assertNotIn("sample.done", self.save_data.event_flags)
+                runner.complete_effect(effect)
+                self.assertIsNone(runner.advance())
+                self.assertIn("sample.done", self.save_data.event_flags)
+        with self.assertRaises(EventResourceError):
+            EventCatalog.from_document(runtime_document([{"command": "stop_bgm", "bgm_id": "da3-field"}]))
+
+    def test_screen_effects_wait_for_completion_in_field_and_battle_events(self) -> None:
+        for context in EventContext:
+            with self.subTest(context=context):
+                self.save_data.event_flags.clear()
+                runner = self.runner([
+                    {"command": "change_brightness", "percent": 0},
+                    {"command": "shake_screen", "frames": 18},
+                    {"command": "set_flag", "flag_id": "sample.done"},
+                ])
+                runner.context = context
+                for expected in (ChangeBrightnessEffect(0), ShakeScreenEffect(18)):
+                    effect = runner.advance()
+                    self.assertEqual(effect, expected)
+                    self.assertIs(runner.advance(), effect)
+                    self.assertNotIn("sample.done", self.save_data.event_flags)
+                    runner.complete_effect(effect)
+                self.assertIsNone(runner.advance())
+                self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_screen_effect_loader_rejects_invalid_fields_and_values(self) -> None:
+        for command in (
+            *({"command": "change_brightness", "percent": value} for value in (None, True, False, 0.0, 25.0, "50", -25, 26, 125)),
+            *({"command": "shake_screen", "frames": value} for value in (None, True, 6.0, "6", 0, -6, 7)),
+            {"command": "change_brightness"}, {"command": "shake_screen"},
+            {"command": "change_brightness", "percent": 50, "frames": 6},
+            {"command": "shake_screen", "frames": 6, "direction": "up"},
+        ):
+            with self.subTest(command=command), self.assertRaises(EventResourceError):
+                EventCatalog.from_document(runtime_document([command]))
+
     def test_give_item_adds_all_items_once_before_waiting_for_notification(self) -> None:
         for context in EventContext:
             with self.subTest(context=context):

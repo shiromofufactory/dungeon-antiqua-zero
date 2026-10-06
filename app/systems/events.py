@@ -55,12 +55,27 @@ class ChangeBgmEffect:
 
 
 @dataclass(frozen=True)
+class StopBgmEffect:
+    pass
+
+
+@dataclass(frozen=True)
 class FlashScreenEffect:
     color: str
 
 
 @dataclass(frozen=True)
 class WaitEffect:
+    frames: int
+
+
+@dataclass(frozen=True)
+class ChangeBrightnessEffect:
+    percent: int
+
+
+@dataclass(frozen=True)
+class ShakeScreenEffect:
     frames: int
 
 
@@ -104,8 +119,11 @@ EventEffect = (
     | ItemReceivedEffect
     | PlaySeEffect
     | ChangeBgmEffect
+    | StopBgmEffect
     | FlashScreenEffect
     | WaitEffect
+    | ChangeBrightnessEffect
+    | ShakeScreenEffect
     | OpenShopEffect
     | StartBattleEffect
     | FacePartyEffect
@@ -249,10 +267,16 @@ class EventRunner:
                 return PlaySeEffect(str(command["se_id"]))
             if command_type == "change_bgm":
                 return ChangeBgmEffect(str(command["bgm_id"]))
+            if command_type == "stop_bgm":
+                return StopBgmEffect()
             if command_type == "flash_screen":
                 return FlashScreenEffect(str(command["color"]))
             if command_type == "wait":
                 return WaitEffect(int(command["frames"]))
+            if command_type == "change_brightness":
+                return ChangeBrightnessEffect(int(command["percent"]))
+            if command_type == "shake_screen":
+                return ShakeScreenEffect(int(command["frames"]))
             if command_type == "recover_party":
                 self.party.recover_all()
                 return None
@@ -302,6 +326,9 @@ class EventRunner:
 
 __all__ = [
     "ChangeBgmEffect",
+    "StopBgmEffect",
+    "ChangeBrightnessEffect",
+    "ShakeScreenEffect",
     "EventContext",
     "EventEffect",
     "EventRunner",

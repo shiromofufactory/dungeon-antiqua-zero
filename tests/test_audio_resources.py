@@ -66,6 +66,98 @@ class FakePyxel:
 
 
 class BgmPlayerTest(unittest.TestCase):
+    def test_fade_stop_lowers_gain_then_stays_silent_until_next_play(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field")
+        self.assertTrue(player.fade_out_and_stop())
+        self.assertEqual(self.pyxel.channels[2].gain, 0.6)
+        for frame in range(1, 30):
+            self.assertFalse(player.update())
+            self.assertEqual(player.current_id, "da3-field")
+            self.assertAlmostEqual(self.pyxel.channels[2].gain, 0.6 * (30 - frame) / 30)
+            self.assertTrue(player.is_fading_out)
+        self.assertTrue(player.update())
+        self.assertFalse(player.is_fading_out)
+        self.assertIsNone(player.current_id)
+        self.assertIsNone(self.pyxel.play_position)
+        self.assertEqual(self.pyxel.stop_calls, [2, 2])
+        for _ in range(60):
+            self.assertFalse(player.update())
+        player.pause()
+        player.resume()
+        self.assertEqual(len(self.pyxel.play_calls), 1)
+        player.play("da3-field")
+        self.assertEqual(len(self.pyxel.play_calls), 2)
+        self.assertEqual(self.pyxel.channels[2].gain, 0.6)
+        self.assertEqual([channel.gain for index, channel in enumerate(self.pyxel.channels) if index != 2], [0.125] * 3)
+
+    def test_fade_stop_cancels_queued_music_even_if_jingle_finishes_early(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play_once_then("da3-welcome", "da3-field")
+        player.fade_out_and_stop()
+        self.pyxel.play_position = None
+        for _ in range(30):
+            player.update()
+        self.assertIsNone(player.current_id)
+        self.assertFalse(player.update())
+        self.assertEqual(len(self.pyxel.play_calls), 1)
+
+    def test_fade_stop_pauses_with_playback_and_resumes_remaining_frames(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field")
+        player.fade_out_and_stop()
+        for _ in range(10):
+            player.update()
+        gain = self.pyxel.channels[2].gain
+        self.pyxel.play_position = (0, 1.5)
+        player.pause()
+        for _ in range(60):
+            player.update()
+        self.assertEqual(self.pyxel.channels[2].gain, gain)
+        player.resume()
+        self.assertEqual(self.pyxel.play_calls[-1][2], 1.5)
+        for _ in range(19):
+            player.update()
+            self.assertTrue(player.is_fading_out)
+        player.update()
+        self.assertIsNone(player.current_id)
+
+    def test_play_during_fade_stop_cancels_stop_for_same_or_different_track(self) -> None:
+        for next_id in ("da3-field", "da3-welcome"):
+            with self.subTest(next_id=next_id):
+                player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+                player.play("da3-field")
+                player.fade_out_and_stop()
+                player.update()
+                player.play(next_id)
+                self.assertFalse(player.is_fading_out)
+                self.assertEqual(self.pyxel.channels[2].gain, 0.6)
+                for _ in range(60):
+                    player.update()
+                self.assertEqual(player.current_id, next_id)
+
+    def test_fade_stop_uses_current_gain_and_immediate_stop_clears_the_fade(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        self.assertFalse(player.fade_out_and_stop())
+        self.assertFalse(player.is_fading_out)
+        player.play("da3-field")
+        player.set_fade_rate(0.5)
+        player.fade_out_and_stop()
+        player.update()
+        self.assertAlmostEqual(self.pyxel.channels[2].gain, 0.3 * 29 / 30)
+        player.set_volume(4)
+        self.assertAlmostEqual(self.pyxel.channels[2].gain, 0.4 * 29 / 30)
+        player.stop()
+        self.assertFalse(player.is_fading_out)
+        player.play("da3-welcome")
+        self.assertEqual(self.pyxel.channels[2].gain, 0.8)
+
+    def test_fade_stop_rejects_invalid_durations(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        for frames in (None, True, 30.0, "30", 0, -1):
+            with self.subTest(frames=frames), self.assertRaises(ValueError):
+                player.fade_out_and_stop(frames)
+
     def test_pause_resume_preserves_position_sound_loop_and_volume(self) -> None:
         player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
         player.play("da3-field")

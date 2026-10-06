@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import MappingProxyType, SimpleNamespace
 import unittest
 from unittest.mock import ANY, Mock, call, patch
@@ -7,7 +9,7 @@ from unittest.mock import ANY, Mock, call, patch
 from game import EVENT_ITEM_RECEIVED_TEXT_KEY, Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
-from resources.maps import MapObjectCondition
+from resources.maps import MapVisibilityCondition
 from resources import (
     CompiledMap,
     EventCatalog,
@@ -18,11 +20,15 @@ from resources import (
     MapTreasureContents,
     WorldSite,
 )
-from rendering import FadeThroughBlack
+from rendering import FadeThroughBlack, ScreenBrightness
 from scenes.battle import BattleEncounter, BattlePhase, BattleResult
 from state import SaveData, Settings
 from systems import (
+    StopBgmEffect,
+    ChangeBrightnessEffect,
+    ShakeScreenEffect,
     InventorySystem,
+    EventContext,
     MessageEffect,
     ItemReceivedEffect,
     FlashScreenEffect,
@@ -103,7 +109,7 @@ def game_for(
         facing=Direction.RIGHT,
         event_flags=game.save_data.event_flags,
     )
-    game.field_actors = FieldActors(game.current_map) if actors else None
+    game.field_actors = FieldActors(game.current_map, event_flags=game.save_data.event_flags) if actors else None
     game.event_release_direction = None
     game.event_release_confirm = False
     game._start_field_event = Mock(return_value=True)
@@ -114,6 +120,144 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    def test_hidden_actor_cannot_start_a_conversation_or_change_facing(self) -> None:
+        actor = MapActor("elder", MapCell(2, 1), "stationary", 0, "up", visibility_condition=MapVisibilityCondition("story.visible", True))
+        trigger = MapEventTrigger("talk", "sample.talk", frozenset(("touch", "interact")), actor_id="elder", offsets=(MapCell(0, 0),))
+        game = game_for(trigger, actors=(actor,))
+        for activation in ("touch", "interact"):
+            self.assertFalse(game._try_field_trigger(activation, 2, 1))
+        game._start_field_event.assert_not_called()
+        self.assertIs(game.field_actors.actor("elder").movement.facing, Direction.UP)
+        game.save_data.event_flags.add("story.visible")
+        self.assertTrue(game._try_field_trigger("interact", 2, 1))
+        game._start_field_event.assert_called_once()
+        self.assertIs(game.field_actors.actor("elder").movement.facing, Direction.LEFT)
+
+    def test_hidden_treasure_has_no_reward_or_opening_side_effects(self) -> None:
+        actor = MapActor("chest", MapCell(2, 1), "treasure", 0, contents=MapTreasureContents("gold", amount=50), visibility_condition=MapVisibilityCondition("story.visible", True))
+        game = game_for(None, actors=(actor,))
+        game.treasure_system = Mock()
+        self.assertFalse(game._try_open_treasure(2, 1))
+        game.treasure_system.open.assert_not_called()
+        self.assertEqual(game.save_data.gold, 0)
+        self.assertEqual(game.save_data.opened_treasures, set())
+        self.assertEqual(game.field_actors.actor("chest").treasure_frame, 0)
+
+    def test_bgm_stop_waits_thirty_updates_in_field_and_battle_without_input_skip(self) -> None:
+        from resources.audio import BgmPlayer
+        from tests.test_audio_resources import FakePyxel
+
+        for context in EventContext:
+            with self.subTest(context=context), TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "da3-field.ogg").touch()
+                px = FakePyxel()
+                game = Game.__new__(Game)
+                game.bgm = BgmPlayer(root, pyxel_api=px)
+                game.bgm.play("da3-field")
+                game.event_runner = Mock(context=context, advance=Mock(return_value=StopBgmEffect()))
+                game.party_system = Mock(active_party=(), character_states={})
+                game.input_reader = Mock(poll=Mock(return_value=InputState(confirm=InputButton(triggered=True, held=True))))
+                game.alert = Mock()
+                game.showing_field = context is EventContext.FIELD
+                game.field = Mock()
+                game.field_actors = Mock()
+                game.battle_scene = Mock() if context is EventContext.BATTLE else None
+                game._update_game_menu = Mock(return_value=False)
+                game._update_fade = Mock(return_value=False)
+                game._continue_event()
+                effect = game.event_effect
+                game._continue_event = Mock()
+                for _ in range(29):
+                    game.update()
+                    game.event_runner.complete_effect.assert_not_called()
+                    self.assertTrue(game.bgm.is_playing)
+                game.update()
+                self.assertFalse(game.bgm.is_playing)
+                self.assertIsNone(game.event_effect)
+                game.event_runner.complete_effect.assert_called_once_with(effect)
+                game._continue_event.assert_called_once_with()
+                game.field.update.assert_not_called()
+                game.field_actors.update_roaming.assert_not_called()
+                if game.battle_scene is not None:
+                    game.battle_scene.update.assert_not_called()
+
+    def test_bgm_stop_while_silent_continues_without_an_extra_wait(self) -> None:
+        game = Game.__new__(Game)
+        effect = StopBgmEffect()
+        game.event_runner = Mock(advance=Mock(side_effect=(effect, WaitEffect(6))))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.bgm = Mock(fade_out_and_stop=Mock(return_value=False))
+        game._continue_event()
+        game.event_runner.complete_effect.assert_called_once_with(effect)
+        self.assertEqual(game.event_effect, WaitEffect(6))
+        self.assertEqual(game.event_wait_remaining, 6)
+
+    def test_brightness_and_shake_wait_exact_frames_then_continue_in_order(self) -> None:
+        game = Game.__new__(Game)
+        effects = (ChangeBrightnessEffect(25), ShakeScreenEffect(18), WaitEffect(6))
+        runner = Mock(advance=Mock(side_effect=(*effects, None)), context=EventContext.FIELD)
+        game.event_runner = runner
+        game.party_system = Mock(active_party=(object(),), character_states={})
+        game.selected_member_index = 0
+        game.screen_brightness = ScreenBrightness()
+        game.palette_shifter = Mock()
+        game._continue_event()
+        self.assertEqual(game.screen_brightness.rate, 1.0)
+        pressed = InputState(confirm=InputButton(triggered=True, held=True), cancel=InputButton(triggered=True, held=True))
+        for frame in range(1, 30):
+            game._update_event(pressed)
+            game.event_runner.complete_effect.assert_not_called()
+            self.assertAlmostEqual(game.screen_brightness.rate, 1 - 0.75 * frame / 30)
+        game._update_event(pressed)
+        self.assertIs(game.event_effect, effects[1])
+        game.palette_shifter.set_brightness.assert_called_with(0.25)
+        for _ in range(17):
+            game._update_event(pressed)
+            self.assertIs(game.event_effect, effects[1])
+        game._update_event(pressed)
+        self.assertIs(game.event_effect, effects[2])
+        self.assertIsNone(game.event_screen_shake)
+        self.assertEqual(game.screen_brightness.rate, 0.25)
+        self.assertEqual(game.event_runner.complete_effect.call_args_list, [call(effects[0]), call(effects[1])])
+        for _ in range(6):
+            game._update_event(pressed)
+        self.assertIsNone(game.event_runner)
+        self.assertEqual(game.screen_brightness.rate, 0.25)
+        runner.complete_effect.assert_called_with(effects[2])
+
+    @patch("game.pyxel")
+    def test_shake_draw_applies_only_horizontal_camera_and_always_restores_it(self, px: Mock) -> None:
+        game = Game.__new__(Game)
+        game.event_runner = Mock(advance=Mock(return_value=ShakeScreenEffect(18)))
+        game.party_system = Mock(active_party=(), character_states={})
+        game.alert = Mock(camera_x=0)
+        game.showing_field = True
+        game._draw_field_screen = Mock()
+        game._continue_event()
+        game._update_event(InputState())
+        game.draw()
+        self.assertEqual(px.camera.call_args_list, [call(1, 0), call()])
+        self.assertEqual(game.event_screen_shake.elapsed_frames, 1)
+        px.camera.reset_mock()
+        game._draw_field_screen.side_effect = RuntimeError("draw failed")
+        with self.assertRaises(RuntimeError):
+            game.draw()
+        px.camera.assert_called_with()
+
+    def test_aborted_screen_effect_restores_shake_and_stops_brightness(self) -> None:
+        game = Game.__new__(Game)
+        game.screen_brightness = ScreenBrightness()
+        game.screen_brightness.start(25)
+        game.screen_brightness.update()
+        current = game.screen_brightness.rate
+        game.event_screen_shake = Mock()
+        game.alert = Mock()
+        game._abort_event(ValueError("preview"))
+        self.assertIsNone(game.event_screen_shake)
+        self.assertFalse(game.screen_brightness.is_active)
+        self.assertEqual(game.screen_brightness.rate, current)
+
     @patch("game.MessageOverlay")
     def test_item_received_message_formats_name_only_and_waits_until_closed(self, overlay: Mock) -> None:
         game = Game.__new__(Game)
@@ -287,7 +431,7 @@ class GameEventTriggerTest(unittest.TestCase):
         )
         game = game_for(trigger)
         object.__setattr__(game.current_map, "object_conditions", MappingProxyType({
-            "rock": MapObjectCondition("story.open", False),
+            "rock": MapVisibilityCondition("story.open", False),
         }))
         self.assertTrue(game._try_field_trigger("touch", 2, 1))
         game._start_field_event.reset_mock()

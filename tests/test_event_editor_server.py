@@ -14,6 +14,29 @@ from tools.event_editor.server import EventEditorApplication, create_server
 
 
 class EventEditorServerTest(unittest.TestCase):
+    def test_saves_bgm_stop_and_rejects_extra_attributes(self) -> None:
+        command = {"command": "stop_bgm"}
+        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "stop", "commands": [command]}]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["events"]["sample.stop"]["commands"], [command])
+        command["frames"] = 6
+        self.assertFalse(self.post_json("/api/save", data)["saved"])
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
+    def test_screen_effects_save_and_invalid_values_preserve_generated_runtime(self) -> None:
+        commands = [{"command": "change_brightness", "percent": 0}, {"command": "shake_screen", "frames": 18}]
+        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "screen", "commands": commands}]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["events"]["sample.screen"]["commands"], commands)
+        commands[0]["percent"] = 30
+        commands[1]["frames"] = 7
+        result = self.post_json("/api/save", data)
+        self.assertFalse(result["saved"])
+        self.assertEqual({item["code"] for item in result["diagnostics"]}, {"invalid_brightness_percent", "invalid_shake_screen_frames"})
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
     def test_give_item_saves_message_toggle_and_rejects_nonboolean_setting(self) -> None:
         command = {"command": "give_item", "item_key": "POTION", "quantity": 3, "show_message": True}
         data = {"format_version": 1, "namespace": "sample", "events": [{"id": "receive", "commands": [command]}]}

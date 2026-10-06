@@ -144,6 +144,55 @@ class MapResourcesTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_loads_area_parent_and_supports_legacy_area_ids(self) -> None:
+        self.runtime["area_parent_id"] = "parent_dungeon"
+        self._write_runtime()
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.assertEqual(loaded.area_parent_id, "parent_dungeon")
+
+        self.runtime.pop("area_parent_id")
+        self.runtime["map_id"] = "parent_dungeon_area_first"
+        (self.maps_dir / "parent_dungeon_area_first.json").write_text(
+            json.dumps(self.runtime), encoding="utf-8",
+        )
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map(
+            "parent_dungeon_area_first"
+        )
+        self.assertEqual(loaded.area_parent_id, "parent_dungeon")
+
+    def test_rejects_invalid_or_self_referencing_area_parent(self) -> None:
+        for parent in ("test_map", "Invalid Parent", 123):
+            with self.subTest(parent=parent):
+                self.runtime["area_parent_id"] = parent
+                self._write_runtime()
+                with self.assertRaises(MapResourceError):
+                    MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+    def test_actor_visibility_filters_triggers_using_live_flags_and_positions(self) -> None:
+        self.runtime["actors"][0]["visibility_condition"] = {"flag_id": "story.open", "value": False}
+        self._write_runtime()
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        flags = set()
+        positions = {"elder": MapCell(0, 1)}
+        self.assertTrue(loaded.is_actor_visible("elder", flags))
+        self.assertTrue(loaded.is_actor_visible("entrance_potion", flags))
+        self.assertEqual(loaded.event_trigger_at("interact", 0, 1, actor_positions=positions, event_flags=flags).id, "elder_talk")
+        flags.add("story.open")
+        self.assertFalse(loaded.is_actor_visible("elder", flags))
+        self.assertIsNone(loaded.event_trigger_at("interact", 0, 1, actor_positions=positions, event_flags=flags))
+        flags.clear()
+        positions["elder"] = MapCell(1, 1)
+        self.assertIsNone(loaded.event_trigger_at("interact", 0, 1, actor_positions=positions, event_flags=flags))
+        self.assertIsNotNone(loaded.event_trigger_at("interact", 1, 1, actor_positions=positions, event_flags=flags))
+
+    def test_rejects_invalid_actor_visibility_conditions(self) -> None:
+        for condition in (None, {}, {"flag_id": "story.open", "value": 1}, {"flag_id": "Bad", "value": False}, {"flag_id": "story.open", "value": True, "conditions": []}):
+            with self.subTest(condition=condition):
+                self.runtime["actors"][0]["visibility_condition"] = condition
+                self._write_runtime()
+                with self.assertRaisesRegex(MapResourceError, r"actors\[0\].visibility_condition"):
+                    MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
     def test_rejects_invalid_visibility_conditions_and_cell_effects(self) -> None:
         for condition in (None, {}, {"flag_id": "story.open", "value": 1}, {"flag_id": "Bad", "value": False}, {"flag_id": "story.open", "value": True, "conditions": []}):
             with self.subTest(condition=condition):

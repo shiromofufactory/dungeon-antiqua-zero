@@ -389,7 +389,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.inventory_system = None
         scene.monster_record_system = None
         scene.settings = Settings()
-        scene.localizer = Localizer.from_settings(scene.settings)
+        scene.localizer = Localizer(scene.settings.language)
         scene.fonts = FontResources()
         scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         scene._play_victory_jingle = Mock()
@@ -988,12 +988,15 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game = Game.__new__(Game)
         game.battle_return_result = BattleResult.DEFEAT
         game.battle_scene = Mock()
-        game.current_map = Mock(bgm_id="da3-forest")
+        game.current_map = Mock(map_id="forest", bgm_id="da3-forest")
         game.field = Mock(position=FieldPosition(20, 20))
+        game.save_data = SaveData()
+        game.map_resources = Mock()
         game.encounter_system = Mock()
         game.encounter_system.defeat_return.return_value = DungeonExitReturn(
             FieldPosition(16, 38),
             Direction.DOWN,
+            "forest",
         )
         members = (
             Mock(hp=10, paralyzed=False, is_front_row=True),
@@ -1001,6 +1004,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         )
         game.party = members
         game._reset_field_actors = Mock()
+        game._refresh_site_name_label = Mock()
         game.bgm = Mock()
 
         with patch("game.FieldMovement", return_value=Mock()) as movement:
@@ -1010,11 +1014,46 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             game.current_map,
             start=FieldPosition(16, 38),
             facing=Direction.DOWN,
+            event_flags=game.save_data.event_flags,
         )
         self.assertIsNone(game.battle_scene)
         for member in members:
             member.fully_recover.assert_called_once_with()
         game._reset_field_actors.assert_called_once_with()
+        game.bgm.transition_to.assert_called_once_with("da3-forest")
+
+    def test_defeat_from_deep_floor_replaces_map_renderer_sites_and_bgm(self) -> None:
+        game = Game.__new__(Game)
+        game.battle_return_result = BattleResult.DEFEAT
+        game.battle_scene = Mock()
+        game.current_map = Mock(map_id="deep_floor", bgm_id="da3-dungeon")
+        game.field = Mock(position=FieldPosition(20, 20))
+        game.save_data = SaveData(event_flags={"story.open"})
+        parent = Mock(map_id="forest", bgm_id="da3-forest", sites=())
+        game.map_resources = Mock(map=Mock(return_value=parent))
+        game.encounter_system = Mock()
+        game.encounter_system.defeat_return.return_value = DungeonExitReturn(
+            FieldPosition(16, 38), Direction.DOWN, "forest",
+        )
+        game.party = (Mock(hp=10, paralyzed=False, is_front_row=True),)
+        game._reset_field_actors = Mock()
+        game._refresh_site_name_label = Mock()
+        game.field_fade_active = True
+        game.bgm = Mock()
+
+        with (patch("game.FieldMovement") as movement,
+              patch("game.FieldRenderer") as renderer):
+            game._apply_battle_return()
+
+        self.assertIs(game.current_map, parent)
+        self.assertIs(game.field_renderer, renderer.return_value)
+        self.assertFalse(game.field_fade_active)
+        movement.assert_called_once_with(
+            parent, start=FieldPosition(16, 38), facing=Direction.DOWN,
+            event_flags={"story.open"},
+        )
+        game._reset_field_actors.assert_called_once_with()
+        game._refresh_site_name_label.assert_called_once_with(force=True)
         game.bgm.transition_to.assert_called_once_with("da3-forest")
 
     @patch("game.pyxel.play_pos", return_value=None)
@@ -1027,6 +1066,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.battle_scene = None
         game.current_map = Mock(bgm_id="da3-forest")
         game.field = Mock(position=FieldPosition(20, 20))
+        game.save_data = SaveData()
+        game.map_resources = Mock()
         game.encounter_system = Mock()
         game.encounter_system.defeat_return.return_value = None
         game.party = (

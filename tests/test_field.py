@@ -33,7 +33,7 @@ from app.resources.maps import (
     MapActor,
     MapCell,
     MapObjectTile,
-    MapObjectCondition,
+    MapVisibilityCondition,
     MapTreasureContents,
 )
 
@@ -358,7 +358,7 @@ class FieldRendererTest(unittest.TestCase):
                 with self.subTest(group=group, value=value):
                     tile = MapObjectTile("rock", "rock", 1, 1, group, 0, 0, 1)
                     map_data = compiled_map(("000", "000", "000"), objects=(tile,))
-                    object.__setattr__(map_data, "object_conditions", MappingProxyType({"rock": MapObjectCondition("story.rock", value)}))
+                    object.__setattr__(map_data, "object_conditions", MappingProxyType({"rock": MapVisibilityCondition("story.rock", value)}))
                     flags = set()
                     field = FieldMovement(map_data, start=FieldPosition(0, 0), event_flags=flags)
                     renderer = FieldRenderer(map_data, screen_width=48, screen_height=48, pyxel_api=Mock(frame_count=0))

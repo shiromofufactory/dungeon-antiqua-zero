@@ -235,6 +235,7 @@ class FieldActors:
             raise TypeError("field actors require a CompiledMap")
         self.map_data = map_data
         self._random = random_source or random.Random(f"{map_data.map_id}:actors")
+        self._event_flags = event_flags
         opened_ids = frozenset(opened_treasure_ids)
         if not all(isinstance(actor_id, str) and actor_id for actor_id in opened_ids):
             raise TypeError("opened treasure IDs must be non-empty strings")
@@ -270,11 +271,18 @@ class FieldActors:
         return tuple(self._actors.values())
 
     @property
+    def visible_actors(self) -> tuple[FieldActor, ...]:
+        return tuple(
+            actor for actor in self._actors.values()
+            if self.map_data.is_actor_visible(actor.id, self._event_flags)
+        )
+
+    @property
     def positions(self) -> Mapping[str, MapCell]:
         return MappingProxyType(
             {
-                actor_id: MapCell(actor.movement.position.x, actor.movement.position.y)
-                for actor_id, actor in self._actors.items()
+                actor.id: MapCell(actor.movement.position.x, actor.movement.position.y)
+                for actor in self.visible_actors
             }
         )
 
@@ -288,7 +296,7 @@ class FieldActors:
         return next(
             (
                 actor
-                for actor in self._actors.values()
+                for actor in self.visible_actors
                 if actor.movement.position == FieldPosition(x, y)
             ),
             None,
@@ -297,8 +305,8 @@ class FieldActors:
     def blocked_positions(self, *, excluding: str | None = None) -> tuple[FieldPosition, ...]:
         positions = (
             position
-            for actor_id, actor in self._actors.items()
-            if actor_id != excluding
+            for actor in self.visible_actors
+            if actor.id != excluding
             for position in (
                 actor.movement.position,
                 actor.movement.destination_position,
@@ -375,7 +383,8 @@ class FieldActors:
     def update_roaming(self, *, party_position: FieldPosition) -> None:
         """Advance autonomous actors once without storing their transient state."""
 
-        for actor_id, actor in self._actors.items():
+        for actor in self.visible_actors:
+            actor_id = actor.id
             if actor.kind == "stationary":
                 actor.movement.update(None)
                 continue
@@ -426,7 +435,7 @@ class FieldActors:
         actor.treasure_animation_elapsed = 0
 
     def update_treasure_animations(self) -> None:
-        for actor in self._actors.values():
+        for actor in self.visible_actors:
             if not actor.treasure_animation:
                 continue
             actor.treasure_animation_elapsed += 1
