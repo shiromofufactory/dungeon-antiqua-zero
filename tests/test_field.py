@@ -149,6 +149,36 @@ class FieldMovementTest(unittest.TestCase):
         self.assertFalse(field.is_walking)
         self.assertIsNone(field.arrived_position)
 
+    def test_animation_update_clears_completed_step_without_changing_facing_or_position(self) -> None:
+        field = FieldMovement(compiled_map(("000", "000", "000")),
+                              start=FieldPosition(1, 1), speed=16)
+        field.update(Direction.RIGHT)
+        self.assertTrue(field.is_walking)
+        self.assertEqual(field.arrived_position, FieldPosition(2, 1))
+
+        field.update_animation()
+
+        self.assertFalse(field.is_walking)
+        self.assertIsNone(field.arrived_position)
+        self.assertEqual(field.walking_frame_count, 0)
+        self.assertEqual(field.position, FieldPosition(2, 1))
+        self.assertIs(field.facing, Direction.RIGHT)
+
+    def test_animation_update_preserves_paused_step_and_allows_it_to_resume(self) -> None:
+        field = FieldMovement(compiled_map(("000", "000", "000"), profile="town"),
+                              start=FieldPosition(1, 1))
+        field.update(Direction.RIGHT)
+        for frame in range(2, 10):
+            field.update_animation()
+            self.assertEqual(field.walking_frame_count, frame)
+            self.assertEqual((field.world_x, field.world_y), (18, 16))
+            self.assertTrue(field.is_moving)
+            self.assertFalse(field.is_walking)
+        for _ in range(7):
+            field.update(None)
+        self.assertEqual(field.position, FieldPosition(2, 1))
+        self.assertFalse(field.is_moving)
+
     def test_ignores_a_new_direction_until_the_current_step_finishes(self) -> None:
         map_data = compiled_map(("11111", "10001", "10001", "11111"))
         field = FieldMovement(map_data, start=FieldPosition(1, 1))

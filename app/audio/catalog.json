@@ -120,6 +120,10 @@
     "shake": {
       "channel": 1,
       "sound": 48
+    },
+    "spell_healing2": {
+      "channel": 1,
+      "sound": 37
     }
   }
 }

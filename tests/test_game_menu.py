@@ -9,7 +9,7 @@ from input import Direction, InputButton, InputState
 from rendering import FadeThroughBlack, ScreenBrightness, ScreenShake
 from resources import FontResources
 from scenes import BattleScene
-from state import Language, Settings
+from state import Language, SaveData, Settings
 from systems import ChangeBrightnessEffect, ShakeScreenEffect, EventContext, WaitEffect
 from text_catalog import TextCatalog
 from ui.game_menu import GAME_MENU_LINE_STEP, GameMenuAction, GameMenuOverlay
@@ -21,6 +21,21 @@ HOLD = InputButton(held=True)
 
 
 class GameMenuTest(unittest.TestCase):
+    def test_play_time_pauses_until_resume_and_input_release(self) -> None:
+        game = self.game()
+        game.save_data = SaveData(play_time_frames=890)
+        game.shop_screen = Mock(update=Mock(return_value=False))
+        self.open(game)
+        for _ in range(60):
+            self.update(game)
+        self.assertEqual(game.save_data.play_time_frames, 890)
+        self.update(game, InputState(cancel=PRESS))
+        self.update(game, InputState(cancel=HOLD))
+        self.update(game)
+        self.assertEqual(game.save_data.play_time_frames, 890)
+        self.update(game)
+        self.assertEqual(game.save_data.play_time_frames, 891)
+
     def test_bgm_stop_fade_pauses_in_game_menu_and_silence_survives_resume(self) -> None:
         from pathlib import Path
         from tempfile import TemporaryDirectory

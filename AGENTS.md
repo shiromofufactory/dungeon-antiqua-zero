@@ -123,6 +123,7 @@
 - フィールド待機時の操作ナビは `python3 -B -m unittest tests.test_field_menu_guide` で待機時間・入力種別・表示抑止を回帰検証する。
 - フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
+- イベント中のフィールドアニメーション・制御移動・非表示actorは `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_actor_visibility tests.test_game_menu` で継続・位置停止・二重更新防止・強制割り込みを回帰検証する。
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。
 - actorのフラグ表示条件は `python3 -B -m unittest tests.test_actor_visibility tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_game tests.test_game_events`、エディタでの指定・解除・Undoは `node --test tests/test_map_editor_objects.mjs` で回帰検証する。
 - オブジェクトのフラグ表示条件は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_game tests.test_game_events` と `node --test tests/test_map_editor_objects.mjs` で保存・条件評価・通行・描画・トリガー・Undoを回帰検証する。

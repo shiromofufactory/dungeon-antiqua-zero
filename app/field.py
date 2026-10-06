@@ -153,6 +153,16 @@ class FieldMovement:
         self.stop()
         self.facing = direction
 
+    def update_animation(self) -> None:
+        """Advance the sprite state while position and facing stay paused."""
+
+        self._moved_this_frame = False
+        self._arrived_position = None
+        if self.is_moving:
+            self._walking_frame_count += 1
+        else:
+            self._walking_frame_count = 0
+
     def update(
         self,
         direction: Direction | None,
@@ -379,6 +389,13 @@ class FieldActors:
                 *self.blocked_positions(excluding=actor_id),
             ),
         )
+
+    def update_character_animations(self, *, excluding: str | None = None) -> None:
+        """Animate visible characters without advancing autonomous movement."""
+
+        for actor in self.visible_actors:
+            if actor.id != excluding and actor.kind in ("stationary", "roaming"):
+                actor.movement.update_animation()
 
     def update_roaming(self, *, party_position: FieldPosition) -> None:
         """Advance autonomous actors once without storing their transient state."""

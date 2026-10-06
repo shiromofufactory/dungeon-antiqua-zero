@@ -387,6 +387,7 @@ class SaveSystemTest(unittest.TestCase):
         self.assertEqual(restored.save_data.gold, 123)
         self.assertEqual(restored.save_data.encounter_count, 83)
         self.assertEqual(restored.save_data.difficulty, Difficulty.HARD)
+        self.assertEqual(restored.save_data.play_time_frames, 890)
         self.assertEqual(
             restored.save_data.monster_records,
             {
@@ -415,6 +416,7 @@ class SaveSystemTest(unittest.TestCase):
             facing=restored.facing,
             saved_at=datetime.fromisoformat(document["saved_at"]),
         )
+        self.assertEqual(round_tripped["progress"]["play_time_frames"], 890)
         for state in round_tripped["party"]["character_states"].values():
             self.assertEqual(
                 state["internal_level"],

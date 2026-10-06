@@ -94,7 +94,7 @@ from rendering import (
 )
 from scenes import BattlePhase, BattleResult
 from state import DisplayMode, Language, SaveData, Settings
-from systems import AUTO_SAVE_SLOT, EncounterSystem, InventorySystem, SaveSystemError
+from systems import AUTO_SAVE_SLOT, EncounterSystem, EventContext, InventorySystem, SaveSystemError
 from ui import (
     DEFAULT_TEXT_COLOR,
     DISABLED_COLOR,
@@ -106,6 +106,83 @@ from ui import (
     WindowText,
 )
 from world_sites import WorldSiteCatalog
+
+
+class GamePlayTimeTest(unittest.TestCase):
+    def game(self) -> Game:
+        game = Game.__new__(Game)
+        game.field = Mock()
+        game.save_data = SaveData()
+        game.input_reader = Mock(poll=Mock(return_value=InputState()))
+        game.alert = Mock()
+        game.showing_field = True
+        game._update_field_menu_guide = Mock()
+        game._update_field_fade_pulse = Mock()
+        game._update_field = Mock()
+        game._update_battle_scene = Mock(return_value=False)
+        game._update_fade = Mock(return_value=False)
+        game._update_window_animations = Mock(return_value=True)
+        game.info_window = Mock()
+        game._refresh_info_window_texts = Mock()
+        return game
+
+    def test_counts_each_active_update_once_across_gameplay_screens(self) -> None:
+        for screen in ("field", "battle", "event", "menu", "item", "shop", "fade", "encounter", "result", "hint"):
+            with self.subTest(screen=screen):
+                game = self.game()
+                if screen == "battle":
+                    game._update_battle_scene.return_value = True
+                elif screen == "event":
+                    game.event_runner = Mock(context=EventContext.FIELD)
+                    game._update_event = Mock()
+                elif screen in ("menu", "item", "shop"):
+                    game.showing_field = False
+                    if screen != "menu":
+                        setattr(game, f"{screen}_screen", Mock(update=Mock(return_value=False)))
+                elif screen == "fade":
+                    game._update_fade.return_value = True
+                elif screen == "encounter":
+                    game.encounter_transition = object()
+                    game._update_encounter_transition = Mock()
+                elif screen == "result":
+                    game.battle_return_fade = object()
+                    game._update_battle_return = Mock()
+                elif screen == "hint":
+                    game.hint_overlay = Mock(update=Mock(return_value=False))
+                for _ in range(60):
+                    game.update()
+                self.assertEqual(game.save_data.play_time_frames, 60)
+
+    def test_start_screen_and_return_to_start_do_not_count(self) -> None:
+        for screen in ("start", "return_to_start"):
+            with self.subTest(screen=screen):
+                game = self.game()
+                game.save_data.play_time_frames = 890
+                if screen == "start":
+                    game.start_screen = Mock()
+                else:
+                    game._returning_to_start = True
+                    game._update_return_to_start = Mock()
+                for _ in range(60):
+                    game.update()
+                self.assertEqual(game.save_data.play_time_frames, 890)
+
+    def test_menu_refreshes_when_the_displayed_minute_changes(self) -> None:
+        game = self.game()
+        game.showing_field = False
+        game.save_data.play_time_frames = 60 * 60 - 1
+        game.update()
+        self.assertEqual(game.save_data.play_time_frames, 60 * 60)
+        game._refresh_info_window_texts.assert_called_once_with()
+        game.update()
+        game._refresh_info_window_texts.assert_called_once_with()
+
+    def test_resumed_play_keeps_subsecond_saved_frames(self) -> None:
+        game = self.game()
+        game.save_data = SaveData(play_time_frames=890)
+        for _ in range(60):
+            game.update()
+        self.assertEqual(game.save_data.play_time_frames, 950)
 
 
 class GameTest(unittest.TestCase):
@@ -989,7 +1066,9 @@ class GameTest(unittest.TestCase):
 
     def test_menu_info_refresh_uses_current_shared_experience(self) -> None:
         game = Game.__new__(Game)
-        game.save_data = SaveData(gold=45, experience=75)
+        game.save_data = SaveData(
+            gold=45, experience=75, play_time_frames=(3600 + 2 * 60 + 3) * 60,
+        )
         game.localized = {
             "menu.info.gold": "Gold",
             "menu.info.experience": "EXP",
@@ -1009,6 +1088,8 @@ class GameTest(unittest.TestCase):
         game.info_window.clear_texts.assert_called_once_with()
         experience_text = game.info_window.add_text.call_args_list[3].args[0]
         self.assertTrue(experience_text.endswith("７５"))
+        play_time_text = game.info_window.add_text.call_args_list[7].args[0]
+        self.assertEqual(play_time_text, "　０１：０２")
 
     def test_menu_screen_change_restores_standard_fade_speed(self) -> None:
         mock = Game.__new__(Game)

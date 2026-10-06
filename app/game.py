@@ -1940,7 +1940,7 @@ class Game:
         )
 
     def _refresh_info_window_texts(self) -> None:
-        """Refresh values that can change while the field is being shown."""
+        """Refresh current values in the shared menu information window."""
 
         self.info_window.clear_texts()
         for placement in self._main_info_window_texts():
@@ -3589,6 +3589,7 @@ class Game:
                     return
         direction = input_state.held_direction
         if not self.field.is_moving and direction is not None:
+            self.field.facing = direction
             x = self.field.position.x + direction.dx
             y = self.field.position.y + direction.dy
             if self._try_open_treasure(
@@ -3721,6 +3722,24 @@ class Game:
         self.bgm.pause()
         return True
 
+    def _advance_play_time(self) -> None:
+        """Count active session frames and refresh the visible minute value."""
+
+        save_data = getattr(self, "save_data", None)
+        if (
+            not isinstance(save_data, SaveData)
+            or getattr(self, "start_screen", None) is not None
+            or getattr(self, "_returning_to_start", False)
+        ):
+            return
+        save_data.advance_play_time()
+        if (
+            save_data.play_time_frames % (FPS * 60) == 0
+            and not getattr(self, "showing_field", False)
+            and getattr(self, "info_window", None) is not None
+        ):
+            self._refresh_info_window_texts()
+
     def update(self) -> None:
         input_state = self.input_reader.poll()
         if self._update_game_menu(input_state):
@@ -3728,6 +3747,7 @@ class Game:
             if guide is not None:
                 guide.reset()
             return
+        self._advance_play_time()
         self._update_field_menu_guide(input_state)
         bgm = getattr(self, "bgm", None)
         if bgm is not None:
@@ -3792,6 +3812,17 @@ class Game:
                     self._finish_field_condition_message()
                 return
             if getattr(self, "event_runner", None) is not None:
+                effect = getattr(self, "event_effect", None)
+                if not isinstance(effect, MovePartyEffect):
+                    self.field.update_animation()
+                if field_actors is not None:
+                    field_actors.update_character_animations(
+                        excluding=(
+                            effect.actor_id
+                            if isinstance(effect, MoveActorEffect)
+                            else None
+                        ),
+                    )
                 self._update_event(input_state)
             else:
                 self._update_field(input_state)

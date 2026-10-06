@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import MappingProxyType, SimpleNamespace
 import unittest
 from unittest.mock import ANY, Mock, call, patch
 
+from tools._bootstrap import APP_ROOT as _APP_ROOT
 from game import EVENT_ITEM_RECEIVED_TEXT_KEY, Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
@@ -21,6 +23,7 @@ from resources import (
     WorldSite,
 )
 from rendering import FadeThroughBlack, ScreenBrightness
+from rendering.field import FieldRenderer
 from scenes.battle import BattleEncounter, BattlePhase, BattleResult
 from state import SaveData, Settings
 from systems import (
@@ -780,6 +783,41 @@ class GameEventTriggerTest(unittest.TestCase):
             release_confirm=False,
         )
 
+    def test_blocked_cell_touch_turns_party_before_starting_event(self) -> None:
+        for direction in Direction:
+            with self.subTest(direction=direction):
+                target = MapCell(1 + direction.dx, 1 + direction.dy)
+                trigger = MapEventTrigger(
+                    "blocked_touch", "sample.talk", frozenset(("touch",)),
+                    cells=(target,),
+                )
+                game = game_for(trigger)
+                rows = [list(row) for row in game.current_map.collision_rows]
+                rows[target.y][target.x] = "1"
+                game.current_map = replace(
+                    game.current_map, collision_rows=tuple("".join(row) for row in rows),
+                )
+                game.field = FieldMovement(
+                    game.current_map, start=FieldPosition(1, 1),
+                    facing=Direction.DOWN if direction is not Direction.DOWN else Direction.UP,
+                )
+
+                def start_event(*args, **kwargs):
+                    self.assertIs(game.field.facing, direction)
+                    self.assertEqual(game.field.position, FieldPosition(1, 1))
+                    self.assertFalse(game.field.is_moving)
+                    return True
+
+                game._start_field_event.side_effect = start_event
+                game._update_field(InputState(held_direction=direction))
+
+                self.assertIs(game.field.facing, direction)
+                self.assertEqual(game.field.position, FieldPosition(1, 1))
+                self.assertFalse(game.field.is_walking)
+                game._start_field_event.assert_called_once_with(
+                    "sample.talk", release_direction=direction, release_confirm=False,
+                )
+
     def test_interact_trigger_uses_the_facing_cell(self) -> None:
         trigger = MapEventTrigger(
             "sign",
@@ -1101,6 +1139,107 @@ class GameEventTriggerTest(unittest.TestCase):
 
         self.assertFalse(game.event_resume_after_fade)
         game._continue_event.assert_called_once_with()
+
+
+class GameEventAnimationTest(unittest.TestCase):
+    def game(self) -> Game:
+        game = game_for(None, width=5, height=5, actors=(
+            MapActor("hover", MapCell(0, 1), "stationary", 0, "down", floating=True),
+            MapActor("walker", MapCell(0, 3), "roaming", 1, "right"),
+            MapActor("hidden", MapCell(3, 3), "roaming", 2, "right",
+                     visibility_condition=MapVisibilityCondition("visible", True)),
+        ))
+        # Start with completed PC/NPC steps and another NPC mid-step.
+        game.field.update(Direction.RIGHT)
+        hover = game.field_actors.actor("hover").movement
+        for _ in range(8):
+            hover.update(Direction.DOWN)
+        for actor_id in ("walker", "hidden"):
+            game.field_actors.actor(actor_id).movement.update(Direction.RIGHT)
+        game.input_reader = Mock(poll=Mock(return_value=InputState(
+            held_direction=Direction.RIGHT, menu=InputButton(triggered=True),
+        )))
+        game.alert = Mock()
+        game.showing_field = True
+        game._update_game_menu = Mock(return_value=False)
+        game._update_field_menu_guide = Mock()
+        game._update_field_fade_pulse = Mock()
+        game._update_battle_scene = Mock(return_value=False)
+        game._update_fade = Mock(return_value=False)
+        game._update_field = Mock()
+        game.event_runner = Mock(context=EventContext.FIELD)
+        game._continue_event = Mock()
+        return game
+
+    def test_message_and_wait_animate_characters_without_moving_or_starting_events(self) -> None:
+        for effect in (MessageEffect("sample.talk"), WaitEffect(180)):
+            with self.subTest(effect=effect):
+                game = self.game()
+                game.event_effect = effect
+                game.event_wait_remaining = 180
+                game.event_message = Mock(update=Mock(return_value=False))
+                walker = game.field_actors.actor("walker")
+                hidden = game.field_actors.actor("hidden")
+                walker_position = (walker.movement.world_x, walker.movement.world_y)
+                walker_wait = walker.roam_wait_frames
+                walking_image = Mock(width=384, height=384)
+                actor_image = Mock(width=192, height=128)
+                px = Mock(frame_count=0)
+                renderer = FieldRenderer(game.current_map, screen_width=80,
+                                         screen_height=80, pyxel_api=px)
+                frames = {"player": set(), "hover": set(), "walker": set()}
+                for frame in range(80):
+                    game.update()
+                    px.blt.reset_mock()
+                    renderer.draw(game.field, actors=game.field_actors,
+                                  player_character_image=walking_image, player_floating=True,
+                                  actor_character_image=actor_image, frame_count=frame)
+                    for draw in px.blt.call_args_list:
+                        if draw.args[2] is walking_image:
+                            frames["player"].add(draw.args[3])
+                        elif draw.args[2] is actor_image:
+                            kind = "hover" if draw.args[3] < 48 else "walker"
+                            frames[kind].add(draw.args[3])
+                self.assertEqual(frames, {"player": {0, 16, 32}, "hover": {0, 16, 32},
+                                          "walker": {48, 64, 80}})
+                self.assertEqual(game.field.position, FieldPosition(2, 1))
+                self.assertFalse(game.field.is_walking)
+                self.assertIsNone(game.field.arrived_position)
+                self.assertEqual(game.field_actors.actor("hover").movement.position,
+                                 FieldPosition(0, 2))
+                self.assertFalse(game.field_actors.actor("hover").movement.is_walking)
+                self.assertEqual((walker.movement.world_x, walker.movement.world_y), walker_position)
+                self.assertIs(walker.movement.facing, Direction.RIGHT)
+                self.assertEqual(walker.roam_wait_frames, walker_wait)
+                self.assertEqual(hidden.movement.walking_frame_count, 1)
+                game._update_field.assert_not_called()
+                game._start_field_event.assert_not_called()
+                game._handle_arrived_site.assert_not_called()
+                game.event_runner.complete_effect.assert_not_called()
+                if isinstance(effect, WaitEffect):
+                    self.assertEqual(game.event_wait_remaining, 100)
+                else:
+                    self.assertEqual(game.event_message.update.call_count, 80)
+
+    def test_controlled_movement_advances_animation_only_once_per_frame(self) -> None:
+        for effect in (MovePartyEffect(Direction.DOWN, 1), MoveActorEffect("walker", Direction.RIGHT, 1)):
+            with self.subTest(effect=effect):
+                game = self.game()
+                game.field = FieldMovement(game.current_map, start=FieldPosition(2, 1))
+                game.event_effect = effect
+                game.event_move_remaining = 1
+                movement = (game.field if isinstance(effect, MovePartyEffect)
+                            else game.field_actors.actor("walker").movement)
+                initial_frame = movement.walking_frame_count
+                initial_position = (movement.world_x, movement.world_y)
+                for frame in range(1, 5):
+                    game.update()
+                    self.assertEqual(movement.walking_frame_count, initial_frame + frame)
+                    self.assertEqual((movement.world_x, movement.world_y), (
+                        initial_position[0] + effect.direction.dx * movement.speed * frame,
+                        initial_position[1] + effect.direction.dy * movement.speed * frame,
+                    ))
+                game.event_runner.complete_effect.assert_not_called()
 
 
 if __name__ == "__main__":
