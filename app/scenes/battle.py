@@ -199,7 +199,7 @@ BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT = 12
 BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
 BATTLE_ESCAPE_SE_ID = "battle_escape"
-BATTLE_FOCUS_SE_ID = "battle_focus"
+BATTLE_FOCUS_SE_ID = "spell_haste"
 BATTLE_HIDE_SE_ID = "battle_hide"
 BATTLE_IDENTIFY_SE_ID = "battle_identify"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
@@ -506,6 +506,17 @@ ACTION_MOVE_SPEED = DA2_ACTION_MOVE_SPEED * DA2_REFERENCE_FPS // FPS
 BATTLE_POPUP_FRAME_COUNT = 30 * FPS // DA2_REFERENCE_FPS
 MONSTER_SPELL_FAILURE_FRAME_COUNT = 12 * FPS // DA2_REFERENCE_FPS
 FOCUS_PRESENTATION_FRAME_COUNT = 36
+FOCUS_EFFECT_WIDTH = 16
+FOCUS_EFFECT_HEIGHT = 32
+FOCUS_ACTIVATION_EFFECT_SOURCE_Y = 160
+FOCUS_ACTIVATION_EFFECT_PATTERN_COUNT = 4
+FOCUS_ACTIVATION_EFFECT_PATTERN_FRAME_COUNT = 6
+FOCUS_WAIT_EFFECT_DELAY_FRAME_COUNT = 6
+FOCUS_WAIT_EFFECT_SOURCE_Y = 192
+FOCUS_WAIT_EFFECT_WIDTH = 32
+FOCUS_WAIT_EFFECT_PATTERN_COUNT = 3
+FOCUS_WAIT_EFFECT_PATTERN_FRAME_COUNT = 12
+FOCUS_WAIT_EFFECT_FLOATING_OFFSET_Y = 4
 FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
 SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
@@ -1289,9 +1300,11 @@ class BattleAttackPresentation:
             latest = self.latest_result_strike()
             return () if latest is None else (latest,)
         return tuple(
-            strike for strike in self.strikes
+            strike
+            for strike in self.strikes
             if strike.damage_applied
-            and 0 <= strike.damage_popup_elapsed_frame(self.elapsed_frame)
+            and 0
+            <= strike.damage_popup_elapsed_frame(self.elapsed_frame)
             < CRITICAL_MARKER_FRAME_COUNT
         )
 
@@ -1727,9 +1740,7 @@ def _battle_start_front_monster_indexes(
     """Resolve rows from display slots, promoting a lineup with no front slot."""
 
     front_indexes = frozenset(
-        index
-        for index, slot_index in enumerate(slot_indexes)
-        if slot_index >= 2
+        index for index, slot_index in enumerate(slot_indexes) if slot_index >= 2
     )
     if front_indexes:
         return front_indexes
@@ -2227,6 +2238,7 @@ class BattleScene:
         self.battle_popup = BattleTimedPopup()
         self.focused_target_by_party_index: dict[int, int] = {}
         self.focus_presentation_elapsed_frame = 0
+        self.focus_wait_animation_frame = 0
         self.hidden_party_indexes: set[int] = set()
         self.hide_presentation_elapsed_frame = 0
         self.identify_target_index: int | None = None
@@ -2349,12 +2361,17 @@ class BattleScene:
     def is_transitioning(self) -> bool:
         """Expose transition blocking without leaking battle timers to Game."""
 
-        return any(
-            fade.is_active
-            for fade in (
-                self.entrance_fade, self.escape_fade, self.result_transition_fade,
+        return (
+            any(
+                fade.is_active
+                for fade in (
+                    self.entrance_fade,
+                    self.escape_fade,
+                    self.result_transition_fade,
+                )
             )
-        ) or getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
+            or getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
+        )
 
     @property
     def is_party_command_ready(self) -> bool:
@@ -2426,6 +2443,7 @@ class BattleScene:
         if battle_popup is not None:
             battle_popup.update()
         self._clear_interrupted_focus_states()
+        self._update_focus_wait_animation()
         self._update_healing_popups()
         self._update_spell_damage_popups()
         self._update_affinity_popups()
@@ -2776,6 +2794,7 @@ class BattleScene:
         self.action_gauge_adjustment = 0.0
         self.focused_target_by_party_index.clear()
         self.focus_presentation_elapsed_frame = 0
+        self.focus_wait_animation_frame = 0
         self.hidden_party_indexes.clear()
         self.hide_presentation_elapsed_frame = 0
         self.identify_target_index = None
@@ -3075,10 +3094,7 @@ class BattleScene:
         if (
             self._command_memory_enabled
             and remembered is not None
-            and (
-                remembered is not BattleGlobalCommand.ESCAPE
-                or escape_enabled
-            )
+            and (remembered is not BattleGlobalCommand.ESCAPE or escape_enabled)
         ):
             self.global_command_cursor.select_key(remembered)
 
@@ -3113,7 +3129,9 @@ class BattleScene:
             learned = tuple(
                 s
                 for s in self.spells.values()
-                if s.type is not SpellType.ITEM and s.on_battle and s.is_learned_by(member)
+                if s.type is not SpellType.ITEM
+                and s.on_battle
+                and s.is_learned_by(member)
             )
             combatants.append(
                 AutoCombatant.from_member(
@@ -3140,13 +3158,17 @@ class BattleScene:
                     key=f"enemy:{monster.key}:{index}",
                     species_key=monster.key,
                     enemy=True,
-                    max_hp=monster.state.max_hp
-                    if "profile" in fields or hp_shown
-                    else None,
+                    max_hp=(
+                        monster.state.max_hp
+                        if "profile" in fields or hp_shown
+                        else None
+                    ),
                     hp=monster.state.hp if hp_shown else None,
                     alive=monster.is_alive,
                     max_mp=monster.max_mp,
-                    mp=max(0, monster.max_mp - observations.enemy_mp_spent.get(index, 0)),
+                    mp=max(
+                        0, monster.max_mp - observations.enemy_mp_spent.get(index, 0)
+                    ),
                     front=monster.is_front_row,
                     agility=monster.agility,
                     magic=monster.magic,
@@ -3186,13 +3208,17 @@ class BattleScene:
         )
         return AutoBattleSnapshot(
             tuple(combatants),
-            tuple((numbers[id(e.actor)], e.gauge) for e in self._timeline_order.entries),
+            tuple(
+                (numbers[id(e.actor)], e.gauge) for e in self._timeline_order.entries
+            ),
             self.active_party_index,
             tuple(self.spells.values()),
             self.auto_battle_policy,
             frozenset(self.surprise_pending_party_indexes),
             tuple(self.surprise_original_front_rows.items()),
-            frozenset(t.value for t, k in SPELL_PROFICIENCY_BY_TYPE.items() if k in used),
+            frozenset(
+                t.value for t, k in SPELL_PROFICIENCY_BY_TYPE.items() if k in used
+            ),
         )
 
     def _update_auto_thinking(self) -> None:
@@ -3207,7 +3233,9 @@ class BattleScene:
         if planner.result is not None:
             decision = planner.result
             self.auto_battle_log.append(
-                AutoBattleLogEntry(self.auto_battle_sequence, planner.snapshot, decision)
+                AutoBattleLogEntry(
+                    self.auto_battle_sequence, planner.snapshot, decision
+                )
             )
             del self.auto_battle_log[:-16]
             self.auto_battle_planner = None
@@ -3253,7 +3281,9 @@ class BattleScene:
                     self.target_cursor.select_key(self.selected_target_index)
                 else:
                     self.selected_party_target_index = action.targets[0]
-                    self.party_target_cursor.select_key(self.selected_party_target_index)
+                    self.party_target_cursor.select_key(
+                        self.selected_party_target_index
+                    )
         elif command is BattleCommand.COVER:
             self._begin_cover_target_selection()
             self.selected_party_target_index = action.targets[0]
@@ -3859,6 +3889,19 @@ class BattleScene:
             return
         self.focus_presentation_elapsed_frame = FOCUS_PRESENTATION_FRAME_COUNT
         self._complete_current_turn()
+
+    def _update_focus_wait_animation(self) -> None:
+        """Advance the looping aura only while the battle scene updates."""
+
+        if getattr(self, "focused_target_by_party_index", {}):
+            cycle_frames = (
+                FOCUS_WAIT_EFFECT_PATTERN_COUNT * FOCUS_WAIT_EFFECT_PATTERN_FRAME_COUNT
+            )
+            self.focus_wait_animation_frame = (
+                getattr(self, "focus_wait_animation_frame", 0) + 1
+            ) % cycle_frames
+        else:
+            self.focus_wait_animation_frame = 0
 
     @staticmethod
     def _member_focus_is_interrupted(member: object) -> bool:
@@ -4610,11 +4653,7 @@ class BattleScene:
             party_count = len(
                 getattr(self, "party_visuals", getattr(self, "party", ()))
             )
-            return tuple(
-                index
-                for index in range(party_count)
-                if index not in escaped
-            )
+            return tuple(index for index in range(party_count) if index not in escaped)
         hidden = getattr(self, "hidden_party_indexes", set())
         indexes = tuple(
             index
@@ -4639,11 +4678,16 @@ class BattleScene:
     def _selected_party_target_can_receive_spell(self, spell: Spell) -> bool:
         """Check single-target recovery before paying an item or spell cost."""
 
-        if spell.to_enemy or spell.to_all or spell.action not in (
-            SpellAction.HEAL,
-            SpellAction.MANA,
-            SpellAction.CURE,
-            SpellAction.REVIVE,
+        if (
+            spell.to_enemy
+            or spell.to_all
+            or spell.action
+            not in (
+                SpellAction.HEAL,
+                SpellAction.MANA,
+                SpellAction.CURE,
+                SpellAction.REVIVE,
+            )
         ):
             return True
         index = getattr(self, "selected_party_target_index", None)
@@ -4727,12 +4771,11 @@ class BattleScene:
         spell = self.pending_spell
         use_spell_key = item_candidate.item.use_spell_key if item_candidate else None
         effect_spell = (
-            getattr(self, "spells", {}).get(use_spell_key)
-            if use_spell_key
-            else spell
+            getattr(self, "spells", {}).get(use_spell_key) if use_spell_key else spell
         )
-        if effect_spell is not None and not self._selected_party_target_can_receive_spell(
-            effect_spell
+        if (
+            effect_spell is not None
+            and not self._selected_party_target_can_receive_spell(effect_spell)
         ):
             if getattr(self, "on_invalid_action", None) is not None:
                 self.on_invalid_action()
@@ -4763,7 +4806,8 @@ class BattleScene:
             member = self.party[self.active_party_index]
             if member.silenced:
                 self.action_presentation = BattleActionPresentation(
-                    (), post_effect_wait_frame_count=MONSTER_SPELL_FAILURE_FRAME_COUNT,
+                    (),
+                    post_effect_wait_frame_count=MONSTER_SPELL_FAILURE_FRAME_COUNT,
                 )
                 self.phase = BattlePhase.ACTION_PRESENTATION
                 self._show_monster_spell_sealed_message(actor_is_enemy=False)
@@ -4945,7 +4989,8 @@ class BattleScene:
             weapon
             for slot in (
                 (EquipmentSlot.RIGHT,)
-                if right_hand_only else (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
+                if right_hand_only
+                else (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
             )
             if (weapon := member.equipment.weapon_at(slot)) is not None
         )
@@ -5273,10 +5318,7 @@ class BattleScene:
         for index in indexes:
             monster = self.monsters[index]
             success = False
-            if (
-                monster.state.defense_modifier >= 0
-                and monster.effective_defense > 0
-            ):
+            if monster.state.defense_modifier >= 0 and monster.effective_defense > 0:
                 success = resolve_status_spell(
                     spell_modifier=modifier,
                     rate=spell.rate,
@@ -5394,9 +5436,7 @@ class BattleScene:
             raise BattleDataError("REVIVE spells must target allies")
         if not 1 <= spell.intensity <= 100:
             raise BattleDataError("REVIVE intensity must be from 1 to 100")
-        return tuple(
-            BattleReviveResult(index, spell.intensity) for index in indexes
-        )
+        return tuple(BattleReviveResult(index, spell.intensity) for index in indexes)
 
     def _resolve_silence_results(
         self,
@@ -5785,7 +5825,9 @@ class BattleScene:
                 self.party[result.target_index].apply_silence(result.turns)
             else:
                 damage_popups.append(
-                    BattleSpellDamagePopup(result.popup_x, result.popup_y, 0, is_miss=True)
+                    BattleSpellDamagePopup(
+                        result.popup_x, result.popup_y, 0, is_miss=True
+                    )
                 )
 
         for result in presentation.party_sleep_results:
@@ -5962,7 +6004,9 @@ class BattleScene:
             align_left=True,
         )
 
-    def _show_monster_spell_sealed_message(self, *, actor_is_enemy: bool = True) -> None:
+    def _show_monster_spell_sealed_message(
+        self, *, actor_is_enemy: bool = True
+    ) -> None:
         """Show DA2's sealed-spell result on the enemy side."""
 
         if (
@@ -6110,8 +6154,7 @@ class BattleScene:
             FADE_ESCAPE_BGM_FADE_FRAME_COUNT,
         )
         bgm_rate = 1.0 - (
-            self.fade_escape_bgm_fade_frame
-            / FADE_ESCAPE_BGM_FADE_FRAME_COUNT
+            self.fade_escape_bgm_fade_frame / FADE_ESCAPE_BGM_FADE_FRAME_COUNT
         )
         self.bgm.set_fade_rate(bgm_rate)
         if self.fade_escape_bgm_fade_frame >= FADE_ESCAPE_BGM_FADE_FRAME_COUNT:
@@ -6362,7 +6405,8 @@ class BattleScene:
             self.target_cursor.select_key(self.selected_target_index)
         if command is BattleCommand.IAI:
             target_positions = tuple(
-                target for target in self.target_cursor.targets
+                target
+                for target in self.target_cursor.targets
                 if target.key in selectable
             )
             self.all_target_cursors = self._make_all_target_cursors(
@@ -6479,7 +6523,9 @@ class BattleScene:
             getattr(self, "auto_battle_active", False)
             and self.identify_result_elapsed_frame >= 60
         )
-        if not (timed_out or input_state.confirm.triggered or input_state.cancel.triggered):
+        if not (
+            timed_out or input_state.confirm.triggered or input_state.cancel.triggered
+        ):
             return
         self._finish_identify_result()
 
@@ -6719,7 +6765,8 @@ class BattleScene:
         if not member_can_iai(member):
             return False
         targets = tuple(
-            index for index in self.selectable_target_indexes
+            index
+            for index in self.selectable_target_indexes
             if self.monsters[index].is_alive
         )
         if not targets:
@@ -6945,14 +6992,13 @@ class BattleScene:
             play_se(presentation.strikes[-1].sound_effect_id)
             presentation.sound_played = True
         targets_enemy = presentation.target_side == "enemy"
-        monster = (
-            self.monsters[presentation.target_index] if targets_enemy else None
-        )
+        monster = self.monsters[presentation.target_index] if targets_enemy else None
         member = self.party[presentation.target_index] if not targets_enemy else None
         for strike in presentation.strikes:
             strike_target_index = (
                 presentation.target_index
-                if strike.target_index is None else strike.target_index
+                if strike.target_index is None
+                else strike.target_index
             )
             if targets_enemy:
                 monster = self.monsters[strike_target_index]
@@ -7016,8 +7062,11 @@ class BattleScene:
             if party_index is not None and monster is not None:
                 target_indexes = tuple(
                     dict.fromkeys(
-                        presentation.target_index
-                        if strike.target_index is None else strike.target_index
+                        (
+                            presentation.target_index
+                            if strike.target_index is None
+                            else strike.target_index
+                        )
                         for strike in presentation.strikes
                     )
                 )
@@ -7028,8 +7077,7 @@ class BattleScene:
                         for index in target_indexes
                     ),
                     defeated_enemy=any(
-                        not self.monsters[index].is_alive
-                        for index in target_indexes
+                        not self.monsters[index].is_alive for index in target_indexes
                     ),
                     critical=any(strike.is_critical for strike in presentation.strikes),
                     **({"right_hand_only": True} if presentation.is_iai else {}),
@@ -8067,9 +8115,7 @@ class BattleScene:
                 hit_roll=random.randint(0, 99),
                 target_defending=target_defending,
                 target_incapacitated=target_incapacitated,
-                critical_roll=(
-                    random.randint(0, 99) if target_incapacitated else None
-                ),
+                critical_roll=(random.randint(0, 99) if target_incapacitated else None),
             )
             pose_change_frame = motion_start_frame + ATTACK_POSE_RAISE_FRAME_COUNT
             projectile_sprites = (
@@ -8256,9 +8302,7 @@ class BattleScene:
             effect_roll=random.randint(0, 99),
             target_is_member=False,
             target_is_boss=target.is_boss,
-            target_is_weak=(
-                resistance is not None and resistance in target.weaknesses
-            ),
+            target_is_weak=(resistance is not None and resistance in target.weaknesses),
             target_is_resistant=(
                 resistance is not None and resistance in target.resistances
             ),
@@ -8346,10 +8390,13 @@ class BattleScene:
             if actor.state.poisoned
             else 0
         )
-        hp_change = battle_healing_amount(
-            max_hp=actor.state.max_hp,
-            healing=actor.combat_stats.healing,
-        ) - poison_damage
+        hp_change = (
+            battle_healing_amount(
+                max_hp=actor.state.max_hp,
+                healing=actor.combat_stats.healing,
+            )
+            - poison_damage
+        )
         if hp_change == 0:
             return False
         monster_index = next(
@@ -8412,7 +8459,10 @@ class BattleScene:
             return True
         if self._monster_attack_target_indexes(actor):
             return True
-        if any(self._monster_spell_target_indexes(self.spells[key]) for key in actor.spell_keys):
+        if any(
+            self._monster_spell_target_indexes(self.spells[key])
+            for key in actor.spell_keys
+        ):
             return True
         if MonsterSpecialAction.CHARGE in actor.special_actions:
             return bool(self._monster_charge_target_indexes())
@@ -8432,9 +8482,7 @@ class BattleScene:
             if not member_can_iai(actor):
                 return ()
             return tuple(
-                index
-                for index, monster in enumerate(self.monsters)
-                if monster.is_alive
+                index for index, monster in enumerate(self.monsters) if monster.is_alive
             )
         if not member_can_attack(actor):
             return ()
@@ -8459,7 +8507,9 @@ class BattleScene:
             active_party,
             self.monsters,
             context=BattleCommandContext(
-                silenced=bool(getattr(self.party[self.active_party_index], "silenced", 0)),
+                silenced=bool(
+                    getattr(self.party[self.active_party_index], "silenced", 0)
+                ),
                 item_available=bool(self._active_member_item_candidates()),
                 actor_hidden=(
                     self.active_party_index
@@ -8524,7 +8574,9 @@ class BattleScene:
 
     @property
     def _command_memory_enabled(self) -> bool:
-        return getattr(getattr(self, "settings", None), "remember_battle_commands", True)
+        return getattr(
+            getattr(self, "settings", None), "remember_battle_commands", True
+        )
 
     def _restore_command_memory(self) -> None:
         self.initial_global_command_pending = False
@@ -8861,9 +8913,13 @@ class BattleScene:
         if slot is None:
             return False
         caller = self.monster_definitions_by_key[actor.key]
-        target = caller if same_monster else reinforcement_target(
-            caller,
-            tuple(self.monster_definitions_by_key.values()),
+        target = (
+            caller
+            if same_monster
+            else reinforcement_target(
+                caller,
+                tuple(self.monster_definitions_by_key.values()),
+            )
         )
         record = self.monster_records_by_key[target.key]
         monster = BattleMonster.from_record(
@@ -8880,9 +8936,7 @@ class BattleScene:
         self.monster_images[target.key] = self.monster_image_resources.image(
             target.image_resource_id
         )
-        name_x, name_y = self._monster_name_window_grid_position(
-            monster, *position
-        )
+        name_x, name_y = self._monster_name_window_grid_position(monster, *position)
         window = self.monster_window_factory.create(
             name_x, name_y, 20, 4, transparent=True
         )
@@ -8924,13 +8978,9 @@ class BattleScene:
 
         front_slot_occupied = any(
             existing.is_alive and existing_slot >= 2
-            for existing, existing_slot in zip(
-                self.monsters, self.monster_slot_indexes
-            )
+            for existing, existing_slot in zip(self.monsters, self.monster_slot_indexes)
         )
-        for existing, existing_slot in zip(
-            self.monsters, self.monster_slot_indexes
-        ):
+        for existing, existing_slot in zip(self.monsters, self.monster_slot_indexes):
             if existing.is_alive:
                 existing.is_front_row = (
                     existing_slot >= 2 if front_slot_occupied else True
@@ -8943,9 +8993,7 @@ class BattleScene:
         if not frames:
             return
         for index, elapsed in tuple(frames.items()):
-            duration = MONSTER_ENTRANCE_FRAME_COUNTS[
-                self._monster_slot_index(index)
-            ]
+            duration = MONSTER_ENTRANCE_FRAME_COUNTS[self._monster_slot_index(index)]
             if elapsed + 1 >= duration:
                 del frames[index]
             else:
@@ -8999,7 +9047,8 @@ class BattleScene:
             spell_keys=self._targetable_monster_spell_keys(actor),
             call_slot=(
                 self._monster_ally_slot()
-                if MonsterSpecialAction.CALL in actor.special_actions else None
+                if MonsterSpecialAction.CALL in actor.special_actions
+                else None
             ),
             intelligence=actor.intelligence,
         )
@@ -9019,11 +9068,15 @@ class BattleScene:
 
     def _member_can_cast_spells(self, member: Member) -> bool:
         return any(
-            spell.type is not SpellType.ITEM and spell.on_battle and spell.is_learned_by(member)
+            spell.type is not SpellType.ITEM
+            and spell.on_battle
+            and spell.is_learned_by(member)
             for spell in self.spells.values()
         )
 
-    def _eligible_monster_spell_targets(self, actor: BattleMonster, spell: Spell) -> tuple[int, ...]:
+    def _eligible_monster_spell_targets(
+        self, actor: BattleMonster, spell: Spell
+    ) -> tuple[int, ...]:
         indexes = self._monster_spell_target_indexes(spell)
         if actor.intelligence <= 0:
             return indexes
@@ -9033,8 +9086,11 @@ class BattleScene:
             MonsterSpellTarget(
                 index=index,
                 front=self.party[index].formation_row is FormationRow.FRONT,
-                actionable=not (self.party[index].sleeping or self.party[index].paralyzed
-                                or self.party[index].confused),
+                actionable=not (
+                    self.party[index].sleeping
+                    or self.party[index].paralyzed
+                    or self.party[index].confused
+                ),
                 can_cast=self._member_can_cast_spells(self.party[index]),
                 silenced=self.party[index].silenced,
                 speed=self.party[index].speed_modifier,
@@ -9043,8 +9099,11 @@ class BattleScene:
             for index in indexes
         )
         return monster_spell_candidate_targets(
-            spell, targets, intelligence=actor.intelligence,
-            silenced=bool(actor.state.silenced), mp=actor.state.mp,
+            spell,
+            targets,
+            intelligence=actor.intelligence,
+            silenced=bool(actor.state.silenced),
+            mp=actor.state.mp,
             choose=random.choice,
         )
 
@@ -9095,15 +9154,25 @@ class BattleScene:
         if observations is not None:
             observations.spend_mp(self._monster_index(actor), spell.mp)
 
-        planned = getattr(self, "_monster_spell_candidate_targets", {}).pop(spell.key, None)
+        planned = getattr(self, "_monster_spell_candidate_targets", {}).pop(
+            spell.key, None
+        )
         if actor.intelligence > 0 and planned is not None:
             candidates = planned
-        indexes = candidates if spell.to_all or len(candidates) == 1 else (random.choice(candidates),)
+        indexes = (
+            candidates
+            if spell.to_all or len(candidates) == 1
+            else (random.choice(candidates),)
+        )
         target_side = "ally" if spell.to_enemy else "enemy"
         party_damage_results = self._resolve_monster_spell_damage_results(
-            actor, spell, indexes,
+            actor,
+            spell,
+            indexes,
         )
-        party_silence_results = self._resolve_monster_silence_results(actor, spell, indexes)
+        party_silence_results = self._resolve_monster_silence_results(
+            actor, spell, indexes
+        )
         party_sleep_results = self._resolve_monster_sleep_results(
             actor,
             spell,
@@ -9241,20 +9310,30 @@ class BattleScene:
             success = False
             if self._member_can_cast_spells(member):
                 success = resolve_status_spell(
-                    spell_modifier=actor.magic, rate=spell.rate,
+                    spell_modifier=actor.magic,
+                    rate=spell.rate,
                     target_spell_defense=member.battle_stats.spell_resistance,
-                    attribute=spell.attribute, target_weaknesses=frozenset(),
+                    attribute=spell.attribute,
+                    target_weaknesses=frozenset(),
                     target_resistances=member.resistances,
                     success_roll=random.randint(0, 19),
                 ).success
             position = self._party_draw_position(index)
             if position is not None:
                 x, y = position
-                results.append(BattlePartySilenceResult(
-                    index, success,
-                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS) if success else 0,
-                    x + 6, y + 16,
-                ))
+                results.append(
+                    BattlePartySilenceResult(
+                        index,
+                        success,
+                        (
+                            random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                            if success
+                            else 0
+                        ),
+                        x + 6,
+                        y + 16,
+                    )
+                )
         return tuple(results)
 
     def _resolve_monster_sleep_results(
@@ -10308,10 +10387,7 @@ class BattleScene:
             for result in presentation.visible_result_strikes():
                 if not result.is_hit or result.is_weak:
                     continue
-                if (
-                    not self.settings.screen_flash_enabled
-                    and result.is_critical
-                ):
+                if not self.settings.screen_flash_enabled and result.is_critical:
                     continue
                 index = result.target_index
                 monster = self.monsters[index]
@@ -10343,7 +10419,8 @@ class BattleScene:
                 _target_x, target_y = self._monster_base_position(index)
                 source_x, source_y = ADDITIONAL_EFFECT_MARKER_SOURCE[effect]
                 pyxel.blt(
-                    self._monster_draw_x(index) + monster.width // 2
+                    self._monster_draw_x(index)
+                    + monster.width // 2
                     - CRITICAL_MARKER_WIDTH // 2,
                     target_y + 20,
                     0,
@@ -10550,11 +10627,14 @@ class BattleScene:
             )
             if self._party_shadow_is_visible(sprite_source_x):
                 self._draw_party_shadow(x, y, width)
+            y -= self._party_floating_offset(index, sprite_source_x)
+            focus_wait_y = y
+            if self._party_floating_is_enabled(index, sprite_source_x):
+                focus_wait_y -= FOCUS_WAIT_EFFECT_FLOATING_OFFSET_Y
+            self._draw_focus_effect(index, x, focus_wait_y, foreground=False)
             if attack_pose is not None:
-                y -= self._party_floating_offset(index, sprite_source_x)
                 self._draw_attack_composite(index, x, y, attack_pose)
                 continue
-            y -= self._party_floating_offset(index, sprite_source_x)
             if self.phase is BattlePhase.ACTION_PRESENTATION:
                 self._draw_spell_effect_target(
                     "ally",
@@ -10597,6 +10677,69 @@ class BattleScene:
                 32,
                 TRANSPARENT_INDEX,
             )
+            self._draw_focus_effect(index, x, y, foreground=True)
+
+    def _draw_focus_effect(
+        self,
+        index: int,
+        x: int,
+        y: int,
+        *,
+        foreground: bool,
+    ) -> None:
+        """Draw the activation in front, then the sustained aura behind the member."""
+
+        if self.phase in (
+            BattlePhase.VICTORY_SUMMARY,
+            BattlePhase.RESULT_TRANSITION,
+            BattlePhase.ESCAPE_MESSAGE,
+            BattlePhase.ESCAPE,
+        ):
+            return
+        if index not in getattr(self, "focused_target_by_party_index", {}):
+            return
+        activation_elapsed = getattr(self, "focus_presentation_elapsed_frame", 0)
+        activation_frame_count = (
+            FOCUS_ACTIVATION_EFFECT_PATTERN_COUNT
+            * FOCUS_ACTIVATION_EFFECT_PATTERN_FRAME_COUNT
+        )
+        is_activating = (
+            self.phase is BattlePhase.FOCUS_PRESENTATION
+            and index == self.active_party_index
+        )
+        if (
+            is_activating
+            and activation_frame_count
+            <= activation_elapsed
+            < activation_frame_count + FOCUS_WAIT_EFFECT_DELAY_FRAME_COUNT
+        ):
+            return
+        activation_visible = (
+            is_activating and activation_elapsed < activation_frame_count
+        )
+        if foreground != activation_visible:
+            return
+        if activation_visible:
+            pattern = activation_elapsed // FOCUS_ACTIVATION_EFFECT_PATTERN_FRAME_COUNT
+            source_y = FOCUS_ACTIVATION_EFFECT_SOURCE_Y
+            effect_width = FOCUS_EFFECT_WIDTH
+        else:
+            pattern = (
+                getattr(self, "focus_wait_animation_frame", 0)
+                // FOCUS_WAIT_EFFECT_PATTERN_FRAME_COUNT
+            ) % FOCUS_WAIT_EFFECT_PATTERN_COUNT
+            source_y = FOCUS_WAIT_EFFECT_SOURCE_Y
+            effect_width = FOCUS_WAIT_EFFECT_WIDTH
+        pyxel.blt(
+            x + (PARTY_SPRITE_WIDTH - effect_width) // 2,
+            y,
+            0,
+            pattern * effect_width,
+            source_y,
+            effect_width,
+            FOCUS_EFFECT_HEIGHT,
+            TRANSPARENT_INDEX,
+        )
 
     def _draw_attack_composite(
         self,
@@ -10995,8 +11138,11 @@ class BattleScene:
         for strike in presentation.strikes:
             anchor_x, anchor_y = self._spell_effect_anchor(
                 getattr(presentation, "target_side", "enemy"),
-                presentation.target_index
-                if strike.target_index is None else strike.target_index,
+                (
+                    presentation.target_index
+                    if strike.target_index is None
+                    else strike.target_index
+                ),
             )
             hit_elapsed_frame = strike.hit_elapsed_frame(presentation.elapsed_frame)
             if (
@@ -11159,7 +11305,8 @@ class BattleScene:
         for strike in presentation.strikes:
             target_index = (
                 presentation.target_index
-                if strike.target_index is None else strike.target_index
+                if strike.target_index is None
+                else strike.target_index
             )
             if getattr(presentation, "target_side", "enemy") == "ally":
                 position = self._party_draw_position(target_index)
@@ -11270,9 +11417,7 @@ class BattleScene:
             ):
                 continue
             x, y = self._monster_draw_position(index)
-            if not is_dying or getattr(
-                self, "monster_death_delay_frames_remaining", 0
-            ):
+            if not is_dying or getattr(self, "monster_death_delay_frames_remaining", 0):
                 if self.phase is BattlePhase.ACTION_PRESENTATION:
                     self._draw_spell_effect_target(
                         "enemy",
@@ -11496,8 +11641,7 @@ class BattleScene:
                     x + 22,
                     y + 24,
                     0,
-                    PROTECTION_ICON_SOURCE_X
-                    + defense_pattern * PROTECTION_ICON_SIZE,
+                    PROTECTION_ICON_SOURCE_X + defense_pattern * PROTECTION_ICON_SIZE,
                     DEFENSE_DOWN_ICON_SOURCE_Y,
                     PROTECTION_ICON_SIZE,
                     PROTECTION_ICON_SIZE,
@@ -11547,11 +11691,12 @@ class BattleScene:
                     self._monster_draw_x(index) + monster.width - 24,
                     y + monster.height,
                     0,
-                    PROTECTION_ICON_SOURCE_X
-                    + defense_pattern * PROTECTION_ICON_SIZE,
-                    DEFENSE_DOWN_ICON_SOURCE_Y
-                    if defense_modifier < 0
-                    else PROTECTION_ICON_SOURCE_Y,
+                    PROTECTION_ICON_SOURCE_X + defense_pattern * PROTECTION_ICON_SIZE,
+                    (
+                        DEFENSE_DOWN_ICON_SOURCE_Y
+                        if defense_modifier < 0
+                        else PROTECTION_ICON_SOURCE_Y
+                    ),
                     PROTECTION_ICON_SIZE,
                     PROTECTION_ICON_SIZE,
                     TRANSPARENT_INDEX,
@@ -11591,8 +11736,16 @@ class BattleScene:
             position = self._party_condition_icon_position(index, "silenced")
             if position is not None:
                 x, y = position
-                pyxel.blt(x, y, 0, SILENCE_ICON_SOURCE_X, SILENCE_ICON_SOURCE_Y,
-                          SILENCE_ICON_SIZE, SILENCE_ICON_SIZE, TRANSPARENT_INDEX)
+                pyxel.blt(
+                    x,
+                    y,
+                    0,
+                    SILENCE_ICON_SOURCE_X,
+                    SILENCE_ICON_SOURCE_Y,
+                    SILENCE_ICON_SIZE,
+                    SILENCE_ICON_SIZE,
+                    TRANSPARENT_INDEX,
+                )
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.silenced:
                 continue
@@ -11910,7 +12063,9 @@ class BattleScene:
                     continue
                 visible_frame = pyxel.frame_count % TARGET_AFFINITY_BLINK_FRAME_COUNT
                 affinity_index = min(
-                    visible_frame * len(affinities) // TARGET_AFFINITY_VISIBLE_FRAME_COUNT,
+                    visible_frame
+                    * len(affinities)
+                    // TARGET_AFFINITY_VISIBLE_FRAME_COUNT,
                     len(affinities) - 1,
                 )
                 affinity = affinities[affinity_index]
@@ -12002,9 +12157,9 @@ class BattleScene:
         ):
             return self._monster_escape_x(index), target_y
         slot_index = self._monster_slot_index(index)
-        reinforcement_frame = getattr(
-            self, "reinforcement_entrance_frames", {}
-        ).get(index)
+        reinforcement_frame = getattr(self, "reinforcement_entrance_frames", {}).get(
+            index
+        )
         if reinforcement_frame is not None:
             elapsed = reinforcement_frame
         elif phase is BattlePhase.ENTRANCE:

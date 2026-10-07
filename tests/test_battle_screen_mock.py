@@ -3306,13 +3306,135 @@ class BattleScreenMockTest(unittest.TestCase):
             "ためる",
             FOCUS_PRESENTATION_FRAME_COUNT,
         )
-        play_se.assert_called_once_with(BATTLE_FOCUS_SE_ID)
+        self.assertEqual(BATTLE_FOCUS_SE_ID, "spell_haste")
+        play_se.assert_called_once_with("spell_haste")
 
         for _frame in range(FOCUS_PRESENTATION_FRAME_COUNT - 1):
             mock._update_focus_presentation()
         mock._complete_current_turn.assert_not_called()
         mock._update_focus_presentation()
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_focus_activation_plays_four_frames_in_front_then_uses_back_aura(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.character_sprites = object()
+        mock.party_visuals = (
+            SimpleNamespace(member=SimpleNamespace(hp=30), battle_sprite=2),
+        )
+        mock.phase = BattleMockPhase.FOCUS_PRESENTATION
+        mock.active_party_index = 0
+        mock.focused_target_by_party_index = {0: 0}
+        mock.focus_wait_animation_frame = 0
+        mock._party_draw_position = Mock(return_value=(156, 40))
+        mock._party_attack_pose = Mock(return_value=None)
+        mock._party_sprite_source_x = Mock(return_value=DEFEND_SPRITE_SOURCE_X)
+        mock._party_shadow_is_visible = Mock(return_value=False)
+        mock._party_floating_offset = Mock(return_value=3)
+        mock._active_party_pulse_is_visible = Mock(return_value=False)
+        character = call(
+            156, 37, mock.character_sprites, DEFEND_SPRITE_SOURCE_X, 64, 16, 32, 1,
+        )
+
+        for elapsed in (0, 5, 6, 11, 12, 17, 18, 23, 24, 29, 30, 35):
+            with self.subTest(elapsed=elapsed):
+                mock.focus_presentation_elapsed_frame = elapsed
+                with patch("scenes.battle.pyxel.blt") as blt:
+                    mock._draw_party()
+                if elapsed < 24:
+                    self.assertEqual(blt.call_args_list, [
+                        character,
+                        call(156, 37, 0, elapsed // 6 * 16, 160, 16, 32, 1),
+                    ])
+                elif elapsed < 30:
+                    self.assertEqual(blt.call_args_list, [character])
+                else:
+                    self.assertEqual(blt.call_args_list, [
+                        call(148, 37, 0, 0, 192, 32, 32, 1),
+                        character,
+                    ])
+
+    def test_focus_wait_aura_loops_every_36_frames_and_stops_when_consumed(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.active_party_index = 1
+        mock.focused_target_by_party_index = {0: 0}
+        mock.focus_wait_animation_frame = 0
+
+        with patch("scenes.battle.pyxel.blt") as blt:
+            for frame in range(72):
+                mock._draw_focus_effect(0, 156, 40, foreground=False)
+                blt.assert_called_with(
+                    148, 40, 0, frame // 12 % 3 * 32, 192, 32, 32, 1,
+                )
+                self.assertEqual(mock.focus_wait_animation_frame, frame % 36)
+                mock._update_focus_wait_animation()
+            blt.reset_mock()
+            mock.focused_target_by_party_index.clear()
+            mock._draw_focus_effect(0, 156, 40, foreground=False)
+            mock._draw_focus_effect(0, 156, 40, foreground=True)
+            blt.assert_not_called()
+        mock._update_focus_wait_animation()
+        self.assertEqual(mock.focus_wait_animation_frame, 0)
+
+    def test_focus_wait_aura_is_four_pixels_above_floating_member(self) -> None:
+        for race, floating_offset in ((Race.HUMAN, 0), (Race.FAIRY, 0), (Race.FAIRY, 3)):
+            with self.subTest(race=race, floating_offset=floating_offset):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.character_sprites = object()
+                mock.party_visuals = (
+                    SimpleNamespace(
+                        member=SimpleNamespace(hp=30, definition=SimpleNamespace(race=race)),
+                        battle_sprite=2,
+                    ),
+                )
+                mock.phase = BattleMockPhase.COMMAND
+                mock.active_party_index = 1
+                mock.focused_target_by_party_index = {0: 0}
+                mock.focus_wait_animation_frame = 0
+                mock._party_draw_position = Mock(return_value=(156, 40))
+                mock._party_attack_pose = Mock(return_value=None)
+                mock._party_sprite_source_x = Mock(return_value=DEFEND_SPRITE_SOURCE_X)
+                mock._draw_party_shadow = Mock()
+                mock._party_floating_offset = Mock(return_value=floating_offset)
+                mock._active_party_pulse_is_visible = Mock(return_value=False)
+
+                with patch("scenes.battle.pyxel.blt") as blt:
+                    mock._draw_party()
+
+                character_y = 40 - floating_offset
+                effect_y = character_y - (4 if race is Race.FAIRY else 0)
+                self.assertEqual(blt.call_args_list, [
+                    call(148, effect_y, 0, 0, 192, 32, 32, 1),
+                    call(156, character_y, mock.character_sprites,
+                         DEFEND_SPRITE_SOURCE_X, 64, 16, 32, 1),
+                ])
+
+    def test_focus_effects_are_hidden_with_invisible_members_or_after_battle(self) -> None:
+        for state_name in ("hidden_party_indexes", "escaped_party_indexes"):
+            with self.subTest(state=state_name):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party_visuals = (SimpleNamespace(),)
+                mock.phase = BattleMockPhase.COMMAND
+                mock.active_party_index = 0
+                mock.focused_target_by_party_index = {0: 0}
+                setattr(mock, state_name, {0})
+                with patch("scenes.battle.pyxel.blt") as blt:
+                    mock._draw_party()
+                blt.assert_not_called()
+        for phase in (
+            BattleMockPhase.VICTORY_SUMMARY,
+            BattleMockPhase.RESULT_TRANSITION,
+            BattleMockPhase.ESCAPE_MESSAGE,
+            BattleMockPhase.ESCAPE,
+        ):
+            with self.subTest(phase=phase):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.phase = phase
+                mock.focused_target_by_party_index = {0: 0}
+                with patch("scenes.battle.pyxel.blt") as blt:
+                    mock._draw_focus_effect(0, 156, 40, foreground=False)
+                    mock._draw_focus_effect(0, 156, 40, foreground=True)
+                blt.assert_not_called()
 
     def test_focus_target_selection_does_not_begin_attack_movement(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
