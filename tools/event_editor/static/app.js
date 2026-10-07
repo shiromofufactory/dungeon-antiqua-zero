@@ -379,10 +379,10 @@ function renderMessagePreview(messageId) {
     modifier = " missing";
   } else if (message) {
     const lines = Array.isArray(message.text_ja)
-      ? message.text_ja.filter((line) => typeof line === "string" && line.length)
+      ? message.text_ja.filter((line) => typeof line === "string")
       : [];
-    if (lines.length) {
-      content = lines.map((line) => `<p>${esc(line)}</p>`).join("");
+    if (lines.some((line) => line.trim())) {
+      content = lines.map((line) => `<p>${line.trim() ? esc(line) : "<br>"}</p>`).join("");
       modifier = "";
     } else {
       content = '<p class="message-preview-status">日本語は未入力です。</p>';
@@ -936,7 +936,12 @@ function uniqueId(base, records, fieldName = "id") {
 
 function linesFromTextarea(value) {
   if (!value) return [];
-  return value.replaceAll("\r", "").split("\n").filter((line) => line.trim());
+  const lines = value.replaceAll("\r", "").split("\n");
+  let start = 0;
+  let end = lines.length;
+  while (start < end && !lines[start].trim()) start += 1;
+  while (end > start && !lines[end - 1].trim()) end -= 1;
+  return lines.slice(start, end);
 }
 
 function requestBody() {

@@ -49,6 +49,11 @@ def message_record(
 class EventMessagePipelineTest(unittest.TestCase):
     def test_compiles_localized_records(self) -> None:
         source = [message_record()]
+        source[0].update(
+            text_ja=["あいうえお", "", "かきくけこ", "さしすせそ"],
+            text_en=["First", "", "", "Last"],
+            text_zhcn=["第一行", "", "最后一行"],
+        )
 
         diagnostics = validate_event_messages(source)
         compiled = compile_event_messages(source)
@@ -56,6 +61,22 @@ class EventMessagePipelineTest(unittest.TestCase):
         self.assertEqual(diagnostics, [])
         self.assertEqual(compiled[0]["message_id"], "sample.greeting")
         self.assertEqual(compiled, source)
+        catalog = EventMessageCatalog.from_records(compiled)
+        for language, expected in (
+            (Language.JAPANESE, ("あいうえお", "", "かきくけこ", "さしすせそ")),
+            (Language.ENGLISH, ("Ｆｉｒｓｔ", "", "", "Ｌａｓｔ")),
+            (Language.SIMPLIFIED_CHINESE, ("第一行", "", "最后一行")),
+        ):
+            with self.subTest(language=language):
+                self.assertEqual(catalog.lines("sample.greeting", Localizer(language)), expected)
+
+    def test_rejects_edge_blank_lines_and_nonstring_lines(self) -> None:
+        for field in ("text_ja", "text_en", "text_zhcn"):
+            for lines in (["", "本文"], ["本文", " "], ["", ""], ["本文", None, "本文"]):
+                with self.subTest(field=field, lines=lines):
+                    source = [{**message_record(), field: lines}]
+                    self.assertEqual({item.code for item in validate_event_messages(source)}, {"invalid_message_text"})
+        self.assertEqual({item.code for item in validate_event_messages([{**message_record(), "text_ja": []}])}, {"invalid_message_text"})
 
     def test_rejects_removed_note_field(self) -> None:
         source = [{**message_record(), "note": "制作メモ"}]

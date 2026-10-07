@@ -18,17 +18,22 @@
 |---|---|---|---|
 | 最初の味方手番で全体／個別コマンドWindowが開き終わったとき | `hint.first_battle` | `hint.shown.first_battle` | 戦闘画面上 |
 | 成長リザルトが初めて表示されたとき | `hint.first_result` | `hint.shown.first_result` | リザルト画面上 |
+| 町・ダンジョンから初めてワールドマップへ出たときのフェードイン完了後 | `hint.first_world_map` | `hint.shown.first_world_map` | フィールド上 |
 | ダンジョンからワールドマップへのフェードイン完了後 | `hint.first_dungeon_exit` | `hint.shown.first_dungeon_exit` | フィールド上 |
 | 全滅復帰のフェードイン完了後 | `hint.first_defeat_restart` | `hint.shown.first_defeat_restart` | フィールド上 |
 
-上記4文言は `content/data/texts.json` を正本とする。成長変化がなくリザルト画面を省略した戦闘では
+上記5文言は `content/data/texts.json` を正本とする。成長変化がなくリザルト画面を省略した戦闘では
 `hint.first_result` の条件を満たさない。戦闘からの逃走はダンジョン脱出に含めない。
+`hint.first_world_map` は施設出口とテレポートによる到着を対象とし、ワールドマップ内の移動や
+ロード直後では表示しない。初回ワールドマップ到着と初回ダンジョン脱出が同時に成立した場合は、
+`hint.first_world_map` を閉じてから `hint.first_dungeon_exit` を表示する。後続ヒントも表示時に
+フラグを記録してオートセーブし、ヒント間にフィールド操作を挟まない。
 
 ## Windowと操作
 
 座標・寸法は4×4pxグリッド。
 
-- `hint.load.mission`、`hint.first_battle`、`hint.first_dungeon_exit`、
+- `hint.load.mission`、`hint.first_battle`、`hint.first_world_map`、`hint.first_dungeon_exit`、
   `hint.first_defeat_restart` は画面最上部のWindow `(0, 0, 64, 20)` を使う。
 - `hint.first_result` は画面最下部のWindow `(0, 40, 64, 20)` を使う。
   いずれも標準Windowの8フレームの開閉アニメーションを付ける。
@@ -54,7 +59,9 @@
 - 決定・キャンセルのどちらでも閉じられ、開く操作の押しっぱなしでは閉じない。
 - 開閉中に移動・メニュー操作がフィールドへ伝わらない。
 - 戦闘開始・リザルトではBattleSceneの更新を停止し、ヒントを戦闘画面より手前へ表示する。
-- ダンジョン脱出・全滅復帰ではフィールドが完全に表示された後にヒントを開く。
+- 初回ワールドマップ到着・ダンジョン脱出・全滅復帰ではフィールドが完全に表示された後にヒントを開く。
+- 初回ワールドマップ到着のヒントは同じセーブで再表示せず、初回ダンジョン脱出のヒントと
+  同時に成立した場合も両方を順に表示する。
 - 情報メニューの先頭には `information.mission` があり、条件成立したミッションを制作順に表示する。
   表示と操作は [`information-menu.md`](./information-menu.md) を参照する。
 

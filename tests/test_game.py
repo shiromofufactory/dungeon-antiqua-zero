@@ -20,6 +20,7 @@ from game import (
     FIRST_DEFEAT_RESTART_HINT_ID,
     FIRST_DUNGEON_EXIT_HINT_ID,
     FIRST_RESULT_HINT_ID,
+    FIRST_WORLD_MAP_HINT_ID,
     FACES_IMAGE_ID,
     INITIAL_GOLD,
     INITIAL_PARTY_KEYS,
@@ -2955,13 +2956,130 @@ class GameTest(unittest.TestCase):
 
     def test_pending_field_hint_opens_after_fade(self) -> None:
         mock = Game.__new__(Game)
-        mock.pending_hint_after_fade = FIRST_DUNGEON_EXIT_HINT_ID
+        mock.pending_hints_after_fade = [FIRST_DUNGEON_EXIT_HINT_ID]
         mock._show_hint_once = Mock()
 
         mock._show_pending_hint_after_fade()
 
-        self.assertIsNone(mock.pending_hint_after_fade)
+        self.assertEqual(mock.pending_hints_after_fade, [])
         mock._show_hint_once.assert_called_once_with(FIRST_DUNGEON_EXIT_HINT_ID)
+
+    @patch("game.FieldRenderer")
+    @patch("game.FieldMovement")
+    def test_world_map_entry_queues_hint_for_exits_from_town_and_dungeon(
+        self, _movement: Mock, _renderer: Mock,
+    ) -> None:
+        for source_profile, target_profile, expected in (
+            ("town", "world", [FIRST_WORLD_MAP_HINT_ID]),
+            ("dungeon", "world", [FIRST_WORLD_MAP_HINT_ID, FIRST_DUNGEON_EXIT_HINT_ID]),
+            ("world", "world", []),
+            ("world", "town", []),
+            ("town", "town", []),
+        ):
+            with self.subTest(source=source_profile, target=target_profile):
+                mock = Game.__new__(Game)
+                mock.current_map = Mock(map_id="source", profile=source_profile)
+                target = Mock(
+                    map_id="target", profile=target_profile, sites=(), bgm_id="da3-field",
+                )
+                mock.world_map = target if target_profile == "world" else Mock()
+                mock.pending_target_map = target
+                mock.pending_target_arrival = MapArrivalPoint(
+                    "entry", MapCell(7, 8), "down", False, None,
+                )
+                mock.pending_site = Mock()
+                mock.party = ()
+                mock.save_data = SaveData()
+                mock.travel_system = Mock()
+                mock.bgm = Mock()
+                mock._reset_field_actors = Mock()
+                mock._reset_field_fade = Mock()
+                mock._refresh_site_name_label = Mock()
+                mock.pending_hints_after_fade = []
+
+                mock._apply_pending_site_change()
+
+                self.assertEqual(mock.pending_hints_after_fade, expected)
+                self.assertIsNone(getattr(mock, "hint_overlay", None))
+                self.assertEqual(mock.save_data.event_flags, set())
+
+    @patch("game.HintOverlay")
+    def test_world_map_and_dungeon_exit_hints_open_in_order_and_save_each_flag(
+        self, hint_class: Mock,
+    ) -> None:
+        first_hint = Mock(update=Mock(return_value=True))
+        second_hint = Mock()
+        hint_class.side_effect = (first_hint, second_hint)
+        mock = Game.__new__(Game)
+        mock.settings = Settings()
+        mock.save_data = SaveData()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock.hint_overlay = None
+        mock._queue_hint_after_fade(FIRST_WORLD_MAP_HINT_ID)
+        mock._queue_hint_after_fade(FIRST_DUNGEON_EXIT_HINT_ID)
+        mock.fade = Mock(
+            is_active=True, phase=FadePhase.FADING_IN, visible_rate=1.0,
+            update=Mock(return_value=FadeEvent.FINISHED),
+        )
+        mock.palette_shifter = Mock(base_colors=(0,))
+        mock.fade_bgm = False
+        mock.animate_main_windows_with_fade = False
+        mock.auto_save_after_fade = True
+        mock.event_resume_after_fade = False
+        saved_flags = []
+        mock._auto_save = Mock(
+            side_effect=lambda: saved_flags.append(set(mock.save_data.event_flags))
+        )
+
+        mock._update_fade()
+
+        self.assertIs(mock.hint_overlay, first_hint)
+        self.assertEqual(saved_flags, [{"hint.shown.first_world_map"}])
+        mock.fade.is_active = False
+        mock.input_reader = Mock(poll=Mock(return_value=InputState()))
+        mock._update_game_menu = Mock(return_value=False)
+        mock._update_field_menu_guide = Mock()
+        mock.alert = Mock()
+        mock._update_field = Mock()
+
+        mock.update()
+
+        self.assertIs(mock.hint_overlay, second_hint)
+        mock._update_field.assert_not_called()
+        self.assertEqual(mock.pending_hints_after_fade, [])
+        self.assertEqual(saved_flags[-1], {
+            "hint.shown.first_world_map", "hint.shown.first_dungeon_exit",
+        })
+        self.assertEqual(
+            [entry.kwargs["text_key"] for entry in hint_class.call_args_list],
+            ["hint.first_world_map", "hint.first_dungeon_exit"],
+        )
+
+    @patch("game.HintOverlay")
+    def test_queued_world_map_hint_respects_disabled_and_previously_shown_states(
+        self, hint_class: Mock,
+    ) -> None:
+        mock = Game.__new__(Game)
+        mock.settings = Settings(in_game_hints_enabled=False)
+        mock.save_data = SaveData()
+        mock.texts = Mock()
+        mock.fonts = Mock()
+        mock._queue_hint_after_fade(FIRST_WORLD_MAP_HINT_ID)
+        self.assertFalse(mock._show_pending_hint_after_fade())
+        hint_class.assert_not_called()
+        self.assertEqual(mock.save_data.event_flags, set())
+
+        mock.settings = Settings()
+        mock._queue_hint_after_fade(FIRST_WORLD_MAP_HINT_ID)
+        self.assertTrue(mock._show_pending_hint_after_fade())
+        self.assertIn("hint.shown.first_world_map", mock.save_data.event_flags)
+        mock.hint_overlay = None
+        mock._queue_hint_after_fade(FIRST_WORLD_MAP_HINT_ID)
+        mock._queue_hint_after_fade(FIRST_DUNGEON_EXIT_HINT_ID)
+        self.assertTrue(mock._show_pending_hint_after_fade())
+        self.assertEqual(hint_class.call_count, 2)
+        self.assertEqual(hint_class.call_args.kwargs["text_key"], "hint.first_dungeon_exit")
 
     def test_result_phase_requests_the_first_result_hint(self) -> None:
         mock = Game.__new__(Game)

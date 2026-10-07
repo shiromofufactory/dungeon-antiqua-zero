@@ -292,6 +292,39 @@ class WindowTest(unittest.TestCase):
         draw_contents.assert_called_once_with()
         clip.assert_not_called()
 
+    def test_vertical_text_offset_clips_text_and_keeps_frame_in_place(self) -> None:
+        window = Window(
+            1, 2, 64, 12,
+            (WindowText("first", 11, 2), WindowText("second", 11, 6)),
+        )
+        with (
+            patch("app.ui.window.pyxel") as pyxel,
+            patch("app.ui.window.draw_tagged_text") as draw_text,
+            patch.object(window, "_draw_gradient") as draw_gradient,
+            patch.object(window, "_draw_frame") as draw_frame,
+        ):
+            window.draw(text_offset_y=-8)
+
+        draw_gradient.assert_called_once_with()
+        draw_frame.assert_called_once_with()
+        self.assertEqual(pyxel.clip.call_args_list, [call(12, 16, 240, 32), call()])
+        self.assertEqual(
+            [draw.args[:3] for draw in draw_text.call_args_list],
+            [(48, 8, "first"), (48, 24, "second")],
+        )
+        self.assertEqual(tuple(text.y for text in window.texts), (2, 6))
+
+    def test_vertical_text_offset_restores_clip_when_drawing_fails(self) -> None:
+        window = Window(0, 0, 64, 12, (WindowText("first", 4, 2),))
+        with (
+            patch("app.ui.window.pyxel") as pyxel,
+            patch("app.ui.window.draw_tagged_text", side_effect=RuntimeError("draw failed")),
+            self.assertRaisesRegex(RuntimeError, "draw failed"),
+        ):
+            window.draw(text_offset_y=-8)
+
+        self.assertEqual(pyxel.clip.call_args_list, [call(8, 8, 240, 32), call()])
+
     def test_open_immediately_skips_opening_animation(self) -> None:
         window = Window(1, 2, 8, 6, opened=False)
 

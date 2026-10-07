@@ -178,7 +178,9 @@ def validate_event_messages(
         for field in LOCALIZED_FIELDS:
             lines = record.get(field)
             valid_lines = isinstance(lines, list) and all(
-                isinstance(line, str) and bool(line.strip()) for line in lines
+                isinstance(line, str) for line in lines
+            ) and (
+                not lines or (bool(lines[0].strip()) and bool(lines[-1].strip()))
             )
             if not valid_lines or (field == "text_ja" and not lines):
                 diagnostics.append(
@@ -187,9 +189,9 @@ def validate_event_messages(
                         "invalid_message_text",
                         f"{path}.{field}",
                         (
-                            "text_jaは空でない文字列を1行以上指定してください。"
+                            "text_jaは文字列配列で1行以上指定し、先頭・末尾を空行にしないでください。"
                             if field == "text_ja"
-                            else f"{field}は空でない文字列の配列または空配列で指定してください。"
+                            else f"{field}は先頭・末尾が空行でない文字列配列または空配列で指定してください。"
                         ),
                     )
                 )

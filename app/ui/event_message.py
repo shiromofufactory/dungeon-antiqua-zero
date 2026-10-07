@@ -23,11 +23,11 @@ else:
     from ..state import Language, Settings
 
 from .localized_text import LocalizedWindowTextFactory
-from .window import WindowFactory, WindowText
+from .window import TEXT_GRID_Y, WindowFactory, WindowText
 
 EVENT_MESSAGE_WINDOW_GRID = (0, 0, 64, 12)
 EVENT_MESSAGE_TEXT_X = 4
-EVENT_MESSAGE_PORTRAIT_TEXT_X = 12
+EVENT_MESSAGE_PORTRAIT_TEXT_X = 11
 EVENT_MESSAGE_FIRST_TEXT_Y = 2
 EVENT_MESSAGE_CJK_LINE_STEP = 4
 EVENT_MESSAGE_CJK_MAX_LINES = 2
@@ -39,6 +39,7 @@ EVENT_MESSAGE_FACE_SIZE = 32
 EVENT_MESSAGE_FONT_ROLE = FontRole.LARGE
 EVENT_MESSAGE_CHARACTERS_PER_FRAME = 1
 EVENT_MESSAGE_FAST_CHARACTERS_PER_FRAME = 2
+EVENT_MESSAGE_SCROLL_PIXELS_PER_FRAME = 4
 EVENT_MESSAGE_WAIT_ARROW_BANK = 0
 EVENT_MESSAGE_WAIT_ARROW_SOURCE = (88, 16)
 EVENT_MESSAGE_WAIT_ARROW_SIZE = 8
@@ -81,6 +82,8 @@ class MessageOverlay:
         self._page_index = 0
         self._visible_character_count = 0
         self._wait_arrow_frame = 0
+        self._scroll_offset_y = 0
+        self._scroll_distance = self._max_lines * self._line_step * TEXT_GRID_Y
         self._text_factory = LocalizedWindowTextFactory.from_language(
             fonts,
             settings.language,
@@ -168,6 +171,9 @@ class MessageOverlay:
         self.window.update()
         if not was_open:
             return False
+        if self._scroll_offset_y:
+            self._advance_page_scroll()
+            return False
         if not self._page_is_complete:
             characters_per_frame = (
                 EVENT_MESSAGE_FAST_CHARACTERS_PER_FRAME
@@ -185,15 +191,25 @@ class MessageOverlay:
             return False
         if self._page_index + 1 >= len(self._pages):
             return True
+        self._advance_page_scroll()
+        return False
+
+    def _advance_page_scroll(self) -> None:
+        self._scroll_offset_y += EVENT_MESSAGE_SCROLL_PIXELS_PER_FRAME
+        if self._scroll_offset_y < self._scroll_distance:
+            return
+        self._scroll_offset_y = 0
         self._page_index += 1
         self._visible_character_count = 0
         self._wait_arrow_frame = 0
         self._page_placements = self._create_page_placements()
         self._refresh_visible_text()
-        return False
 
     def draw(self) -> None:
-        self.window.draw()
+        if self._scroll_offset_y:
+            self.window.draw(text_offset_y=-self._scroll_offset_y)
+        else:
+            self.window.draw()
         if not self.window.is_open:
             return
         if self.face_position is not None:
@@ -207,7 +223,11 @@ class MessageOverlay:
                 EVENT_MESSAGE_FACE_SIZE,
                 TRANSPARENT_INDEX,
             )
-        if self._page_is_complete and self._wait_arrow_is_visible:
+        if (
+            not self._scroll_offset_y
+            and self._page_is_complete
+            and self._wait_arrow_is_visible
+        ):
             source_x, source_y = EVENT_MESSAGE_WAIT_ARROW_SOURCE
             pyxel.blt(
                 self.window.content_x
@@ -267,6 +287,8 @@ class EventMessageOverlay(MessageOverlay):
             faces=faces,
             face_position=face_position,
         )
+
+
 __all__ = [
     "EVENT_MESSAGE_CJK_LINE_STEP",
     "EVENT_MESSAGE_CJK_MAX_LINES",
@@ -276,6 +298,7 @@ __all__ = [
     "EVENT_MESSAGE_FACE_SIZE",
     "EVENT_MESSAGE_FAST_CHARACTERS_PER_FRAME",
     "EVENT_MESSAGE_FONT_ROLE",
+    "EVENT_MESSAGE_SCROLL_PIXELS_PER_FRAME",
     "EVENT_MESSAGE_WAIT_ARROW_BLINK_FRAMES",
     "EVENT_MESSAGE_WAIT_ARROW_SOURCE",
     "EVENT_MESSAGE_WINDOW_GRID",

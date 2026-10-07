@@ -24,6 +24,7 @@ HINT_BOTTOM_WINDOW_GRID = (0, 40, 64, 20)
 TOP_HINT_TEXT_KEYS = frozenset((
     "hint.load.mission",
     "hint.first_battle",
+    "hint.first_world_map",
     "hint.first_dungeon_exit",
     "hint.first_defeat_restart",
 ))

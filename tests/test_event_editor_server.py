@@ -436,9 +436,9 @@ class EventEditorServerTest(unittest.TestCase):
         messages = [
             {
                 "message_id": "shared.new_message",
-                "text_ja": ["新しいメッセージ"],
-                "text_en": [],
-                "text_zhcn": [],
+                "text_ja": ["あいうえお", "", "かきくけこ", "さしすせそ"],
+                "text_en": ["First", "", "", "Last"],
+                "text_zhcn": ["第一行", "", "最后一行"],
             }
         ]
         data = {
@@ -464,6 +464,9 @@ class EventEditorServerTest(unittest.TestCase):
             ),
             messages,
         )
+
+        self.assertEqual(json.loads(self.application.runtime_messages_path.read_text(encoding="utf-8")), messages)
+        self.assertEqual(self.get_json("/api/document?token=test-token")["messages"], messages)
 
     def test_preserves_flag_event_and_message_order_when_saving(self) -> None:
         flags = [

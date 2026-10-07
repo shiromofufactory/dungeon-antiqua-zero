@@ -9,7 +9,7 @@ from app.member import FacePosition
 from app.resources import FontRole
 from app.resources.event_messages import EventMessageCatalog
 from app.state import Language, Settings
-from app.ui.event_message import EventMessageDataError, EventMessageOverlay
+from app.ui.event_message import EventMessageDataError, EventMessageOverlay, MessageOverlay
 from app.ui.window import WINDOW_ANIMATION_FRAME_COUNT, WindowState
 
 
@@ -102,6 +102,28 @@ class EventMessageOverlayTest(unittest.TestCase):
                     tuple(text.y for text in overlay.window.texts),
                     expected_y_positions,
                 )
+
+    def test_internal_blank_line_occupies_a_row_and_counts_towards_pagination(self) -> None:
+        messages = EventMessageCatalog.from_records([{
+            "message_id": "sample.blank_line",
+            "text_ja": ["あいうえお", "", "かきくけこ", "さしすせそ"],
+            "text_en": [], "text_zhcn": [],
+        }])
+        overlay = EventMessageOverlay(
+            message_id="sample.blank_line", settings=Settings(), messages=messages,
+            fonts=self.fonts, faces=self.faces, face_positions={},
+        )
+        self.finish_opening(overlay)
+        for _ in range(5):
+            self.assertFalse(overlay.update(InputState()))
+        self.assertEqual(tuple((text.text, text.y) for text in overlay.window.texts), (("あいうえお", 2), ("", 6)))
+        self.assertFalse(overlay.update(InputState(confirm=InputButton(triggered=True, held=True))))
+        for _ in range(3):
+            self.assertFalse(overlay.update(InputState()))
+        for _ in range(10):
+            self.assertFalse(overlay.update(InputState()))
+        self.assertEqual(tuple((text.text, text.y) for text in overlay.window.texts), (("かきくけこ", 2), ("さしすせそ", 6)))
+        self.assertTrue(overlay.update(InputState(confirm=InputButton(triggered=True, held=True))))
 
     def test_opens_before_revealing_text_or_accepting_confirm(self) -> None:
         overlay = self.overlay()
@@ -290,6 +312,12 @@ class EventMessageOverlayTest(unittest.TestCase):
         self.assertEqual(overlay.window.state, WindowState.OPEN)
         self.assertEqual(
             tuple(text.text for text in overlay.window.texts),
+            ("ａ", "ａ"),
+        )
+        for _ in range(3):
+            self.assertFalse(overlay.update(InputState()))
+        self.assertEqual(
+            tuple(text.text for text in overlay.window.texts),
             ("", ""),
         )
         for _ in range(2):
@@ -297,6 +325,8 @@ class EventMessageOverlayTest(unittest.TestCase):
         self.assertFalse(overlay.update(
             InputState(confirm=InputButton(triggered=True, held=True))
         ))
+        for _ in range(3):
+            self.assertFalse(overlay.update(InputState()))
         self.assertEqual(
             tuple(text.text for text in overlay.window.texts),
             ("",),
@@ -307,6 +337,89 @@ class EventMessageOverlayTest(unittest.TestCase):
                 InputState(confirm=InputButton(triggered=True, held=True))
             )
         )
+
+    def test_page_scroll_finishes_before_next_page_reveals_text(self) -> None:
+        for language, page_line_count, scroll_frame_count in (
+            (Language.JAPANESE, 2, 4),
+            (Language.SIMPLIFIED_CHINESE, 2, 4),
+            (Language.ENGLISH, 3, 5),
+        ):
+            with self.subTest(language=language):
+                lines = ("一行目", "二行目", "三行目", "四行目")
+                overlay = MessageOverlay(
+                    lines=lines,
+                    settings=Settings(language=language),
+                    fonts=self.fonts,
+                )
+                self.finish_opening(overlay)
+                old_page = lines[:page_line_count]
+                for _ in range(sum(map(len, old_page))):
+                    overlay.update(InputState())
+
+                press = InputState(confirm=InputButton(triggered=True, held=True))
+                for frame in range(1, scroll_frame_count):
+                    self.assertFalse(overlay.update(press))
+                    self.assertEqual(
+                        tuple(text.text for text in overlay.window.texts),
+                        old_page,
+                    )
+                    with patch.object(overlay.window, "draw") as draw_window:
+                        overlay.draw()
+                        overlay.draw()
+                    self.assertEqual(draw_window.call_count, 2)
+                    draw_window.assert_called_with(text_offset_y=-8 * frame)
+                    self.assertEqual(overlay.window.state, WindowState.OPEN)
+
+                self.assertFalse(overlay.update(press))
+                self.assertEqual(
+                    tuple(text.text for text in overlay.window.texts),
+                    ("",) * (len(lines) - page_line_count),
+                )
+                self.assertFalse(overlay.update(InputState()))
+                self.assertEqual(overlay.window.texts[0].text, lines[page_line_count][0])
+
+    @patch("app.ui.event_message.pyxel")
+    def test_scroll_keeps_face_stationary_and_hides_wait_arrow(self, pyxel: Mock) -> None:
+        overlay = MessageOverlay(
+            lines=("one", "two", "three"),
+            settings=Settings(),
+            fonts=self.fonts,
+            faces=self.faces,
+            face_position=FacePosition(32, 64),
+        )
+        self.finish_opening(overlay)
+        for _ in range(6):
+            overlay.update(InputState())
+        overlay.update(InputState(confirm=InputButton(triggered=True)))
+
+        with patch.object(overlay.window, "draw") as draw_window:
+            overlay.draw()
+
+        draw_window.assert_called_once_with(text_offset_y=-8)
+        pyxel.blt.assert_called_once_with(8, 8, self.faces, 32, 64, 32, 32, 1)
+
+    def test_page_with_only_internal_blank_lines_waits_for_confirm(self) -> None:
+        overlay = MessageOverlay(
+            lines=("一行目", "二行目", "", "", "最後"),
+            settings=Settings(),
+            fonts=self.fonts,
+        )
+        self.finish_opening(overlay)
+        for _ in range(6):
+            overlay.update(InputState())
+        overlay.update(InputState(confirm=InputButton(triggered=True)))
+        for _ in range(3):
+            overlay.update(InputState())
+        for _ in range(20):
+            self.assertFalse(overlay.update(InputState()))
+        self.assertEqual(tuple(text.text for text in overlay.window.texts), ("", ""))
+
+        overlay.update(InputState(confirm=InputButton(triggered=True)))
+        for _ in range(3):
+            overlay.update(InputState())
+        self.assertEqual(tuple(text.text for text in overlay.window.texts), ("",))
+        overlay.update(InputState())
+        self.assertEqual(overlay.window.texts[0].text, "最")
 
 
 if __name__ == "__main__":

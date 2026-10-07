@@ -260,6 +260,7 @@ DEFEAT_RETURN_FACE_POSITION = FacePosition(0, 224)
 HINT_SHOWN_FLAG_PREFIX = "hint.shown."
 FIRST_BATTLE_HINT_ID = "first_battle"
 FIRST_RESULT_HINT_ID = "first_result"
+FIRST_WORLD_MAP_HINT_ID = "first_world_map"
 FIRST_DUNGEON_EXIT_HINT_ID = "first_dungeon_exit"
 FIRST_DEFEAT_RESTART_HINT_ID = "first_defeat_restart"
 MENU_MEMBER_TEXT_KEYS = (
@@ -634,7 +635,7 @@ class Game:
         self.information_screen: InformationMenuOverlay | None = None
         self.hint_overlay: HintOverlay | None = None
         self._load_mission_hint_shown_this_launch = False
-        self.pending_hint_after_fade: str | None = None
+        self.pending_hints_after_fade: list[str] = []
         self.spell_screen: SpellMenuOverlay | None = None
         self.save_screen: SaveMenuOverlay | None = None
         self.shop_screen: ShopOverlay | None = None
@@ -1052,13 +1053,20 @@ class Game:
     def _queue_hint_after_fade(self, hint_id: str) -> None:
         """Reserve a field hint until the active fade-in has completed."""
 
-        self.pending_hint_after_fade = hint_id
+        if not hasattr(self, "pending_hints_after_fade"):
+            self.pending_hints_after_fade = []
+        self.pending_hints_after_fade.append(hint_id)
 
-    def _show_pending_hint_after_fade(self) -> None:
-        hint_id = getattr(self, "pending_hint_after_fade", None)
-        self.pending_hint_after_fade = None
-        if hint_id is not None:
-            self._show_hint_once(hint_id)
+    def _show_pending_hint_after_fade(self) -> bool:
+        """Open the next eligible field hint, preserving the remaining order."""
+
+        if getattr(self, "hint_overlay", None) is not None:
+            return False
+        pending = getattr(self, "pending_hints_after_fade", [])
+        while pending:
+            if self._show_hint_once(pending.pop(0)):
+                return True
+        return False
 
     def _begin_battle_return(
         self,
@@ -1633,10 +1641,11 @@ class Game:
         arrival = self.pending_target_arrival
         if target_map is None or arrival is None:
             raise RuntimeError("map change has incomplete destination data")
-        previous_map_id = getattr(
-            getattr(self, "current_map", None),
-            "map_id",
-            None,
+        previous_map = getattr(self, "current_map", None)
+        previous_map_id = getattr(previous_map, "map_id", None)
+        entering_world_map = (
+            getattr(target_map, "profile", None) == "world"
+            and getattr(previous_map, "profile", None) in ("town", "dungeon")
         )
         if target_map is getattr(self, "world_map", None):
             for member in self.party:
@@ -1662,6 +1671,8 @@ class Game:
         self.pending_target_map = None
         self.pending_target_arrival = None
         self._refresh_site_name_label(force=True)
+        if entering_world_map:
+            self._queue_hint_after_fade(FIRST_WORLD_MAP_HINT_ID)
 
     def _apply_pending_site_change(self) -> None:
         site = self.pending_site
@@ -3768,6 +3779,8 @@ class Game:
         ):
             if hint_overlay.update(input_state):
                 self.hint_overlay = None
+                if self._show_pending_hint_after_fade():
+                    self._auto_save()
             return
         if getattr(self, "battle_return_fade", None) is not None:
             self._update_battle_return(input_state)

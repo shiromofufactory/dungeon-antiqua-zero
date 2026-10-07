@@ -412,12 +412,17 @@ class Window:
             self.pixel_y + text.y * TEXT_GRID_Y,
         )
 
-    def draw(self) -> None:
+    def draw(self, *, text_offset_y: int = 0) -> None:
+        """Draw the window, clipping vertically shifted text to its content area."""
+
         if self._visible_height == 0:
             return
 
         if self._visible_height == self.pixel_height:
-            self._draw_contents()
+            if text_offset_y:
+                self._draw_contents(text_offset_y=text_offset_y)
+            else:
+                self._draw_contents()
             return
 
         frame_offset = 0 if self.transparent else FRAME_Y_OFFSET
@@ -437,7 +442,7 @@ class Window:
         finally:
             pyxel.clip()
 
-    def _draw_contents(self) -> None:
+    def _draw_contents(self, *, text_offset_y: int = 0) -> None:
         if not self.transparent:
             self._draw_gradient()
             self._draw_frame()
@@ -445,7 +450,19 @@ class Window:
             self._draw_horizontal_navigation()
         if self.vertical_navigation:
             self._draw_vertical_navigation()
-        self._draw_texts()
+        if text_offset_y:
+            pyxel.clip(
+                self.content_x,
+                self.content_y,
+                self.content_width,
+                self.content_height,
+            )
+            try:
+                self._draw_texts(offset_y=text_offset_y)
+            finally:
+                pyxel.clip()
+        else:
+            self._draw_texts()
         if self._cursor is not None:
             self._cursor.draw()
 
@@ -634,13 +651,13 @@ class Window:
             )
             y += height
 
-    def _draw_texts(self) -> None:
+    def _draw_texts(self, *, offset_y: int = 0) -> None:
         for text in self._texts:
             x, y = self.text_position(text)
             font = text.font if text.font is not None else self.font
             draw_tagged_text(
                 x,
-                y,
+                y + offset_y,
                 text.text,
                 text.color,
                 font,

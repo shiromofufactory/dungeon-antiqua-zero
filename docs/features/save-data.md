@@ -141,7 +141,7 @@
     "items": {}
   },
   "auto_recovery": {
-    "threshold": 60,
+    "threshold": 80,
     "method": "spells_items",
     "healer_key": null
   }
@@ -304,7 +304,7 @@ Sceneのカーソル座標・選択中の未確定行動を保存せず、確認
 
 | フィールド | 型・値 | 内容 |
 |---|---|---|
-| `threshold` | `60` / `70` / `80` / `90` / `100` | 回復対象とするHP割合。初期値は `60` |
+| `threshold` | `60` / `70` / `80` / `90` / `100` | 回復対象とするHP割合。初期値は `80` |
 | `method` | `spells` / `spells_items` / `items_spells` | 回復手段の優先順。初期値は `spells_items` |
 | `healer_key` | キャラクターの安定キー / `null` | 優先する神聖呪文の術者。`null` はバランス |
 

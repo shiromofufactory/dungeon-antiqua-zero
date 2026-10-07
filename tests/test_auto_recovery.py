@@ -289,7 +289,7 @@ class AutoRecoveryTest(unittest.TestCase):
 
         overlay.cursor.select_key("threshold")
         overlay.update(InputState(navigation=Direction.RIGHT))
-        self.assertEqual(save_data.auto_recovery.threshold, 70)
+        self.assertEqual(save_data.auto_recovery.threshold, 90)
 
     def test_result_shows_only_items_actually_used(self) -> None:
         fonts = Mock()

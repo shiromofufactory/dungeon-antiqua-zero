@@ -46,7 +46,7 @@ class AutoRecoveryMethod(StrEnum):
 
 @dataclass(frozen=True)
 class AutoRecoveryConfig:
-    threshold: int = 60
+    threshold: int = 80
     method: AutoRecoveryMethod = AutoRecoveryMethod.SPELLS_ITEMS
     healer_key: str | None = None
 
