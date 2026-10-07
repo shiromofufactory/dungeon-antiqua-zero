@@ -138,6 +138,14 @@ class BgmPlayer:
         return self._current_id
 
     @property
+    def playback_position_sec(self) -> float | None:
+        """Return the current track's position, including while paused."""
+
+        if self._paused:
+            return self._paused_sec
+        return self._playback_position_sec()
+
+    @property
     def volume(self) -> int:
         return self._volume
 
@@ -236,27 +244,41 @@ class BgmPlayer:
         self._paused_sec = None
         return True
 
-    def play_once_then(self, bgm_id: str, next_bgm_id: str) -> bool:
+    def play_once_then(
+        self,
+        bgm_id: str,
+        next_bgm_id: str,
+        *,
+        next_start_sec: float = 0.0,
+    ) -> bool:
         """Play one track once and start a looping track immediately afterward."""
 
         if not isinstance(next_bgm_id, str) or not next_bgm_id:
             raise ValueError("next_bgm_id must be a non-empty string")
+        if isinstance(next_start_sec, bool) or not isinstance(next_start_sec, (int, float)):
+            raise TypeError("next_start_sec must be a number")
+        if next_start_sec < 0:
+            raise ValueError("next_start_sec must not be negative")
         self._path_for(next_bgm_id)
-        resume_sec = 0.0
+        resume_sec = float(next_start_sec)
         if self._current_id == next_bgm_id and self._loop:
-            resume_sec = self._playback_position_sec() or 0.0
+            resume_sec = self.playback_position_sec or 0.0
+        elif self._queued_id == next_bgm_id:
+            resume_sec = self._queued_start_sec
         changed = self.play(bgm_id, loop=False)
         self._queued_id = next_bgm_id
         self._queued_start_sec = resume_sec
         return changed
 
-    def transition_to(self, bgm_id: str) -> bool:
+    def transition_to(self, bgm_id: str, *, start_sec: float = 0.0) -> bool:
         """Respect a matching queued transition, or play the requested BGM now."""
 
         self._path_for(bgm_id)
         if self._queued_id == bgm_id:
             return False
-        return self.play(bgm_id)
+        if self._current_id == bgm_id and self._loop:
+            return self.play(bgm_id)
+        return self.play(bgm_id, start_sec=start_sec)
 
     def update(self) -> bool:
         """Advance a pending fade stop, or resolve a one-shot successor."""

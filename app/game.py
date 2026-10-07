@@ -623,6 +623,7 @@ class Game:
         self.field_fade_pulse_frame = 0
         self.encounter_transition: EncounterTransition | None = None
         self.encounter_snapshot = None
+        self.pending_battle_bgm_start_sec = 0.0
         self.battle_return_fade: FadeThroughBlack | None = None
         self.battle_return_result: BattleResult | None = None
         self.defeat_return_message: MessageOverlay | None = None
@@ -719,6 +720,7 @@ class Game:
             result_party=self.party,
             save_data=self.save_data,
             return_bgm_id=self.current_map.bgm_id,
+            return_bgm_start_sec=getattr(self, "pending_battle_bgm_start_sec", 0.0),
             encounter=encounter,
             command_memory=memory,
             on_invalid_action=self.alert.start,
@@ -914,6 +916,9 @@ class Game:
         self.field.stop()
         self.encounter_transition = EncounterTransition(pivot_x, pivot_y)
         self.encounter_snapshot = None
+        self.pending_battle_bgm_start_sec = 0.0
+        if self.bgm.current_id == self.current_map.bgm_id:
+            self.pending_battle_bgm_start_sec = self.bgm.playback_position_sec or 0.0
         self.bgm.play(ENCOUNTER_JINGLE_ID, loop=False)
 
     def _update_encounter_transition(self) -> None:
@@ -938,6 +943,7 @@ class Game:
         self.battle_scene = self._build_battle_scene(
             event_encounter or debug_encounter or self._create_random_battle_encounter()
         )
+        self.pending_battle_bgm_start_sec = 0.0
         battle_id = getattr(self, "pending_event_battle_id", None)
         if (
             battle_id is not None
@@ -1125,7 +1131,8 @@ class Game:
             base_rate=fade.visible_rate,
             target_color=self.palette_shifter.base_colors[0],
         )
-        self.bgm.set_fade_rate(fade.visible_rate)
+        if self.battle_return_result is BattleResult.DEFEAT:
+            self.bgm.set_fade_rate(fade.visible_rate)
         if event is FadeEvent.COVERED:
             if self.battle_return_result is BattleResult.DEFEAT:
                 self._begin_defeat_return_message()
@@ -1137,7 +1144,8 @@ class Game:
                 self._apply_battle_return()
         if event is FadeEvent.FINISHED:
             finished_result = self.battle_return_result
-            self.bgm.set_fade_rate(1.0)
+            if finished_result is BattleResult.DEFEAT:
+                self.bgm.set_fade_rate(1.0)
             self.battle_return_fade = None
             self.battle_return_result = None
             self.defeat_return_sound_waiting = False
@@ -1251,10 +1259,20 @@ class Game:
             self._sync_field_fade_palette()
         else:
             self._restore_dimmed_palette()
-        self.bgm.set_fade_rate(0.0)
+        if result is BattleResult.DEFEAT:
+            self.bgm.set_fade_rate(0.0)
         if field_defeat:
             self.bgm.stop()
             self.defeat_return_bgm_restart_pending = True
+        elif (
+            result in (BattleResult.VICTORY, BattleResult.ESCAPED)
+            and battle_scene is not None
+            and battle_scene.return_bgm_id == self.current_map.bgm_id
+        ):
+            self.bgm.transition_to(
+                self.current_map.bgm_id,
+                start_sec=battle_scene.return_bgm_start_sec,
+            )
         else:
             self.bgm.transition_to(self.current_map.bgm_id)
 

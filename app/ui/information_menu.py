@@ -48,10 +48,7 @@ else:
     )
     from ..text_catalog import TextCatalog
 
-from .colors import (
-    BLUE_TEXT_COLOR,
-    NEGATIVE_COLOR,
-)
+from .colors import BLUE_TEXT_COLOR
 from .localized_text import LocalizedWindowTextFactory
 from .text_format import pad
 from .window import (
@@ -117,7 +114,6 @@ INFORMATION_TEXT_KEYS = (
     "monster_book.treasure_unknown",
     "monster_book.tolerance",
     "monster_book.weakness",
-    "monster_book.unidentified",
     *(f"term.monster_tribe.{tribe.value}" for tribe in MonsterTribe),
 )
 
@@ -246,10 +242,6 @@ def monster_detail_texts(
             ),
         )
     )
-    if not fully_identified:
-        lines.append(
-            (texts.text("monster_book.unidentified", localizer), NEGATIVE_COLOR)
-        )
     result: list[WindowText] = []
     affinity_rows = {8: monster.resistances, 10: monster.weaknesses}
     for index, (text, color) in enumerate(lines):

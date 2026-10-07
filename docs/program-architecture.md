@@ -410,6 +410,12 @@ OGGが存在することを保存・生成前に確認する。
 `pyxel.play_pos()` の秒位置を退避し、ジングル終了後に `pyxel.play(..., sec=退避位置)` で再開する。
 Scene切り替え時も同じ次曲が予約済みならジングルを中断しない。別のジングルを明示的に再生した場合は
 現在のジングルへ割り込み、新しい予約へ置き換える。
+戦闘への遷移開始時はGameが `BgmPlayer.playback_position_sec` を取得し、生成するBattleSceneへ
+復帰用BGM IDと開始秒位置を渡す。BattleSceneはその戦闘の復帰位置を所有し、勝利ジングルの
+`play_once_then(..., next_start_sec=位置)` と逃走後の `transition_to(..., start_sec=位置)` に使う。
+同じ次曲へ予約済みのジングルを切り替える場合は、BgmPlayerが予約位置も引き継ぐ。
+`transition_to()` は次曲が再開済みなら位置を巻き戻さず継続する。具体的な復帰規則は
+[`features/encounters.md`](./features/encounters.md) を正本とする。秒位置はセーブへ保存しない。
 イベントのBGM停止は `BgmPlayer.fade_out_and_stop()` が音量補間と停止までのフレーム進行を
 所有する。Gameは停止要求を渡し、`is_fading_out` が偽になるまでEventRunnerを待機させる。
 停止要求は予約された次曲を解除し、新しい再生要求は進行中の停止フェードを解除する。

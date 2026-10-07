@@ -116,12 +116,11 @@ Settingsと言語で `TextCatalog` または `EventMessageCatalog` から再解�
 - `term.monster_tribe.*` から解決した種族名
 - `monsters.json.lv` の実際のモンスターレベル
 - HPとMPの `？？？？`
-- `monster_book.unidentified`
 
 `profile` と全 `ResistanceType` が `revealed_field_keys` に揃った場合を完全識別とする。
 `treasure_identified` と `treasure_acquired` は完全識別の判定へ含めない。完全識別後は
 最大HPと最大MPを開示する。お宝と属性は完全識別を待たず、個別の判明状態で表示する。
-未完全識別の場合は `monster_book.unidentified` を詳細の末尾に表示する。
+未完全識別でも `monster_book.unidentified` のメッセージは表示しない。
 
 - 耐性と弱点のアイコン列。該当属性は通常アイコン、非該当属性はdisabledアイコンにする。
   未判明属性はアイコンを描画せず、8pxの属性枠を空ける。判明済み属性は耐性・弱点の両方へ表示する。
@@ -137,6 +136,8 @@ LVはHPの直前へ置き、値をHP・MPと同じ数値欄へ右揃えする。
 
 画像は `image_id` の `monsters/{image_id}` を使い、詳細Window内のDA2相当位置へ原寸表示する。
 表示名や一覧順から画像を推測しない。
+縦96pxの画像上端は画面Y=140pxで、最後の弱点アイコン列より下へ置く。
+弱点アイコン列の後にメッセージを追加しない。
 
 ## 表示文言
 
@@ -153,7 +154,6 @@ LVはHPの直前へ置き、値をHP・MPと同じ数値欄へ右揃えする。
 - `monster_book.treasure_unknown`
 - `monster_book.tolerance`
 - `monster_book.weakness`
-- `monster_book.unidentified`
 - `term.monster_tribe.*`
 
 ## 受け入れ条件
@@ -173,6 +173,7 @@ LVはHPの直前へ置き、値をHP・MPと同じ数値欄へ右揃えする。
   メインメニューへ戻れる。
 - 一覧に遭遇済みモンスターだけがマスター順で表示され、No.は未遭遇分を詰めない。
 - 不完全記録でもLVは実値を表示し、HP・MPは未開示とする。お宝・相性は個別の判明状態で表示する。
+- 未完全識別のメッセージを表示せず、縦96pxの画像が弱点アイコン列と重ならない。
 - 完全識別後はボスを含めて最大HPを表示する。
 - お宝名はアイテム図鑑ではなく、そのモンスターの `treasure_identified` または
   `treasure_acquired` で開示される。

@@ -166,6 +166,7 @@ class BgmPlayerTest(unittest.TestCase):
         player.set_fade_rate(0.5)
         player.pause()
         player.pause()
+        self.assertEqual(player.playback_position_sec, 12.5)
         self.assertIsNone(self.pyxel.play_position)
         self.assertEqual(player.current_id, "da3-field")
         self.assertFalse(player.update())
@@ -367,6 +368,66 @@ class BgmPlayerTest(unittest.TestCase):
 
         self.assertEqual(player.current_id, "da3-field")
         self.assertEqual(self.pyxel.play_calls[-1][2:], (12.5, True))
+
+    def test_battle_jingles_resume_the_saved_field_position(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field")
+        self.pyxel.play_position = (0, 12.5)
+        saved_position = player.playback_position_sec
+        player.play("da3-welcome", loop=False)
+        player.play("dungeon/floor1")
+
+        player.play_once_then(
+            "da3-welcome", "da3-field", next_start_sec=saved_position,
+        )
+        # A level-up jingle interrupts the victory jingle before the field resumes.
+        player.play_once_then("dungeon/floor1", "da3-field")
+        self.assertFalse(player.transition_to("da3-field", start_sec=12.5))
+        self.pyxel.play_position = None
+        player.update()
+
+        self.assertEqual(player.current_id, "da3-field")
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (12.5, True))
+
+    def test_jingle_uses_live_field_position_instead_of_older_battle_position(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("da3-field", start_sec=12.5)
+        self.pyxel.play_position = (0, 16.0)
+
+        player.play_once_then("da3-welcome", "da3-field", next_start_sec=12.5)
+        self.pyxel.play_position = None
+        player.update()
+
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (16.0, True))
+
+    def test_transition_resumes_saved_position_but_keeps_an_already_resumed_track(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play("dungeon/floor1")
+        player.stop()
+
+        self.assertTrue(player.transition_to("da3-field", start_sec=12.5))
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (12.5, True))
+        self.pyxel.play_position = (0, 16.0)
+        self.assertFalse(player.transition_to("da3-field", start_sec=12.5))
+        self.assertEqual(player.playback_position_sec, 16.0)
+        self.assertEqual(len(self.pyxel.play_calls), 2)
+
+    def test_different_jingle_successor_does_not_reuse_saved_position(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        player.play_once_then("da3-welcome", "da3-field", next_start_sec=12.5)
+        player.play_once_then("da3-welcome", "dungeon/floor1")
+        self.pyxel.play_position = None
+        player.update()
+
+        self.assertEqual(player.current_id, "dungeon/floor1")
+        self.assertEqual(self.pyxel.play_calls[-1][2:], (0.0, True))
+
+    def test_jingle_rejects_invalid_successor_positions_before_playing(self) -> None:
+        player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)
+        for value, error in ((True, TypeError), ("12", TypeError), (-1, ValueError)):
+            with self.subTest(value=value), self.assertRaises(error):
+                player.play_once_then("da3-welcome", "da3-field", next_start_sec=value)
+        self.assertEqual(self.pyxel.play_calls, [])
 
     def test_matching_scene_transition_does_not_interrupt_one_shot(self) -> None:
         player = BgmPlayer(self.audio_dir, pyxel_api=self.pyxel)

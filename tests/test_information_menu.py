@@ -415,7 +415,7 @@ class InformationMenuOverlayTest(unittest.TestCase):
         self.assertTrue(detail[3].endswith("１"))
         self.assertIn("？？？？", detail[4])
         self.assertIn("？？？？", detail[5])
-        self.assertIn("しきべつ　されていません", detail)
+        self.assertNotIn("しきべつ　されていません", detail)
         self.assertIn("おたから：？？？？", detail)
         self.assertIn("%FIRE_DISABLED%", detail)
         self.assertFalse(any("%FREEZE" in text for text in detail))

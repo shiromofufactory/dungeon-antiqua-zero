@@ -1791,6 +1791,7 @@ class BattleScene:
         save_data: SaveData,
         result_party: tuple[Member, ...],
         return_bgm_id: str,
+        return_bgm_start_sec: float = 0.0,
         command_memory: BattleCommandMemory | None = None,
         on_invalid_action: Callable[[], None] | None = None,
     ) -> BattleScene:
@@ -1815,6 +1816,7 @@ class BattleScene:
             save_data=save_data,
             result_party=result_party,
             return_bgm_id=return_bgm_id,
+            return_bgm_start_sec=return_bgm_start_sec,
             fonts=fonts,
             attack_poses=load_attack_poses(APP_ROOT / "effects" / "attack_poses.json"),
             spell_effect_renderer=SpellEffectRenderer(
@@ -1852,6 +1854,7 @@ class BattleScene:
         save_data: SaveData | None = None,
         result_party: tuple[Member, ...] | None = None,
         return_bgm_id: str | None = None,
+        return_bgm_start_sec: float = 0.0,
         fonts: FontResources | None = None,
         command_memory: BattleCommandMemory | None = None,
         on_invalid_action: Callable[[], None] | None = None,
@@ -1893,6 +1896,7 @@ class BattleScene:
         ):
             raise ValueError("return_bgm_id must be a non-empty string or None")
         self.return_bgm_id = return_bgm_id
+        self.return_bgm_start_sec = return_bgm_start_sec
         self.palette_shifter = palette_shifter
         self._sync_unselectable_target_palette()
         self.bgm = bgm
@@ -7357,7 +7361,10 @@ class BattleScene:
             self.result = BattleResult.ESCAPED
             return
         if self.return_bgm_id is not None:
-            self.bgm.transition_to(self.return_bgm_id)
+            self.bgm.transition_to(
+                self.return_bgm_id,
+                start_sec=self.return_bgm_start_sec,
+            )
         self.result_overlay = BattleResultOverlay(
             party=self.result_party,
             growth=growth,
@@ -7445,7 +7452,11 @@ class BattleScene:
         if self.return_bgm_id is None:
             self.bgm.play(bgm_id, loop=False)
             return
-        self.bgm.play_once_then(bgm_id, self.return_bgm_id)
+        self.bgm.play_once_then(
+            bgm_id,
+            self.return_bgm_id,
+            next_start_sec=self.return_bgm_start_sec,
+        )
 
     def _update_victory_summary(self, input_state: InputState) -> None:
         self.victory_motion_frame = min(

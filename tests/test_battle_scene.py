@@ -543,6 +543,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.texts = object()
         scene.bgm = Mock()
         scene.return_bgm_id = "da3-field"
+        scene.return_bgm_start_sec = 12.5
         scene.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
 
         with patch("scenes.battle.BattleResultOverlay") as overlay:
@@ -554,7 +555,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         )
         scene.bgm.stop.assert_called_once_with()
         scene.bgm.set_fade_rate.assert_called_once_with(1.0)
-        scene.bgm.transition_to.assert_called_once_with("da3-field")
+        scene.bgm.transition_to.assert_called_once_with("da3-field", start_sec=12.5)
         self.assertIs(scene.result_overlay, overlay.return_value)
         self.assertIs(scene.result_outcome, BattleResult.ESCAPED)
         self.assertIs(scene.phase, BattlePhase.RESULT_TRANSITION)
@@ -646,12 +647,14 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene = BattleScene.__new__(BattleScene)
         scene.bgm = Mock()
         scene.return_bgm_id = "da3-field"
+        scene.return_bgm_start_sec = 12.5
 
         scene._play_victory_jingle("da3-win")
 
         scene.bgm.play_once_then.assert_called_once_with(
             "da3-win",
             "da3-field",
+            next_start_sec=12.5,
         )
 
     def test_held_confirm_repeats_at_da2_equivalent_timing(self) -> None:
@@ -771,6 +774,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.party = tuple(object() for _index in range(6))
         game.save_data = SaveData()
         game.current_map = Mock(bgm_id="da3-field")
+        game.pending_battle_bgm_start_sec = 12.5
         encounter = BattleEncounter(("Coyote",))
 
         with patch("game.BattleScene.create", return_value=Mock()) as create:
@@ -781,6 +785,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertEqual(len(create.call_args.kwargs["result_party"]), 6)
         self.assertIs(create.call_args.kwargs["save_data"], game.save_data)
         self.assertEqual(create.call_args.kwargs["return_bgm_id"], "da3-field")
+        self.assertEqual(create.call_args.kwargs["return_bgm_start_sec"], 12.5)
         self.assertIs(create.call_args.kwargs["encounter"], encounter)
         self.assertIs(
             create.call_args.kwargs["on_invalid_action"],
@@ -847,19 +852,35 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
     def test_game_begins_pc_centered_transition_with_encounter_jingle(self) -> None:
         game = Game.__new__(Game)
-        game.current_map = Mock(tile_size=16)
+        game.current_map = Mock(tile_size=16, bgm_id="da3-field")
         game.field = Mock(world_x=160, world_y=96)
         game.field_renderer = Mock()
         game.field_renderer.camera_position.return_value = (40, 20)
-        game.bgm = Mock()
+        game.bgm = Mock(current_id="da3-field", playback_position_sec=12.5)
 
         game._begin_random_encounter()
 
         self.assertEqual(game.encounter_transition.pivot_x, 128)
         self.assertEqual(game.encounter_transition.pivot_y, 76)
         self.assertIsNone(game.encounter_snapshot)
+        self.assertEqual(game.pending_battle_bgm_start_sec, 12.5)
         game.field.stop.assert_called_once_with()
         game.bgm.play.assert_called_once_with(ENCOUNTER_JINGLE_ID, loop=False)
+
+    def test_encounter_does_not_save_another_track_or_a_stale_battle_position(self) -> None:
+        for current_id, position in (("da3-welcome", 5.0), (None, None), ("da3-field", None)):
+            with self.subTest(current_id=current_id, position=position):
+                game = Game.__new__(Game)
+                game.current_map = Mock(tile_size=16, bgm_id="da3-field")
+                game.field = Mock(world_x=160, world_y=96)
+                game.field_renderer = Mock()
+                game.field_renderer.camera_position.return_value = (40, 20)
+                game.bgm = Mock(current_id=current_id, playback_position_sec=position)
+                game.pending_battle_bgm_start_sec = 12.5
+
+                game._begin_random_encounter()
+
+                self.assertEqual(game.pending_battle_bgm_start_sec, 0.0)
 
     def test_encounter_transition_builds_the_generated_lineup_at_black(
         self,
@@ -1114,6 +1135,24 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         member.fully_recover.assert_not_called()
         member.recover_world_map_entry_ailments.assert_not_called()
 
+    def test_victory_and_escape_return_use_the_encounter_bgm_position(self) -> None:
+        for result in (BattleResult.VICTORY, BattleResult.ESCAPED):
+            with self.subTest(result=result):
+                game = Game.__new__(Game)
+                game.battle_return_result = result
+                game.battle_scene = Mock(
+                    return_bgm_id="da3-field", return_bgm_start_sec=12.5,
+                )
+                game.party = ()
+                game.save_data = SaveData()
+                game.current_map = Mock(bgm_id="da3-field")
+                game.bgm = Mock()
+
+                game._apply_battle_return()
+
+                game.bgm.transition_to.assert_called_once_with("da3-field", start_sec=12.5)
+                self.assertIsNone(game.battle_scene)
+
     def test_battle_return_permanently_advances_first_recoverable_rear(
         self,
     ) -> None:
@@ -1153,6 +1192,81 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game._apply_battle_return.assert_not_called()
         self.assertIs(game.battle_return_result, BattleResult.ESCAPED)
         self.assertIs(game.battle_return_fade.phase, FadePhase.FADING_OUT)
+
+    def test_result_return_keeps_bgm_volume_during_the_entire_screen_fade(self) -> None:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from resources.audio import BgmPlayer
+        from tests.test_audio_resources import FakePyxel
+
+        for result in (BattleResult.VICTORY, BattleResult.ESCAPED):
+            for bgm_id in ("da3-field", "da3-lvup"):
+                with self.subTest(result=result, bgm_id=bgm_id), TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    for name in ("da3-field", "da3-lvup"):
+                        (root / f"{name}.ogg").touch()
+                    px = FakePyxel()
+                    player = BgmPlayer(root, volume=2, pyxel_api=px)
+                    player.play("da3-field", start_sec=12.5)
+                    if bgm_id == "da3-lvup":
+                        player.play_once_then("da3-lvup", "da3-field")
+                    gain = px.channels[2].gain
+                    play_count = len(px.play_calls)
+                    stop_count = len(px.stop_calls)
+                    game = Game.__new__(Game)
+                    game.bgm = player
+                    game.current_map = Mock(bgm_id="da3-field")
+                    game.battle_scene = Mock(
+                        return_bgm_id="da3-field", return_bgm_start_sec=12.5,
+                    )
+                    game.palette_shifter = Mock(base_colors=(0,))
+                    game.party = ()
+                    game.save_data = SaveData()
+                    game._resume_event_after_battle = Mock()
+
+                    game._begin_battle_return(result)
+                    for _frame in range(DEFAULT_FADE_FRAME_COUNT * 2):
+                        game._update_battle_return(InputState())
+                        self.assertEqual(px.channels[2].gain, gain)
+                        self.assertEqual(player.current_id, bgm_id)
+
+                    self.assertIsNone(game.battle_return_fade)
+                    self.assertEqual(len(px.play_calls), play_count)
+                    self.assertEqual(len(px.stop_calls), stop_count)
+
+    def test_escape_without_result_starts_field_at_configured_volume(self) -> None:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from resources.audio import BgmPlayer
+        from tests.test_audio_resources import FakePyxel
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "da3-field.ogg").touch()
+            px = FakePyxel()
+            player = BgmPlayer(root, volume=4, pyxel_api=px)
+            gain = px.channels[2].gain
+            game = Game.__new__(Game)
+            game.bgm = player
+            game.current_map = Mock(bgm_id="da3-field")
+            game.battle_scene = Mock(
+                return_bgm_id="da3-field", return_bgm_start_sec=12.5,
+            )
+            game.palette_shifter = Mock(base_colors=(0,))
+            game.party = ()
+            game.save_data = SaveData()
+            game._resume_event_after_battle = Mock()
+
+            game._begin_battle_return(BattleResult.ESCAPED, screen_already_covered=True)
+            self.assertEqual(player.current_id, "da3-field")
+            self.assertEqual(px.channels[2].gain, gain)
+            for _frame in range(DEFAULT_FADE_FRAME_COUNT):
+                game._update_battle_return(InputState())
+                self.assertEqual(px.channels[2].gain, gain)
+
+            self.assertIsNone(game.battle_return_fade)
+            self.assertEqual(len(px.play_calls), 1)
+            self.assertEqual(px.play_calls[-1][2:], (12.5, True))
 
     def test_escape_without_result_reuses_the_existing_blackout(self) -> None:
         game = Game.__new__(Game)
