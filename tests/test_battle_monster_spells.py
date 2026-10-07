@@ -14,6 +14,7 @@ from tools.screen_mocks._fixtures import (
 )
 from tools.screen_mocks.battle import (
     BattleMockMonster,
+    BattleMockCharacter,
     BattleMockPhase,
     BattleScreenMock,
 )
@@ -21,6 +22,7 @@ from monster import MonsterBattleState, MonsterCombatStats
 from monster_ai import MonsterSpellAction
 from battle_magic import resolve_spell_damage, SpellAffinity
 from member import Member, FormationRow
+from battle_timeline import TimelineEntry, TimelineOrder
 from resistance import ResistanceType
 
 
@@ -82,6 +84,13 @@ class MonsterSpellTest(unittest.TestCase):
         actor = spellcaster(magic=7, spell_key="SLOW")
         mock = spell_scene(actor)
         spell = mock.spells["SLOW"]
+        visuals = tuple(BattleMockCharacter(member, 0, 0, index) for index, member in enumerate(mock.party))
+        mock._timeline_order = TimelineOrder((
+            TimelineEntry(actor, actor.agility, 64),
+            TimelineEntry(visuals[1], visuals[1].agility, 60),
+            TimelineEntry(visuals[0], visuals[0].agility, 56),
+        ))
+        mock.timeline = mock._timeline_order.actors
 
         with (
             patch("scenes.battle.random.choice", return_value=1) as choice,
@@ -100,6 +109,11 @@ class MonsterSpellTest(unittest.TestCase):
         mock._apply_action_results(presentation)
         self.assertEqual(mock.party[0].speed_modifier, 0)
         self.assertEqual(mock.party[1].speed_modifier, -1)
+        self.assertEqual(mock.party[1].effective_agility, max(1, mock.party[1].adjusted_abilities.agility - 8))
+        self.assertEqual(mock.timeline, (actor, visuals[0], visuals[1]))
+        self.assertEqual(tuple(entry.gauge for entry in mock._timeline_order.entries), (64, 56, 52))
+        mock._apply_action_results(presentation)
+        self.assertEqual(mock._timeline_order.entries[-1].gauge, 52)
         self.assertEqual(actor.state.mp, 10)
         mock._show_spell_cast_message.assert_called_once_with(
             spell,

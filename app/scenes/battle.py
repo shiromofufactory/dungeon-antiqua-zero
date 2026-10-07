@@ -63,7 +63,12 @@ from monster_ai import (
     reinforcement_target,
     select_monster_action,
 )
-from battle_speed import MAX_SPEED_MODIFIER, MIN_SPEED_MODIFIER, modified_agility
+from battle_speed import (
+    MAX_SPEED_MODIFIER,
+    MIN_SPEED_MODIFIER,
+    SLOW_GAUGE_ADJUSTMENT,
+    modified_agility,
+)
 from battle_physical import (
     PHYSICAL_STATUS_EFFECTS,
     PhysicalAttackResult,
@@ -75,6 +80,7 @@ from battle_timeline import (
     GAUGE_READY_VALUE,
     TimelineAdvance,
     TimelineOrder,
+    adjust_timeline_entry_gauge,
     complete_timeline_action,
     initialize_timeline_order,
     insert_timeline_actor,
@@ -4974,7 +4980,7 @@ class BattleScene:
         party_index: int,
         enemy_levels: tuple[int, ...],
         *,
-        defeated_enemy: bool = False,
+        defeated_enemy_count: int = 0,
         critical: bool = False,
         right_hand_only: bool = False,
     ) -> None:
@@ -4999,7 +5005,7 @@ class BattleScene:
                 member,
                 weapons,
                 enemy_levels,
-                defeated_enemy=defeated_enemy,
+                defeated_enemy_count=defeated_enemy_count,
                 critical=critical,
             )
 
@@ -5765,8 +5771,8 @@ class BattleScene:
                 monster.state.apply_poison()
         for result in presentation.slow_results:
             monster = self.monsters[result.target_index]
-            if result.success:
-                monster.state.apply_slow()
+            if result.success and monster.state.apply_slow():
+                self._delay_slow_target(monster)
             else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
@@ -5858,7 +5864,9 @@ class BattleScene:
                 )
         for result in presentation.party_slow_results:
             member = self.party[result.target_index]
-            if not result.success or not member.apply_slow():
+            if result.success and member.apply_slow():
+                self._delay_slow_target(member)
+            else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
                         result.popup_x,
@@ -5909,6 +5917,25 @@ class BattleScene:
             )
             if result.is_hit:
                 play_se(BATTLE_HIT_SE_ID)
+
+    def _delay_slow_target(self, target: Member | BattleMonster) -> None:
+        """Reflect a successful SLOW in its target's waiting turn immediately."""
+
+        order = getattr(self, "_timeline_order", None)
+        if order is None:
+            return
+        for index, entry in enumerate(order.entries):
+            actor = entry.actor
+            if actor is target or (
+                isinstance(actor, BattleCharacter) and actor.member is target
+            ):
+                self._timeline_order = adjust_timeline_entry_gauge(
+                    order,
+                    entry_index=index,
+                    gauge_adjustment=SLOW_GAUGE_ADJUSTMENT,
+                )
+                self.timeline = self._timeline_order.actors
+                return
 
     def _reinsert_revived_party_member(self, index: int) -> None:
         """Return a revived member to the current timeline at a reset gauge."""
@@ -6098,7 +6125,7 @@ class BattleScene:
                         self.party[party_index],
                         (progression_weapon,),
                         getattr(self, "action_progression_enemy_levels", ()),
-                        defeated_enemy=True,
+                        defeated_enemy_count=len(defeated_indexes),
                     )
             self.action_progression_weapon = None
             self.action_progression_enemy_levels = ()
@@ -7076,7 +7103,7 @@ class BattleScene:
                         getattr(self.monsters[index], "level", 1)
                         for index in target_indexes
                     ),
-                    defeated_enemy=any(
+                    defeated_enemy_count=sum(
                         not self.monsters[index].is_alive for index in target_indexes
                     ),
                     critical=any(strike.is_critical for strike in presentation.strikes),

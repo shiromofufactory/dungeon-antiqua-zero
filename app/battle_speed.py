@@ -5,10 +5,12 @@ from __future__ import annotations
 
 MIN_SPEED_MODIFIER = -1
 MAX_SPEED_MODIFIER = 2
+SPEED_MODIFIER_STEP = 8
+SLOW_GAUGE_ADJUSTMENT = -8.0
 
 
 def modified_agility(base_agility: int, speed_modifier: int) -> int:
-    """Apply ZERO's quarter-step battle speed formula."""
+    """Apply ZERO's fixed eight-point battle speed stages."""
 
     if isinstance(base_agility, bool) or not isinstance(base_agility, int):
         raise TypeError("base_agility must be an integer")
@@ -21,11 +23,13 @@ def modified_agility(base_agility: int, speed_modifier: int) -> int:
             f"speed_modifier must be from {MIN_SPEED_MODIFIER} "
             f"to {MAX_SPEED_MODIFIER}"
         )
-    return max(1, base_agility * (4 + speed_modifier) // 4)
+    return max(1, base_agility + speed_modifier * SPEED_MODIFIER_STEP)
 
 
 __all__ = [
     "MAX_SPEED_MODIFIER",
     "MIN_SPEED_MODIFIER",
+    "SPEED_MODIFIER_STEP",
+    "SLOW_GAUGE_ADJUSTMENT",
     "modified_agility",
 ]

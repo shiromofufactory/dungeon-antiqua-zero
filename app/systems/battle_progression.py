@@ -265,15 +265,21 @@ class BattleProgression:
         weapons: Iterable[Item],
         enemy_levels: Iterable[int],
         *,
-        defeated_enemy: bool = False,
+        defeated_enemy_count: int = 0,
         critical: bool = False,
     ) -> None:
         """Keep the maximum award produced by one physical or weapon-use action."""
 
+        if (
+            isinstance(defeated_enemy_count, bool)
+            or not isinstance(defeated_enemy_count, int)
+            or defeated_enemy_count < 0
+        ):
+            raise ValueError("defeated_enemy_count must be a non-negative integer")
         levels = self._enemy_levels(enemy_levels)
         if not levels:
             return
-        bonus = int(defeated_enemy) + int(critical)
+        bonus = defeated_enemy_count + int(critical)
         awards = self._weapon_awards.setdefault(member.definition.key, {})
         for weapon in weapons:
             if not isinstance(weapon, Item) or not weapon.is_weapon:

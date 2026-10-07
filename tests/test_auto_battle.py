@@ -36,6 +36,7 @@ from battle_timeline import TimelineEntry, TimelineOrder
 from item import AdditionalEffect
 from member import EquipmentSlot
 from monster import MonsterSpecialAction
+from monster_ai import MonsterSpellAction
 from resistance import ResistanceType
 from spell import SpellAction, SpellType
 
@@ -888,18 +889,62 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         )
         self.assertEqual(result, expected)
 
-    def test_slow_changes_reinsertion_not_current_order(self):
-        forecast = BattleForecast(self.snapshot(), 0)
-        order = tuple(e.actor for e in forecast.order.entries)
+    def test_slow_delays_current_turn_and_future_reinsertion(self):
+        forecast = BattleForecast(self.snapshot(
+            self.specs[0], self.enemy(), self.enemy(number=6),
+            gauges=((0, 64), (5, 60), (6, 56)),
+        ), 0)
         enemy = forecast.actors[5]
-        enemy.speed = -1
-        self.assertEqual(tuple(e.actor for e in forecast.order.entries), order)
-        self.assertLess(enemy.agility, enemy.spec.agility)
+        with patch.object(forecast, "status_success", return_value=True):
+            forecast.cast(forecast.actors[0], AutoAction(BattleCommand.SPELL, (5,), spell_key="SLOW"))
+        self.assertEqual(forecast.order.actors, (0, 6, 5))
+        self.assertEqual(tuple(e.gauge for e in forecast.order.entries), (64, 56, 52))
+        self.assertEqual(enemy.agility, 7)
+        forecast.apply_slow(enemy)
+        self.assertEqual(forecast.order.entries[-1].gauge, 52)
         forecast.execute(0, AutoAction(BattleCommand.DEFEND))
+        self.assertEqual(forecast.order.entries[0].actor, 6)
+        forecast.enemy_turn(forecast.actors[6])
         self.assertEqual(forecast.order.entries[0].actor, 5)
         forecast.enemy_turn(enemy)
         inserted = next(e for e in forecast.order.entries if e.actor == 5)
         self.assertEqual(inserted.agility, enemy.agility)
+
+    def test_slow_cancels_haste_and_delays_the_gauge_on_each_success(self):
+        forecast = BattleForecast(self.snapshot(self.specs[0], self.enemy(speed=2)), 0)
+        target = forecast.actors[5]
+        for stage, gauge in ((0, 46), (-1, 38), (-1, 38)):
+            forecast.apply_slow(target)
+            self.assertEqual(target.speed, stage)
+            self.assertEqual(forecast.order.entries[1].gauge, gauge)
+
+    def test_enemy_slow_forecast_delays_a_waiting_ally_immediately(self):
+        enemy = self.enemy(spells=(self.spells["SLOW"],), magic=7, mp=12, max_mp=12)
+        forecast = BattleForecast(self.snapshot(
+            self.specs[0], self.specs[1], enemy, active=5,
+            gauges=((5, 64), (0, 60), (1, 56)),
+        ), 0)
+        with (
+            patch("auto_battle_simulation.monster_action_candidates", return_value=(MonsterSpellAction("SLOW"),)),
+            patch.object(forecast, "status_success", return_value=True),
+            patch.object(forecast, "roll", return_value=0),
+        ):
+            forecast.enemy_turn(forecast.actors[5])
+        self.assertEqual(forecast.actors[0].speed, -1)
+        self.assertEqual(forecast.actors[0].agility, max(1, self.specs[0].agility - 8))
+        self.assertEqual(forecast.order.actors, (1, 0, 5))
+        gauges = {entry.actor: entry.gauge for entry in forecast.order.entries}
+        self.assertEqual(gauges[1] - gauges[0], 4)
+
+    def test_haste_forecast_adds_eight_per_stage_without_changing_waiting_gauges(self):
+        forecast = BattleForecast(self.snapshot(self.specs[0], self.specs[1], self.enemy()), 0)
+        target = forecast.actors[1]
+        order = forecast.order
+        action = AutoAction(BattleCommand.SPELL, (1,), spell_key="HASTE")
+        for stage in (1, 2):
+            forecast.cast(forecast.actors[0], action)
+            self.assertEqual(target.agility, target.spec.agility + stage * 8)
+            self.assertIs(forecast.order, order)
 
     def test_stun_sleep_consumption_and_poison_do_not_wake(self):
         forecast = BattleForecast(self.snapshot(), 0)

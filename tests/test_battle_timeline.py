@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import unittest
 
+from tools._bootstrap import APP_ROOT
+
 from battle_timeline import (
     GAUGE_READY_VALUE,
     TimelineEntry,
     TimelineOrder,
+    adjust_timeline_entry_gauge,
     complete_timeline_action,
     initialize_timeline_order,
     insert_timeline_actor,
@@ -45,6 +48,29 @@ class BattleTimelineTest(unittest.TestCase):
             tuple(entry.gauge for entry in readied.entries),
             (64.0, 49.0, 34.0),
         )
+
+    def test_slow_penalty_reorders_only_the_target_without_readying_the_head(self) -> None:
+        order = TimelineOrder(
+            tuple(TimelineEntry(actor, 20, gauge) for actor, gauge in (
+                ("caster", 64), ("target", 60), ("other", 56), ("last", 2),
+            ))
+        )
+
+        delayed = adjust_timeline_entry_gauge(order, entry_index=1, gauge_adjustment=-8)
+
+        self.assertEqual(delayed.actors, ("caster", "other", "target", "last"))
+        self.assertEqual(tuple(entry.gauge for entry in delayed.entries), (64, 56, 52, 2))
+        self.assertEqual(order.entries[1].gauge, 60)
+        delayed = adjust_timeline_entry_gauge(delayed, entry_index=3, gauge_adjustment=-8)
+        self.assertEqual(delayed.entries[-1].gauge, -6)
+
+    def test_gauge_adjustment_preserves_previous_order_for_ties(self) -> None:
+        order = TimelineOrder((TimelineEntry("target", 20, 60), TimelineEntry("other", 20, 52)))
+
+        delayed = adjust_timeline_entry_gauge(order, entry_index=0, gauge_adjustment=-8)
+
+        self.assertEqual(delayed.actors, ("target", "other"))
+        self.assertEqual(tuple(entry.gauge for entry in delayed.entries), (52, 52))
 
     def test_completed_actor_resets_and_interrupts_visible_order(self) -> None:
         order = TimelineOrder(

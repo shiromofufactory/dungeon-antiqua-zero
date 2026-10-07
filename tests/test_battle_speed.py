@@ -6,15 +6,17 @@ from app.battle_speed import modified_agility
 
 
 class BattleSpeedTest(unittest.TestCase):
-    def test_applies_zero_quarter_step_speed_formula(self) -> None:
-        self.assertEqual(modified_agility(20, -1), 15)
-        self.assertEqual(modified_agility(20, 0), 20)
-        self.assertEqual(modified_agility(20, 1), 25)
-        self.assertEqual(modified_agility(20, 2), 30)
+    def test_applies_fixed_eight_point_speed_stages(self) -> None:
+        for base in (10, 20, 32):
+            for stage in (-1, 0, 1, 2):
+                with self.subTest(base=base, stage=stage):
+                    self.assertEqual(modified_agility(base, stage), base + stage * 8)
 
     def test_effective_agility_has_a_minimum_of_one(self) -> None:
         self.assertEqual(modified_agility(0, 0), 1)
         self.assertEqual(modified_agility(1, -1), 1)
+        self.assertEqual(modified_agility(8, -1), 1)
+        self.assertEqual(modified_agility(9, -1), 1)
 
     def test_rejects_invalid_values(self) -> None:
         for base_agility in (True, -1, 1.5):

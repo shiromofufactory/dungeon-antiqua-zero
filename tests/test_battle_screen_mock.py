@@ -2192,7 +2192,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._record_equipped_weapon_action.assert_called_once_with(
             0,
             (1,),
-            defeated_enemy=True,
+            defeated_enemy_count=1,
             critical=False,
         )
 
@@ -2231,7 +2231,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._record_equipped_weapon_action.assert_called_once_with(
             0,
             (1,),
-            defeated_enemy=True,
+            defeated_enemy_count=1,
             critical=True,
         )
 
@@ -2267,9 +2267,55 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._record_equipped_weapon_action.assert_called_once_with(
             0,
             (1,),
-            defeated_enemy=False,
+            defeated_enemy_count=0,
             critical=False,
         )
+
+    def test_weapon_progression_counts_distinct_defeats_for_iai_and_dual_wield(
+        self,
+    ) -> None:
+        cases = (
+            (True, (0, 1, 2), (0, 1), (1, 1, 1), 2),
+            (False, (0, 0), (0,), (1,), 1),
+        )
+        for is_iai, targets, defeated, levels, count in cases:
+            with self.subTest(is_iai=is_iai):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.monsters = tuple(_damage_test_monster(index) for index in range(3))
+                for index in defeated:
+                    mock.monsters[index].state.defeat()
+                mock.action_party_index = 0
+                mock.attack_presentation = BattleAttackPresentation(
+                    target_index=0,
+                    strikes=tuple(
+                        BattleAttackStrike(
+                            damage=10,
+                            poses=(),
+                            effect_row=2,
+                            motion_start_frame=0,
+                            hit_start_frame=ATTACK_HIT_START_FRAME,
+                            target_index=index,
+                            damage_applied=True,
+                            is_critical=order == 0,
+                        )
+                        for order, index in enumerate(targets)
+                    ),
+                    is_iai=is_iai,
+                )
+                mock._record_equipped_weapon_action = Mock()
+                mock._begin_action_return = Mock()
+
+                with patch("scenes.battle.play_se"):
+                    mock._update_attack_presentation()
+                    mock._update_attack_presentation()
+
+                mock._record_equipped_weapon_action.assert_called_once_with(
+                    0,
+                    levels,
+                    defeated_enemy_count=count,
+                    critical=True,
+                    **({"right_hand_only": True} if is_iai else {}),
+                )
 
     def test_cancelled_spell_caster_walks_back_to_the_original_position(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -5794,6 +5840,15 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.selected_target_index = 0
         mock.monsters = (_damage_test_monster(),)
         mock.monsters[0].agility = 20
+        other = _damage_test_monster(1)
+        mock.monsters = (*mock.monsters, other)
+        caster = BattleMockCharacter(mock.party[0], 0, 0, 0)
+        mock._timeline_order = TimelineOrder((
+            TimelineEntry(caster, caster.agility, 64),
+            TimelineEntry(mock.monsters[0], 20, 60),
+            TimelineEntry(other, other.agility, 56),
+        ))
+        mock.timeline = mock._timeline_order.actors
         mock.spell_effects = {}
         mock.target_cursor = SimpleNamespace(active=True)
         mock.party_target_cursor = None
@@ -5812,7 +5867,11 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._apply_action_results(mock.action_presentation)
 
         self.assertEqual(mock.monsters[0].state.speed_modifier, -1)
-        self.assertEqual(mock.monsters[0].effective_agility, 15)
+        self.assertEqual(mock.monsters[0].effective_agility, 12)
+        self.assertEqual(mock.timeline, (caster, other, mock.monsters[0]))
+        self.assertEqual(tuple(entry.gauge for entry in mock._timeline_order.entries), (64, 56, 52))
+        mock._apply_action_results(mock.action_presentation)
+        self.assertEqual(mock._timeline_order.entries[-1].gauge, 52)
         self.assertEqual(mock.spell_damage_popups, [])
         randint.assert_called_once_with(0, 19)
 
@@ -5826,12 +5885,17 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         target = mock.party[0]
         target.speed_modifier = -1
+        visual = BattleMockCharacter(target, 0, 0, 0)
+        order = TimelineOrder((TimelineEntry(visual, visual.agility, 32),))
+        mock._timeline_order = order
+        mock.timeline = order.actors
 
-        results = mock._resolve_haste_results(spell, (0,))
-        mock._apply_action_results(BattleActionPresentation((), haste_results=results))
-
-        self.assertEqual(target.speed_modifier, 0)
-        self.assertEqual(target.effective_agility, target.adjusted_abilities.agility)
+        for stage in (0, 1, 2):
+            results = mock._resolve_haste_results(spell, (0,))
+            mock._apply_action_results(BattleActionPresentation((), haste_results=results))
+            self.assertEqual(target.speed_modifier, stage)
+            self.assertEqual(target.effective_agility, target.adjusted_abilities.agility + stage * 8)
+            self.assertIs(mock._timeline_order, order)
 
     def test_cure_removes_its_four_ailments_but_not_stun(self) -> None:
         spell = load_mock_spells()["CURE"]
@@ -6084,6 +6148,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.active_party_index = 0
         mock.phase = BattleMockPhase.ACTION_TARGET
         mock.monsters = (_damage_test_monster(spell_resistance=100),)
+        order = TimelineOrder((TimelineEntry(mock.monsters[0], 20, 4),))
+        mock._timeline_order = order
         mock.spell_damage_popups = []
         results = ()
         with patch("scenes.battle.random.randint", return_value=19):
@@ -6094,6 +6160,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._apply_action_results(presentation)
 
         self.assertEqual(mock.monsters[0].state.speed_modifier, 0)
+        self.assertIs(mock._timeline_order, order)
         self.assertEqual(
             [popup.is_miss for popup in mock.spell_damage_popups],
             [True],
@@ -6122,11 +6189,14 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.phase = BattleMockPhase.ACTION_TARGET
         mock.monsters = (_damage_test_monster(),)
         mock.monsters[0].state.speed_modifier = -1
+        order = TimelineOrder((TimelineEntry(mock.monsters[0], 12, 4),))
+        mock._timeline_order = order
         mock.spell_damage_popups = []
         with patch("scenes.battle.random.randint") as randint:
             results = mock._resolve_slow_results(spell, (0,))
         mock._apply_action_results(BattleActionPresentation((), slow_results=results))
         self.assertEqual(mock.monsters[0].state.speed_modifier, -1)
+        self.assertIs(mock._timeline_order, order)
         self.assertEqual([popup.is_miss for popup in mock.spell_damage_popups], [True])
         randint.assert_not_called()
 
@@ -6929,6 +6999,41 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.battle_popup.frames_remaining, 22)
         self.assertTrue(mock.battle_popup.visible)
         mock._complete_current_turn.assert_called_once_with()
+
+    def test_weapon_spell_records_each_defeated_target_once(self) -> None:
+        items = load_mock_items()
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(items, load_mock_skills(), character_keys=("Fiora",))
+        mock.monsters = tuple(_damage_test_monster(index) for index in range(3))
+        mock.monsters[0].state.defeat()
+        mock.monsters[1].state.defeat()
+        mock.action_party_index = 0
+        mock.action_progression_weapon = items["KATANA"]
+        mock.action_progression_enemy_levels = (2, 3, 4)
+        mock.progression = Mock()
+        mock.action_presentation = BattleActionPresentation(
+            (),
+            damage_results=tuple(
+                SimpleNamespace(target_index=index) for index in (0, 1, 0, 2)
+            ),
+            post_effect_wait_frame_count=0,
+        )
+        mock._apply_action_results = Mock()
+        mock._release_palette_variant = Mock()
+        mock._sync_unselectable_target_palette = Mock()
+        mock._begin_action_return = Mock()
+        mock._begin_monster_deaths = Mock()
+
+        mock._update_action_presentation()
+
+        mock.progression.record_weapon_action.assert_called_once_with(
+            mock.party[0],
+            (items["KATANA"],),
+            (2, 3, 4),
+            defeated_enemy_count=2,
+        )
+        mock._begin_monster_deaths.assert_called_once_with([0, 1])
+        self.assertIsNone(mock.action_progression_weapon)
 
     def test_fade_presentation_starts_mosaic_escape_instead_of_returning(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

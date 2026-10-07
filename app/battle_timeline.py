@@ -106,6 +106,30 @@ def ready_timeline_head(
     )
 
 
+def adjust_timeline_entry_gauge(
+    order: TimelineOrder[Actor],
+    *,
+    entry_index: int,
+    gauge_adjustment: Real,
+) -> TimelineOrder[Actor]:
+    """Adjust one waiting gauge and stably reorder without readying the head."""
+
+    if isinstance(entry_index, bool) or not isinstance(entry_index, int):
+        raise TypeError("entry_index must be an integer")
+    if not 0 <= entry_index < len(order.entries):
+        raise ValueError("entry_index must identify a timeline entry")
+    if isinstance(gauge_adjustment, bool) or not isinstance(gauge_adjustment, Real):
+        raise TypeError("gauge_adjustment must be numeric")
+    entries = list(order.entries)
+    entry = entries[entry_index]
+    entries[entry_index] = TimelineEntry(
+        entry.actor, entry.agility, entry.gauge + gauge_adjustment
+    )
+    return TimelineOrder(
+        tuple(sorted(entries, key=lambda entry: entry.gauge, reverse=True))
+    )
+
+
 def complete_timeline_action(
     order: TimelineOrder[Actor],
     *,
@@ -221,6 +245,7 @@ __all__ = [
     "TimelineAdvance",
     "TimelineEntry",
     "TimelineOrder",
+    "adjust_timeline_entry_gauge",
     "complete_timeline_action",
     "initialize_timeline_order",
     "insert_timeline_actor",

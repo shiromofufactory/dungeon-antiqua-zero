@@ -299,13 +299,51 @@ class BattleProgressionTest(unittest.TestCase):
             member,
             (self.sword,),
             (4,),
-            defeated_enemy=True,
+            defeated_enemy_count=1,
             critical=True,
         )
         progression.settle(SaveData(), (member,))
 
         proficiency = member.proficiency(ProficiencyKind.SWORD)
         self.assertEqual((proficiency.level, proficiency.progress), (2, 1))
+
+    def test_weapon_counts_each_defeat_but_keeps_only_the_largest_action_award(
+        self,
+    ) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        member.proficiency(ProficiencyKind.SWORD).progress = 95
+        progression = BattleProgression(
+            tuple(EnemyProgressionData(level, 0, 1, 0) for level in (2, 3, 4))
+        )
+
+        progression.record_weapon_action(
+            member,
+            (self.sword,),
+            (2, 3, 4),
+            defeated_enemy_count=3,
+            critical=True,
+        )
+        progression.record_weapon_action(
+            member,
+            (self.sword,),
+            (4,),
+            defeated_enemy_count=1,
+        )
+        progression.settle(SaveData(), (member,))
+
+        # Highest enemy LV 4 + aptitude 1 - weapon LV 1 + 3 defeats + 1 critical.
+        proficiency = member.proficiency(ProficiencyKind.SWORD)
+        self.assertEqual((proficiency.level, proficiency.progress), (2, 3))
+
+    def test_weapon_rejects_invalid_defeat_counts(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        progression = BattleProgression((EnemyProgressionData(4, 0, 1, 0),))
+
+        for count in (True, -1, 1.5):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                progression.record_weapon_action(
+                    member, (self.sword,), (4,), defeated_enemy_count=count
+                )
 
     def test_spell_uses_highest_enemy_level_and_cumulative_paid_mp(self) -> None:
         member = Member.from_record(member_record("Mage"))

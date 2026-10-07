@@ -536,6 +536,10 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 速度補正から実効素早さを求める共通ルールはPyxel非依存の `app/battle_speed.py` が所有する。
 味方の速度補正は `Member`、敵の速度補正は `MonsterBattleState` が戦闘中だけ保持し、
 `BattleScene` は現在の実効素早さをタイムライン再挿入と物理攻撃へ渡す。
+待機中の個体に対するゲージ補正と安定した並べ替えはPyxel非依存の `app/battle_timeline.py` が
+所有する。`BattleScene` はスロウの適用契機に対象個体のゲージを補正し、表示順を同期する。
+オートバトル予測も同じ素早さ・ゲージ補正処理を利用する。効果量と相殺の規則は
+[`features/battle.md`](./features/battle.md) を参照する。
 通常ランダムエンカウントの不意打ち抽選値は、Pyxel非依存の `app/battle_surprise.py` が
 味方・敵それぞれの素早さ列から浮動小数を使わず算出する。遭遇元による抽選可否、乱数の取得、
 「けいかい」保有者の選択、反転隊列、未到達メンバー、および隊列復帰アニメーションは

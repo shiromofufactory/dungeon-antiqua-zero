@@ -37,11 +37,12 @@ if __package__:
         resolve_physical_additional_effect,
         resolve_physical_attack,
     )
-    from .battle_speed import modified_agility
+    from .battle_speed import SLOW_GAUGE_ADJUSTMENT, modified_agility
     from .battle_timeline import (
         GAUGE_READY_VALUE,
         TimelineEntry,
         TimelineOrder,
+        adjust_timeline_entry_gauge,
         complete_timeline_action,
         insert_timeline_actor,
         ready_timeline_head,
@@ -84,11 +85,12 @@ else:
         resolve_physical_additional_effect,
         resolve_physical_attack,
     )
-    from battle_speed import modified_agility
+    from battle_speed import SLOW_GAUGE_ADJUSTMENT, modified_agility
     from battle_timeline import (
         GAUGE_READY_VALUE,
         TimelineEntry,
         TimelineOrder,
+        adjust_timeline_entry_gauge,
         complete_timeline_action,
         insert_timeline_actor,
         ready_timeline_head,
@@ -1028,7 +1030,7 @@ class BattleForecast:
                         elif spell.action is SpellAction.CONFUSE:
                             self.apply_extra(actor, target, AdditionalEffect.CONFUSE)
                         elif spell.action is SpellAction.SLOW:
-                            target.speed = 0 if target.speed > 0 else -1
+                            self.apply_slow(target)
                         elif spell.action is SpellAction.BREAK:
                             target.protection = (
                                 0 if target.protection > 0 else -1
@@ -1044,6 +1046,21 @@ class BattleForecast:
                         if spell.attribute is ResistanceType.POISON:
                             target.poisoned = True
         actor.hidden = False
+
+    def apply_slow(self, target: ForecastActor) -> None:
+        """Use the live speed stages and immediate waiting-gauge penalty."""
+
+        if not target.is_alive or target.speed <= -1:
+            return
+        target.speed = 0 if target.speed > 0 else -1
+        for index, entry in enumerate(self.order.entries):
+            if entry.actor == target.spec.number:
+                self.order = adjust_timeline_entry_gauge(
+                    self.order,
+                    entry_index=index,
+                    gauge_adjustment=SLOW_GAUGE_ADJUSTMENT,
+                )
+                return
 
     def status_success(self, actor, target, spell, modifier):
         return resolve_status_spell(
@@ -1242,7 +1259,7 @@ class BattleForecast:
                             elif spell.action is SpellAction.SILENCE:
                                 self.apply_extra(actor, target, AdditionalEffect.SILENCE)
                             elif spell.action is SpellAction.SLOW:
-                                target.speed = 0 if target.speed > 0 else -1
+                                self.apply_slow(target)
                             else:
                                 target.protection = (
                                     0 if target.protection > 0 else -1
