@@ -321,7 +321,7 @@ class GameMenuTest(unittest.TestCase):
                 for placement, target in zip(menu.window.texts, menu.cursor.targets):
                     x, _y = menu.window.text_position(placement)
                     self.assertEqual(x, left)
-                    self.assertEqual(target.x, placement.x - 4)
+                    self.assertEqual(target.x, placement.x - 3)
                 for expected in (
                     GameMenuAction.RETURN_TITLE, GameMenuAction.QUIT, GameMenuAction.RESUME,
                 ):

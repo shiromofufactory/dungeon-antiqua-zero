@@ -384,6 +384,53 @@ class EventRunnerTest(unittest.TestCase):
         self.assertTrue(runner.is_complete)
         self.assertEqual(self.inventory.quantity("POTION"), 0)
 
+    def test_branch_detects_dead_active_members_in_field_and_battle(self) -> None:
+        self.party.join("Alvan")
+        fiora, alvan = self.party.active_party
+        commands = [{
+            "command": "branch",
+            "condition": {"type": "any_member_dead"},
+            "then": [{"command": "message", "message_id": "sample.dead"}],
+            "else": [{"command": "message", "message_id": "sample.alive"}],
+        }]
+        alvan.poisoned = True
+        for context in EventContext:
+            for health in ((1, 1), (0, 1), (1, 0), (0, 0)):
+                with self.subTest(context=context, health=health):
+                    fiora.hp, alvan.hp = health
+                    runner = self.runner(commands)
+                    runner.context = context
+                    expected = "sample.dead" if 0 in health else "sample.alive"
+                    self.assertEqual(runner.advance(), MessageEffect(expected))
+                    self.assertEqual((fiora.hp, alvan.hp), health)
+                    self.assertTrue(alvan.poisoned)
+
+        fiora.hp, alvan.hp = 1, 0
+        self.party.leave("Alvan")
+        self.assertIs(self.party.character_states["Alvan"], alvan)
+        self.assertEqual(self.runner(commands).advance(), MessageEffect("sample.alive"))
+
+    def test_death_condition_rechecks_health_after_event_recovery(self) -> None:
+        self.party.join("Alvan")
+        self.party.active_party[1].hp = 0
+        runner = self.runner([
+            {
+                "command": "branch",
+                "condition": {"type": "any_member_dead"},
+                "then": [{"command": "recover_party"}],
+                "else": [{"command": "end_event"}],
+            },
+            {
+                "command": "branch",
+                "condition": {"type": "not", "condition": {"type": "any_member_dead"}},
+                "then": [{"command": "message", "message_id": "sample.recovered"}],
+                "else": [],
+            },
+        ])
+
+        self.assertEqual(runner.advance(), MessageEffect("sample.recovered"))
+        self.assertTrue(all(member.is_alive for member in self.party.active_party))
+
     def test_end_event_inside_branch_skips_all_remaining_commands(self) -> None:
         runner = self.runner(
             [

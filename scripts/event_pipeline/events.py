@@ -126,7 +126,9 @@ def _validate_condition(
         _diagnostic(diagnostics, "error", "condition_too_deep", path, f"条件の入れ子は{MAX_BRANCH_DEPTH}段までです。")
         return
     condition_type = value.get("type")
-    if condition_type == "flag_set":
+    if condition_type == "any_member_dead":
+        _known_fields(value, {"type"}, diagnostics, path)
+    elif condition_type == "flag_set":
         _known_fields(value, {"type", "flag_id"}, diagnostics, path)
         flag_id = value.get("flag_id")
         if not isinstance(flag_id, str) or flag_id not in flag_ids:

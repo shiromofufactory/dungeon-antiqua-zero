@@ -14,6 +14,22 @@ from tools.event_editor.server import EventEditorApplication, create_server
 
 
 class EventEditorServerTest(unittest.TestCase):
+    def test_saves_death_branch_and_rejects_extra_condition_attributes(self) -> None:
+        branch = {
+            "command": "branch", "condition": {"type": "any_member_dead"},
+            "then": [{"command": "recover_party"}], "else": [],
+        }
+        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "recover", "commands": [branch]}]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["events"]["sample.recover"]["commands"], [branch])
+        self.assertEqual(self.get_json("/api/document?token=test-token")["data"], data)
+        branch["condition"]["flag_id"] = "story.done"
+        result = self.post_json("/api/save", data)
+        self.assertFalse(result["saved"])
+        self.assertEqual({item["code"] for item in result["diagnostics"]}, {"unknown_field"})
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
     def test_saves_bgm_stop_and_rejects_extra_attributes(self) -> None:
         command = {"command": "stop_bgm"}
         data = {"format_version": 1, "namespace": "sample", "events": [{"id": "stop", "commands": [command]}]}

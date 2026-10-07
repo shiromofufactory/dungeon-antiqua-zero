@@ -6,6 +6,22 @@ from app.rendering.screen_effects import ScreenBrightness, ScreenShake
 
 
 class ScreenEffectsTest(unittest.TestCase):
+    def test_initial_darkness_is_immediate_and_event_brightens_from_zero(self) -> None:
+        brightness = ScreenBrightness(initial_percent=0)
+        self.assertEqual(brightness.rate, 0.0)
+        self.assertFalse(brightness.is_active)
+        brightness.update()
+        self.assertEqual(brightness.rate, 0.0)
+
+        brightness.start(50)
+        self.assertEqual(brightness.rate, 0.0)
+        for frame in range(1, 31):
+            brightness.update()
+            self.assertAlmostEqual(brightness.rate, 0.5 * frame / 30)
+        self.assertFalse(brightness.is_active)
+        brightness.update()
+        self.assertEqual(brightness.rate, 0.5)
+
     def test_brightness_interpolates_from_current_rate_and_retains_target(self) -> None:
         brightness = ScreenBrightness()
         for percent in (25, 0, 75, 50, 0, 100):
@@ -40,6 +56,8 @@ class ScreenEffectsTest(unittest.TestCase):
         for percent in (None, True, False, 0.0, 25.0, "50", -25, 26, 125):
             with self.subTest(percent=percent), self.assertRaises(ValueError):
                 brightness.start(percent)
+            with self.subTest(initial_percent=percent), self.assertRaises(ValueError):
+                ScreenBrightness(initial_percent=percent)
         for frames in (None, True, 6.0, "6", 0, -6, 7):
             with self.subTest(frames=frames), self.assertRaises(ValueError):
                 ScreenShake(frames)

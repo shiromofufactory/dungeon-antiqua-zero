@@ -11,10 +11,12 @@ SHAKE_OFFSETS = (0, 1, 2, 0, -2, -1)
 class ScreenBrightness:
     """Keep the chosen brightness after interpolating from the current value."""
 
-    def __init__(self) -> None:
-        self.rate = 1.0
-        self._start_rate = 1.0
-        self._target_rate = 1.0
+    def __init__(self, *, initial_percent: int = 100) -> None:
+        if type(initial_percent) is not int or initial_percent not in BRIGHTNESS_PERCENTAGES:
+            raise ValueError("brightness percent must be 0, 25, 50, 75 or 100")
+        self.rate = initial_percent / 100
+        self._start_rate = self.rate
+        self._target_rate = self.rate
         self.elapsed_frames = BRIGHTNESS_CHANGE_FRAMES
 
     @property

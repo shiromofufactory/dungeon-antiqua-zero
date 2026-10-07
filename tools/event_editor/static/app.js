@@ -498,6 +498,16 @@ function listForKind(kind) {
   return null;
 }
 
+function insertListItem(kind, item) {
+  const items = listForKind(kind);
+  const selectionKey = `selected${kind[0].toUpperCase()}${kind.slice(1)}`;
+  const selectedIndex = state[selectionKey];
+  const insertionIndex = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < items.length
+    ? selectedIndex + 1 : items.length;
+  items.splice(insertionIndex, 0, item);
+  state[selectionKey] = insertionIndex;
+}
+
 function moveListItem(kind, sourceIndex, targetIndex) {
   const items = listForKind(kind);
   if (!items || !items[sourceIndex] || targetIndex < 0 || targetIndex > items.length) {
@@ -657,9 +667,9 @@ function renderCondition(condition, commandPath, path) {
       <div>${renderCondition(child, commandPath, `${path}/conditions/${index}`)}<button class="danger icon" data-action="delete-condition" data-command-path="${commandPath}" data-condition-path="${path}" data-index="${index}">条件を削除</button></div>
     `).join("")}<button class="icon" data-action="add-condition" data-command-path="${commandPath}" data-condition-path="${path}">子条件を追加</button></div>`;
   }
-  const types = ["flag_set", "member_in_party", "item_at_least", "all", "any", "not"];
+  const types = ["flag_set", "member_in_party", "any_member_dead", "item_at_least", "all", "any", "not"];
   return `<div class="condition">
-    <div class="field"><label>条件</label><select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="type">${types.map((value) => `<option ${value === type ? "selected" : ""}>${value}</option>`).join("")}</select></div>
+    <div class="field"><label>条件</label><select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="type">${types.map((value) => `<option value="${value}" ${value === type ? "selected" : ""}>${value === "any_member_dead" ? "誰かが死亡状態のとき" : value}</option>`).join("")}</select></div>
     <div class="command-fields compact">${fields}</div>
   </div>`;
 }
@@ -861,8 +871,7 @@ function addEvent(linkToPendingActor = false) {
   let createdEvent = null;
   commit(() => {
     createdEvent = {id: uniqueId("event", state.data.events), note: "", commands: []};
-    state.data.events.push(createdEvent);
-    state.selectedEvent = state.data.events.length - 1;
+    insertListItem("event", createdEvent);
     state.mode = "event";
     if (linkToPendingActor) state.pendingActorEventId = createdEvent.id;
   });
@@ -870,6 +879,7 @@ function addEvent(linkToPendingActor = false) {
 }
 
 function defaultCondition(type = "flag_set") {
+  if (type === "any_member_dead") return {type};
   if (type === "flag_set") return {type, flag_id: fullFlags()[0] || ""};
   if (type === "member_in_party") return {type, character_key: state.catalogs.character_keys?.[0] || ""};
   if (type === "item_at_least") return {type, item_key: state.catalogs.item_keys?.[0] || "", quantity: 1};
@@ -1053,8 +1063,7 @@ document.body.addEventListener("click", (event) => {
     $("namespace-dialog").close();
   } else if (action === "add-flag") {
     commit(() => {
-      state.flags.push({flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
-      state.selectedFlag = state.flags.length - 1;
+      insertListItem("flag", {flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
       state.mode = "flag";
     });
   } else if (action === "select-flag") {
@@ -1067,8 +1076,7 @@ document.body.addEventListener("click", (event) => {
     commit(() => {
       const mission = {id: uniqueId("mission", state.missions), note: "", condition: defaultCondition(), message_id: ""};
       newMissionMessage(mission);
-      state.missions.push(mission);
-      state.selectedMission = state.missions.length - 1;
+      insertListItem("mission", mission);
       state.mode = "mission";
     });
   } else if (action === "select-mission") {
@@ -1099,13 +1107,12 @@ document.body.addEventListener("click", (event) => {
   } else if (action === "add-message") {
     commit(() => {
       const base = `${state.data.namespace}.message`;
-      state.messages.push({
+      insertListItem("message", {
         message_id: uniqueId(base, state.messages, "message_id"),
         text_ja: ["メッセージ"],
         text_en: [],
         text_zhcn: [],
       });
-      state.selectedMessage = state.messages.length - 1;
       state.mode = "message";
     });
   } else if (action === "select-message") {

@@ -50,6 +50,8 @@ def _condition_is_valid(value: object, *, depth: int = 0) -> bool:
     if not isinstance(value, dict) or not isinstance(value.get("type"), str):
         return False
     condition_type = value["type"]
+    if condition_type == "any_member_dead":
+        return set(value) == {"type"}
     if condition_type == "flag_set":
         return set(value) == {"type", "flag_id"} and isinstance(
             value.get("flag_id"), str

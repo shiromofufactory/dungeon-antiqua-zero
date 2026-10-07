@@ -4,6 +4,7 @@ from copy import deepcopy
 import unittest
 
 from scripts.event_pipeline import compile_event_sources, validate_event_sources
+from app.resources.events import EventCatalog, EventResourceError
 
 
 CATALOGS = {
@@ -51,6 +52,27 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_death_condition_compiles_and_loads_without_attributes(self) -> None:
+        source = sample_source()
+        branch = source["events"][0]["commands"][0]
+        for condition in (
+            {"type": "any_member_dead"},
+            {"type": "not", "condition": {"type": "any_member_dead"}},
+            {"type": "all", "conditions": [{"type": "any", "conditions": [{"type": "any_member_dead"}]}]},
+        ):
+            with self.subTest(condition=condition):
+                branch["condition"] = condition
+                self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+                compiled = compile_event_sources({"sample": source}, **CATALOGS)
+                self.assertEqual(compiled["events"]["sample.greeting"]["commands"][0]["condition"], condition)
+                EventCatalog.from_document(compiled)
+
+        branch["condition"] = {"type": "any_member_dead", "character_key": "Fiora"}
+        self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {"unknown_field"})
+        compiled["events"]["sample.greeting"]["commands"][0]["condition"] = branch["condition"]
+        with self.assertRaises(EventResourceError):
+            EventCatalog.from_document(compiled)
+
     def test_bgm_stop_compiles_in_both_contexts_and_rejects_extra_fields(self) -> None:
         source = sample_source()
         source["events"][0]["commands"] = [{"command": "stop_bgm"}]

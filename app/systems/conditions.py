@@ -24,6 +24,8 @@ def evaluate_condition(
         return condition["flag_id"] in save_data.event_flags
     if condition_type == "member_in_party":
         return party.contains(str(condition["character_key"]))
+    if condition_type == "any_member_dead":
+        return any(member.is_dead for member in party.active_party)
     if condition_type == "item_at_least":
         return inventory.quantity(str(condition["item_key"])) >= int(condition["quantity"])
     if condition_type in ("all", "any"):

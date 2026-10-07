@@ -32,7 +32,9 @@ from game import (
     FORMATION_ARROW_WIDTH,
     FORMATION_ARROW_Y,
     MENU_COMMANDS,
-    NEW_GAME_EVENT_ID,
+    NEW_GAME_MAP_ID,
+    NEW_GAME_START_POSITION,
+    NEW_GAME_START_FACING,
     PARTY_FACE_SIZE,
     PARTY_FACE_X,
     PARTY_FACE_Y,
@@ -62,7 +64,6 @@ from game import (
     TELEPORT_SOUND_ID,
     WELCOME_BGM_ID,
     WORLD_MAP_ID,
-    WORLD_MAP_START_POSITION,
     MenuAlertEffect,
     GameScreenChange,
     Game,
@@ -91,6 +92,7 @@ from rendering import (
     FadeThroughBlack,
     FadeEvent,
     FadePhase,
+    ScreenBrightness,
 )
 from scenes import BattlePhase, BattleResult
 from state import DisplayMode, Language, SaveData, Settings
@@ -413,8 +415,9 @@ class GameTest(unittest.TestCase):
         cursor = command_window.set_cursor.return_value
         face_image = object()
         images_class.return_value.image.return_value = face_image
-        world_map = map_resources_class.return_value.map.return_value
-        world_map.sites = ()
+        world_map = Mock(sites=())
+        new_game_map = Mock(sites=())
+        map_resources_class.return_value.map.side_effect = (world_map, new_game_map)
 
         palette_shifter = Mock()
         mock = Game(
@@ -433,23 +436,29 @@ class GameTest(unittest.TestCase):
             [call(FACES_IMAGE_ID)],
         )
         self.assertIs(mock.faces, face_image)
-        map_resources_class.return_value.map.assert_called_once_with(WORLD_MAP_ID)
+        self.assertEqual(NEW_GAME_MAP_ID, "faily_village")
         self.assertEqual(
-            (WORLD_MAP_START_POSITION.x, WORLD_MAP_START_POSITION.y),
-            (17, 39),
+            map_resources_class.return_value.map.call_args_list,
+            [call(WORLD_MAP_ID), call(NEW_GAME_MAP_ID)],
         )
+        self.assertEqual(
+            (NEW_GAME_START_POSITION.x, NEW_GAME_START_POSITION.y),
+            (39, 43),
+        )
+        self.assertIs(NEW_GAME_START_FACING, Direction.LEFT)
         field_movement_class.assert_called_once_with(
-            world_map,
-            start=WORLD_MAP_START_POSITION,
+            new_game_map,
+            start=NEW_GAME_START_POSITION,
+            facing=NEW_GAME_START_FACING,
             event_flags=mock.save_data.event_flags,
         )
         field_renderer_class.assert_called_once_with(
-            world_map,
+            new_game_map,
             screen_width=256,
             screen_height=240,
         )
         self.assertIs(mock.world_map, world_map)
-        self.assertIs(mock.current_map, world_map)
+        self.assertIs(mock.current_map, new_game_map)
         self.assertEqual(mock.world_sites.sites, ())
         self.assertEqual(
             mock.texts.text(
@@ -580,7 +589,7 @@ class GameTest(unittest.TestCase):
             [(text.text, text.x, text.y) for text in info_args[4]],
             [
                 ("Ｇｏｌｄ", 2, 1),
-                ("　　　１００", 2, 4),
+                ("　　　　　０", 2, 4),
                 ("けいけんち", 2, 7),
                 ("　　　　　０", 2, 10),
                 ("なんいど", 2, 13),
@@ -2790,6 +2799,8 @@ class GameTest(unittest.TestCase):
         loaded.inventory = InventorySystem({})
         loaded.battle_command_memory = BattleCommandMemory(global_command="escape")
         mock.settings = Settings(in_game_hints_enabled=False)
+        mock.screen_brightness = ScreenBrightness()
+        mock.palette_shifter = Mock()
         mock.pending_loaded_state = loaded
         mock.pending_loaded_map = Mock(sites=(), bgm_id="dungeon/ruins")
         mock.pending_loaded_field = Mock()
@@ -2822,6 +2833,8 @@ class GameTest(unittest.TestCase):
         self.assertTrue(mock.showing_field)
         mock.bgm.play.assert_called_once_with("dungeon/ruins")
         mock._start_field_event.assert_not_called()
+        self.assertEqual(mock.screen_brightness.rate, 1.0)
+        mock.palette_shifter.set_brightness.assert_not_called()
 
         mock.pending_loaded_state = loaded
         mock.pending_loaded_map = mock.current_map
@@ -3015,6 +3028,8 @@ class GameTest(unittest.TestCase):
         mock = Game.__new__(Game)
         calls = []
         mock.settings = Settings()
+        mock.screen_brightness = ScreenBrightness()
+        mock.palette_shifter = Mock()
         mock.battle_command_memory = BattleCommandMemory(global_command="auto")
         mock.pending_loaded_state = None
         mock.pending_loaded_map = None
@@ -3023,7 +3038,7 @@ class GameTest(unittest.TestCase):
         mock.pending_load_slot = None
         mock.start_screen = Mock()
         mock.showing_field = False
-        mock.current_map = Mock(bgm_id="da3-field")
+        mock.current_map = Mock(bgm_id="da3-town")
         mock._refresh_site_name_label = Mock()
         mock.bgm = Mock()
         mock._start_field_event = Mock()
@@ -3032,14 +3047,24 @@ class GameTest(unittest.TestCase):
             "event"
         )
 
+        def apply_brightness(rate: float) -> None:
+            self.assertEqual(rate, 0.0)
+            self.assertFalse(mock.showing_field)
+            calls.append("brightness")
+
+        mock.palette_shifter.set_brightness.side_effect = apply_brightness
+
         mock._apply_start_game()
 
         self.assertIsNone(mock.start_screen)
         self.assertTrue(mock.showing_field)
-        mock.bgm.play.assert_called_once_with("da3-field")
-        mock._start_field_event.assert_called_once_with(NEW_GAME_EVENT_ID)
+        self.assertEqual(mock.screen_brightness.rate, 0.0)
+        self.assertFalse(mock.screen_brightness.is_active)
+        mock.palette_shifter.set_brightness.assert_called_once_with(0.0)
+        mock.bgm.play.assert_called_once_with("da3-town")
+        mock._start_field_event.assert_called_once_with("faily_village.prologue")
         self.assertEqual(mock.battle_command_memory, BattleCommandMemory())
-        self.assertEqual(calls, ["bgm", "event"])
+        self.assertEqual(calls, ["brightness", "bgm", "event"])
 
     def test_fade_blocks_screen_input_and_restores_palette(self) -> None:
         mock = Game.__new__(Game)

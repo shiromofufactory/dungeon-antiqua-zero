@@ -331,8 +331,10 @@ DISPLAY_SEQUENCE = (DisplayMode.PIXEL, DisplayMode.SMOOTH)
 MOCK_INPUT_DEVICE = InputDevice.KEYBOARD
 FACES_IMAGE_ID = "faces/faces"
 WORLD_MAP_ID = "worldmap"
-WORLD_MAP_START_POSITION = FieldPosition(x=17, y=39)
-NEW_GAME_EVENT_ID = "worldmap.prologue"
+NEW_GAME_MAP_ID = "faily_village"
+NEW_GAME_START_POSITION = FieldPosition(x=39, y=43)
+NEW_GAME_START_FACING = Direction.LEFT
+NEW_GAME_EVENT_ID = "faily_village.prologue"
 RUNTIME_TEXTS_PATH = APP_ROOT / "data" / "texts.json"
 SITE_MAP_FADE_FRAME_COUNT = 12
 SITE_NAME_FONT_ROLE = FontRole.LARGE
@@ -387,7 +389,7 @@ SE_PREVIEW_SOUND_ID = 9
 GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
 WELCOME_BGM_ID = "da3-welcome"
 ENCOUNTER_JINGLE_ID = "da3-encount"
-INITIAL_GOLD = 100
+INITIAL_GOLD = 0
 INITIAL_PARTY_KEYS = ("Fiora", "Cerion")
 
 
@@ -555,17 +557,18 @@ class Game:
         self.event_messages = EventMessageCatalog.from_json()
         self.map_resources = MapResources()
         self.world_map = self.map_resources.map(WORLD_MAP_ID)
-        self.current_map = self.world_map
+        self.current_map = self.map_resources.map(NEW_GAME_MAP_ID)
         self.world_sites = WorldSiteCatalog(self.world_map.sites)
         self.current_sites = WorldSiteCatalog(self.current_map.sites)
         self.travel_system = TravelSystem(self.world_sites, self.map_resources)
         self.field = FieldMovement(
-            self.world_map,
-            start=WORLD_MAP_START_POSITION,
+            self.current_map,
+            start=NEW_GAME_START_POSITION,
+            facing=NEW_GAME_START_FACING,
             event_flags=self.save_data.event_flags,
         )
         self.field_renderer = FieldRenderer(
-            self.world_map,
+            self.current_map,
             screen_width=SCREEN_WIDTH,
             screen_height=SCREEN_HEIGHT,
         )
@@ -2776,6 +2779,9 @@ class Game:
         self.pending_loaded_field = None
         self.pending_loaded_renderer = None
         self.pending_load_slot = None
+        if is_new_game:
+            self.screen_brightness = ScreenBrightness(initial_percent=0)
+            self.palette_shifter.set_brightness(self.screen_brightness.rate)
         self.start_screen = None
         self.showing_field = True
         self._reset_field_fade()

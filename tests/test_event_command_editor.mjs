@@ -12,10 +12,10 @@ assert.notEqual(changeHandlerStart, -1);
 assert.notEqual(changeHandlerEnd, -1);
 const names = [
   'snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize',
-  'currentEvent', 'commandAt', 'listAt', 'commandPath', 'fullFlags', 'messageIds',
+  'currentEvent', 'commandAt', 'conditionAt', 'listAt', 'commandPath', 'fullFlags', 'messageIds',
   'field', 'options', 'noteSummary', 'flagOptions', 'renderCommand', 'renderDropZone',
   'renderCommandList', 'addCommand', 'defaultCondition', 'defaultCommand',
-  'addDefaultCommand',
+  'addDefaultCommand', 'renderCondition',
   'changeCommandType', 'requestBody',
 ];
 const declarations = names.map((name) => {
@@ -71,6 +71,30 @@ test('add button creates a message command with its fields and permits changing 
   assert.match(html, /data-command-field="battle_id"/);
   assert.match(html, /data-battle-monster-index="0"/);
   assert.doesNotMatch(html, /data-draft-command/);
+});
+
+test('branch death condition saves no attributes and switching types supports undo and redo', () => {
+  const { state, context, handlers } = editor();
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'branch');
+  const original = JSON.parse(context.requestBody()).data.events[0].commands[0].condition;
+  handlers.get('change')({ target: {
+    dataset: { condCommand: '0', condPath: 'condition', condField: 'type' }, value: 'any_member_dead',
+  } });
+  const condition = JSON.parse(context.requestBody()).data.events[0].commands[0].condition;
+  assert.deepEqual(condition, { type: 'any_member_dead' });
+  const html = context.renderCondition(condition, '0', 'condition');
+  assert.match(html, /value="any_member_dead" selected>誰かが死亡状態のとき<\/option>/);
+  assert.doesNotMatch(html, /data-cond-field="(?:flag_id|character_key|quantity)"|子条件を追加/);
+  context.undo();
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0].condition, original);
+  context.redo();
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0].condition, condition);
+  handlers.get('change')({ target: {
+    dataset: { condCommand: '0', condPath: 'condition', condField: 'type' }, value: 'item_at_least',
+  } });
+  assert.equal(state.data.events[0].commands[0].condition.type, 'item_at_least');
+  assert.equal(state.data.events[0].commands[0].condition.quantity, 1);
 });
 
 test('undo removes the added default message and redo restores it', () => {
