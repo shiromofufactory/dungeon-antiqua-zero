@@ -11,7 +11,7 @@ from app.member import (
     required_experience_for_level,
 )
 from app.resources.events import EventCatalog, EventResourceError
-from app.state import SaveData
+from app.state import LaunchMode, SaveData
 from app.systems import (
     ChangeBrightnessEffect,
     StopBgmEffect,
@@ -84,6 +84,28 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_launch_mode_branches_in_field_and_battle_with_nested_conditions(self) -> None:
+        for context in EventContext:
+            for mode in LaunchMode:
+                for target in LaunchMode:
+                    with self.subTest(context=context, mode=mode, target=target):
+                        condition = {"type": "all", "conditions": [
+                            {"type": "any", "conditions": [{"type": "launch_mode", "mode": target.value}]},
+                            {"type": "not", "condition": {"type": "flag_set", "flag_id": "sample.done"}},
+                        ]}
+                        catalog = EventCatalog.from_document(runtime_document([{
+                            "command": "branch", "condition": condition,
+                            "then": [{"command": "message", "message_id": "sample.matches"}],
+                            "else": [{"command": "message", "message_id": "sample.other"}],
+                        }]))
+                        runner = EventRunner.from_catalog(
+                            catalog, "sample.run", context=context,
+                            save_data=self.save_data, party=self.party,
+                            inventory=self.inventory, launch_mode=mode,
+                        )
+                        expected = "sample.matches" if mode is target else "sample.other"
+                        self.assertEqual(runner.advance(), MessageEffect(expected))
+
     def test_bgm_stop_waits_for_audio_completion_before_following_commands(self) -> None:
         for context in EventContext:
             with self.subTest(context=context):

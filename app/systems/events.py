@@ -9,11 +9,11 @@ from typing import Mapping
 if __package__ == "systems":
     from input import Direction
     from resources.events import EventCatalog, EventDefinition
-    from state import SaveData
+    from state import LaunchMode, SaveData
 else:
     from ..input import Direction
     from ..resources.events import EventCatalog, EventDefinition
-    from ..state import SaveData
+    from ..state import LaunchMode, SaveData
 
 from .conditions import evaluate_condition
 from .inventory import InventorySystem
@@ -151,16 +151,20 @@ class EventRunner:
         save_data: SaveData,
         party: PartySystem,
         inventory: InventorySystem,
+        launch_mode: LaunchMode = LaunchMode.NORMAL,
     ) -> None:
         if not isinstance(definition, EventDefinition):
             raise TypeError("definition must be an EventDefinition")
         if not isinstance(context, EventContext):
             raise TypeError("context must be an EventContext")
+        if not isinstance(launch_mode, LaunchMode):
+            raise TypeError("launch_mode must be a LaunchMode")
         self.definition = definition
         self.context = context
         self.save_data = save_data
         self.party = party
         self.inventory = inventory
+        self.launch_mode = launch_mode
         self._stack = [_Frame(definition.commands, "commands")]
         self._waiting_effect: EventEffect | None = None
         self._complete = False
@@ -310,6 +314,7 @@ class EventRunner:
         return evaluate_condition(
             condition, save_data=self.save_data,
             party=self.party, inventory=self.inventory,
+            launch_mode=self.launch_mode,
         )
 
     def _require_field(self, command_type: object) -> None:

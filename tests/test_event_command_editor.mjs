@@ -97,6 +97,29 @@ test('branch death condition saves no attributes and switching types supports un
   assert.equal(state.data.events[0].commands[0].condition.quantity, 1);
 });
 
+test('launch mode condition edits all four modes and supports undo and redo', () => {
+  const { context, handlers } = editor();
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'branch');
+  handlers.get('change')({ target: {
+    dataset: { condCommand: '0', condPath: 'condition', condField: 'type' }, value: 'launch_mode',
+  } });
+  const condition = () => JSON.parse(context.requestBody()).data.events[0].commands[0].condition;
+  assert.deepEqual(condition(), { type: 'launch_mode', mode: 'normal' });
+  const html = context.renderCondition(condition(), '0', 'condition');
+  for (const [mode, label] of [['normal', '通常モード'], ['exhibition', '試遊版モード'], ['demo', '体験版モード'], ['beta', 'βテスト版モード']]) {
+    assert.match(html, new RegExp(`value="${mode}"[^>]*>${label}</option>`));
+    handlers.get('change')({ target: {
+      dataset: { condCommand: '0', condPath: 'condition', condField: 'mode' }, value: mode,
+    } });
+    assert.deepEqual(condition(), { type: 'launch_mode', mode });
+  }
+  context.undo();
+  assert.equal(condition().mode, 'demo');
+  context.redo();
+  assert.equal(condition().mode, 'beta');
+});
+
 test('undo removes the added default message and redo restores it', () => {
   const { state, context } = editor();
   context.addDefaultCommand('');

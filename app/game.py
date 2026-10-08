@@ -73,6 +73,7 @@ from member import (
     Member,
     MemberDataError,
     Race,
+    required_experience_for_level,
 )
 from systems.auto_recovery import valid_config_for_party
 from monster import MonsterDataError
@@ -128,12 +129,13 @@ from scenes import (
     BattlePhase,
     BattleResult,
     BattleScene,
+    TitleScene,
 )
 from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
 from spell_effect import SpellEffectDataError
-from state import DisplayMode, Difficulty, Language, SaveData, Settings, SpellMode
+from state import DisplayMode, Difficulty, Language, LaunchMode, SaveData, Settings, SpellMode
 from systems import (
     AUTO_SAVE_SLOT,
     ChangeBgmEffect,
@@ -417,6 +419,7 @@ class GameScreenChange(Enum):
     CLOSE_SHOP = auto()
     CHANGE_MAP = auto()
     TELEPORT = auto()
+    SHOW_START_MENU = auto()
     START_GAME = auto()
 
 
@@ -474,7 +477,9 @@ def localized_menu_texts(
 
 
 class Game:
-    """Own the current field-first runtime state and Pyxel callbacks."""
+    """Own title, load, and gameplay state and Pyxel callbacks."""
+
+    launch_mode: LaunchMode = LaunchMode.NORMAL
 
     def __init__(
         self,
@@ -482,9 +487,13 @@ class Game:
         settings: Settings,
         palette_shifter: PaletteShifter,
         settings_repository: SettingsRepository | None = None,
+        launch_mode: LaunchMode = LaunchMode.NORMAL,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
+        if not isinstance(launch_mode, LaunchMode):
+            raise TypeError("launch_mode must be LaunchMode")
+        self.launch_mode = launch_mode
         self.settings = settings
         self.battle_command_memory = BattleCommandMemory()
         self.settings_repository = (
@@ -503,7 +512,11 @@ class Game:
         self._apply_se_volume()
         self.bgm = BgmPlayer(volume=self.settings.bgm_volume)
         self.bgm.play(WELCOME_BGM_ID)
-        self.save_data = SaveData(gold=INITIAL_GOLD)
+        initial_party_level = 3 if launch_mode is LaunchMode.EXHIBITION else 1
+        self.save_data = SaveData(
+            gold=INITIAL_GOLD,
+            experience=required_experience_for_level(initial_party_level),
+        )
         self.items = load_items()
         self.monsters = load_monsters()
         self.inventory_system = InventorySystem(self.items)
@@ -513,7 +526,10 @@ class Game:
             self.items,
             self.skills,
             character_keys=INITIAL_PARTY_KEYS,
+            fiora_internal_level=initial_party_level,
         )
+        for member in self.party:
+            member.set_joining_experience_offset(self.save_data.experience)
         self.shops = load_shops(self.items)
         self.shop_system = ShopSystem(
             shops=self.shops,
@@ -664,7 +680,16 @@ class Game:
         self.pending_load_slot: int | None = None
         self._build_main_windows()
         self._refresh_site_name_label()
-        self.start_screen: StartMenuOverlay | None = StartMenuOverlay(
+        self.start_screen: StartMenuOverlay | None = None
+        self.title_scene: TitleScene | None = TitleScene(
+            texts=self.texts,
+            fonts=self.fonts,
+            screen_width=SCREEN_WIDTH,
+            screen_height=SCREEN_HEIGHT,
+        )
+
+    def _show_start_menu(self) -> None:
+        self.start_screen = StartMenuOverlay(
             summaries=self.save_repository.summaries(),
             autosave_summary=self.save_repository.summary(AUTO_SAVE_SLOT),
             location_text_keys=self.map_resources.location_text_keys(self.world_map),
@@ -679,6 +704,13 @@ class Game:
             on_delete=self._delete_save_slot,
             on_invalid_action=self.alert.start,
         )
+        self.title_scene = None
+
+    def _finish_title(self) -> None:
+        if self.launch_mode is LaunchMode.EXHIBITION:
+            self._start_new_game()
+        else:
+            self._begin_screen_change(GameScreenChange.SHOW_START_MENU)
 
     @staticmethod
     def settings_from_environment(
@@ -1002,6 +1034,7 @@ class Game:
                 save_data=self.save_data,
                 party=self.party_system,
                 inventory=self.inventory_system,
+                launch_mode=self.launch_mode,
             )
             self.last_event_error = None
             self._continue_event()
@@ -1288,6 +1321,9 @@ class Game:
                 return
         raise ValueError(f"cursor key is not registered: {key!r}")
 
+    def _manual_save_enabled(self) -> bool:
+        return self.launch_mode is not LaunchMode.EXHIBITION
+
     def _build_main_windows(
         self,
         selected_command: str = "heal",
@@ -1323,8 +1359,13 @@ class Game:
                 localized[text_key],
                 4,
                 2 + index * 3,
+                color=(
+                    DISABLED_COLOR
+                    if command_key == "save" and not self._manual_save_enabled()
+                    else DEFAULT_TEXT_COLOR
+                ),
             )
-            for index, (_command_key, text_key) in enumerate(MENU_COMMANDS)
+            for index, (command_key, text_key) in enumerate(MENU_COMMANDS)
         )
         self.command_window = windows.create(
             48,
@@ -2019,6 +2060,11 @@ class Game:
             return self.localized[f"settings.auto_spells.{mode}"]
         raise ValueError(f"settings key has no value: {key}")
 
+    def _settings_rows(self) -> tuple[tuple[str, int], ...]:
+        if self.launch_mode is LaunchMode.NORMAL:
+            return SETTINGS_ROWS
+        return tuple((key, y) for key, y in SETTINGS_ROWS if key != "debug")
+
     def _settings_window_texts(
         self,
         selected_key: str,
@@ -2039,7 +2085,7 @@ class Game:
             "return_title": "settings.return_title",
             "quit": "settings.quit",
         }
-        for key, y in SETTINGS_ROWS:
+        for key, y in self._settings_rows():
             if key in label_keys:
                 texts.extend(
                     (
@@ -2110,7 +2156,8 @@ class Game:
         )
         self.settings_cursor = self.settings_window.set_cursor(
             tuple(
-                CursorTarget(SETTINGS_CURSOR_X, y, key=key) for key, y in SETTINGS_ROWS
+                CursorTarget(SETTINGS_CURSOR_X, y, key=key)
+                for key, y in self._settings_rows()
             )
         )
         self._select_cursor_key(self.settings_cursor, selected_key)
@@ -2137,7 +2184,7 @@ class Game:
         self._build_settings_window()
 
     def _start_debug_menu(self) -> None:
-        if self.settings_cursor is None:
+        if self.launch_mode is not LaunchMode.NORMAL or self.settings_cursor is None:
             return
         self.settings_cursor.active = False
         editor = DebugPartyEditor(
@@ -2430,6 +2477,7 @@ class Game:
                     save_data=self.save_data,
                     party=self.party_system,
                     inventory=self.inventory_system,
+                    launch_mode=self.launch_mode,
                 )
             ),
             settings=self.settings,
@@ -2445,7 +2493,7 @@ class Game:
         self.command_cursor.active = True
 
     def _begin_screen_change(self, change: GameScreenChange) -> None:
-        """Reserve one menu-related screen replacement and begin fading out."""
+        """Reserve one screen replacement and begin fading out."""
 
         if not isinstance(change, GameScreenChange):
             raise TypeError("field screen change must be a GameScreenChange")
@@ -2559,6 +2607,8 @@ class Game:
             self._apply_pending_teleport()
         elif change is GameScreenChange.START_GAME:
             self._apply_start_game()
+        elif change is GameScreenChange.SHOW_START_MENU:
+            self._show_start_menu()
         else:
             raise RuntimeError(f"unsupported field screen change: {change}")
         self.pending_screen_change = None
@@ -2655,6 +2705,9 @@ class Game:
         self.menu_member_selected = True
 
     def _start_save(self) -> None:
+        if not self._manual_save_enabled():
+            self.alert.start()
+            return
         self.command_cursor.active = False
         self.save_screen = SaveMenuOverlay(
             summaries=self.save_repository.summaries(),
@@ -2699,7 +2752,7 @@ class Game:
         self._save_to_slot(AUTO_SAVE_SLOT)
 
     def _start_new_game(self) -> None:
-        """Fade from the opening selector into the initialized new game."""
+        """Fade from the title or load menu into the initialized new game."""
 
         self.pending_loaded_state = None
         self.pending_load_slot = None
@@ -2811,6 +2864,7 @@ class Game:
         if is_new_game:
             self.screen_brightness = ScreenBrightness(initial_percent=0)
             self.palette_shifter.set_brightness(self.screen_brightness.rate)
+        self.title_scene = None
         self.start_screen = None
         self.showing_field = True
         self._reset_field_fade()
@@ -3082,6 +3136,7 @@ class Game:
             settings=settings,
             palette_shifter=palette_shifter,
             settings_repository=self.settings_repository,
+            launch_mode=self.launch_mode,
         )
         self._load_mission_hint_shown_this_launch = load_mission_hint_shown
 
@@ -3128,6 +3183,7 @@ class Game:
                 save_data=self.save_data,
                 party=self.party_system,
                 inventory=self.inventory_system,
+                launch_mode=self.launch_mode,
             )
             self.event_release_direction = release_direction
             self.event_release_confirm = release_confirm
@@ -3681,6 +3737,7 @@ class Game:
             and all(
                 getattr(self, attribute, None) is None
                 for attribute in (
+                    "title_scene",
                     "start_screen",
                     "shop_screen",
                     "battle_scene",
@@ -3763,6 +3820,7 @@ class Game:
         save_data = getattr(self, "save_data", None)
         if (
             not isinstance(save_data, SaveData)
+            or getattr(self, "title_scene", None) is not None
             or getattr(self, "start_screen", None) is not None
             or getattr(self, "_returning_to_start", False)
         ):
@@ -3813,6 +3871,11 @@ class Game:
             self._update_return_to_start(input_state)
             return
         if self._update_fade():
+            return
+        title_scene = getattr(self, "title_scene", None)
+        if title_scene is not None:
+            if title_scene.update(input_state):
+                self._finish_title()
             return
         start_screen = getattr(self, "start_screen", None)
         if start_screen is not None:
@@ -4012,6 +4075,9 @@ class Game:
             self._start_settings()
             return
         if input_state.confirm.triggered and self.command_cursor.selected_key == "save":
+            if not self._manual_save_enabled():
+                self.alert.start()
+                return
             self._begin_screen_change(GameScreenChange.OPEN_SAVE)
             return
         self.command_window.update(input_state.navigation)
@@ -4046,6 +4112,10 @@ class Game:
                 hint_overlay = getattr(self, "hint_overlay", None)
                 if hint_overlay is not None:
                     hint_overlay.draw()
+                return
+            title_scene = getattr(self, "title_scene", None)
+            if title_scene is not None:
+                title_scene.draw()
                 return
             start_screen = getattr(self, "start_screen", None)
             if start_screen is not None:

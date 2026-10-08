@@ -52,6 +52,31 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_launch_mode_condition_compiles_and_loads(self) -> None:
+        source = sample_source()
+        branch = source["events"][0]["commands"][0]
+        for mode in ("normal", "exhibition", "demo", "beta"):
+            with self.subTest(mode=mode):
+                condition = {"type": "launch_mode", "mode": mode}
+                branch["condition"] = condition
+                self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+                compiled = compile_event_sources({"sample": source}, **CATALOGS)
+                loaded = EventCatalog.from_document(compiled)
+                self.assertEqual(dict(loaded.event("sample.greeting").commands[0]["condition"]), condition)
+
+        for condition, code in (
+            ({"type": "launch_mode"}, "invalid_launch_mode"),
+            *(({"type": "launch_mode", "mode": value}, "invalid_launch_mode")
+              for value in (None, True, 1, [], {}, "unknown", "NORMAL")),
+            ({"type": "launch_mode", "mode": "normal", "extra": True}, "unknown_field"),
+        ):
+            with self.subTest(condition=condition):
+                branch["condition"] = condition
+                self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {code})
+                compiled["events"]["sample.greeting"]["commands"][0]["condition"] = condition
+                with self.assertRaises(EventResourceError):
+                    EventCatalog.from_document(compiled)
+
     def test_death_condition_compiles_and_loads_without_attributes(self) -> None:
         source = sample_source()
         branch = source["events"][0]["commands"][0]

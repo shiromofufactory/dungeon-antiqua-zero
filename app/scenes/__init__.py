@@ -7,6 +7,7 @@ from .battle import (
     BattleResult,
     BattleScene,
 )
+from .title import TitleScene
 
 __all__ = [
     "BattleDataError",
@@ -14,4 +15,5 @@ __all__ = [
     "BattlePhase",
     "BattleResult",
     "BattleScene",
+    "TitleScene",
 ]

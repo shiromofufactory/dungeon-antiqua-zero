@@ -19,6 +19,7 @@ FULL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 CHARACTER_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9 _+!&'\-]*$")
 CARDINAL_DIRECTIONS = frozenset(("up", "right", "down", "left"))
 FLASH_COLORS = frozenset(("white",))
+LAUNCH_MODES = frozenset(("normal", "exhibition", "demo", "beta"))
 
 
 class EventSourceError(ValueError):
@@ -126,7 +127,12 @@ def _validate_condition(
         _diagnostic(diagnostics, "error", "condition_too_deep", path, f"条件の入れ子は{MAX_BRANCH_DEPTH}段までです。")
         return
     condition_type = value.get("type")
-    if condition_type == "any_member_dead":
+    if condition_type == "launch_mode":
+        _known_fields(value, {"type", "mode"}, diagnostics, path)
+        mode = value.get("mode")
+        if not isinstance(mode, str) or mode not in LAUNCH_MODES:
+            _diagnostic(diagnostics, "error", "invalid_launch_mode", f"{path}.mode", "modeはnormal、exhibition、demo、betaのいずれかで指定してください。")
+    elif condition_type == "any_member_dead":
         _known_fields(value, {"type"}, diagnostics, path)
     elif condition_type == "flag_set":
         _known_fields(value, {"type", "flag_id"}, diagnostics, path)

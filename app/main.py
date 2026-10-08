@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+import argparse
 from pathlib import Path
 
 import pyxel
@@ -14,7 +16,7 @@ from game import (
     Game,
 )
 from rendering import PaletteShifter, create_default_palette_shifter
-from state import DisplayMode, Settings
+from state import DisplayMode, LaunchMode, Settings
 from systems import SettingsRepository
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -43,7 +45,7 @@ def initialize_game(settings: Settings) -> PaletteShifter:
     return create_default_palette_shifter()
 
 
-def run_game() -> None:
+def run_game(launch_mode: LaunchMode = LaunchMode.NORMAL) -> None:
     """Create the current game flow and connect it to Pyxel callbacks."""
 
     settings_repository = SettingsRepository()
@@ -53,15 +55,24 @@ def run_game() -> None:
         settings=settings,
         palette_shifter=palette_shifter,
         settings_repository=settings_repository,
+        launch_mode=launch_mode,
     )
     pyxel.run(game.update, game.draw)
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Normalize expected startup failures into a command exit code."""
 
+    parser = argparse.ArgumentParser(description=WINDOW_TITLE)
+    parser.add_argument(
+        "--mode",
+        choices=tuple(mode.value for mode in LaunchMode),
+        default=LaunchMode.NORMAL.value,
+        help="起動モード: normal=通常、exhibition=試遊版、demo=体験版、beta=βテスト版",
+    )
+    arguments = parser.parse_args(argv)
     try:
-        run_game()
+        run_game(LaunchMode(arguments.mode))
         return 0
     except GAME_ERRORS as error:
         print(error)

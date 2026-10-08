@@ -36,7 +36,8 @@
 
 ## 機能一覧
 
-- [スタート・ロード画面](./start-load.md)
+- [タイトル・スタート・ロード画面](./start-load.md)
+- [起動モード](./launch-modes.md)
 - [セーブデータ形式](./save-data.md)
 - [フィールド・メニュー](./field.md)
 - [ゲームメニュー（強制割り込み）](./game-menu.md)

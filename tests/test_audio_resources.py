@@ -241,7 +241,7 @@ class BgmPlayerTest(unittest.TestCase):
     def test_plays_stable_se_id_from_shared_catalog(self) -> None:
         pyxel = Mock()
 
-        play_se("confirm", pyxel_api=pyxel)
+        play_se("spell_healing1", pyxel_api=pyxel)
 
         pyxel.play.assert_called_once_with(1, 9)
         self.assertTrue(
@@ -255,14 +255,14 @@ class BgmPlayerTest(unittest.TestCase):
                 "battle_monster_death",
                 "battle_weapon_blunt",
                 "battle_weapon_slash",
-                "confirm",
+                "spell_healing1",
                 "result_increment",
                 "teleport",
                 "treasure_open",
             }
             <= set(list_se_ids())
         )
-        self.assertEqual(se_channel_and_sound("confirm"), (1, 9))
+        self.assertEqual(se_channel_and_sound("spell_healing1"), (1, 9))
         self.assertEqual(se_channel_and_sound("battle_escape"), (0, 26))
         self.assertEqual(se_channel_and_sound("battle_focus"), (0, 37))
         self.assertEqual(se_channel_and_sound("battle_hide"), (0, 30))

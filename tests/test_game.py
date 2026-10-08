@@ -157,11 +157,13 @@ class GamePlayTimeTest(unittest.TestCase):
                 self.assertEqual(game.save_data.play_time_frames, 60)
 
     def test_start_screen_and_return_to_start_do_not_count(self) -> None:
-        for screen in ("start", "return_to_start"):
+        for screen in ("title", "start", "return_to_start"):
             with self.subTest(screen=screen):
                 game = self.game()
                 game.save_data.play_time_frames = 890
-                if screen == "start":
+                if screen == "title":
+                    game.title_scene = Mock(update=Mock(return_value=False))
+                elif screen == "start":
                     game.start_screen = Mock()
                 else:
                     game._returning_to_start = True
@@ -401,6 +403,8 @@ class GameTest(unittest.TestCase):
     ) -> None:
         fonts = fonts_class.return_value
         font = fonts.font_for.return_value
+        font.text_width.side_effect = lambda text: len(text) * 6
+        fonts.line_height_for.return_value = 8
         fonts.baseline_offset_for.return_value = 0
         factory = window_factory_class.return_value
         party_window = Mock()
@@ -477,6 +481,7 @@ class GameTest(unittest.TestCase):
                 call(Language.JAPANESE),
                 call(Language.JAPANESE),
                 call(Language.JAPANESE),
+                call(Language.ENGLISH),
             ],
         )
         window_factory_class.assert_called_once_with(font)
@@ -562,7 +567,9 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.pending_settings_action)
         self.assertFalse(mock.animate_main_windows_with_fade)
         self.assertFalse(mock.showing_field)
-        self.assertIs(mock.start_screen, start_menu_class.return_value)
+        self.assertIsNone(mock.start_screen)
+        self.assertIsNotNone(mock.title_scene)
+        start_menu_class.assert_not_called()
         self.assertIsNone(mock.item_screen)
         self.assertIsNone(mock.equipment_screen)
         self.assertIsNone(mock.status_screen)
@@ -4419,6 +4426,7 @@ class GameTest(unittest.TestCase):
             settings=mock.settings,
             palette_shifter=mock.palette_shifter,
             settings_repository=mock.settings_repository,
+            launch_mode=mock.launch_mode,
         )
         self.assertTrue(mock._load_mission_hint_shown_this_launch)
 

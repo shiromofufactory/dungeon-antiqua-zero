@@ -9,6 +9,11 @@ import re
 from types import MappingProxyType
 from typing import Mapping
 
+if __package__ == "resources":
+    from state import LaunchMode
+else:
+    from ..state import LaunchMode
+
 
 EVENT_FORMAT_VERSION = 1
 EVENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
@@ -50,6 +55,12 @@ def _condition_is_valid(value: object, *, depth: int = 0) -> bool:
     if not isinstance(value, dict) or not isinstance(value.get("type"), str):
         return False
     condition_type = value["type"]
+    if condition_type == "launch_mode":
+        return (
+            set(value) == {"type", "mode"}
+            and isinstance(value.get("mode"), str)
+            and value["mode"] in tuple(mode.value for mode in LaunchMode)
+        )
     if condition_type == "any_member_dead":
         return set(value) == {"type"}
     if condition_type == "flag_set":

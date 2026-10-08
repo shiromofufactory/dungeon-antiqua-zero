@@ -8,7 +8,7 @@ from tools._bootstrap import APP_ROOT
 import main as game_main
 from game import Game
 from rendering import PaletteShifter
-from state import DisplayMode, Settings
+from state import DisplayMode, LaunchMode, Settings
 
 
 class MainTest(unittest.TestCase):
@@ -76,12 +76,32 @@ class MainTest(unittest.TestCase):
             settings=settings,
             palette_shifter=palette,
             settings_repository=settings_repository,
+            launch_mode=LaunchMode.NORMAL,
         )
         run.assert_called_once_with(game.update, game.draw)
 
     def test_main_returns_keyboard_interrupt_exit_code(self) -> None:
         with patch("main.run_game", side_effect=KeyboardInterrupt):
-            self.assertEqual(game_main.main(), 130)
+            self.assertEqual(game_main.main([]), 130)
+
+    def test_launch_options_select_each_mode(self) -> None:
+        for mode in LaunchMode:
+            with self.subTest(mode=mode), patch("main.run_game") as run:
+                self.assertEqual(game_main.main(["--mode", mode.value]), 0)
+                run.assert_called_once_with(mode)
+        with patch("main.run_game") as run:
+            self.assertEqual(game_main.main([]), 0)
+            run.assert_called_once_with(LaunchMode.NORMAL)
+
+    def test_invalid_launch_mode_does_not_initialize_game(self) -> None:
+        with (
+            patch("main.run_game") as run,
+            patch("sys.stderr"),
+            self.assertRaises(SystemExit) as error,
+        ):
+            game_main.main(["--mode", "unknown"])
+        self.assertEqual(error.exception.code, 2)
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

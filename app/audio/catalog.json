@@ -45,10 +45,6 @@
       "channel": 0,
       "sound": 29
     },
-    "confirm": {
-      "channel": 1,
-      "sound": 9
-    },
     "field_poison": {
       "channel": 3,
       "sound": 43

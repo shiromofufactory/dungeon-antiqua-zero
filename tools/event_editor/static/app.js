@@ -653,7 +653,9 @@ function conditionAt(command, path) {
 function renderCondition(condition, commandPath, path) {
   const type = condition?.type || "flag_set";
   let fields = "";
-  if (type === "flag_set") {
+  if (type === "launch_mode") {
+    fields = field("起動モード", `<select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="mode">${[["normal", "通常モード"], ["exhibition", "試遊版モード"], ["demo", "体験版モード"], ["beta", "βテスト版モード"]].map(([value, label]) => `<option value="${value}" ${value === condition.mode ? "selected" : ""}>${label}</option>`).join("")}</select>`, true);
+  } else if (type === "flag_set") {
     fields = field("フラグ", `<select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="flag_id">${flagOptions(condition.flag_id)}</select>`, true);
   } else if (type === "member_in_party") {
     fields = field("メンバー", `<select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="character_key">${options(state.catalogs.character_keys || [], condition.character_key)}</select>`, true);
@@ -667,9 +669,9 @@ function renderCondition(condition, commandPath, path) {
       <div>${renderCondition(child, commandPath, `${path}/conditions/${index}`)}<button class="danger icon" data-action="delete-condition" data-command-path="${commandPath}" data-condition-path="${path}" data-index="${index}">条件を削除</button></div>
     `).join("")}<button class="icon" data-action="add-condition" data-command-path="${commandPath}" data-condition-path="${path}">子条件を追加</button></div>`;
   }
-  const types = ["flag_set", "member_in_party", "any_member_dead", "item_at_least", "all", "any", "not"];
+  const types = ["flag_set", "member_in_party", "any_member_dead", "item_at_least", "launch_mode", "all", "any", "not"];
   return `<div class="condition">
-    <div class="field"><label>条件</label><select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="type">${types.map((value) => `<option value="${value}" ${value === type ? "selected" : ""}>${value === "any_member_dead" ? "誰かが死亡状態のとき" : value}</option>`).join("")}</select></div>
+    <div class="field"><label>条件</label><select data-cond-command="${commandPath}" data-cond-path="${path}" data-cond-field="type">${types.map((value) => `<option value="${value}" ${value === type ? "selected" : ""}>${value === "any_member_dead" ? "誰かが死亡状態のとき" : value === "launch_mode" ? "起動モード" : value}</option>`).join("")}</select></div>
     <div class="command-fields compact">${fields}</div>
   </div>`;
 }
@@ -879,6 +881,7 @@ function addEvent(linkToPendingActor = false) {
 }
 
 function defaultCondition(type = "flag_set") {
+  if (type === "launch_mode") return {type, mode: "normal"};
   if (type === "any_member_dead") return {type};
   if (type === "flag_set") return {type, flag_id: fullFlags()[0] || ""};
   if (type === "member_in_party") return {type, character_key: state.catalogs.character_keys?.[0] || ""};

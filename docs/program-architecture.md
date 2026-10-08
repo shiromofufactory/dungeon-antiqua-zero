@@ -54,8 +54,9 @@ Pyxelの `update()` と `draw()` はエンジンとの接続口であり、ア�
 ```text
 app/
 ├── main.py                   # Pyxel初期化、共通資産読込、Game生成、pyxel.run
-├── game.py                   # スタート画面・フィールド間の調停とPyxelコールバック
+├── game.py                   # タイトル・ロード画面・フィールド間の調停とPyxelコールバック
 ├── scenes/
+│   ├── title.py              # 仮タイトルの決定入力と中央の文言描画
 │   └── battle.py             # 本編と単独テストで共有する戦闘Scene
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
@@ -69,7 +70,7 @@ app/
 ├── input.py                  # Pyxel入力を論理InputStateへ変換
 ├── field.py                  # タイル単位のフィールド移動状態と通行判定
 ├── world_sites.py            # ワールド拠点のセル検索と訪問済み候補の抽出
-├── state.py                  # SettingsとSaveData
+├── state.py                  # LaunchMode、Settings、SaveData
 ├── localization.py           # 多言語フィールドの選択とフォールバック
 ├── item_detail.py            # メニュー・店・戦闘で共有するアイテム詳細表現
 ├── systems/
@@ -85,7 +86,7 @@ app/
 ├── ui/
 │   ├── battle_result.py      # 6人リザルト、待機、数値補間、増加SE
 │   ├── input_icons.py        # 論理操作と入力種別から表示タグを選択
-│   ├── start_menu.py         # 起動直後のロード・削除Overlay
+│   ├── start_menu.py         # タイトル後のロード・削除Overlay
 │   ├── save_menu.py          # プレイ中の手動セーブOverlay
 │   ├── item_menu.py          # アイテムメニューOverlay
 │   ├── equipment_menu.py     # 装備メニューOverlay
@@ -963,6 +964,22 @@ guide.draw()
 
 状態は寿命と所有者で分ける。
 
+### 起動モード
+
+`state.LaunchMode` はプロセス単位の起動条件を表す。`main.py` が起動オプションを解析し、
+`Game` へ注入する。Gameは起動中のモードを保持し、再初期化時も同じ値を引き継ぐ。
+Settings／SaveDataへ含めず、ロード対象のデータからモードを変更しない。
+
+初期パーティ生成は `game_data.create_party()` へフィオラの開始LVを明示して依頼する。
+GameはDomain Modelの必要経験値計算を使って初期共有経験値を設定し、各Memberの
+`set_joining_experience_offset()` で開始LVをその共有経験値へ対応付ける。
+初期HP・MPもDomain Modelの計算から生成し、戦闘側に起動モード判定を
+分散させない。Gameはメニュー項目の表示と、手動セーブ・デバッグ画面の開始可否も判断する。
+
+イベントRunnerと共通条件評価器はGameへの逆参照を持たず、`LaunchMode` の値だけを受け取る。
+フィールド・戦闘イベントとミッション条件のすべてへ同じ起動モードを渡す。
+具体的なモードと操作・受け入れ条件は [起動モード仕様](./features/launch-modes.md) を参照する。
+
 ### Settings
 
 端末やプレイヤー設定。BGM、SE、言語、表示倍率、表示方式、画面フラッシュ、キー配置などを持つ。
@@ -1358,13 +1375,16 @@ HP・MP、状態異常、戦闘中補正を全回復してから入口直前へ�
 メインWindowは開いた状態で生成し、アニメーションを繰り返さない。いずれかのWindowが開閉中は入力を受け付けず、
 パーティの顔画像とカーソルも所属Windowが完全に開いてから表示する。
 フィールドと接続済み画面の詳細は [`features/field.md`](./features/field.md) を正本とする。
-現在のゲームは起動直後に `ui/start_menu.py` のロードOverlayを表示する。ニューゲームでは
+起動直後は `scenes/title.py` の `TitleScene` を表示する。Sceneは文言の描画と決定入力を所有し、
+`Game` は決定後の要求を `GameScreenChange` と標準フェードで調停する。試遊版は既存の
+ニューゲーム開始処理へ直接接続し、ほかのモードは完全暗転時に `ui/start_menu.py` の
+ロードOverlayを生成する。セーブ一覧の読込はロードOverlayの生成時に限定する。ニューゲームでは
 初期状態を、ロードでは `systems/save.py` が完全に検証・再構築した `LoadedGameState` と
 `MapResources` が解決した保存地点をフェード開始前に準備する。完全暗転時にだけ
 `Game` が状態一式を反映し、`FieldMovement` と `FieldRenderer` を使うフィールドへ切り替える。
 ロード用の `FieldMovement` はマップ内の保存座標であれば通行不能セルも開始地点として許可する。
 ニューゲーム、マップ到着地点、NPC配置では従来どおり開始セルの通行可否を検証する。
-スタート画面のレイアウトと入力は [`features/start-load.md`](./features/start-load.md) を正本とする。
+タイトルとロード画面のレイアウトと入力は [`features/start-load.md`](./features/start-load.md) を正本とする。
 メインメニューで
 キャンセルした場合もプロセスを終了せず、現在位置を維持してワールドマップへ戻る。
 メニューからワールドマップ、ワールドマップからメニューの
@@ -1376,7 +1396,7 @@ HP・MP、状態異常、戦闘中補正を全回復してから入口直前へ�
 完了させる。Windowのテキスト、カーソル対象、現在の選択位置は再生成しない。
 ワールドマップ上の決定とキャンセルには、現時点では操作を割り当てない。モック確認用だった
 決定によるショップ選択と、キャンセルによるプロセス終了は本編接続から撤廃する。
-現在のゲームはスタート・ロード画面で `BgmPlayer` により `da3-welcome` をループ再生する。
+タイトルとスタート・ロード画面では `BgmPlayer` により `da3-welcome` をループ再生する。
 フィールドへの切り替え成立時に現在マップの `bgm_id` へ切り替え、メニューと
 フィールドの往復、および同じBGM IDを持つマップ間の移動では再スタートしない。
 BGM音量変更は再生中のチャンネル2へ即時反映する。
@@ -1387,9 +1407,9 @@ SE音量変更時はチャンネル利得を更新して確認音を鳴らし、
 確認で「はい」を決定した後は、表示中のメイン、設定、確認Windowを標準の8フレームで閉じる。
 閉じ終えるまでは入力を遮断し、閉じた後も決定、キャンセル、メニュー、前後ページの入力が
 すべて離されるまで待ってからGame所有状態を再生成する。これにより、再生成された
-`PyxelInputReader` が復帰を決定した押下をスタート・ロード画面の新規入力として検出しない。
+`PyxelInputReader` が復帰を決定した押下をタイトル画面の新規入力として検出しない。
 適用済みの画面倍率から変更がなければ、現在のPyxelウィンドウと `PaletteShifter` を維持したまま
-Game所有状態を再生成してスタート・ロード画面へ戻る。倍率が変わった場合だけPyxelの
+Game所有状態を再生成して仮タイトルへ戻る。起動モードは再生成時にも保持する。倍率が変わった場合だけPyxelの
 ウィンドウ状態を破棄して `pyxel.reset()` を実行し、再起動後の
 `pyxel.init(display_scale=...)` へ倍率を渡す。倍率5ではフルスクリーンを有効化する。
 
@@ -1404,12 +1424,11 @@ Field Sceneは移動完了を受けて遷移を要求し、実際の
 Scene切り替えはTransitionとして調停する。拠点名Windowやフェードの状態をCatalogやSystemへ
 持たせない。
 
-本編のデバッグモードはComposition Rootが起動オプションから生成する実行時依存とする。
+本編の起動モードはComposition Rootが起動オプションから生成し、`Game` が保持する実行時依存とする。
 プレイヤー設定やゲーム進行ではないため、`Settings`、`SaveData`、設定ファイル、セーブデータへ
-有効・無効を保存しない。将来は通常起動では設定Overlayに入口自体を生成せず、デバッグ起動時だけ
-「デバッグメニュー」をカーソル対象へ追加する。タイトルSceneと起動オプションが未実装の現在は、
-従来の確認環境を維持するため常に入口を表示する。入口の文字色には `NEGATIVE_COLOR` を使い、
-通常の設定項目と視覚的に区別する。
+保存しない。現在は通常モードだけ設定Overlayへデバッグ入口を生成し、画面開始時にもモードを
+確認する。最終的には通常モードでも非表示にする。詳細は
+[`features/launch-modes.md`](./features/launch-modes.md) を正本とする。
 
 デバッグメニュー固有の入力、数値入力バッファ、候補一覧は
 `app/ui/debug_menu.py` が所有する。ただしTELEPORTの行き先候補一覧は本編と共通の

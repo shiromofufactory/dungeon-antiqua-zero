@@ -266,6 +266,7 @@ npm run events:build
 | `member_in_party` | `character_key` | 現在の活動パーティにキャラクターがいる |
 | `any_member_dead` | なし | 現在の活動パーティの誰かが死亡状態（`Member.is_dead`、HPが0）である |
 | `item_at_least` | `item_key`, `quantity` | 装備中を除くインベントリに指定数以上ある |
+| `launch_mode` | `mode` | 現在の起動モードが指定した安定キーと一致する |
 | `all` | `conditions` | 1件以上の全子条件が真 |
 | `any` | `conditions` | 1件以上のいずれかの子条件が真 |
 | `not` | `condition` | 子条件が偽 |
@@ -273,6 +274,9 @@ npm run events:build
 不在、未所持、未設定は専用の重複conditionを増やさず `not` で表す。
 `any_member_dead` はエディタで「誰かが死亡状態のとき」と表示し、追加の属性を持たない。
 活動パーティ全員を判定し、離脱済みのキャラクターは含めない。全員生存の条件は `not` で表す。
+`launch_mode` はエディタで「起動モード」と表示し、通常・試遊版・体験版・βテスト版から選ぶ。
+`mode` は `normal` / `exhibition` / `demo` / `beta` のいずれかとし、フィールド・戦闘イベントで
+共通に使う。起動方法とモードの寿命は [起動モード仕様](./launch-modes.md) を参照する。
 
 ```json
 {

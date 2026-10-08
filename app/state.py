@@ -23,6 +23,15 @@ class Difficulty(StrEnum):
     HARD = "hard"
 
 
+class LaunchMode(StrEnum):
+    """Process-wide launch mode, never persisted in settings or saves."""
+
+    NORMAL = "normal"
+    EXHIBITION = "exhibition"
+    DEMO = "demo"
+    BETA = "beta"
+
+
 class DisplayMode(StrEnum):
     """Stable desktop rendering styles used by Pyxel."""
 

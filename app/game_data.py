@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 
 from item import Item
-from member import FormationRow, Member, MemberDataError
+from member import (
+    FIORA_CHARACTER_KEY,
+    MIN_INTERNAL_LEVEL,
+    FormationRow,
+    Member,
+    MemberDataError,
+    required_experience_for_level,
+)
 from monster import MonsterDefinition
 from resources import load_record_array
 from shop import Shop
@@ -98,12 +106,14 @@ def create_party(
     character_keys: Iterable[str],
     back_row_character_keys: Iterable[str] = (),
     internal_level: int | None = None,
+    fiora_internal_level: int = MIN_INTERNAL_LEVEL,
 ) -> tuple[Member, ...]:
     """Create an ordered party from generated character data.
 
     ``internal_level`` is for explicit-state fixtures, restoration, and debug
     tools.  Normal party creation leaves it as ``None`` and uses each
-    character's joining-level rule.
+    character's joining-level rule. ``fiora_internal_level`` selects the new
+    game's starting party level while preserving Fiora's initial proficiencies.
     """
 
     requested_keys = tuple(character_keys)
@@ -128,7 +138,23 @@ def create_party(
         if record is None:
             raise MemberDataError(f"キャラクターが見つかりません: {key}")
         if internal_level is None:
-            member = Member.from_record(record, items=items, skills=skills)
+            member = Member.from_record(
+                record, items=items, skills=skills,
+                fiora_internal_level=fiora_internal_level,
+            )
+            if (
+                key == FIORA_CHARACTER_KEY
+                and fiora_internal_level != MIN_INTERNAL_LEVEL
+            ):
+                member = replace(
+                    member,
+                    internal_level=fiora_internal_level,
+                    experience_offset=required_experience_for_level(fiora_internal_level),
+                    hp=None,
+                    max_hp=None,
+                    mp=None,
+                    max_mp=None,
+                )
         else:
             member = Member.from_record_at_internal_level(
                 record,
