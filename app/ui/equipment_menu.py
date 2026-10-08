@@ -85,7 +85,7 @@ MAIN_TEXT_X = 4
 MAIN_CURSOR_X = 2
 AUTO_Y = 29
 AUTO_KEY = "auto"
-AUTO_EQUIP_SE_ID = "auto_equip_complete"
+EQUIP_SE_ID = "equip_complete"
 
 STAT_Y = {
     "attack": 35,
@@ -732,7 +732,7 @@ class EquipmentMenuOverlay:
                 if self.selected_main_key == AUTO_KEY:
                     self.inventory_system.auto_equip(self.member)
                     self._rebuild()
-                    play_se(AUTO_EQUIP_SE_ID)
+                    play_se(EQUIP_SE_ID)
                 else:
                     self._enter_item_selection()
             return False
@@ -761,11 +761,12 @@ class EquipmentMenuOverlay:
                 return False
             slot = self.selected_slot
             if slot is not None:
-                self.inventory_system.equip(
+                if self.inventory_system.equip(
                     self.member,
                     slot,
                     self.selected_candidate,
-                )
+                ):
+                    play_se(EQUIP_SE_ID)
             self.phase = EquipmentSelectionPhase.MAIN
             self.selected_item_index = 0
             self.scroll_offset = 0

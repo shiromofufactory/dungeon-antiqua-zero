@@ -344,7 +344,10 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertEqual(head.color, DEFAULT_TEXT_COLOR)
         self.assertIn(None, mock.candidates)
 
-    def test_confirming_npc_initial_equipment_stays_put_and_alerts(self) -> None:
+    @patch("ui.equipment_menu.play_se")
+    def test_confirming_npc_initial_equipment_stays_put_and_alerts(
+        self, play_se: Mock,
+    ) -> None:
         on_invalid_action = Mock()
         mock = self.build_mock(
             member_index=2,
@@ -360,6 +363,7 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertEqual(mock.selected_main_key, EquipmentSlot.RIGHT)
         self.assertEqual(mock.main_cursor.selected_key, EquipmentSlot.RIGHT)
         on_invalid_action.assert_called_once_with()
+        play_se.assert_not_called()
 
     def test_item_preview_uses_status_terms_without_mutating_equipment(self) -> None:
         mock = self.build_mock()
@@ -441,7 +445,10 @@ class EquipmentMenuTest(unittest.TestCase):
             f"%WAND%{poison_wand.localized_name(mock.localizer)}",
         )
 
-    def test_ineligible_items_sort_last_but_remain_cursorable(self) -> None:
+    @patch("ui.equipment_menu.play_se")
+    def test_ineligible_items_sort_last_but_remain_cursorable(
+        self, play_se: Mock,
+    ) -> None:
         on_invalid_action = Mock()
         mock = self.build_mock(on_invalid_action=on_invalid_action)
         equippable = tuple(
@@ -518,6 +525,7 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertIs(mock.member.equipment.item_at(EquipmentSlot.RIGHT), before)
         self.assertEqual(mock.phase, EquipmentSelectionPhase.ITEM)
         on_invalid_action.assert_called_once_with()
+        play_se.assert_not_called()
 
     def test_left_hides_one_hand_weapons_without_dual_wield(self) -> None:
         mock = self.build_mock()
@@ -634,7 +642,10 @@ class EquipmentMenuTest(unittest.TestCase):
         )
         self.assertEqual(preview[1].x, current_paralysis.x)
 
-    def test_confirm_equips_candidate_and_keeps_source_slot_selected(self) -> None:
+    @patch("ui.equipment_menu.play_se")
+    def test_confirm_equips_and_removes_candidate_with_completion_sound(
+        self, play_se: Mock,
+    ) -> None:
         mock = self.build_mock()
         mock.phase = EquipmentSelectionPhase.ITEM
         mock.selected_item_index = next(
@@ -656,6 +667,25 @@ class EquipmentMenuTest(unittest.TestCase):
         )
         self.assertEqual(mock.inventory_system.quantity("SILVER KNIFE"), 0)
         self.assertEqual(mock.inventory_system.quantity("DAGGER"), 2)
+        play_se.assert_called_once_with("equip_complete")
+
+        play_se.reset_mock()
+        mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
+        self.assertEqual(mock.phase, EquipmentSelectionPhase.ITEM)
+        mock.selected_item_index = mock.candidates.index(None)
+        mock._rebuild()
+        play_se.assert_not_called()
+
+        closed = mock.update(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+
+        self.assertFalse(closed)
+        self.assertEqual(mock.phase, EquipmentSelectionPhase.MAIN)
+        self.assertEqual(mock.selected_main_key, EquipmentSlot.RIGHT)
+        self.assertIsNone(mock.member.equipment.item_at(EquipmentSlot.RIGHT))
+        self.assertEqual(mock.inventory_system.quantity("SILVER KNIFE"), 1)
+        play_se.assert_called_once_with("equip_complete")
 
     def test_member_switch_wraps_and_auto_equipment_is_selectable(self) -> None:
         mock = self.build_mock(member_index=5)
@@ -671,7 +701,9 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertEqual(mock.member.definition.key, "Dain")
 
     @patch("ui.equipment_menu.play_se")
-    def test_auto_equipment_plays_save_sound_when_executed(self, play_se: Mock) -> None:
+    def test_auto_equipment_plays_completion_sound_when_executed(
+        self, play_se: Mock,
+    ) -> None:
         mock = self.build_mock()
         mock.selected_main_key = AUTO_KEY
         mock._rebuild()
@@ -680,7 +712,7 @@ class EquipmentMenuTest(unittest.TestCase):
         mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
 
         mock.inventory_system.auto_equip.assert_called_once_with(mock.member)
-        play_se.assert_called_once_with("auto_equip_complete")
+        play_se.assert_called_once_with("equip_complete")
 
     def test_reserve_replaces_formation_text(self) -> None:
         mock = self.build_mock(member_index=5)
@@ -757,7 +789,10 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertTrue(mock.item_cursor.active)
         mock.item_cursor.draw.assert_called_once_with()
 
-    def test_cancel_returns_from_item_phase_before_closing(self) -> None:
+    @patch("ui.equipment_menu.play_se")
+    def test_cancel_returns_from_item_phase_before_closing(
+        self, play_se: Mock,
+    ) -> None:
         mock = self.build_mock()
         mock.update(InputState(confirm=InputButton(triggered=True, held=True)))
         self.assertEqual(mock.phase, EquipmentSelectionPhase.ITEM)
@@ -769,6 +804,7 @@ class EquipmentMenuTest(unittest.TestCase):
         self.assertTrue(
             mock.update(InputState(cancel=InputButton(triggered=True, held=True)))
         )
+        play_se.assert_not_called()
 
     def test_confirming_head_slot_enters_item_selection(self) -> None:
         mock = self.build_mock()

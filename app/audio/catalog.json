@@ -5,7 +5,7 @@
       "channel": 1,
       "sound": 7
     },
-    "auto_equip_complete": {
+    "equip_complete": {
       "channel": 1,
       "sound": 6
     },
@@ -119,7 +119,7 @@
     },
     "spell_healing2": {
       "channel": 1,
-      "sound": 37
+      "sound": 22
     }
   }
 }
