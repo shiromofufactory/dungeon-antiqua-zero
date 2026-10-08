@@ -129,6 +129,7 @@ class SpellMenuOverlay:
         on_field_teleport: Callable[[str], bool] | None = None,
         on_invalid_action: Callable[[], None] | None = None,
         on_spell_level_up: Callable[[], None] | None = None,
+        proficiency_level_limit: int | None = None,
     ) -> None:
         """Build a DA2-style spell view from menu-owned state."""
 
@@ -177,6 +178,7 @@ class SpellMenuOverlay:
         self.on_field_teleport = on_field_teleport
         self.on_invalid_action = on_invalid_action
         self.on_spell_level_up = on_spell_level_up
+        self.proficiency_level_limit = proficiency_level_limit
         self.phase = SpellSelectionPhase.CASTER
         self._proficiency_animation: _ProficiencyAnimation | None = None
         self._level_growth_before: dict[
@@ -778,6 +780,7 @@ class SpellMenuOverlay:
             self.member,
             kind,
             mp_spent=spell.mp,
+            proficiency_level_limit=self.proficiency_level_limit,
         )
         if growth.applied_amount > 0:
             self._start_proficiency_animation(growth, spell, selected_target)

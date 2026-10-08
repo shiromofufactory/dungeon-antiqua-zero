@@ -997,6 +997,37 @@ class MemberTest(unittest.TestCase):
 
         self.assertEqual((proficiency.level, proficiency.progress), (0, 0))
 
+    def test_runtime_proficiency_limit_stops_at_99_and_allows_lower_levels(self) -> None:
+        for limit in (2, 4):
+            with self.subTest(limit=limit):
+                proficiency = Proficiency(
+                    ProficiencyAptitude.FAVORED, level=limit - 1, progress=99
+                )
+                proficiency.add_progress(1, level_limit=limit)
+                self.assertEqual((proficiency.level, proficiency.progress), (limit, 0))
+                proficiency.add_progress(1000, level_limit=limit)
+                proficiency.add_progress(10, level_limit=limit)
+                self.assertEqual((proficiency.level, proficiency.progress), (limit, 99))
+
+    def test_joining_proficiency_above_runtime_limit_is_preserved(self) -> None:
+        for limit, internal_level in ((2, 18), (4, 50)):
+            with self.subTest(limit=limit):
+                proficiency = Proficiency.for_joining_member(
+                    ProficiencyAptitude.FAVORED, internal_level
+                )
+                original = (proficiency.level, proficiency.progress)
+                self.assertGreater(proficiency.level, limit)
+                proficiency.add_progress(1000, level_limit=limit)
+                self.assertEqual((proficiency.level, proficiency.progress), original)
+
+    def test_runtime_limit_keeps_aptitude_ceiling_and_disabled_proficiencies(self) -> None:
+        normal = Proficiency(ProficiencyAptitude.NORMAL, level=8, progress=98)
+        normal.add_progress(1000, level_limit=9)
+        self.assertEqual((normal.level, normal.progress), (8, 99))
+        disabled = Proficiency(ProficiencyAptitude.DISABLED)
+        disabled.add_progress(1000, level_limit=2)
+        self.assertEqual((disabled.level, disabled.progress), (0, 0))
+
     def test_rejects_proficiency_aptitude_outside_zero_to_two(self) -> None:
         record = {
             "name_en": "Fiora",

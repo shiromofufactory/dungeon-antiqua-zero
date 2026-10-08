@@ -552,6 +552,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.progression.settle_escape.assert_called_once_with(
             scene.save_data,
             scene.result_party,
+            proficiency_level_limit=None,
         )
         scene.bgm.stop.assert_called_once_with()
         scene.bgm.set_fade_rate.assert_called_once_with(1.0)

@@ -130,7 +130,7 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or not _commands_are_valid(command.get("else"), depth=depth + 1)
             ):
                 return False
-        elif command_type in ("end_event", "stop_bgm"):
+        elif command_type in ("end_event", "stop_bgm", "reset_game"):
             if set(command) != {"command"}:
                 return False
         elif command_type == "message":

@@ -60,6 +60,11 @@ class StopBgmEffect:
 
 
 @dataclass(frozen=True)
+class ResetGameEffect:
+    pass
+
+
+@dataclass(frozen=True)
 class FlashScreenEffect:
     color: str
 
@@ -120,6 +125,7 @@ EventEffect = (
     | PlaySeEffect
     | ChangeBgmEffect
     | StopBgmEffect
+    | ResetGameEffect
     | FlashScreenEffect
     | WaitEffect
     | ChangeBrightnessEffect
@@ -265,6 +271,9 @@ class EventRunner:
             if command_type == "end_event":
                 self._stack.clear()
                 return None
+            if command_type == "reset_game":
+                self._stack.clear()
+                return ResetGameEffect()
             if command_type == "message":
                 return MessageEffect(str(command["message_id"]))
             if command_type == "play_se":
@@ -332,6 +341,7 @@ class EventRunner:
 __all__ = [
     "ChangeBgmEffect",
     "StopBgmEffect",
+    "ResetGameEffect",
     "ChangeBrightnessEffect",
     "ShakeScreenEffect",
     "EventContext",

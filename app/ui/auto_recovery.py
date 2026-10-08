@@ -76,6 +76,7 @@ class AutoRecoveryOverlay:
         faces: object,
         palette_shifter: PaletteShifter | None = None,
         on_spell_level_up: Callable[[], None] | None = None,
+        proficiency_level_limit: int | None = None,
     ) -> None:
         self.party = party
         self.spells = spells
@@ -85,6 +86,7 @@ class AutoRecoveryOverlay:
         self.settings = settings
         self.fonts = fonts
         self.on_spell_level_up = on_spell_level_up
+        self.proficiency_level_limit = proficiency_level_limit
         self.localizer = Localizer(settings.language)
         self.texts = texts
         self.faces = faces
@@ -368,6 +370,7 @@ class AutoRecoveryOverlay:
                     self.spells,
                     self.inventory,
                     self.save_data.auto_recovery,
+                    proficiency_level_limit=self.proficiency_level_limit,
                 )
                 if self.result.actions:
                     play_se("spell_healing1")

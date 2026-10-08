@@ -1772,6 +1772,9 @@ def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
 class BattleScene:
     """Own one battle's input, temporary state, update order, and rendering."""
 
+    proficiency_level_limit: int | None = None
+    experience_limit: int | None = None
+
     @classmethod
     def create(
         cls,
@@ -1794,6 +1797,8 @@ class BattleScene:
         return_bgm_start_sec: float = 0.0,
         command_memory: BattleCommandMemory | None = None,
         on_invalid_action: Callable[[], None] | None = None,
+        proficiency_level_limit: int | None = None,
+        experience_limit: int | None = None,
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -1826,6 +1831,8 @@ class BattleScene:
             spell_effects=load_spell_effects(APP_ROOT / "effects" / "spells.json"),
             command_memory=command_memory,
             on_invalid_action=on_invalid_action,
+            proficiency_level_limit=proficiency_level_limit,
+            experience_limit=experience_limit,
         )
 
     def __init__(
@@ -1858,6 +1865,8 @@ class BattleScene:
         fonts: FontResources | None = None,
         command_memory: BattleCommandMemory | None = None,
         on_invalid_action: Callable[[], None] | None = None,
+        proficiency_level_limit: int | None = None,
+        experience_limit: int | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
@@ -1886,6 +1895,8 @@ class BattleScene:
         self.reset_party_on_restart = reset_party_on_restart
         self.reset_inventory_on_restart = reset_inventory_on_restart
         self.on_invalid_action = on_invalid_action
+        self.proficiency_level_limit = proficiency_level_limit
+        self.experience_limit = experience_limit
         self.settings = settings
         self.fonts = FontResources() if fonts is None else fonts
         self.window_factory = windows
@@ -7310,6 +7321,8 @@ class BattleScene:
             hp_growth_ineligible_member_keys=hp_growth_ineligible,
             inventory_system=self.inventory_system,
             monster_record_system=self.monster_record_system,
+            proficiency_level_limit=self.proficiency_level_limit,
+            experience_limit=self.experience_limit,
         )
         self.growth_result = growth
         self.result_outcome = BattleResult.VICTORY
@@ -7354,6 +7367,7 @@ class BattleScene:
         growth = self.progression.settle_escape(
             self.save_data,
             self.result_party,
+            proficiency_level_limit=self.proficiency_level_limit,
         )
         self.growth_result = growth
         self.result_outcome = BattleResult.ESCAPED

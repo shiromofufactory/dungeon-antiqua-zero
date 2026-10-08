@@ -976,6 +976,13 @@ GameはDomain Modelの必要経験値計算を使って初期共有経験値を�
 初期HP・MPもDomain Modelの計算から生成し、戦闘側に起動モード判定を
 分散させない。Gameはメニュー項目の表示と、手動セーブ・デバッグ画面の開始可否も判断する。
 
+起動モード別の成長上限は `LaunchMode` が数値として提供し、GameがBattleSceneと
+呪文・自動回復Overlayへ渡す。Scene／Overlayは上限値だけを成長Systemへ渡し、Systemや
+Domain ModelにGameや起動モードへの参照を持たせない。`Proficiency.add_progress()` は
+適性と実行時の上限を併用し、既存値を引き下げずに追加分を制限する。BattleProgressionは
+共有経験値の追加分も制限し、実際の獲得値を結果へ返す。Gameは同じ上限値をメインメニューの
+経験値到達色の判定にも使う。上限はSettings／SaveDataに保存しない。
+
 イベントRunnerと共通条件評価器はGameへの逆参照を持たず、`LaunchMode` の値だけを受け取る。
 フィールド・戦闘イベントとミッション条件のすべてへ同じ起動モードを渡す。
 具体的なモードと操作・受け入れ条件は [起動モード仕様](./features/launch-modes.md) を参照する。
@@ -1412,6 +1419,12 @@ SE音量変更時はチャンネル利得を更新して確認音を鳴らし、
 Game所有状態を再生成して仮タイトルへ戻る。起動モードは再生成時にも保持する。倍率が変わった場合だけPyxelの
 ウィンドウ状態を破棄して `pyxel.reset()` を実行し、再起動後の
 `pyxel.init(display_scale=...)` へ倍率を渡す。倍率5ではフルスクリーンを有効化する。
+
+イベントの `reset_game` は `ResetGameEffect` を返し、Gameが同じタイトル復帰経路へ接続する。
+Runnerはbranchを含む残りのコマンド列を破棄する。復帰待ちはイベント・戦闘更新より優先し、
+入力リリース後に実行中のRunnerや中断した戦闘ごとGameのプレイ状態を再生成する。
+再生成前に全画面パレットの合成を通常状態へ戻し、明るさ変更などをタイトルへ持ち越さない。
+操作とコマンド形式は [イベント仕様](./features/events.md#ゲームをリセット) を参照する。
 
 ワールドマップ拠点の詳細は [`features/world-sites.md`](./features/world-sites.md) を正本とする。
 `resources.maps` は生成済みの拠点、遷移先参照、到着地点を不変の値として読み込む。拠点は

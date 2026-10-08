@@ -159,6 +159,24 @@ test('BGM stop replaces track selection, saves without attributes and permits un
   assert.equal(state.data.events[0].commands[0].command, 'stop_bgm');
 });
 
+test('game reset is named in Japanese, saves without attributes and supports undo/redo', () => {
+  const {state, context} = editor();
+  state.catalogs.bgm_ids = ['da3-field'];
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'change_bgm');
+  context.changeCommandType('0', 'reset_game');
+  assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], {command: 'reset_game'});
+  const html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+  assert.match(html, /ゲームをリセット/);
+  assert.match(html, /タイトル画面に戻ります/);
+  assert.doesNotMatch(html, /data-command-field=/);
+  context.undo();
+  assert.equal(state.data.events[0].commands[0].command, 'change_bgm');
+  assert.equal(state.data.events[0].commands[0].bgm_id, 'da3-field');
+  context.redo();
+  assert.equal(state.data.events[0].commands[0].command, 'reset_game');
+});
+
 test('give item message toggle saves boolean ON/OFF and supports undo without a take-item option', () => {
   const { state, context, handlers } = editor();
   state.catalogs.item_keys = ['POTION'];

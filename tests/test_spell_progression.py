@@ -112,6 +112,35 @@ class MenuSpellProgressionTest(unittest.TestCase):
                 mp_spent=True,
             )
 
+    def test_menu_growth_stops_at_runtime_ceiling_without_mp_level_growth(self) -> None:
+        sacred = self.member.proficiency(ProficiencyKind.SACRED)
+        for limit in (2, 4):
+            with self.subTest(limit=limit):
+                sacred.level, sacred.progress = limit, 98
+                original_mp = self.member.max_mp
+                growth = apply_menu_spell_proficiency_growth(
+                    self.member, ProficiencyKind.SACRED,
+                    mp_spent=100, proficiency_level_limit=limit,
+                )
+                self.assertEqual(growth.applied_amount, 1)
+                self.assertEqual((sacred.level, sacred.progress), (limit, 99))
+                self.assertEqual(self.member.max_mp, original_mp)
+                growth = apply_menu_spell_proficiency_growth(
+                    self.member, ProficiencyKind.SACRED,
+                    mp_spent=100, proficiency_level_limit=limit,
+                )
+                self.assertEqual(growth.applied_amount, 0)
+
+    def test_menu_growth_preserves_joining_spell_level_above_limit(self) -> None:
+        sacred = self.member.proficiency(ProficiencyKind.SACRED)
+        sacred.level, sacred.progress = 5, 17
+        growth = apply_menu_spell_proficiency_growth(
+            self.member, ProficiencyKind.SACRED,
+            mp_spent=100, proficiency_level_limit=4,
+        )
+        self.assertEqual(growth.applied_amount, 0)
+        self.assertEqual((sacred.level, sacred.progress), (5, 17))
+
 
 if __name__ == "__main__":
     unittest.main()

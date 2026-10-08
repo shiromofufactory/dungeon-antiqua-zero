@@ -11,9 +11,9 @@ from input import Direction, InputButton, InputState
 from member import FIORA_CHARACTER_KEY, required_experience_for_level
 from resources.events import EventCatalog
 from state import Language, LaunchMode, Settings
-from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
+from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR, POSITIVE_COLOR
 from systems import (
-    BattleProgression, EnemyProgressionData, EventContext, MessageEffect,
+    BattleProgression, EnemyProgressionData, EventContext, MessageEffect, ResetGameEffect,
     create_save_document, restore_save_document,
 )
 
@@ -161,6 +161,85 @@ class LaunchModeGameTest(unittest.TestCase):
             self.assertEqual(game.party[0].internal_level, expected_level)
             self.assertEqual(game.party[0].experience_offset, 0)
 
+    def test_mode_growth_limits_reach_battle_and_both_field_spell_paths(self) -> None:
+        expected = {
+            LaunchMode.NORMAL: (None, 999999),
+            LaunchMode.EXHIBITION: (2, 500),
+            LaunchMode.DEMO: (4, 5000),
+            LaunchMode.BETA: (None, 999999),
+        }
+        for mode, (proficiency_limit, experience_limit) in expected.items():
+            with self.subTest(mode=mode), \
+                patch("game.BattleScene.create") as battle, \
+                patch("game.SpellMenuOverlay") as spell, \
+                patch("game.AutoRecoveryOverlay") as recovery:
+                game = self.game(mode)
+                game._build_battle_scene(Mock())
+                game._start_spell()
+                game._start_auto_recovery()
+                for target in (battle, spell, recovery):
+                    self.assertEqual(
+                        target.call_args.kwargs["proficiency_level_limit"], proficiency_limit
+                    )
+                self.assertEqual(battle.call_args.kwargs["experience_limit"], experience_limit)
+
+    def test_experience_value_uses_positive_color_at_each_mode_limit(self) -> None:
+        for mode, limit in (
+            (LaunchMode.NORMAL, 999999), (LaunchMode.EXHIBITION, 500),
+            (LaunchMode.DEMO, 5000), (LaunchMode.BETA, 999999),
+        ):
+            with self.subTest(mode=mode):
+                game = self.game(mode)
+                for experience, expected_color in (
+                    (limit - 1, DEFAULT_TEXT_COLOR),
+                    (limit, POSITIVE_COLOR),
+                    (limit + 1, POSITIVE_COLOR),
+                    (0, DEFAULT_TEXT_COLOR),
+                ):
+                    with self.subTest(experience=experience):
+                        game.save_data.experience = experience
+                        game._refresh_info_window_texts()
+                        placements = game._main_info_window_texts()
+                        self.assertEqual(placements[3].color, expected_color)
+                        self.assertEqual(placements[2].color, DEFAULT_TEXT_COLOR)
+                        self.assertEqual(placements[1].color, DEFAULT_TEXT_COLOR)
+                        self.assertEqual(
+                            game.info_window.add_text.call_args_list[-5].kwargs["color"],
+                            expected_color,
+                        )
+
+    def test_capped_experience_and_growth_survive_save_restore(self) -> None:
+        for mode, limit, expected_level in (
+            (LaunchMode.EXHIBITION, 500, 10), (LaunchMode.DEMO, 5000, 19),
+        ):
+            with self.subTest(mode=mode):
+                game = self.game(mode)
+                game.save_data.experience = limit - 5
+                growth = BattleProgression((EnemyProgressionData(5, 4, 4, 0),)).settle(
+                    game.save_data, game.party,
+                    proficiency_level_limit=mode.proficiency_level_limit,
+                    experience_limit=mode.experience_limit,
+                )
+                self.assertEqual(growth.experience_gained, 5)
+                self.assertEqual(game.party[0].internal_level, expected_level)
+                document = create_save_document(
+                    save_data=game.save_data, active_party=game.party,
+                    character_states=game.character_states, inventory=game.inventory_system,
+                    map_id=NEW_GAME_MAP_ID, position=FieldPosition(39, 43), facing=Direction.UP,
+                )
+                restored = restore_save_document(
+                    document, character_records=game.character_records,
+                    items=game.items, skills=game.skills,
+                )
+                self.assertEqual(restored.save_data.experience, limit)
+                self.assertEqual(restored.character_states[FIORA_CHARACTER_KEY].internal_level, expected_level)
+                growth = BattleProgression((EnemyProgressionData(5, 4, 4, 0),)).settle(
+                    restored.save_data, tuple(restored.character_states.values()),
+                    proficiency_level_limit=mode.proficiency_level_limit,
+                    experience_limit=mode.experience_limit,
+                )
+                self.assertEqual(growth.experience_gained, 0)
+
     def test_return_to_start_keeps_launch_mode_and_resets_initial_party(self) -> None:
         for mode in LaunchMode:
             with self.subTest(mode=mode):
@@ -172,6 +251,63 @@ class LaunchModeGameTest(unittest.TestCase):
                 self.assertEqual(game.save_data.experience, 26 if mode is LaunchMode.EXHIBITION else 0)
                 self.assertIsNotNone(game.title_scene)
                 self.assertIsNone(game.start_screen)
+
+    def test_message_then_reset_returns_to_title_after_release_in_both_event_contexts(self) -> None:
+        catalog = EventCatalog.from_document({
+            "format_version": 1, "source_sha256": "0" * 64,
+            "flags": ["sample.after_reset"],
+            "events": {"sample.end": {"commands": [
+                {"command": "message", "message_id": "sample.finished"},
+                {"command": "reset_game"},
+                {"command": "set_flag", "flag_id": "sample.after_reset"},
+            ]}},
+        })
+        for mode in LaunchMode:
+            for context in EventContext:
+                with self.subTest(mode=mode, context=context), patch("game.EventMessageOverlay") as message:
+                    game = self.game(mode)
+                    game.title_scene = None
+                    game.showing_field = True
+                    game.save_data.gold = 123
+                    game.event_catalog = catalog
+                    battle = Mock() if context is EventContext.BATTLE else None
+                    game.battle_scene = battle
+                    if context is EventContext.BATTLE:
+                        game._start_battle_event("sample.end")
+                    else:
+                        self.assertTrue(game._start_field_event("sample.end"))
+                    message.return_value.update.return_value = False
+                    game._update_event(InputState())
+                    self.assertFalse(game._returning_to_start)
+                    self.assertIsInstance(game.event_effect, MessageEffect)
+                    message.return_value.update.return_value = True
+                    held = InputState(confirm=InputButton(triggered=True, held=True))
+                    game._update_event(held)
+                    self.assertIsInstance(game.event_effect, ResetGameEffect)
+                    self.assertTrue(game._returning_to_start)
+                    game.input_reader.poll.return_value = held
+                    with patch.object(game, "_update_event", wraps=game._update_event) as update_event:
+                        for _frame in range(3):
+                            game.update()
+                        update_event.assert_not_called()
+                    self.assertIsNone(game.title_scene)
+                    self.assertNotIn("sample.after_reset", game.save_data.event_flags)
+                    if battle is not None:
+                        battle.update.assert_not_called()
+                    game.input_reader.poll.return_value = InputState()
+                    game.update()
+                    self.assertIs(game.launch_mode, mode)
+                    self.assertIsNotNone(game.title_scene)
+                    self.assertIsNone(game.start_screen)
+                    self.assertIsNone(game.event_runner)
+                    self.assertIsNone(game.event_effect)
+                    self.assertIsNone(game.battle_scene)
+                    self.assertEqual(game.save_data.gold, 0)
+                    self.assertEqual(game.save_data.event_flags, set())
+                    self.assertEqual(game.save_data.experience, 26 if mode is LaunchMode.EXHIBITION else 0)
+                    game.save_repository.save.assert_not_called()
+                    if battle is not None:
+                        battle.release_palette_variants.assert_called_once_with()
 
     def test_debug_label_cursor_and_entry_are_hidden_outside_normal_mode(self) -> None:
         for mode in LaunchMode:

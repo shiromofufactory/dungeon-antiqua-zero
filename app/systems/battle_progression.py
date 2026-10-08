@@ -11,14 +11,14 @@ from typing import Iterable, Mapping, Sequence
 if __package__ == "systems":
     from item import Item
     from member import Member, ProficiencyKind
-    from state import SaveData
+    from state import MAX_EXPERIENCE, SaveData
     from systems.inventory import InventorySystem
     from systems.monster_records import MonsterRecordSystem
     from systems.shop import MAX_GOLD
 else:
     from ..item import Item
     from ..member import Member, ProficiencyKind
-    from ..state import SaveData
+    from ..state import MAX_EXPERIENCE, SaveData
     from .inventory import InventorySystem
     from .monster_records import MonsterRecordSystem
     from .shop import MAX_GOLD
@@ -353,6 +353,8 @@ class BattleProgression:
         allow_max_hp_growth: bool = True,
         inventory_system: InventorySystem | None = None,
         monster_record_system: MonsterRecordSystem | None = None,
+        proficiency_level_limit: int | None = None,
+        experience_limit: int | None = None,
     ) -> BattleGrowthResult:
         """Apply rewards once, including one HP and one eligible MP increase."""
 
@@ -378,6 +380,15 @@ class BattleProgression:
             raise TypeError("award_rewards must be a bool")
         if not isinstance(allow_max_hp_growth, bool):
             raise TypeError("allow_max_hp_growth must be a bool")
+        for name, limit in (
+            ("proficiency_level_limit", proficiency_level_limit),
+            ("experience_limit", experience_limit),
+        ):
+            if limit is not None:
+                if isinstance(limit, bool) or not isinstance(limit, int):
+                    raise TypeError(f"{name} must be an integer or None")
+                if limit < 0:
+                    raise ValueError(f"{name} must not be negative")
         if (inventory_system is None) != (monster_record_system is None):
             raise ValueError(
                 "inventory_system and monster_record_system must be supplied together"
@@ -395,6 +406,15 @@ class BattleProgression:
         before_by_key = dict(zip(keys, before))
         if award_rewards:
             experience_gained, gold_gained = self.rewards()
+            experience_ceiling = (
+                MAX_EXPERIENCE
+                if experience_limit is None
+                else min(MAX_EXPERIENCE, experience_limit)
+            )
+            experience_gained = min(
+                experience_gained,
+                max(0, experience_ceiling - save_data.experience),
+            )
             save_data.experience += experience_gained
             save_data.gold = min(MAX_GOLD, save_data.gold + gold_gained)
             for member in party:
@@ -413,7 +433,9 @@ class BattleProgression:
             if key not in eligible:
                 continue
             for kind, amount in self._weapon_awards.get(key, {}).items():
-                member.proficiency(kind).add_progress(amount)
+                member.proficiency(kind).add_progress(
+                    amount, level_limit=proficiency_level_limit
+                )
             for kind, usage in self._spell_uses.get(key, {}).items():
                 proficiency = member.proficiency(kind)
                 amount = max(
@@ -423,7 +445,9 @@ class BattleProgression:
                     - proficiency.level
                     + isqrt(usage.total_mp),
                 )
-                proficiency.add_progress(amount)
+                proficiency.add_progress(
+                    amount, level_limit=proficiency_level_limit
+                )
 
         ordered = sorted(
             enumerate(party),
@@ -490,6 +514,8 @@ class BattleProgression:
         self,
         save_data: SaveData,
         members: Sequence[Member],
+        *,
+        proficiency_level_limit: int | None = None,
     ) -> BattleGrowthResult:
         """Settle proficiencies and max MP after escape, never HP or rewards."""
 
@@ -498,6 +524,7 @@ class BattleProgression:
             members,
             award_rewards=False,
             allow_max_hp_growth=False,
+            proficiency_level_limit=proficiency_level_limit,
         )
 
     def _settle_treasure(

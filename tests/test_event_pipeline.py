@@ -52,6 +52,24 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_reset_game_compiles_and_loads_in_both_contexts_without_attributes(self) -> None:
+        source = sample_source()
+        source["events"][0]["commands"] = [{"command": "reset_game"}]
+        for battle_start_id in (None, "guard"):
+            with self.subTest(battle_start_id=battle_start_id):
+                if battle_start_id is not None:
+                    source["events"][0]["battle_start_id"] = battle_start_id
+                self.assertEqual(validate_event_sources({"sample": source}, **CATALOGS), [])
+                compiled = compile_event_sources({"sample": source}, **CATALOGS)
+                self.assertEqual(compiled["events"]["sample.greeting"]["commands"], [{"command": "reset_game"}])
+                EventCatalog.from_document(compiled)
+                invalid = deepcopy(compiled)
+                invalid["events"]["sample.greeting"]["commands"][0]["mode"] = "exhibition"
+                with self.assertRaises(EventResourceError):
+                    EventCatalog.from_document(invalid)
+        source["events"][0]["commands"][0]["mode"] = "exhibition"
+        self.assertEqual({item.code for item in validate_event_sources({"sample": source}, **CATALOGS)}, {"unknown_field"})
+
     def test_launch_mode_condition_compiles_and_loads(self) -> None:
         source = sample_source()
         branch = source["events"][0]["commands"][0]

@@ -8,6 +8,9 @@ import re
 from typing import Mapping
 
 
+MAX_EXPERIENCE = 999_999
+
+
 class Language(StrEnum):
     """Stable language identifiers used by settings and localized data."""
 
@@ -30,6 +33,18 @@ class LaunchMode(StrEnum):
     EXHIBITION = "exhibition"
     DEMO = "demo"
     BETA = "beta"
+
+    @property
+    def proficiency_level_limit(self) -> int | None:
+        """Additional weapon/spell growth ceiling for this process."""
+
+        return {self.EXHIBITION: 2, self.DEMO: 4}.get(self)
+
+    @property
+    def experience_limit(self) -> int:
+        """Shared experience ceiling, independent of member offsets."""
+
+        return {self.EXHIBITION: 500, self.DEMO: 5000}.get(self, MAX_EXPERIENCE)
 
 
 class DisplayMode(StrEnum):

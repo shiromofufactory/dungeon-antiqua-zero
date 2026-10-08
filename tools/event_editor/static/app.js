@@ -21,6 +21,7 @@ const COMMAND_OPTIONS = [
   ["play_se", "play_se"],
   ["change_bgm", "change_bgm"],
   ["stop_bgm", "stop_bgm（BGM停止）"],
+  ["reset_game", "ゲームをリセット"],
   ["flash_screen", "画面をフラッシュ"],
   ["change_brightness", "画面の明るさを変更"],
   ["shake_screen", "画面を横揺れ"],
@@ -699,6 +700,8 @@ function renderCommand(command, path, listPath, index) {
     fields = field("BGM", `<select ${attr("bgm_id")}>${options(state.catalogs.bgm_ids || [], command.bgm_id)}</select>`, true);
   } else if (type === "stop_bgm") {
     fields = '<p class="command-description full">BGMをフェードアウトして停止します。</p>';
+  } else if (type === "reset_game") {
+    fields = '<p class="command-description full">現在のプレイを終了してタイトル画面に戻ります。後続のコマンドは実行しません。</p>';
   } else if (type === "flash_screen") {
     fields = field("色", `<select ${attr("color")}>${options(["white"], command.color)}</select>`, true);
   } else if (type === "change_brightness") {
@@ -899,7 +902,7 @@ function defaultCommand(type) {
   if (type === "message") return one("message_id", messageIds());
   if (type === "play_se") return one("se_id", state.catalogs.se_ids);
   if (type === "change_bgm") return one("bgm_id", state.catalogs.bgm_ids);
-  if (type === "stop_bgm") return {command: type};
+  if (type === "stop_bgm" || type === "reset_game") return {command: type};
   if (type === "flash_screen") return {command: type, color: "white"};
   if (type === "change_brightness") return {command: type, percent: 100};
   if (type === "wait" || type === "shake_screen") return {command: type, frames: 6};

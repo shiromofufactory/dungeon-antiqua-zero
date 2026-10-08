@@ -307,6 +307,71 @@ class BattleProgressionTest(unittest.TestCase):
         proficiency = member.proficiency(ProficiencyKind.SWORD)
         self.assertEqual((proficiency.level, proficiency.progress), (2, 1))
 
+    def test_victory_and_escape_cap_weapon_and_spell_growth_but_preserve_npcs(self) -> None:
+        for limit in (2, 4):
+            for escape in (False, True):
+                with self.subTest(limit=limit, escape=escape):
+                    member = Member.from_record(member_record("Fighter"))
+                    npc = Member.from_record_at_internal_level(member_record("NPC"), 60)
+                    kinds = (ProficiencyKind.SWORD, ProficiencyKind.MYSTIC)
+                    npc_before = tuple(
+                        (npc.proficiency(kind).level, npc.proficiency(kind).progress)
+                        for kind in kinds
+                    )
+                    progression = BattleProgression((EnemyProgressionData(99, 0, 1, 0),))
+                    for kind in kinds:
+                        member.proficiency(kind).level = limit
+                        member.proficiency(kind).progress = 98
+                    for actor in (member, npc):
+                        progression.record_weapon_action(actor, (self.sword,), (99,))
+                        progression.record_spell_use(
+                            actor, ProficiencyKind.MYSTIC, (99,), mp_spent=9
+                        )
+                    settle = progression.settle_escape if escape else progression.settle
+                    settle(SaveData(), (member, npc), proficiency_level_limit=limit)
+                    for index, kind in enumerate(kinds):
+                        proficiency = member.proficiency(kind)
+                        self.assertEqual((proficiency.level, proficiency.progress), (limit, 99))
+                        proficiency = npc.proficiency(kind)
+                        self.assertGreater(npc_before[index][0], limit)
+                        self.assertEqual((proficiency.level, proficiency.progress), npc_before[index])
+
+    def test_experience_ceiling_awards_only_remaining_points_and_keeps_gold(self) -> None:
+        for limit, expected_level in ((500, 10), (5000, 19), (999999, 99)):
+            with self.subTest(limit=limit):
+                member = Member.from_record(member_record("Fighter"))
+                save_data = SaveData(experience=limit - 5)
+                for expected_award in (5, 0):
+                    progression = BattleProgression((EnemyProgressionData(5, 4, 4, 25),))
+                    growth = progression.settle(
+                        save_data, (member,), experience_limit=limit
+                    )
+                    self.assertEqual(growth.experience_gained, expected_award)
+                    self.assertEqual(growth.gold_gained, 25)
+                    self.assertEqual(save_data.experience, limit)
+                    self.assertEqual(member.internal_level, expected_level)
+                self.assertEqual(save_data.gold, 50)
+
+    def test_default_experience_ceiling_stops_at_six_digits(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        save_data = SaveData(experience=999998)
+        for expected_award in (1, 0):
+            growth = BattleProgression((EnemyProgressionData(5, 4, 4, 0),)).settle(
+                save_data, (member,)
+            )
+            self.assertEqual(save_data.experience, 999999)
+            self.assertEqual(growth.experience_gained, expected_award)
+
+    def test_experience_already_over_ceiling_is_preserved_without_reward(self) -> None:
+        member = Member.from_record(member_record("Fighter"))
+        save_data = SaveData(experience=6085)
+        growth = BattleProgression((EnemyProgressionData(5, 4, 4, 0),)).settle(
+            save_data, (member,), experience_limit=5000
+        )
+        self.assertEqual(save_data.experience, 6085)
+        self.assertEqual(growth.experience_gained, 0)
+        self.assertEqual(member.internal_level, 20)
+
     def test_weapon_counts_each_defeat_but_keeps_only_the_largest_action_award(
         self,
     ) -> None:

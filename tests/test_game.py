@@ -3409,6 +3409,7 @@ class GameTest(unittest.TestCase):
             on_field_teleport=mock._start_field_teleport,
             on_invalid_action=mock.alert.start,
             on_spell_level_up=mock._play_field_spell_level_up_jingle,
+            proficiency_level_limit=None,
         )
         self.assertIs(mock.spell_screen, spell_screen_class.return_value)
         self.assertIsNone(mock.pending_screen_change)
@@ -4407,7 +4408,7 @@ class GameTest(unittest.TestCase):
         mock = Game.__new__(Game)
         mock.settings = Settings(language=Language.ENGLISH, screen_scale=3)
         mock.settings_repository = Mock()
-        mock.palette_shifter = Mock()
+        mock.palette_shifter = Mock(base_colors=(0x000000,))
         mock._load_mission_hint_shown_this_launch = True
 
         def reinitialize(game: Game, **_kwargs: object) -> None:
@@ -4429,6 +4430,9 @@ class GameTest(unittest.TestCase):
             launch_mode=mock.launch_mode,
         )
         self.assertTrue(mock._load_mission_hint_shown_this_launch)
+        mock.palette_shifter.set_global_mix.assert_called_once_with(
+            base_rate=1.0, target_color=0x000000,
+        )
 
     def test_return_to_title_closes_all_menu_windows_and_disables_cursors(
         self,

@@ -14,6 +14,19 @@ from tools.event_editor.server import EventEditorApplication, create_server
 
 
 class EventEditorServerTest(unittest.TestCase):
+    def test_reset_game_saves_and_extra_attributes_preserve_last_generation(self) -> None:
+        command = {"command": "reset_game"}
+        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "reset", "commands": [command]}]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["events"]["sample.reset"]["commands"], [command])
+        self.assertEqual(self.get_json("/api/document?token=test-token")["data"], data)
+        command["frames"] = 6
+        result = self.post_json("/api/save", data)
+        self.assertFalse(result["saved"])
+        self.assertEqual({item["code"] for item in result["diagnostics"]}, {"unknown_field"})
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
     def test_saves_death_branch_and_rejects_extra_condition_attributes(self) -> None:
         branch = {
             "command": "branch", "condition": {"type": "any_member_dead"},

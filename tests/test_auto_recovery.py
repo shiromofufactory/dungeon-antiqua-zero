@@ -107,6 +107,42 @@ class AutoRecoveryTest(unittest.TestCase):
             proficiency.level * 100 + proficiency.progress,
         )
 
+    @patch("ui.auto_recovery.play_se")
+    def test_auto_recovery_caps_growth_then_still_heals_without_growth_animation(self, _play_se: Mock) -> None:
+        for limit in (2, 4):
+            with self.subTest(limit=limit):
+                party = load_mock_party(self.items, self.skills)
+                healer, target = party[1], party[5]
+                sacred = healer.proficiency(ProficiencyKind.SACRED)
+                sacred.level, sacred.progress = limit, 98
+                healer.proficiency(ProficiencyKind.MYSTIC).level = limit
+                healer.mp = healer.max_mp = 255
+                target.hp = 1
+                fonts = Mock()
+                fonts.baseline_offset_for.return_value = 0
+                overlay = AutoRecoveryOverlay(
+                    party=party, spells=self.spells, items=self.items,
+                    inventory=InventorySystem(self.items),
+                    save_data=SaveData(auto_recovery=AutoRecoveryConfig(
+                        100, AutoRecoveryMethod.SPELLS, healer.definition.key
+                    )),
+                    settings=Settings(), texts=self.texts, fonts=fonts, faces=Mock(),
+                    proficiency_level_limit=limit,
+                )
+                confirm = InputState(confirm=InputButton(True, True))
+                overlay.update(confirm)
+                self.assertGreater(overlay.result.actions, 0)
+                self.assertEqual(target.hp, target.max_hp)
+                self.assertEqual((sacred.level, sacred.progress), (limit, 99))
+                self.assertEqual(overlay.result.proficiency_growths[1].applied_amount, 1)
+                for _frame in range(PROFICIENCY_ANIMATION_FRAME_COUNT + 1):
+                    overlay.update(InputState())
+                target.hp = target.max_hp - 1
+                overlay.update(confirm)
+                self.assertEqual(target.hp, target.max_hp)
+                self.assertEqual(overlay.result.proficiency_growths, {})
+                self.assertEqual(overlay.proficiency_windows, {})
+
     def test_multiple_casts_aggregate_proficiency_growth_per_caster(self) -> None:
         self.party[5].hp = 20
         healer = self.party[1]

@@ -346,17 +346,29 @@ class Proficiency:
         level, progress = divmod(total, 100)
         return cls(aptitude, level=level, progress=progress)
 
-    def add_progress(self, amount: int) -> None:
-        """Add progress, carrying each 100 points into one level."""
+    def add_progress(self, amount: int, *, level_limit: int | None = None) -> None:
+        """Carry progress up to the ceiling without reducing existing values."""
 
         if isinstance(amount, bool) or not isinstance(amount, int):
             raise TypeError("amount must be an integer")
         if amount < 0:
             raise ValueError("amount must not be negative")
+        if level_limit is not None:
+            if isinstance(level_limit, bool) or not isinstance(level_limit, int):
+                raise TypeError("level_limit must be an integer or None")
+            if level_limit < 0:
+                raise ValueError("level_limit must not be negative")
         if self.aptitude is ProficiencyAptitude.DISABLED or amount == 0:
             return
         current = self.level * 100 + self.progress
-        limit = self.max_level * 100 + 99
+        maximum_level = (
+            self.max_level
+            if level_limit is None
+            else min(self.max_level, level_limit)
+        )
+        limit = maximum_level * 100 + 99
+        if current >= limit:
+            return
         self.level, self.progress = divmod(min(current + amount, limit), 100)
 
 

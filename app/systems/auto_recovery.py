@@ -214,6 +214,7 @@ def execute_auto_recovery(
     config: AutoRecoveryConfig,
     *,
     random_factor: Callable[[], float] = random.random,
+    proficiency_level_limit: int | None = None,
 ) -> RecoveryResult:
     """Apply each step and recalculate until no usable recovery remains."""
 
@@ -256,7 +257,10 @@ def execute_auto_recovery(
             if caster.mp < mp_before:
                 result.mp_spent.add(step.caster_index)
             growth = apply_menu_spell_proficiency_growth(
-                caster, ProficiencyKind.SACRED, mp_spent=step.spell.mp
+                caster,
+                ProficiencyKind.SACRED,
+                mp_spent=step.spell.mp,
+                proficiency_level_limit=proficiency_level_limit,
             )
             if growth.applied_amount > 0:
                 previous = result.proficiency_growths.get(step.caster_index)

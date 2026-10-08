@@ -140,6 +140,7 @@ from systems import (
     AUTO_SAVE_SLOT,
     ChangeBgmEffect,
     StopBgmEffect,
+    ResetGameEffect,
     ChangeBrightnessEffect,
     ShakeScreenEffect,
     DebugPartyEditor,
@@ -756,6 +757,8 @@ class Game:
             encounter=encounter,
             command_memory=memory,
             on_invalid_action=self.alert.start,
+            proficiency_level_limit=self.launch_mode.proficiency_level_limit,
+            experience_limit=self.launch_mode.experience_limit,
         )
 
     def _advance_random_encounter(self) -> bool:
@@ -1984,7 +1987,16 @@ class Game:
                 2,
                 7,
             ),
-            WindowText(pad(self.save_data.experience, 6), 2, 10),
+            WindowText(
+                pad(self.save_data.experience, 6),
+                2,
+                10,
+                color=(
+                    POSITIVE_COLOR
+                    if self.save_data.experience >= self.launch_mode.experience_limit
+                    else DEFAULT_TEXT_COLOR
+                ),
+            ),
             self.localized_texts.create(
                 self.localized["menu.info.difficulty"],
                 2,
@@ -2408,6 +2420,7 @@ class Game:
             faces=self.faces,
             palette_shifter=self.palette_shifter,
             on_spell_level_up=self._play_field_spell_level_up_jingle,
+            proficiency_level_limit=self.launch_mode.proficiency_level_limit,
         )
 
     def _play_field_spell_level_up_jingle(self) -> None:
@@ -2699,6 +2712,7 @@ class Game:
             on_field_teleport=self._start_field_teleport,
             on_invalid_action=self.alert.start,
             on_spell_level_up=self._play_field_spell_level_up_jingle,
+            proficiency_level_limit=self.launch_mode.proficiency_level_limit,
         )
         if member_index is None:
             self.selected_member_index = self.spell_screen.member_index
@@ -3127,6 +3141,10 @@ class Game:
 
         settings = self.settings
         palette_shifter = self.palette_shifter
+        palette_shifter.set_global_mix(
+            base_rate=1.0,
+            target_color=palette_shifter.base_colors[0],
+        )
         load_mission_hint_shown = getattr(
             self,
             "_load_mission_hint_shown_this_launch",
@@ -3239,6 +3257,9 @@ class Game:
                         self._show_hint_once(FIRST_BATTLE_HINT_ID)
                 return
             self.event_effect = effect
+            if isinstance(effect, ResetGameEffect):
+                self._begin_return_to_start()
+                return
             if isinstance(effect, WaitEffect):
                 self.event_wait_remaining = effect.frames
                 return
@@ -3846,6 +3867,9 @@ class Game:
         if bgm is not None:
             bgm.update()
         self.alert.update()
+        if getattr(self, "_returning_to_start", False):
+            self._update_return_to_start(input_state)
+            return
         if getattr(self, "encounter_transition", None) is not None:
             self._update_encounter_transition()
             return
@@ -3866,9 +3890,6 @@ class Game:
             self._update_event(input_state)
             return
         if self._update_battle_scene(input_state):
-            return
-        if getattr(self, "_returning_to_start", False):
-            self._update_return_to_start(input_state)
             return
         if self._update_fade():
             return

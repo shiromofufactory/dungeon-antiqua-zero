@@ -111,12 +111,13 @@
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。
 - ゲームルールは可能な範囲でPyxel非依存のテストを用意する。
 - 起動モード・試遊版の初期LV・モード別イベント条件・デバッグ表示は `python3 -B -m unittest tests.test_launch_modes tests.test_main tests.test_game tests.test_events tests.test_event_pipeline tests.test_game_events tests.test_save_system`、条件の編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
+- 起動モード別の武器・呪文・経験値上限と経験値到達色、上限超過NPCの保持、戦闘・メニュー呪文・自動回復への適用は `python3 -B -m unittest tests.test_member tests.test_battle_progression tests.test_spell_progression tests.test_auto_recovery tests.test_spell_menu tests.test_battle_scene tests.test_launch_modes tests.test_game tests.test_save_system` で回帰検証する。
 - 仮タイトル・モード別の開始経路・押しっぱなし入力・タイトル復帰は `python3 -B -m unittest tests.test_title tests.test_start_menu tests.test_launch_modes tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
 - 戦闘設定とコマンド記憶は `python3 -B -m unittest tests.test_battle_preferences tests.test_state tests.test_settings_system tests.test_game` で設定互換性・即時保存・復元を回帰検証する。
 - セーブ形式と戦闘コマンド記憶の永続化は `python3 -B -m unittest tests.test_save_system tests.test_battle_preferences tests.test_game` でスロット保存・ロード・旧形式互換を回帰検証する。
 - ミッションの検証・条件判定・情報メニュー表示は `python3 -B -m unittest tests.test_missions tests.test_information_menu tests.test_event_editor_server tests.test_editor_server`、エディタ操作は `node --test tests/test_mission_editor.mjs` で回帰検証する。
-- イベントコマンドの検証・実行・待機・ゲームメニュー中の停止は `python3 -B -m unittest tests.test_game tests.test_game_events tests.test_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu`、コマンドの編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
+- イベントコマンドの検証・実行・待機・ゲームメニュー中の停止とゲームリセットは `python3 -B -m unittest tests.test_game tests.test_game_events tests.test_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu tests.test_launch_modes`、コマンドの編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
 - イベントの明るさ変更・横揺れは `python3 -B -m unittest tests.test_screen_effects tests.test_palette tests.test_game_events tests.test_game_menu` で補間・パレット合成・位置復元・割り込み停止を回帰検証する。
 - イベントのBGM停止は `python3 -B -m unittest tests.test_audio_resources tests.test_events tests.test_game_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu` でフェードアウト・予約解除・停止保持・次曲再生・割り込み停止を回帰検証する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。

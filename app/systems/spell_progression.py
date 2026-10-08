@@ -70,6 +70,7 @@ def apply_menu_spell_proficiency_growth(
     kind: ProficiencyKind,
     *,
     mp_spent: int,
+    proficiency_level_limit: int | None = None,
 ) -> MenuSpellProficiencyGrowth:
     """Apply one menu spell's proficiency and any resulting max-MP growth."""
 
@@ -78,7 +79,7 @@ def apply_menu_spell_proficiency_growth(
     before_total = proficiency.level * 100 + proficiency.progress
     before_level = proficiency.level
     before_maximum_spell_level = member.maximum_spell_level()
-    proficiency.add_progress(amount)
+    proficiency.add_progress(amount, level_limit=proficiency_level_limit)
     after_total = proficiency.level * 100 + proficiency.progress
 
     if proficiency.level > before_level:

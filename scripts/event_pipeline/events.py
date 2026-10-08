@@ -257,7 +257,7 @@ def _validate_command_list(
                 ):
                     continue
                 _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, monster_keys=monster_keys, tall_first_monster_keys=tall_first_monster_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context)
-        elif command_type in ("end_event", "stop_bgm"):
+        elif command_type in ("end_event", "stop_bgm", "reset_game"):
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
             _known_fields(command, {"command", "message_id"}, diagnostics, command_path)

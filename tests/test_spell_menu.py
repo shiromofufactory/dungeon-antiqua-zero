@@ -409,6 +409,35 @@ class SpellMenuTest(unittest.TestCase):
             "%SACRED%%COL_POSITIVE%２－０２%COL_END%",
         )
 
+    @patch("ui.spell_menu.play_se")
+    @patch("ui.spell_menu.random.random", return_value=0.5)
+    def test_healing_at_mode_limit_uses_mp_without_growth_animation_or_jingle(
+        self, _random_value: Mock, _play_se: Mock,
+    ) -> None:
+        for limit in (2, 4):
+            with self.subTest(limit=limit):
+                jingle = Mock()
+                overlay = SpellMenuHarness(
+                    member_index=1, proficiency_level_limit=limit,
+                    on_spell_level_up=jingle,
+                )
+                sacred = overlay.member.proficiency(ProficiencyKind.SACRED)
+                sacred.level, sacred.progress = limit, 99
+                target = overlay.party[0]
+                target.hp = target.max_hp - 1
+                mp_before = overlay.member.mp
+                confirm = InputState(confirm=InputButton(True, True))
+                overlay.update(confirm)
+                overlay.spell_cursor.select_key("HEALING1")
+                overlay.update(confirm)
+                overlay.member_cursor.select_key(0)
+                overlay.update(confirm)
+                self.assertEqual(target.hp, target.max_hp)
+                self.assertEqual(overlay.member.mp, mp_before - overlay.spells["HEALING1"].mp)
+                self.assertEqual((sacred.level, sacred.progress), (limit, 99))
+                self.assertIsNone(overlay._proficiency_animation)
+                jingle.assert_not_called()
+
     def test_healing_with_no_valid_target_reports_an_error(self) -> None:
         invalid_action = Mock()
         mock = SpellMenuHarness(member_index=1)

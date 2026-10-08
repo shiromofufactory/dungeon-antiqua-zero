@@ -15,6 +15,7 @@ from app.state import LaunchMode, SaveData
 from app.systems import (
     ChangeBrightnessEffect,
     StopBgmEffect,
+    ResetGameEffect,
     ShakeScreenEffect,
     EventContext,
     EventRunner,
@@ -84,6 +85,33 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
 
 
 class EventRunnerTest(unittest.TestCase):
+    def test_reset_waits_after_message_and_discards_all_branch_continuations(self) -> None:
+        for context in EventContext:
+            with self.subTest(context=context):
+                self.save_data.event_flags.clear()
+                runner = self.runner([
+                    {"command": "message", "message_id": "sample.end"},
+                    {"command": "branch", "condition": {
+                        "type": "not", "condition": {"type": "flag_set", "flag_id": "sample.done"},
+                    }, "then": [
+                        {"command": "reset_game"},
+                        {"command": "set_flag", "flag_id": "sample.done"},
+                    ], "else": []},
+                    {"command": "set_flag", "flag_id": "sample.done"},
+                ])
+                runner.context = context
+                message = runner.advance()
+                self.assertEqual(message, MessageEffect("sample.end"))
+                self.assertIs(runner.advance(), message)
+                runner.complete_effect(message)
+                reset = runner.advance()
+                self.assertEqual(reset, ResetGameEffect())
+                self.assertIs(runner.advance(), reset)
+                runner.complete_effect(reset)
+                self.assertIsNone(runner.advance())
+                self.assertTrue(runner.is_complete)
+                self.assertNotIn("sample.done", self.save_data.event_flags)
+
     def test_launch_mode_branches_in_field_and_battle_with_nested_conditions(self) -> None:
         for context in EventContext:
             for mode in LaunchMode:
