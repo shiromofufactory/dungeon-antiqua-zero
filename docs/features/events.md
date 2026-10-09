@@ -441,8 +441,9 @@ npm run events:build
   即時停止は予約されたフェード停止を解除し、後から新しい曲を停止しない。
 - イベントで切り替えたBGMは、別のBGMコマンドまたはScene遷移まで継続する。再生位置と現在曲は
   セーブしない。
-- `se_id` も数値Sound番号ではなく安定IDとする。Pyxel Sound番号との対応は
+- `se_id` も数値Sound番号ではなく安定IDとする。Pyxel Sound番号またはWAVとの対応は
   `app/audio/catalog.json` へ分離し、イベントエディタと本番コードが同じカタログを読む。
+  定義形式と再生チャンネルの規則は [効果音](./sound-effects.md) を参照する。
 - 音量は `Settings.bgm_volume` / `se_volume` を使い、イベント定義へ音量設定を持たせない。
 
 #### 画面フラッシュ

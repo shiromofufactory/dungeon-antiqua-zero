@@ -387,8 +387,20 @@ Rendererは背面の `object`、通常の `object_y_sorted` とキャラクタ�
 - `app/audio`: `npm run audio:build` で生成するゲーム用Ogg Vorbis
 - `output/mp3`: 同じコマンドで生成する視聴用MP3
 - `output/.audio-cache`: 形式別の変換状態（Git管理対象外）
-- `app/resources/audio.py`: BGM IDの解決、PCM読込、音量、再生状態
+- `app/se`: ゲームと制作ツールが直接読むSE用WAV
+- `app/audio/catalog.json`: 安定したSE IDとWAVまたはPyxel Soundの対応
+- `app/audio_catalog.py`: Pyxel非依存のSE定義解析・WAV参照検証
+- `app/resources/audio.py`: BGM IDの解決、PCM読込、音量、再生状態、共通SE再生
 - Pyxelチャンネル2: BGM専用チャンネル
+
+`SoundEffectPlayer` はゲームと制作ツールで共通の再生処理を所有する。登録済みWAVは
+初期化時に独立したSoundへ読み込み、キャッシュして再利用する。ゲーム側は `play_se()`
+へ安定IDを渡し、エディタは未保存の定義も同じPlayerへ渡す。定義の解析は
+イベントと呪文エフェクトの生成処理からも共有し、Pyxelを初期化せず検証できる。
+ゲームは設定のSE音量を同Playerへ通知し、Playerが音源種別に応じた利得を適用する。
+ゲーム音量を指定しない制作ツールでは、試聴用チャンネルの利得を維持する。
+SE定義・共通チャンネル・割り込み・制作操作は
+[`features/sound-effects.md`](./features/sound-effects.md) を正本とする。
 
 `scripts/build-audio.py` は変換元の相対パスを維持し、22,050Hz・モノラル・Vorbis quality 4
 へ変換する。拡張子を除いた `app/audio` からの相対パスを安定したBGM IDとして使い、
@@ -506,7 +518,8 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 制作設定の正本はGoogle Sheets同期外の`content/effects/spells.json`、ゲーム用生成物は
 `app/effects/spells.json`とし、呪文マスターの`content/data/spells.json`へ描画設定を混在させない。
 未登録Soundへ安定した`se_id`を付ける操作は同ツールに持たせ、ゲーム本体も参照する
-`app/audio/catalog.json`へ追加する。Sound自体の編集責務はPyxel Editorに残す。
+`app/audio/catalog.json`へ追加する。SE用WAVの登録と試聴も共通Playerを使用する。
+Sound自体の編集責務はPyxel Editorに残す。
 形式検証とゲーム用索引の生成はPyxel非依存にし、ツール保存と非対話ビルドから同じ処理を使う。
 経過フレームと画像パターンの計算は`app/spell_effect.py`、Pyxel画像と対象パレットの描画は
 `app/rendering/spell_effect.py`相当が所有し、将来のBattleSceneと設定ツールで共有する。

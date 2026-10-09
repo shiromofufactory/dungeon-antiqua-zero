@@ -10,6 +10,7 @@ import tempfile
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
+from app.audio_catalog import AudioCatalogError, load_sound_effects
 from app.spell_effect import (
     SPELL_EFFECT_FORMAT_VERSION,
     SPELL_EFFECT_IMAGE_CELL_SIZES,
@@ -173,13 +174,9 @@ def _load_images(
 
 def _load_se_ids(path: Path) -> frozenset[str]:
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise SpellEffectSourceError(f"SEカタログを読み込めません: {path}: {error}") from error
-    records = document.get("sound_effects") if isinstance(document, dict) else None
-    if not isinstance(records, dict):
-        raise SpellEffectSourceError("SEカタログのsound_effectsが不正です。")
-    return frozenset(key for key in records if isinstance(key, str) and key)
+        return frozenset(load_sound_effects(path))
+    except AudioCatalogError as error:
+        raise SpellEffectSourceError(str(error)) from error
 
 
 def load_project_catalogs(

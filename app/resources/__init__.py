@@ -3,14 +3,19 @@
 from .audio import (
     BGM_CHANNEL,
     BGM_VOLUME_GAINS,
+    SE_CHANNEL,
+    SE_VOLUME_GAINS,
     AudioResourceError,
     BgmPlayer,
+    SoundEffectPlayer,
     list_bgm_ids,
     load_se_catalog,
     list_se_ids,
     play_se,
+    preload_se,
     reload_se_catalog,
-    se_channel_and_sound,
+    set_se_volume,
+    sound_effect_definition,
 )
 from .data import DataResourceError, load_record_array
 from .fonts import (
@@ -95,5 +100,10 @@ __all__ = [
     "list_se_ids",
     "play_se",
     "reload_se_catalog",
-    "se_channel_and_sound",
+    "SE_CHANNEL",
+    "SE_VOLUME_GAINS",
+    "set_se_volume",
+    "SoundEffectPlayer",
+    "preload_se",
+    "sound_effect_definition",
 ]

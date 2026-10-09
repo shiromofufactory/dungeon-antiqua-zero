@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
+from app.audio_catalog import SoundEffectDefinition
 from app.resources.audio import (
     BGM_VOLUME_GAINS,
     SE_CATALOG,
@@ -17,7 +18,9 @@ from app.resources.audio import (
     list_se_ids,
     play_se,
     reload_se_catalog,
-    se_channel_and_sound,
+    sound_effect_definition,
+    SoundEffectPlayer,
+    SE_CHANNEL,
 )
 
 
@@ -30,6 +33,90 @@ class FakeSound:
         self.pcm_paths.append(path)
         if self.error is not None:
             raise self.error
+
+
+class SoundEffectPlayerTest(unittest.TestCase):
+    def test_game_volume_boosts_only_wav_and_restores_synth_gain(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "hit.wav").touch()
+            px = Mock()
+            px.channels = [SimpleNamespace(gain=0.42) for _ in range(4)]
+            px.Sound.return_value = FakeSound()
+            player = SoundEffectPlayer(root, pyxel_api=px, volume=3)
+            wav = SoundEffectDefinition.from_record("hit", {"wav": "hit.wav"})
+            synth = SoundEffectDefinition.from_record("equip", {"sound": 6})
+
+            for volume, wav_gain, synth_gain in (
+                (0, 0.0, 0.0), (1, 0.075, 0.05), (2, 0.15, 0.10),
+                (3, 0.225, 0.15), (4, 0.30, 0.20),
+            ):
+                with self.subTest(volume=volume):
+                    player.set_volume(volume)
+                    player.play(wav)
+                    self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, wav_gain)
+                    player.play(synth)
+                    self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, synth_gain)
+            player.play(wav)
+            player.set_volume(3)
+            self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, 0.225)
+            player.set_volume(0)
+            self.assertEqual(px.channels[SE_CHANNEL].gain, 0.0)
+            self.assertEqual([channel.gain for index, channel in enumerate(px.channels) if index != SE_CHANNEL], [0.42] * 3)
+
+    def test_editor_preview_preserves_gain_for_both_sources(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "hit.wav").touch()
+            px = Mock()
+            px.channels = [SimpleNamespace(gain=0.42) for _ in range(4)]
+            px.Sound.return_value = FakeSound()
+            player = SoundEffectPlayer(root, pyxel_api=px)
+            player.play(SoundEffectDefinition.from_record("hit", {"wav": "hit.wav"}))
+            self.assertEqual(px.channels[SE_CHANNEL].gain, 0.42)
+            player.play(SoundEffectDefinition.from_record("equip", {"sound": 6}))
+            self.assertEqual(px.channels[SE_CHANNEL].gain, 0.42)
+
+    def test_preloads_and_reuses_wav_while_pyxel_sounds_share_the_channel(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "hit.wav"
+            path.touch()
+            px = Mock()
+            px.Sound.return_value = FakeSound()
+            player = SoundEffectPlayer(root, pyxel_api=px)
+            wav = SoundEffectDefinition.from_record("hit", {"wav": "hit.wav"})
+            synth = SoundEffectDefinition.from_record("equip", {"sound": 6})
+
+            player.preload({"hit": wav, "equip": synth})
+            px.play.assert_not_called()
+            player.play(wav)
+            player.play(synth)
+            player.play(wav)
+
+            px.Sound.assert_called_once_with()
+            self.assertEqual(px.Sound.return_value.pcm_paths, [str(path)])
+            self.assertEqual([call.args for call in px.play.call_args_list], [
+                (SE_CHANNEL, px.Sound.return_value), (SE_CHANNEL, 6),
+                (SE_CHANNEL, px.Sound.return_value),
+            ])
+
+    def test_reloads_modified_wav_and_reports_decode_failures(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "hit.wav"
+            path.touch()
+            px = Mock()
+            px.Sound.side_effect = [FakeSound(), FakeSound(error=ValueError("invalid WAV"))]
+            player = SoundEffectPlayer(root, pyxel_api=px)
+            definition = SoundEffectDefinition.from_record("hit", {"wav": "hit.wav"})
+            player.play(definition)
+            path.write_bytes(b"changed")
+
+            with self.assertRaisesRegex(AudioResourceError, "hit.*invalid WAV"):
+                player.play(definition)
+            px.play.assert_called_once()
+            self.assertEqual(px.Sound.call_count, 2)
 
 
 class FakePyxel:
@@ -240,10 +327,11 @@ class BgmPlayerTest(unittest.TestCase):
 
     def test_plays_stable_se_id_from_shared_catalog(self) -> None:
         pyxel = Mock()
+        pyxel.channels = [SimpleNamespace(gain=0.42) for _ in range(4)]
 
-        play_se("spell_healing1", pyxel_api=pyxel)
+        play_se("equip_complete", pyxel_api=pyxel)
 
-        pyxel.play.assert_called_once_with(1, 9)
+        pyxel.play.assert_called_once_with(SE_CHANNEL, 6)
         self.assertTrue(
             {
                 "alert",
@@ -262,30 +350,30 @@ class BgmPlayerTest(unittest.TestCase):
             }
             <= set(list_se_ids())
         )
-        self.assertEqual(se_channel_and_sound("spell_healing1"), (1, 9))
-        self.assertEqual(se_channel_and_sound("battle_escape"), (0, 26))
-        self.assertEqual(se_channel_and_sound("battle_focus"), (0, 37))
-        self.assertEqual(se_channel_and_sound("battle_hide"), (0, 30))
-        self.assertEqual(se_channel_and_sound("battle_identify"), (0, 20))
-        self.assertEqual(se_channel_and_sound("battle_monster_death"), (0, 10))
-        self.assertEqual(se_channel_and_sound("battle_weapon_slash"), (0, 11))
-        self.assertEqual(se_channel_and_sound("battle_weapon_blunt"), (0, 29))
-        self.assertEqual(se_channel_and_sound("result_increment"), (1, 2))
-        self.assertEqual(se_channel_and_sound("save_complete"), (1, 6))
-        self.assertEqual(se_channel_and_sound("equip_complete"), (1, 6))
+        self.assertEqual(sound_effect_definition("spell_healing1").wav, "Healing1.wav")
+        self.assertEqual(sound_effect_definition("battle_escape").sound, 26)
+        self.assertEqual(sound_effect_definition("battle_focus").sound, 37)
+        self.assertEqual(sound_effect_definition("battle_hide").sound, 30)
+        self.assertEqual(sound_effect_definition("battle_identify").sound, 20)
+        self.assertEqual(sound_effect_definition("battle_monster_death").sound, 10)
+        self.assertEqual(sound_effect_definition("battle_weapon_slash").sound, 11)
+        self.assertEqual(sound_effect_definition("battle_weapon_blunt").sound, 29)
+        self.assertEqual(sound_effect_definition("result_increment").sound, 2)
+        self.assertEqual(sound_effect_definition("save_complete").sound, 6)
+        self.assertEqual(sound_effect_definition("equip_complete").sound, 6)
         with self.assertRaises(AudioResourceError):
             play_se("missing", pyxel_api=pyxel)
         with self.assertRaises(AudioResourceError):
-            se_channel_and_sound("missing")
+            sound_effect_definition("missing")
 
     def test_reloads_edited_catalog_without_replacing_public_mapping(self) -> None:
         path = self.audio_dir / "catalog.json"
         path.write_text(
             json.dumps(
                 {
-                    "format_version": 1,
+                    "format_version": 2,
                     "sound_effects": {
-                        "spell_fire1": {"channel": 0, "sound": 17},
+                        "spell_fire1": {"sound": 17},
                     },
                 }
             ),
@@ -296,9 +384,9 @@ class BgmPlayerTest(unittest.TestCase):
         try:
             loaded = load_se_catalog(path)
             reloaded = reload_se_catalog(path)
-            self.assertEqual(loaded["spell_fire1"], (0, 17))
+            self.assertEqual(loaded["spell_fire1"].sound, 17)
             self.assertIs(reloaded, public_mapping)
-            self.assertEqual(se_channel_and_sound("spell_fire1"), (0, 17))
+            self.assertEqual(sound_effect_definition("spell_fire1").sound, 17)
         finally:
             reload_se_catalog()
 

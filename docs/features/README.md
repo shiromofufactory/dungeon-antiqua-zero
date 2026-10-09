@@ -42,6 +42,7 @@
 - [フィールド・メニュー](./field.md)
 - [ゲームメニュー（強制割り込み）](./game-menu.md)
 - [ゲーム内ヒント](./game-hints.md)
+- [効果音](./sound-effects.md)
 - [情報メニュー・ミッション・モンスター図鑑](./information-menu.md)
 - [エンカウントと戦闘復帰](./encounters.md)
 - [戦闘表示データ](./battle.md)

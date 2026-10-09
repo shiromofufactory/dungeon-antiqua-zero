@@ -17,6 +17,7 @@ class MainTest(unittest.TestCase):
         with (
             patch("main.pyxel.init") as init,
             patch("main.pyxel.load") as load,
+            patch("main.preload_se") as preload,
             patch("main.pyxel.load_pal") as load_pal,
             patch("main.pyxel.fullscreen") as fullscreen,
             patch("main.create_default_palette_shifter") as create_palette,
@@ -36,6 +37,7 @@ class MainTest(unittest.TestCase):
             load.call_args_list,
         )
         load_pal.assert_called_once_with(str(APP_ROOT / "assets.pyxpal"))
+        preload.assert_called_once_with()
         fullscreen.assert_not_called()
         self.assertIs(palette, create_palette.return_value)
 
@@ -44,6 +46,7 @@ class MainTest(unittest.TestCase):
         with (
             patch("main.pyxel.init") as init,
             patch("main.pyxel.load"),
+            patch("main.preload_se"),
             patch("main.pyxel.load_pal"),
             patch("main.pyxel.fullscreen") as fullscreen,
             patch("main.pyxel.screen_mode") as screen_mode,

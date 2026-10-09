@@ -28,9 +28,9 @@ class SpellEffectEditorStoreTest(unittest.TestCase):
         self.audio_path.write_text(
             json.dumps(
                 {
-                    "format_version": 1,
+                    "format_version": 2,
                     "sound_effects": {
-                        "confirm": {"channel": 1, "sound": 9},
+                        "confirm": {"sound": 9},
                     },
                 }
             ),
@@ -125,7 +125,7 @@ class SpellEffectEditorStoreTest(unittest.TestCase):
             self.root, content_root=self.content_root, catalogs=self.catalogs
         )
 
-        store.register_sound_effect("spell_fire1", channel=0, sound=17)
+        store.register_sound_effect("spell_fire1", sound=17)
         self.assertIn("spell_fire1", store.catalogs.se_ids)
         definition = self.definition()
         store.set_definition(
@@ -139,7 +139,7 @@ class SpellEffectEditorStoreTest(unittest.TestCase):
         audio = json.loads(self.audio_path.read_text(encoding="utf-8"))
         self.assertEqual(
             audio["sound_effects"]["spell_fire1"],
-            {"channel": 0, "sound": 17},
+            {"sound": 17},
         )
         runtime = json.loads(store.runtime_path.read_text(encoding="utf-8"))
         self.assertEqual(runtime["effects"]["FIRE1"]["se_id"], "spell_fire1")
@@ -150,17 +150,81 @@ class SpellEffectEditorStoreTest(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError):
-            store.register_sound_effect("confirm", channel=1, sound=9)
+            store.register_sound_effect("confirm", sound=9)
         with self.assertRaises(ValueError):
-            store.register_sound_effect("BAD ID", channel=1, sound=9)
+            store.register_sound_effect("BAD ID", sound=9)
+
+    def test_updates_existing_sound_source_without_changing_references(self) -> None:
+        se_dir = self.root / "app" / "se"
+        se_dir.mkdir()
+        (se_dir / "fire1.wav").touch()
+        store = SpellEffectEditorStore(
+            self.root, content_root=self.content_root, catalogs=self.catalogs
+        )
+        store.set_definition(self.definition())
+        store.save()
+
+        store.update_sound_effect("confirm", sound=9)
+        self.assertFalse(store.dirty)
+        store.update_sound_effect("confirm", wav="fire1.wav")
+        self.assertTrue(store.dirty)
+        store.save()
+
+        reopened = SpellEffectEditorStore(
+            self.root, content_root=self.content_root, catalogs=self.catalogs
+        )
+        self.assertEqual(reopened.definition("FIRE1").se_id, "confirm")
+        self.assertEqual(reopened.sound_effect("confirm").wav, "fire1.wav")
+        self.assertIsNone(reopened.sound_effect("confirm").sound)
+        self.assertEqual(set(reopened.sound_effects), {"confirm"})
+        reopened.update_sound_effect("confirm", sound=17)
+        reopened.save()
+        audio = json.loads(self.audio_path.read_text())
+        self.assertEqual(audio["sound_effects"], {"confirm": {"sound": 17}})
+        with self.assertRaises(ValueError):
+            reopened.update_sound_effect("missing", sound=9)
+        with self.assertRaises(ValueError):
+            reopened.update_sound_effect("confirm", wav="missing.wav")
+        self.assertEqual(reopened.sound_effect("confirm").sound, 17)
+
+    def test_registers_wav_and_preserves_both_sources_when_saved_and_reopened(self) -> None:
+        se_dir = self.root / "app" / "se"
+        se_dir.mkdir()
+        (se_dir / "fire1.wav").touch()
+        store = SpellEffectEditorStore(
+            self.root, content_root=self.content_root, catalogs=self.catalogs
+        )
+
+        self.assertEqual(store.available_wavs, ("fire1.wav",))
+        store.register_sound_effect("spell_fire1", wav="fire1.wav")
+        store.set_definition(SpellEffectDefinition.from_record(
+            "FIRE1", {**self.definition().to_runtime_record(), "se_id": "spell_fire1"},
+        ))
+        store.save()
+
+        audio = json.loads(self.audio_path.read_text())
+        self.assertEqual(audio["format_version"], 2)
+        self.assertEqual(audio["sound_effects"]["confirm"], {"sound": 9})
+        self.assertEqual(audio["sound_effects"]["spell_fire1"], {"wav": "fire1.wav"})
+        reopened = SpellEffectEditorStore(
+            self.root, content_root=self.content_root, catalogs=store.catalogs
+        )
+        self.assertEqual(reopened.sound_effect("spell_fire1").wav, "fire1.wav")
+        self.assertEqual(reopened.definition("FIRE1").se_id, "spell_fire1")
+        with self.assertRaises(ValueError):
+            reopened.register_sound_effect("missing", wav="missing.wav")
+        (se_dir / "fire1.wav").unlink()
+        with self.assertRaises(SpellEffectSourceError):
+            reopened.save()
+        self.assertEqual(json.loads(self.audio_path.read_text()), audio)
 
     def test_refuses_to_overwrite_external_audio_catalog_change(self) -> None:
         store = SpellEffectEditorStore(
             self.root, content_root=self.content_root, catalogs=self.catalogs
         )
-        store.register_sound_effect("spell_fire1", channel=1, sound=17)
+        store.register_sound_effect("spell_fire1", sound=17)
         self.audio_path.write_text(
-            '{"format_version": 1, "sound_effects": {}}\n',
+            '{"format_version": 2, "sound_effects": {}}\n',
             encoding="utf-8",
         )
 

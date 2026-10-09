@@ -92,7 +92,9 @@ from resources import (
     MapDestination,
     MapResourceError,
     MapResources,
+    SE_CHANNEL,
     play_se,
+    set_se_volume,
 )
 from systems.conditions import evaluate_condition
 from resources.event_messages import (
@@ -254,7 +256,6 @@ EVENT_ITEM_RECEIVED_TEXT_KEY = "event.received_item"
 TREASURE_CAPACITY_TEXT_KEY = "treasure.capacity_exceeded"
 TREASURE_OPEN_SE_ID = "treasure_open"
 FIELD_POISON_SE_ID = "field_poison"
-FIELD_POISON_SE_CHANNEL = 3
 FIELD_MEMBER_DEAD_TEXT_KEY = "field.member.dead"
 FIELD_MEMBER_ADVANCED_TEXT_KEY = "field.member.advanced"
 FIELD_PARTY_ANNIHILATED_TEXT_KEY = "field.party.annihilated"
@@ -366,15 +367,8 @@ PARTY_CURSOR_X = 3
 PARTY_CURSOR_Y = 5
 RESERVE_MEMBER_Y_OFFSET_GRID = 2
 SORT_SOURCE_CURSOR_X_OFFSET = 1
-TELEPORT_SOUND_CHANNEL = 0
-TELEPORT_SOUND_ID = 8
-ALERT_CHANNEL = 1
-ALERT_SOUND_ID = 7
-SE_CHANNELS = (
-    TELEPORT_SOUND_CHANNEL,
-    ALERT_CHANNEL,
-    FIELD_POISON_SE_CHANNEL,
-)
+TELEPORT_SE_ID = "teleport"
+ALERT_SE_ID = "alert"
 ALERT_FRAME_COUNT = 3
 ALERT_CAMERA_X = (0, 0, 1, -1)
 SETTINGS_WINDOW_GRID = (4, 4, 56, 52)
@@ -388,8 +382,7 @@ CONFIRMATION_WINDOW_GRID = (8, 22, 48, 16)
 CONFIRMATION_CURSOR_X = 4
 CONFIRMATION_YES_Y = 8
 CONFIRMATION_NO_Y = 11
-SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
-SE_PREVIEW_SOUND_ID = 9
+SE_PREVIEW_SE_ID = "spell_healing1"
 GAME_SETTINGS_ENV = "DA0_GAME_SETTINGS"
 WELCOME_BGM_ID = "da3-welcome"
 ENCOUNTER_JINGLE_ID = "da3-encount"
@@ -435,7 +428,7 @@ class MenuAlertEffect:
         return ALERT_CAMERA_X[self.remaining_frames]
 
     def start(self) -> None:
-        pyxel.play(ALERT_CHANNEL, ALERT_SOUND_ID)
+        play_se(ALERT_SE_ID)
         self.remaining_frames = ALERT_FRAME_COUNT
 
     def update(self) -> None:
@@ -937,7 +930,7 @@ class Game:
             getattr(current_map, "profile", None) != "dungeon"
             or not self.field.is_moving
             or not any(member.poisoned for member in self.party)
-            or pyxel.play_pos(FIELD_POISON_SE_CHANNEL) is not None
+            or pyxel.play_pos(SE_CHANNEL) is not None
         ):
             return
         play_se(FIELD_POISON_SE_ID)
@@ -1152,11 +1145,11 @@ class Game:
                     target_color=self.palette_shifter.base_colors[0],
                 )
                 self._apply_battle_return()
-                pyxel.play(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+                play_se(TELEPORT_SE_ID)
                 self.defeat_return_sound_waiting = True
             return
         if getattr(self, "defeat_return_sound_waiting", False):
-            if pyxel.play_pos(TELEPORT_SOUND_CHANNEL) is not None:
+            if pyxel.play_pos(SE_CHANNEL) is not None:
                 return
             self.defeat_return_sound_waiting = False
             if getattr(self, "defeat_return_bgm_restart_pending", False):
@@ -2332,7 +2325,7 @@ class Game:
         self.pending_site = None
         self.pending_teleport_source = source
         self._begin_screen_change(GameScreenChange.TELEPORT)
-        pyxel.play(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+        play_se(TELEPORT_SE_ID)
         return True
 
     def _finish_debug_menu(self, *, resume_settings: bool = True) -> None:
@@ -3006,16 +2999,13 @@ class Game:
             self.bgm.set_volume(self.settings.bgm_volume)
         elif key == "se":
             self._apply_se_volume()
-            pyxel.play(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
+            play_se(SE_PREVIEW_SE_ID)
         elif key == "display":
             self._apply_display_mode()
         self._refresh_settings_window(selected_key=key)
 
     def _apply_se_volume(self) -> None:
-        gain = SE_VOLUME_GAINS[self.settings.se_volume]
-        for channel in SE_CHANNELS:
-            if len(pyxel.channels) > channel:
-                pyxel.channels[channel].gain = gain
+        set_se_volume(self.settings.se_volume, pyxel_api=pyxel)
 
     def _apply_display_mode(self) -> None:
         pyxel.screen_mode(1 if self.settings.display_mode is DisplayMode.SMOOTH else 0)

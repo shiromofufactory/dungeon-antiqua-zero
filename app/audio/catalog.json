@@ -1,124 +1,94 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "sound_effects": {
     "alert": {
-      "channel": 1,
       "sound": 7
     },
     "equip_complete": {
-      "channel": 1,
       "sound": 6
     },
     "battle_hit": {
-      "channel": 0,
       "sound": 12
     },
     "battle_monster_death": {
-      "channel": 0,
       "sound": 10
     },
     "battle_monster_escape": {
-      "channel": 0,
       "sound": 49
     },
     "battle_escape": {
-      "channel": 0,
       "sound": 26
     },
     "battle_focus": {
-      "channel": 0,
       "sound": 37
     },
     "battle_hide": {
-      "channel": 0,
       "sound": 30
     },
     "battle_identify": {
-      "channel": 0,
       "sound": 20
     },
     "battle_weapon_slash": {
-      "channel": 0,
       "sound": 11
     },
     "battle_weapon_blunt": {
-      "channel": 0,
       "sound": 29
     },
     "field_poison": {
-      "channel": 3,
       "sound": 43
     },
     "result_increment": {
-      "channel": 1,
       "sound": 2
     },
     "save_complete": {
-      "channel": 1,
       "sound": 6
     },
     "teleport": {
-      "channel": 0,
       "sound": 8
     },
     "treasure_open": {
-      "channel": 0,
       "sound": 25
     },
     "spell_fire1": {
-      "channel": 1,
-      "sound": 31
+      "wav": "Fire1.wav"
     },
     "spell_slow": {
-      "channel": 1,
-      "sound": 34
+      "wav": "Slow.wav"
     },
     "spell_healing1": {
-      "channel": 1,
-      "sound": 9
+      "wav": "Healing1.wav"
     },
     "spell_protection": {
-      "channel": 1,
       "sound": 38
     },
     "spell_poison1": {
-      "channel": 1,
-      "sound": 41
+      "wav": "Poison1.wav"
     },
     "spell_sleep": {
-      "channel": 1,
       "sound": 16
     },
     "spell_spark": {
-      "channel": 1,
       "sound": 17
     },
     "spell_armor_break": {
-      "channel": 1,
       "sound": 33
     },
     "spell_confusion": {
-      "channel": 1,
       "sound": 35
     },
     "spell_freeze1": {
-      "channel": 1,
       "sound": 36
     },
     "spell_silence": {
-      "channel": 1,
       "sound": 21
     },
     "spell_haste": {
-      "channel": 1,
       "sound": 37
     },
     "shake": {
-      "channel": 1,
       "sound": 48
     },
     "spell_healing2": {
-      "channel": 1,
       "sound": 22
     }
   }

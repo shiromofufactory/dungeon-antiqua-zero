@@ -10,9 +10,10 @@ from typing import Callable
 import pyxel
 
 from app.rendering import SpellEffectRenderer, create_default_palette_shifter
+from app.audio_catalog import SoundEffectDefinition
 from app.resources import (
-    BGM_CHANNEL,
     AudioResourceError,
+    SoundEffectPlayer,
     FontResources,
     ImageResourceError,
     ImageResources,
@@ -116,8 +117,10 @@ class PreviewTarget:
 @dataclass
 class SoundRegistrationDraft:
     se_id: str
-    channel: int
-    sound: int
+    sound: int = 0
+    use_wav: bool = False
+    wav_index: int = 0
+    original_se_id: str | None = None
 
 
 class SpellEffectEditor:
@@ -145,6 +148,8 @@ class SpellEffectEditor:
             self.project_root,
             content_root=self.content_root,
         )
+        self.se_player = SoundEffectPlayer(self.store.se_dir)
+        self.se_player.preload(self.store.sound_effects)
         self.japanese_font = FontResources(
             self.project_root / "app" / "fonts"
         ).font_for(Language.JAPANESE)
@@ -328,82 +333,92 @@ class SpellEffectEditor:
             self._set_status(str(error), ERROR_COLOR)
 
     def _play_registered_sound(self, se_id: str) -> None:
-        entry = self.store.sound_effect(se_id)
-        try:
-            pyxel.play(entry.channel, entry.sound)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as error:
-            raise AudioResourceError(
-                f"SEを再生できません: {se_id}: {error}"
-            ) from error
+        self.se_player.play(self.store.sound_effect(se_id))
 
     def _open_sound_registration(self) -> None:
         self.status_frames = 0
+        se_id = self.definition.se_id
+        if se_id is not None:
+            entry = self.store.sound_effect(se_id)
+            self.sound_registration = SoundRegistrationDraft(
+                se_id,
+                sound=entry.sound if entry.sound is not None else 0,
+                use_wav=entry.wav is not None,
+                wav_index=(
+                    self.store.available_wavs.index(entry.wav)
+                    if entry.wav is not None else 0
+                ),
+                original_se_id=se_id,
+            )
+            return
         suggested = "spell_" + "_".join(self.selected_spell.key.lower().split())
         suffix = 2
         candidate = suggested
         while candidate in self.store.sound_effects:
             candidate = f"{suggested}_{suffix}"
             suffix += 1
-        available_channels = self._available_se_channels()
-        self.sound_registration = SoundRegistrationDraft(
-            candidate[:MAX_SE_ID_LENGTH],
-            1 if 1 in available_channels else available_channels[0],
-            0,
-        )
-
-    @staticmethod
-    def _available_se_channels() -> tuple[int, ...]:
-        channels = tuple(
-            channel
-            for channel in range(len(pyxel.channels))
-            if channel != BGM_CHANNEL
-        )
-        if not channels:
-            raise AudioResourceError("SEに使用できるPyxel channelがありません。")
-        return channels
+        self.sound_registration = SoundRegistrationDraft(candidate[:MAX_SE_ID_LENGTH])
 
     def _change_sound_registration_number(self, direction: int) -> None:
         draft = self.sound_registration
         if draft is None:
             return
+        if draft.use_wav:
+            wavs = self.store.available_wavs
+            if wavs:
+                draft.wav_index = (draft.wav_index + direction) % len(wavs)
+            return
         maximum = max(0, len(pyxel.sounds) - 1)
         draft.sound = max(0, min(draft.sound + direction, maximum))
 
-    def _change_sound_registration_channel(self, direction: int) -> None:
+    def _change_sound_registration_source(self) -> None:
         draft = self.sound_registration
         if draft is None:
             return
-        channels = self._available_se_channels()
-        index = (channels.index(draft.channel) + direction) % len(channels)
-        draft.channel = channels[index]
+        if not draft.use_wav and not self.store.available_wavs:
+            raise ValueError("app/seに登録できるWAVがありません。")
+        draft.use_wav = not draft.use_wav
+
+    def _registration_definition(self) -> SoundEffectDefinition:
+        draft = self.sound_registration
+        if draft is None:
+            raise ValueError("SE登録画面が開いていません。")
+        if draft.use_wav:
+            wavs = self.store.available_wavs
+            if not wavs:
+                raise ValueError("app/seに登録できるWAVがありません。")
+            record = {"wav": wavs[draft.wav_index % len(wavs)]}
+        else:
+            record = {"sound": draft.sound}
+        # Preview remains available while the ID field is being edited.
+        return SoundEffectDefinition.from_record("preview", record)
 
     def _preview_sound_registration(self) -> None:
         draft = self.sound_registration
         if draft is None:
             return
-        try:
-            pyxel.play(draft.channel, draft.sound)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as error:
-            raise AudioResourceError(
-                f"Sound {draft.sound}を再生できません: {error}"
-            ) from error
+        self.se_player.play(self._registration_definition())
 
     def _register_sound(self) -> None:
         draft = self.sound_registration
         if draft is None:
             return
-        self.store.register_sound_effect(
-            draft.se_id,
-            channel=draft.channel,
-            sound=draft.sound,
+        save_sound = (
+            self.store.update_sound_effect
+            if draft.se_id == draft.original_se_id
+            else self.store.register_sound_effect
+        )
+        save_sound(
+            draft.se_id, **self._registration_definition().to_record(),
         )
         self.sound_registration = None
-        self._change_definition(se_id=draft.se_id)
-        self._set_status(f"SE {draft.se_id}を登録しました", SUCCESS_COLOR)
+        if self.definition.se_id != draft.se_id:
+            self._change_definition(se_id=draft.se_id)
+        self._set_status(f"SE {draft.se_id}を設定しました", SUCCESS_COLOR)
+
+    def _clear_sound(self) -> None:
+        self.sound_registration = None
+        self._change_definition(se_id=None)
 
     def _start_playback(self) -> None:
         self.playing = True
@@ -575,12 +590,6 @@ class SpellEffectEditor:
         self._change_definition(flash_color=color)
         self.flash_picker_open = False
 
-    def _cycle_se(self, direction: int) -> None:
-        choices: tuple[str | None, ...] = (None, *sorted(self.store.catalogs.se_ids))
-        current = self.definition.se_id
-        index = (choices.index(current) + direction) % len(choices)
-        self._change_definition(se_id=choices[index])
-
     def _cycle_target(self, direction: int) -> None:
         options = self.targets[self.target_side]
         self.target_indexes[self.target_side] = (
@@ -605,6 +614,7 @@ class SpellEffectEditor:
 
     def _save(self) -> bool:
         try:
+            self.se_player.preload(self.store.sound_effects)
             self.store.save()
             reload_se_catalog(self.store.audio_catalog_path)
         except (
@@ -653,26 +663,27 @@ class SpellEffectEditor:
             Button("flash_prev", 440, 104, 12, 11, "<"),
             Button("flash_picker", 454, 104, 42, 11, "PICK"),
             Button("flash_next", 498, 104, 12, 11, ">"),
-            Button("se_prev", 440, 118, 12, 11, "<"),
-            Button("se_next", 498, 118, 12, 11, ">"),
+            Button(
+                "se_select", 390, 116, 120, 11,
+                definition.se_id[:MAX_SE_ID_LENGTH] if definition.se_id else "NONE",
+            ),
             Button("set", 362, 142, 40, 12, "UNSET" if configured else "SET"),
-            Button("test_se", 404, 142, 34, 12, "TEST"),
             Button("save", 440, 142, 38, 12, "SAVE", self.store.dirty),
-            Button("new_se", 362, 158, 54, 12, "NEW SE"),
             Button("strip_prev", 480, 242, 14, 12, "<"),
             Button("strip_next", 496, 242, 14, 12, ">"),
         ]
         if self.sound_registration is not None:
             buttons.extend(
                 (
-                    Button("sound_number_prev", 260, 130, 16, 12, "-"),
-                    Button("sound_number_next", 330, 130, 16, 12, "+"),
-                    Button("sound_channel_prev", 260, 146, 16, 12, "<"),
-                    Button("sound_channel_next", 330, 146, 16, 12, ">"),
+                    Button("sound_source_prev", 260, 130, 16, 12, "<"),
+                    Button("sound_source_next", 330, 130, 16, 12, ">"),
+                    Button("sound_number_prev", 260, 146, 16, 12, "-"),
+                    Button("sound_number_next", 330, 146, 16, 12, "+"),
                     Button("sound_key_clear", 346, 108, 42, 12, "CLEAR"),
                     Button("sound_preview", 128, 174, 64, 14, "PREVIEW"),
-                    Button("sound_register", 198, 174, 70, 14, "REGISTER"),
-                    Button("sound_cancel", 274, 174, 64, 14, "CANCEL"),
+                    Button("sound_register", 198, 174, 52, 14, "APPLY"),
+                    Button("sound_none", 256, 174, 48, 14, "NONE"),
+                    Button("sound_cancel", 310, 174, 64, 14, "CANCEL"),
                 )
             )
         if self.flash_picker_open:
@@ -701,7 +712,6 @@ class SpellEffectEditor:
         return tuple(buttons)
 
     def _activate(self, button_id: str) -> None:
-        definition = self.definition
         actions: dict[str, Callable[[], None]] = {
             "filter": self._cycle_filter,
             "target_side": self._toggle_target_side,
@@ -728,31 +738,25 @@ class SpellEffectEditor:
             "flash_prev": lambda: self._cycle_flash(-1),
             "flash_picker": lambda: setattr(self, "flash_picker_open", True),
             "flash_next": lambda: self._cycle_flash(1),
-            "se_prev": lambda: self._cycle_se(-1),
-            "se_next": lambda: self._cycle_se(1),
-            "new_se": self._open_sound_registration,
+            "se_select": self._open_sound_registration,
             "set": lambda: (
                 self.store.remove_definition(self.selected_spell.key)
                 if self.store.definition(self.selected_spell.key) is not None
                 else self.store.set_definition(self.definition)
-            ),
-            "test_se": lambda: (
-                self._play_registered_sound(definition.se_id)
-                if definition.se_id
-                else None
             ),
             "save": self._save,
             "strip_prev": lambda: self._change_strip_scroll(-1),
             "strip_next": lambda: self._change_strip_scroll(1),
             "sound_number_prev": lambda: self._change_sound_registration_number(-1),
             "sound_number_next": lambda: self._change_sound_registration_number(1),
-            "sound_channel_prev": lambda: self._change_sound_registration_channel(-1),
-            "sound_channel_next": lambda: self._change_sound_registration_channel(1),
+            "sound_source_prev": self._change_sound_registration_source,
+            "sound_source_next": self._change_sound_registration_source,
             "sound_key_clear": lambda: setattr(
                 self.sound_registration, "se_id", ""
             ),
             "sound_preview": self._preview_sound_registration,
             "sound_register": self._register_sound,
+            "sound_none": self._clear_sound,
             "sound_cancel": lambda: setattr(self, "sound_registration", None),
             "flash_dialog_none": lambda: self._select_flash_color(None),
             "flash_dialog_cancel": lambda: setattr(self, "flash_picker_open", False),
@@ -771,7 +775,11 @@ class SpellEffectEditor:
 
     def _handle_mouse(self) -> None:
         wheel = getattr(pyxel, "mouse_wheel", 0)
-        if wheel and SPELL_LIST_X <= pyxel.mouse_x < SETTINGS_X:
+        if (
+            wheel
+            and not (self.exit_confirmation or self.flash_picker_open or self.sound_registration is not None)
+            and SPELL_LIST_X <= pyxel.mouse_x < SETTINGS_X
+        ):
             self._select_spell(self.selected_spell_index - int(wheel))
         if not pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
             return
@@ -851,9 +859,9 @@ class SpellEffectEditor:
             if pyxel.btnp(pyxel.KEY_DOWN, hold=20, repeat=4):
                 self._change_sound_registration_number(-1)
             if pyxel.btnp(pyxel.KEY_LEFT):
-                self._change_sound_registration_channel(-1)
+                self._activate("sound_source_prev")
             if pyxel.btnp(pyxel.KEY_RIGHT):
-                self._change_sound_registration_channel(1)
+                self._activate("sound_source_next")
             if pyxel.btnp(pyxel.KEY_RETURN):
                 self._activate("sound_register")
             elif pyxel.btnp(pyxel.KEY_ESCAPE):
@@ -1013,13 +1021,13 @@ class SpellEffectEditor:
             pyxel.rect(426, 104, 10, 9, definition.flash_color)
             pyxel.rectb(426, 104, 10, 9, 5)
         if definition.se_id is None:
-            se_text = "NONE"
             se_detail = "SE NONE"
         else:
             entry = self.store.sound_effect(definition.se_id)
-            se_text = definition.se_id
-            se_detail = f"SE {definition.se_id}  C{entry.channel} S{entry.sound}"
-        self._draw_value_line("SE", se_text, 116)
+            se_detail = (
+                f"WAV {entry.wav}" if entry.wav is not None else f"PYXEL S{entry.sound}"
+            )
+        pyxel.text(363, 118, "SE", 4)
         pyxel.text(363, 128, se_detail[:36], 4)
         duration = definition.total_frames / FPS
         pyxel.text(363, 135, f"{definition.total_frames}F  {duration:.3f}s", 4)
@@ -1028,7 +1036,7 @@ class SpellEffectEditor:
         errors = sum(item.severity == "error" for item in diagnostics)
         warnings = sum(item.severity == "warning" for item in diagnostics)
         pyxel.text(480, 145, f"E{errors} W{warnings}", ERROR_COLOR if errors else 4)
-        pyxel.text(420, 161, f"{len(self.store.sound_effects)} IDS", 4)
+        pyxel.text(363, 161, f"{len(self.store.sound_effects)} IDS", 4)
         ally_x, ally_y = definition.offset_for("ally")
         enemy_x, enemy_y = definition.offset_for("enemy")
         pyxel.text(363, 177, f"ALLY  {ally_x:+4d},{ally_y:+4d}", 4)
@@ -1111,7 +1119,7 @@ class SpellEffectEditor:
         pyxel.dither(1.0)
         pyxel.rect(106, 76, 296, 136, PANEL_COLOR)
         pyxel.rectb(106, 76, 296, 136, BUTTON_TEXT_COLOR)
-        pyxel.text(122, 86, "REGISTER PYXEL SOUND", BUTTON_TEXT_COLOR)
+        pyxel.text(122, 86, "SELECT SE", BUTTON_TEXT_COLOR)
         pyxel.text(122, 102, "SE ID", 4)
         pyxel.rect(168, 100, 174, 16, 6)
         pyxel.rectb(168, 100, 174, 16, BUTTON_ACTIVE_COLOR)
@@ -1119,10 +1127,14 @@ class SpellEffectEditor:
         if pyxel.frame_count % 60 < 30:
             cursor_x = 172 + min(len(draft.se_id), MAX_SE_ID_LENGTH) * 4
             pyxel.line(cursor_x, 104, cursor_x, 111, WARNING_COLOR)
-        pyxel.text(122, 133, "SOUND", 4)
-        pyxel.text(286, 133, f"{draft.sound:02d}", BUTTON_TEXT_COLOR)
-        pyxel.text(122, 149, "CHANNEL", 4)
-        pyxel.text(290, 149, str(draft.channel), BUTTON_TEXT_COLOR)
+        pyxel.text(122, 133, "TYPE", 4)
+        pyxel.text(284, 133, "WAV" if draft.use_wav else "PYXEL", BUTTON_TEXT_COLOR)
+        pyxel.text(122, 149, "FILE" if draft.use_wav else "SOUND", 4)
+        wavs = self.store.available_wavs
+        value = f"{draft.sound:02d}"
+        if draft.use_wav:
+            value = wavs[draft.wav_index % len(wavs)] if wavs else "NONE"
+        pyxel.text(172, 149, value[:20], BUTTON_TEXT_COLOR)
         if self.status_message and self.status_frames > 0:
             pyxel.text(
                 122,
@@ -1132,8 +1144,8 @@ class SpellEffectEditor:
                 self.japanese_font,
             )
         else:
-            pyxel.text(122, 193, "Up/Down=Sound  Left/Right=Channel", 3)
-            pyxel.text(122, 201, "Type key / Enter=register / Esc=cancel", 3)
+            pyxel.text(122, 193, "Up/Down=File/Sound  Left/Right=Type", 3)
+            pyxel.text(122, 201, "Type key / Enter=apply / Esc=cancel", 3)
 
     def _draw_flash_picker(self) -> None:
         pyxel.dither(0.5)

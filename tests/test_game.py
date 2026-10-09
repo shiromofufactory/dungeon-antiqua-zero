@@ -9,9 +9,10 @@ from tools._bootstrap import APP_ROOT
 from battle_command_memory import BattleCommandMemory
 from ui.debug_menu import DebugShopTarget, DebugTeleportTarget
 from game import (
-    ALERT_CHANNEL,
-    ALERT_SOUND_ID,
-    FIELD_POISON_SE_CHANNEL,
+    SE_CHANNEL,
+    TELEPORT_SE_ID,
+    ALERT_SE_ID,
+    SE_PREVIEW_SE_ID,
     FIELD_POISON_SE_ID,
     FIELD_FADE_PULSE_MIN_BASE_RATE,
     FIELD_FADE_PULSE_PALETTE,
@@ -49,8 +50,6 @@ from game import (
     PARTY_STATUS_TEXT_X,
     PARTY_WINDOW_GRID,
     RESERVE_MEMBER_Y_OFFSET_GRID,
-    SE_CHANNELS,
-    SE_PREVIEW_SOUND_ID,
     SITE_MAP_FADE_FRAME_COUNT,
     SITE_NAME_FONT_ROLE,
     SITE_NAME_LABEL_GAP,
@@ -61,8 +60,6 @@ from game import (
     SETTINGS_VALUE_X,
     SETTINGS_WINDOW_GRID,
     SORT_SOURCE_CURSOR_X_OFFSET,
-    TELEPORT_SOUND_CHANNEL,
-    TELEPORT_SOUND_ID,
     WELCOME_BGM_ID,
     WORLD_MAP_ID,
     MenuAlertEffect,
@@ -1366,7 +1363,7 @@ class GameTest(unittest.TestCase):
 
         mock._play_dungeon_poison_movement_sound()
 
-        play_pos.assert_called_once_with(FIELD_POISON_SE_CHANNEL)
+        play_pos.assert_called_once_with(SE_CHANNEL)
         play_se_mock.assert_called_once_with(FIELD_POISON_SE_ID)
 
     @patch("game.play_se")
@@ -1561,7 +1558,7 @@ class GameTest(unittest.TestCase):
             font_spans=(),
         )
 
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     @patch("game.FieldRenderer")
     @patch("game.FieldMovement")
     def test_arriving_at_site_changes_map_at_fade_midpoint(
@@ -1755,7 +1752,7 @@ class GameTest(unittest.TestCase):
         )
         self.assertIsInstance(mock.texts.text.call_args.args[1], Localizer)
 
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     def test_debug_teleport_stages_destination_and_starts_slow_fade(
         self,
         play: Mock,
@@ -1799,9 +1796,9 @@ class GameTest(unittest.TestCase):
         )
         self.assertEqual(mock.pending_teleport_source, "debug")
         self.assertEqual(mock.fade.frame_count, SITE_MAP_FADE_FRAME_COUNT)
-        play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+        play.assert_called_once_with(TELEPORT_SE_ID)
 
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     def test_field_teleport_uses_the_same_staged_transition(self, play: Mock) -> None:
         destination = MapDestination("worldmap", "sample_town_world")
         arrival = MapArrivalPoint(
@@ -1832,7 +1829,7 @@ class GameTest(unittest.TestCase):
         self.assertIs(mock.pending_target_map, target_map)
         self.assertIs(mock.pending_target_arrival, arrival)
         self.assertIs(mock.pending_screen_change, GameScreenChange.TELEPORT)
-        play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+        play.assert_called_once_with(TELEPORT_SE_ID)
 
     def test_applying_spell_teleport_closes_spell_menu_and_returns_to_field(
         self,
@@ -1871,11 +1868,11 @@ class GameTest(unittest.TestCase):
         mock._apply_pending_map_destination.assert_called_once_with()
 
     @patch("game.pyxel.channels")
-    def test_se_volume_applies_to_every_game_se_channel(
+    def test_se_volume_applies_only_to_the_shared_se_channel(
         self,
         channels: Mock,
     ) -> None:
-        channel_values = [Mock() for _ in range(max(SE_CHANNELS) + 1)]
+        channel_values = [Mock(gain=0.42) for _ in range(4)]
         channels.__len__.return_value = len(channel_values)
         channels.__getitem__.side_effect = channel_values.__getitem__
         mock = Game.__new__(Game)
@@ -1883,8 +1880,10 @@ class GameTest(unittest.TestCase):
 
         mock._apply_se_volume()
 
-        for channel in SE_CHANNELS:
-            self.assertEqual(channel_values[channel].gain, 0.15)
+        self.assertEqual(channel_values[SE_CHANNEL].gain, 0.15)
+        for index, channel in enumerate(channel_values):
+            if index != SE_CHANNEL:
+                self.assertEqual(channel.gain, 0.42)
 
     @patch("game.FieldRenderer")
     @patch("game.FieldMovement")
@@ -3994,13 +3993,13 @@ class GameTest(unittest.TestCase):
         mock.party_window.clear_cursor.assert_not_called()
         mock.party_window.update.assert_called_once_with(Direction.RIGHT)
 
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     def test_alert_matches_da2_sound_and_three_frame_shake(self, play: Mock) -> None:
         alert = MenuAlertEffect()
 
         alert.start()
 
-        play.assert_called_once_with(ALERT_CHANNEL, ALERT_SOUND_ID)
+        play.assert_called_once_with(ALERT_SE_ID)
         self.assertEqual(alert.camera_x, -1)
         alert.update()
         self.assertEqual(alert.camera_x, 1)
@@ -4163,7 +4162,7 @@ class GameTest(unittest.TestCase):
             selected_key="language"
         )
 
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     def test_se_setting_wraps_and_plays_da2_preview_sound(self, play: Mock) -> None:
         mock = Game.__new__(Game)
         mock.settings = Settings(se_volume=4)
@@ -4176,10 +4175,10 @@ class GameTest(unittest.TestCase):
 
         self.assertEqual(mock.settings.se_volume, 0)
         mock._apply_se_volume.assert_called_once_with()
-        play.assert_called_once_with(ALERT_CHANNEL, SE_PREVIEW_SOUND_ID)
+        play.assert_called_once_with(SE_PREVIEW_SE_ID)
         mock._refresh_settings_window.assert_called_once_with(selected_key="se")
 
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     def test_bgm_setting_wraps_and_immediately_changes_volume(
         self,
         play: Mock,

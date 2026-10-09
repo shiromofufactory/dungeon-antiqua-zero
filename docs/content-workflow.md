@@ -154,9 +154,10 @@ Google Sheetsとの同期対象にしない。呪文の表示名、効果、対�
 生成済みデータだけを読む。保存形式とツール操作は
 [`features/spell-effect-editor.md`](./features/spell-effect-editor.md)を参照する。
 
-呪文エフェクト設定ツールで未登録Soundへ安定IDを付けた場合は、ゲーム本体が直接読む
-`app/audio/catalog.json`へ追加する。Sound本体は`assets.pyxres`で管理し、ツールはnotes、tones、
-volumes、speedを変更しない。
+呪文エフェクト設定ツールでPyxel Soundまたは`app/se`のWAVへ安定IDを付けた場合は、
+ゲーム本体が直接読む`app/audio/catalog.json`へ追加する。Sound本体は`assets.pyxres`、
+SE用WAVは`app/se`で管理し、ツールは音源自体を変更しない。定義形式は
+[`features/sound-effects.md`](./features/sound-effects.md)を参照する。
 
 攻撃ポーズは `content/battle/attack_poses.json` を正本とし、エディタ保存時、`npm start` 時、
 または `npm run attack-poses:build` で `app/effects/attack_poses.json` を生成する。

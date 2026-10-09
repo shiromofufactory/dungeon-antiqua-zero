@@ -16,6 +16,7 @@ from game import (
     Game,
 )
 from rendering import PaletteShifter, create_default_palette_shifter
+from resources import preload_se
 from state import DisplayMode, LaunchMode, Settings
 from systems import SettingsRepository
 
@@ -37,6 +38,7 @@ def initialize_game(settings: Settings) -> PaletteShifter:
         init_options["display_scale"] = settings.screen_scale
     pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT, **init_options)
     pyxel.load(str(APP_ROOT / "assets.pyxres"))
+    preload_se()
     pyxel.load_pal(str(APP_ROOT / "assets.pyxpal"))
     if settings.screen_scale == 5:
         pyxel.fullscreen(True)

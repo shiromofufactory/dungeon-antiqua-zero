@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.audio_catalog import load_sound_effects
 
 def _record_keys(path: Path, field: str) -> set[str]:
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -18,23 +19,7 @@ def _record_keys(path: Path, field: str) -> set[str]:
 
 
 def _se_ids(path: Path) -> set[str]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or value.get("format_version") != 1:
-        raise ValueError(f"{path}のformat_versionが不正です。")
-    records = value.get("sound_effects")
-    if not isinstance(records, dict) or not records:
-        raise ValueError(f"{path}のsound_effectsが不正です。")
-    for se_id, record in records.items():
-        if not isinstance(se_id, str) or not se_id or not isinstance(record, dict):
-            raise ValueError(f"{path}のSEレコードが不正です。")
-        if not all(
-            isinstance(record.get(field), int)
-            and not isinstance(record[field], bool)
-            and record[field] >= 0
-            for field in ("channel", "sound")
-        ):
-            raise ValueError(f"{path}のSE channelまたはsoundが不正です: {se_id}")
-    return set(records)
+    return set(load_sound_effects(path))
 
 
 def _tall_first_monster_keys(path: Path) -> set[str]:

@@ -14,9 +14,9 @@ from tools.screen_mocks._fixtures import (
 
 from field import FieldPosition
 from game import (
+    SE_CHANNEL,
+    TELEPORT_SE_ID,
     ENCOUNTER_JINGLE_ID,
-    TELEPORT_SOUND_CHANNEL,
-    TELEPORT_SOUND_ID,
     Game,
 )
 from input import Direction, InputButton, InputState
@@ -1112,7 +1112,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         game._update_battle_return(InputState())
 
-        play_pos.assert_called_once_with(TELEPORT_SOUND_CHANNEL)
+        play_pos.assert_called_once_with(SE_CHANNEL)
         game.bgm.play.assert_called_once_with("da3-forest")
         self.assertFalse(game.defeat_return_bgm_restart_pending)
         self.assertEqual(game.battle_return_fade.elapsed_frames, 1)
@@ -1303,7 +1303,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         )
 
     @patch("game.pyxel.play_pos")
-    @patch("game.pyxel.play")
+    @patch("game.play_se")
     @patch("game.MessageOverlay")
     def test_defeat_return_waits_at_black_for_rescue_message(
         self,
@@ -1357,14 +1357,14 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             game.palette_shifter.set_global_mix.call_args.kwargs["base_rate"],
             0.0,
         )
-        play.assert_called_once_with(TELEPORT_SOUND_CHANNEL, TELEPORT_SOUND_ID)
+        play.assert_called_once_with(TELEPORT_SE_ID)
         self.assertTrue(game.defeat_return_sound_waiting)
         self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
 
-        play_pos.return_value = (TELEPORT_SOUND_ID, 0)
+        play_pos.return_value = (8, 0)
         game._update_battle_return(InputState())
 
-        play_pos.assert_called_once_with(TELEPORT_SOUND_CHANNEL)
+        play_pos.assert_called_once_with(SE_CHANNEL)
         self.assertTrue(game.defeat_return_sound_waiting)
         self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
 

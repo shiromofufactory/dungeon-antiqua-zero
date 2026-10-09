@@ -1,15 +1,23 @@
-"""Load and play external PCM background music through a dedicated channel."""
+"""Play WAV/Pyxel sound effects and external PCM background music."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Mapping
 
 import pyxel
 
+if __package__ == "resources":
+    from audio_catalog import AudioCatalogError, SoundEffectDefinition, load_sound_effects
+else:
+    from ..audio_catalog import AudioCatalogError, SoundEffectDefinition, load_sound_effects
 
+
+SE_CHANNEL = 0
+SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
+# ゲーム内のWAV効果音だけに適用する倍率。1.0で補正なし、1.5で50%増。
+WAV_SE_VOLUME_MULTIPLIER = 1.5
 BGM_CHANNEL = 2
 BGM_VOLUME_GAINS = (0.0, 0.2, 0.4, 0.6, 0.8)
 BGM_STOP_FADE_FRAMES = 30
@@ -17,36 +25,14 @@ SE_CATALOG_PATH = Path(__file__).resolve().parents[1] / "audio" / "catalog.json"
 
 
 class AudioResourceError(RuntimeError):
-    """Raised when a BGM asset cannot be resolved or decoded."""
+    """Raised when an audio asset cannot be resolved, decoded, or played."""
 
 
 def load_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise AudioResourceError(
-            f"SEカタログを読み込めません: {path}: {error}"
-        ) from error
-    if not isinstance(document, dict) or document.get("format_version") != 1:
-        raise AudioResourceError("SEカタログのformat_versionが不正です。")
-    records = document.get("sound_effects")
-    if not isinstance(records, dict) or not records:
-        raise AudioResourceError("SEカタログのsound_effectsが不正です。")
-    loaded: dict[str, tuple[int, int]] = {}
-    for se_id, record in records.items():
-        if not isinstance(se_id, str) or not se_id or not isinstance(record, dict):
-            raise AudioResourceError("SEカタログのレコードが不正です。")
-        channel = record.get("channel")
-        sound = record.get("sound")
-        if not all(
-            isinstance(value, int) and not isinstance(value, bool) and value >= 0
-            for value in (channel, sound)
-        ):
-            raise AudioResourceError(
-                f"SEカタログのchannelまたはsoundが不正です: {se_id}"
-            )
-        loaded[se_id] = (channel, sound)
-    return MappingProxyType(loaded)
+        return load_sound_effects(path)
+    except AudioCatalogError as error:
+        raise AudioResourceError(str(error)) from error
 
 
 _SE_CATALOG_DATA = dict(load_se_catalog())
@@ -59,6 +45,8 @@ def reload_se_catalog(path: Path = SE_CATALOG_PATH) -> MappingProxyType:
     loaded = load_se_catalog(path)
     _SE_CATALOG_DATA.clear()
     _SE_CATALOG_DATA.update(loaded)
+    global _se_player
+    _se_player = SoundEffectPlayer(path.parent.parent / "se", volume=_se_player.volume)
     return SE_CATALOG
 
 
@@ -81,22 +69,117 @@ def list_se_ids() -> tuple[str, ...]:
     return tuple(SE_CATALOG)
 
 
-def se_channel_and_sound(se_id: str) -> tuple[int, int]:
-    """Resolve a stable SE ID to its Pyxel channel and Sound number."""
+def sound_effect_definition(se_id: str) -> SoundEffectDefinition:
+    """Resolve a stable SE ID to its WAV or Pyxel Sound definition."""
 
     if not isinstance(se_id, str) or se_id not in SE_CATALOG:
         raise AudioResourceError(f"未定義のSE IDです: {se_id}")
     return SE_CATALOG[se_id]
 
 
-def play_se(se_id: str, *, pyxel_api: Any = pyxel) -> None:
-    channel, sound = se_channel_and_sound(se_id)
-    try:
-        pyxel_api.play(channel, sound)
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except BaseException as error:
-        raise AudioResourceError(f"SEを再生できません: {se_id}: {error}") from error
+class SoundEffectPlayer:
+    """Cache WAVs; an optional game volume enables source-specific gain."""
+
+    def __init__(
+        self, se_dir: Path | None = None, *, pyxel_api: Any | None = None,
+        volume: int | None = None,
+    ) -> None:
+        self.se_dir = (se_dir or SE_CATALOG_PATH.parent.parent / "se").resolve()
+        self._pyxel = pyxel if pyxel_api is None else pyxel_api
+        self._wav_sounds: dict[Path, tuple[int, int, Any]] = {}
+        if volume is not None:
+            self._validate_volume(volume)
+        self._volume = volume
+        self._active_wav = False
+
+    @property
+    def volume(self) -> int | None:
+        return self._volume
+
+    @staticmethod
+    def _validate_volume(volume: int) -> None:
+        if isinstance(volume, bool) or not isinstance(volume, int):
+            raise TypeError("SE volume must be an integer")
+        if not 0 <= volume < len(SE_VOLUME_GAINS):
+            raise ValueError("SE volume must be from 0 to 4")
+
+    def set_volume(self, volume: int, *, pyxel_api: Any | None = None) -> None:
+        self._validate_volume(volume)
+        self._volume = volume
+        self._apply_gain(pyxel_api=pyxel_api)
+
+    def _apply_gain(self, *, pyxel_api: Any | None = None) -> None:
+        # Editors without a game volume keep their existing preview gain.
+        if self._volume is None:
+            return
+        px = self._pyxel if pyxel_api is None else pyxel_api
+        if len(px.channels) > SE_CHANNEL:
+            multiplier = WAV_SE_VOLUME_MULTIPLIER if self._active_wav else 1.0
+            px.channels[SE_CHANNEL].gain = SE_VOLUME_GAINS[self._volume] * multiplier
+
+    def _sound(self, definition: SoundEffectDefinition) -> Any:
+        if definition.wav is None:
+            return definition.sound
+        path = definition.wav_path(self.se_dir)
+        stat = path.stat()
+        cached = self._wav_sounds.get(path)
+        signature = (stat.st_mtime_ns, stat.st_size)
+        if cached is not None and cached[:2] == signature:
+            return cached[2]
+        sound = self._pyxel.Sound()
+        sound.pcm(str(path))
+        self._wav_sounds[path] = (*signature, sound)
+        return sound
+
+    def preload(
+        self, definitions: Mapping[str, SoundEffectDefinition] = SE_CATALOG,
+    ) -> None:
+        """Decode registered WAVs during initialization rather than combat."""
+
+        for definition in definitions.values():
+            if definition.wav is not None:
+                self._resolve_sound(definition)
+
+    def _resolve_sound(self, definition: SoundEffectDefinition) -> Any:
+        try:
+            return self._sound(definition)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as error:
+            raise AudioResourceError(f"SEを読み込めません: {definition.se_id}: {error}") from error
+
+    def play(self, definition: SoundEffectDefinition) -> None:
+        sound = self._resolve_sound(definition)
+        try:
+            self._active_wav = definition.wav is not None
+            self._apply_gain()
+            self._pyxel.play(SE_CHANNEL, sound)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as error:
+            raise AudioResourceError(f"SEを再生できません: {definition.se_id}: {error}") from error
+
+
+_se_player = SoundEffectPlayer()
+
+
+def preload_se() -> None:
+    _se_player.preload()
+
+
+def set_se_volume(volume: int, *, pyxel_api: Any | None = None) -> None:
+    _se_player.set_volume(volume, pyxel_api=pyxel_api)
+
+
+def play_se(se_id: str, *, pyxel_api: Any | None = None) -> None:
+    definition = sound_effect_definition(se_id)
+    player = (
+        _se_player if pyxel_api is None
+        else SoundEffectPlayer(
+            _se_player.se_dir, pyxel_api=pyxel_api, volume=_se_player.volume,
+        )
+    )
+    player.play(definition)
 
 
 class BgmPlayer:
@@ -435,5 +518,11 @@ __all__ = [
     "list_se_ids",
     "play_se",
     "reload_se_catalog",
-    "se_channel_and_sound",
+    "SE_CHANNEL",
+    "SE_VOLUME_GAINS",
+    "WAV_SE_VOLUME_MULTIPLIER",
+    "SoundEffectPlayer",
+    "sound_effect_definition",
+    "preload_se",
+    "set_se_volume",
 ]

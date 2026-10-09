@@ -73,9 +73,9 @@ class EditorServerTest(unittest.TestCase):
         (app_root / "audio" / "catalog.json").write_text(
             json.dumps(
                 {
-                    "format_version": 1,
+                    "format_version": 2,
                     "sound_effects": {
-                        "confirm": {"channel": 1, "sound": 9}
+                        "confirm": {"sound": 9}
                     },
                 }
             ),

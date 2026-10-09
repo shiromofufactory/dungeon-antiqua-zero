@@ -105,6 +105,7 @@
 ## 検証方針
 
 - JSON変更時は少なくとも全対象ファイルをパースする。
+- WAV・Pyxel Sound併用、共通SEチャンネル、カタログ検証、エディタ登録・試聴は `python3 -B -m unittest tests.test_audio_catalog tests.test_audio_resources tests.test_spell_effect_editor_model tests.test_spell_effect_editor_ui tests.test_spell_effect_pipeline tests.test_event_pipeline tests.test_event_editor_server tests.test_game tests.test_battle_scene tests.test_game_menu tests.test_main` で回帰検証する。
 - 共有JSON変更時は `npm run content:validate` と `npm run sync` を実行する。
 - ゲーム用JSONが正本と一致するかは `node scripts/sync-content.mjs --check` で確認する。
   この検証コマンドは `package.json` のnpm scriptsへ復元しない。

@@ -5,10 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
-import re
 from types import MappingProxyType
 from typing import Mapping
 
+from app.audio_catalog import (
+    AudioCatalogError,
+    SE_CATALOG_FORMAT_VERSION,
+    SE_ID_PATTERN,
+    SoundEffectDefinition,
+    load_sound_effects,
+)
 from app.spell_effect import SpellEffectDefinition
 from scripts.spell_effect_pipeline import (
     SpellEffectCatalogs,
@@ -28,7 +34,6 @@ from scripts.spell_effect_pipeline import (
 
 DEFAULT_IMAGE_ID = "effects/spells64"
 DEFAULT_FRAMES_PER_PATTERN = 4
-SE_ID_PATTERN = re.compile(r"[a-z][a-z0-9_]*\Z")
 
 
 @dataclass(frozen=True)
@@ -37,13 +42,6 @@ class EditorSpell:
     name: str
     type: str
     on_battle: bool
-
-
-@dataclass(frozen=True)
-class SoundEffectEntry:
-    se_id: str
-    channel: int
-    sound: int
 
 
 class SpellEffectEditorStore:
@@ -61,6 +59,7 @@ class SpellEffectEditorStore:
         self.source_path = self.content_root / "effects" / "spells.json"
         self.runtime_path = self.project_root / "app" / "effects" / "spells.json"
         self.audio_catalog_path = self.project_root / "app" / "audio" / "catalog.json"
+        self.se_dir = self.project_root / "app" / "se"
         self.catalogs = catalogs or load_project_catalogs(
             self.project_root, content_root=self.content_root
         )
@@ -75,63 +74,64 @@ class SpellEffectEditorStore:
         self._effect_dirty = False
         self._audio_dirty = False
 
-    def _load_sound_effects(self) -> dict[str, SoundEffectEntry]:
+    def _load_sound_effects(self) -> dict[str, SoundEffectDefinition]:
         try:
-            document = json.loads(self.audio_catalog_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise SpellEffectSourceError(
-                f"SEカタログを読み込めません: {self.audio_catalog_path}: {error}"
-            ) from error
-        records = document.get("sound_effects") if isinstance(document, dict) else None
-        if (
-            not isinstance(document, dict)
-            or document.get("format_version") != 1
-            or not isinstance(records, dict)
-        ):
-            raise SpellEffectSourceError("SEカタログの形式が不正です。")
-        result: dict[str, SoundEffectEntry] = {}
-        for se_id, record in records.items():
-            channel = record.get("channel") if isinstance(record, dict) else None
-            sound = record.get("sound") if isinstance(record, dict) else None
-            if (
-                not isinstance(se_id, str)
-                or SE_ID_PATTERN.fullmatch(se_id) is None
-                or isinstance(channel, bool)
-                or not isinstance(channel, int)
-                or channel < 0
-                or isinstance(sound, bool)
-                or not isinstance(sound, int)
-                or sound < 0
-            ):
-                raise SpellEffectSourceError(f"SEカタログのレコードが不正です: {se_id}")
-            result[se_id] = SoundEffectEntry(se_id, channel, sound)
-        return result
+            return dict(load_sound_effects(self.audio_catalog_path, se_dir=self.se_dir))
+        except AudioCatalogError as error:
+            raise SpellEffectSourceError(str(error)) from error
+
+    @property
+    def available_wavs(self) -> tuple[str, ...]:
+        wavs = (
+            path.relative_to(self.se_dir).as_posix()
+            for path in self.se_dir.rglob("*")
+            if path.is_file()
+            and path.suffix.lower() == ".wav"
+            and not path.name.startswith(".")
+        )
+        return tuple(sorted(wavs, key=str.casefold))
 
     @property
     def dirty(self) -> bool:
         return self._effect_dirty or self._audio_dirty
 
     @property
-    def sound_effects(self) -> Mapping[str, SoundEffectEntry]:
+    def sound_effects(self) -> Mapping[str, SoundEffectDefinition]:
         return MappingProxyType(self._sound_effects)
 
-    def sound_effect(self, se_id: str) -> SoundEffectEntry:
+    def sound_effect(self, se_id: str) -> SoundEffectDefinition:
         try:
             return self._sound_effects[se_id]
         except KeyError as error:
             raise ValueError(f"未登録のSE IDです: {se_id}") from error
 
-    def register_sound_effect(self, se_id: str, *, channel: int, sound: int) -> None:
-        if not isinstance(se_id, str) or SE_ID_PATTERN.fullmatch(se_id) is None:
-            raise ValueError("SE IDは英小文字で始まる英小文字・数字・_にしてください。")
+    def register_sound_effect(
+        self, se_id: str, *, sound: int | None = None, wav: str | None = None,
+    ) -> None:
         if se_id in self._sound_effects:
             raise ValueError(f"登録済みのSE IDです: {se_id}")
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in (channel, sound)
-        ):
-            raise ValueError("SEのchannelとSound番号は0以上の整数が必要です。")
-        self._sound_effects[se_id] = SoundEffectEntry(se_id, channel, sound)
+        self._set_sound_effect(se_id, sound=sound, wav=wav)
+
+    def update_sound_effect(
+        self, se_id: str, *, sound: int | None = None, wav: str | None = None,
+    ) -> None:
+        self.sound_effect(se_id)
+        self._set_sound_effect(se_id, sound=sound, wav=wav)
+
+    def _set_sound_effect(
+        self, se_id: str, *, sound: int | None, wav: str | None,
+    ) -> None:
+        record = {}
+        if sound is not None:
+            record["sound"] = sound
+        if wav is not None:
+            record["wav"] = wav
+        definition = SoundEffectDefinition.from_record(se_id, record)
+        if definition.wav is not None:
+            definition.wav_path(self.se_dir)
+        if self._sound_effects.get(se_id) == definition:
+            return
+        self._sound_effects[se_id] = definition
         self.catalogs = replace(
             self.catalogs,
             se_ids=frozenset(self._sound_effects),
@@ -238,14 +238,17 @@ class SpellEffectEditorStore:
                 "SEカタログが外部で変更されています。再起動して読み直してください。"
             )
         source = self._source_document()
+        try:
+            for entry in self._sound_effects.values():
+                if entry.wav is not None:
+                    entry.wav_path(self.se_dir)
+        except AudioCatalogError as error:
+            raise SpellEffectSourceError(str(error)) from error
         if self._audio_dirty:
             audio_document = {
-                "format_version": 1,
+                "format_version": SE_CATALOG_FORMAT_VERSION,
                 "sound_effects": {
-                    se_id: {
-                        "channel": entry.channel,
-                        "sound": entry.sound,
-                    }
+                    se_id: entry.to_record()
                     for se_id, entry in self._sound_effects.items()
                 },
             }
@@ -268,6 +271,6 @@ __all__ = [
     "DEFAULT_IMAGE_ID",
     "EditorSpell",
     "SE_ID_PATTERN",
-    "SoundEffectEntry",
+    "SoundEffectDefinition",
     "SpellEffectEditorStore",
 ]
