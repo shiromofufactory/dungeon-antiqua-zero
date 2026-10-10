@@ -195,6 +195,10 @@ SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
 
 BACKGROUND_IMAGE_ID = "background/bg_nector"
+MONSTER_SHADOW_IMAGE_ID = "background/shadow"
+MONSTER_SHADOW_WIDTH = 64
+MONSTER_SHADOW_HEIGHT = 5
+MONSTER_SHADOW_OFFSET_Y = -4
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
 BATTLE_BOSS_BGM_ID = "da3-battle2"
@@ -1923,6 +1927,7 @@ class BattleScene:
                 f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}"
             )
         self.background = resources.image(BACKGROUND_IMAGE_ID)
+        self.monster_shadow = resources.image(MONSTER_SHADOW_IMAGE_ID)
         self.character_sprites = resources.image(CH_BATTLE_IMAGE_ID)
         self.attack_effect_image = resources.image(ATTACK_EFFECT_IMAGE_ID)
         self.attack_poses = attack_poses
@@ -11474,6 +11479,7 @@ class BattleScene:
                 continue
             x, y = self._monster_draw_position(index)
             if not is_dying or getattr(self, "monster_death_delay_frames_remaining", 0):
+                self._draw_monster_shadow(monster, x, y)
                 if self.phase is BattlePhase.ACTION_PRESENTATION:
                     self._draw_spell_effect_target(
                         "enemy",
@@ -11510,6 +11516,7 @@ class BattleScene:
                 raise RuntimeError("dying monster requires an animation")
             pyxel.dither(animation.opacity)
             try:
+                self._draw_monster_shadow(monster, x, y)
                 with self.palette_shifter.shifted(MONSTER_DEATH_PALETTE):
                     self._draw_monster_image(monster, x, y)
             finally:
@@ -12145,6 +12152,27 @@ class BattleScene:
                 AFFINITY_ICON_HEIGHT,
                 TRANSPARENT_INDEX,
             )
+
+    def _draw_monster_shadow(
+        self,
+        monster: BattleMonster,
+        x: int,
+        y: int,
+    ) -> None:
+        """Keep DA2's ground shadow below visible monsters without floating."""
+
+        if not monster.is_shadow:
+            return
+        pyxel.blt(
+            x + (monster.width - MONSTER_SHADOW_WIDTH) // 2,
+            y + monster.height + MONSTER_SHADOW_OFFSET_Y,
+            self.monster_shadow,
+            0,
+            0,
+            MONSTER_SHADOW_WIDTH,
+            MONSTER_SHADOW_HEIGHT,
+            TRANSPARENT_INDEX,
+        )
 
     def _draw_monster_image(
         self,

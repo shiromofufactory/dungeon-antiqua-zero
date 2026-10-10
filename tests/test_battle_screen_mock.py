@@ -2439,7 +2439,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         image = object()
         mock.monsters = (
-            SimpleNamespace(key="Coyote", width=96, height=64, is_alive=True),
+            SimpleNamespace(
+                key="Coyote", width=96, height=64, is_alive=True, is_shadow=False
+            ),
         )
         mock.monster_images = {"Coyote": image}
         mock.blinking_monster_index = None
@@ -2465,6 +2467,53 @@ class BattleScreenMockTest(unittest.TestCase):
                 call(74, 216, 0, 88, 16, 8, 8, 1),
             ],
         )
+
+    def test_monster_shadow_tracks_entrance_and_stays_still_while_waiting(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        monster = replace(_damage_test_monster(), height=96, is_shadow=True)
+        mock.monsters = (monster,)
+        mock.monster_images = {monster.key: object()}
+        mock.monster_shadow = object()
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+
+        for frame in (0, 6, 18, 48):
+            for phase in (BattleMockPhase.ENTRANCE, BattleMockPhase.COMMAND):
+                with self.subTest(frame=frame, phase=phase):
+                    mock.phase = phase
+                    mock.entrance_animation_frame = frame
+                    x, y = mock._monster_draw_position(0)
+                    with (
+                        patch("tools.screen_mocks.battle.pyxel.frame_count", frame),
+                        patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                    ):
+                        mock._draw_monsters()
+                    self.assertEqual(
+                        blt.call_args_list,
+                        [
+                            call(x, y + 92, mock.monster_shadow, 0, 0, 64, 5, 1),
+                            call(x, y, mock.monster_images[monster.key], 0, 0, 64, 96, 1),
+                        ],
+                    )
+                    if phase is BattleMockPhase.COMMAND:
+                        self.assertEqual((x, y), MONSTER_POSITIONS[0])
+
+        monster = replace(monster, width=96, height=64)
+        mock.monsters = (monster,)
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_monsters()
+        self.assertEqual(
+            blt.call_args_list,
+            [
+                call(20, 108, mock.monster_shadow, 0, 0, 64, 5, 1),
+                call(4, 48, mock.monster_images[monster.key], 0, 0, 96, 64, 1),
+            ],
+        )
+
+        monster.state.defeat()
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_monsters()
+        blt.assert_not_called()
 
     def test_monster_name_position_follows_image_height(self) -> None:
         monster_64 = SimpleNamespace(height=64)
@@ -4152,6 +4201,7 @@ class BattleScreenMockTest(unittest.TestCase):
             is_front_row=True,
             state=MonsterBattleState(max_hp=2),
             agility=12,
+            is_shadow=True,
         )
         monster.state.defeat()
         animation = MonsterDeathAnimation()
@@ -4164,6 +4214,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = (monster,)
         mock.monster_images = {"Coyote": object()}
+        mock.monster_shadow = object()
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
         mock.phase = BattleMockPhase.MONSTER_DEATH
@@ -4176,20 +4227,25 @@ class BattleScreenMockTest(unittest.TestCase):
             patch("tools.screen_mocks.battle.pyxel.blt") as blt,
             patch("tools.screen_mocks.battle.pyxel.dither") as dither,
         ):
+            draws = Mock()
+            draws.attach_mock(dither, "dither")
+            draws.attach_mock(blt, "blt")
+            draws.attach_mock(mock.palette_shifter.shifted, "shifted")
             mock._draw_monsters()
 
         mock.palette_shifter.shifted.assert_called_once_with(
             MONSTER_DEATH_PALETTE
         )
         self.assertEqual(dither.call_args_list, [call(0.5), call(1.0)])
-        blt.assert_called_once_with(
-            *MONSTER_POSITIONS[0],
-            mock.monster_images["Coyote"],
-            0,
-            0,
-            64,
-            64,
-            1,
+        self.assertEqual(
+            draws.mock_calls,
+            [
+                call.dither(0.5),
+                call.blt(4, 108, mock.monster_shadow, 0, 0, 64, 5, 1),
+                call.shifted(MONSTER_DEATH_PALETTE),
+                call.blt(4, 48, mock.monster_images["Coyote"], 0, 0, 64, 64, 1),
+                call.dither(1.0),
+            ],
         )
 
     def test_simultaneous_monster_deaths_draw_with_shared_animation(self) -> None:
@@ -8006,9 +8062,11 @@ class BattleScreenMockTest(unittest.TestCase):
                 width=64,
                 height=64,
                 is_alive=True,
+                is_shadow=True,
             ),
         )
         mock.monster_images = {"Giant Spider": image}
+        mock.monster_shadow = object()
         mock.blinking_monster_index = 0
         mock.phase = BattleMockPhase.MONSTER_ACTION
 
@@ -8019,14 +8077,12 @@ class BattleScreenMockTest(unittest.TestCase):
 
             mock.monster_blink_frames_remaining = 5
             mock._draw_monsters()
-            blt.assert_called_once_with(
-                *MONSTER_POSITIONS[0],
-                image,
-                0,
-                0,
-                64,
-                64,
-                1,
+            self.assertEqual(
+                blt.call_args_list,
+                [
+                    call(4, 108, mock.monster_shadow, 0, 0, 64, 5, 1),
+                    call(*MONSTER_POSITIONS[0], image, 0, 0, 64, 64, 1),
+                ],
             )
 
     def test_front_monster_attacks_only_a_living_front_party_member(self) -> None:
