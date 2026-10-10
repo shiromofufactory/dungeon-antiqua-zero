@@ -31,6 +31,15 @@ class MonsterDataError(ValueError):
     """Raised when monster master data cannot initialize battle state."""
 
 
+def monster_shadow_from_record(record: Mapping[str, object]) -> int:
+    """Read the flying flag while preserving its ground-shadow display mode."""
+
+    value = record.get("shadow")
+    if isinstance(value, bool) or not isinstance(value, int) or value not in (0, 1, 2):
+        raise MonsterDataError("monster.shadow must be 0, 1 or 2")
+    return value
+
+
 class MonsterFormationTarget(Protocol):
     """Mutable formation state required when an enemy front row collapses."""
 
@@ -145,7 +154,13 @@ class MonsterDefinition:
     resistances: frozenset[ResistanceType]
     treasure_item_key: str
     treasure_rate: int
-    is_shadow: bool = False
+    shadow: int = 0
+
+    @property
+    def is_shadow(self) -> bool:
+        """Both flying modes count for effective spells and profile icons."""
+
+        return self.shadow != 0
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MonsterDefinition:
@@ -198,7 +213,7 @@ class MonsterDefinition:
             raise MonsterDataError("monster.treasure_rate must be from 0 to 16")
 
         flags: dict[str, bool] = {}
-        for field_name in ("is_boss", "shadow", "early_appear", "large_animal"):
+        for field_name in ("is_boss", "early_appear", "large_animal"):
             value = record.get(field_name)
             if (
                 isinstance(value, bool)
@@ -233,7 +248,7 @@ class MonsterDefinition:
             resistances=resistances_from_tolerance(tolerance),
             treasure_item_key=treasure_item_key,
             treasure_rate=treasure_rate,
-            is_shadow=flags["shadow"],
+            shadow=monster_shadow_from_record(record),
         )
 
     @property

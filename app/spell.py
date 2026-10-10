@@ -16,6 +16,7 @@ if __package__ == "":
         format_text_template,
     )
     from member import Member, ProficiencyKind
+    from monster import MonsterTribe
     from resistance import ResistanceType, TOLERANCE_CHARACTER_MAP
 else:
     from .localization import (
@@ -25,6 +26,7 @@ else:
         format_text_template,
     )
     from .member import Member, ProficiencyKind
+    from .monster import MonsterTribe
     from .resistance import ResistanceType, TOLERANCE_CHARACTER_MAP
 
 
@@ -122,6 +124,7 @@ class Spell:
     intensity: int
     rate: int
     descriptions: Mapping[str, tuple[str, ...]]
+    effective_race: str = ""
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> Spell:
@@ -187,6 +190,12 @@ class Spell:
                     f"unsupported spell.attr: {attribute_value}"
                 )
 
+        effective_race = record.get("race", "")
+        if not isinstance(effective_race, str) or effective_race not in (
+            "", "FLYING", *MonsterTribe
+        ):
+            raise SpellDataError("unsupported spell.race")
+
         return cls(
             key=key,
             names=MappingProxyType(names),
@@ -202,6 +211,7 @@ class Spell:
             intensity=_integer(record, "intensity", 0),
             rate=_integer(record, "rate", 0),
             descriptions=MappingProxyType(descriptions),
+            effective_race=effective_race,
         )
 
     def localized_name(self, localizer: Localizer) -> str:

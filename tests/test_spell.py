@@ -123,6 +123,15 @@ class SpellTest(unittest.TestCase):
     def test_empty_attribute_is_normalized_to_none(self) -> None:
         self.assertIsNone(self.spells["SPARK"].attribute)
 
+    def test_air_blade_keeps_flying_effect_without_an_elemental_attribute(self) -> None:
+        self.assertIsNone(self.spells["AIR BLADE"].attribute)
+        self.assertEqual(self.spells["AIR BLADE"].effective_race, "FLYING")
+        record = dict(load_record_array("spells.json")[0])
+        for race in (None, True, "unknown"):
+            with self.subTest(race=race):
+                with self.assertRaisesRegex(SpellDataError, "spell.race"):
+                    Spell.from_record({**record, "race": race})
+
     def test_rejects_unknown_attribute_code(self) -> None:
         record = dict(load_record_array("spells.json")[0])
         record["attr"] = "雷"

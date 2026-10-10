@@ -100,7 +100,22 @@ class ResolveSpellDamageTest(unittest.TestCase):
 
         self.assertEqual((result.damage, result.affinity), (8, SpellAffinity.RESIST))
 
-    def test_death_magic_treats_shadow_as_da2_double_weakness(self) -> None:
+    def test_flying_effective_magic_doubles_damage_without_an_attribute(self) -> None:
+        result = resolve_spell_damage(
+            intensity=15,
+            spell_modifier=10,
+            target_spell_defense=20,
+            attribute=None,
+            target_weaknesses=frozenset(),
+            target_resistances=frozenset(),
+            target_is_shadow=True,
+            flying_effective=True,
+            random_factor=0,
+        )
+
+        self.assertEqual((result.damage, result.affinity), (48, SpellAffinity.WEAK))
+
+    def test_death_attribute_does_not_gain_flying_effect(self) -> None:
         result = resolve_spell_damage(
             intensity=15,
             spell_modifier=10,
@@ -111,8 +126,7 @@ class ResolveSpellDamageTest(unittest.TestCase):
             target_is_shadow=True,
             random_factor=0,
         )
-
-        self.assertEqual((result.damage, result.affinity), (48, SpellAffinity.WEAK))
+        self.assertEqual((result.damage, result.affinity), (24, SpellAffinity.NORMAL))
 
 
 class ResolveStatusSpellTest(unittest.TestCase):

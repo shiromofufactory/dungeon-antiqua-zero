@@ -1004,6 +1004,7 @@ class BattleForecast:
                         target_weaknesses=target.spec.weaknesses,
                         target_resistances=target.spec.resistances,
                         target_is_shadow=target.spec.shadow,
+                        flying_effective=spell.effective_race == "FLYING",
                         random_factor=u,
                     )
                     target.damage(result.damage)

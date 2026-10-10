@@ -178,7 +178,11 @@ def monster_detail_texts(
             ),
             DEFAULT_TEXT_COLOR,
         ),
-        (monster.localized_name(localizer), DEFAULT_TEXT_COLOR),
+        (
+            monster.localized_name(localizer)
+            + (" %FLY%" if monster.is_shadow and "profile" in revealed_fields else ""),
+            DEFAULT_TEXT_COLOR,
+        ),
         (
             texts.text(f"term.monster_tribe.{monster.tribe.value}", localizer),
             DEFAULT_TEXT_COLOR,

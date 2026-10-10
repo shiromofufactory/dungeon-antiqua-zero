@@ -62,6 +62,18 @@ class MonsterCombatStatsTest(unittest.TestCase):
 
 
 class MonsterSpellDefinitionTest(unittest.TestCase):
+    def test_preserves_shadow_mode_and_both_flying_flags(self) -> None:
+        record = load_record_array("monsters.json")[0]
+        for shadow in (0, 1, 2):
+            with self.subTest(shadow=shadow):
+                monster = MonsterDefinition.from_record({**record, "shadow": shadow})
+                self.assertEqual(monster.shadow, shadow)
+                self.assertEqual(monster.is_shadow, shadow != 0)
+        for shadow in (None, True, -1, 3, 1.0, "2"):
+            with self.subTest(shadow=shadow):
+                with self.assertRaisesRegex(MonsterDataError, "shadow"):
+                    MonsterDefinition.from_record({**record, "shadow": shadow})
+
     def test_reads_magic_intelligence_and_structured_spell_keys(self) -> None:
         records = {
             record["name_en"]: record

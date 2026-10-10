@@ -112,10 +112,12 @@ from member import (
     Race,
 )
 from monster import (
+    MonsterDataError,
     MonsterDefinition,
     MonsterBattleState,
     MonsterCombatStats,
     MonsterSpecialAction,
+    monster_shadow_from_record,
     monster_spell_keys_from_record,
     monster_special_actions_from_record,
     promote_rear_monsters_if_front_empty,
@@ -199,6 +201,8 @@ MONSTER_SHADOW_IMAGE_ID = "background/shadow"
 MONSTER_SHADOW_WIDTH = 64
 MONSTER_SHADOW_HEIGHT = 5
 MONSTER_SHADOW_OFFSET_Y = -4
+MONSTER_FLOATING_OFFSETS = (-2, -2, -2, -1, 0, 0, 0, -1)
+MONSTER_FLOATING_PATTERN_FRAME_COUNT = 12  # DA2's six frames at twice its FPS.
 CH_BATTLE_IMAGE_ID = "characters/ch_battle"
 BATTLE_BGM_ID = "da3-battle1"
 BATTLE_BOSS_BGM_ID = "da3-battle2"
@@ -1523,7 +1527,7 @@ class BattleMonster:
     )
     weaknesses: frozenset[ResistanceType] = field(default_factory=frozenset)
     resistances: frozenset[ResistanceType] = field(default_factory=frozenset)
-    is_shadow: bool = False
+    shadow: int = 0
     initial_is_front_row: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -1553,13 +1557,10 @@ class BattleMonster:
         tolerance = record.get("tolerance")
         if not isinstance(tolerance, str):
             raise BattleDataError(f"{key}.tolerance must be a string")
-        shadow = record.get("shadow")
-        if (
-            isinstance(shadow, bool)
-            or not isinstance(shadow, int)
-            or shadow not in (0, 1)
-        ):
-            raise BattleDataError(f"{key}.shadow must be 0 or 1")
+        try:
+            shadow = monster_shadow_from_record(record)
+        except MonsterDataError as error:
+            raise BattleDataError(f"{key}.shadow must be 0, 1 or 2") from error
         is_boss = record.get("is_boss")
         if (
             isinstance(is_boss, bool)
@@ -1602,8 +1603,14 @@ class BattleMonster:
             spell_keys=monster_spell_keys_from_record(record),
             weaknesses=resistances_from_tolerance(weakness),
             resistances=resistances_from_tolerance(tolerance),
-            is_shadow=bool(shadow),
+            shadow=shadow,
         )
+
+    @property
+    def is_shadow(self) -> bool:
+        """Keep both flying modes effective for spells and identification."""
+
+        return self.shadow != 0
 
     @property
     def image_resource_id(self) -> str:
@@ -4917,6 +4924,7 @@ class BattleScene:
             return ()
 
         attributes: tuple[ResistanceType, ...] = ()
+        flying_effective = False
         if self.phase is BattlePhase.TARGET:
             if (
                 self.selected_command
@@ -4949,6 +4957,8 @@ class BattleScene:
                 spell = getattr(self, "spells", {}).get(use_spell_key)
             if spell is not None and spell.attribute is not None:
                 attributes = (spell.attribute,)
+            if spell is not None:
+                flying_effective = getattr(spell, "effective_race", "") == "FLYING"
         else:
             return ()
 
@@ -4957,6 +4967,12 @@ class BattleScene:
         if records is None:
             return ()
         affinities: list[SpellAffinity] = []
+        if (
+            flying_effective
+            and monster.is_shadow
+            and "profile" in records.save_data.monster_records.get(monster.key, ())
+        ):
+            affinities.append(SpellAffinity.WEAK)
         for attribute in attributes:
             if not records.affinity_is_revealed(monster.key, attribute):
                 continue
@@ -5563,6 +5579,7 @@ class BattleScene:
                 target_weaknesses=monster.weaknesses,
                 target_resistances=monster.resistances,
                 target_is_shadow=monster.is_shadow,
+                flying_effective=spell.effective_race == "FLYING",
                 random_factor=random.random(),
             )
             _base_x, base_y = self._monster_base_position(index)
@@ -12159,9 +12176,9 @@ class BattleScene:
         x: int,
         y: int,
     ) -> None:
-        """Keep DA2's ground shadow below visible monsters without floating."""
+        """Keep the ground shadow fixed while the monster sprite floats."""
 
-        if not monster.is_shadow:
+        if monster.shadow != 1:
             return
         pyxel.blt(
             x + (monster.width - MONSTER_SHADOW_WIDTH) // 2,
@@ -12182,6 +12199,11 @@ class BattleScene:
         *,
         flip_x: bool = False,
     ) -> None:
+        if monster.shadow == 1:
+            pattern = (
+                pyxel.frame_count // MONSTER_FLOATING_PATTERN_FRAME_COUNT
+            ) % len(MONSTER_FLOATING_OFFSETS)
+            y += MONSTER_FLOATING_OFFSETS[pattern]
         pyxel.blt(
             x,
             y,

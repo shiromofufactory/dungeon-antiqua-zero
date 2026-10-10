@@ -2440,7 +2440,7 @@ class BattleScreenMockTest(unittest.TestCase):
         image = object()
         mock.monsters = (
             SimpleNamespace(
-                key="Coyote", width=96, height=64, is_alive=True, is_shadow=False
+                key="Coyote", width=96, height=64, is_alive=True, shadow=0
             ),
         )
         mock.monster_images = {"Coyote": image}
@@ -2468,16 +2468,16 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_monster_shadow_tracks_entrance_and_stays_still_while_waiting(self) -> None:
+    def test_monster_floats_above_fixed_shadow_during_entrance_and_waiting(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        monster = replace(_damage_test_monster(), height=96, is_shadow=True)
+        monster = replace(_damage_test_monster(), height=96, shadow=1)
         mock.monsters = (monster,)
         mock.monster_images = {monster.key: object()}
         mock.monster_shadow = object()
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
 
-        for frame in (0, 6, 18, 48):
+        for frame, offset in ((0, -2), (24, -2), (36, -1), (48, 0), (84, -1), (96, -2)):
             for phase in (BattleMockPhase.ENTRANCE, BattleMockPhase.COMMAND):
                 with self.subTest(frame=frame, phase=phase):
                     mock.phase = phase
@@ -2492,7 +2492,7 @@ class BattleScreenMockTest(unittest.TestCase):
                         blt.call_args_list,
                         [
                             call(x, y + 92, mock.monster_shadow, 0, 0, 64, 5, 1),
-                            call(x, y, mock.monster_images[monster.key], 0, 0, 64, 96, 1),
+                            call(x, y + offset, mock.monster_images[monster.key], 0, 0, 64, 96, 1),
                         ],
                     )
                     if phase is BattleMockPhase.COMMAND:
@@ -2500,7 +2500,10 @@ class BattleScreenMockTest(unittest.TestCase):
 
         monster = replace(monster, width=96, height=64)
         mock.monsters = (monster,)
-        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+        with (
+            patch("tools.screen_mocks.battle.pyxel.frame_count", 48),
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+        ):
             mock._draw_monsters()
         self.assertEqual(
             blt.call_args_list,
@@ -2533,6 +2536,54 @@ class BattleScreenMockTest(unittest.TestCase):
             ),
             (3, 33),
         )
+
+    def test_shadow_two_keeps_flying_profile_without_shadow_or_floating(self) -> None:
+        record = load_record_array("monsters.json")[0]
+        monster = BattleMockMonster.from_record({**record, "shadow": 2}, is_front_row=True)
+        self.assertTrue(monster.is_shadow)
+        self.assertEqual(monster.shadow, 2)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+        mock.monster_images = {monster.key: object()}
+        mock.phase = BattleMockPhase.COMMAND
+        mock.blinking_monster_index = None
+        mock.monster_blink_frames_remaining = 0
+        for frame in (0, 36, 48, 84):
+            with (
+                self.subTest(frame=frame),
+                patch("tools.screen_mocks.battle.pyxel.frame_count", frame),
+                patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            ):
+                mock._draw_monsters()
+                blt.assert_called_once_with(
+                    4, 48, mock.monster_images[monster.key], 0, 0,
+                    monster.width, monster.height, 1,
+                )
+
+    def test_air_blade_doubles_both_shadow_modes_and_reveals_known_weak_marker(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = load_mock_party(load_mock_items(), load_mock_skills())
+        mock.active_party_index = 0
+        mock.monsters = tuple(
+            replace(_damage_test_monster(shadow), shadow=shadow) for shadow in (0, 1, 2)
+        )
+        spell = load_mock_spells()["AIR BLADE"]
+        with patch("scenes.battle.random.random", return_value=0.0):
+            results = mock._resolve_spell_damage_results(spell, (0, 1, 2))
+        self.assertEqual(
+            [result.affinity for result in results],
+            [SpellAffinity.NORMAL, SpellAffinity.WEAK, SpellAffinity.WEAK],
+        )
+        self.assertEqual(results[1].damage, int(results[0].damage * 2))
+        self.assertEqual(results[1].damage, results[2].damage)
+        mock.phase = BattleMockPhase.ACTION_TARGET
+        mock.action_targets_enemy = True
+        mock.selectable_target_indexes = (0, 1, 2)
+        mock.pending_spell = spell
+        mock.monster_record_system = MonsterRecordSystem(SaveData())
+        self.assertEqual(mock._target_affinities(2), ())
+        mock.monster_record_system.reveal_profile(mock.monsters[2].key)
+        self.assertEqual(mock._target_affinities(2), (SpellAffinity.WEAK,))
 
     def test_monster_entrance_matches_da2_slide_timing_at_sixty_fps(self) -> None:
         self.assertEqual(MONSTER_ENTRANCE_FRAME_COUNTS, (16, 16, 14, 14, 12))
@@ -4201,7 +4252,7 @@ class BattleScreenMockTest(unittest.TestCase):
             is_front_row=True,
             state=MonsterBattleState(max_hp=2),
             agility=12,
-            is_shadow=True,
+            shadow=1,
         )
         monster.state.defeat()
         animation = MonsterDeathAnimation()
@@ -4243,7 +4294,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call.dither(0.5),
                 call.blt(4, 108, mock.monster_shadow, 0, 0, 64, 5, 1),
                 call.shifted(MONSTER_DEATH_PALETTE),
-                call.blt(4, 48, mock.monster_images["Coyote"], 0, 0, 64, 64, 1),
+                call.blt(4, 46, mock.monster_images["Coyote"], 0, 0, 64, 64, 1),
                 call.dither(1.0),
             ],
         )
@@ -4572,6 +4623,26 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertFalse(any(text == "おたから：？？？？" for text in lines))
         self.assertTrue(any("%FIRE%" in text for text in lines))
         self.assertFalse(any("スタン" in text or "止" in text for text in lines))
+
+    def test_identify_name_shows_flying_icon_for_both_shadow_modes(self) -> None:
+        record = load_record_array("monsters.json")[0]
+        text_factory = Mock()
+        text_factory.create.side_effect = (
+            lambda text, x, y, **kwargs: WindowText(text, x, y, **kwargs)
+        )
+        for shadow in (0, 1, 2):
+            for revealed in (set(), set(MONSTER_IDENTIFY_FIELD_KEYS)):
+                with self.subTest(shadow=shadow, revealed=revealed):
+                    detail = identify_detail_texts(
+                        number=1,
+                        definition=MonsterDefinition.from_record({**record, "shadow": shadow}),
+                        revealed_fields=revealed,
+                        items=load_mock_items(),
+                        texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
+                        localizer=Localizer(Language.JAPANESE),
+                        text_factory=text_factory,
+                    )
+                    self.assertEqual("%FLY%" in detail[1].text, bool(shadow and revealed))
 
     def test_identify_result_uses_da2_monster_image_position(self) -> None:
         record = load_record_array("monsters.json")[0]
@@ -8062,7 +8133,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 width=64,
                 height=64,
                 is_alive=True,
-                is_shadow=True,
+                shadow=1,
             ),
         )
         mock.monster_images = {"Giant Spider": image}
@@ -8081,7 +8152,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 blt.call_args_list,
                 [
                     call(4, 108, mock.monster_shadow, 0, 0, 64, 5, 1),
-                    call(*MONSTER_POSITIONS[0], image, 0, 0, 64, 64, 1),
+                    call(4, 46, image, 0, 0, 64, 64, 1),
                 ],
             )
 

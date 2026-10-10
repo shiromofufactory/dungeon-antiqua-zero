@@ -1174,6 +1174,24 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(forecast.actors[0].hp, wounded.max_hp)
         self.assertFalse(any(a.spell_key == "HEALING1" for a in forecast.candidates(1)))
 
+    def test_air_blade_predicts_double_damage_for_flying_profiles(self):
+        enemies = tuple(
+            self.enemy(number, hp=10000, max_hp=10000, shadow=number != 5)
+            for number in (5, 6, 7)
+        )
+        forecast = BattleForecast(self.snapshot(self.specs[0], *enemies), 0)
+        with patch.object(forecast, "roll", return_value=0):
+            forecast.cast(
+                forecast.actors[0],
+                AutoAction(BattleCommand.SPELL, (5, 6, 7), "AIR BLADE"),
+            )
+        normal, flying_one, flying_two = (
+            10000 - forecast.actors[number].hp for number in (5, 6, 7)
+        )
+        self.assertGreater(normal, 0)
+        self.assertLessEqual(abs(flying_one - normal * 2), 1)
+        self.assertEqual(flying_one, flying_two)
+
     def test_zero_mp_and_already_dead_member_do_not_block_planning(self):
         ally = replace(self.specs[0], max_mp=0, mp=0, spells=())
         dead = replace(self.specs[1], alive=False, hp=0)

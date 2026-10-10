@@ -103,6 +103,7 @@ def resolve_spell_damage(
     target_weaknesses: frozenset[ResistanceType],
     target_resistances: frozenset[ResistanceType],
     target_is_shadow: bool = False,
+    flying_effective: bool = False,
     random_factor: float,
 ) -> SpellDamageResult:
     """Resolve DAMAGE magic with ZERO's formula and DA2's affinities."""
@@ -133,6 +134,8 @@ def resolve_spell_damage(
         raise TypeError("target_resistances must be a ResistanceType frozenset")
     if not isinstance(target_is_shadow, bool):
         raise TypeError("target_is_shadow must be a boolean")
+    if not isinstance(flying_effective, bool):
+        raise TypeError("flying_effective must be a boolean")
     if isinstance(random_factor, bool) or not isinstance(
         random_factor,
         (int, float),
@@ -149,7 +152,7 @@ def resolve_spell_damage(
     elif attribute is not None and attribute in target_weaknesses:
         affinity = SpellAffinity.WEAK
         multiplier = 3.0
-    elif attribute is ResistanceType.DEATH and target_is_shadow:
+    elif flying_effective and target_is_shadow:
         affinity = SpellAffinity.WEAK
         multiplier = 2.0
 
