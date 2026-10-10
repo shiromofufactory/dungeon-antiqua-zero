@@ -604,6 +604,7 @@ class Game:
         self.event_release_direction: Direction | None = None
         self.event_release_confirm = False
         self.event_resume_after_fade = False
+        self.event_conversation_actor_id: str | None = None
         self.event_stationary_actor_facing_restore: (
             tuple[
                 str,
@@ -1049,7 +1050,7 @@ class Game:
         if suspended is None:
             return
         if result is BattleResult.DEFEAT:
-            self._restore_event_stationary_actor_facing()
+            self._finish_field_conversation()
             return
         runner, effect = suspended
         try:
@@ -3233,7 +3234,7 @@ class Game:
                 if runner.is_complete:
                     battle_event_finished = runner.context is EventContext.BATTLE
                     if not battle_event_finished:
-                        self._restore_event_stationary_actor_facing()
+                        self._finish_field_conversation()
                     self.event_runner = None
                     self.event_effect = None
                     self.event_message = None
@@ -3489,7 +3490,7 @@ class Game:
             )
         self.last_event_error = str(error)
         print(f"イベントを中断しました: {error}", file=sys.stderr)
-        self._restore_event_stationary_actor_facing()
+        self._finish_field_conversation()
         self.event_runner = None
         self.event_effect = None
         self.event_message = None
@@ -3498,7 +3499,8 @@ class Game:
         self.event_resume_after_fade = False
         self.alert.start()
 
-    def _restore_event_stationary_actor_facing(self) -> None:
+    def _finish_field_conversation(self) -> None:
+        self.event_conversation_actor_id = None
         restore = getattr(self, "event_stationary_actor_facing_restore", None)
         self.event_stationary_actor_facing_restore = None
         if restore is None:
@@ -3553,6 +3555,7 @@ class Game:
             if activation in ("touch", "interact"):
                 actor = self.field_actors.actor(trigger.actor_id)
                 if actor.kind in ("stationary", "roaming"):
+                    self.event_conversation_actor_id = actor.id
                     dx = actor.movement.position.x - self.field.position.x
                     dy = actor.movement.position.y - self.field.position.y
                     if abs(dx) + abs(dy) == 1:
@@ -3927,12 +3930,16 @@ class Game:
                 if not isinstance(effect, MovePartyEffect):
                     self.field.update_animation()
                 if field_actors is not None:
-                    field_actors.update_character_animations(
-                        excluding=(
-                            effect.actor_id
-                            if isinstance(effect, MoveActorEffect)
-                            else None
-                        ),
+                    excluded_actor_ids = set()
+                    conversation_actor_id = getattr(self, "event_conversation_actor_id", None)
+                    if conversation_actor_id is not None:
+                        excluded_actor_ids.add(conversation_actor_id)
+                    if isinstance(effect, MoveActorEffect):
+                        excluded_actor_ids.add(effect.actor_id)
+                    field_actors.update_roaming(
+                        party_position=self.field.position,
+                        party_destination=self.field.destination_position,
+                        excluding=excluded_actor_ids,
                     )
                 self._update_event(input_state)
             else:

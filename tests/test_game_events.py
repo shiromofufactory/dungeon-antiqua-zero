@@ -115,6 +115,7 @@ def game_for(
     game.field_actors = FieldActors(game.current_map, event_flags=game.save_data.event_flags) if actors else None
     game.event_release_direction = None
     game.event_release_confirm = False
+    game.event_conversation_actor_id = None
     game._start_field_event = Mock(return_value=True)
     game._handle_arrived_site = Mock()
     game._refresh_site_name_label = Mock()
@@ -181,7 +182,10 @@ class GameEventTriggerTest(unittest.TestCase):
                 game.event_runner.complete_effect.assert_called_once_with(effect)
                 game._continue_event.assert_called_once_with()
                 game.field.update.assert_not_called()
-                game.field_actors.update_roaming.assert_not_called()
+                if context is EventContext.FIELD:
+                    self.assertEqual(game.field_actors.update_roaming.call_count, 30)
+                else:
+                    game.field_actors.update_roaming.assert_not_called()
                 if game.battle_scene is not None:
                     game.battle_scene.update.assert_not_called()
 
@@ -573,6 +577,7 @@ class GameEventTriggerTest(unittest.TestCase):
         effect = StartBattleEffect("shrine_guard", ("SLIME",))
         game.event_runner = runner
         game.event_effect = effect
+        game.event_conversation_actor_id = "villager"
         game.suspended_field_event = None
         game._begin_random_encounter = Mock()
         game._continue_event = Mock()
@@ -584,12 +589,14 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertFalse(game.pending_event_battle_encounter.escape_command_enabled)
         self.assertIsNone(game.event_runner)
         self.assertIsNone(game.event_effect)
+        self.assertEqual(game.event_conversation_actor_id, "villager")
         game._begin_random_encounter.assert_called_once_with()
 
         game._resume_event_after_battle(BattleResult.VICTORY)
 
         runner.complete_effect.assert_called_once_with(effect)
         self.assertIs(game.event_runner, runner)
+        self.assertEqual(game.event_conversation_actor_id, "villager")
         game._continue_event.assert_called_once_with()
 
     def test_named_battle_event_starts_before_first_command_window_opens(self) -> None:
@@ -1156,6 +1163,9 @@ class GameEventAnimationTest(unittest.TestCase):
             hover.update(Direction.DOWN)
         for actor_id in ("walker", "hidden"):
             game.field_actors.actor(actor_id).movement.update(Direction.RIGHT)
+        game.field_actors._random = Mock(
+            randint=Mock(return_value=30), choice=Mock(return_value=Direction.RIGHT),
+        )
         game.input_reader = Mock(poll=Mock(return_value=InputState(
             held_direction=Direction.RIGHT, menu=InputButton(triggered=True),
         )))
@@ -1171,7 +1181,7 @@ class GameEventAnimationTest(unittest.TestCase):
         game._continue_event = Mock()
         return game
 
-    def test_message_and_wait_animate_characters_without_moving_or_starting_events(self) -> None:
+    def test_message_and_wait_continue_npc_movement_without_field_input_or_new_events(self) -> None:
         for effect in (MessageEffect("sample.talk"), WaitEffect(180)):
             with self.subTest(effect=effect):
                 game = self.game()
@@ -1181,7 +1191,8 @@ class GameEventAnimationTest(unittest.TestCase):
                 walker = game.field_actors.actor("walker")
                 hidden = game.field_actors.actor("hidden")
                 walker_position = (walker.movement.world_x, walker.movement.world_y)
-                walker_wait = walker.roam_wait_frames
+                hidden_position = (hidden.movement.world_x, hidden.movement.world_y)
+                hidden_wait = hidden.roam_wait_frames
                 walking_image = Mock(width=384, height=384)
                 actor_image = Mock(width=192, height=128)
                 px = Mock(frame_count=0)
@@ -1200,17 +1211,21 @@ class GameEventAnimationTest(unittest.TestCase):
                         elif draw.args[2] is actor_image:
                             kind = "hover" if draw.args[3] < 48 else "walker"
                             frames[kind].add(draw.args[3])
-                self.assertEqual(frames, {"player": {0, 16, 32}, "hover": {0, 16, 32},
-                                          "walker": {48, 64, 80}})
+                self.assertEqual(frames["player"], {0, 16, 32})
+                self.assertEqual(frames["hover"], {0, 16, 32})
+                self.assertGreaterEqual(len(frames["walker"]), 2)
+                self.assertTrue(frames["walker"].issubset({48, 64, 80}))
                 self.assertEqual(game.field.position, FieldPosition(2, 1))
                 self.assertFalse(game.field.is_walking)
                 self.assertIsNone(game.field.arrived_position)
                 self.assertEqual(game.field_actors.actor("hover").movement.position,
                                  FieldPosition(0, 2))
                 self.assertFalse(game.field_actors.actor("hover").movement.is_walking)
-                self.assertEqual((walker.movement.world_x, walker.movement.world_y), walker_position)
+                self.assertNotEqual((walker.movement.world_x, walker.movement.world_y), walker_position)
                 self.assertIs(walker.movement.facing, Direction.RIGHT)
-                self.assertEqual(walker.roam_wait_frames, walker_wait)
+                game.field_actors._random.choice.assert_called()
+                self.assertEqual((hidden.movement.world_x, hidden.movement.world_y), hidden_position)
+                self.assertEqual(hidden.roam_wait_frames, hidden_wait)
                 self.assertEqual(hidden.movement.walking_frame_count, 1)
                 game._update_field.assert_not_called()
                 game._start_field_event.assert_not_called()
@@ -1221,6 +1236,109 @@ class GameEventAnimationTest(unittest.TestCase):
                 else:
                     self.assertEqual(game.event_message.update.call_count, 80)
 
+    def test_roaming_wait_expires_and_starts_a_new_step_during_a_message(self) -> None:
+        game = self.game()
+        game.event_effect = MessageEffect("sample.talk")
+        game.event_message = Mock(update=Mock(return_value=False))
+        walker = game.field_actors.actor("walker")
+        walker.movement.stop()
+        walker.roam_wait_frames = 2
+        game.update()
+        self.assertEqual(walker.roam_wait_frames, 1)
+        game.update()
+        self.assertEqual(walker.roam_wait_frames, 0)
+        self.assertFalse(walker.movement.is_moving)
+        game.update()
+        self.assertTrue(walker.movement.is_moving)
+        self.assertEqual(walker.movement.world_x, walker.movement.speed)
+        game.event_runner.complete_effect.assert_not_called()
+
+    def test_only_the_conversation_partner_pauses_until_the_event_finishes(self) -> None:
+        for activation in ("touch", "interact"):
+            for effect in (MessageEffect("sample.talk"), WaitEffect(180)):
+                with self.subTest(activation=activation, effect=effect):
+                    game = self.game()
+                    trigger = MapEventTrigger("talk", "sample.talk", frozenset((activation,)),
+                                              actor_id="walker", offsets=(MapCell(0, 0),))
+                    game.current_map = replace(game.current_map,
+                        actors=(*game.current_map.actors,
+                                MapActor("bystander", MapCell(4, 4), "roaming", 3, "left")),
+                        actor_event_triggers=MappingProxyType({"walker": (trigger,)}))
+                    game.field_actors = FieldActors(game.current_map, random_source=Mock(
+                        randint=Mock(return_value=30), choice=Mock(return_value=Direction.LEFT),
+                    ))
+                    game.field = FieldMovement(game.current_map, start=FieldPosition(1, 3))
+                    game.event_runner = None
+                    self.assertTrue(game._try_field_trigger(activation, 0, 3))
+                    self.assertEqual(game.event_conversation_actor_id, "walker")
+                    game.event_runner = Mock(context=EventContext.FIELD)
+                    game.event_effect = effect
+                    game.event_wait_remaining = 180
+                    game.event_message = Mock(update=Mock(return_value=False))
+                    walker = game.field_actors.actor("walker")
+                    bystander = game.field_actors.actor("bystander")
+                    walker.roam_wait_frames = 0
+                    bystander.roam_wait_frames = 0
+                    for _ in range(10):
+                        game.update()
+                    self.assertEqual(walker.movement.position, FieldPosition(0, 3))
+                    self.assertIs(walker.movement.facing, Direction.RIGHT)
+                    self.assertFalse(walker.movement.is_moving)
+                    self.assertEqual(walker.roam_wait_frames, 0)
+                    self.assertEqual(bystander.movement.position, FieldPosition(3, 4))
+                    game.event_runner.complete_effect.assert_not_called()
+                    game.event_runner = Mock(context=EventContext.FIELD,
+                                             advance=Mock(return_value=None), is_complete=True)
+                    game.party_system = Mock(active_party=(), character_states={})
+                    game.selected_member_index = 0
+                    Game._continue_event(game)
+                    self.assertIsNone(game.event_conversation_actor_id)
+                    game.event_runner = Mock(context=EventContext.FIELD)
+                    game.event_effect = WaitEffect(180)
+                    game.event_wait_remaining = 180
+                    walker.roam_wait_frames = 0
+                    game.field_actors._random.choice.return_value = Direction.DOWN
+                    game.update()
+                    self.assertTrue(walker.movement.is_moving)
+
+    def test_aborting_an_event_releases_the_conversation_partner(self) -> None:
+        game = self.game()
+        game.event_conversation_actor_id = "walker"
+        game._abort_event(ValueError("preview conversation"))
+        self.assertIsNone(game.event_conversation_actor_id)
+
+    def test_conversation_partner_keeps_its_roaming_wait_time(self) -> None:
+        game = self.game()
+        game.event_conversation_actor_id = "walker"
+        game.event_effect = MessageEffect("sample.talk")
+        game.event_message = Mock(update=Mock(return_value=False))
+        walker = game.field_actors.actor("walker")
+        walker.movement.stop()
+        walker.roam_wait_frames = 40
+        for _ in range(5):
+            game.update()
+        self.assertEqual(walker.roam_wait_frames, 40)
+        self.assertIs(walker.movement.facing, Direction.RIGHT)
+
+    def test_roaming_npc_does_not_enter_the_partys_controlled_destination(self) -> None:
+        game = self.game()
+        game.current_map = replace(game.current_map, actors=(
+            MapActor("walker", MapCell(3, 2), "roaming", 1, "left"),
+        ))
+        game.field = FieldMovement(game.current_map, start=FieldPosition(2, 1))
+        game.field.update(Direction.DOWN)
+        game.field_actors = FieldActors(game.current_map, random_source=Mock(
+            randint=Mock(return_value=30), choice=Mock(return_value=Direction.LEFT),
+        ))
+        walker = game.field_actors.actor("walker")
+        walker.roam_wait_frames = 0
+        game.event_effect = MovePartyEffect(Direction.DOWN, 1)
+        game.event_move_remaining = 1
+        game.update()
+        self.assertEqual(walker.movement.position, FieldPosition(3, 2))
+        self.assertFalse(walker.movement.is_moving)
+        self.assertGreater(game.field.world_y, 16)
+
     def test_controlled_movement_advances_animation_only_once_per_frame(self) -> None:
         for effect in (MovePartyEffect(Direction.DOWN, 1), MoveActorEffect("walker", Direction.RIGHT, 1)):
             with self.subTest(effect=effect):
@@ -1228,8 +1346,12 @@ class GameEventAnimationTest(unittest.TestCase):
                 game.field = FieldMovement(game.current_map, start=FieldPosition(2, 1))
                 game.event_effect = effect
                 game.event_move_remaining = 1
+                if isinstance(effect, MoveActorEffect):
+                    game.event_conversation_actor_id = "walker"
                 movement = (game.field if isinstance(effect, MovePartyEffect)
                             else game.field_actors.actor("walker").movement)
+                walker = game.field_actors.actor("walker")
+                walker_wait = walker.roam_wait_frames
                 initial_frame = movement.walking_frame_count
                 initial_position = (movement.world_x, movement.world_y)
                 for frame in range(1, 5):
@@ -1239,7 +1361,60 @@ class GameEventAnimationTest(unittest.TestCase):
                         initial_position[0] + effect.direction.dx * movement.speed * frame,
                         initial_position[1] + effect.direction.dy * movement.speed * frame,
                     ))
+                    if isinstance(effect, MoveActorEffect):
+                        self.assertEqual(walker.roam_wait_frames, walker_wait)
+                if isinstance(effect, MovePartyEffect):
+                    self.assertGreater(walker.movement.world_x, walker.movement.speed)
                 game.event_runner.complete_effect.assert_not_called()
+
+    def test_conversation_partner_stays_paused_while_another_actor_is_controlled(self) -> None:
+        game = self.game()
+        game.current_map = replace(game.current_map, actors=(
+            MapActor("walker", MapCell(0, 3), "roaming", 1, "right"),
+            MapActor("bystander", MapCell(4, 3), "roaming", 2, "up"),
+        ))
+        game.field_actors = FieldActors(game.current_map, random_source=Mock(
+            randint=Mock(return_value=30), choice=Mock(return_value=Direction.LEFT),
+        ))
+        game.event_conversation_actor_id = "walker"
+        game.event_effect = MoveActorEffect("bystander", Direction.UP, 1)
+        game.event_move_remaining = 1
+        walker = game.field_actors.actor("walker")
+        bystander = game.field_actors.actor("bystander")
+        walker.roam_wait_frames = bystander.roam_wait_frames = 0
+        for _ in range(4):
+            game.update()
+        self.assertFalse(walker.movement.is_moving)
+        self.assertEqual(walker.movement.position, FieldPosition(0, 3))
+        self.assertEqual(bystander.movement.walking_frame_count, 4)
+        self.assertEqual(bystander.movement.world_y, 3 * 16 - 4 * bystander.movement.speed)
+
+    def test_controlled_actor_resumes_roaming_while_other_npcs_keep_moving(self) -> None:
+        game = self.game()
+        game.current_map = replace(game.current_map, actors=(
+            MapActor("walker", MapCell(0, 3), "roaming", 1, "right"),
+            MapActor("bystander", MapCell(4, 3), "roaming", 2, "left"),
+        ))
+        game.field_actors = FieldActors(game.current_map, random_source=Mock(
+            randint=Mock(return_value=30), choice=Mock(return_value=Direction.LEFT),
+        ))
+        walker = game.field_actors.actor("walker")
+        bystander = game.field_actors.actor("bystander")
+        walker.roam_wait_frames = bystander.roam_wait_frames = 0
+        effect = MoveActorEffect("walker", Direction.RIGHT, 1)
+        game.event_effect = effect
+        game.event_move_remaining = 1
+        for _ in range(8):
+            game.update()
+        self.assertEqual(walker.movement.position, FieldPosition(1, 3))
+        self.assertEqual(bystander.movement.position, FieldPosition(3, 3))
+        self.assertEqual(walker.roam_wait_frames, 0)
+        game.event_runner.complete_effect.assert_called_once_with(effect)
+        game.event_effect = WaitEffect(180)
+        game.event_wait_remaining = 180
+        game.update()
+        self.assertIs(walker.movement.facing, Direction.LEFT)
+        self.assertEqual(walker.movement.world_x, 16 - walker.movement.speed)
 
 
 if __name__ == "__main__":

@@ -1138,8 +1138,12 @@ Pythonの実行ごとに変わる組み込み `hash()` や実行時乱数は使�
 `FieldMovement.walking_frame_count` による従来の歩行フレームを優先する。戦闘画像の横方向は
 行動ポーズを表すため、この待機パターン切り替えを適用しない。
 `FieldMovement.update_animation()` は移動を止めたまま歩行描画状態と画像パターン用の時間を
-更新し、`FieldActors` が表示中の人物actorへの適用を担当する。Gameはフィールドイベント中に
-この更新を呼び、イベント指定の移動対象は通常の移動更新へ任せて二重更新を避ける。
+更新する。Gameはフィールドイベント中にPCのアニメーション更新と `FieldActors.update_roaming()` を
+呼び、表示中のNPCの自律移動を継続する。FieldActorsはpartyの現在セル・移動先セルとほかのactorの
+占有セルを衝突判定へ渡す。イベント指定の移動対象は自律更新から除外し、コマンド側の移動更新へ
+任せて二重更新を避ける。
+Gameは会話の起動元actor IDをイベントの一時状態として保持し、FieldActorsの自律更新から除外する。
+フィールドイベントの終了・中断時に解除し、戦闘でイベントを一時中断している間は保持する。
 メッセージ・待機中の詳しい継続規則は [`features/field.md`](./features/field.md) を参照する。
 キャラクター用の共通影は `rendering/character_shadow.py` が、イメージバンク0の
 `(80, 144)` から16×16pxを描く規則として所有する。`FieldRenderer` は町・ダンジョンのPCおよび

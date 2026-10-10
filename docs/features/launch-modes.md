@@ -6,10 +6,14 @@
 
 | モード | 安定キー | 起動コマンド |
 |---|---|---|
-| 通常モード | `normal` | `npm start` |
-| 試遊版モード | `exhibition` | `npm start -- --mode exhibition` |
-| 体験版モード | `demo` | `npm start -- --mode demo` |
-| βテスト版モード | `beta` | `npm start -- --mode beta` |
+| 通常モード | `normal` | `npm start` または `npm run start` |
+| 試遊版モード | `exhibition` | `npm run start:exhibition` |
+| 体験版モード | `demo` | `npm run start:demo` |
+| βテスト版モード | `beta` | `npm run start:beta` |
+
+`npm run` だけを実行すると、起動モード別のコマンドを一覧で確認できる。
+各モードのscriptは既存の `start` へオプションを渡すため、起動前の攻撃ポーズ生成も共通で行う。
+従来の `npm start -- --mode <安定キー>` も引き続き利用できる。
 
 `python3 -B app/main.py --mode <安定キー>` でも同じモードを指定できる。
 `--mode normal` は通常起動と同じ。未対応の値や不正なオプションは、Pyxelの初期化前に
@@ -111,6 +115,7 @@
 
 ## 受け入れ条件
 
+- `npm run` の一覧にモード別の起動scriptが表示され、各コマンドから対応するモードで起動できる。
 - オプション省略と各モード指定で、対応する起動モードをGameへ渡せる。
 - 全モードでタイトルから始まり、試遊版だけ決定入力からニューゲームへ直接進める。
 - 試遊版でだけニューゲームのパーティLVを3から開始し、成長・保存・ロードでも維持できる。

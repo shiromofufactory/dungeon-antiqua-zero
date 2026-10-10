@@ -390,18 +390,19 @@ class FieldActors:
             ),
         )
 
-    def update_character_animations(self, *, excluding: str | None = None) -> None:
-        """Animate visible characters without advancing autonomous movement."""
-
-        for actor in self.visible_actors:
-            if actor.id != excluding and actor.kind in ("stationary", "roaming"):
-                actor.movement.update_animation()
-
-    def update_roaming(self, *, party_position: FieldPosition) -> None:
+    def update_roaming(
+        self,
+        *,
+        party_position: FieldPosition,
+        party_destination: FieldPosition | None = None,
+        excluding: Collection[str] = (),
+    ) -> None:
         """Advance autonomous actors once without storing their transient state."""
 
         for actor in self.visible_actors:
             actor_id = actor.id
+            if actor_id in excluding:
+                continue
             if actor.kind == "stationary":
                 actor.movement.update(None)
                 continue
@@ -409,6 +410,7 @@ class FieldActors:
                 continue
             blockers = (
                 party_position,
+                *((party_destination,) if party_destination is not None else ()),
                 *self.blocked_positions(excluding=actor_id),
             )
             if actor.movement.is_moving:

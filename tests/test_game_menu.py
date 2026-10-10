@@ -182,6 +182,7 @@ class GameMenuTest(unittest.TestCase):
         self.open(game)
         self.update(game, InputState(confirm=PRESS))
         game.field.update.assert_not_called()
+        game.field_actors.update_roaming.assert_not_called()
         game.field_actors.update_treasure_animations.assert_not_called()
         game.field_birds.update.assert_not_called()
         game.event_message.update.assert_not_called()
