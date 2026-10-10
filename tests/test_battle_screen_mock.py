@@ -956,6 +956,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.escape_start_x, ())
         self.assertFalse(mock.escape_requested)
         self.assertIsNone(mock.escape_actor_index)
+        self.assertEqual(mock.escape_start_frame_by_party_index, {})
         self.assertEqual(mock.escaped_party_indexes, set())
         self.assertEqual(mock.temporary_front_party_indexes, set())
         first_member = mock.party[0]
@@ -10159,6 +10160,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escape_actor_index = 0
         mock.escape_start_x = (ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED, 176)
         mock.escape_animation_frame = 0
+        mock.escape_start_frame_by_party_index = {0: 0}
         mock.escaped_party_indexes = set()
         mock.temporary_front_party_indexes = set()
         mock.command_cursor = Mock(active=False)
@@ -10196,6 +10198,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escape_actor_index = 0
         mock.escape_start_x = (ESCAPE_RUN_DESTINATION_X - ESCAPE_RUN_SPEED, 160)
         mock.escape_animation_frame = 0
+        mock.escape_start_frame_by_party_index = {0: 0}
         mock.escaped_party_indexes = set()
         mock.temporary_front_party_indexes = set()
         mock.command_cursor = Mock(active=False)
@@ -10291,6 +10294,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.escaped_party_indexes = set()
         mock.escape_start_x = (156,)
         mock.escape_animation_frame = ESCAPE_RUN_PATTERN_FRAME_COUNT
+        mock.escape_start_frame_by_party_index = {0: 0}
 
         self.assertGreater(ESCAPE_RUN_SPEED, 0)
         self.assertEqual(
@@ -10584,6 +10588,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_window = command_window
         mock.phase = BattleMockPhase.ESCAPE_MEMBER
         mock.escape_actor_index = 1
+        mock.escape_start_frame_by_party_index = {1: 0}
         mock.escaped_party_indexes = {0}
 
         mock._draw_windows()
@@ -10592,6 +10597,24 @@ class BattleScreenMockTest(unittest.TestCase):
         party_status_windows[0].draw.assert_not_called()
         party_status_windows[1].draw.assert_not_called()
         party_status_windows[2].draw.assert_called_once_with()
+
+    def test_overlapping_escape_hides_each_running_members_status(self) -> None:
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        party_status_windows = [Mock(), Mock(), Mock(), Mock()]
+        mock.windows = party_status_windows
+        mock.party_status_windows = party_status_windows
+        mock.monsters = ()
+        mock.monster_name_windows = []
+        mock.command_window = Mock()
+        mock.phase = BattleMockPhase.ESCAPE_MEMBER
+        mock.escape_start_frame_by_party_index = {0: 0, 1: 4}
+        mock.escaped_party_indexes = {2}
+
+        mock._draw_windows()
+
+        for window in party_status_windows[:3]:
+            window.draw.assert_not_called()
+        party_status_windows[3].draw.assert_called_once_with()
 
     def test_cancel_input_opens_the_global_command_menu(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

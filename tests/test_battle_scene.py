@@ -13,6 +13,7 @@ from tools.screen_mocks._fixtures import (
 )
 
 from field import FieldPosition
+from battle_timeline import TimelineEntry, TimelineOrder
 from game import (
     SE_CHANNEL,
     TELEPORT_SE_ID,
@@ -43,6 +44,10 @@ from scenes.battle import (
     NEAR_DEATH_SPRITE_SOURCE_X,
     MONSTER_POSITIONS,
     MONSTER_DEATH_PALETTE,
+    BATTLE_ESCAPE_SE_ID,
+    ESCAPE_MEMBER_STAGGER_FRAME_COUNT,
+    ESCAPE_RUN_SPEED,
+    FORMATION_MOVE_FRAME_COUNT,
     SPELL_EFFECT_FLASH_PALETTE,
     UNSELECTABLE_TARGET_PALETTE,
     _battle_start_front_monster_indexes,
@@ -363,6 +368,172 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         self.assertTrue(scene._party_member_is_front_row(1))
         self.assertIs(living_rear.formation_row, FormationRow.BACK)
         scene._start_timeline_animation.assert_called_once_with()
+
+
+class BattleEscapeStaggerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        sound_patch = patch("scenes.battle.play_se")
+        self.sound = sound_patch.start()
+        self.addCleanup(sound_patch.stop)
+
+    @staticmethod
+    def _scene(order: tuple[int | None, ...]) -> BattleScene:
+        scene = BattleScene.__new__(BattleScene)
+        scene.party = tuple(load_mock_party(load_mock_items(), load_mock_skills())[:3])
+        for member in scene.party:
+            member.formation_row = FormationRow.FRONT
+        scene.party_visuals = tuple(
+            BattleCharacter(member, 0, 0, index)
+            for index, member in enumerate(scene.party)
+        )
+        enemy = SimpleNamespace(is_alive=True)
+        scene._timeline_order = TimelineOrder(tuple(
+            TimelineEntry(
+                enemy if index is None else scene.party_visuals[index],
+                10,
+                64.0 - position * 8,
+            )
+            for position, index in enumerate(order)
+        ))
+        scene.timeline = scene._timeline_order.actors
+        scene.phase = BattlePhase.COMMAND
+        scene.active_party_index = order[0]
+        scene.escape_actor_index = None
+        scene.escape_start_frame_by_party_index = {}
+        scene.escaped_party_indexes = set()
+        scene.temporary_front_party_indexes = set()
+        scene.defending_party_indexes = set()
+        scene.escape_requested = False
+        scene.restart_enabled = False
+        scene.timeline_animation_phase = None
+        scene.timeline_animation_frame = 0
+        scene.timeline_advance = None
+        scene.command_cursor = Mock()
+        scene.command_window = Mock()
+        scene.escape_cursor = Mock()
+        scene._apply_confirm_repeat = lambda input_state: input_state
+        for method in (
+            "_refresh_input_guide", "_update_reinforcement_entrances",
+            "_clear_interrupted_focus_states", "_update_focus_wait_animation",
+            "_update_healing_popups", "_update_spell_damage_popups",
+            "_update_affinity_popups", "_update_action_motion",
+            "_hide_command_guide", "_refresh_party_text_colors",
+            "_refresh_party_hp_text",
+        ):
+            setattr(scene, method, Mock())
+        return scene
+
+    @staticmethod
+    def _frames(scene: BattleScene, count: int) -> None:
+        for _frame in range(count):
+            scene.update(InputState())
+
+    def test_three_consecutive_allies_start_four_frames_apart_and_finish_all_runs(self) -> None:
+        scene = self._scene((0, 1, 2, None))
+        scene._accept_escape_confirmation()
+
+        self._frames(scene, ESCAPE_MEMBER_STAGGER_FRAME_COUNT - 1)
+        self.assertEqual(scene.escape_start_frame_by_party_index, {0: 0})
+        self._frames(scene, 1)
+        self.assertEqual(scene.escape_start_frame_by_party_index, {0: 0, 1: 4})
+        self.assertEqual(scene._party_draw_position(0), (156 + 4 * ESCAPE_RUN_SPEED, 64))
+        self.assertEqual(scene._party_draw_position(1), (160, 92))
+        self._frames(scene, 3)
+        self.assertEqual(scene.escape_start_frame_by_party_index, {0: 0, 1: 4})
+        self._frames(scene, 1)
+        self.assertEqual(scene.escape_start_frame_by_party_index, {0: 0, 1: 4, 2: 8})
+        self.assertEqual(scene.escape_start_x, (156, 160, 164))
+        self.assertEqual(scene.escaped_party_indexes, set())
+        self.assertIs(scene.timeline[0], scene.party_visuals[2])
+        self.assertEqual(self.sound.call_count, 3)
+        self.sound.assert_called_with(BATTLE_ESCAPE_SE_ID)
+
+        self._frames(scene, 10)
+        self.assertEqual(scene.escaped_party_indexes, {0})
+        self.assertIsNone(scene._party_draw_position(0))
+        self.assertIsNotNone(scene._party_draw_position(1))
+        self.assertIs(scene.phase, BattlePhase.ESCAPE_MEMBER)
+        self._frames(scene, 5)
+        self.assertIs(scene.phase, BattlePhase.ESCAPE_MEMBER)
+        self._frames(scene, 1)
+        self.assertEqual(scene.escaped_party_indexes, {0, 1, 2})
+        self.assertEqual(scene.escape_start_frame_by_party_index, {})
+        self.assertIs(scene.phase, BattlePhase.ESCAPE_MESSAGE)
+        self.assertEqual(len(scene.timeline), 1)
+        self.assertIsNone(scene.escape_actor_index)
+
+    def test_enemy_between_allies_waits_for_departure_and_keeps_its_turn(self) -> None:
+        scene = self._scene((0, None, 1, 2))
+        enemy = scene.timeline[1]
+        scene._accept_escape_confirmation()
+        self._frames(scene, 17)
+
+        self.assertEqual(scene.escape_start_frame_by_party_index, {0: 0})
+        self.assertEqual(scene.timeline, scene._timeline_order.actors)
+        self.assertIs(scene.timeline[0], scene.party_visuals[0])
+        self.assertEqual(self.sound.call_count, 1)
+        self._frames(scene, 1)
+        self.assertIs(scene.phase, BattlePhase.TIMELINE)
+        self.assertIs(scene.timeline_advance.after.actors[0], enemy)
+        with patch.object(scene, "_activate_timeline_head") as activate:
+            scene._advance_timeline()
+        self.assertIs(scene.timeline[0], enemy)
+        activate.assert_called_once_with()
+
+    def test_sleeping_next_ally_consumes_one_turn_and_waits_for_preceding_run(self) -> None:
+        scene = self._scene((0, 1, None, 2))
+        scene.party[1].sleeping = 2
+        scene._accept_escape_confirmation()
+        self._frames(scene, 4)
+
+        self.assertEqual(scene.party[1].sleeping, 1)
+        self.assertEqual(scene.escape_start_frame_by_party_index, {0: 0})
+        self.assertIs(scene.phase, BattlePhase.TIMELINE)
+        self._frames(scene, 14)
+        self.assertEqual(scene.escaped_party_indexes, {0})
+        self.assertEqual(scene.party[1].sleeping, 1)
+        self.assertEqual(scene.timeline_animation_frame, 0)
+        self._frames(scene, 1)
+        self.assertEqual(scene.timeline_animation_frame, 1)
+        self.assertEqual(self.sound.call_count, 1)
+
+    def test_next_ally_poison_death_finishes_preceding_escape_before_success(self) -> None:
+        scene = self._scene((0, 1, None))
+        scene.party[1].poisoned = True
+        scene.party[1].hp = 1
+        scene.party[2].hp = 0
+        scene._accept_escape_confirmation()
+        self._frames(scene, 4)
+
+        self.assertTrue(scene.party[1].is_dead)
+        self.assertIs(scene.phase, BattlePhase.TIMELINE)
+        self._frames(scene, 13)
+        self.assertIs(scene.phase, BattlePhase.TIMELINE)
+        self._frames(scene, 1)
+        self.assertIs(scene.phase, BattlePhase.ESCAPE_MESSAGE)
+        self.assertEqual(scene.escaped_party_indexes, {0})
+        self.assertNotIn(scene.party_visuals[1], scene.timeline)
+        self.assertEqual(self.sound.call_count, 1)
+
+    def test_front_promotion_waits_for_all_overlapping_runs_before_enemy_turn(self) -> None:
+        scene = self._scene((0, 1, None, 2))
+        scene.party[1].formation_row = FormationRow.BACK
+        scene.party[2].formation_row = FormationRow.BACK
+        scene._accept_escape_confirmation()
+        self._frames(scene, 17)
+
+        self.assertIs(scene.phase, BattlePhase.ESCAPE_MEMBER)
+        self.assertEqual(scene.temporary_front_party_indexes, set())
+        self._frames(scene, 1)
+        self.assertEqual(scene.escaped_party_indexes, {0, 1})
+        self.assertIs(scene.phase, BattlePhase.FORMATION)
+        self.assertEqual(scene.formation_actor_indexes, (2,))
+        self.assertEqual(scene.temporary_front_party_indexes, {2})
+        self.assertIs(scene.party[2].formation_row, FormationRow.BACK)
+        self._frames(scene, FORMATION_MOVE_FRAME_COUNT)
+        self.assertIs(scene.phase, BattlePhase.TIMELINE)
+        self.assertIs(scene.timeline_advance.after.actors[-1], scene.party_visuals[2])
+        self.assertEqual(len(scene.timeline_advance.after.actors), 2)
 
 
 class BattleSceneIntegrationTest(unittest.TestCase):

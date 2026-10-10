@@ -295,6 +295,7 @@ DA2_ESCAPE_RUN_SPEED = 12
 ESCAPE_RUN_SPEED = DA2_ESCAPE_RUN_SPEED * DA2_REFERENCE_FPS // FPS
 ESCAPE_RUN_DESTINATION_X = SCREEN_WIDTH + 4
 ESCAPE_RUN_PATTERN_FRAME_COUNT = FPS // DA2_REFERENCE_FPS
+ESCAPE_MEMBER_STAGGER_FRAME_COUNT = 4
 DA2_MONSTER_ENTRANCE_SLIDE_STEPS = (8, 8, 7, 7, 6)
 DA2_MONSTER_ENTRANCE_STEP_DISTANCE = 24
 MONSTER_ENTRANCE_FRAME_COUNTS = tuple(
@@ -2230,6 +2231,7 @@ class BattleScene:
         self.escape_start_x: tuple[int, ...] = ()
         self.escape_requested = False
         self.escape_actor_index: int | None = None
+        self.escape_start_frame_by_party_index: dict[int, int] = {}
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.monster_death_animation: MonsterDeathAnimation | None = None
@@ -2484,6 +2486,16 @@ class BattleScene:
             self._update_active_party_pulse()
         if getattr(self, "auto_battle_active", False) and input_state.cancel.triggered:
             self._cancel_auto_battle()
+            return
+        if self.phase is not BattlePhase.ESCAPE_MEMBER and getattr(
+            self, "escape_start_frame_by_party_index", {}
+        ):
+            # A following ally may skip their turn or start a different action.
+            # Finish the preceding runs before advancing that pending phase.
+            self._update_party_escape_runs()
+            if not self._active_party_indexes():
+                self._remove_defeated_party_from_timeline()
+                self._begin_escape_animation()
             return
         self._update_action_motion()
         if self.phase is BattlePhase.ACTION_RETURN:
@@ -2783,6 +2795,7 @@ class BattleScene:
         self.escape_start_x = ()
         self.escape_requested = False
         self.escape_actor_index = None
+        self.escape_start_frame_by_party_index = {}
         self.escape_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.escape_fade_covered = False
         self.fade_escape_transition = None
@@ -3408,14 +3421,20 @@ class BattleScene:
             self.escaped_party_indexes = escaped
         if index in escaped or self._party_member_is_dead(index):
             raise ValueError("only an active living member can escape")
+        start_frames = getattr(self, "escape_start_frame_by_party_index", None)
+        if start_frames is None:
+            start_frames = {}
+            self.escape_start_frame_by_party_index = start_frames
+        if not start_frames:
+            self.escape_animation_frame = 0
+            self.escape_start_x = tuple(
+                self._party_sprite_x(party_index)
+                for party_index in range(len(self.party_visuals))
+            )
+        start_frames[index] = self.escape_animation_frame
         play_se(BATTLE_ESCAPE_SE_ID)
         self.phase = BattlePhase.ESCAPE_MEMBER
         self.escape_actor_index = index
-        self.escape_animation_frame = 0
-        self.escape_start_x = tuple(
-            self._party_sprite_x(party_index)
-            for party_index in range(len(self.party_visuals))
-        )
         getattr(self, "defending_party_indexes", set()).discard(index)
         getattr(self, "cover_target_by_party_index", {}).pop(index, None)
         self.command_cursor.active = False
@@ -3423,15 +3442,29 @@ class BattleScene:
         self._refresh_party_text_colors()
 
     def _update_party_member_escape(self) -> None:
-        """Advance one member's run and remove them after reaching screen right."""
+        """Stagger consecutive allies while waiting for runs before enemy turns."""
 
         index = self.escape_actor_index
         if index is None:
             raise RuntimeError("member escape phase requires an actor")
-        self.escape_animation_frame += 1
-        if self._escape_party_x(index) < ESCAPE_RUN_DESTINATION_X:
+        self._update_party_escape_runs()
+        start_frames = self.escape_start_frame_by_party_index
+        if start_frames:
+            if (
+                index in start_frames
+                and self.escape_animation_frame - start_frames[index]
+                >= ESCAPE_MEMBER_STAGGER_FRAME_COUNT
+                and len(self._timeline_order.entries) > 1
+                and isinstance(self._timeline_order.entries[1].actor, BattleCharacter)
+            ):
+                # Consecutive escape turns share their running presentation;
+                # their intermediate timeline handoff does not add a wait.
+                advance = remove_timeline_head(self._timeline_order)
+                self._timeline_order = ready_timeline_head(advance.after)
+                self.timeline = self._timeline_order.actors
+                self.escape_actor_index = None
+                self._activate_timeline_head()
             return
-        self.escaped_party_indexes.add(index)
         self.escape_actor_index = None
         self.active_party_index = None
         if not self._active_party_indexes():
@@ -3447,6 +3480,23 @@ class BattleScene:
         ):
             return
         self._start_timeline_removal_animation()
+
+    def _update_party_escape_runs(self) -> None:
+        """Advance each running member and exclude them only on arrival."""
+
+        self.escape_animation_frame += 1
+        start_frames = self.escape_start_frame_by_party_index
+        arrived = tuple(
+            index
+            for index in start_frames
+            if self._escape_party_x(index) >= ESCAPE_RUN_DESTINATION_X
+        )
+        for index in arrived:
+            self.escaped_party_indexes.add(index)
+            del start_frames[index]
+
+    def _party_member_is_escaping(self, index: int) -> bool:
+        return index in getattr(self, "escape_start_frame_by_party_index", {})
 
     def _begin_escape_animation(self) -> None:
         """Show escape success after the final active member has left."""
@@ -10693,9 +10743,7 @@ class BattleScene:
                     self.monster_attack_animation_frame * DA2_REFERENCE_FPS // FPS
                 ) % len(MONSTER_DAMAGE_SHAKE_X)
                 x += MONSTER_DAMAGE_SHAKE_X[shake_index]
-            is_escaping = self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
-                self, "escape_actor_index", None
-            )
+            is_escaping = self._party_member_is_escaping(index)
             width = self._party_sprite_width(index, is_escaping=is_escaping)
             attack_pose = self._party_attack_pose(index)
             sprite_source_x = (
@@ -10900,9 +10948,7 @@ class BattleScene:
             self, "victory_returning_party_indexes", ()
         ):
             return self._victory_return_x(index), target_y
-        if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
-            self, "escape_actor_index", None
-        ):
+        if self._party_member_is_escaping(index):
             return self._escape_party_x(index), target_y
         if self.phase is BattlePhase.FORMATION and index in getattr(
             self, "formation_actor_indexes", ()
@@ -10973,7 +11019,11 @@ class BattleScene:
         """Return one member's rightward run position for the current frame."""
 
         return min(
-            self.escape_start_x[index] + self.escape_animation_frame * ESCAPE_RUN_SPEED,
+            self.escape_start_x[index]
+            + (
+                self.escape_animation_frame
+                - self.escape_start_frame_by_party_index[index]
+            ) * ESCAPE_RUN_SPEED,
             ESCAPE_RUN_DESTINATION_X,
         )
 
@@ -11073,12 +11123,12 @@ class BattleScene:
             if getattr(self.party_visuals[index].member, "paralyzed", False):
                 return NEAR_DEATH_SPRITE_SOURCE_X
             return victory_sprite_source_x(self.victory_motion_frame)
-        if self.phase is BattlePhase.ESCAPE_MEMBER and index == getattr(
-            self, "escape_actor_index", None
-        ):
-            pattern = (
-                self.escape_animation_frame // ESCAPE_RUN_PATTERN_FRAME_COUNT
-            ) % 2
+        if self._party_member_is_escaping(index):
+            elapsed = (
+                self.escape_animation_frame
+                - self.escape_start_frame_by_party_index[index]
+            )
+            pattern = (elapsed // ESCAPE_RUN_PATTERN_FRAME_COUNT) % 2
             return pattern * FORMATION_SPRITE_STEP_X
         if self.phase is BattlePhase.FORMATION and index in getattr(
             self, "formation_actor_indexes", ()
@@ -11997,10 +12047,7 @@ class BattleScene:
             return
 
         hidden_indexes = set(getattr(self, "escaped_party_indexes", set()))
-        if phase is BattlePhase.ESCAPE_MEMBER:
-            escape_actor_index = getattr(self, "escape_actor_index", None)
-            if escape_actor_index is not None:
-                hidden_indexes.add(escape_actor_index)
+        hidden_indexes.update(getattr(self, "escape_start_frame_by_party_index", {}))
 
         for index, (member, window) in enumerate(
             zip(
@@ -12524,10 +12571,9 @@ class BattleScene:
             )
         )
         hidden_party_status_indexes = set(getattr(self, "escaped_party_indexes", set()))
-        if self.phase is BattlePhase.ESCAPE_MEMBER:
-            escape_actor_index = getattr(self, "escape_actor_index", None)
-            if escape_actor_index is not None:
-                hidden_party_status_indexes.add(escape_actor_index)
+        hidden_party_status_indexes.update(
+            getattr(self, "escape_start_frame_by_party_index", {})
+        )
         for window in self.windows:
             if hide_party_status and any(
                 window is status_window for status_window in self.party_status_windows
