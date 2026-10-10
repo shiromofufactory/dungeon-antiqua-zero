@@ -288,7 +288,7 @@ class BattleProgressionTest(unittest.TestCase):
 
         self.assertEqual(save_data.experience, 75)
 
-    def test_weapon_uses_maximum_action_award_and_stacks_bonuses(self) -> None:
+    def test_weapon_settlement_carries_progress_into_the_next_level(self) -> None:
         member = Member.from_record(member_record("Fighter"))
         member.proficiency(ProficiencyKind.SWORD).progress = 95
         progression = BattleProgression((EnemyProgressionData(4, 0, 1, 0),))
@@ -299,7 +299,7 @@ class BattleProgressionTest(unittest.TestCase):
             member,
             (self.sword,),
             (4,),
-            defeated_enemy_count=1,
+            defeated_enemy_keys=("Coyote",),
             critical=True,
         )
         progression.settle(SaveData(), (member,))
@@ -372,43 +372,126 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertEqual(growth.experience_gained, 0)
         self.assertEqual(member.internal_level, 20)
 
-    def test_weapon_counts_each_defeat_but_keeps_only_the_largest_action_award(
-        self,
-    ) -> None:
+    def test_weapon_combines_highest_target_level_defeat_species_and_critical(self) -> None:
         member = Member.from_record(member_record("Fighter"))
-        member.proficiency(ProficiencyKind.SWORD).progress = 95
         progression = BattleProgression(
-            tuple(EnemyProgressionData(level, 0, 1, 0) for level in (2, 3, 4))
+            tuple(EnemyProgressionData(level, 0, 1, 0) for level in (7, 1, 1))
         )
 
+        progression.record_weapon_action(member, (self.sword,), (7,))
         progression.record_weapon_action(
             member,
             (self.sword,),
-            (2, 3, 4),
-            defeated_enemy_count=3,
+            (1,),
+            defeated_enemy_keys=("Coyote",),
             critical=True,
         )
         progression.record_weapon_action(
             member,
             (self.sword,),
-            (4,),
-            defeated_enemy_count=1,
+            (1,),
+            defeated_enemy_keys=("Cobra",),
+        )
+        progression.record_weapon_action(
+            member,
+            (self.sword,),
+            (1,),
+            defeated_enemy_keys=("Coyote", "Cobra"),
+            critical=True,
         )
         progression.settle(SaveData(), (member,))
 
-        # Highest enemy LV 4 + aptitude 1 - weapon LV 1 + 3 defeats + 1 critical.
+        # Highest LV 7 + two species + any critical 1 + aptitude 1 - weapon LV 1.
         proficiency = member.proficiency(ProficiencyKind.SWORD)
-        self.assertEqual((proficiency.level, proficiency.progress), (2, 3))
+        self.assertEqual((proficiency.level, proficiency.progress), (1, 10))
 
-    def test_weapon_rejects_invalid_defeat_counts(self) -> None:
+    def test_coyotes_and_cobras_award_four_for_two_defeated_species(self) -> None:
+        for simultaneous in (False, True):
+            with self.subTest(simultaneous=simultaneous):
+                record = {**member_record("Fighter"), "eq_sword": 2}
+                member = Member.from_record(record)
+                member.proficiency(ProficiencyKind.SWORD).level = 2
+                member.proficiency(ProficiencyKind.SWORD).progress = 0
+                progression = BattleProgression(
+                    tuple(EnemyProgressionData(level, 0, 5, 0) for level in (1, 1, 1, 2, 2))
+                )
+                if simultaneous:
+                    progression.record_weapon_action(
+                        member,
+                        (self.sword,),
+                        (1, 1, 1, 2, 2),
+                        defeated_enemy_keys=("Coyote", "Coyote", "Coyote", "Cobra", "Cobra"),
+                    )
+                else:
+                    for key, level in (("Coyote", 1),) * 3 + (("Cobra", 2),) * 2:
+                        progression.record_weapon_action(
+                            member, (self.sword,), (level,), defeated_enemy_keys=(key,)
+                        )
+                progression.settle(SaveData(), (member,))
+
+                proficiency = member.proficiency(ProficiencyKind.SWORD)
+                self.assertEqual((proficiency.level, proficiency.progress), (2, 4))
+
+    def test_attacking_only_a_coyote_without_defeating_it_awards_one(self) -> None:
+        record = {**member_record("Fighter"), "eq_sword": 2}
+        member = Member.from_record(record)
+        member.proficiency(ProficiencyKind.SWORD).level = 2
+        member.proficiency(ProficiencyKind.SWORD).progress = 0
+        progression = BattleProgression(
+            (EnemyProgressionData(1, 0, 3, 0), EnemyProgressionData(2, 0, 2, 0))
+        )
+
+        progression.record_weapon_action(member, (self.sword,), (1,))
+        progression.record_weapon_action(member, (self.sword,), (1,))
+        progression.settle_escape(SaveData(), (member,))
+
+        proficiency = member.proficiency(ProficiencyKind.SWORD)
+        self.assertEqual((proficiency.level, proficiency.progress), (2, 1))
+
+    def test_weapon_facts_are_separate_by_member_and_weapon_kind(self) -> None:
+        member = Member.from_record({**member_record("Fighter"), "eq_axe": 1})
+        other = Member.from_record(member_record("Other Fighter"))
+        axe = next(item for item in self.items.values() if item.subtype == "AXE")
+        progression = BattleProgression((EnemyProgressionData(4, 0, 1, 0),))
+
+        progression.record_weapon_action(
+            member, (self.sword, self.sword), (3,), defeated_enemy_keys=("Coyote",)
+        )
+        progression.record_weapon_action(
+            member, (axe,), (2,), defeated_enemy_keys=("Cobra",), critical=True
+        )
+        progression.record_weapon_action(other, (self.sword,), (4,))
+        progression.settle(SaveData(), (member, other))
+
+        self.assertEqual(member.proficiency(ProficiencyKind.SWORD).progress, 4)
+        self.assertEqual(member.proficiency(ProficiencyKind.AXE).progress, 4)
+        self.assertEqual(other.proficiency(ProficiencyKind.SWORD).progress, 4)
+
+    def test_weapon_formula_uses_settlement_level_and_never_awards_negative_progress(self) -> None:
+        for final_level, expected in ((1, 2), (8, 0)):
+            with self.subTest(final_level=final_level):
+                member = Member.from_record(member_record("Fighter"))
+                proficiency = member.proficiency(ProficiencyKind.SWORD)
+                proficiency.level = 5
+                progression = BattleProgression((EnemyProgressionData(2, 0, 1, 0),))
+                progression.record_weapon_action(member, (self.sword,), (2,))
+                proficiency.level = final_level
+                progression.settle(SaveData(), (member,))
+                self.assertEqual((proficiency.level, proficiency.progress), (final_level, expected))
+
+    def test_weapon_rejects_invalid_defeated_species_keys(self) -> None:
         member = Member.from_record(member_record("Fighter"))
         progression = BattleProgression((EnemyProgressionData(4, 0, 1, 0),))
 
-        for count in (True, -1, 1.5):
-            with self.subTest(count=count), self.assertRaises(ValueError):
+        for keys in (("",), (1,), (None,)):
+            with self.subTest(keys=keys), self.assertRaises(ValueError):
                 progression.record_weapon_action(
-                    member, (self.sword,), (4,), defeated_enemy_count=count
+                    member, (self.sword,), (4,), defeated_enemy_keys=keys
                 )
+        with self.assertRaises(TypeError):
+            progression.record_weapon_action(
+                member, (self.sword,), (4,), defeated_enemy_keys="Coyote"
+            )
 
     def test_spell_uses_highest_enemy_level_and_cumulative_paid_mp(self) -> None:
         member = Member.from_record(member_record("Mage"))

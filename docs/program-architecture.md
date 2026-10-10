@@ -503,6 +503,11 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 
 戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。逃走とフェードの確定では同Systemが経験値、Gold、お宝、最大HPを除外し、熟練度と最大MPだけを反映する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利・逃走演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
+武器使用実績は同Systemがキャラクター・武器種ごとに対象敵LV、撃破したモンスターの識別キー集合、
+会心の有無を保持し、戦闘終了時に熟練度の加算値を計算する。`BattleScene` は物理攻撃と装備武器使用の
+結果から実績だけを渡す。計算式と記録対象の詳細は [`features/battle.md`](./features/battle.md#勝利報酬と成長記録)
+を参照する。
+
 遭遇済みモンスター、開示済み属性、お宝取得済みの更新と照会は、Pyxel非依存の
 `systems/monster_records.py` が `SaveData.monster_records` に対して行う。BattleSceneは遭遇、
 行動確定、ターゲット表示の契機だけを調停し、マスターデータの弱点・耐性そのものをSaveDataへ

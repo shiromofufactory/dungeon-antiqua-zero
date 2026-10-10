@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isqrt
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
@@ -160,6 +160,13 @@ class BattleGrowthResult:
 
 
 @dataclass
+class _WeaponUse:
+    maximum_enemy_level: int = 0
+    defeated_enemy_keys: set[str] = field(default_factory=set)
+    critical: bool = False
+
+
+@dataclass
 class _SpellUse:
     maximum_enemy_level: int = 0
     total_mp: int = 0
@@ -197,7 +204,7 @@ class BattleProgression:
         self._escaped_enemy_indexes: set[int] = set()
         self._defeated_enemy_indexes: set[int] = set()
         self._last_defeated_enemy_index: int | None = None
-        self._weapon_awards: dict[str, dict[ProficiencyKind, int]] = {}
+        self._weapon_uses: dict[str, dict[ProficiencyKind, _WeaponUse]] = {}
         self._spell_uses: dict[str, dict[ProficiencyKind, _SpellUse]] = {}
         self._settled = False
 
@@ -265,32 +272,28 @@ class BattleProgression:
         weapons: Iterable[Item],
         enemy_levels: Iterable[int],
         *,
-        defeated_enemy_count: int = 0,
+        defeated_enemy_keys: Iterable[str] = (),
         critical: bool = False,
     ) -> None:
-        """Keep the maximum award produced by one physical or weapon-use action."""
+        """Keep battle-wide target levels, defeated species, and critical facts."""
 
-        if (
-            isinstance(defeated_enemy_count, bool)
-            or not isinstance(defeated_enemy_count, int)
-            or defeated_enemy_count < 0
-        ):
-            raise ValueError("defeated_enemy_count must be a non-negative integer")
+        if isinstance(defeated_enemy_keys, str):
+            raise TypeError("defeated_enemy_keys must contain monster keys")
+        defeated_keys = tuple(defeated_enemy_keys)
+        if not all(isinstance(key, str) and key for key in defeated_keys):
+            raise ValueError("defeated_enemy_keys must contain non-empty strings")
         levels = self._enemy_levels(enemy_levels)
         if not levels:
             return
-        bonus = defeated_enemy_count + int(critical)
-        awards = self._weapon_awards.setdefault(member.definition.key, {})
+        uses = self._weapon_uses.setdefault(member.definition.key, {})
         for weapon in weapons:
             if not isinstance(weapon, Item) or not weapon.is_weapon:
                 raise ValueError("weapons must contain weapon items")
             kind = ProficiencyKind[weapon.subtype]
-            proficiency = member.proficiency(kind)
-            amount = max(
-                0,
-                max(levels) + int(proficiency.aptitude) - proficiency.level + bonus,
-            )
-            awards[kind] = max(awards.get(kind, 0), amount)
+            usage = uses.setdefault(kind, _WeaponUse())
+            usage.maximum_enemy_level = max(usage.maximum_enemy_level, max(levels))
+            usage.defeated_enemy_keys.update(defeated_keys)
+            usage.critical = usage.critical or critical
 
     def used_spell_kinds(self, character_key: str) -> frozenset[ProficiencyKind]:
         """Expose school usage for auto tie-breaking without mutable records."""
@@ -432,8 +435,17 @@ class BattleProgression:
             key = member.definition.key
             if key not in eligible:
                 continue
-            for kind, amount in self._weapon_awards.get(key, {}).items():
-                member.proficiency(kind).add_progress(
+            for kind, usage in self._weapon_uses.get(key, {}).items():
+                proficiency = member.proficiency(kind)
+                amount = max(
+                    0,
+                    usage.maximum_enemy_level
+                    + len(usage.defeated_enemy_keys)
+                    + int(usage.critical)
+                    + int(proficiency.aptitude)
+                    - proficiency.level,
+                )
+                proficiency.add_progress(
                     amount, level_limit=proficiency_level_limit
                 )
             for kind, usage in self._spell_uses.get(key, {}).items():

@@ -2192,7 +2192,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._record_equipped_weapon_action.assert_called_once_with(
             0,
             (1,),
-            defeated_enemy_count=1,
+            defeated_enemy_keys=("monster",),
             critical=False,
         )
 
@@ -2231,7 +2231,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._record_equipped_weapon_action.assert_called_once_with(
             0,
             (1,),
-            defeated_enemy_count=1,
+            defeated_enemy_keys=("damage-monster-0",),
             critical=True,
         )
 
@@ -2267,18 +2267,18 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._record_equipped_weapon_action.assert_called_once_with(
             0,
             (1,),
-            defeated_enemy_count=0,
+            defeated_enemy_keys=(),
             critical=False,
         )
 
-    def test_weapon_progression_counts_distinct_defeats_for_iai_and_dual_wield(
+    def test_weapon_progression_records_species_for_iai_and_dual_wield(
         self,
     ) -> None:
         cases = (
-            (True, (0, 1, 2), (0, 1), (1, 1, 1), 2),
-            (False, (0, 0), (0,), (1,), 1),
+            (True, (0, 1, 2), (0, 1), (1, 1, 1)),
+            (False, (0, 0), (0,), (1,)),
         )
-        for is_iai, targets, defeated, levels, count in cases:
+        for is_iai, targets, defeated, levels in cases:
             with self.subTest(is_iai=is_iai):
                 mock = BattleScreenMock.__new__(BattleScreenMock)
                 mock.monsters = tuple(_damage_test_monster(index) for index in range(3))
@@ -2312,7 +2312,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 mock._record_equipped_weapon_action.assert_called_once_with(
                     0,
                     levels,
-                    defeated_enemy_count=count,
+                    defeated_enemy_keys=tuple(f"damage-monster-{index}" for index in defeated),
                     critical=True,
                     **({"right_hand_only": True} if is_iai else {}),
                 )
@@ -7000,7 +7000,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.battle_popup.visible)
         mock._complete_current_turn.assert_called_once_with()
 
-    def test_weapon_spell_records_each_defeated_target_once(self) -> None:
+    def test_weapon_spell_records_each_defeated_targets_species(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(items, load_mock_skills(), character_keys=("Fiora",))
@@ -7030,7 +7030,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock.party[0],
             (items["KATANA"],),
             (2, 3, 4),
-            defeated_enemy_count=2,
+            defeated_enemy_keys=("damage-monster-0", "damage-monster-1"),
         )
         mock._begin_monster_deaths.assert_called_once_with([0, 1])
         self.assertIsNone(mock.action_progression_weapon)

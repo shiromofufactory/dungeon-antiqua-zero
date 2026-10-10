@@ -4995,7 +4995,7 @@ class BattleScene:
         party_index: int,
         enemy_levels: tuple[int, ...],
         *,
-        defeated_enemy_count: int = 0,
+        defeated_enemy_keys: tuple[str, ...] = (),
         critical: bool = False,
         right_hand_only: bool = False,
     ) -> None:
@@ -5020,7 +5020,7 @@ class BattleScene:
                 member,
                 weapons,
                 enemy_levels,
-                defeated_enemy_count=defeated_enemy_count,
+                defeated_enemy_keys=defeated_enemy_keys,
                 critical=critical,
             )
 
@@ -6140,7 +6140,9 @@ class BattleScene:
                         self.party[party_index],
                         (progression_weapon,),
                         getattr(self, "action_progression_enemy_levels", ()),
-                        defeated_enemy_count=len(defeated_indexes),
+                        defeated_enemy_keys=tuple(
+                            self.monsters[index].key for index in defeated_indexes
+                        ),
                     )
             self.action_progression_weapon = None
             self.action_progression_enemy_levels = ()
@@ -7118,8 +7120,10 @@ class BattleScene:
                         getattr(self.monsters[index], "level", 1)
                         for index in target_indexes
                     ),
-                    defeated_enemy_count=sum(
-                        not self.monsters[index].is_alive for index in target_indexes
+                    defeated_enemy_keys=tuple(
+                        self.monsters[index].key
+                        for index in target_indexes
+                        if not self.monsters[index].is_alive
                     ),
                     critical=any(strike.is_critical for strike in presentation.strikes),
                     **({"right_hand_only": True} if presentation.is_iai else {}),
