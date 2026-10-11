@@ -378,6 +378,7 @@ class FieldActors:
         direction: Direction,
         *,
         party_position: FieldPosition,
+        party_destination: FieldPosition | None = None,
     ) -> bool:
         actor = self.actor(actor_id)
         if actor.kind in ("prop", "treasure"):
@@ -386,6 +387,7 @@ class FieldActors:
             direction,
             blocked_positions=(
                 party_position,
+                *((party_destination,) if party_destination is not None else ()),
                 *self.blocked_positions(excluding=actor_id),
             ),
         )

@@ -124,6 +124,29 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    def test_normal_pc_and_npc_movement_cannot_share_a_destination(self) -> None:
+        for first_mover in ("party", "actor"):
+            with self.subTest(first_mover=first_mover):
+                game = game_for(None, actors=(
+                    MapActor("walker", MapCell(2, 0), "roaming", 0, "down"),
+                ), width=4, height=3)
+                game.field = FieldMovement(game.current_map, start=FieldPosition(1, 1))
+                game.field_actors._random = Mock(randint=Mock(return_value=30),
+                                                 choice=Mock(return_value=Direction.DOWN))
+                walker = game.field_actors.actor("walker")
+                walker.roam_wait_frames = 0
+                if first_mover == "actor":
+                    game.field_actors.update("walker", Direction.DOWN, party_position=game.field.position)
+                game._update_field(InputState(held_direction=Direction.RIGHT))
+                winner, loser = ((game.field, walker.movement) if first_mover == "party"
+                                 else (walker.movement, game.field))
+                self.assertEqual(winner.destination_position, FieldPosition(2, 1))
+                self.assertFalse(loser.is_moving)
+                for _ in range(8):
+                    game._update_field(InputState())
+                self.assertEqual(winner.position, FieldPosition(2, 1))
+                self.assertNotEqual(winner.position, loser.position)
+
     def test_hidden_actor_cannot_start_a_conversation_or_change_facing(self) -> None:
         actor = MapActor("elder", MapCell(2, 1), "stationary", 0, "up", visibility_condition=MapVisibilityCondition("story.visible", True))
         trigger = MapEventTrigger("talk", "sample.talk", frozenset(("touch", "interact")), actor_id="elder", offsets=(MapCell(0, 0),))
@@ -1338,6 +1361,31 @@ class GameEventAnimationTest(unittest.TestCase):
         self.assertEqual(walker.movement.position, FieldPosition(3, 2))
         self.assertFalse(walker.movement.is_moving)
         self.assertGreater(game.field.world_y, 16)
+
+    def test_controlled_moves_cannot_enter_another_characters_destination(self) -> None:
+        for first_mover in ("party", "actor"):
+            with self.subTest(first_mover=first_mover):
+                game = self.game()
+                game.current_map = replace(game.current_map, actors=(
+                    MapActor("walker", MapCell(2, 0), "roaming", 1, "down"),
+                ))
+                game.field = FieldMovement(game.current_map, start=FieldPosition(1, 1))
+                game.field_actors = FieldActors(game.current_map)
+                walker = game.field_actors.actor("walker")
+                if first_mover == "party":
+                    game.field.update(Direction.RIGHT)
+                    game.event_effect = MoveActorEffect("walker", Direction.DOWN, 1)
+                    candidate = walker.movement
+                else:
+                    game.field_actors.update("walker", Direction.DOWN, party_position=game.field.position)
+                    game.event_effect = MovePartyEffect(Direction.RIGHT, 1)
+                    candidate = game.field
+                game.event_move_remaining = 1
+                game._abort_event = Mock()
+                game.update()
+                self.assertFalse(candidate.is_moving)
+                game._abort_event.assert_called_once()
+                self.assertIn("controlled movement is blocked", str(game._abort_event.call_args.args[0]))
 
     def test_controlled_movement_advances_animation_only_once_per_frame(self) -> None:
         for effect in (MovePartyEffect(Direction.DOWN, 1), MoveActorEffect("walker", Direction.RIGHT, 1)):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 from types import MappingProxyType
 import unittest
 from unittest.mock import Mock, call
@@ -229,6 +230,54 @@ class FieldMovementTest(unittest.TestCase):
             )
         )
         self.assertEqual(actors.actor("elder").movement.position, FieldPosition(1, 1))
+
+    def test_actor_cannot_start_a_controlled_move_into_the_partys_destination(self) -> None:
+        for profile in ("world", "town", "dungeon"):
+            with self.subTest(profile=profile):
+                map_data = replace(compiled_map(("000",) * 3, profile=profile), actors=(
+                    MapActor("villager", MapCell(1, 2), "roaming", 0, "up"),
+                ))
+                party = FieldMovement(map_data, start=FieldPosition(0, 1))
+                party.update(Direction.RIGHT)
+                actors = FieldActors(map_data)
+                self.assertFalse(actors.update("villager", Direction.UP,
+                    party_position=party.position, party_destination=party.destination_position))
+                self.assertFalse(actors.actor("villager").movement.is_moving)
+                self.assertEqual(party.destination_position, FieldPosition(1, 1))
+
+    def test_actor_destination_blocks_party_and_other_actors_until_released(self) -> None:
+        map_data = replace(compiled_map(("000",) * 3, profile="town"), actors=(
+            MapActor("first", MapCell(0, 1), "roaming", 0, "right", sprite_source="pc"),
+            MapActor("second", MapCell(1, 2), "roaming", 1, "up"),
+        ))
+        party = FieldMovement(map_data, start=FieldPosition(2, 1))
+        actors = FieldActors(map_data)
+        self.assertTrue(actors.update("first", Direction.RIGHT, party_position=party.position))
+        self.assertFalse(party.update(Direction.LEFT, blocked_positions=actors.blocked_positions()))
+        self.assertFalse(actors.update("second", Direction.UP, party_position=party.position))
+        self.assertEqual(actors.actor("first").movement.destination_position, FieldPosition(1, 1))
+        actors.stop("first")
+        self.assertTrue(party.update(Direction.LEFT, blocked_positions=actors.blocked_positions()))
+
+    def test_roaming_actors_cannot_reserve_the_same_destination_in_one_frame(self) -> None:
+        for first_id in ("left", "right"):
+            with self.subTest(first_id=first_id):
+                left = MapActor("left", MapCell(0, 1), "roaming", 0, "right", sprite_source="pc")
+                right = MapActor("right", MapCell(2, 1), "roaming", 1, "left")
+                map_data = replace(compiled_map(("000",) * 3, profile="town"), actors=(
+                    (left, right) if first_id == "left" else (right, left)
+                ))
+                directions = (Direction.RIGHT, Direction.LEFT) if first_id == "left" else (
+                    Direction.LEFT, Direction.RIGHT)
+                actors = FieldActors(map_data, random_source=Mock(
+                    randint=Mock(return_value=30), choice=Mock(side_effect=directions),
+                ))
+                for actor in actors.actors:
+                    actor.roam_wait_frames = 0
+                actors.update_roaming(party_position=FieldPosition(0, 0))
+                moving = [actor for actor in actors.actors if actor.movement.is_moving]
+                self.assertEqual([actor.id for actor in moving], [first_id])
+                self.assertEqual(moving[0].movement.destination_position, FieldPosition(1, 1))
 
     def test_field_actor_can_start_on_a_blocked_map_cell(self) -> None:
         map_data = compiled_map(("111", "101", "111"))

@@ -3451,6 +3451,7 @@ class Game:
                     effect.actor_id,
                     effect.direction,
                     party_position=self.field.position,
+                    party_destination=self.field.destination_position,
                 )
                 movement = self.field_actors.actor(effect.actor_id).movement
             else:
@@ -3738,7 +3739,10 @@ class Game:
         self._refresh_site_name_label()
         field_actors = getattr(self, "field_actors", None)
         if field_actors is not None:
-            field_actors.update_roaming(party_position=self.field.position)
+            field_actors.update_roaming(
+                party_position=self.field.position,
+                party_destination=self.field.destination_position,
+            )
 
     def _field_menu_guide_available(self) -> bool:
         """Limit the idle hint to ordinary field play, excluding modal flows."""
