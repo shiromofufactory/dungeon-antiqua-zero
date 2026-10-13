@@ -108,6 +108,7 @@ class Settings:
     in_game_hints_enabled: bool = True
     auto_battle_spell_mode: SpellMode = SpellMode.USE
     remember_battle_commands: bool = True
+    control_guide_device: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.language, Language):
@@ -144,6 +145,8 @@ class Settings:
             raise TypeError("auto_battle_spell_mode must be a SpellMode")
         if not isinstance(self.remember_battle_commands, bool):
             raise TypeError("remember_battle_commands must be a boolean")
+        if self.control_guide_device not in (None, "keyboard", "gamepad"):
+            raise ValueError("control_guide_device must be keyboard, gamepad or None")
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON-compatible representation of these settings."""
@@ -158,6 +161,7 @@ class Settings:
             "in_game_hints_enabled": self.in_game_hints_enabled,
             "auto_battle_spell_mode": self.auto_battle_spell_mode.value,
             "remember_battle_commands": self.remember_battle_commands,
+            "control_guide_device": self.control_guide_device,
         }
 
     def with_language(self, language: Language) -> Settings:
@@ -211,6 +215,11 @@ class Settings:
 
         return replace(self, remember_battle_commands=enabled)
 
+    def with_control_guide_device(self, device: str) -> Settings:
+        """Remember the physical input family acknowledged in the startup guide."""
+
+        return replace(self, control_guide_device=device)
+
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Settings:
         """Build settings from persisted data with DA2-compatible defaults."""
@@ -257,6 +266,7 @@ class Settings:
                 in_game_hints_enabled=data.get("in_game_hints_enabled", True),
                 auto_battle_spell_mode=spell_mode,
                 remember_battle_commands=data.get("remember_battle_commands", True),
+                control_guide_device=data.get("control_guide_device"),
             )
         except (TypeError, ValueError) as error:
             raise SettingsDataError(str(error)) from error

@@ -155,7 +155,7 @@ class GamePlayTimeTest(unittest.TestCase):
                 self.assertEqual(game.save_data.play_time_frames, 60)
 
     def test_start_screen_and_return_to_start_do_not_count(self) -> None:
-        for screen in ("title", "start", "return_to_start"):
+        for screen in ("title", "start", "control_guide", "return_to_start"):
             with self.subTest(screen=screen):
                 game = self.game()
                 game.save_data.play_time_frames = 890
@@ -163,6 +163,8 @@ class GamePlayTimeTest(unittest.TestCase):
                     game.title_scene = Mock(update=Mock(return_value=False))
                 elif screen == "start":
                     game.start_screen = Mock()
+                elif screen == "control_guide":
+                    game.control_guide = Mock(update=Mock(return_value=None))
                 else:
                     game._returning_to_start = True
                     game._update_return_to_start = Mock()
@@ -504,6 +506,11 @@ class GameTest(unittest.TestCase):
         self.assertEqual(mock.save_data.gold, INITIAL_GOLD)
         self.assertEqual(dict(mock.inventory_system.quantities), {})
         self.assertEqual(mock.inventory_system.items, ())
+        self.assertEqual(
+            {item.key for item in mock.inventory_system.recorded_items},
+            {"DAGGER", "ROBE", "BRONZE SPEAR"},
+        )
+        self.assertEqual(mock.inventory_system.recorded_count, 3)
         self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 2)].text, "フィオラ")
         self.assertEqual(
             party_texts[(PARTY_POINT_TEXT_X, 5)].text,

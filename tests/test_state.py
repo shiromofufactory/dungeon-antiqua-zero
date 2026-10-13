@@ -33,9 +33,19 @@ class SettingsTest(unittest.TestCase):
                 "in_game_hints_enabled": True,
                 "auto_battle_spell_mode": "use",
                 "remember_battle_commands": True,
+                "control_guide_device": None,
             },
         )
         self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
+
+    def test_control_guide_device_defaults_migrates_and_round_trips(self) -> None:
+        self.assertIsNone(Settings.from_dict({"language": "ja"}).control_guide_device)
+        for device in ("keyboard", "gamepad"):
+            settings = Settings().with_control_guide_device(device)
+            self.assertEqual(Settings.from_dict(settings.to_dict()), settings)
+        for invalid in ("mouse", "", 1, True, [], {}):
+            with self.subTest(value=invalid), self.assertRaises(SettingsDataError):
+                Settings.from_dict({"control_guide_device": invalid})
 
     def test_old_settings_enable_hints_and_invalid_hint_values_are_rejected(self) -> None:
         self.assertTrue(Settings.from_dict({"language": "ja"}).in_game_hints_enabled)

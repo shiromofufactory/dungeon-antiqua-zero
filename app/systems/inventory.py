@@ -112,6 +112,19 @@ class InventorySystem:
     def catalog_count(self) -> int:
         return len(self._items)
 
+    def record_equipment(self, members: Iterable[Member]) -> None:
+        """Reveal equipped item types without adding loose inventory copies."""
+
+        party = tuple(members)
+        if not all(isinstance(member, Member) for member in party):
+            raise TypeError("members must contain only Member values")
+        keys = {
+            self._item_key(item)
+            for member in party
+            for item in member.equipment.equipped_items()
+        }
+        self._recorded_keys = self._recorded_keys | keys
+
     def quantity(self, item: Item | str) -> int:
         """Return the owned count for an item model or stable item key."""
 

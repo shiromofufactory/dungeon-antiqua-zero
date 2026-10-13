@@ -34,13 +34,15 @@ from app.systems import (
 )
 
 
-def item_record(key: str) -> Item:
+def item_record(
+    key: str, *, equip_type: str = "ITEM", subtype: str = "GENERAL"
+) -> Item:
     return Item.from_record(
         {
             "name_en": key,
             "name_ja": key,
-            "type1": "ITEM",
-            "type2": "GENERAL",
+            "type1": equip_type,
+            "type2": subtype,
             "price": 10,
             "atk": 0,
             "hit": 0,
@@ -524,6 +526,47 @@ class EventRunnerTest(unittest.TestCase):
 
         self.assertIs(self.party.active_party[-1], alvan)
         self.assertEqual(self.party.active_party[-1].hp, 1)
+
+    def test_join_records_all_npc_equipment_and_keeps_records_after_leaving(self) -> None:
+        self.records[1]["type"] = "NPC"
+        for slot in EquipmentSlot:
+            key = f"NPC {slot.value}"
+            self.items[key] = item_record(
+                key,
+                equip_type=slot.value,
+                subtype="SWORD" if slot is EquipmentSlot.RIGHT else "GENERAL",
+            )
+            self.records[1][f"equip_{slot.value.lower()}"] = key
+        self.party = PartySystem(
+            character_records=self.records,
+            items=self.items,
+            skills={},
+            active_party=self.party.active_party,
+        )
+        self.inventory = InventorySystem(self.items)
+        expected_keys = {f"NPC {slot.value}" for slot in EquipmentSlot}
+        self.assertEqual(self.inventory.recorded_count, 0)
+
+        self.runner([{"command": "join_party", "character_key": "Alvan"}]).advance()
+
+        alvan = self.party.active_party[-1]
+        self.assertEqual(
+            {item.key for item in self.inventory.recorded_items}, expected_keys
+        )
+        self.assertEqual(dict(self.inventory.quantities), {})
+        self.assertTrue(all(alvan.is_equipment_fixed(slot) for slot in EquipmentSlot))
+
+        self.runner([{"command": "leave_party", "character_key": "Alvan"}]).advance()
+        self.assertEqual(
+            {item.key for item in self.inventory.recorded_items}, expected_keys
+        )
+        self.runner([
+            {"command": "join_party", "character_key": "Alvan"},
+            {"command": "join_party", "character_key": "Alvan"},
+        ]).advance()
+        self.assertIs(self.party.active_party[-1], alvan)
+        self.assertEqual(self.inventory.recorded_count, len(expected_keys))
+        self.assertEqual(dict(self.inventory.quantities), {})
 
     def test_join_event_anchors_level_difference_to_shared_experience(self) -> None:
         self.records[1]["lv_diff"] = 17

@@ -139,6 +139,26 @@ class InventorySystemTest(unittest.TestCase):
         self.assertFalse(inventory.can_discard(self.potion))
         self.assertFalse(inventory.discard(self.potion))
 
+    def test_record_equipment_preserves_history_and_deduplicates_shared_gear(self) -> None:
+        dagger = equipment("DAGGER", "RIGHT", "KNIFE")
+        robe = equipment("ROBE", "BODY", "GENERAL")
+        first = member(initial={EquipmentSlot.RIGHT: dagger, EquipmentSlot.BODY: robe})
+        second = member(initial={EquipmentSlot.BODY: robe})
+        inventory = InventorySystem(
+            {**self.items, dagger.key: dagger, robe.key: robe},
+            recorded_keys=(self.potion.key,),
+        )
+        original_equipment = (first.equipment, second.equipment)
+
+        inventory.record_equipment((first, second))
+        inventory.record_equipment(member for member in (first, second))
+
+        self.assertEqual(inventory.recorded_items, (self.potion, dagger, robe))
+        self.assertEqual(inventory.recorded_count, 3)
+        self.assertEqual(dict(inventory.quantities), {})
+        self.assertEqual((first.equipment, second.equipment), original_equipment)
+        self.assertEqual(inventory.total_quantity(robe, (first, second)), 2)
+
     def test_item_and_equipment_stack_limits_are_enforced(self) -> None:
         dagger = equipment("DAGGER", "RIGHT", "KNIFE")
 

@@ -143,14 +143,14 @@ class GameMenuTest(unittest.TestCase):
 
     def test_interrupts_every_screen_and_restores_the_same_instance(self) -> None:
         for attribute in (
-            "title_scene", "battle_scene", "start_screen", "shop_screen", "item_screen",
+            "title_scene", "control_guide", "battle_scene", "start_screen", "shop_screen", "item_screen",
             "spell_screen", "equipment_screen", "status_screen",
             "information_screen", "save_screen", "debug_screen",
         ):
             with self.subTest(screen=attribute):
                 game = self.game()
                 screen = Mock()
-                screen.update.return_value = False
+                screen.update.return_value = None if attribute == "control_guide" else False
                 setattr(game, attribute, screen)
                 self.open(game)
                 for _ in range(3):

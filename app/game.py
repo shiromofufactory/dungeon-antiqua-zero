@@ -32,6 +32,7 @@ from ui.teleport_menu import TeleportTarget
 from ui.game_menu import GameMenuAction, GameMenuOverlay
 from ui.field_menu_guide import FieldMenuGuide
 from ui.hint import HintOverlay
+from ui.control_guide import ControlGuideOverlay, ControlGuideResult
 from ui.equipment_menu import (
     EquipmentMenuDataError,
     EquipmentMenuOverlay,
@@ -416,6 +417,7 @@ class GameScreenChange(Enum):
     CHANGE_MAP = auto()
     TELEPORT = auto()
     SHOW_START_MENU = auto()
+    SHOW_CONTROL_GUIDE = auto()
     START_GAME = auto()
 
 
@@ -529,6 +531,7 @@ class Game:
             character_keys=INITIAL_PARTY_KEYS,
             fiora_internal_level=initial_party_level,
         )
+        self.inventory_system.record_equipment(self.party)
         for member in self.party:
             member.set_joining_experience_offset(self.save_data.experience)
         self.shops = load_shops(self.items)
@@ -683,6 +686,12 @@ class Game:
         self._build_main_windows()
         self._refresh_site_name_label()
         self.start_screen: StartMenuOverlay | None = None
+        self.control_guide: ControlGuideOverlay | None = None
+        self.pending_control_guide_device: InputDevice | None = None
+        self._show_title()
+
+    def _show_title(self) -> None:
+        self.control_guide = None
         self.title_scene: TitleScene | None = TitleScene(
             texts=self.texts,
             fonts=self.fonts,
@@ -691,6 +700,7 @@ class Game:
         )
 
     def _show_start_menu(self) -> None:
+        self.control_guide = None
         self.start_screen = StartMenuOverlay(
             summaries=self.save_repository.summaries(),
             autosave_summary=self.save_repository.summary(AUTO_SAVE_SLOT),
@@ -708,7 +718,41 @@ class Game:
         )
         self.title_scene = None
 
-    def _finish_title(self) -> None:
+    def _finish_title(self, device: InputDevice) -> None:
+        if (
+            self.launch_mode is LaunchMode.EXHIBITION
+            or self.settings.control_guide_device != device.value
+        ):
+            self.pending_control_guide_device = device
+            self._begin_screen_change(GameScreenChange.SHOW_CONTROL_GUIDE)
+        else:
+            self._continue_from_title()
+
+    def _show_control_guide(self) -> None:
+        device = self.pending_control_guide_device
+        if device is None:
+            raise RuntimeError("startup control guide has no input device")
+        self.control_guide = ControlGuideOverlay(
+            device=device,
+            settings=self.settings,
+            texts=self.texts,
+            fonts=self.fonts,
+            on_confirm=self._confirm_control_guide,
+        )
+        self.pending_control_guide_device = None
+        self.title_scene = None
+
+    def _confirm_control_guide(self, device: InputDevice) -> bool:
+        updated_settings = self.settings.with_control_guide_device(device.value)
+        try:
+            self.settings_repository.save(self._settings_for_persistence(updated_settings))
+        except SettingsSystemError:
+            self.alert.start()
+            return False
+        self.settings = updated_settings
+        return True
+
+    def _continue_from_title(self) -> None:
         if self.launch_mode is LaunchMode.EXHIBITION:
             self._start_new_game()
         else:
@@ -2645,6 +2689,8 @@ class Game:
             self._apply_start_game()
         elif change is GameScreenChange.SHOW_START_MENU:
             self._show_start_menu()
+        elif change is GameScreenChange.SHOW_CONTROL_GUIDE:
+            self._show_control_guide()
         else:
             raise RuntimeError(f"unsupported field screen change: {change}")
         self.pending_screen_change = None
@@ -2903,6 +2949,7 @@ class Game:
             self.palette_shifter.set_brightness(self.screen_brightness.rate)
         self.title_scene = None
         self.start_screen = None
+        self.control_guide = None
         self.showing_field = True
         self._reset_field_fade()
         self._refresh_site_name_label(force=True)
@@ -3871,6 +3918,7 @@ class Game:
             not isinstance(save_data, SaveData)
             or getattr(self, "title_scene", None) is not None
             or getattr(self, "start_screen", None) is not None
+            or getattr(self, "control_guide", None) is not None
             or getattr(self, "_returning_to_start", False)
         ):
             return
@@ -3924,7 +3972,16 @@ class Game:
         title_scene = getattr(self, "title_scene", None)
         if title_scene is not None:
             if title_scene.update(input_state):
-                self._finish_title()
+                self._finish_title(input_state.device)
+            return
+        control_guide = getattr(self, "control_guide", None)
+        if control_guide is not None:
+            result = control_guide.update(input_state)
+            if result is not None:
+                if result is ControlGuideResult.CONTINUE:
+                    self._continue_from_title()
+                else:
+                    self._show_title()
             return
         start_screen = getattr(self, "start_screen", None)
         if start_screen is not None:
@@ -4169,6 +4226,10 @@ class Game:
             title_scene = getattr(self, "title_scene", None)
             if title_scene is not None:
                 title_scene.draw()
+                return
+            control_guide = getattr(self, "control_guide", None)
+            if control_guide is not None:
+                control_guide.draw()
                 return
             start_screen = getattr(self, "start_screen", None)
             if start_screen is not None:

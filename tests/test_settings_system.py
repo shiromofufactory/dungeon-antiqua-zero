@@ -29,6 +29,7 @@ class SettingsRepositoryTest(unittest.TestCase):
             in_game_hints_enabled=False,
             auto_battle_spell_mode=SpellMode.RECOVERY_ONLY,
             remember_battle_commands=False,
+            control_guide_device="gamepad",
         )
         with tempfile.TemporaryDirectory() as directory:
             repository = SettingsRepository(Path(directory) / "settings.json")

@@ -115,6 +115,7 @@
 - 起動モード・試遊版の初期LVと日本語固定・モード別イベント条件・デバッグ表示は `python3 -B -m unittest tests.test_launch_modes tests.test_main tests.test_game tests.test_events tests.test_event_pipeline tests.test_game_events tests.test_save_system`、条件の編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
 - 起動モード別の武器・呪文・経験値上限と経験値到達色、上限超過NPCの保持、戦闘・メニュー呪文・自動回復への適用は `python3 -B -m unittest tests.test_member tests.test_battle_progression tests.test_spell_progression tests.test_auto_recovery tests.test_spell_menu tests.test_battle_scene tests.test_launch_modes tests.test_game tests.test_save_system` で回帰検証する。
 - 仮タイトル・モード別の開始経路・押しっぱなし入力・タイトル復帰は `python3 -B -m unittest tests.test_title tests.test_start_menu tests.test_launch_modes tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
+- 開始時の操作説明・入力種別変更・初回判定・試遊版での毎回表示・端末設定の互換性は `python3 -B -m unittest tests.test_control_guide tests.test_launch_modes tests.test_state tests.test_settings_system tests.test_title tests.test_start_menu tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
 - 戦闘設定とコマンド記憶は `python3 -B -m unittest tests.test_battle_preferences tests.test_state tests.test_settings_system tests.test_game` で設定互換性・即時保存・復元を回帰検証する。
 - セーブ形式と戦闘コマンド記憶の永続化は `python3 -B -m unittest tests.test_save_system tests.test_battle_preferences tests.test_game` でスロット保存・ロード・旧形式互換を回帰検証する。

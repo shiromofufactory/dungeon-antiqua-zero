@@ -14,14 +14,15 @@ from game import (
     Game, GameScreenChange, INITIAL_PARTY_KEYS, MENU_COMMANDS, NEW_GAME_EVENT_ID, NEW_GAME_MAP_ID,
 )
 from game_data import create_party
-from input import Direction, InputButton, InputState
+from input import Direction, InputButton, InputDevice, InputState
 from member import FIORA_CHARACTER_KEY, required_experience_for_level
 from resources.events import EventCatalog
 from state import Language, LaunchMode, Settings
 from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR, POSITIVE_COLOR, WindowCursor
+from ui.window import WINDOW_ANIMATION_FRAME_COUNT
 from systems import (
     BattleProgression, EnemyProgressionData, EventContext, MessageEffect, ResetGameEffect,
-    SettingsRepository, create_save_document, restore_save_document,
+    SettingsRepository, SettingsSystemError, create_save_document, restore_save_document,
 )
 
 
@@ -49,7 +50,10 @@ class LaunchModeGameTest(unittest.TestCase):
                 window.set_cursor.side_effect = lambda targets, window=window: WindowCursor(window, targets)
 
     def game(self, mode: LaunchMode) -> Game:
-        return Game(settings=Settings(), palette_shifter=Mock(base_colors=(0x000000,)), launch_mode=mode)
+        return Game(
+            settings=Settings(), settings_repository=Mock(),
+            palette_shifter=Mock(base_colors=(0x000000,)), launch_mode=mode,
+        )
 
     def test_only_exhibition_overrides_device_language_at_startup(self) -> None:
         for mode in LaunchMode:
@@ -175,7 +179,7 @@ class LaunchModeGameTest(unittest.TestCase):
                 game.save_repository.summaries.assert_not_called()
                 game.save_repository.summary.assert_not_called()
 
-    def test_title_confirm_routes_exhibition_directly_to_new_game(self) -> None:
+    def test_first_title_confirm_shows_controls_then_routes_each_mode_after_acknowledgement(self) -> None:
         for mode in LaunchMode:
             with self.subTest(mode=mode), patch("game.StartMenuOverlay") as start_menu:
                 game = self.game(mode)
@@ -184,12 +188,30 @@ class LaunchModeGameTest(unittest.TestCase):
                 game._update_field = Mock()
                 game.input_reader.poll.return_value = InputState(confirm=InputButton(triggered=True, held=True))
                 game.update()
+                self.assertIs(game.pending_screen_change, GameScreenChange.SHOW_CONTROL_GUIDE)
+                game.input_reader.poll.return_value = InputState(confirm=InputButton(held=True))
+                for _frame in range(2 * game.fade.frame_count + WINDOW_ANIMATION_FRAME_COUNT + 1):
+                    game.update()
+                self.assertIsNone(game.title_scene)
+                self.assertIsNotNone(game.control_guide)
+                self.assertTrue(game.control_guide.window.is_open)
+                self.assertEqual(game.save_data.play_time_frames, 0)
+                game.settings_repository.save.assert_not_called()
+                game.save_repository.summaries.assert_not_called()
+                game._start_field_event.assert_not_called()
+                game.input_reader.poll.return_value = InputState()
+                game.update()
+                game.input_reader.poll.return_value = InputState(confirm=InputButton(triggered=True, held=True))
+                game.update()
+                self.assertEqual(game.settings.control_guide_device, "keyboard")
+                game.settings_repository.save.assert_called_once_with(game.settings)
                 expected = GameScreenChange.START_GAME if mode is LaunchMode.EXHIBITION else GameScreenChange.SHOW_START_MENU
                 self.assertIs(game.pending_screen_change, expected)
                 game.input_reader.poll.return_value = InputState(confirm=InputButton(held=True))
                 for _frame in range(2 * game.fade.frame_count + 1):
                     game.update()
                 self.assertIsNone(game.title_scene)
+                self.assertIsNone(game.control_guide)
                 self.assertIsNone(game.pending_screen_change)
                 if mode is LaunchMode.EXHIBITION:
                     start_menu.assert_not_called()
@@ -204,6 +226,74 @@ class LaunchModeGameTest(unittest.TestCase):
                     self.assertIs(game.start_screen, start_menu.return_value)
                     self.assertFalse(game.showing_field)
                     game._start_field_event.assert_not_called()
+
+    def test_startup_guide_compares_acknowledged_device_and_exhibition_always_shows(self) -> None:
+        for mode in LaunchMode:
+            for acknowledged in (None, "keyboard", "gamepad"):
+                for device in InputDevice:
+                    with self.subTest(mode=mode, acknowledged=acknowledged, device=device):
+                        game = self.game(mode)
+                        if acknowledged is not None:
+                            game.settings = game.settings.with_control_guide_device(acknowledged)
+                        game._begin_screen_change = Mock()
+                        game._finish_title(device)
+                        expected = (
+                            GameScreenChange.SHOW_CONTROL_GUIDE
+                            if mode is LaunchMode.EXHIBITION or acknowledged != device.value
+                            else GameScreenChange.SHOW_START_MENU
+                        )
+                        game._begin_screen_change.assert_called_once_with(expected)
+
+    def test_cancel_controls_returns_to_title_without_acknowledging_or_reading_saves(self) -> None:
+        for mode in LaunchMode:
+            with self.subTest(mode=mode):
+                game = self.game(mode)
+                game.pending_control_guide_device = InputDevice.KEYBOARD
+                game._show_control_guide()
+                game.input_reader.poll.return_value = InputState()
+                for _frame in range(WINDOW_ANIMATION_FRAME_COUNT + 1):
+                    game.update()
+                game.input_reader.poll.return_value = InputState(cancel=InputButton(triggered=True, held=True))
+                game.update()
+                game.input_reader.poll.return_value = InputState(cancel=InputButton(held=True))
+                for _frame in range(WINDOW_ANIMATION_FRAME_COUNT):
+                    game.update()
+                self.assertIsNotNone(game.title_scene)
+                self.assertIsNone(game.control_guide)
+                self.assertIsNone(game.settings.control_guide_device)
+                game.settings_repository.save.assert_not_called()
+                game.save_repository.summaries.assert_not_called()
+                self.assertEqual(game.save_data.play_time_frames, 0)
+
+    def test_acknowledging_guide_preserves_exhibition_device_language_and_survives_title_return(self) -> None:
+        for mode in LaunchMode:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                repository = SettingsRepository(Path(directory) / "settings.json")
+                game = Game(
+                    settings=Settings(language=Language.ENGLISH), settings_repository=repository,
+                    palette_shifter=Mock(base_colors=(0x000000,)), launch_mode=mode,
+                )
+                self.assertTrue(game._confirm_control_guide(InputDevice.GAMEPAD))
+                saved = repository.load()
+                self.assertEqual(saved.control_guide_device, "gamepad")
+                self.assertIs(saved.language, Language.ENGLISH)
+                game._return_to_start_without_window_restart()
+                self.assertEqual(game.settings.control_guide_device, "gamepad")
+                game._begin_screen_change = Mock()
+                game._finish_title(InputDevice.GAMEPAD)
+                expected = (
+                    GameScreenChange.SHOW_CONTROL_GUIDE
+                    if mode is LaunchMode.EXHIBITION else GameScreenChange.SHOW_START_MENU
+                )
+                game._begin_screen_change.assert_called_once_with(expected)
+
+    def test_failed_guide_settings_save_does_not_acknowledge_input_device(self) -> None:
+        game = self.game(LaunchMode.NORMAL)
+        game.settings_repository.save.side_effect = SettingsSystemError("cannot save")
+        game.alert.start = Mock()
+        self.assertFalse(game._confirm_control_guide(InputDevice.GAMEPAD))
+        self.assertIsNone(game.settings.control_guide_device)
+        game.alert.start.assert_called_once_with()
 
     def test_only_exhibition_starts_at_party_level_three(self) -> None:
         for mode in LaunchMode:
