@@ -106,6 +106,20 @@ build.bat --mode beta
 `npm run build:win:beta` も利用できる。リポジトリは事前に任意の方法で更新する。
 DA2にあった `git pull` はビルド処理に含めず、現在の作業内容をそのままビルドする。
 
+Windows版は既定で、ビルド前に共有データの同期（`sync-content.mjs`）と、Git管理外の
+実行時リソース（画像・マップ・イベント・呪文エフェクト・攻撃ポーズ）の生成を行う。
+そのため、clone直後でも `git submodule update --init` 済みであれば `build.bat` だけで完結する。
+画像は配布用の厳密なパレット検証で生成する。BGMの変換（`npm run audio:build`）は
+変換元WAVが必要なため含めない。
+
+```bat
+build.bat --mode exhibition --skip-prepare             :: 同期・生成を省き、現在のappをそのままビルド
+build.bat --mode exhibition --allow-palette-mismatch   :: パレット外の色を最近傍色へ変換（確認用）
+```
+
+`--allow-palette-mismatch` で作った配布物はMacの厳密な生成結果と一致しないため、
+`receive:win` では拒否される場合がある。
+
 ### 環境
 
 Python 3.11以上、Node.js 20以上と生成済みリソースが必要。

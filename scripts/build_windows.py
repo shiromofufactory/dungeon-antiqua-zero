@@ -28,6 +28,28 @@ def run(command: list[str], cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def prepare_resources(root: Path, *, allow_palette_mismatch: bool = False) -> None:
+    """共有コンテンツの同期と、Git管理外の実行時リソースの生成を行う。"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(root), env.get("PYTHONPATH")]))
+    if not any((root / "content").iterdir()):
+        raise ValueError("contentが空です。先に git submodule update --init を実行してください。")
+    images = [sys.executable, "-B", str(root / "scripts/build-images.py")]
+    if allow_palette_mismatch:
+        images.append("--allow-palette-mismatch")
+    steps = [
+        ("共有データの同期", ["node", str(root / "scripts/sync-content.mjs")]),
+        ("画像の生成", images),
+        ("マップの生成", [sys.executable, "-B", str(root / "scripts/compile-maps.py")]),
+        ("イベントの生成", [sys.executable, "-B", str(root / "scripts/compile-events.py")]),
+        ("呪文エフェクトの生成", [sys.executable, "-B", str(root / "scripts/compile-spell-effects.py")]),
+        ("攻撃ポーズの生成", [sys.executable, "-B", str(root / "scripts/compile-attack-poses.py")]),
+    ]
+    for label, command in steps:
+        print(f"== {label}", flush=True)
+        subprocess.run(command, cwd=root, env=env, check=True)
+
+
 def export_to_dropbox(archive: Path, destination: Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -124,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-sign", action="store_true", help="ローカル確認用に署名を省略")
     parser.add_argument("--no-dropbox", action="store_true", help="ローカル生成のみ")
     parser.add_argument("--dropbox-dir", type=Path, default=default_dropbox_dir(), help="受け渡し先の基部ディレクトリ")
+    parser.add_argument("--skip-prepare", action="store_true", help="リソースの同期・生成を行わず、現在のappをそのままビルド")
+    parser.add_argument("--allow-palette-mismatch", action="store_true", help="画像生成でパレット外の色を最近傍色へ変換（確認用）")
     args = parser.parse_args(argv)
     if sys.platform != "win32":
         print("Windows版はWindows上でビルドしてください。", file=sys.stderr)
@@ -138,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("Node.jsがPATHにありません。")
         if not args.no_sign and shutil.which(os.environ.get("SIGNTOOL", "signtool")) is None:
             raise ValueError("signtoolがPATHにありません。SIGNTOOLへパスを指定するか、確認用に--no-signを指定してください。")
+        if not args.skip_prepare:
+            prepare_resources(PROJECT_ROOT, allow_palette_mismatch=args.allow_palette_mismatch)
         build_windows(
             PROJECT_ROOT, args.mode, sign=not args.no_sign,
             dropbox_dir=None if args.no_dropbox else args.dropbox_dir.expanduser().resolve(),

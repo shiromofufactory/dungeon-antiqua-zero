@@ -8,6 +8,11 @@ import os
 from pathlib import Path
 import sys
 
+# app パッケージ（app.audio_catalog など）を読み込めるよう、プロジェクトルートを通す。
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.append(_PROJECT_ROOT)
+
 from map_pipeline import (
     compile_map,
     load_map_source,
