@@ -36,7 +36,7 @@ from ui.teleport_menu import TeleportMenuOverlay, TeleportTarget
 from ui.text_layout import right_aligned_grid_x
 
 FACES_IMAGE_ID = "faces/faces"
-CATEGORY_WINDOW_GRID = (6, 0, 52, 5)
+CATEGORY_WINDOW_GRID = (14, 0, 36, 5)
 ITEM_LIST_WINDOW_GRID = (0, 5, 32, 39)
 ITEM_INFO_WINDOW_GRID = (31, 5, 33, 39)
 
@@ -44,9 +44,8 @@ CATEGORY_TEXT_KEYS = {
     "use": "item.category.use",
     "drop": "item.category.drop",
     "index": "item.category.index",
-    "important": "item.category.important",
 }
-CATEGORY_TEXT_X = (4, 14, 24, 36)
+CATEGORY_TEXT_X = (4, 14, 24)
 CATEGORY_CURSOR_X = tuple(x - 2 for x in CATEGORY_TEXT_X)
 CATEGORY_TEXT_Y = 1
 
@@ -97,7 +96,6 @@ class ItemCategory(StrEnum):
     USE = "use"
     DROP = "drop"
     INDEX = "index"
-    IMPORTANT = "important"
 
 
 class ItemSelectionPhase(Enum):
@@ -167,7 +165,6 @@ class ItemMenuOverlay:
         self.items = dict(item_catalog)
         self.spells = dict(spell_catalog)
         self.inventory_system = inventory_system
-        self.important_items: tuple[Item, ...] = ()
         self.settings = settings
         self.texts = texts
         self.fonts = fonts
@@ -204,8 +201,6 @@ class ItemMenuOverlay:
 
     @property
     def category_items(self) -> tuple[Item, ...]:
-        if self.category is ItemCategory.IMPORTANT:
-            return self.important_items
         if self.category is ItemCategory.INDEX:
             return self.inventory_system.recorded_items
         return self.inventory
@@ -360,10 +355,7 @@ class ItemMenuOverlay:
         if selected is not None:
             self.item_cursor.select_key(selected.key)
         info_texts: tuple[WindowText, ...] = ()
-        if (
-            self.phase is ItemSelectionPhase.CATEGORY
-            and self.category is not ItemCategory.IMPORTANT
-        ):
+        if self.phase is ItemSelectionPhase.CATEGORY:
             info_texts = self._item_summary_texts()
         elif selected is not None:
             info_texts = tuple(

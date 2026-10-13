@@ -13,6 +13,11 @@
 - カレントディレクトリへ依存させず、リポジトリルートから `python3 -m tools.<module>` で起動する。
 - `pyxel package app ...` の対象へ `tools/` を含めない。
 
+Mac配布物はルートの `build.sh` または `npm run build:mac`、Windows配布物は
+`build.bat` または `npm run build:win` で生成する。MacでのWindows版受け取りは
+`npm run receive:win` を使う。モード指定、環境、Dropbox運用は
+[デスクトップビルド](../docs/desktop-build.md) を参照する。
+
 ## 音声変換
 
 `tools/audio_wav/` のWAVから、ゲーム用OGGを `app/audio/`、視聴用MP3を

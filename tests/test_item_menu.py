@@ -74,14 +74,13 @@ class ItemMenuTest(unittest.TestCase):
         )
         self.assertIs(mock.windows[1], mock.item_info_window)
         self.assertIs(mock.windows[2], mock.item_list_window)
-        self.assertEqual(CATEGORY_WINDOW_GRID, (6, 0, 52, 5))
+        self.assertEqual(CATEGORY_WINDOW_GRID, (14, 0, 36, 5))
         self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 32, 39))
         self.assertEqual(ITEM_INFO_WINDOW_GRID, (31, 5, 33, 39))
-        self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24, 36))
+        self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24))
         self.assertEqual(len(mock.items), 123)
         self.assertEqual(len(mock.inventory), len(mock.items))
         self.assertEqual(set(mock.item_counts.values()), {1})
-        self.assertEqual(mock.important_items, ())
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
         self.assertEqual(mock.category, ItemCategory.USE)
         self.assertTrue(mock.category_cursor.active)
@@ -92,7 +91,6 @@ class ItemMenuTest(unittest.TestCase):
                 ("つかう", CATEGORY_TEXT_X[0], CATEGORY_TEXT_Y),
                 ("すてる", CATEGORY_TEXT_X[1], CATEGORY_TEXT_Y),
                 ("いちらん", CATEGORY_TEXT_X[2], CATEGORY_TEXT_Y),
-                ("だいじなもの", CATEGORY_TEXT_X[3], CATEGORY_TEXT_Y),
             ],
         )
         self.assertEqual(
@@ -582,18 +580,18 @@ class ItemMenuTest(unittest.TestCase):
             english_starts[1] - (english_starts[0] + len("Use") * 6),
             22,
         )
-        important = english.category_window.texts[-1]
-        important_end = (
+        index = english.category_window.texts[-1]
+        index_end = (
             english.category_window.pixel_x
-            + important.x * 4
-            + len("Important") * 6
+            + index.x * 4
+            + index.font.text_width(index.text)
         )
         right_frame_start = (
             english.category_window.pixel_x
             + english.category_window.pixel_width
             - 8
         )
-        self.assertLessEqual(important_end, right_frame_start)
+        self.assertLessEqual(index_end, right_frame_start)
 
     def test_item_selection_scrolls_one_row_at_the_bottom_edge(self) -> None:
         mock = ItemMenuHarness()
@@ -701,21 +699,29 @@ class ItemMenuTest(unittest.TestCase):
             str(mock.selected_item.localized_name(mock.localizer)),
         )
 
-    def test_important_items_stay_empty_and_cannot_enter_item_selection(self) -> None:
+    def test_category_navigation_cycles_three_tabs_and_returns_from_item_selection(self) -> None:
         mock = ItemMenuHarness()
-        for _ in range(3):
+        for category in (ItemCategory.DROP, ItemCategory.INDEX, ItemCategory.USE):
             mock.update(InputState(navigation=Direction.RIGHT))
+            self.assertIs(mock.category, category)
 
-        self.assertEqual(mock.category, ItemCategory.IMPORTANT)
-        self.assertEqual(mock.category_items, ())
-        self.assertEqual(mock.item_list_window.texts, ())
-        self.assertEqual(mock.item_info_window.texts, ())
-        self.assertFalse(mock.item_list_window.horizontal_navigation)
-        self.assertFalse(mock.item_list_window.vertical_navigation)
+        mock.update(InputState(navigation=Direction.LEFT))
+        self.assertIs(mock.category, ItemCategory.INDEX)
+        self.assertEqual(mock.category_items, mock.inventory_system.recorded_items)
 
         mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertFalse(mock.category_cursor.active)
+
+        mock.update(InputState(cancel=InputButton(True, True)))
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
+        self.assertIs(mock.category, ItemCategory.INDEX)
         self.assertTrue(mock.category_cursor.active)
+
+        for _ in range(2):
+            mock.update(InputState(navigation=Direction.LEFT))
+        self.assertIs(mock.category, ItemCategory.USE)
+        self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))
 
     def test_drop_confirmation_uses_da2_text_and_discards_one_item(self) -> None:
         mock = ItemMenuHarness()

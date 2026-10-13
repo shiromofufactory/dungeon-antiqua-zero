@@ -17,6 +17,7 @@
 - `docs/features/*.md`: 機能ごとの詳細な操作、UI、状態遷移、境界値、受け入れ条件。対象機能の文書がある場合は実装前に参照する。
 - `docs/program-architecture.md`: ZEROのプログラム構造、責務分割、状態管理、Scene、Overlay、イベント構造の設計基準。実装・リファクタリングでは必ず参照する。
 - `docs/content-workflow.md`: 共有コンテンツ、Google Sheets、ゲーム用データ、スタッフポータルの責務と同期手順。
+- `docs/desktop-build.md`: モード別のMac・Windows配布物のビルド手順、署名、Dropbox受け渡しと受け取り検証。
 
 文書に矛盾がある場合は、ゲーム内容と体験の方向性は `content/docs/da0.md`、機能の詳細な振る舞いとUIは `docs/features/*.md`、ソフトウェア構造は `docs/program-architecture.md`、コンテンツ運用は `docs/content-workflow.md` を基準とする。表示文言の正本は `content/data/texts.json`、マスターデータの正本は対応する `content/data/*.json` とする。ユーザーの最新の明示指示は常に文書より優先する。
 
@@ -135,6 +136,7 @@
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。
 - マップチップエディタのオブジェクト一覧・レイヤー絞り込み・新規作成・並び替えは `node --test tests/test_mapchip_objects.mjs` で回帰検証する。
 - ビルドや配布物の生成は、ユーザーが依頼した範囲でのみ行う。
+- Mac・Windowsビルドのモード埋め込み・ZIP内容・署名の呼び出し・Dropbox受け渡し検証・失敗時の成果物保持は `python3 -B -m unittest tests.test_desktop_build tests.test_windows_build` で検証する。
 
 ゲーム本体のテスト基盤はまだ確定していない。上記コンテンツ用コマンド以外について、存在しない標準コマンドを仮定しない。実装が追加されたら、このファイルまたは下位の `AGENTS.md` に正式なコマンドを追記する。
 

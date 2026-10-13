@@ -1,0 +1,3 @@
+# 画像manifestがパレットの生バイトを照合するため、OS間で改行を固定する。
+app/assets.pyxpal text eol=lf
+build.bat text eol=crlf

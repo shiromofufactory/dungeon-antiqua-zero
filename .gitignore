@@ -10,4 +10,6 @@ scripts/node_modules
 scripts/package-lock.json
 tmp
 output
+dist/
+.venv-build/
 tools/audio_wav
