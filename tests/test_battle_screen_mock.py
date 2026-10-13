@@ -5017,11 +5017,105 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(candidates[1].is_equipped)
         self.assertTrue(all(not candidate.is_equipped for candidate in candidates[2:]))
         candidate_keys = {candidate.item.key for candidate in candidates}
+        self.assertEqual(
+            tuple(
+                candidate.item.key
+                for candidate in candidates
+                if candidate.item.subtype == "BOOK"
+            ),
+            (
+                "BOOK of FIRE",
+                "BOOK of SLEEP",
+                "BOOK of SPARK",
+                "BOOK of DUNES",
+                "BOOK of WRING",
+                "BOOK of DOOM",
+            ),
+        )
         self.assertIn("MAGNIFIER", candidate_keys)
         self.assertNotIn("FRUIT of STR", candidate_keys)
         self.assertNotIn("FRUIT of AGI", candidate_keys)
         self.assertNotIn("FRUIT of MAG", candidate_keys)
         self.assertNotIn("NECTOR", candidate_keys)
+
+        mock.inventory_system.remove("BOOK of SLEEP")
+        self.assertNotIn(
+            "BOOK of SLEEP",
+            {candidate.item.key for candidate in mock._active_member_item_candidates()},
+        )
+
+    def test_books_target_enemies_and_apply_effects_only_after_confirmation(self) -> None:
+        items = load_mock_items()
+        from systems import InventorySystem
+
+        for item_key in ("BOOK of SLEEP", "BOOK of SPARK"):
+            with self.subTest(item=item_key):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = load_mock_party(items, load_mock_skills())
+                mock.party[0].mp = 0
+                mock.active_party_index = 0
+                mock.spells = load_mock_spells()
+                mock.inventory_system = InventorySystem(items, {item_key: 2})
+                mock.item_candidates = mock._active_member_item_candidates()
+                mock.selected_item_index = next(
+                    index
+                    for index, candidate in enumerate(mock.item_candidates)
+                    if candidate.item.key == item_key
+                )
+                mock.monsters = (_damage_test_monster(0), _damage_test_monster(1))
+                mock.target_window = Window(0, 0, 64, 60, transparent=True)
+                mock.target_cursor = WindowCursor(
+                    mock.target_window,
+                    (CursorTarget(0, 0, key=0), CursorTarget(16, 0, key=1)),
+                )
+                mock.item_window = Mock()
+                mock.item_guide_window = Mock()
+                mock._close_spell_windows = Mock()
+                mock._refresh_monster_name_colors = Mock()
+                mock._refresh_item_options = Mock()
+                mock._monster_base_position = Mock(return_value=(0, 0))
+                mock._monster_draw_x = Mock(return_value=0)
+                mock.progression = Mock()
+
+                self.assertTrue(mock._use_selected_item())
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_TARGET)
+                self.assertTrue(mock.action_targets_enemy)
+                self.assertTrue(mock.action_targets_all)
+                self.assertEqual(mock.selectable_target_indexes, (0, 1))
+                self.assertEqual(mock.inventory_system.quantity(item_key), 2)
+                self.assertIsNone(mock.pending_spell)
+
+                mock._cancel_action_target_selection()
+                self.assertIs(mock.phase, BattleMockPhase.ITEM)
+                self.assertEqual(mock.inventory_system.quantity(item_key), 2)
+                self.assertTrue(
+                    all(monster.state.hp == 10_000 for monster in mock.monsters)
+                )
+                self.assertTrue(
+                    all(monster.state.sleeping == 0 for monster in mock.monsters)
+                )
+
+                self.assertTrue(mock._use_selected_item())
+                with (
+                    patch("scenes.battle.random.random", return_value=0.5),
+                    patch("scenes.battle.random.randint", return_value=2),
+                ):
+                    self.assertTrue(mock._confirm_action_target_selection())
+
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+                self.assertEqual(mock.inventory_system.quantity(item_key), 1)
+                self.assertEqual(mock.party[0].mp, 0)
+                mock.progression.record_spell_use.assert_not_called()
+                assert mock.action_presentation is not None
+                mock._apply_action_results(mock.action_presentation)
+                if item_key == "BOOK of SLEEP":
+                    self.assertTrue(
+                        all(monster.state.sleeping == 2 for monster in mock.monsters)
+                    )
+                else:
+                    self.assertTrue(
+                        all(monster.state.hp < 10_000 for monster in mock.monsters)
+                    )
 
     def test_item_list_uses_its_own_wider_window_with_three_candidates(self) -> None:
         items = load_mock_items()
@@ -5043,7 +5137,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock._refresh_item_options()
 
-        self.assertEqual(ITEM_WINDOW_GRID, (32, 0, 32, 13))
+        self.assertEqual(ITEM_WINDOW_GRID, (33, 0, 31, 13))
         self.assertEqual(mock.item_window.add_text.call_count, 6)
         self.assertTrue(mock.item_window.vertical_navigation)
         targets = mock.item_window.set_cursor.call_args.args[0]
@@ -5068,21 +5162,30 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_item_guide_opens_immediately_in_its_own_window(self) -> None:
         items = load_mock_items()
-        mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.item_candidates = (BattleItemCandidate(items["POTION"]),)
-        mock.selected_item_index = 0
-        mock.spells = load_mock_spells()
-        mock.localizer = Localizer(Language.JAPANESE)
-        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
-        mock.item_guide_window = Mock()
-        mock.command_guide_window = Mock()
+        for language in Language:
+            for item_key in ("POTION", "BOOK of SPARK", "WAND of FIRE"):
+                with self.subTest(language=language, item=item_key):
+                    mock = BattleScreenMock.__new__(BattleScreenMock)
+                    mock.item_candidates = (BattleItemCandidate(items[item_key]),)
+                    mock.selected_item_index = 0
+                    mock.spells = load_mock_spells()
+                    mock.localizer = Localizer(language)
+                    mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+                    mock.item_guide_window = Mock()
+                    mock.command_guide_window = Mock()
 
-        mock._refresh_item_guide()
+                    mock._refresh_item_guide()
 
-        self.assertEqual(ITEM_GUIDE_WINDOW_GRID, (0, 0, 32, 13))
-        mock.item_guide_window.open_immediately.assert_called_once_with()
-        self.assertGreater(mock.item_guide_window.add_text.call_count, 0)
-        mock.command_guide_window.open_immediately.assert_not_called()
+                    self.assertEqual(ITEM_GUIDE_WINDOW_GRID, (0, 0, 34, 13))
+                    mock.item_guide_window.open_immediately.assert_called_once_with()
+                    lines = mock.spells[items[item_key].use_spell_key].localized_description(mock.localizer)
+                    self.assertEqual(
+                        mock.item_guide_window.add_text.call_args_list,
+                        [call(line, COMMAND_GUIDE_TEXT_X,
+                              COMMAND_GUIDE_FIRST_Y + index * COMMAND_GUIDE_LINE_SPACING)
+                         for index, line in enumerate(lines)],
+                    )
+                    mock.command_guide_window.open_immediately.assert_not_called()
 
     def test_spell_candidates_are_learned_battle_spells_only(self) -> None:
         items = load_mock_items()

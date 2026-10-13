@@ -265,6 +265,30 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
 
         rndi.assert_not_called()
 
+    def test_low_danger_encounter_does_not_draw_or_skip_party_turns(self) -> None:
+        game = Game.__new__(Game)
+        game.current_map = SimpleNamespace(
+            random_encounter=SimpleNamespace(monster_level=1, danger="low")
+        )
+        game.monsters = (object(),)
+        game.encounter_system = Mock()
+        game.encounter_system.generate_formation.return_value = EncounterFormation(
+            ("Coyote",),
+        )
+        scene = self._scene(self._member(1, FormationRow.FRONT, vigilant=True))
+        scene.encounter = game._create_random_battle_encounter()
+
+        with patch("scenes.battle.pyxel.rndi", return_value=0) as rndi:
+            scene._prepare_surprise()
+
+        rndi.assert_not_called()
+        self.assertFalse(scene.surprise_active)
+        self.assertIsNone(scene.surprise_roll)
+        self.assertIsNone(scene.surprise_prevented_by_index)
+        self.assertEqual(scene.surprise_pending_party_indexes, set())
+        self.assertTrue(scene._party_member_is_front_row(0))
+        self.assertFalse(scene._skip_surprised_party_turn(0))
+
     def test_agility_average_includes_dead_battle_participants(self) -> None:
         scene = self._scene(
             self._member(32, FormationRow.FRONT, alive=False),
@@ -1079,7 +1103,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
     def test_game_resolves_dynamic_map_level_and_enables_surprise(self) -> None:
         game = Game.__new__(Game)
         game.current_map = SimpleNamespace(
-            random_encounter=SimpleNamespace(monster_level="dynamic")
+            random_encounter=SimpleNamespace(monster_level="dynamic", danger="high")
         )
         game.save_data = SaveData(battle_count=20)
         game.monsters = (object(),)

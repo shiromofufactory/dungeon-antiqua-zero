@@ -265,12 +265,20 @@ class ItemDetailTest(unittest.TestCase):
         self.assertIsNone(battle.source)
 
     def test_battle_context_contains_only_use_effect_lines(self) -> None:
-        menu = self.detail("BOOK of FIRE")
-        battle = self.detail("BOOK of FIRE", ItemDetailContext.BATTLE)
-
-        self.assertNotIn("ほのおのしょ", battle.lines)
-        self.assertNotIn("どうぐ", battle.lines)
-        self.assertEqual(battle.lines, menu.lines[-4:])
+        for language in Language:
+            for item_key in ("POTION", "BOOK of FIRE", "BOOK of SPARK", "WAND of FIRE"):
+                with self.subTest(language=language, item=item_key):
+                    localizer = Localizer(language)
+                    item = self.items[item_key]
+                    battle = build_item_detail(
+                        item, self.spells, localizer, self.texts,
+                        context=ItemDetailContext.BATTLE,
+                    )
+                    self.assertEqual(
+                        battle.lines,
+                        self.spells[item.use_spell_key].localized_description(localizer),
+                    )
+                    self.assertNotIn("", battle.lines)
 
     def test_rejects_undefined_use_spell(self) -> None:
         item = Item.from_record(

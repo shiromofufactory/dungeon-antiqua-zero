@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
@@ -3558,18 +3559,30 @@ class GameTest(unittest.TestCase):
 
     def test_debug_encounter_uses_requested_settings_and_dynamic_level(self) -> None:
         from resources.maps import MapRandomEncounter
-        mock = Game.__new__(Game)
-        mock.monsters = (Mock(),)
-        mock.encounter_system = Mock()
-        mock.encounter_system.dynamic_monster_level.return_value = 3
-        mock.encounter_system.generate_formation.return_value.monster_keys = ("SLIME",)
-        settings = MapRandomEncounter("dynamic", "high", "yin", True, False, True, False)
-        result = mock._create_random_battle_encounter(settings)
-        mock.encounter_system.generate_formation.assert_called_once_with(
-            mock.monsters, settings, monster_level=3,
-        )
-        self.assertEqual(result.monster_keys, ("SLIME",))
-        self.assertTrue(result.surprise_enabled)
+        for danger, map_danger in (("low", "high"), ("high", "low")):
+            with self.subTest(danger=danger, map_danger=map_danger):
+                mock = Game.__new__(Game)
+                mock.current_map = SimpleNamespace(
+                    random_encounter=MapRandomEncounter(
+                        1, map_danger, "neutral", False, False, False, True,
+                    ),
+                )
+                mock.monsters = (Mock(),)
+                mock.encounter_system = Mock()
+                mock.encounter_system.dynamic_monster_level.return_value = 3
+                mock.encounter_system.generate_formation.return_value.monster_keys = ("SLIME",)
+                settings = MapRandomEncounter(
+                    "dynamic", danger, "yin", True, False, True, False,
+                )
+
+                result = mock._create_random_battle_encounter(settings)
+
+                mock.encounter_system.dynamic_monster_level.assert_called_once_with()
+                mock.encounter_system.generate_formation.assert_called_once_with(
+                    mock.monsters, settings, monster_level=3,
+                )
+                self.assertEqual(result.monster_keys, ("SLIME",))
+                self.assertEqual(result.surprise_enabled, danger == "high")
 
     def test_debug_encounter_transition_uses_prepared_formation(self) -> None:
         from scenes.battle import BattleEncounter

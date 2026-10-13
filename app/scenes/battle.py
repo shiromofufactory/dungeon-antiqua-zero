@@ -256,8 +256,8 @@ ESCAPE_NO_Y = 5
 COMMAND_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
 GLOBAL_COMMAND_WINDOW_GRID = (49, 0, 15, 13)
 INPUT_GUIDE_WINDOW_GRID = (48, 56, 16, 4)
-ITEM_GUIDE_WINDOW_GRID = (0, 0, 32, 13)
-ITEM_WINDOW_GRID = (32, 0, 32, 13)
+ITEM_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
+ITEM_WINDOW_GRID = (33, 0, 31, 13)
 SPELL_WINDOW_GRID = (36, 0, 28, 16)
 SPELL_GUIDE_WINDOW_GRID = (0, 0, 36, 16)
 SPELL_MP_WINDOW_GRID = (20, 9, 16, 7)
@@ -4089,7 +4089,6 @@ class BattleScene:
             for item in self.inventory_system.items
             if (
                 item.equip_type is ItemEquipType.ITEM
-                and item.subtype == "ITEM"
                 and self._item_is_usable_in_battle(item)
             )
         )

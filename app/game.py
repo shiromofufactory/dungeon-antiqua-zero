@@ -488,7 +488,12 @@ class Game:
         if not isinstance(launch_mode, LaunchMode):
             raise TypeError("launch_mode must be LaunchMode")
         self.launch_mode = launch_mode
-        self.settings = settings
+        self._preferred_language = settings.language
+        self.settings = (
+            settings.with_language(Language.JAPANESE)
+            if launch_mode is LaunchMode.EXHIBITION
+            else settings
+        )
         self.battle_command_memory = BattleCommandMemory()
         self.settings_repository = (
             SettingsRepository() if settings_repository is None else settings_repository
@@ -725,6 +730,13 @@ class Game:
             return repository.load()
         except SettingsSystemError:
             return Settings()
+
+    def _settings_for_persistence(self, settings: Settings) -> Settings:
+        """Keep the device language separate from the exhibition override."""
+
+        if self.launch_mode is LaunchMode.EXHIBITION:
+            return settings.with_language(self._preferred_language)
+        return settings
 
     def _build_battle_scene(self, encounter: BattleEncounter) -> BattleScene:
         """Create a battle from current session state without choosing when it starts."""
@@ -1000,7 +1012,7 @@ class Game:
         )
         return BattleEncounter(
             formation.monster_keys,
-            surprise_enabled=True,
+            surprise_enabled=settings.danger == "high",
         )
 
     def _begin_event_battle(self, effect: StartBattleEffect) -> None:
@@ -2093,18 +2105,25 @@ class Game:
         }
         for key, y in self._settings_rows():
             if key in label_keys:
+                color = (
+                    DISABLED_COLOR
+                    if key == "language" and self.launch_mode is LaunchMode.EXHIBITION
+                    else DEFAULT_TEXT_COLOR
+                )
                 texts.extend(
                     (
                         self.localized_texts.create(
                             self.localized[label_keys[key]],
                             SETTINGS_LABEL_X,
                             y,
+                            color=color,
                         ),
-                        self.localized_texts.create("：", 28, y),
+                        self.localized_texts.create("：", 28, y, color=color),
                         self.localized_texts.create(
                             self._settings_value(key),
                             SETTINGS_VALUE_X,
                             y,
+                            color=color,
                         ),
                     )
                 )
@@ -2128,6 +2147,8 @@ class Game:
                     )
                 )
         guide_key = SETTINGS_GUIDE_KEYS.get(selected_key)
+        if selected_key == "language" and self.launch_mode is LaunchMode.EXHIBITION:
+            guide_key = None
         guide_lines = (
             self.texts.lines(guide_key, Localizer(self.settings.language))
             if guide_key is not None
@@ -2152,6 +2173,12 @@ class Game:
         return tuple(texts)
 
     def _build_settings_window(self, selected_key: str = "language") -> None:
+        cursor_rows = tuple(
+            (key, y) for key, y in self._settings_rows()
+            if key != "language" or self.launch_mode is not LaunchMode.EXHIBITION
+        )
+        if selected_key not in {key for key, _y in cursor_rows}:
+            selected_key = cursor_rows[0][0]
         texts = self._settings_window_texts(selected_key)
 
         windows = WindowFactory(self.fonts.font_for(Language.JAPANESE))
@@ -2163,7 +2190,7 @@ class Game:
         self.settings_cursor = self.settings_window.set_cursor(
             tuple(
                 CursorTarget(SETTINGS_CURSOR_X, y, key=key)
-                for key, y in self._settings_rows()
+                for key, y in cursor_rows
             )
         )
         self._select_cursor_key(self.settings_cursor, selected_key)
@@ -2942,6 +2969,8 @@ class Game:
             raise ValueError("settings distance must be -1 or 1")
         key = self.settings_cursor.selected_key
         if key == "language":
+            if self.launch_mode is LaunchMode.EXHIBITION:
+                return
             index = LANGUAGE_SEQUENCE.index(self.settings.language)
             language = LANGUAGE_SEQUENCE[(index + 1) % len(LANGUAGE_SEQUENCE)]
             updated_settings = self.settings.with_language(language)
@@ -2980,7 +3009,7 @@ class Game:
             return
 
         try:
-            self.settings_repository.save(updated_settings)
+            self.settings_repository.save(self._settings_for_persistence(updated_settings))
         except SettingsSystemError:
             self.alert.start()
             return
@@ -3114,7 +3143,7 @@ class Game:
 
     def _return_to_start_screen(self) -> None:
         os.environ[GAME_SETTINGS_ENV] = json.dumps(
-            self.settings.to_dict(),
+            self._settings_for_persistence(self.settings).to_dict(),
             ensure_ascii=True,
         )
         battle_scene = getattr(self, "battle_scene", None)
@@ -3130,7 +3159,7 @@ class Game:
     def _return_to_start_without_window_restart(self) -> None:
         """Recreate game-owned state while preserving the Pyxel window."""
 
-        settings = self.settings
+        settings = self._settings_for_persistence(self.settings)
         palette_shifter = self.palette_shifter
         palette_shifter.set_global_mix(
             base_rate=1.0,

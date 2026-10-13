@@ -111,7 +111,7 @@
   この検証コマンドは `package.json` のnpm scriptsへ復元しない。
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。
 - ゲームルールは可能な範囲でPyxel非依存のテストを用意する。
-- 起動モード・試遊版の初期LV・モード別イベント条件・デバッグ表示は `python3 -B -m unittest tests.test_launch_modes tests.test_main tests.test_game tests.test_events tests.test_event_pipeline tests.test_game_events tests.test_save_system`、条件の編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
+- 起動モード・試遊版の初期LVと日本語固定・モード別イベント条件・デバッグ表示は `python3 -B -m unittest tests.test_launch_modes tests.test_main tests.test_game tests.test_events tests.test_event_pipeline tests.test_game_events tests.test_save_system`、条件の編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
 - 起動モード別の武器・呪文・経験値上限と経験値到達色、上限超過NPCの保持、戦闘・メニュー呪文・自動回復への適用は `python3 -B -m unittest tests.test_member tests.test_battle_progression tests.test_spell_progression tests.test_auto_recovery tests.test_spell_menu tests.test_battle_scene tests.test_launch_modes tests.test_game tests.test_save_system` で回帰検証する。
 - 仮タイトル・モード別の開始経路・押しっぱなし入力・タイトル復帰は `python3 -B -m unittest tests.test_title tests.test_start_menu tests.test_launch_modes tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。

@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT as _APP_ROOT
 from field import FieldPosition
-from game import Game, GameScreenChange, INITIAL_PARTY_KEYS, MENU_COMMANDS, NEW_GAME_EVENT_ID, NEW_GAME_MAP_ID
+from game import (
+    GAME_SETTINGS_ENV, SETTINGS_GUIDE_Y, SETTINGS_VALUE_X,
+    Game, GameScreenChange, INITIAL_PARTY_KEYS, MENU_COMMANDS, NEW_GAME_EVENT_ID, NEW_GAME_MAP_ID,
+)
 from game_data import create_party
 from input import Direction, InputButton, InputState
 from member import FIORA_CHARACTER_KEY, required_experience_for_level
 from resources.events import EventCatalog
 from state import Language, LaunchMode, Settings
-from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR, POSITIVE_COLOR
+from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR, POSITIVE_COLOR, WindowCursor
 from systems import (
     BattleProgression, EnemyProgressionData, EventContext, MessageEffect, ResetGameEffect,
-    create_save_document, restore_save_document,
+    SettingsRepository, create_save_document, restore_save_document,
 )
 
 
@@ -36,10 +43,123 @@ class LaunchModeGameTest(unittest.TestCase):
             elif name == "MapResources":
                 mocked.return_value.map.return_value = Mock(sites=())
             elif name == "WindowFactory":
-                mocked.return_value.create.return_value.set_cursor.return_value.selected_key = "language"
+                window = mocked.return_value.create.return_value
+                window.pixel_width = 256
+                window.pixel_height = 240
+                window.set_cursor.side_effect = lambda targets, window=window: WindowCursor(window, targets)
 
     def game(self, mode: LaunchMode) -> Game:
         return Game(settings=Settings(), palette_shifter=Mock(base_colors=(0x000000,)), launch_mode=mode)
+
+    def test_only_exhibition_overrides_device_language_at_startup(self) -> None:
+        for mode in LaunchMode:
+            for language in Language:
+                with self.subTest(mode=mode, language=language):
+                    settings = Settings(language=language, bgm_volume=1, se_volume=2)
+                    repository = Mock()
+                    game = Game(
+                        settings=settings, settings_repository=repository,
+                        palette_shifter=Mock(base_colors=(0x000000,)), launch_mode=mode,
+                    )
+                    expected = Language.JAPANESE if mode is LaunchMode.EXHIBITION else language
+                    self.assertIs(game.settings.language, expected)
+                    self.assertIs(settings.language, language)
+                    self.assertEqual(game.settings.bgm_volume, 1)
+                    self.assertEqual(game.settings.se_volume, 2)
+                    repository.save.assert_not_called()
+
+    def test_exhibition_language_is_disabled_and_cursor_skips_it(self) -> None:
+        for mode in LaunchMode:
+            with self.subTest(mode=mode):
+                game = self.game(mode)
+                game._build_settings_window()
+                cursor = game.settings_cursor
+                keys = [target.key for target in cursor.targets]
+                self.assertEqual("language" in keys, mode is not LaunchMode.EXHIBITION)
+                self.assertEqual(cursor.selected_key, "bgm" if mode is LaunchMode.EXHIBITION else "language")
+                texts = game._settings_window_texts("language")
+                language_row = [text for text in texts if text.y == 2]
+                self.assertEqual(len(language_row), 3)
+                expected_color = DISABLED_COLOR if mode is LaunchMode.EXHIBITION else DEFAULT_TEXT_COLOR
+                self.assertTrue(all(text.color == expected_color for text in language_row))
+                self.assertEqual(next(text.text for text in language_row if text.x == SETTINGS_VALUE_X), "にほんご")
+                if mode is LaunchMode.EXHIBITION:
+                    self.assertFalse(any(text.y >= SETTINGS_GUIDE_Y for text in texts))
+                    placements = game.settings_window.set_cursor.call_args.args[0]
+                    self.assertEqual(placements[0].y, 5)
+                    guide = game._settings_window_texts(cursor.selected_key)
+                    self.assertTrue(any(text.y >= SETTINGS_GUIDE_Y for text in guide))
+                    for _step in range(len(cursor.targets) * 2):
+                        cursor.move_up()
+                        self.assertNotEqual(cursor.selected_key, "language")
+
+    def test_only_exhibition_blocks_language_changes(self) -> None:
+        for mode in LaunchMode:
+            for distance in (-1, 1):
+                with self.subTest(mode=mode, distance=distance):
+                    game = self.game(mode)
+                    game.settings_repository = Mock()
+                    game.settings_cursor = Mock(selected_key="language")
+                    game._build_main_windows = Mock()
+                    game._refresh_settings_window = Mock()
+                    game._change_setting(distance)
+                    if mode is LaunchMode.EXHIBITION:
+                        self.assertIs(game.settings.language, Language.JAPANESE)
+                        game.settings_repository.save.assert_not_called()
+                        game._build_main_windows.assert_not_called()
+                    else:
+                        self.assertIs(game.settings.language, Language.ENGLISH)
+                        game.settings_repository.save.assert_called_once_with(game.settings)
+                        game._build_main_windows.assert_called_once()
+
+    def test_exhibition_keeps_device_language_when_saving_settings_and_returning_to_title(self) -> None:
+        for language in Language:
+            with self.subTest(language=language), tempfile.TemporaryDirectory() as directory, patch.dict("game.os.environ", {}, clear=True):
+                repository = SettingsRepository(Path(directory) / "settings.json")
+                preferred = Settings(language=language, bgm_volume=1, se_volume=2)
+                repository.save(preferred)
+                game = Game(
+                    settings=Game.settings_from_environment(repository),
+                    settings_repository=repository,
+                    palette_shifter=Mock(base_colors=(0x000000,)),
+                    launch_mode=LaunchMode.EXHIBITION,
+                )
+                game.settings_cursor = Mock(selected_key="bgm")
+                game._refresh_settings_window = Mock()
+                game._change_setting(1)
+                saved = repository.load()
+                self.assertIs(saved.language, language)
+                self.assertEqual(saved.bgm_volume, 2)
+                self.assertEqual(saved.se_volume, 2)
+                self.assertIs(game.settings.language, Language.JAPANESE)
+                for _reset in range(2):
+                    game._return_to_start_screen()
+                    self.assertIs(game.settings.language, Language.JAPANESE)
+                    self.assertEqual(game.settings.bgm_volume, 2)
+                    self.assertIsNotNone(game.title_scene)
+                    restored = Game.settings_from_environment(repository)
+                    self.assertIs(restored.language, language)
+                    self.assertEqual(json.loads(os.environ[GAME_SETTINGS_ENV])["language"], language.value)
+                game.settings = game.settings.with_screen_scale(4)
+                with patch("game.pyxel.reset") as reset:
+                    game._return_to_start_screen()
+                reset.assert_called_once_with()
+                restarted = Game(
+                    settings=Game.settings_from_environment(repository),
+                    settings_repository=repository,
+                    palette_shifter=Mock(base_colors=(0x000000,)),
+                    launch_mode=LaunchMode.EXHIBITION,
+                )
+                self.assertIs(restarted.settings.language, Language.JAPANESE)
+                self.assertEqual(restarted.settings.screen_scale, 4)
+                restarted._return_to_start_screen()
+                self.assertIs(restarted.settings.language, Language.JAPANESE)
+                self.assertIs(Game.settings_from_environment(repository).language, language)
+                normal = Game(
+                    settings=repository.load(), settings_repository=repository,
+                    palette_shifter=Mock(base_colors=(0x000000,)), launch_mode=LaunchMode.NORMAL,
+                )
+                self.assertIs(normal.settings.language, language)
 
     def test_title_waits_for_confirm_without_reading_slots_or_counting_play_time(self) -> None:
         for mode in LaunchMode:

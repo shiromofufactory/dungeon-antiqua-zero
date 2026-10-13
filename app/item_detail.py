@@ -295,6 +295,8 @@ def _item_use_lines(
     spells: Mapping[str, Spell],
     localizer: Localizer,
     texts: TextCatalog,
+    *,
+    context: ItemDetailContext,
 ) -> tuple[str, ...]:
     if not item.use_spell_key:
         return ()
@@ -304,7 +306,8 @@ def _item_use_lines(
 
     lines: list[str] = []
     shows_spell_name = (
-        spell.type is not SpellType.ITEM
+        context is not ItemDetailContext.BATTLE
+        and spell.type is not SpellType.ITEM
         and (item.is_equipment or item.is_spell_book)
     )
     if shows_spell_name:
@@ -312,10 +315,11 @@ def _item_use_lines(
         lines.append(
             _composed_text(localizer, label, spell.localized_display_name(localizer))
         )
-    if item.equip_type is ItemEquipType.ITEM:
+    if item.equip_type is ItemEquipType.ITEM or context is ItemDetailContext.BATTLE:
         description = spell.localized_description(localizer)
         if description:
-            lines.append("")
+            if context is not ItemDetailContext.BATTLE:
+                lines.append("")
             lines.extend(description)
     if item.breaks_on_use and item.equip_type is not ItemEquipType.ITEM:
         lines.append(_required_catalog_text(texts, "item.detail.breaks_on_use", localizer))
@@ -346,10 +350,8 @@ def build_item_detail(
     if not isinstance(context, ItemDetailContext):
         raise TypeError("context must be an ItemDetailContext")
 
-    use_lines = _item_use_lines(item, spells, localizer, texts)
+    use_lines = _item_use_lines(item, spells, localizer, texts, context=context)
     if context is ItemDetailContext.BATTLE:
-        if use_lines[:1] == ("",):
-            use_lines = use_lines[1:]
         return ItemDetailView(lines=use_lines)
 
     lines = [item.localized_name(localizer), _item_type_line(item, localizer, texts)]
