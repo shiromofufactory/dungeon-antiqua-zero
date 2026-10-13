@@ -15,7 +15,7 @@
     "build:win:exhibition": "npm run build:win -- --mode exhibition",
     "build:win:demo": "npm run build:win -- --mode demo",
     "build:win:beta": "npm run build:win -- --mode beta",
-    "receive:win": "python3 -B scripts/import_windows_build.py",
+    "receive:win": "bash receive-windows.sh",
     "sync": "node scripts/sync-content.mjs",
     "get-data": "npm --prefix content run get-data && npm run sync",
     "put-data": "npm --prefix content run put-data",

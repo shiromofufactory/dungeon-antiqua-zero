@@ -117,8 +117,9 @@ build.bat --mode exhibition --skip-prepare             :: 同期・生成を省�
 build.bat --mode exhibition --allow-palette-mismatch   :: パレット外の色を最近傍色へ変換（確認用）
 ```
 
-`--allow-palette-mismatch` で作った配布物はMacの厳密な生成結果と一致しないため、
-`receive:win` では拒否される場合がある。
+`--allow-palette-mismatch` で作った配布物はMacの厳密な生成結果と一致しない場合がある。
+取り出し専用の `receive:win` では差分を表示して保管する。現在のMacの内容との一致を
+必須とする確認には、後述のPythonスクリプトを直接使う。
 
 ### 環境
 
@@ -196,9 +197,11 @@ build.bat --mode exhibition --dropbox-dir "D:\Dropbox\public\tmp\dungeon-antiqua
 build.bat --mode exhibition --no-dropbox
 ```
 
-MacでDropboxの同期が完了したら次を実行する。
+MacでDropboxの同期が完了したら、ルートの `receive-windows.sh` で取り出しと片付けを行う。
+`npm run receive:win` も同じ入口を呼ぶ。
 
 ```sh
+./receive-windows.sh --mode exhibition
 npm run receive:win -- --mode exhibition
 ```
 
@@ -206,20 +209,40 @@ npm run receive:win -- --mode exhibition
 任意のZIPを選ぶ場合やDropbox以外で受け取る場合は、同じ場所に `.zip.sha256` を置いて指定する。
 
 ```sh
-python3 -B scripts/import_windows_build.py --mode exhibition --source /path/to/build.zip
+./receive-windows.sh --mode exhibition --source /path/to/build.zip
 npm run receive:win -- --mode exhibition --dropbox-dir /path/to/Dropbox/inbox
 ```
 
 受け取り時には一時コピーを作り、ZIP全体のチェックサム、exeヘッダー、ZIPの構成・破損、
-起動モード、埋め込んだコード・データのハッシュを確認する。Mac上の現在の `app/` と
-Windows側のビルド内容が一致しない場合も拒否する。改行のLF／CRLF差だけは同一として扱う。
+起動モード、埋め込んだコード・データとビルド記録の一致を確認する。
+取り出し専用の入口では、Mac上の現在の `app/` とWindows版に違いがある場合も、
+差分のファイル名を表示してWindows版の内容をそのまま保管する。
+Mac側のゲームデータは書き換えない。改行のLF／CRLF差だけは同一として扱う。
 パレットは生バイトの一致を必要とする。
-そのため、Windows側にもMacと同じ生成済み画像・マップ・イベント・音声が必要である。
-コミットIDだけの比較ではなく、未コミットの変更と生成物も含めて照合する。
+照合はコミットIDだけでなく、未コミットの変更と生成物も含めて行う。
 
-受け取り完了後は `dist/windows/<mode>/` に固定名のZIPとチェックサムを置く。
-Mac側でexeを展開・起動・再署名せず、Windowsで署名したZIPをそのまま保存する。
-失敗時は前回の受け取り済み配布物を保持する。Dropboxの原本は削除しない。
+`dist/windows/<mode>/` へ、固定名のZIPとチェックサムに加え、展開したexeと `_internal/` を置く。
+ZIPはWindowsで署名したものをそのまま保存し、展開したファイルも起動・再署名しない。
+検証と展開を一時ディレクトリで終えてから保存先を置き換える。失敗時は前回の出力と原本を保持する。
+Steamへのアップロードなどの配布処理は含めない。
+
+保存完了後、Dropboxの原本ZIPとチェックサムが受け取り時の内容と一致することを再確認し、
+その2ファイルだけを削除する。古い受け渡し物、別モード、他のファイル、同期途中の
+`.partial` は削除しない。既定の受け渡し先で空になったモードディレクトリは取り除き、
+共有の `tmp` と基部ディレクトリは残す。原本が受け取り中に更新された場合は削除を中止し、
+受け取り済みZIPは保持したままエラーにする。
+
+原本を残し、現在のMacのコード・データとの一致を必須にしてZIPだけを保管したい場合は、
+Pythonスクリプトを直接使う。
+
+```sh
+python3 -B scripts/import_windows_build.py --mode exhibition
+```
+
+この直接起動では、Windows側にもMacと同じ生成済み画像・マップ・イベント・音声が必要になる。
+Pythonスクリプトの `--extract` は展開、`--cleanup` は原本の片付け、
+`--allow-source-differences` は現在のMacとの差分を表示して保管する指定である。
+保存先 `dist/windows/<mode>/` 内のZIPを原本に指定することは拒否する。
 Windows側でのDropboxコピーに失敗した場合も、完成済みのローカル配布物は残る。
 
 ## 運用の選択肢

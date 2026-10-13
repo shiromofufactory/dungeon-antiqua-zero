@@ -15,7 +15,8 @@
 
 Mac配布物はルートの `build.sh` または `npm run build:mac`、Windows配布物は
 `build.bat` または `npm run build:win` で生成する。MacでのWindows版受け取りは
-`npm run receive:win` を使う。モード指定、環境、Dropbox運用は
+`./receive-windows.sh` または `npm run receive:win` を使い、保存・展開完了後に
+受け取ったZIPとチェックサムだけをDropboxから片付ける。モード指定、環境、Dropbox運用は
 [デスクトップビルド](../docs/desktop-build.md) を参照する。
 
 ## 音声変換

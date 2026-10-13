@@ -73,9 +73,9 @@ class WindowsBuildTest(unittest.TestCase):
         with patch.object(builder, "run", side_effect=self.fake_run):
             return builder.build_windows(self.root, mode, sign=sign, dropbox_dir=self.inbox)
 
-    def receive(self, source: Path, mode: str = "demo") -> Path:
+    def receive(self, source: Path, mode: str = "demo", **options: bool) -> Path:
         with patch.object(receiver.subprocess, "run"):
-            return receiver.import_windows_build(self.root, source, mode)
+            return receiver.import_windows_build(self.root, source, mode, **options)
 
     def test_all_modes_build_signed_zip_and_receive_without_loose_pyxapp(self) -> None:
         for mode in MODES:
@@ -262,6 +262,105 @@ class WindowsBuildTest(unittest.TestCase):
                 builder.export_to_dropbox(archive, self.inbox / "demo")
         self.assertEqual(archive.read_bytes(), saved)
         self.assertEqual(set((self.inbox / "demo").iterdir()), previous)
+
+    def test_extract_and_cleanup_only_received_transfer_after_publication(self) -> None:
+        self.build()
+        source, = (self.inbox / "demo").glob("*.zip")
+        saved = source.read_bytes()
+        unrelated = source.parent / "unrelated.txt"
+        unrelated.write_bytes(b"keep")
+        another_mode = self.inbox / "beta"
+        another_mode.mkdir()
+        (another_mode / "another.zip").write_bytes(b"keep")
+        archive = self.receive(source, extract=True, cleanup=True)
+        self.assertEqual(archive.read_bytes(), saved)
+        check_checksum(archive)
+        self.assertTrue((archive.parent / "dungeon-antiqua-zero-demo.exe").is_file())
+        self.assertTrue((archive.parent / "_internal/library.dll").is_file())
+        self.assertFalse(source.exists())
+        self.assertFalse(source.with_suffix(".zip.sha256").exists())
+        self.assertEqual(unrelated.read_bytes(), b"keep")
+        self.assertTrue((another_mode / "another.zip").exists())
+
+    def test_cleanup_does_not_run_on_invalid_checksum_or_source_mismatch(self) -> None:
+        self.build()
+        source, = (self.inbox / "demo").glob("*.zip")
+        checksum = source.with_suffix(".zip.sha256")
+        saved = checksum.read_bytes()
+        checksum.write_text("invalid")
+        with self.assertRaisesRegex(ValueError, "チェックサム"):
+            self.receive(source, cleanup=True)
+        self.assertTrue(source.exists())
+        self.assertTrue(checksum.exists())
+        checksum.write_bytes(saved)
+        (self.app / "main.py").write_text("changed")
+        with self.assertRaisesRegex(ValueError, "現在のapp"):
+            self.receive(source, cleanup=True)
+        self.assertTrue(source.exists())
+        self.assertTrue(checksum.exists())
+
+    def test_cleanup_detects_update_during_import_and_preserves_new_source(self) -> None:
+        self.build()
+        source, = (self.inbox / "demo").glob("*.zip")
+        saved_zip = source.read_bytes()
+        saved_checksum = source.with_suffix(".zip.sha256").read_bytes()
+        real_publish = receiver.publish_directory
+
+        for update in ("zip", "checksum"):
+            with self.subTest(update=update):
+                source.write_bytes(saved_zip)
+                source.with_suffix(".zip.sha256").write_bytes(saved_checksum)
+
+                def publish_and_update(staged: Path, output: Path) -> None:
+                    real_publish(staged, output)
+                    target = source if update == "zip" else source.with_suffix(".zip.sha256")
+                    target.write_bytes(target.read_bytes() + b"updated")
+
+                with patch.object(receiver, "publish_directory", side_effect=publish_and_update):
+                    with self.assertRaisesRegex(ValueError, "原本が更新"):
+                        self.receive(source, extract=True, cleanup=True)
+                self.assertTrue(source.exists())
+                self.assertTrue(source.with_suffix(".zip.sha256").exists())
+                self.assertEqual((self.root / "dist/windows/demo/dungeon-antiqua-zero-demo-win.zip").read_bytes(), saved_zip)
+
+    def test_retrieve_historical_build_with_source_differences(self) -> None:
+        self.build()
+        source, = (self.inbox / "demo").glob("*.zip")
+        saved = source.read_bytes()
+        (self.app / "events/messages.json").write_text("new local messages")
+        archive = self.receive(source, extract=True, cleanup=True, require_current_source=False)
+        self.assertEqual(archive.read_bytes(), saved)
+        self.assertEqual((self.app / "events/messages.json").read_text(), "new local messages")
+        self.assertFalse(source.exists())
+
+    def test_failed_extraction_preserves_previous_release_and_dropbox(self) -> None:
+        self.build()
+        source, = (self.inbox / "demo").glob("*.zip")
+        output = self.root / "dist/windows/demo"
+        saved_zip = (output / "dungeon-antiqua-zero-demo-win.zip").read_bytes()
+        with patch.object(zipfile.ZipFile, "extractall", side_effect=OSError("extraction failed")):
+            with self.assertRaisesRegex(OSError, "extraction failed"):
+                self.receive(source, extract=True, cleanup=True)
+        self.assertEqual((output / "dungeon-antiqua-zero-demo-win.zip").read_bytes(), saved_zip)
+        self.assertTrue(source.exists())
+        self.assertTrue(source.with_suffix(".zip.sha256").exists())
+
+    def test_cleanup_removes_only_empty_mode_directory(self) -> None:
+        inbox = self.root / "Dropbox/dungeon-antiqua-zero"
+        with patch.object(builder, "run", side_effect=self.fake_run):
+            builder.build_windows(self.root, "demo", sign=False, dropbox_dir=inbox)
+        source, = (inbox / "demo").glob("*.zip")
+        self.receive(source, cleanup=True)
+        self.assertFalse((inbox / "demo").exists())
+        self.assertTrue(inbox.exists())
+
+    def test_rejects_source_inside_output_without_removing_release(self) -> None:
+        archive = self.build()
+        saved = archive.read_bytes()
+        with self.assertRaisesRegex(ValueError, "保存先dist/windows"):
+            self.receive(archive, cleanup=True)
+        self.assertEqual(archive.read_bytes(), saved)
+        check_checksum(archive)
 
 
 if __name__ == "__main__":

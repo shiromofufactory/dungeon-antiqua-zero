@@ -252,6 +252,8 @@ MENU_INFO_TEXT_KEYS = (
 MENU_CLOSE_GUIDE_TEXT_KEY = "menu.close_guide"
 TREASURE_GOLD_TEXT_KEY = "treasure.found_gold"
 TREASURE_ITEM_TEXT_KEY = "treasure.found_item"
+TREASURE_GOLD_RECEIVED_TEXT_KEY = "treasure.received_gold"
+TREASURE_ITEM_RECEIVED_TEXT_KEY = "treasure.received_item"
 EVENT_ITEM_RECEIVED_TEXT_KEY = "event.received_item"
 TREASURE_CAPACITY_TEXT_KEY = "treasure.capacity_exceeded"
 TREASURE_OPEN_SE_ID = "treasure_open"
@@ -3656,9 +3658,10 @@ class Game:
         if contents is None:
             raise ValueError("treasure contents are missing")
         localizer = Localizer(self.settings.language)
+        opened = status is TreasureOpenStatus.OPENED
         if contents.type == "gold":
-            first_line = self.texts.formatted_text(
-                TREASURE_GOLD_TEXT_KEY,
+            message_lines = self.texts.formatted_lines(
+                TREASURE_GOLD_RECEIVED_TEXT_KEY if opened else TREASURE_GOLD_TEXT_KEY,
                 localizer,
                 {"AMOUNT": format_number(contents.amount)},
             )
@@ -3666,13 +3669,12 @@ class Game:
             if contents.item_key is None:
                 raise ValueError("item treasure key is missing")
             item = self.items[contents.item_key]
-            first_line = self.texts.formatted_text(
-                TREASURE_ITEM_TEXT_KEY,
+            message_lines = self.texts.formatted_lines(
+                TREASURE_ITEM_RECEIVED_TEXT_KEY if opened else TREASURE_ITEM_TEXT_KEY,
                 localizer,
                 {"ITEM": str(item.localized_name(localizer))},
             )
-        opened = status is TreasureOpenStatus.OPENED
-        lines = [first_line]
+        lines = list(message_lines)
         if not opened:
             lines.append(self.texts.text(TREASURE_CAPACITY_TEXT_KEY, localizer))
         else:

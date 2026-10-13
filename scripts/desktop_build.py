@@ -109,7 +109,9 @@ def check_checksum(archive: Path) -> None:
         raise ValueError(f"チェックサムが一致しません。Dropboxの同期完了を確認してください: {archive}")
 
 
-def validate_windows_zip(archive: Path, mode: str, app_root: Path) -> None:
+def validate_windows_zip(
+    archive: Path, mode: str, app_root: Path, *, require_current_source: bool = True,
+) -> list[str]:
     name = app_name(mode)
     with zipfile.ZipFile(archive) as release:
         paths = release.namelist()
@@ -152,9 +154,12 @@ def validate_windows_zip(archive: Path, mode: str, app_root: Path) -> None:
             if not actual or actual != info.get("source_files"):
                 raise ValueError("Windows版のゲームデータとビルド記録が一致しません。")
             expected = source_manifest(app_root)
+            differences = []
             if actual != expected:
                 differences = sorted(k for k in actual.keys() | expected.keys() if actual.get(k) != expected.get(k))
-                raise ValueError("Windows版と現在のappが一致しません:\n- " + "\n- ".join(differences[:20]))
+                if require_current_source:
+                    raise ValueError("Windows版と現在のappが一致しません:\n- " + "\n- ".join(differences[:20]))
+            return differences
 
 
 def publish_directory(staged: Path, output: Path) -> None:

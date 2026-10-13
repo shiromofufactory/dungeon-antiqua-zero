@@ -686,7 +686,7 @@ class GameEventTriggerTest(unittest.TestCase):
         game.settings = Settings()
         game.fonts = Mock()
         game.texts = Mock()
-        game.texts.formatted_text.return_value = "宝箱には　５０Ｇが入っていた！"
+        game.texts.formatted_lines.return_value = ("宝箱から", "５０Ｇを　手に入れた！")
         game.field.facing = Direction.LEFT
 
         with patch("game.play_se") as play_se:
@@ -698,12 +698,12 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertIn(("test_map", "gold_chest"), game.save_data.opened_treasures)
         self.assertEqual(game.field_actors.actor("gold_chest").treasure_frame, 1)
         message_overlay.assert_called_once_with(
-            lines=("宝箱には　５０Ｇが入っていた！",),
+            lines=("宝箱から", "５０Ｇを　手に入れた！"),
             settings=game.settings,
             fonts=game.fonts,
         )
-        game.texts.formatted_text.assert_called_once_with(
-            "treasure.found_gold",
+        game.texts.formatted_lines.assert_called_once_with(
+            "treasure.received_gold",
             ANY,
             {"AMOUNT": "５０"},
         )
@@ -771,7 +771,7 @@ class GameEventTriggerTest(unittest.TestCase):
         game.settings = Settings()
         game.fonts = Mock()
         game.texts = Mock()
-        game.texts.formatted_text.return_value = "宝箱には　５０Ｇが入っていた！"
+        game.texts.formatted_lines.return_value = ("宝箱には　５０Ｇが入っていた！",)
         game.texts.text.return_value = "しかし、これ以上持つことができない"
 
         with patch("game.play_se") as play_se:

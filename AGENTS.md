@@ -136,7 +136,7 @@
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。
 - マップチップエディタのオブジェクト一覧・レイヤー絞り込み・新規作成・並び替えは `node --test tests/test_mapchip_objects.mjs` で回帰検証する。
 - ビルドや配布物の生成は、ユーザーが依頼した範囲でのみ行う。
-- Mac・Windowsビルドのモード埋め込み・ZIP内容・署名の呼び出し・Dropbox受け渡し検証・失敗時の成果物保持は `python3 -B -m unittest tests.test_desktop_build tests.test_windows_build` で検証する。
+- Mac・Windowsビルドのモード埋め込み・ZIP内容・署名の呼び出し・Dropbox受け渡し検証・展開・受け取り後の限定削除と更新検出・失敗時の成果物保持は `python3 -B -m unittest tests.test_desktop_build tests.test_windows_build` で検証する。
 
 ゲーム本体のテスト基盤はまだ確定していない。上記コンテンツ用コマンド以外について、存在しない標準コマンドを仮定しない。実装が追加されたら、このファイルまたは下位の `AGENTS.md` に正式なコマンドを追記する。
 
