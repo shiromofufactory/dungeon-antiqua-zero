@@ -140,12 +140,22 @@ class LocalizationTest(unittest.TestCase):
 
         self.assertFalse(text.prefers_wide_font)
 
-    def test_chinese_display_text_is_not_fullwidth_normalized(self) -> None:
+    def test_chinese_display_text_normalizes_ascii_without_changing_source(self) -> None:
         localizer = Localizer(Language.SIMPLIFIED_CHINESE)
+        record = {"name_zhcn": "Fiora HP 61/61"}
 
+        self.assertEqual(localizer.value(record, "name"), "Fiora HP 61/61")
         self.assertEqual(
-            localizer.text({"name_zhcn": "Fiora"}, "name"),
-            "Fiora",
+            localizer.text(record, "name"),
+            "Ｆｉｏｒａ　ＨＰ　６１／６１",
+        )
+
+    def test_chinese_mixed_text_preserves_cjk_and_display_tags(self) -> None:
+        self.assertEqual(
+            Localizer(Language.SIMPLIFIED_CHINESE).text(
+                {"text_zhcn": "消耗HP 10，造成%FIRE%伤害"}, "text",
+            ),
+            "消耗ＨＰ　１０，造成%FIRE%伤害",
         )
 
 

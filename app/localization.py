@@ -232,7 +232,7 @@ class Localizer:
             self.language is Language.ENGLISH
             and _has_authored_wide_text(value)
         )
-        if self.language is Language.JAPANESE:
+        if self.language in (Language.JAPANESE, Language.SIMPLIFIED_CHINESE):
             return LocalizedText(ascii_to_fullwidth(value))
         if self.language is Language.ENGLISH:
             return normalize_ascii_display_text(

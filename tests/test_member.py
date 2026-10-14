@@ -1424,7 +1424,7 @@ class MemberTest(unittest.TestCase):
             self.texts,
         )
 
-        self.assertEqual(identity.name, "Fiora")
+        self.assertEqual(identity.name, "Ｆｉｏｒａ")
         self.assertEqual(identity.race, "妖精")
         self.assertEqual(identity.gender, "女性")
 

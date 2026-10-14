@@ -375,7 +375,7 @@ class ShopOverlay:
                             count_text,
                             reference_text=format_number(0),
                             reference_x=SHOP_ITEM_COUNT_X,
-                            font=self.localized_texts.font,
+                            font=self.localized_texts,
                         ),
                         y,
                     )
@@ -588,7 +588,7 @@ class ShopOverlay:
         if not total_text:
             raise ShopUiDataError("shop.price_displayが見つかりません")
         quantity = format_number(self.trade_quantity)
-        quantity_width = self.localized_texts.font.text_width(quantity)
+        quantity_width = self.localized_texts.text_width(quantity)
         quantity_x = (
             QUANTITY_NUMBER_RIGHT_X * 4 - quantity_width + 2
         ) // 4

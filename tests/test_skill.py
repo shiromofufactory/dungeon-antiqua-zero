@@ -36,7 +36,7 @@ class SkillTest(unittest.TestCase):
         )
         self.assertEqual(
             self.skill.localized_name(Localizer(Language.SIMPLIFIED_CHINESE)),
-            "Two-Handed",
+            "Ｔｗｏ－Ｈａｎｄｅｄ",
         )
 
     def test_rejects_missing_lookup_key(self) -> None:

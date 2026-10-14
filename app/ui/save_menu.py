@@ -10,7 +10,7 @@ import pyxel
 
 if __package__ == "ui":
     from input import Direction, InputState
-    from localization import Localizer, ascii_to_fullwidth, format_number
+    from localization import LocalizedText, Localizer, ascii_to_fullwidth, format_number
     from member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
     from rendering import MONOCHROME_PALETTE, PaletteShifter
     from resources import FontResources, FontRole, TRANSPARENT_INDEX, play_se
@@ -19,7 +19,7 @@ if __package__ == "ui":
     from text_catalog import TextCatalog
 else:
     from ..input import Direction, InputState
-    from ..localization import Localizer, ascii_to_fullwidth, format_number
+    from ..localization import LocalizedText, Localizer, ascii_to_fullwidth, format_number
     from ..member import BATTLE_PARTY_MEMBER_COUNT, FacePosition
     from ..rendering import MONOCHROME_PALETTE, PaletteShifter
     from ..resources import FontResources, FontRole, TRANSPARENT_INDEX, play_se
@@ -34,6 +34,7 @@ from .shop_party import (
     SHOP_PARTY_FACE_SIZE,
 )
 from .text_layout import right_aligned_grid_x
+from .tagged_text import tagged_text_width
 from .window import (
     DEFAULT_TEXT_COLOR,
     TEXT_GRID_X,
@@ -117,26 +118,35 @@ def save_location_text(
         default=summary.map_id,
     )
     placement = text_factory.create(name, 0, SAVE_SLOT_LOCATION_Y)
-    label_right = slot_label.x * TEXT_GRID_X + slot_label.font.text_width(slot_label.text)
+    label_right = slot_label.x * TEXT_GRID_X + tagged_text_width(
+        slot_label.text, slot_label.font, font_spans=slot_label.font_spans,
+    )
     max_width = SAVE_SLOT_LOCATION_RIGHT_X * TEXT_GRID_X - label_right - 8
-    if placement.font.text_width(placement.text) > max_width:
+    if text_factory.text_width(placement.text) > max_width:
         shortened = placement.text
         suffix = "．．．"
-        while placement.font.text_width(shortened + suffix) > max_width:
+
+        def with_suffix(prefix: str) -> LocalizedText:
+            return LocalizedText(
+                prefix + suffix,
+                prefers_wide_font=getattr(name, "prefers_wide_font", False),
+            )
+
+        while shortened and text_factory.text_width(with_suffix(shortened)) > max_width:
             shortened = shortened[:-1]
-        placement = replace(placement, text=shortened + suffix)
+        placement = text_factory.create(with_suffix(shortened), 0, SAVE_SLOT_LOCATION_Y)
     x = right_aligned_grid_x(
         placement.text,
         reference_text="",
         reference_x=SAVE_SLOT_LOCATION_RIGHT_X,
-        font=placement.font,
+        font=text_factory,
     )
     return replace(
         placement,
         x=x,
         pixel_offset_x=(
             (SAVE_SLOT_LOCATION_RIGHT_X - x) * TEXT_GRID_X
-            - placement.font.text_width(placement.text)
+            - text_factory.text_width(placement.text)
         ),
     )
 

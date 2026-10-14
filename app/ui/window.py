@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 import pyxel
 
@@ -172,6 +172,7 @@ class Window:
         texts: Iterable[WindowText] = (),
         *,
         font: Any | None = None,
+        text_style: Callable[[WindowText], WindowText] | None = None,
         transparent: bool = False,
         thin_frame: bool = False,
         horizontal_navigation: bool = False,
@@ -205,6 +206,7 @@ class Window:
         self.width = width
         self.height = height
         self.font = font
+        self.text_style = text_style
         self.transparent = transparent
         self.thin_frame = thin_frame
         self.horizontal_navigation = horizontal_navigation
@@ -216,6 +218,8 @@ class Window:
         self._state = WindowState.OPEN if opened else WindowState.CLOSED
         self._visible_height = self.pixel_height if opened else 0
         for text in texts:
+            if self.text_style is not None:
+                text = self.text_style(text)
             self._validate_text_position(text)
             self._texts.append(text)
 
@@ -313,6 +317,8 @@ class Window:
             baseline_offset,
             font_spans,
         )
+        if self.text_style is not None:
+            placement = self.text_style(placement)
         self._validate_text_position(placement)
         self._texts.append(placement)
         return placement
@@ -740,10 +746,16 @@ class Window:
 class WindowFactory:
     """Create windows that share one language-specific default font."""
 
-    def __init__(self, default_font: Any) -> None:
+    def __init__(
+        self,
+        default_font: Any,
+        *,
+        text_style: Callable[[WindowText], WindowText] | None = None,
+    ) -> None:
         if default_font is None:
             raise ValueError("default_font must not be None")
         self.default_font = default_font
+        self.text_style = text_style
 
     def create(
         self,
@@ -770,6 +782,7 @@ class WindowFactory:
             height,
             texts,
             font=self.default_font if font is None else font,
+            text_style=self.text_style if font is None else None,
             transparent=transparent,
             thin_frame=thin_frame,
             horizontal_navigation=horizontal_navigation,

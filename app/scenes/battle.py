@@ -1814,7 +1814,15 @@ class BattleScene:
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
-        windows = WindowFactory(fonts.font_for(settings.language))
+        text_factory = LocalizedWindowTextFactory.from_language(fonts, settings.language)
+        windows = WindowFactory(
+            fonts.font_for(settings.language),
+            text_style=(
+                text_factory.apply
+                if settings.language is Language.SIMPLIFIED_CHINESE
+                else None
+            ),
+        )
         return cls(
             settings=settings,
             palette_shifter=palette_shifter,
@@ -6146,15 +6154,19 @@ class BattleScene:
         battle_popup = getattr(self, "battle_popup", None)
         if window is None or battle_popup is None:
             return
-        text_width = tagged_text_width(message, window.font)
+        window.clear_texts()
+        placement = window.add_text(message, *BATTLE_ACTION_POPUP_TEXT_POSITION)
+        text_width = tagged_text_width(
+            placement.text,
+            placement.font if placement.font is not None else window.font,
+            font_spans=placement.font_spans,
+        )
         window.width = min(
             SCREEN_WIDTH // TEXT_GRID_X,
             BATTLE_ACTION_POPUP_HORIZONTAL_PADDING_GRID
             + (text_width + TEXT_GRID_X - 1) // TEXT_GRID_X,
         )
         window.x = 0 if align_left else SCREEN_WIDTH // TEXT_GRID_X - window.width
-        window.clear_texts()
-        window.add_text(message, *BATTLE_ACTION_POPUP_TEXT_POSITION)
         battle_popup.show(frame_count)
 
     def _spell_effect_anchor(self, target_side: str, index: int) -> tuple[int, int]:

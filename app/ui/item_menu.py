@@ -331,7 +331,7 @@ class ItemMenuOverlay:
                             count_text,
                             reference_text=format_number(0),
                             reference_x=ITEM_COUNT_X,
-                            font=self.localized_texts.font,
+                            font=self.localized_texts,
                         ),
                         y,
                     )

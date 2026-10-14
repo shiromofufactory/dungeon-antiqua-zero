@@ -680,9 +680,9 @@ class StatusMenuTest(unittest.TestCase):
         self.assertEqual(texts[(6, 38)], "技能：")
         self.assertEqual(texts[(8, 41)], "")
         self.assertEqual(texts[(8, 44)], "")
-        self.assertEqual(texts[(30, 8)], "右手：%KNIFE%DAGGER")
+        self.assertEqual(texts[(30, 8)], "右手：%KNIFE%ＤＡＧＧＥＲ")
         self.assertEqual(texts[(30, 11)], "左手：")
-        self.assertEqual(texts[(30, 14)], "身体：ROBE")
+        self.assertEqual(texts[(30, 14)], "身体：ＲＯＢＥ")
         self.assertEqual(texts[(30, 17)], "头部：")
         arm = mock.member.equipment.item_at(EquipmentSlot.ARM)
         self.assertEqual(

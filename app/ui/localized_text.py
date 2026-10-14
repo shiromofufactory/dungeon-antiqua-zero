@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import re
 from typing import Any
 
 if __package__ == "ui":
@@ -19,7 +20,12 @@ from .window import (
     DEFAULT_TEXT_SHADOW_COLOR,
     WindowText,
 )
-from .tagged_text import TextFontSpan
+from .tagged_text import TextFontSpan, tagged_text_width
+
+
+_JAPANESE_GLYPH_PATTERN = re.compile(
+    r"%[A-Z][A-Z0-9_]*%|[ -~\u3000\uFF01-\uFF5E←→▼]+"
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,8 @@ class LocalizedWindowTextFactory:
     normalize_ascii: bool = False
     narrow_font: Any | None = None
     narrow_baseline_offset: int = 0
+    japanese_font: Any | None = None
+    japanese_baseline_offset: int = 0
 
     def __post_init__(self) -> None:
         if self.font is None:
@@ -55,6 +63,8 @@ class LocalizedWindowTextFactory:
             raise TypeError(
                 "narrow text baseline offset must be an integer"
             )
+        if not isinstance(self.japanese_baseline_offset, int):
+            raise TypeError("Japanese text baseline offset must be an integer")
 
     @classmethod
     def from_language(
@@ -83,6 +93,14 @@ class LocalizedWindowTextFactory:
                 font,
                 baseline_offset,
                 normalize_ascii=True,
+            )
+        if language is Language.SIMPLIFIED_CHINESE:
+            return cls(
+                font,
+                baseline_offset,
+                normalize_ascii=True,
+                japanese_font=font_for(Language.JAPANESE),
+                japanese_baseline_offset=baseline_offset_for(Language.JAPANESE),
             )
         if language is not Language.ENGLISH:
             return cls(font, baseline_offset)
@@ -113,7 +131,18 @@ class LocalizedWindowTextFactory:
         if self.normalize_ascii and not isinstance(text, LocalizedText):
             text = normalize_ascii_display_text(text)
         font_spans: tuple[TextFontSpan, ...] = ()
-        if (
+        if self.japanese_font is not None:
+            font_spans = tuple(
+                TextFontSpan(
+                    match.start(),
+                    match.end(),
+                    self.japanese_font,
+                    self.japanese_baseline_offset,
+                )
+                for match in _JAPANESE_GLYPH_PATTERN.finditer(text)
+                if not match.group().startswith("%")
+            )
+        elif (
             isinstance(text, LocalizedText)
             and text.narrow_spans
             and self.narrow_font is not None
@@ -141,4 +170,32 @@ class LocalizedWindowTextFactory:
                 else self.baseline_offset
             ),
             font_spans=font_spans,
+        )
+
+    def apply(self, placement: WindowText) -> WindowText:
+        """Style default-font placements while retaining explicit font overrides."""
+
+        if placement.font is not None:
+            return placement
+        styled = self.create(
+            placement.text,
+            placement.x,
+            placement.y,
+            color=placement.color,
+            shadow_color=placement.shadow_color,
+        )
+        return replace(
+            placement,
+            text=styled.text,
+            font=styled.font,
+            baseline_offset=styled.baseline_offset,
+            font_spans=styled.font_spans,
+        )
+
+    def text_width(self, text: str) -> int:
+        """Measure the same glyphs and icons that ``create`` will place."""
+
+        placement = self.create(text, 0, 0)
+        return tagged_text_width(
+            placement.text, placement.font, font_spans=placement.font_spans,
         )

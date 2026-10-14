@@ -205,6 +205,7 @@ from ui import (
     format_play_time,
     input_icon_tag,
     pad,
+    tagged_text_width,
 )
 from ui.formation_arrow import (
     FORMATION_ARROW_BANK,
@@ -1686,10 +1687,8 @@ class Game:
         max_y = max(cell.y for cell in site.entrance_cells)
         left = min_x * tile_size
         right = (max_x + 1) * tile_size
-        text_width = (
-            text.font.text_width(text.text)
-            if text.font is not None
-            else pyxel.FONT_WIDTH * len(text.text)
+        text_width = tagged_text_width(
+            text.text, text.font, font_spans=text.font_spans,
         )
         x = (left + right - text_width) // 2 - camera_x
         line_height = self.fonts.line_height_for(

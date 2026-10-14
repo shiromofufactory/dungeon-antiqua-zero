@@ -270,8 +270,8 @@ class EquipmentMenuTest(unittest.TestCase):
             ),
             (
                 Language.SIMPLIFIED_CHINESE,
-                "右手：%KNIFE%DAGGER",
-                "身体：ROBE",
+                "右手：%KNIFE%ＤＡＧＧＥＲ",
+                "身体：ＲＯＢＥ",
                 "双手：",
             ),
         ):
