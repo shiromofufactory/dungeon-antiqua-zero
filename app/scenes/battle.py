@@ -126,7 +126,6 @@ from resistance import ResistanceType, resistances_from_tolerance
 from input import Direction, InputAction, InputDevice, InputState
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
-    DIMMED_PALETTE,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_PALETTE_BASE_RATE,
     SPELL_EFFECT_FLASH_PALETTE,
@@ -220,13 +219,9 @@ ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 FADE_ESCAPE_BGM_FADE_FRAME_COUNT = DEFAULT_FADE_FRAME_COUNT
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
-# Pyxel can remap only four 16-color palette blocks. The battle scene does
-# not use its default dimmed block, so the active-member pulse owns that slot.
-ACTIVE_PARTY_PULSE_PALETTE = DIMMED_PALETTE
-ACTIVE_PARTY_PULSE_TARGET_COLOR = 0xFFFFFF
-ACTIVE_PARTY_PULSE_MIN_BASE_RATE = 0.5
-ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT = 90
-ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT // 2
+ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT = 30
+ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT = 15
+ACTIVE_PARTY_CURSOR_OFFSETS = ((-8, 0), (16, 0), (-8, 24), (16, 24))
 MONSTER_POSITIONS = ((4, 48), (4, 112), (68, 16), (68, 80), (68, 144))
 TALL_FIRST_MONSTER_SIZE = (64, 96)
 TALL_FIRST_MONSTER_SLOT_INDEXES = (0, 2, 3, 4)
@@ -2197,7 +2192,7 @@ class BattleScene:
         self.phase = BattlePhase.INITIAL
         self.result: BattleResult | None = None
         self.active_party_index: int | None = 0
-        self.active_party_pulse_frame = 0
+        self.active_party_cursor_frame = 0
         self.blinking_monster_index: int | None = None
         self.monster_blink_frames_remaining = 0
         self.monster_confused_action_pending = False
@@ -2482,8 +2477,8 @@ class BattleScene:
         self._update_healing_popups()
         self._update_spell_damage_popups()
         self._update_affinity_popups()
-        if hasattr(self, "active_party_pulse_frame"):
-            self._update_active_party_pulse()
+        if hasattr(self, "active_party_cursor_frame"):
+            self._update_active_party_cursor()
         if getattr(self, "auto_battle_active", False) and input_state.cancel.triggered:
             self._cancel_auto_battle()
             return
@@ -2763,8 +2758,7 @@ class BattleScene:
         self.phase = BattlePhase.ENTRANCE
         self.result = None
         self.active_party_index = None
-        self.active_party_pulse_frame = 0
-        self._sync_active_party_pulse_palette()
+        self.active_party_cursor_frame = 0
         self.blinking_monster_index = None
         self.monster_blink_frames_remaining = 0
         self.monster_attack_target_index = None
@@ -7795,9 +7789,8 @@ class BattleScene:
         self.action_gauge_adjustment = 0.0
         self.phase = BattlePhase.TIMELINE
         self.active_party_index = None
-        if hasattr(self, "active_party_pulse_frame"):
-            self.active_party_pulse_frame = 0
-            self._sync_active_party_pulse_palette()
+        if hasattr(self, "active_party_cursor_frame"):
+            self.active_party_cursor_frame = 0
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.timeline_animation_phase = TimelineAnimationPhase.DROP
@@ -7816,17 +7809,16 @@ class BattleScene:
         self.timeline_advance = remove_timeline_head(self._timeline_order)
         self.phase = BattlePhase.TIMELINE
         self.active_party_index = None
-        if hasattr(self, "active_party_pulse_frame"):
-            self.active_party_pulse_frame = 0
-            self._sync_active_party_pulse_palette()
+        if hasattr(self, "active_party_cursor_frame"):
+            self.active_party_cursor_frame = 0
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.timeline_animation_phase = TimelineAnimationPhase.DROP
         self.timeline_animation_frame = 0
         self._refresh_party_text_colors()
 
-    def _active_party_pulse_is_visible(self) -> bool:
-        """Return whether the current actor's palette pulse should be drawn."""
+    def _active_party_cursor_is_visible(self) -> bool:
+        """Return whether command input is pending for the current actor."""
 
         return (
             self.phase
@@ -7841,31 +7833,15 @@ class BattleScene:
             and getattr(self, "active_party_index", None) is not None
         )
 
-    def _update_active_party_pulse(self) -> None:
-        """Advance the current actor's whiteward palette pulse."""
+    def _update_active_party_cursor(self) -> None:
+        """Advance the current actor's blinking frame cursor."""
 
-        if self._active_party_pulse_is_visible():
-            self.active_party_pulse_frame = (
-                self.active_party_pulse_frame + 1
-            ) % ACTIVE_PARTY_PULSE_CYCLE_FRAME_COUNT
+        if self._active_party_cursor_is_visible():
+            self.active_party_cursor_frame = (
+                self.active_party_cursor_frame + 1
+            ) % ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT
         else:
-            self.active_party_pulse_frame = 0
-        self._sync_active_party_pulse_palette()
-
-    def _sync_active_party_pulse_palette(self) -> None:
-        """Apply the pulse frame as a scoped palette variant."""
-
-        half_cycle = ACTIVE_PARTY_PULSE_HALF_CYCLE_FRAME_COUNT
-        distance_from_peak = abs(half_cycle - self.active_party_pulse_frame)
-        progress_to_normal = distance_from_peak / half_cycle
-        base_rate = ACTIVE_PARTY_PULSE_MIN_BASE_RATE + (
-            (1.0 - ACTIVE_PARTY_PULSE_MIN_BASE_RATE) * progress_to_normal
-        )
-        self.palette_shifter.define_mix(
-            ACTIVE_PARTY_PULSE_PALETTE,
-            base_rate=base_rate,
-            target_color=ACTIVE_PARTY_PULSE_TARGET_COLOR,
-        )
+            self.active_party_cursor_frame = 0
 
     def _update_timeline_animation(self) -> None:
         self.command_window.update(None)
@@ -10776,22 +10752,6 @@ class BattleScene:
                     ),
                 )
                 continue
-            if (
-                self._active_party_pulse_is_visible()
-                and index == self.active_party_index
-            ):
-                with self.palette_shifter.shifted(ACTIVE_PARTY_PULSE_PALETTE):
-                    pyxel.blt(
-                        x,
-                        y,
-                        self.character_sprites,
-                        sprite_source_x,
-                        visual.battle_sprite * 32,
-                        width,
-                        32,
-                        TRANSPARENT_INDEX,
-                    )
-                continue
             pyxel.blt(
                 x,
                 y,
@@ -10803,6 +10763,36 @@ class BattleScene:
                 TRANSPARENT_INDEX,
             )
             self._draw_focus_effect(index, x, y, foreground=True)
+        self._draw_active_party_cursor()
+
+    def _draw_active_party_cursor(self) -> None:
+        """Frame the acting member at its position before floating is applied."""
+
+        if (
+            not self._active_party_cursor_is_visible()
+            or self.active_party_index in getattr(self, "hidden_party_indexes", ())
+            or getattr(self, "active_party_cursor_frame", 0)
+            >= ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT
+        ):
+            return
+        position = self._party_draw_position(self.active_party_index)
+        if position is None:
+            return
+        x, y = position
+        for (source_x, source_y, _, _), (offset_x, offset_y) in zip(
+            AIM_RETICLE_CORNER_SOURCES,
+            ACTIVE_PARTY_CURSOR_OFFSETS,
+        ):
+            pyxel.blt(
+                x + offset_x,
+                y + offset_y,
+                0,
+                source_x,
+                source_y,
+                AIM_RETICLE_CORNER_SIZE,
+                AIM_RETICLE_CORNER_SIZE,
+                TRANSPARENT_INDEX,
+            )
 
     def _draw_focus_effect(
         self,
