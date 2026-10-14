@@ -126,6 +126,7 @@ from resistance import ResistanceType, resistances_from_tolerance
 from input import Direction, InputAction, InputDevice, InputState
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
+    DIMMED_PALETTE,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_PALETTE_BASE_RATE,
     SPELL_EFFECT_FLASH_PALETTE,
@@ -219,8 +220,12 @@ ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
 FADE_ESCAPE_BGM_FADE_FRAME_COUNT = DEFAULT_FADE_FRAME_COUNT
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
-ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT = 30
-ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT = 15
+# Reuse the battle's otherwise unused dimmed block, as the former actor pulse did.
+ACTIVE_PARTY_CURSOR_PALETTE = DIMMED_PALETTE
+ACTIVE_PARTY_CURSOR_TARGET_COLOR = 0xFFFFFF
+ACTIVE_PARTY_CURSOR_MIN_BASE_RATE = 0.5
+ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT = 90
+ACTIVE_PARTY_CURSOR_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT // 2
 ACTIVE_PARTY_CURSOR_OFFSETS = ((-8, 0), (16, 0), (-8, 24), (16, 24))
 MONSTER_POSITIONS = ((4, 48), (4, 112), (68, 16), (68, 80), (68, 144))
 TALL_FIRST_MONSTER_SIZE = (64, 96)
@@ -2759,6 +2764,7 @@ class BattleScene:
         self.result = None
         self.active_party_index = None
         self.active_party_cursor_frame = 0
+        self._sync_active_party_cursor_palette()
         self.blinking_monster_index = None
         self.monster_blink_frames_remaining = 0
         self.monster_attack_target_index = None
@@ -7791,6 +7797,7 @@ class BattleScene:
         self.active_party_index = None
         if hasattr(self, "active_party_cursor_frame"):
             self.active_party_cursor_frame = 0
+            self._sync_active_party_cursor_palette()
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.timeline_animation_phase = TimelineAnimationPhase.DROP
@@ -7811,6 +7818,7 @@ class BattleScene:
         self.active_party_index = None
         if hasattr(self, "active_party_cursor_frame"):
             self.active_party_cursor_frame = 0
+            self._sync_active_party_cursor_palette()
         self.command_cursor.active = False
         self.command_window.close_immediately()
         self.timeline_animation_phase = TimelineAnimationPhase.DROP
@@ -7834,7 +7842,7 @@ class BattleScene:
         )
 
     def _update_active_party_cursor(self) -> None:
-        """Advance the current actor's blinking frame cursor."""
+        """Advance the cursor's continuous whiteward palette pulse."""
 
         if self._active_party_cursor_is_visible():
             self.active_party_cursor_frame = (
@@ -7842,6 +7850,22 @@ class BattleScene:
             ) % ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT
         else:
             self.active_party_cursor_frame = 0
+        self._sync_active_party_cursor_palette()
+
+    def _sync_active_party_cursor_palette(self) -> None:
+        """Use the former actor pulse's timing and white mix for the cursor."""
+
+        half_cycle = ACTIVE_PARTY_CURSOR_HALF_CYCLE_FRAME_COUNT
+        distance_from_peak = abs(half_cycle - self.active_party_cursor_frame)
+        progress_to_normal = distance_from_peak / half_cycle
+        base_rate = ACTIVE_PARTY_CURSOR_MIN_BASE_RATE + (
+            (1.0 - ACTIVE_PARTY_CURSOR_MIN_BASE_RATE) * progress_to_normal
+        )
+        self.palette_shifter.define_mix(
+            ACTIVE_PARTY_CURSOR_PALETTE,
+            base_rate=base_rate,
+            target_color=ACTIVE_PARTY_CURSOR_TARGET_COLOR,
+        )
 
     def _update_timeline_animation(self) -> None:
         self.command_window.update(None)
@@ -10771,28 +10795,27 @@ class BattleScene:
         if (
             not self._active_party_cursor_is_visible()
             or self.active_party_index in getattr(self, "hidden_party_indexes", ())
-            or getattr(self, "active_party_cursor_frame", 0)
-            >= ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT
         ):
             return
         position = self._party_draw_position(self.active_party_index)
         if position is None:
             return
         x, y = position
-        for (source_x, source_y, _, _), (offset_x, offset_y) in zip(
-            AIM_RETICLE_CORNER_SOURCES,
-            ACTIVE_PARTY_CURSOR_OFFSETS,
-        ):
-            pyxel.blt(
-                x + offset_x,
-                y + offset_y,
-                0,
-                source_x,
-                source_y,
-                AIM_RETICLE_CORNER_SIZE,
-                AIM_RETICLE_CORNER_SIZE,
-                TRANSPARENT_INDEX,
-            )
+        with self.palette_shifter.shifted(ACTIVE_PARTY_CURSOR_PALETTE):
+            for (source_x, source_y, _, _), (offset_x, offset_y) in zip(
+                AIM_RETICLE_CORNER_SOURCES,
+                ACTIVE_PARTY_CURSOR_OFFSETS,
+            ):
+                pyxel.blt(
+                    x + offset_x,
+                    y + offset_y,
+                    0,
+                    source_x,
+                    source_y,
+                    AIM_RETICLE_CORNER_SIZE,
+                    AIM_RETICLE_CORNER_SIZE,
+                    TRANSPARENT_INDEX,
+                )
 
     def _draw_focus_effect(
         self,

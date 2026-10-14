@@ -52,7 +52,8 @@ from tools.screen_mocks.battle import (
     BATTLE_MOCK_PARTY_CHARACTER_KEYS,
     BATTLE_TEST_PARTY,
     ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT,
-    ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT,
+    ACTIVE_PARTY_CURSOR_PALETTE,
+    ACTIVE_PARTY_CURSOR_TARGET_COLOR,
     COMMAND_GUIDE_DELAY_FRAME_COUNT,
     COMMAND_GUIDE_FIRST_Y,
     COMMAND_GUIDE_LINE_SPACING,
@@ -917,6 +918,11 @@ class BattleScreenMockTest(unittest.TestCase):
                     UNSELECTABLE_TARGET_PALETTE,
                     base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
                     target_color=0x858585,
+                ),
+                call(
+                    ACTIVE_PARTY_CURSOR_PALETTE,
+                    base_rate=1.0,
+                    target_color=ACTIVE_PARTY_CURSOR_TARGET_COLOR,
                 ),
             ],
         )
@@ -7984,6 +7990,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.character_sprites = object()
         mock.phase = BattleMockPhase.COMMAND
         mock.palette_shifter = Mock()
+        mock.palette_shifter.shifted.side_effect = lambda _name: nullcontext()
 
         for offset in (0, 2):
             with self.subTest(floating_offset=offset):
@@ -7991,7 +7998,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
                     mock._draw_party()
 
-                mock.palette_shifter.shifted.assert_not_called()
+                mock.palette_shifter.shifted.assert_called_with(ACTIVE_PARTY_CURSOR_PALETTE)
                 self.assertEqual(blt.call_args_list, [
                     _character_shadow_call(156, 80),
                     call(156, 64 - offset, mock.character_sprites, 0, 0, 16, 32, 1),
@@ -8003,26 +8010,38 @@ class BattleScreenMockTest(unittest.TestCase):
                     call(176, 116, 0, 8, 136, 8, 8, 1),
                 ])
 
-    def test_active_party_cursor_blinks_and_resets_after_input(self) -> None:
+    def test_active_party_cursor_pulses_without_disappearing_and_resets_after_input(
+        self,
+    ) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.active_party_index = 0
         mock.active_party_cursor_frame = 0
         mock.phase = BattleMockPhase.COMMAND
         mock._party_draw_position = Mock(return_value=(156, 64))
+        colors = [0x000000, 0xFF0080, 0x888888]
+        mock.palette_shifter = PaletteShifter(colors=colors, remap=Mock())
+        mock._sync_active_party_cursor_palette()
+        cursor_colors = []
 
         for frame in range(ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT):
             with self.subTest(frame=frame):
                 with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
                     mock._draw_active_party_cursor()
-                self.assertEqual(
-                    blt.call_count,
-                    4 if frame < ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT else 0,
-                )
+                self.assertEqual(blt.call_count, 4)
+                cursor_colors.append(colors[-1])
                 self.assertEqual(mock.active_party_cursor_frame, frame)
                 mock._update_active_party_cursor()
         self.assertEqual(mock.active_party_cursor_frame, 0)
 
-        mock.active_party_cursor_frame = ACTIVE_PARTY_CURSOR_VISIBLE_FRAME_COUNT
+        self.assertEqual(cursor_colors[0], 0x888888)
+        self.assertEqual(cursor_colors[ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT // 2], 0xC3C3C3)
+        self.assertLess(cursor_colors[0], cursor_colors[22])
+        self.assertLess(cursor_colors[22], cursor_colors[45])
+        self.assertEqual(cursor_colors[22], cursor_colors[-22])
+        self.assertEqual(colors[-1], 0x888888)
+        self.assertEqual(colors[:3], [0x000000, 0xFF0080, 0x888888])
+
+        mock.active_party_cursor_frame = ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT // 2
         mock.phase = BattleMockPhase.TIMELINE
         mock._update_active_party_cursor()
         self.assertEqual(mock.active_party_cursor_frame, 0)
