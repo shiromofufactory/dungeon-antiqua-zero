@@ -14,6 +14,7 @@ test("trigger offsets remain editable with Shift and left click", () => {
     state,
     mapCanvas: { addEventListener: (_type, callback) => { pointerDown = callback; } },
     mapCellFromPointer: () => [3, 4],
+    rememberMapPointer() {},
     currentTrigger: () => ({ id: "trigger_1" }),
     toggleTriggerOffset: (cell) => calls.push(["offset", ...cell]),
     beginBulkDrag: () => { assert.fail("Shift click should edit an offset before starting a drag"); },

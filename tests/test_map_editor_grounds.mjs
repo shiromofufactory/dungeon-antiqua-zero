@@ -32,6 +32,7 @@ function editor(baseGroundId = "ground", size = [16, 15]) {
   for (const name of [
     "changeSnapshot", "restoreChangeSnapshot", "beginChange", "undo", "redo", "normalizedCellRect",
     "paintGround", "paintGroundRectangle", "beginGroundRectangle", "updateGroundRectangle", "finishGroundRectangle",
+    "rememberMapPointer", "stopMapAutoScroll", "updateMapPointer", "cancelMapPointer",
   ]) {
     const start = source.indexOf(`function ${name}(`);
     const next = source.slice(start + 1).search(/\n(?:async )?function /);

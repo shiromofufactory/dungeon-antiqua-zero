@@ -41,7 +41,7 @@ const state = {
   future: [],
   tab: "ground",
   groundId: null,
-  groundTool: "brush",
+  groundTool: "rectangle",
   objectId: null,
   objectLayer: "object_y_sorted",
   selectedInstanceId: null,
@@ -65,6 +65,8 @@ const state = {
   animationStartedAt: performance.now(),
   pointerStroke: null,
   pointerDrag: null,
+  dragPointer: null,
+  dragScrollTime: null,
   groundPaintRect: null,
   hoveredCell: null,
   resolveTimer: null,
@@ -301,6 +303,13 @@ function saveLastMapId(mapId = state.data?.map_id) {
 
 function applyDocumentPayload(payload) {
   window.clearTimeout(state.resolveTimer);
+  stopMapAutoScroll();
+  if (state.tileset?.tileset_id !== payload.tileset.tileset_id) {
+    state.groundId = null;
+    state.objectId = null;
+  }
+  state.pointerDrag = null;
+  state.pointerStroke = null;
   state.resolveRevision += 1;
   state.data = payload.data;
   state.tileset = payload.tileset;
@@ -318,8 +327,6 @@ function applyDocumentPayload(payload) {
   state.dirty = Boolean(payload.is_new || payload.dirty);
   state.history = [];
   state.future = [];
-  state.groundId = state.tileset.grounds[0]?.id || null;
-  state.objectId = state.tileset.objects[0]?.id || null;
   state.selectedInstanceId = null;
   state.selectedSiteId = null;
   state.selectedArrivalId = null;
@@ -329,7 +336,6 @@ function applyDocumentPayload(payload) {
   state.selectedTriggerId = null;
   state.bulkSelection = [];
   state.selectionRect = null;
-  state.groundTool = "brush";
   state.groundPaintRect = null;
   state.hoveredCell = null;
   state.zoom = 2;
@@ -1534,7 +1540,8 @@ function drawMap(now) {
 }
 
 function animationLoop(now) {
-  if (!state.paused) drawMap(now);
+  const scrolled = updateMapAutoScroll(now);
+  if (!state.paused || scrolled) drawMap(now);
   requestAnimationFrame(animationLoop);
 }
 
@@ -1566,14 +1573,115 @@ function updateToolStatus() {
   }
 }
 
-function mapCellFromPointer(event) {
+function mapScrollBounds() {
+  const scroll = byId("map-scroll");
+  const rect = scroll.getBoundingClientRect();
+  const left = rect.left + scroll.clientLeft;
+  const top = rect.top + scroll.clientTop;
+  return { left, top, right: left + scroll.clientWidth, bottom: top + scroll.clientHeight };
+}
+
+function mapCellFromPointer(event, clampToViewport = false) {
   const canvas = byId("map-canvas");
   const rect = canvas.getBoundingClientRect();
   const scale = CELL_SIZE * state.zoom;
-  const x = Math.floor((event.clientX - rect.left) * canvas.width / rect.width / scale);
-  const y = Math.floor((event.clientY - rect.top) * canvas.height / rect.height / scale);
+  let { clientX, clientY } = event;
+  if (clampToViewport) {
+    const bounds = mapScrollBounds();
+    clientX = Math.min(Math.max(clientX, bounds.left), bounds.right - 1);
+    clientY = Math.min(Math.max(clientY, bounds.top), bounds.bottom - 1);
+  }
+  let x = Math.floor((clientX - rect.left) * canvas.width / rect.width / scale);
+  let y = Math.floor((clientY - rect.top) * canvas.height / rect.height / scale);
+  if (clampToViewport) {
+    x = Math.min(Math.max(x, 0), state.data.size[0] - 1);
+    y = Math.min(Math.max(y, 0), state.data.size[1] - 1);
+  }
   if (x < 0 || y < 0 || x >= state.data.size[0] || y >= state.data.size[1]) return null;
   return [x, y];
+}
+
+function rememberMapPointer(event) {
+  state.dragPointer = { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId };
+}
+
+function stopMapAutoScroll() {
+  state.dragPointer = null;
+  state.dragScrollTime = null;
+}
+
+function mapDragScrollAmount(position, start, end, elapsed) {
+  const direction = position < start ? -1 : position >= end ? 1 : 0;
+  if (!direction) return 0;
+  const distance = direction < 0 ? start - position : position - end;
+  const speed = Math.min(720, 180 + distance * 6);
+  return direction * Math.min(CELL_SIZE * state.zoom, speed * elapsed / 1000);
+}
+
+function updateMapAutoScroll(now) {
+  const drag = state.pointerDrag || state.pointerStroke;
+  if (!drag || !state.dragPointer || drag.pointerId !== state.dragPointer.pointerId) {
+    stopMapAutoScroll();
+    return;
+  }
+  const elapsed = Math.min(50, Math.max(0, now - (state.dragScrollTime ?? now)));
+  state.dragScrollTime = now;
+  const bounds = mapScrollBounds();
+  const dx = mapDragScrollAmount(state.dragPointer.clientX, bounds.left, bounds.right, elapsed);
+  const dy = mapDragScrollAmount(state.dragPointer.clientY, bounds.top, bounds.bottom, elapsed);
+  if (!dx && !dy) return;
+  const scroll = byId("map-scroll");
+  const previousLeft = scroll.scrollLeft;
+  const previousTop = scroll.scrollTop;
+  scroll.scrollLeft += dx;
+  scroll.scrollTop += dy;
+  if (scroll.scrollLeft !== previousLeft || scroll.scrollTop !== previousTop) {
+    updateMapPointer(state.dragPointer);
+    return true;
+  }
+}
+
+function updateMapPointer(event) {
+  const dragging = Boolean(state.pointerDrag || state.pointerStroke);
+  const drag = state.pointerDrag || state.pointerStroke;
+  if (drag && drag.pointerId !== event.pointerId) return;
+  if (dragging) rememberMapPointer(event);
+  const cell = mapCellFromPointer(event, dragging);
+  byId("cursor-status").textContent = cell ? `セル ${cell[0]}, ${cell[1]}` : "セル —";
+  state.hoveredCell = cell ? [...cell] : null;
+  if (cell && state.pointerDrag) {
+    if (state.pointerDrag.kind === "object") dragObjectTo(cell);
+    else if (state.pointerDrag.kind === "site_anchor") dragSiteAnchorTo(cell);
+    else if (state.pointerDrag.kind === "range_selection") updateRangeSelection(event, cell);
+    else if (state.pointerDrag.kind === "bulk") dragBulkTo(cell);
+    else if (state.pointerDrag.kind === "single_selection") dragBulkTo(cell);
+    else if (state.pointerDrag.kind === "ground_rectangle") updateGroundRectangle(cell);
+    return;
+  }
+  if (!state.pointerStroke) drawMap(performance.now());
+  if (!cell || !state.pointerStroke || state.pointerStroke.last === cell.join(",")) return;
+  state.pointerStroke.last = cell.join(",");
+  if (paintGround(...cell)) {
+    state.pointerStroke.changed = true;
+    state.dirty = true;
+    scheduleResolution();
+    updateSaveState();
+  }
+}
+
+function cancelMapPointer(event) {
+  const drag = state.pointerDrag || state.pointerStroke;
+  if (drag && event?.pointerId !== undefined && drag.pointerId !== event.pointerId) return;
+  stopMapAutoScroll();
+  if (!state.pointerStroke && !state.pointerDrag) return;
+  if (state.pointerStroke && !state.pointerStroke.changed) state.history.pop();
+  if (state.pointerDrag?.kind === "ground_rectangle") state.history.pop();
+  else if (state.pointerDrag && state.pointerDrag.kind !== "range_selection" && !state.pointerDrag.changed) state.history.pop();
+  if (state.pointerDrag?.kind === "range_selection") state.selectionRect = null;
+  state.pointerStroke = null;
+  state.pointerDrag = null;
+  state.groundPaintRect = null;
+  renderAll();
 }
 
 function normalizedCellRect(start, end) {
@@ -3070,8 +3178,10 @@ byId("animation-toggle").addEventListener("click", () => {
 
 const mapCanvas = byId("map-canvas");
 mapCanvas.addEventListener("pointerdown", (event) => {
+  if (state.pointerDrag || state.pointerStroke) return;
   const cell = mapCellFromPointer(event);
   if (!cell) return;
+  rememberMapPointer(event);
   state.hoveredCell = [...cell];
   if (event.button === 2) {
     event.preventDefault();
@@ -3106,30 +3216,12 @@ mapCanvas.addEventListener("pointerdown", (event) => {
   } else if (state.tab === "event") handleEventCell(cell);
   else if (!beginSiteAnchorDrag(event, cell)) handleTravelCell(cell);
 });
-mapCanvas.addEventListener("pointermove", (event) => {
-  const cell = mapCellFromPointer(event);
-  byId("cursor-status").textContent = cell ? `セル ${cell[0]}, ${cell[1]}` : "セル —";
-  state.hoveredCell = cell ? [...cell] : null;
-  if (cell && state.pointerDrag) {
-    if (state.pointerDrag.kind === "object") dragObjectTo(cell);
-    else if (state.pointerDrag.kind === "site_anchor") dragSiteAnchorTo(cell);
-    else if (state.pointerDrag.kind === "range_selection") updateRangeSelection(event, cell);
-    else if (state.pointerDrag.kind === "bulk") dragBulkTo(cell);
-    else if (state.pointerDrag.kind === "single_selection") dragBulkTo(cell);
-    else if (state.pointerDrag.kind === "ground_rectangle") updateGroundRectangle(cell);
-    return;
-  }
-  if (!state.pointerStroke) drawMap(performance.now());
-  if (!cell || !state.pointerStroke || state.pointerStroke.last === cell.join(",")) return;
-  state.pointerStroke.last = cell.join(",");
-  if (paintGround(...cell)) {
-    state.pointerStroke.changed = true;
-    state.dirty = true;
-    scheduleResolution();
-    updateSaveState();
-  }
-});
+mapCanvas.addEventListener("pointermove", updateMapPointer);
 mapCanvas.addEventListener("pointerup", (event) => {
+  const drag = state.pointerDrag || state.pointerStroke;
+  if (drag && drag.pointerId !== event.pointerId) return;
+  if (drag) updateMapPointer(event);
+  stopMapAutoScroll();
   if (state.pointerDrag) {
     if (state.pointerDrag.kind === "ground_rectangle") {
       finishGroundRectangle(event);
@@ -3164,22 +3256,17 @@ mapCanvas.addEventListener("pointerup", (event) => {
   if (mapCanvas.hasPointerCapture(event.pointerId)) mapCanvas.releasePointerCapture(event.pointerId);
   renderAll();
 });
-mapCanvas.addEventListener("pointercancel", () => {
-  if (state.pointerStroke && !state.pointerStroke.changed) state.history.pop();
-  if (state.pointerDrag?.kind === "ground_rectangle") state.history.pop();
-  else if (state.pointerDrag && state.pointerDrag.kind !== "range_selection" && !state.pointerDrag.changed) state.history.pop();
-  if (state.pointerDrag?.kind === "range_selection") state.selectionRect = null;
-  state.pointerStroke = null;
-  state.pointerDrag = null;
-  state.groundPaintRect = null;
-  renderAll();
-});
+mapCanvas.addEventListener("pointercancel", cancelMapPointer);
+mapCanvas.addEventListener("lostpointercapture", cancelMapPointer);
 mapCanvas.addEventListener("contextmenu", (event) => event.preventDefault());
 mapCanvas.addEventListener("pointerleave", () => {
+  if (state.pointerDrag || state.pointerStroke) return;
   byId("cursor-status").textContent = "セル —";
   state.hoveredCell = null;
   drawMap(performance.now());
 });
+window.addEventListener("blur", cancelMapPointer);
+document.addEventListener("visibilitychange", () => { if (document.hidden) cancelMapPointer(); });
 
 window.addEventListener("keydown", (event) => {
   if (rightClickWithEscape(event)) return;
