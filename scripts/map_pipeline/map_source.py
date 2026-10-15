@@ -396,7 +396,7 @@ def validate_map_source(
 
     instance_ids: set[str] = set()
     placements: set[tuple[str, frozenset[tuple[int, int]]]] = set()
-    valid_instances: list[tuple[int, Mapping[str, Any]]] = []
+    valid_instances: list[Mapping[str, Any]] = []
     object_origins: dict[str, tuple[int, int]] = {}
     known_flags = None if flag_ids is None else set(flag_ids)
     for index, instance in enumerate(instances):
@@ -439,11 +439,10 @@ def validate_map_source(
         if not valid_order:
             _diagnostic(diagnostics, "error", "invalid_object_order", f"{path}.order", "描画順は整数で指定してください。")
         if definition is not None and valid_origin and valid_order:
-            valid_instances.append((index, instance))
+            valid_instances.append(instance)
             if unique_instance_id:
                 object_origins[instance_id] = (origin[0], origin[1])
 
-    blocked_by_object: set[tuple[int, int]] = set()
     collision: list[bool] | None = None
     if (
         rows_valid
@@ -466,12 +465,12 @@ def validate_map_source(
             for y in range(height)
             for x in range(width)
         ]
-    for source_index, instance in sorted(
+    for instance in sorted(
         valid_instances,
-        key=lambda item: _object_draw_key(item[1], objects_by_id),
+        key=lambda item: _object_draw_key(item, objects_by_id),
     ):
         definition = objects_by_id[instance["definition_id"]]
-        for cell_index, cell in enumerate(definition.get("cells", [])):
+        for cell in definition.get("cells", []):
             if not isinstance(cell, dict):
                 continue
             offset = cell.get("offset")
@@ -479,19 +478,9 @@ def validate_map_source(
                 continue
             position = (instance["origin"][0] + offset[0], instance["origin"][1] + offset[1])
             if cell.get("collision") == "blocked":
-                blocked_by_object.add(position)
                 if collision is not None and _point_in_bounds(position, width, height):
                     collision[position[1] * width + position[0]] = True
             elif cell.get("collision") == "passable_override":
-                if position not in blocked_by_object:
-                    _diagnostic(
-                        diagnostics,
-                        "warning",
-                        "passable_override_without_blocked_object",
-                        f"objects[{source_index}]",
-                        f"通行可上書きセル{list(position)}の下に通行不可オブジェクトがありません。",
-                    )
-                blocked_by_object.discard(position)
                 if collision is not None and _point_in_bounds(position, width, height):
                     collision[position[1] * width + position[0]] = False
 

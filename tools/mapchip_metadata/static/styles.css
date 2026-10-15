@@ -183,6 +183,8 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .source-panel, .preview-panel { padding: 14px; }
+.source-panel { display: flex; flex-direction: column; min-height: 0; }
+.source-panel > :not(.canvas-scroll) { flex-shrink: 0; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .panel-heading.compact { margin-bottom: 12px; }
 .panel-heading h2, .issues-heading h2 { font-size: 14px; letter-spacing: .04em; }
@@ -210,8 +212,9 @@ h1, h2, h3, p { margin: 0; }
 .usage-dot.map-layer { background: var(--map-layer-text); box-shadow: none; }
 
 .canvas-scroll {
+  flex: 1 1 auto;
   height: calc(100vh - 208px);
-  min-height: 390px;
+  min-height: 0;
   overflow: auto;
   border: 1px solid #090b08;
   border-radius: 8px;

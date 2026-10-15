@@ -164,8 +164,7 @@ tools/
     ├── _runtime.py         # Pyxel初期化、共通資産、戦闘テスト入力
     ├── _runner.py          # 例外表示とCLI終了コード
     ├── _fixtures.py        # 疑似パーティなど戦闘テスト専用状態
-    ├── battle.py           # BattleSceneへfixtureを注入する単独起動口
-    └── battle_result.py    # 戦闘勝利リザルトの静的モック
+    └── battle.py           # BattleSceneへfixtureを注入する単独起動口
 ```
 
 `content/data` は共有JSONの正本である。`app/data` は `npm run sync` で作るGit管理対象外の実行時コピーであり、直接編集しない。ゲームコードは外部リポジトリやGoogle Sheetsを知らず、従来どおり `app/data` を読む。
@@ -508,7 +507,7 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 同じ集合を渡す。マップリソースへSaveDataやGameの逆参照、可視状態の複製は持たせない。
 具体的な制作操作と適用範囲は [`features/map-editor.md`](./features/map-editor.md) を参照する。
 
-戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。逃走とフェードの確定では同Systemが経験値、Gold、お宝、最大HPを除外し、熟練度と最大MPだけを反映する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利・逃走演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。`tools/screen_mocks/battle_result.py` は同じ座標・スプライト解決規則を再利用する静的確認口とし、本編側から `tools/` は参照しない。本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
+戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。逃走とフェードの確定では同Systemが経験値、Gold、お宝、最大HPを除外し、熟練度と最大MPだけを反映する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利・逃走演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。リザルトと本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 武器使用実績は同Systemがキャラクター・武器種ごとに対象敵LV、撃破したモンスターの識別キー集合、
 会心の有無を保持し、戦闘終了時に熟練度の加算値を計算する。`BattleScene` は物理攻撃と装備武器使用の

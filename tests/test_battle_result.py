@@ -5,13 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from tools._bootstrap import APP_ROOT
-from tools.screen_mocks._fixtures import (
-    load_mock_character_records,
-    load_mock_items,
-    load_mock_skills,
-)
-from tools.screen_mocks.battle_result import build_result_party
-from game_data import load_spells
+from game_data import create_party, load_items, load_skills, load_spells
 
 from input import InputButton, InputState
 from member import EquipmentSlot, ProficiencyKind
@@ -29,6 +23,7 @@ from ui.battle_result import (
     RESULT_WAIT_FRAME_COUNT,
     BattleResultOverlay,
     member_battle_sprite_region,
+    result_window_grid,
 )
 
 
@@ -37,11 +32,12 @@ class BattleResultOverlayTest(unittest.TestCase):
         play_se_patcher = patch("ui.battle_result.play_se")
         self.play_se = play_se_patcher.start()
         self.addCleanup(play_se_patcher.stop)
-        self.party = build_result_party(
-            load_mock_character_records(),
-            load_mock_items(),
-            load_mock_skills(),
-        )[:1]
+        self.party = create_party(
+            load_items(),
+            load_skills(),
+            character_keys=("Fiora",),
+            internal_level=50,
+        )
         member = self.party[0]
         member.proficiency(ProficiencyKind.KNIFE).level = 0
         member.proficiency(ProficiencyKind.KNIFE).progress = 99
@@ -57,6 +53,38 @@ class BattleResultOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             character_sprites=object(),
+        )
+
+    def test_places_six_windows_in_two_columns_and_three_rows(self) -> None:
+        self.assertEqual(
+            [result_window_grid(index) for index in range(6)],
+            [
+                (0, 0, 32, 20),
+                (32, 0, 32, 20),
+                (0, 20, 32, 20),
+                (32, 20, 32, 20),
+                (0, 40, 32, 20),
+                (32, 40, 32, 20),
+            ],
+        )
+
+    def test_uses_first_battle_pose_and_leaves_dain_artwork_blank(self) -> None:
+        party = create_party(
+            load_items(),
+            load_skills(),
+            character_keys=("Fiora", "Cerion", "Alvan", "Elika", "Ragna", "Dain"),
+            internal_level=50,
+        )
+        self.assertEqual(
+            [member_battle_sprite_region(member) for member in party],
+            [
+                (0, 0, 16, 32),
+                (0, 32, 16, 32),
+                (0, 64, 16, 32),
+                (0, 96, 16, 32),
+                (0, 128, 16, 32),
+                None,
+            ],
         )
 
     def test_interpolates_for_exactly_thirty_frames(self) -> None:

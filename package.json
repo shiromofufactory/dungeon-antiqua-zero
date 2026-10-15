@@ -31,7 +31,6 @@
     "pyxel-edit": "pyxel edit app/assets",
     "editor": "python3 -B -m tools.editor",
     "test-battle": "npm run spell-effects:build && npm run attack-poses:build && python3 -B -m tools.screen_mocks.battle",
-    "mock-battle-result": "python3 -B -m tools.screen_mocks.battle_result",
     "attack-pose-editor": "python3 -B -m tools.attack_pose_editor",
     "spell-effect-editor": "npm run image-build && python3 -B -m tools.spell_effect_editor"
   },

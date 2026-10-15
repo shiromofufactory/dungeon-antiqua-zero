@@ -1307,7 +1307,7 @@ class MapSourceTest(unittest.TestCase):
             [2, 2, 2, 2],
         )
 
-    def test_warns_when_passable_override_has_no_blocked_object_below(self) -> None:
+    def test_allows_passable_override_without_blocked_object_below(self) -> None:
         tileset = deepcopy(self.tileset)
         tileset["objects"].append({
             "id": "entrance",
@@ -1320,9 +1320,15 @@ class MapSourceTest(unittest.TestCase):
             {"id": "entrance_1", "definition_id": "entrance", "origin": [2, 2], "order": 0}
         ]
 
-        warnings = {item.code for item in validate_map_source(source, tileset) if item.severity == "warning"}
+        for ground_id in ("sea", "plain"):
+            with self.subTest(ground_id=ground_id):
+                source["grounds"][2][2] = ground_id
+                warnings = {item.code for item in validate_map_source(source, tileset) if item.severity == "warning"}
 
-        self.assertIn("passable_override_without_blocked_object", warnings)
+                self.assertNotIn("passable_override_without_blocked_object", warnings)
+                self.assertFalse(resolve_map(source, tileset)["collision"][2 * 16 + 2])
+                compiled = compile_map(source, tileset, self.image_path, self.palette_path)
+                self.assertEqual(compiled.runtime["collision_rows"][2][2], "0")
 
     def test_compiles_rules_and_choices_to_runtime_atlas(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)

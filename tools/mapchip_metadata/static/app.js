@@ -1496,7 +1496,7 @@ function handleAction(element) {
   } else if (action === "add-ground") {
     commit(() => {
       const id = uniqueId("ground", grounds);
-      grounds.push({ id, parent_id: currentGround()?.id || null, collision: "passable", base_visual: singleTileVisual(), boundaries: [] });
+      grounds.push({ id, parent_id: null, collision: "passable", base_visual: singleTileVisual(), boundaries: [] });
       state.groundIndex = grounds.length - 1;
     });
   } else if (action === "delete-ground") {
