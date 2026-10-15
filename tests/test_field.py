@@ -78,7 +78,7 @@ class FieldMovementTest(unittest.TestCase):
         self.assertEqual(actors.actor("elder").movement.position, FieldPosition(2, 5))
         self.assertEqual(actors.actor("elder").movement.world_y, 80)
 
-    def test_hidden_border_blocks_party_and_both_actor_movement_paths(self) -> None:
+    def test_hidden_border_blocks_party_and_autonomous_actors_but_allows_controlled_actors(self) -> None:
         for profile in ("world", "town", "dungeon"):
             for position, direction in (
                 ((1, 2), Direction.LEFT), ((3, 2), Direction.RIGHT),
@@ -97,8 +97,11 @@ class FieldMovementTest(unittest.TestCase):
                     actors = FieldActors(map_data, random_source=Mock(
                         randint=Mock(return_value=30), choice=Mock(return_value=direction),
                     ))
-                    self.assertFalse(actors.update(
+                    self.assertTrue(actors.update(
                         "walker", direction, party_position=FieldPosition(2, 2),
+                    ))
+                    actors = FieldActors(map_data, random_source=Mock(
+                        randint=Mock(return_value=30), choice=Mock(return_value=direction),
                     ))
                     actors.actor("walker").roam_wait_frames = 0
                     actors.update_roaming(party_position=FieldPosition(2, 2))

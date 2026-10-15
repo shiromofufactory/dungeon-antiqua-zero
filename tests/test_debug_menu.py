@@ -71,6 +71,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             alert=self.alert,
+            flag_ids=("sample.first", "sample.second"),
         )
         self.assertEqual(self.screen._member_count_text(), "フィオラ＋５にん")
 
@@ -142,7 +143,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
     def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
         target_y = [target.y for target in self.screen.main_cursor.targets]
 
-        self.assertEqual(len(target_y), 8)
+        self.assertEqual(len(target_y), 9)
         self.assertEqual(self.screen.main_cursor.targets[0].key, "encounter")
         self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
         self.assertTrue(
@@ -151,6 +152,39 @@ class DebugMenuOverlayTest(unittest.TestCase):
                 for current_y, next_y in pairwise(target_y)
             )
         )
+
+    def test_event_flags_toggle_live_save_data_and_return_to_main(self) -> None:
+        flags = self.save_data.event_flags
+        flags.update(("sample.second", "unregistered.legacy"))
+        self.screen.main_cursor.select_key("event_flags")
+        self.screen.update(self.confirm())
+
+        self.assertIs(self.screen.phase, DebugMenuPhase.EVENT_FLAGS)
+        self.assertEqual(self.screen.flag_menu.cursor.selected_key, "sample.first")
+        self.assertEqual(
+            [target.key for target in self.screen.flag_menu.cursor.targets],
+            ["sample.first", "sample.second"],
+        )
+        self.screen.update(self.confirm())
+        self.assertIs(self.save_data.event_flags, flags)
+        self.assertIn("sample.first", flags)
+        self.screen.update(InputState(navigation=Direction.DOWN))
+        self.screen.update(self.confirm())
+        self.assertNotIn("sample.second", flags)
+        self.assertIn("unregistered.legacy", flags)
+
+        self.assertFalse(self.screen.update(self.cancel()))
+        self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+        self.assertIsNone(self.screen.flag_menu)
+        self.assertEqual(self.screen.main_cursor.selected_key, "event_flags")
+        self.screen.update(self.confirm())
+        self.assertEqual(flags, {"sample.first", "unregistered.legacy"})
+        self.assertIn(
+            DEBUG_TEXT.flag_on,
+            [placement.text for placement in self.screen.flag_menu.window.texts],
+        )
+        self.screen.update(self.cancel())
+        self.assertTrue(self.screen.update(self.cancel()))
 
     def test_encounter_options_wrap_and_persist_after_cancel_and_reopen(self) -> None:
         self.screen.main_cursor.select_key("encounter")

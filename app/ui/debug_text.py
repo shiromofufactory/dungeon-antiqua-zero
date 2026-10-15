@@ -52,6 +52,13 @@ class DebugText:
     allow_large_animals: str = "大型動物出現"
     encounter_start: str = "バトル開始"
     encounter_change_guide: str = "←→／決定：設定変更"
+    event_flags: str = "イベントフラグ"
+    no_event_flags: str = "フラグが　ありません"
+    flag_on: str = "ＯＮ"
+    flag_off: str = "ＯＦＦ"
+    flag_toggle_guide: str = "%CONFIRM%：ＯＮ／ＯＦＦ"
+    flag_page_guide: str = "←→：ページ"
+    flag_count_template: str = "{count}こ"
     member_count_template: str = "フィオラ＋{count}にん"
     party_member_count_template: str = "{count}にん"
     numeric_delete: str = "けす"
@@ -87,6 +94,16 @@ class DebugText:
         """Format the number of selectable debug shops."""
 
         return self._format_count(count, self.shop_count_template)
+
+    def flag_count(self, count: int) -> str:
+        """Format the number of registered event flags."""
+
+        return self._format_count(count, self.flag_count_template)
+
+    def flag_page(self, page: int, total: int) -> str:
+        """Format the current and total flag pages."""
+
+        return f"{self._validated_count_text(page)}／{self._validated_count_text(total)}"
 
     @staticmethod
     def _format_count(count: int, template: str) -> str:

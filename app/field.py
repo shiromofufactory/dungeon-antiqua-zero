@@ -173,11 +173,14 @@ class FieldMovement:
         direction: Direction | None,
         *,
         blocked_positions: tuple[FieldPosition, ...] = (),
+        allow_hidden_border: bool = False,
     ) -> bool:
         """Advance one frame and return whether the character moved."""
 
         if direction is not None and not isinstance(direction, Direction):
             raise TypeError("field movement direction must be a Direction or None")
+        if not isinstance(allow_hidden_border, bool):
+            raise TypeError("allow_hidden_border must be a boolean")
         if not isinstance(blocked_positions, tuple) or not all(
             isinstance(position, FieldPosition) for position in blocked_positions
         ):
@@ -192,7 +195,8 @@ class FieldMovement:
             destination_x = self.position.x + direction.dx
             destination_y = self.position.y + direction.dy
             if self.map_data.is_blocked(
-                destination_x, destination_y, event_flags=self.event_flags
+                destination_x, destination_y, event_flags=self.event_flags,
+                allow_hidden_border=allow_hidden_border,
             ) or FieldPosition(
                 destination_x, destination_y
             ) in blocked_positions:
@@ -389,11 +393,13 @@ class FieldActors:
         party_position: FieldPosition,
         party_destination: FieldPosition | None = None,
     ) -> bool:
+        """Advance an event-controlled actor, including passable hidden border cells."""
         actor = self.actor(actor_id)
         if actor.kind in ("prop", "treasure"):
             raise ValueError("prop/treasure field actors cannot move")
         return actor.movement.update(
             direction,
+            allow_hidden_border=True,
             blocked_positions=(
                 party_position,
                 *((party_destination,) if party_destination is not None else ()),

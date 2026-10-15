@@ -533,6 +533,17 @@ class LaunchModeGameTest(unittest.TestCase):
                 self.assertEqual(overlay.called, mode is LaunchMode.NORMAL)
                 self.assertEqual(game.debug_screen is not None, mode is LaunchMode.NORMAL)
 
+    def test_debug_flag_editor_receives_registered_flags_and_live_save_data(self) -> None:
+        game = self.game(LaunchMode.NORMAL)
+        game.event_catalog = EventCatalog(flag_ids=frozenset({"quest.done", "quest.started"}))
+        game._build_settings_window()
+
+        with patch("game.DebugMenuOverlay") as overlay:
+            game._start_debug_menu()
+
+        self.assertIs(overlay.call_args.kwargs["flag_ids"], game.event_catalog.flag_ids)
+        self.assertIs(overlay.call_args.kwargs["save_data"], game.save_data)
+
     def test_only_exhibition_save_command_is_disabled_in_all_languages(self) -> None:
         for mode in LaunchMode:
             game = self.game(mode)

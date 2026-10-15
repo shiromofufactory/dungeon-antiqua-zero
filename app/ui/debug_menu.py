@@ -33,6 +33,7 @@ from ui import (
 from ui.debug_text import DEBUG_TEXT
 from resources.maps import MapRandomEncounter
 from ui.debug_encounter import DebugEncounterOverlay, DebugEncounterState
+from ui.debug_flags import DebugFlagsOverlay
 from ui.teleport_menu import (
     TeleportMenuLabels,
     TeleportMenuOverlay,
@@ -50,6 +51,7 @@ MAIN_ITEM_KEYS = (
     "items",
     "teleport",
     "shop",
+    "event_flags",
 )
 MAIN_FIRST_Y = 9
 MAIN_ROWS = tuple(
@@ -115,6 +117,7 @@ class DebugMenuPhase(Enum):
     TELEPORT = auto()
     SHOP = auto()
     ENCOUNTER = auto()
+    EVENT_FLAGS = auto()
     NUMBER = auto()
 
 
@@ -209,6 +212,7 @@ class DebugMenuOverlay:
         on_shop: Callable[[str], bool] | None = None,
         encounter_state: DebugEncounterState | None = None,
         on_encounter: Callable[[MapRandomEncounter], bool] | None = None,
+        flag_ids: Iterable[str] = (),
     ) -> None:
         if not isinstance(editor, DebugPartyEditor):
             raise TypeError("editor must be a DebugPartyEditor")
@@ -259,6 +263,8 @@ class DebugMenuOverlay:
         self.encounter_state = encounter_state or DebugEncounterState()
         self.on_encounter = on_encounter
         self.encounter_menu: DebugEncounterOverlay | None = None
+        self.flag_ids = tuple(flag_ids)
+        self.flag_menu: DebugFlagsOverlay | None = None
         self.localizer = Localizer(settings.language)
         self.debug_texts = LocalizedWindowTextFactory.from_language(
             fonts,
@@ -370,6 +376,7 @@ class DebugMenuOverlay:
             "teleport": self._teleport_count_text(),
             "shop": self._shop_count_text(),
             "encounter": "",
+            "event_flags": DEBUG_TEXT.flag_count(len(self.flag_ids)),
         }
         labels = {
             "party_level": DEBUG_TEXT.party_level,
@@ -380,6 +387,7 @@ class DebugMenuOverlay:
             "teleport": DEBUG_TEXT.teleport,
             "shop": DEBUG_TEXT.shop,
             "encounter": DEBUG_TEXT.encounter,
+            "event_flags": DEBUG_TEXT.event_flags,
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.title, 4, 3)
@@ -1229,6 +1237,12 @@ class DebugMenuOverlay:
                 self.phase = DebugMenuPhase.MAIN
                 self._build_main_window(selected_key="encounter")
             return False
+        if self.phase is DebugMenuPhase.EVENT_FLAGS:
+            if self.flag_menu.update(input_state):
+                self.flag_menu = None
+                self.phase = DebugMenuPhase.MAIN
+                self._build_main_window(selected_key="event_flags")
+            return False
         if self.phase is DebugMenuPhase.ITEMS:
             self._update_items(input_state)
             return False
@@ -1284,6 +1298,12 @@ class DebugMenuOverlay:
                 self._open_teleport()
             elif key == "shop":
                 self._open_shops()
+            elif key == "event_flags":
+                self.flag_menu = DebugFlagsOverlay(
+                    flag_ids=self.flag_ids, save_data=self.save_data,
+                    fonts=self.fonts, alert=self.alert,
+                )
+                self.phase = DebugMenuPhase.EVENT_FLAGS
             elif key == "encounter":
                 self.encounter_menu = DebugEncounterOverlay(
                     state=self.encounter_state, texts=self.debug_texts,
@@ -1300,6 +1320,9 @@ class DebugMenuOverlay:
         return False
 
     def draw(self) -> None:
+        if self.phase is DebugMenuPhase.EVENT_FLAGS:
+            self.flag_menu.draw()
+            return
         if self.phase is DebugMenuPhase.ENCOUNTER:
             self.encounter_menu.draw()
             return

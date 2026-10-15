@@ -380,6 +380,9 @@ Rendererは背面の `object`、通常の `object_y_sorted` とキャラクタ�
 通行グリッドの生成順はレイヤー順のまま維持し、共通Y整列の描画順とは分離する。
 ゲーム内の表示範囲とカメラ制限はRendererが所有し、制作用データや論理座標を切り詰めない。
 外周への進入制限は `CompiledMap.is_blocked()` で通行可上書きより先に適用する。
+イベント制御のactor移動では `FieldActors.update()` が外周制限だけを除外する指定を渡す。
+外周を含む地面・オブジェクトの通行判定は引き続き `CompiledMap` が所有し、
+playerの移動とactorの自律移動へこの指定を渡さない。
 actorの画像範囲とマップの重なりの判定はPyxel非依存の `app/actor_placement.py` が所有し、
 制作用マップの検証、実行時のリソース読込、FieldActorsの初期位置設定で共用する。
 外周を含む表示・移動規則は [`features/field.md`](./features/field.md#移動と描画) に従う。
@@ -1534,6 +1537,14 @@ Scene切り替えはTransitionとして調停する。拠点名Windowやフェ�
 Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受けて通常の `EncounterSystem` と
 遭遇Transitionへ接続する。設定はSaveData／Settingsへ含めない。詳細は
 [エンカウント仕様](./features/encounters.md#デバッグエンカウント)を参照する。
+
+デバッグのイベントフラグ編集は `ui/debug_flags.py` が一覧、ページ、選択行、入力と描画を
+所有する。Gameは読み込み済み `EventCatalog.flag_ids` と既存のSaveDataをデバッグメニューへ
+注入するだけとし、項目ごとの変更処理は持たない。フラグ画面は登録IDだけを編集し、
+`SaveData.event_flags` の同じ集合へ追加・解除することで、FieldMovementやFieldActorsが
+保持する参照と既存のイベント・ミッション条件評価をそのまま使う。制作元JSONやカタログ、
+セーブ形式は変更しない。操作と画面仕様は [フィールド・メニュー](./features/field.md#設定とデバッグ)
+を参照する。
 
 パーティをまたぐデバッグ操作はPyxel非依存の `systems.debug.DebugPartyEditor` が担当する。
 フィオラを必須とし、フィオラを含むパーティ総数を1〜6名に制限する。

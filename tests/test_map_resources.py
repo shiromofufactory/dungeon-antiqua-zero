@@ -55,6 +55,12 @@ class MapResourcesTest(unittest.TestCase):
                                 map_data.is_blocked(x, y, event_flags=flags),
                                 border or not flags,
                             )
+                            self.assertEqual(
+                                map_data.is_blocked(x, y, event_flags=flags, allow_hidden_border=True),
+                                not flags,
+                            )
+            for position in ((-1, 0), (0, -1), (5, 0), (0, 5)):
+                self.assertTrue(map_data.is_blocked(*position, allow_hidden_border=True))
 
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()

@@ -2284,6 +2284,7 @@ class Game:
             on_shop=self._start_debug_shop,
             encounter_state=self.debug_encounter_state,
             on_encounter=self._start_debug_encounter,
+            flag_ids=self.event_catalog.flag_ids,
         )
 
     def _teleport_targets(self) -> tuple[TeleportTarget, ...]:

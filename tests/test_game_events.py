@@ -1363,15 +1363,58 @@ class GameEventAnimationTest(unittest.TestCase):
         self.assertFalse(walker.movement.is_moving)
         self.assertGreater(game.field.world_y, 16)
 
-    def test_controlled_party_and_actor_moves_cannot_enter_hidden_border(self) -> None:
-        for effect in (MovePartyEffect(Direction.UP, 1), MoveActorEffect("walker", Direction.UP, 1)):
-            with self.subTest(effect=effect):
+    def test_controlled_party_moves_cannot_enter_hidden_border(self) -> None:
+        game = self.game()
+        game.field = FieldMovement(game.current_map, start=FieldPosition(2, 1))
+        walker = game.field_actors.actor("walker").movement
+        walker.position = FieldPosition(3, 1)
+        walker.stop()
+        game.event_effect = MovePartyEffect(Direction.UP, 1)
+        game.event_move_remaining = 1
+        game._abort_event = Mock()
+
+        game.update()
+
+        game._abort_event.assert_called_once()
+        self.assertIn("controlled movement is blocked", str(game._abort_event.call_args.args[0]))
+        self.assertEqual(game.field.position, FieldPosition(2, 1))
+        self.assertEqual(walker.position, FieldPosition(3, 1))
+        self.assertFalse(game.field.is_moving)
+        self.assertFalse(walker.is_moving)
+
+    def test_controlled_actor_enters_from_below_map_and_completes_all_five_steps(self) -> None:
+        game = self.game()
+        game.current_map = compiled_map(None, width=36, height=28, actors=(
+            MapActor("walker", MapCell(17, 28), "stationary", 0, "up"),
+        ))
+        game.field = FieldMovement(game.current_map, start=FieldPosition(17, 20))
+        game.field_actors = FieldActors(game.current_map)
+        effect = MoveActorEffect("walker", Direction.UP, 5)
+        game.event_effect = effect
+        game.event_move_remaining = 5
+        game._abort_event = Mock()
+
+        for _ in range(40):
+            game.update()
+
+        game._abort_event.assert_not_called()
+        walker = game.field_actors.actor("walker").movement
+        self.assertEqual(walker.position, FieldPosition(17, 23))
+        self.assertFalse(walker.is_moving)
+        game.event_runner.complete_effect.assert_called_once_with(effect)
+        game._continue_event.assert_called_once_with()
+
+    def test_controlled_actor_still_stops_at_blocked_border_or_outside_destination(self) -> None:
+        for position in (FieldPosition(3, 1), FieldPosition(3, 0)):
+            with self.subTest(position=position):
                 game = self.game()
+                game.current_map = replace(game.current_map, collision_rows=("000100",) + ("000000",) * 5)
                 game.field = FieldMovement(game.current_map, start=FieldPosition(2, 1))
+                game.field_actors = FieldActors(game.current_map)
                 walker = game.field_actors.actor("walker").movement
-                walker.position = FieldPosition(3, 1)
+                walker.position = position
                 walker.stop()
-                game.event_effect = effect
+                game.event_effect = MoveActorEffect("walker", Direction.UP, 1)
                 game.event_move_remaining = 1
                 game._abort_event = Mock()
 
@@ -1379,9 +1422,7 @@ class GameEventAnimationTest(unittest.TestCase):
 
                 game._abort_event.assert_called_once()
                 self.assertIn("controlled movement is blocked", str(game._abort_event.call_args.args[0]))
-                self.assertEqual(game.field.position, FieldPosition(2, 1))
-                self.assertEqual(walker.position, FieldPosition(3, 1))
-                self.assertFalse(game.field.is_moving)
+                self.assertEqual(walker.position, position)
                 self.assertFalse(walker.is_moving)
 
     def test_controlled_moves_cannot_enter_another_characters_destination(self) -> None:

@@ -127,9 +127,11 @@
 - 強制割り込みゲームメニューは `python3 -B -m unittest tests.test_game_menu tests.test_input tests.test_audio_resources` で停止・復帰・BGM保持を回帰検証する。
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。
 - フィールド待機時の操作ナビは `python3 -B -m unittest tests.test_field_menu_guide` で待機時間・入力種別・表示抑止を回帰検証する。
+- デバッグのイベントフラグ編集は `python3 -B -m unittest tests.test_debug_flags tests.test_debug_menu tests.test_launch_modes tests.test_game tests.test_actor_visibility tests.test_game_events tests.test_save_system` でON/OFF・100件のページ切替・未登録ID保持・戻る操作・ゲームへの接続を回帰検証する。
 - フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
 - イベント中のフィールドアニメーション・制御移動・非表示actorは `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_actor_visibility tests.test_game_menu` で継続・位置停止・二重更新防止・強制割り込みを回帰検証する。
+- イベント制御actorの外周通過・範囲外の初期配置からの登場と、PC・自律移動の外周禁止、地形・占有・マップ外への移動停止は `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_map_resources tests.test_actor_visibility tests.test_game_menu` で回帰検証する。
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。
 - actorのフラグ表示条件は `python3 -B -m unittest tests.test_actor_visibility tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_game tests.test_game_events`、エディタでの指定・解除・Undoは `node --test tests/test_map_editor_objects.mjs` で回帰検証する。
 - オブジェクトのフラグ表示条件は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_game tests.test_game_events` と `node --test tests/test_map_editor_objects.mjs` で保存・条件評価・通行・描画・トリガー・Undoを回帰検証する。
