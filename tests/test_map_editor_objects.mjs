@@ -35,12 +35,12 @@ function editor() {
     ensureActorTrigger: () => {}, commit: (mutator) => mutator(), uniqueInstanceId: () => "new_instance",
   });
   for (const name of [
-    "addPoint", "objectDefinition", "objectLayerEditable", "objectPlacementSignature", "objectPlacementConflict",
+    "addPoint", "actorCells", "actorIntersectsMap", "actorOccupiesCell", "objectDefinition", "objectIntersectsMap", "objectLayerEditable", "objectPlacementSignature", "objectPlacementConflict",
     "objectBottom", "objectDrawGroupOrder", "objectDrawGroupLabel", "compareObjectsBackToFront",
     "instanceOccupies", "instanceAt", "currentInstance", "bulkItemExists", "normalizeSelections",
     "clearSingleSelections", "clearBulkSelection", "handlePaletteAction", "renderPalette",
     "mapSelectionCandidatesAt", "pointInCellRect", "rangeSelectionItems", "placeObject", "validObjectOrigin",
-    "candidatePosition", "validBulkDelta", "drawMapObjectCell", "drawObjectOutline", "drawTabCellHighlights",
+    "candidatePosition", "validBulkDelta", "bulkItemOccupiesCell", "drawMapObjectCell", "drawObjectOutline", "drawTabCellHighlights",
     "beginObjectDrag",
     "updateObjectField", "updateVisibilityField", "updateActorField", "currentActor", "visibilityInspector", "objectFlagOptions", "attachSiteToObject",
   ]) {
@@ -257,9 +257,74 @@ test("bulk movement uses exact cell signatures and layer, and retains bounds che
   assert.equal(context.validBulkDelta([20, 0]), false);
 });
 
+test("placement and single/group movement allow partial objects at all edges but require an inside cell", () => {
+  const { context, state, definitions } = editor();
+  const definition = definitions[1];
+  definition.size = [2, 2];
+  definition.cells = [[0, 0], [1, 0], [0, 1], [1, 1]].map((offset) => ({ offset }));
+  state.data.objects = [];
+  context.placeObject(15, 14);
+  assert.equal(state.data.objects.length, 1);
+  const moving = state.data.objects[0];
+  state.pointerDrag = { descriptors: [{ kind: "object", id: moving.id, position: [15, 14] }] };
+  for (const origin of [[-1, 5], [15, 5], [5, -1], [5, 14]]) {
+    assert.equal(context.validObjectOrigin(moving, ...origin), true);
+    assert.equal(context.validBulkDelta([origin[0] - 15, origin[1] - 14]), true);
+  }
+  for (const origin of [[-2, 5], [16, 5], [5, -2], [5, 15]]) {
+    assert.equal(context.validObjectOrigin(moving, ...origin), false);
+    assert.equal(context.validBulkDelta([origin[0] - 15, origin[1] - 14]), false);
+  }
+  context.placeObject(16, 14);
+  assert.equal(state.data.objects.length, 1);
+  definition.cells = [{ offset: [1, 1] }];
+  assert.equal(context.objectIntersectsMap(definition, [15, 14]), false);
+  assert.equal(context.objectIntersectsMap(definition, [-1, -1]), true);
+});
+
 test("different definitions and origins cannot bypass the exact-overlap check", () => {
   const { context, state, definitions } = editor();
   const shifted = { ...definitions[0], id: "shifted", size: [2, 1], cells: [{ offset: [1, 0] }] };
   state.tileset.objects.push(shifted);
   assert.ok(context.objectPlacementConflict(shifted, [1, 2]));
+});
+
+test("character actors can move one cell below the map, keep triggers and be selected by their remaining head", () => {
+  const { context, state } = editor();
+  state.tab = "event";
+  state.data.objects = [];
+  const actor = { id: "elder", kind: "stationary", position: [5, 14] };
+  state.data.actors = [actor];
+  state.data.event_triggers = [{ id: "talk", anchor: { kind: "actor", actor_id: actor.id }, offsets: [[0, 0]] }];
+  state.pointerDrag = { descriptors: [{ kind: "actor", id: actor.id, position: [...actor.position] }] };
+  assert.equal(context.validBulkDelta([0, 1]), true);
+  assert.equal(context.validBulkDelta([0, 2]), false);
+  assert.equal(context.validBulkDelta([-6, 0]), false);
+  actor.position = [5, 15];
+  assert.equal(context.actorIntersectsMap(actor), true);
+  assert.equal(context.bulkItemOccupiesCell({ kind: "actor", id: actor.id }, [5, 14]), true);
+  assert.deepEqual(ids(context.mapSelectionCandidatesAt([5, 14])), ["elder"]);
+  assert.deepEqual(ids(context.rangeSelectionItems({ left: 5, right: 5, top: 14, bottom: 14 })), ["elder"]);
+  for (const kind of ["prop", "treasure"]) {
+    actor.kind = kind;
+    assert.equal(context.actorIntersectsMap(actor), false);
+  }
+  actor.kind = "stationary";
+  actor.position = [5, 14];
+  state.pointerDrag = { kind: "bulk", start: [5, 14], delta: [0, 0], descriptors: [{ kind: "actor", id: actor.id, position: [5, 14] }] };
+  state.history = [];
+  state.future = [];
+  context.scheduleResolution = () => {};
+  context.updateSaveState = () => {};
+  for (const name of ["changeSnapshot", "restoreChangeSnapshot", "beginChange", "dragBulkTo", "undo"]) {
+    const start = source.indexOf(`function ${name}(`);
+    const next = source.slice(start + 1).search(/\n(?:async )?function /);
+    vm.runInContext(source.slice(start, start + 1 + next), context);
+  }
+  context.beginChange();
+  context.dragBulkTo([5, 15]);
+  assert.deepEqual(Array.from(state.data.actors[0].position), [5, 15]);
+  assert.equal(state.data.event_triggers[0].id, "talk");
+  context.undo();
+  assert.deepEqual(Array.from(state.data.actors[0].position), [5, 14]);
 });

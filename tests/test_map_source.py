@@ -41,6 +41,43 @@ class MapSourceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def test_character_head_may_remain_inside_when_foot_and_actor_trigger_are_below_map(self) -> None:
+        from app.field import FieldActors, FieldPosition
+        from app.resources.maps import MapResourceError, MapResources
+        from tests.test_map_resources import FakePyxel
+
+        for kind in ("stationary", "roaming"):
+            with self.subTest(kind=kind):
+                source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+                source["actors"] = [{"id": "elder", "kind": kind, "position": [5, 15], "sprite_index": 0, "facing": "down"}]
+                source["event_triggers"] = [{"id": "talk", "event_id": "sample.talk", "activations": ["touch", "interact"], "anchor": {"kind": "actor", "actor_id": "elder"}, "offsets": [[0, 0]]}]
+                self.assertEqual([issue for issue in validate_map_source(source, self.tileset) if issue.severity == "error"], [])
+                compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
+                save_compiled_map(self.root / "test_world.json", compiled)
+                loaded = MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+                actors = FieldActors(loaded)
+                self.assertEqual(actors.actor("elder").movement.position, FieldPosition(5, 15))
+                self.assertEqual(loaded.event_triggers[0].actor_id, "elder")
+                for position in ([5, 16], [5, -1], [-1, 15], [16, 15]):
+                    source["actors"][0]["position"] = position
+                    self.assertIn("actor_out_of_bounds", {issue.code for issue in validate_map_source(source, self.tileset)})
+                for position in ([5, 16], [5, -1], [-1, 15], [16, 15]):
+                    compiled.runtime["actors"][0]["position"] = position
+                    save_compiled_map(self.root / "test_world.json", compiled)
+                    with self.assertRaises(MapResourceError):
+                        MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+
+    def test_one_cell_actor_cannot_be_placed_below_map(self) -> None:
+        for kind in ("prop", "treasure"):
+            with self.subTest(kind=kind):
+                source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+                source["actors"] = [{"id": "thing", "kind": kind, "position": [5, 15], "sprite_index": 0}]
+                if kind == "treasure":
+                    source["actors"][0]["contents"] = {"type": "gold", "amount": 1}
+                else:
+                    source["event_triggers"] = [{"id": "talk", "event_id": "sample.talk", "activations": ["touch", "interact"], "anchor": {"kind": "actor", "actor_id": "thing"}, "offsets": [[0, 0]]}]
+                self.assertIn("actor_out_of_bounds", {issue.code for issue in validate_map_source(source, self.tileset)})
+
     def test_actor_visibility_validates_all_kinds_and_survives_compilation(self) -> None:
         from app.resources.maps import MapResources
         from tests.test_map_resources import FakePyxel
@@ -1142,6 +1179,57 @@ class MapSourceTest(unittest.TestCase):
         codes = {item.code for item in validate_map_source(source, self.tileset)}
 
         self.assertEqual(codes, {"duplicate_object_placement"})
+
+    def test_partial_objects_compile_only_inside_cells_and_keep_original_depth(self) -> None:
+        from app.resources.maps import MapResources
+        from tests.test_map_resources import FakePyxel
+
+        self.tileset["objects"][0].update({
+            "size": [3, 3], "interact_through": True,
+            "cells": [
+                {"offset": [x, y], "collision": "blocked", "tile": [0, 0]}
+                for y in range(3) for x in range(3)
+            ],
+        })
+        for origin in ([4, -1], [4, 14], [-1, 5], [15, 5]):
+            with self.subTest(origin=origin):
+                source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+                source["grounds"] = [["plain"] * 16 for _ in range(15)]
+                source["objects"] = [{
+                    "id": "rock_1", "definition_id": "rock", "origin": origin, "order": 0,
+                    "visibility_condition": {"flag_id": "story.shown", "value": True},
+                }]
+                expected = {
+                    (origin[0] + x, origin[1] + y) for y in range(3) for x in range(3)
+                    if 0 <= origin[0] + x < 16 and 0 <= origin[1] + y < 15
+                }
+                errors = [issue for issue in validate_map_source(source, self.tileset) if issue.severity == "error"]
+                self.assertEqual(errors, [])
+                resolved = resolve_map(source, self.tileset)
+                self.assertEqual({tuple(cell["position"]) for cell in resolved["object_cells"]}, expected)
+                self.assertEqual({tuple(cell["position"]) for cell in resolved["conditional_cells"]}, expected)
+                for grid in ("collision", "interact_through"):
+                    self.assertEqual({(i % 16, i // 16) for i, value in enumerate(resolved[grid]) if value}, expected)
+                compiled = compile_map(source, self.tileset, self.image_path, self.palette_path)
+                save_compiled_map(self.root / "test_world.json", compiled)
+                loaded = MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+                self.assertEqual({(tile.x, tile.y) for tile in loaded.object_tiles}, expected)
+                self.assertEqual({tile.sort_y for tile in loaded.object_tiles}, {origin[1] + 2})
+                self.assertEqual(source["objects"][0]["origin"], origin)
+
+    def test_object_bounds_use_constituent_cells_and_reject_fully_outside_objects(self) -> None:
+        self.tileset["objects"][0].update({
+            "size": [3, 3],
+            "cells": [{"offset": [2, 2], "collision": "blocked", "tile": [0, 0]}],
+        })
+        source = initial_map_source("test_world", self.tileset, "world", 16, 15)
+        source["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [-2, -2], "order": 0}]
+        self.assertNotIn("object_out_of_bounds", {issue.code for issue in validate_map_source(source, self.tileset)})
+        self.assertEqual(resolve_map(source, self.tileset)["object_cells"][0]["position"], [0, 0])
+        for origin in ([14, 13], [-3, -3], [16, 3]):
+            with self.subTest(origin=origin):
+                source["objects"][0]["origin"] = origin
+                self.assertIn("object_out_of_bounds", {issue.code for issue in validate_map_source(source, self.tileset)})
 
     def test_allows_same_origin_with_different_layer_or_constituent_cells(self) -> None:
         tileset = deepcopy(self.tileset)

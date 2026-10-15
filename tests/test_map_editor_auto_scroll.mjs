@@ -34,7 +34,7 @@ function editor({ zoom = 1, size = [32, 24] } = {}) {
   const canvas = {
     width: size[0] * 16 * zoom, height: size[1] * 16 * zoom,
     getBoundingClientRect() {
-      return { left: 101 - scrollLeft, top: 81 - scrollTop, width: this.width, height: this.height };
+      return { left: 101 - scrollLeft, top: 81 - scrollTop, bottom: 81 - scrollTop + this.height, width: this.width, height: this.height };
     },
     addEventListener: (kind, handler) => handlers.set(kind, handler),
     setPointerCapture: (id) => { captured = id; },
@@ -80,6 +80,19 @@ function editor({ zoom = 1, size = [32, 24] } = {}) {
   return { state, context, viewport, pointer, frame, handlers, windowHandlers, documentHandlers, document,
     movements, draws: () => draws };
 }
+
+test("actor drags can target one row below the canvas when its lower edge is visible", () => {
+  const { state, context, viewport } = editor();
+  viewport.scrollTop = 10000;
+  const event = { clientX: 125, clientY: 190 };
+  assert.deepEqual(copy(context.mapCellFromPointer(event, true)), [1, 23]);
+  state.pointerDrag = { descriptors: [{ kind: "actor", id: "elder" }] };
+  assert.deepEqual(copy(context.mapCellFromPointer(event, true)), [1, 24]);
+  state.pointerDrag = { kind: "range_selection", draggableItem: { kind: "actor", id: "elder" } };
+  assert.deepEqual(copy(context.mapCellFromPointer(event, true)), [1, 24]);
+  viewport.scrollTop = 0;
+  assert.deepEqual(copy(context.mapCellFromPointer(event, true)), [1, 5]);
+});
 
 test("a stationary pointer outside the viewport scrolls a rectangle and one undo restores its fill", () => {
   const { state, context, viewport, pointer, frame } = editor();

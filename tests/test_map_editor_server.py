@@ -560,7 +560,7 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("if (selected) drawCellSelectionFrame(context, arrival.position, scale)", script)
         self.assertIn("function drawTabCellHighlights(context, scale)", script)
         self.assertIn('if (state.tab === "object")', script)
-        self.assertIn("for (const actor of state.data.actors) addPosition(actor.position)", script)
+        self.assertIn("for (const position of actorCells(actor)) addPosition(position)", script)
         self.assertIn("for (const trigger of state.data.event_triggers)", script)
         self.assertIn('context.strokeStyle = "rgba(255,103,189,.82)"', script)
         self.assertIn("context.strokeRect(x * scale + 1, y * scale + 1, scale - 2, scale - 2)", script)
@@ -617,6 +617,25 @@ class MapEditorServerTest(unittest.TestCase):
             script.count("<strong>${escapeHtml(trigger.event_id)}</strong>"),
             2,
         )
+
+    def test_resolves_saves_and_reopens_partially_clipped_object(self) -> None:
+        tileset = self.application.load_tileset("worldmap")
+        tileset["objects"] = [{
+            "id": "wall", "size": [1, 3], "default_draw_group": "object_y_sorted",
+            "cells": [{"offset": [0, y], "collision": "blocked", "tile": [0, 0]} for y in range(3)],
+        }]
+        save_tileset(self.application.content_root / "maps" / "tilesets" / "worldmap.json", tileset)
+        data = self.get_json("/api/document?token=test-token")["data"]
+        data["objects"] = [{"id": "wall_1", "definition_id": "wall", "origin": [5, -1], "order": 0}]
+        validation = self.post_json("/api/resolve", data)
+        self.assertEqual([issue for issue in validation["diagnostics"] if issue["severity"] == "error"], [])
+        self.assertEqual([cell["position"] for cell in validation["resolved"]["object_cells"]], [[5, 0], [5, 1]])
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        reopened = self.get_json("/api/document?token=test-token")
+        self.assertEqual(reopened["data"]["objects"], data["objects"])
+        self.assertEqual([cell["position"] for cell in reopened["resolved"]["object_cells"]], [[5, 0], [5, 1]])
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual([tile["position"] for tile in runtime["object_tiles"]], [[5, 0], [5, 1]])
 
     def test_resolves_and_saves_source_with_runtime_outputs(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]
@@ -843,6 +862,10 @@ class MapEditorServerTest(unittest.TestCase):
             runtime["event_triggers"][0]["target"],
             {"kind": "actor", "actor_id": "elder", "offsets": [[0, 0]]},
         )
+        data["actors"][0]["position"] = [2, data["size"][1]]
+        clipped = self.post_json("/api/save", data)
+        self.assertTrue(clipped["saved"], clipped["diagnostics"])
+        self.assertEqual(self.get_json("/api/document?token=test-token")["data"]["actors"][0]["position"], [2, data["size"][1]])
 
     def test_saves_treasure_actor_without_an_event_trigger(self) -> None:
         payload = self.get_json("/api/document?token=test-token")

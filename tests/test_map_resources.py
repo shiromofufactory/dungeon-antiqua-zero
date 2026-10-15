@@ -405,12 +405,18 @@ class MapResourcesTest(unittest.TestCase):
             MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
 
     def test_rejects_invalid_object_sort_y(self) -> None:
-        for sort_y in (None, True, -1, 2):
+        for sort_y in (None, True, -1, 1.5):
             with self.subTest(sort_y=sort_y):
                 self.runtime["object_tiles"][0]["sort_y"] = sort_y
                 self._write_runtime()
                 with self.assertRaisesRegex(MapResourceError, "sort_y"):
                     MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+
+    def test_accepts_object_sort_y_beyond_map_for_a_clipped_object(self) -> None:
+        self.runtime["object_tiles"][0]["sort_y"] = 3
+        self._write_runtime()
+        loaded = MapResources(self.maps_dir, pyxel_api=self.pyxel).map("test_map")
+        self.assertEqual(loaded.object_tiles[0].sort_y, 3)
 
     def test_rejects_missing_and_unsafe_map_ids(self) -> None:
         resources = MapResources(self.maps_dir, pyxel_api=self.pyxel)

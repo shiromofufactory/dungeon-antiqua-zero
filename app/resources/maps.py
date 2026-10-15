@@ -13,6 +13,11 @@ from typing import Any, Mapping
 
 import pyxel
 
+if __package__ == "resources":
+    from actor_placement import actor_overlaps_map
+else:
+    from ..actor_placement import actor_overlaps_map
+
 
 FORMAT_VERSION = 9
 PIXEL_FORMAT = "pyxel-palette-index-u8"
@@ -815,10 +820,11 @@ class MapResources:
                 raise MapResourceError(f"object_tiles[{index}].tileが不正です。")
             if isinstance(order, bool) or not isinstance(order, int):
                 raise MapResourceError(f"object_tiles[{index}].orderが不正です。")
+            # Clipped objects retain their original bottom for depth sorting.
             if (
                 isinstance(sort_y, bool)
                 or not isinstance(sort_y, int)
-                or not 0 <= sort_y < height
+                or sort_y < 0
             ):
                 raise MapResourceError(f"object_tiles[{index}].sort_yが不正です。")
             draw_group = cls._required_id(record, "draw_group")
@@ -1005,15 +1011,15 @@ class MapResources:
             actor_id = cls._stable_id(record.get("id"), f"{path}.id")
             if actor_id in ids:
                 raise MapResourceError(f"{path}.idが重複しています。")
-            position = cls._map_cell(
-                record.get("position"), width, height, f"{path}.position"
-            )
+            kind = cls._actor_kind(record.get("kind"), f"{path}.kind")
+            position = cls._offset(record.get("position"), f"{path}.position")
+            if not actor_overlaps_map(kind, position.x, position.y, width, height):
+                raise MapResourceError(f"{path}.positionが不正です。")
             point = (position.x, position.y)
             if point in positions:
                 raise MapResourceError(f"{path}.positionでactorが重複しています。")
             ids.add(actor_id)
             positions.add(point)
-            kind = cls._actor_kind(record.get("kind"), f"{path}.kind")
             loaded.append(
                 MapActor(
                     id=actor_id,

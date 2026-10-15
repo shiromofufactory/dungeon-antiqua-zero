@@ -135,6 +135,9 @@
 - オブジェクトのフラグ表示条件は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_game tests.test_game_events` と `node --test tests/test_map_editor_objects.mjs` で保存・条件評価・通行・描画・トリガー・Undoを回帰検証する。
 - マップエディタの地面外周塗布・矩形塗り・Undoは `node --test tests/test_map_editor_grounds.mjs` で回帰検証する。
 - マップエディタのドラッグ中の自動スクロール・塗布と範囲の追従・Undo・終了と中断時の停止は `node --test tests/test_map_editor_auto_scroll.mjs` で回帰検証する。
+- マップエディタの寸法変更・完全に範囲外となる配置の自動削除・関連配置の削除とUndo／Redoは `node --test tests/test_map_editor_resize.mjs` で回帰検証する。
+- 一部がマップ外にあるオブジェクトの配置・移動・保存生成・範囲内セルだけの描画と通行・描画順の維持は `node --test tests/test_map_editor_objects.mjs tests/test_map_editor_resize.mjs` と `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_actor_visibility` で回帰検証する。
+- 人物actorの部分表示・範囲外への移動・残る画像からの選択・寸法変更後の保持は `node --test tests/test_map_editor_objects.mjs tests/test_map_editor_resize.mjs tests/test_map_editor_auto_scroll.mjs`、保存・生成・読込・ゲーム内の位置保持は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_actor_visibility` で回帰検証する。
 - マップ外周の地面自由化・保存生成とゲーム内の外周非表示・進入禁止・カメラ制限・小さいマップの中央表示は `python3 -B -m unittest tests.test_map_source tests.test_map_editor_server tests.test_map_resources tests.test_field tests.test_game_events tests.test_actor_visibility` で回帰検証する。
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。
 - マップチップエディタのオブジェクト一覧・レイヤー絞り込み・新規作成・並び替えは `node --test tests/test_mapchip_objects.mjs` で回帰検証する。

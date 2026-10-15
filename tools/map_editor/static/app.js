@@ -591,6 +591,21 @@ function prepareSourceImage() {
   drawMap(performance.now());
 }
 
+function actorCells(actor, position = actor.position) {
+  const cells = [[...position]];
+  if (actor.kind === "stationary" || actor.kind === "roaming") cells.push([position[0], position[1] - 1]);
+  return cells;
+}
+
+function actorIntersectsMap(actor, position = actor.position) {
+  const [width, height] = state.data.size;
+  return actorCells(actor, position).some(([x, y]) => x >= 0 && x < width && y >= 0 && y < height);
+}
+
+function actorOccupiesCell(actor, cell) {
+  return actorCells(actor).some(([x, y]) => x === cell[0] && y === cell[1]);
+}
+
 function actorAssetId(actor) {
   if (actor.kind === "treasure") return "treasure";
   if (actor.kind === "prop") return "prop";
@@ -1312,7 +1327,9 @@ function drawActor(context, actor, scale, now) {
     context.fill();
     if (actor.kind === "stationary" || actor.kind === "roaming") drawDirectionMarker(context, actor.position, actor.facing, scale, selected ? "#ffb4dc" : "#b3fff0");
   }
-  if (selected) drawCellSelectionFrame(context, actor.position, scale);
+  if (selected) {
+    for (const position of actorCells(actor)) drawCellSelectionFrame(context, position, scale);
+  }
 }
 
 function drawMapObjectCell(context, cell, scale, now) {
@@ -1398,7 +1415,9 @@ function drawTabCellHighlights(context, scale) {
     if (x < 0 || y < 0 || x >= state.data.size[0] || y >= state.data.size[1]) return;
     positions.add(`${x},${y}`);
   };
-  for (const actor of state.data.actors) addPosition(actor.position);
+  for (const actor of state.data.actors) {
+    for (const position of actorCells(actor)) addPosition(position);
+  }
   for (const trigger of state.data.event_triggers) {
     for (const position of triggerPositions(trigger)) addPosition(position);
   }
@@ -1447,8 +1466,7 @@ function drawObjectPlacementPreview(context, scale) {
   const selected = currentInstance();
   if (selected && instanceOccupies(selected, ...state.hoveredCell)) return;
   const [x, y] = state.hoveredCell;
-  const valid = x + definition.size[0] <= state.data.size[0]
-    && y + definition.size[1] <= state.data.size[1]
+  const valid = objectIntersectsMap(definition, [x, y])
     && !objectPlacementConflict(definition, [x, y]);
   context.save();
   context.fillStyle = valid ? "rgba(114,183,119,.12)" : "rgba(227,119,107,.14)";
@@ -1585,19 +1603,22 @@ function mapCellFromPointer(event, clampToViewport = false) {
   const canvas = byId("map-canvas");
   const rect = canvas.getBoundingClientRect();
   const scale = CELL_SIZE * state.zoom;
+  const allowActorOverflow = clampToViewport && (state.pointerDrag?.descriptors?.some((item) => item.kind === "actor")
+    || state.pointerDrag?.draggableItem?.kind === "actor");
   let { clientX, clientY } = event;
   if (clampToViewport) {
     const bounds = mapScrollBounds();
     clientX = Math.min(Math.max(clientX, bounds.left), bounds.right - 1);
     clientY = Math.min(Math.max(clientY, bounds.top), bounds.bottom - 1);
+    if (allowActorOverflow && rect.bottom <= bounds.bottom + 1 && event.clientY >= rect.bottom) clientY = rect.bottom;
   }
   let x = Math.floor((clientX - rect.left) * canvas.width / rect.width / scale);
   let y = Math.floor((clientY - rect.top) * canvas.height / rect.height / scale);
   if (clampToViewport) {
     x = Math.min(Math.max(x, 0), state.data.size[0] - 1);
-    y = Math.min(Math.max(y, 0), state.data.size[1] - 1);
+    y = Math.min(Math.max(y, 0), state.data.size[1] - 1 + (allowActorOverflow ? 1 : 0));
   }
-  if (x < 0 || y < 0 || x >= state.data.size[0] || y >= state.data.size[1]) return null;
+  if (x < 0 || y < 0 || x >= state.data.size[0] || y >= state.data.size[1] + (allowActorOverflow ? 1 : 0)) return null;
   return [x, y];
 }
 
@@ -1719,7 +1740,7 @@ function rangeSelectionItems(rect) {
     if (pointInCellRect(arrival.position, rect)) items.push({ kind: "arrival", id: arrival.id });
   }
   for (const actor of state.data.actors) {
-    if (pointInCellRect(actor.position, rect)) items.push({ kind: "actor", id: actor.id });
+    if (actorCells(actor).some((position) => pointInCellRect(position, rect))) items.push({ kind: "actor", id: actor.id });
   }
   for (const trigger of standaloneTriggers()) {
     if (triggerPositions(trigger).some((position) => pointInCellRect(position, rect))) {
@@ -1784,7 +1805,7 @@ function bulkItemOccupiesCell(item, cell) {
   }
   if (item.kind === "actor") {
     const actor = state.data.actors.find((record) => record.id === item.id);
-    return Boolean(actor && actor.position[0] === cell[0] && actor.position[1] === cell[1]);
+    return Boolean(actor && actorOccupiesCell(actor, cell));
   }
   const trigger = standaloneTriggers().find((record) => record.id === item.id);
   return Boolean(trigger && triggerPositions(trigger).some((position) => position[0] === cell[0] && position[1] === cell[1]));
@@ -1903,17 +1924,17 @@ function validBulkDelta(delta) {
   const [width, height] = state.data.size;
   const inBounds = (position) => position[0] >= 0 && position[1] >= 0 && position[0] < width && position[1] < height;
   const movedObjects = new Map();
-  const movedActors = new Map();
   for (const descriptor of state.pointerDrag.descriptors) {
     const position = candidatePosition(descriptor, delta);
     if (descriptor.kind === "object") {
       const instance = state.data.objects.find((record) => record.id === descriptor.id);
       const definition = objectDefinition(instance);
-      if (!definition || position[0] < 0 || position[1] < 0
-        || position[0] + definition.size[0] > width || position[1] + definition.size[1] > height) return false;
+      if (!objectIntersectsMap(definition, position)) return false;
       movedObjects.set(descriptor.id, position);
+    } else if (descriptor.kind === "actor") {
+      const actor = state.data.actors.find((record) => record.id === descriptor.id);
+      if (!actor || !actorIntersectsMap(actor, position)) return false;
     } else if (!inBounds(position)) return false;
-    if (descriptor.kind === "actor") movedActors.set(descriptor.id, position);
     if (descriptor.kind === "site") {
       const site = state.data.sites.find((record) => record.id === descriptor.id);
       if (site && site.entrance_offsets.some((offset) => !inBounds(addPoint(position, offset)))) return false;
@@ -1938,7 +1959,6 @@ function validBulkDelta(delta) {
   for (const trigger of state.data.event_triggers) {
     let origin = null;
     if (trigger.anchor?.kind === "object") origin = movedObjects.get(trigger.anchor.object_id) || null;
-    else if (trigger.anchor?.kind === "actor") origin = movedActors.get(trigger.anchor.actor_id) || null;
     if (origin && trigger.offsets.some((offset) => !inBounds(addPoint(origin, offset)))) return false;
   }
   return true;
@@ -2252,7 +2272,7 @@ function mapSelectionCandidatesAt(cell) {
       .map((instance) => ({ kind: "object", id: instance.id, tab: "object" }));
   }
   for (const actor of state.data.actors) {
-    if (actor.position[0] === x && actor.position[1] === y) candidates.push({ kind: "actor", id: actor.id, tab: "event" });
+    if (actorOccupiesCell(actor, cell)) candidates.push({ kind: "actor", id: actor.id, tab: "event" });
   }
   for (const trigger of standaloneTriggers()) {
     if (triggerPositions(trigger).some((position) => position[0] === x && position[1] === y)) candidates.push({ kind: "trigger", id: trigger.id, tab: "event" });
@@ -2344,8 +2364,8 @@ function handleEventCell(cell) {
 function placeObject(x, y) {
   const definition = state.tileset.objects.find((object) => object.id === state.objectId);
   if (state.objectLayer === "all" || !objectLayerEditable(definition)) return;
-  if (x < 0 || y < 0 || x + definition.size[0] > state.data.size[0] || y + definition.size[1] > state.data.size[1]) {
-    showToast("オブジェクトがマップ範囲外へはみ出します。", true);
+  if (!objectIntersectsMap(definition, [x, y])) {
+    showToast("オブジェクトの構成セルがすべてマップ範囲外です。", true);
     return;
   }
   const conflict = objectPlacementConflict(definition, [x, y]);
@@ -2367,6 +2387,14 @@ function placeObject(x, y) {
 
 function objectDefinition(instance) {
   return state.tileset.objects.find((object) => object.id === instance?.definition_id) || null;
+}
+
+function objectIntersectsMap(definition, origin) {
+  const [width, height] = state.data.size;
+  return Boolean(definition?.cells.some((cell) => {
+    const [x, y] = addPoint(origin, cell.offset);
+    return x >= 0 && x < width && y >= 0 && y < height;
+  }));
 }
 
 function objectLayerEditable(definition) {
@@ -2431,7 +2459,7 @@ function instanceAt(x, y) {
 
 function validObjectOrigin(instance, x, y) {
   const definition = objectDefinition(instance);
-  if (!definition || x < 0 || y < 0 || x + definition.size[0] > state.data.size[0] || y + definition.size[1] > state.data.size[1]) return false;
+  if (!objectIntersectsMap(definition, [x, y])) return false;
   return !objectPlacementConflict(definition, [x, y], instance.id);
 }
 
@@ -2577,6 +2605,41 @@ function handlePaletteAction(element) {
   }
 }
 
+function removeOutsideMapPlacements() {
+  const [width, height] = state.data.size;
+  const inBounds = (position) => position[0] >= 0 && position[0] < width
+    && position[1] >= 0 && position[1] < height;
+  const removedObjectIds = new Set();
+  state.data.objects = state.data.objects.filter((instance) => {
+    const definition = objectDefinition(instance);
+    // Keep unknown definitions for validation rather than guessing their extent.
+    if (!definition?.cells?.length || objectIntersectsMap(definition, instance.origin)) return true;
+    removedObjectIds.add(instance.id);
+    return false;
+  });
+  const removedActorIds = new Set();
+  state.data.actors = state.data.actors.filter((actor) => {
+    if (actorIntersectsMap(actor)) return true;
+    removedActorIds.add(actor.id);
+    return false;
+  });
+  state.data.event_triggers = state.data.event_triggers.filter((trigger) => {
+    if (trigger.anchor?.kind === "object" && removedObjectIds.has(trigger.anchor.object_id)) return false;
+    if (trigger.anchor?.kind === "actor" && removedActorIds.has(trigger.anchor.actor_id)) return false;
+    if (trigger.anchor?.kind === "actor") return true;
+    const positions = triggerPositions(trigger);
+    return !positions.length || positions.some(inBounds);
+  });
+  const removedSiteIds = new Set();
+  state.data.sites = state.data.sites.filter((site) => {
+    if (site.anchor?.kind !== "object" || !removedObjectIds.has(site.anchor.object_id)) return true;
+    removedSiteIds.add(site.id);
+    delete state.siteNamesJa[site.id];
+    return false;
+  });
+  state.siteOptions = state.siteOptions.filter((siteId) => !removedSiteIds.has(siteId));
+}
+
 function resizeMap() {
   const width = Number(byId("map-width").value);
   const height = Number(byId("map-height").value);
@@ -2619,6 +2682,7 @@ function resizeMap() {
       trigger.anchor.position[1] += offsetY;
     }
     state.data.size = [width, height];
+    removeOutsideMapPlacements();
   });
 }
 
@@ -3213,7 +3277,11 @@ mapCanvas.addEventListener("pointerdown", (event) => {
     if (state.pointerStroke.changed) { state.dirty = true; scheduleResolution(); updateSaveState(); }
   } else if (state.tab === "object") {
     if (!beginObjectDrag(event, cell)) placeObject(...cell);
-  } else if (state.tab === "event") handleEventCell(cell);
+  } else if (state.tab === "event") {
+    const item = currentSingleSelectionItem();
+    if (item?.kind === "actor" && bulkItemOccupiesCell(item, cell) && beginSingleSelectionDrag(event, cell, item)) return;
+    handleEventCell(cell);
+  }
   else if (!beginSiteAnchorDrag(event, cell)) handleTravelCell(cell);
 });
 mapCanvas.addEventListener("pointermove", updateMapPointer);

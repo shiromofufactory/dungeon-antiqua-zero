@@ -13,6 +13,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from PIL import Image
 
+from app.actor_placement import actor_overlaps_map
+
 from .tileset import (
     Diagnostic,
     OBJECT_DRAW_GROUP_ORDER,
@@ -408,11 +410,9 @@ def validate_map_source(
                 if placement in placements:
                     _diagnostic(diagnostics, "error", "duplicate_object_placement", f"{path}.origin", "同じレイヤーで構成セルが完全に重なるオブジェクトは配置できません。")
                 placements.add(placement)
-            if definition is not None and width > 0 and height > 0:
-                object_size = definition.get("size")
-                if isinstance(object_size, list) and len(object_size) == 2:
-                    if origin[0] < 0 or origin[1] < 0 or origin[0] + object_size[0] > width or origin[1] + object_size[1] > height:
-                        _diagnostic(diagnostics, "error", "object_out_of_bounds", f"{path}.origin", "オブジェクトがマップ範囲外へはみ出しています。")
+            if placement is not None and width > 0 and height > 0:
+                if not any(_point_in_bounds(position, width, height) for position in placement[1]):
+                    _diagnostic(diagnostics, "error", "object_out_of_bounds", f"{path}.origin", "オブジェクトの構成セルがすべてマップ範囲外です。")
         valid_order = _is_int(instance.get("order"))
         if not valid_order:
             _diagnostic(diagnostics, "error", "invalid_object_order", f"{path}.order", "描画順は整数で指定してください。")
@@ -557,8 +557,8 @@ def _validate_actors(
         valid_position = _valid_point(position)
         if not valid_position:
             _diagnostic(diagnostics, "error", "invalid_actor_position", f"{path}.position", "actor位置は[x, y]の整数2要素で指定してください。")
-        elif not _point_in_bounds(position, width, height):
-            _diagnostic(diagnostics, "error", "actor_out_of_bounds", f"{path}.position", "actorがマップ範囲外です。")
+        elif not actor_overlaps_map(actor.get("kind"), *position, width, height):
+            _diagnostic(diagnostics, "error", "actor_out_of_bounds", f"{path}.position", "actorの画像全体がマップ範囲外です。")
             valid_position = False
         else:
             point = (position[0], position[1])
@@ -882,10 +882,11 @@ def _validate_event_triggers(
             if anchor_origin is None:
                 continue
             position = (anchor_origin[0] + offset[0], anchor_origin[1] + offset[1])
-            if not _point_in_bounds(position, width, height):
+            in_bounds = _point_in_bounds(position, width, height)
+            if not in_bounds and anchor_kind != "actor":
                 _diagnostic(diagnostics, "error", "trigger_cell_out_of_bounds", offset_path, f"triggerセル{list(position)}がマップ範囲外です。")
                 continue
-            if "step" in activations and collision is not None and collision[position[1] * width + position[0]]:
+            if in_bounds and "step" in activations and collision is not None and collision[position[1] * width + position[0]]:
                 _diagnostic(diagnostics, "error", "step_trigger_on_blocked_cell", offset_path, "step triggerは通行可能セルに置いてください。")
             if moving_actor:
                 if moving_actor_id is not None:
@@ -1679,6 +1680,8 @@ def resolve_map(
         for cell in definition.get("cells", []):
             x = instance["origin"][0] + cell["offset"][0]
             y = instance["origin"][1] + cell["offset"][1]
+            if not _point_in_bounds((x, y), width, height):
+                continue
             resolved_cell = {
                 "instance_id": instance["id"],
                 "definition_id": instance["definition_id"],

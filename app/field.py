@@ -8,9 +8,11 @@ from types import MappingProxyType
 from typing import Collection, Iterable, Mapping
 
 if __package__:
+    from .actor_placement import actor_overlaps_map
     from .input import Direction
     from .resources.maps import CompiledMap, MapActor, MapCell
 else:
+    from actor_placement import actor_overlaps_map
     from input import Direction
     from resources.maps import CompiledMap, MapActor, MapCell
 
@@ -39,6 +41,7 @@ class FieldMovement:
         speed: int | None = None,
         facing: Direction = Direction.DOWN,
         allow_blocked_start: bool = False,
+        allow_outside_start: bool = False,
         event_flags: Collection[str] = (),
     ) -> None:
         if not isinstance(map_data, CompiledMap):
@@ -58,12 +61,14 @@ class FieldMovement:
             raise TypeError("field facing must be a Direction")
         if not isinstance(allow_blocked_start, bool):
             raise TypeError("allow_blocked_start must be a boolean")
+        if not isinstance(allow_outside_start, bool):
+            raise TypeError("allow_outside_start must be a boolean")
         if start is None:
             start = self._nearest_passable_position(map_data, event_flags)
         if not isinstance(start, FieldPosition):
             raise TypeError("field start must be a FieldPosition")
         start_is_blocked = map_data.is_blocked(start.x, start.y, event_flags=event_flags)
-        if not (0 <= start.x < map_data.width and 0 <= start.y < map_data.height):
+        if not allow_outside_start and not (0 <= start.x < map_data.width and 0 <= start.y < map_data.height):
             raise ValueError("field start must be within the map bounds")
         if start_is_blocked and not allow_blocked_start:
             raise ValueError("field start must be on a passable map cell")
@@ -265,6 +270,10 @@ class FieldActors:
                         else Direction[actor.facing.upper()]
                     ),
                     allow_blocked_start=True,
+                    allow_outside_start=actor_overlaps_map(
+                        actor.kind, actor.position.x, actor.position.y,
+                        map_data.width, map_data.height,
+                    ),
                     event_flags=event_flags,
                 ),
                 self._next_roam_wait() if actor.kind == "roaming" else 0,

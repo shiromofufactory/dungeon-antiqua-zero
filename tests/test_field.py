@@ -66,6 +66,18 @@ def compiled_map(
 
 
 class FieldMovementTest(unittest.TestCase):
+    def test_partial_actor_keeps_outside_foot_position_without_allowing_party_outside(self) -> None:
+        map_data = replace(
+            compiled_map(("00000",) * 5, profile="dungeon"),
+            actors=(MapActor("elder", MapCell(2, 5), "stationary", 0, "down"),),
+        )
+        with self.assertRaisesRegex(ValueError, "within the map bounds"):
+            FieldMovement(map_data, start=FieldPosition(2, 5), allow_blocked_start=True)
+        actors = FieldActors(map_data)
+        actors.update_roaming(party_position=FieldPosition(2, 2))
+        self.assertEqual(actors.actor("elder").movement.position, FieldPosition(2, 5))
+        self.assertEqual(actors.actor("elder").movement.world_y, 80)
+
     def test_hidden_border_blocks_party_and_both_actor_movement_paths(self) -> None:
         for profile in ("world", "town", "dungeon"):
             for position, direction in (
