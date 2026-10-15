@@ -166,176 +166,190 @@ class FieldRenderer:
             raise ValueError("player palette name must not be empty")
 
         camera_x, camera_y = self.camera_position(field)
-        self._draw_ground(camera_x, camera_y, frame_count)
-        self._draw_objects(
-            camera_x,
-            camera_y,
-            frame_count,
-            draw_groups=("object",),
-            event_flags=field.event_flags,
+        tile_size = self.map_data.tile_size
+        left = max(0, tile_size - camera_x)
+        top = max(0, tile_size - camera_y)
+        right = min(
+            self.screen_width, (self.map_data.width - 1) * tile_size - camera_x,
         )
-        characters: list[
-            tuple[int, FieldMovement, str, int, Any | None, bool, int, bool]
-        ] = []
-        if draw_player:
-            characters.append(
-                (
-                    field.world_y,
-                    field,
-                    "player",
-                    player_sprite_index,
-                    player_character_image,
-                    player_floating,
-                    player_floating_phase,
-                    True,
-                )
+        bottom = min(
+            self.screen_height, (self.map_data.height - 1) * tile_size - camera_y,
+        )
+        self._pyxel.clip(left, top, max(0, right - left), max(0, bottom - top))
+        try:
+            self._draw_ground(camera_x, camera_y, frame_count)
+            self._draw_objects(
+                camera_x,
+                camera_y,
+                frame_count,
+                draw_groups=("object",),
+                event_flags=field.event_flags,
             )
-        if actors is not None:
-            if actors.map_data is not self.map_data:
-                raise ValueError("field renderer and actors must use the same map data")
-            for actor in actors.visible_actors:
-                if actor.kind == "prop":
-                    image = prop_image
-                elif actor.kind == "treasure":
-                    image = treasure_image
-                elif actor.sprite_source == "pc":
-                    image = actor_pc_character_image
-                else:
-                    image = actor_character_image
+            characters: list[
+                tuple[int, FieldMovement, str, int, Any | None, bool, int, bool]
+            ] = []
+            if draw_player:
                 characters.append(
                     (
-                        actor.movement.world_y,
-                        actor.movement,
-                        actor.kind,
-                        actor.sprite_index,
-                        image,
-                        actor.floating,
-                        floating_phase_offset(
-                            f"actor:{self.map_data.map_id}:{actor.id}"
-                        ),
-                        not (
-                            actor.sprite_source == "pc"
-                            and actor.sprite_index in fairy_sprite_indices
-                            and not actor.floating
-                        ),
+                        field.world_y,
+                        field,
+                        "player",
+                        player_sprite_index,
+                        player_character_image,
+                        player_floating,
+                        player_floating_phase,
+                        True,
                     )
                 )
-        depth_items: list[tuple[int, int, int, str, Any]] = [
-            (character[0], 1, index, f"character:{index}", character)
-            for index, character in enumerate(characters)
-        ]
-        tile_size = self.map_data.tile_size
-        for indexed_tiles in self._y_sorted_object_instances:
-            first_index, first_tile = indexed_tiles[0]
-            if not self.map_data.is_object_visible(first_tile.instance_id, field.event_flags):
-                continue
-            depth_items.append(
-                (
-                    first_tile.sort_y * tile_size,
-                    2 if first_tile.draw_group == "object_foreground" else 0,
-                    first_tile.order,
-                    f"object:{first_index}:{first_tile.instance_id}",
-                    indexed_tiles,
+            if actors is not None:
+                if actors.map_data is not self.map_data:
+                    raise ValueError("field renderer and actors must use the same map data")
+                for actor in actors.visible_actors:
+                    if actor.kind == "prop":
+                        image = prop_image
+                    elif actor.kind == "treasure":
+                        image = treasure_image
+                    elif actor.sprite_source == "pc":
+                        image = actor_pc_character_image
+                    else:
+                        image = actor_character_image
+                    characters.append(
+                        (
+                            actor.movement.world_y,
+                            actor.movement,
+                            actor.kind,
+                            actor.sprite_index,
+                            image,
+                            actor.floating,
+                            floating_phase_offset(
+                                f"actor:{self.map_data.map_id}:{actor.id}"
+                            ),
+                            not (
+                                actor.sprite_source == "pc"
+                                and actor.sprite_index in fairy_sprite_indices
+                                and not actor.floating
+                            ),
+                        )
+                    )
+            depth_items: list[tuple[int, int, int, str, Any]] = [
+                (character[0], 1, index, f"character:{index}", character)
+                for index, character in enumerate(characters)
+            ]
+            tile_size = self.map_data.tile_size
+            for indexed_tiles in self._y_sorted_object_instances:
+                first_index, first_tile = indexed_tiles[0]
+                if not self.map_data.is_object_visible(first_tile.instance_id, field.event_flags):
+                    continue
+                depth_items.append(
+                    (
+                        first_tile.sort_y * tile_size,
+                        2 if first_tile.draw_group == "object_foreground" else 0,
+                        first_tile.order,
+                        f"object:{first_index}:{first_tile.instance_id}",
+                        indexed_tiles,
+                    )
                 )
-            )
 
-        for _depth_y, item_kind, _order, _identity, payload in sorted(depth_items):
-            if item_kind != 1:
-                for object_index, object_tile in payload:
-                    self._draw_object_tile(
-                        object_index,
-                        object_tile,
+            for _depth_y, item_kind, _order, _identity, payload in sorted(depth_items):
+                if item_kind != 1:
+                    for object_index, object_tile in payload:
+                        self._draw_object_tile(
+                            object_index,
+                            object_tile,
+                            camera_x,
+                            camera_y,
+                            frame_count,
+                        )
+                    continue
+
+                (
+                    _world_y,
+                    movement,
+                    kind,
+                    sprite_index,
+                    image,
+                    floating,
+                    floating_phase,
+                    draw_shadow,
+                ) = payload
+                if kind == "player":
+                    self._draw_player_character(
+                        movement,
                         camera_x,
                         camera_y,
                         frame_count,
+                        image=image,
+                        sprite_index=sprite_index,
+                        floating=floating,
+                        floating_phase=floating_phase,
+                        palette_shifter=player_palette_shifter,
+                        palette_name=player_palette_name,
                     )
-                continue
-
-            (
-                _world_y,
-                movement,
-                kind,
-                sprite_index,
-                image,
-                floating,
-                floating_phase,
-                draw_shadow,
-            ) = payload
-            if kind == "player":
-                self._draw_player_character(
-                    movement,
-                    camera_x,
-                    camera_y,
-                    frame_count,
-                    image=image,
-                    sprite_index=sprite_index,
-                    floating=floating,
-                    floating_phase=floating_phase,
-                    palette_shifter=player_palette_shifter,
-                    palette_name=player_palette_name,
-                )
-            elif kind == "prop":
-                self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
-            elif kind == "treasure":
-                actor = actors.actor_at(
-                    movement.position.x,
-                    movement.position.y,
-                )
-                if actor is None:
-                    raise ValueError("treasure actor state is missing")
-                self._draw_treasure(
-                    movement,
-                    camera_x,
-                    camera_y,
-                    actor.treasure_frame,
-                    image,
-                )
-            else:
-                self._draw_character(
-                    movement,
-                    camera_x,
-                    camera_y,
-                    frame_count,
-                    image=image,
-                    sprite_index=sprite_index,
-                    floating=floating,
-                    floating_phase=floating_phase,
-                    draw_shadow=draw_shadow,
-                )
-        self._draw_objects(
-            camera_x,
-            camera_y,
-            frame_count,
-            draw_groups=("object_overlay",),
-            event_flags=field.event_flags,
-        )
+                elif kind == "prop":
+                    self._draw_prop(movement, camera_x, camera_y, sprite_index, image)
+                elif kind == "treasure":
+                    actor = actors.actor_at(
+                        movement.position.x,
+                        movement.position.y,
+                    )
+                    if actor is None:
+                        raise ValueError("treasure actor state is missing")
+                    self._draw_treasure(
+                        movement,
+                        camera_x,
+                        camera_y,
+                        actor.treasure_frame,
+                        image,
+                    )
+                else:
+                    self._draw_character(
+                        movement,
+                        camera_x,
+                        camera_y,
+                        frame_count,
+                        image=image,
+                        sprite_index=sprite_index,
+                        floating=floating,
+                        floating_phase=floating_phase,
+                        draw_shadow=draw_shadow,
+                    )
+            self._draw_objects(
+                camera_x,
+                camera_y,
+                frame_count,
+                draw_groups=("object_overlay",),
+                event_flags=field.event_flags,
+            )
+        finally:
+            self._pyxel.clip()
 
     def camera_position(self, field: FieldMovement) -> tuple[int, int]:
-        player_screen_x = (self.screen_width - FIELD_CHARACTER_SIZE) // 2
-        player_screen_y = (self.screen_height - FIELD_CHARACTER_SIZE) // 2
-        maximum_x = max(
-            0,
-            self.map_data.width * self.map_data.tile_size - self.screen_width,
-        )
-        maximum_y = max(
-            0,
-            self.map_data.height * self.map_data.tile_size - self.screen_height,
-        )
+        def axis_position(player_position: int, cell_count: int, screen_size: int) -> int:
+            inset = self.map_data.tile_size
+            visible_size = max(0, cell_count - 2) * self.map_data.tile_size
+            if visible_size <= screen_size:
+                return inset - (screen_size - visible_size) // 2
+            player_screen_position = (screen_size - FIELD_CHARACTER_SIZE) // 2
+            return min(
+                max(player_position - player_screen_position, inset),
+                inset + visible_size - screen_size,
+            )
+
         return (
-            min(max(field.world_x - player_screen_x, 0), maximum_x),
-            min(max(field.world_y - player_screen_y, 0), maximum_y),
+            axis_position(field.world_x, self.map_data.width, self.screen_width),
+            axis_position(field.world_y, self.map_data.height, self.screen_height),
         )
 
     def _draw_ground(self, camera_x: int, camera_y: int, frame_count: int) -> None:
         tile_size = self.map_data.tile_size
-        start_x = camera_x // tile_size
-        start_y = camera_y // tile_size
+        start_x = max(1, camera_x // tile_size)
+        start_y = max(1, camera_y // tile_size)
         end_x = min(
-            self.map_data.width,
+            self.map_data.width - 1,
             (camera_x + self.screen_width - 1) // tile_size + 1,
         )
         end_y = min(
-            self.map_data.height,
+            self.map_data.height - 1,
             (camera_y + self.screen_height - 1) // tile_size + 1,
         )
         for y in range(start_y, end_y):
@@ -377,6 +391,11 @@ class FieldRenderer:
         camera_y: int,
         frame_count: int,
     ) -> None:
+        if not (
+            1 <= object_tile.x < self.map_data.width - 1
+            and 1 <= object_tile.y < self.map_data.height - 1
+        ):
+            return
         tile_size = self.map_data.tile_size
         x = object_tile.x * tile_size - camera_x
         y = object_tile.y * tile_size - camera_y

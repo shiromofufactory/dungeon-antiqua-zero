@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from app.resources.maps import MapCell, MapDestination, MapResourceError, MapResources
+from app.resources.maps import (
+    MapCell, MapConditionalCell, MapDestination, MapObjectCellEffect,
+    MapResourceError, MapResources, MapVisibilityCondition,
+)
 
 
 class FakeImage:
@@ -30,6 +34,28 @@ class FakePyxel:
 
 
 class MapResourcesTest(unittest.TestCase):
+    def test_hidden_border_stays_blocked_with_conditional_passable_overrides(self) -> None:
+        loaded = MapResources(self.maps_dir, pyxel_api=FakePyxel()).map("test_map")
+        override = MapConditionalCell(
+            True, (MapObjectCellEffect("bridge", "passable_override", False),),
+        )
+        for profile in ("world", "town", "dungeon"):
+            map_data = replace(
+                loaded, profile=profile, width=5, height=5,
+                collision_rows=("00000",) * 5,
+                conditional_cells={(x, y): override for y in range(5) for x in range(5)},
+                object_conditions={"bridge": MapVisibilityCondition("story.bridge", True)},
+            )
+            for flags in ((), ("story.bridge",)):
+                for y in range(5):
+                    for x in range(5):
+                        with self.subTest(profile=profile, flags=flags, position=(x, y)):
+                            border = x in (0, 4) or y in (0, 4)
+                            self.assertEqual(
+                                map_data.is_blocked(x, y, event_flags=flags),
+                                border or not flags,
+                            )
+
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()
         self.maps_dir = Path(self.temporary.name)
@@ -243,7 +269,7 @@ class MapResourcesTest(unittest.TestCase):
             (1, 1),
         )
         self.assertTrue(map_data.is_blocked(0, 0))
-        self.assertFalse(map_data.is_blocked(1, 0))
+        self.assertTrue(map_data.is_blocked(1, 0))
         self.assertTrue(map_data.is_blocked(-1, 0))
         self.assertFalse(map_data.allows_interaction_through(0, 0))
         self.assertTrue(map_data.allows_interaction_through(0, 1))

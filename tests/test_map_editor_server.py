@@ -864,15 +864,17 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertEqual(runtime["actors"], data["actors"])
         self.assertEqual(runtime["event_triggers"], [])
 
-    def test_rejects_invalid_world_edge_without_writing(self) -> None:
+    def test_saves_and_compiles_non_base_world_edge(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]
         data["grounds"][0][0] = "plain"
 
         result = self.post_json("/api/save", data)
 
-        self.assertFalse(result["saved"])
-        self.assertFalse(self.application.source_path.exists())
-        self.assertIn("map_edge_not_base_ground", {item["code"] for item in result["diagnostics"]})
+        self.assertTrue(result["saved"])
+        saved = json.loads(self.application.source_path.read_text(encoding="utf-8"))
+        runtime = json.loads(self.application.runtime_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["grounds"][0][0], "plain")
+        self.assertEqual(runtime["collision_rows"][0][0], "0")
         self.assertIsNotNone(result["resolved"])
         self.assertEqual(
             result["resolved"]["ground_cells"][0]["layers"][-1]["ground_id"],

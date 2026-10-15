@@ -361,28 +361,6 @@ def validate_map_source(
                 if ground_id not in ground_ids:
                     _diagnostic(diagnostics, "error", "unknown_ground", f"grounds[{y}][{x}]", f"未定義の地面IDです: {ground_id}")
 
-    base_ground_id = None
-    if isinstance(ground_definitions, list) and ground_definitions:
-        first_ground = ground_definitions[0]
-        if isinstance(first_ground, dict) and isinstance(first_ground.get("id"), str):
-            base_ground_id = first_ground["id"]
-    if rows_valid and width > 0 and height > 0 and base_ground_id is not None:
-        for y, row in enumerate(rows):
-            if not isinstance(row, list) or len(row) != width:
-                continue
-            for x, ground_id in enumerate(row):
-                if (
-                    (x in (0, width - 1) or y in (0, height - 1))
-                    and ground_id != base_ground_id
-                ):
-                    _diagnostic(
-                        diagnostics,
-                        "error",
-                        "map_edge_not_base_ground",
-                        f"grounds[{y}][{x}]",
-                        f"マップ外周はベース地面`{base_ground_id}`で囲む必要があります。",
-                    )
-
     object_definitions = tileset.get("objects")
     objects_by_id = {
         item.get("id"): item
@@ -1018,13 +996,16 @@ def _validate_arrival_points(
                 f"{path}.position",
                 "到着地点がマップ範囲外です。",
             )
-        elif collision is not None and collision[position[1] * width + position[0]]:
+        elif (
+            position[0] in (0, width - 1) or position[1] in (0, height - 1)
+            or (collision is not None and collision[position[1] * width + position[0]])
+        ):
             _diagnostic(
                 diagnostics,
                 "error",
                 "arrival_point_blocked",
                 f"{path}.position",
-                "到着地点は通行可能セルに置いてください。",
+                "到着地点は外周1セルを除く通行可能セルに置いてください。",
             )
 
         if arrival.get("facing") not in CARDINAL_FACINGS:
@@ -1331,13 +1312,16 @@ def _validate_site_cell(
             path,
             f"{label}セル{list(position)}がマップ範囲外です。",
         )
-    elif collision is not None and collision[position[1] * width + position[0]]:
+    elif (
+        position[0] in (0, width - 1) or position[1] in (0, height - 1)
+        or (collision is not None and collision[position[1] * width + position[0]])
+    ):
         _diagnostic(
             diagnostics,
             "error",
             "site_cell_blocked",
             path,
-            f"{label}セル{list(position)}は通行できません。",
+            f"{label}セル{list(position)}は外周1セルを除く通行可能セルに置いてください。",
         )
 
 
@@ -1639,14 +1623,12 @@ def _resolve_event_triggers(
 def resolve_map(
     data: Mapping[str, Any],
     tileset: Mapping[str, Any],
-    *,
-    permitted_error_codes: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     diagnostics = validate_map_source(data, tileset)
     errors = [
         item
         for item in diagnostics
-        if item.severity == "error" and item.code not in permitted_error_codes
+        if item.severity == "error"
     ]
     if errors:
         raise MapSourceError(errors[0].message)

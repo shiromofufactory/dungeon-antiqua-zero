@@ -804,7 +804,7 @@ function renderPalette() {
           <button class="button small ${state.groundTool === "brush" ? "secondary" : "ghost"}" type="button" data-action="select-ground-tool" data-tool="brush" aria-pressed="${state.groundTool === "brush"}">ブラシ</button>
           <button class="button small ${state.groundTool === "rectangle" ? "secondary" : "ghost"}" type="button" data-action="select-ground-tool" data-tool="rectangle" aria-pressed="${state.groundTool === "rectangle"}">矩形塗り</button>
         </div>
-        <p class="subtle" style="margin-bottom:9px">${state.groundTool === "rectangle" ? "左ドラッグした矩形をまとめて塗ります。" : "左ドラッグで通過したセルを塗ります。"}外周はベース地面のみ塗れます。</p>
+        <p class="subtle" style="margin-bottom:9px">${state.groundTool === "rectangle" ? "左ドラッグした矩形をまとめて塗ります。" : "左ドラッグで通過したセルを塗ります。"}外周1マスはゲーム内では表示されず、進入もできません。</p>
         <div class="palette-list">${state.tileset.grounds.map((ground, index) => `
           <button class="palette-item ${ground.id === state.groundId ? "active" : ""}" type="button" data-action="select-ground" data-id="${escapeHtml(ground.id)}">
             <canvas data-ground-thumb="${index}" width="48" height="48"></canvas><span>${escapeHtml(ground.id)}</span>
@@ -1489,6 +1489,13 @@ function drawMap(now) {
       drawMapObjectCell(context, cell, scale, now);
     }
   }
+  context.save();
+  context.fillStyle = "rgba(0,0,0,.55)";
+  context.fillRect(0, 0, targetWidth, scale);
+  context.fillRect(0, targetHeight - scale, targetWidth, scale);
+  context.fillRect(0, scale, scale, targetHeight - scale * 2);
+  context.fillRect(targetWidth - scale, scale, scale, targetHeight - scale * 2);
+  context.restore();
   if (!groundOnly) drawTabCellHighlights(context, scale);
   if (!groundOnly && state.tab !== "object") for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
     drawObjectOutline(context, selected, scale);
@@ -1498,9 +1505,12 @@ function drawMap(now) {
     context.strokeStyle = "#ff2020";
     context.lineWidth = Math.max(1, state.zoom);
     state.resolved.collision.forEach((blocked, index) => {
-      if (!blocked) return;
-      const x = (index % width) * scale;
-      const y = Math.floor(index / width) * scale;
+      const cellX = index % width;
+      const cellY = Math.floor(index / width);
+      const border = cellX === 0 || cellY === 0 || cellX === width - 1 || cellY === height - 1;
+      if (!blocked && !border) return;
+      const x = cellX * scale;
+      const y = cellY * scale;
       context.fillRect(x, y, scale, scale);
       context.strokeRect(x + .5, y + .5, scale - 1, scale - 1);
     });
@@ -1895,9 +1905,6 @@ function rightClickWithEscape(event) {
 }
 
 function paintGround(x, y) {
-  const [width, height] = state.data.size;
-  const isEdge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
-  if (isEdge && state.groundId !== state.tileset.grounds[0].id) return false;
   if (state.data.grounds[y][x] === state.groundId) return false;
   state.data.grounds[y][x] = state.groundId;
   return true;

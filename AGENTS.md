@@ -133,7 +133,8 @@
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。
 - actorのフラグ表示条件は `python3 -B -m unittest tests.test_actor_visibility tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_game tests.test_game_events`、エディタでの指定・解除・Undoは `node --test tests/test_map_editor_objects.mjs` で回帰検証する。
 - オブジェクトのフラグ表示条件は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_game tests.test_game_events` と `node --test tests/test_map_editor_objects.mjs` で保存・条件評価・通行・描画・トリガー・Undoを回帰検証する。
-- マップエディタの地面外周保護・矩形塗り・Undoは `node --test tests/test_map_editor_grounds.mjs` で回帰検証する。
+- マップエディタの地面外周塗布・矩形塗り・Undoは `node --test tests/test_map_editor_grounds.mjs` で回帰検証する。
+- マップ外周の地面自由化・保存生成とゲーム内の外周非表示・進入禁止・カメラ制限・小さいマップの中央表示は `python3 -B -m unittest tests.test_map_source tests.test_map_editor_server tests.test_map_resources tests.test_field tests.test_game_events tests.test_actor_visibility` で回帰検証する。
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。
 - マップチップエディタのオブジェクト一覧・レイヤー絞り込み・新規作成・並び替えは `node --test tests/test_mapchip_objects.mjs` で回帰検証する。
 - ビルドや配布物の生成は、ユーザーが依頼した範囲でのみ行う。

@@ -50,8 +50,8 @@ def compiled_map(
     trigger: MapEventTrigger | None,
     *,
     actors: tuple[MapActor, ...] = (),
-    width: int = 3,
-    height: int = 3,
+    width: int = 5,
+    height: int = 5,
     interact_through_rows: tuple[str, ...] = (),
 ) -> CompiledMap:
     static = {activation: {} for activation in ("step", "touch", "interact")}
@@ -92,8 +92,8 @@ def game_for(
     trigger: MapEventTrigger,
     *,
     actors: tuple[MapActor, ...] = (),
-    width: int = 3,
-    height: int = 3,
+    width: int = 5,
+    height: int = 5,
     interact_through_rows: tuple[str, ...] = (),
 ) -> Game:
     game = Game.__new__(Game)
@@ -365,12 +365,12 @@ class GameEventTriggerTest(unittest.TestCase):
             "elder", "sample.meeting", frozenset(("touch", "interact")),
             actor_id="elder", offsets=(MapCell(0, 0),),
         )
-        game = game_for(trigger, actors=(MapActor("elder", MapCell(2, 1), "stationary", 0, "up"),))
+        game = game_for(trigger, actors=(MapActor("elder", MapCell(2, 2), "stationary", 0, "up"),))
         game.event_runner = Mock()
         game.field_actors.update("elder", Direction.UP, party_position=game.field.position)
         movement = game.field_actors.actor("elder").movement
         for activation in ("touch", "interact"):
-            self.assertFalse(game._try_field_trigger(activation, 2, 1))
+            self.assertFalse(game._try_field_trigger(activation, 2, 2))
         self.assertTrue(movement.is_moving)
         self.assertEqual(movement.offset_y, -2)
         self.assertIs(movement.facing, Direction.UP)
@@ -522,7 +522,7 @@ class GameEventTriggerTest(unittest.TestCase):
             "floor", "sample.run", frozenset(("step",)),
             cells=(MapCell(2, 1),),
         )
-        game = game_for(trigger, width=4)
+        game = game_for(trigger, width=5)
         game._start_field_event = Game._start_field_event.__get__(game, Game)
         game.event_catalog = EventCatalog.from_document({
             "format_version": 1,
@@ -1173,8 +1173,8 @@ class GameEventTriggerTest(unittest.TestCase):
 
 class GameEventAnimationTest(unittest.TestCase):
     def game(self) -> Game:
-        game = game_for(None, width=5, height=5, actors=(
-            MapActor("hover", MapCell(0, 1), "stationary", 0, "down", floating=True),
+        game = game_for(None, width=6, height=6, actors=(
+            MapActor("hover", MapCell(1, 1), "stationary", 0, "down", floating=True),
             MapActor("walker", MapCell(0, 3), "roaming", 1, "right"),
             MapActor("hidden", MapCell(3, 3), "roaming", 2, "right",
                      visibility_condition=MapVisibilityCondition("visible", True)),
@@ -1242,7 +1242,7 @@ class GameEventAnimationTest(unittest.TestCase):
                 self.assertFalse(game.field.is_walking)
                 self.assertIsNone(game.field.arrived_position)
                 self.assertEqual(game.field_actors.actor("hover").movement.position,
-                                 FieldPosition(0, 2))
+                                 FieldPosition(1, 2))
                 self.assertFalse(game.field_actors.actor("hover").movement.is_walking)
                 self.assertNotEqual((walker.movement.world_x, walker.movement.world_y), walker_position)
                 self.assertIs(walker.movement.facing, Direction.RIGHT)
@@ -1320,7 +1320,8 @@ class GameEventAnimationTest(unittest.TestCase):
                     game.event_effect = WaitEffect(180)
                     game.event_wait_remaining = 180
                     walker.roam_wait_frames = 0
-                    game.field_actors._random.choice.return_value = Direction.DOWN
+                    game.field_actors._random.choice.return_value = Direction.RIGHT
+                    game.field = FieldMovement(game.current_map, start=FieldPosition(2, 2))
                     game.update()
                     self.assertTrue(walker.movement.is_moving)
 
@@ -1361,6 +1362,27 @@ class GameEventAnimationTest(unittest.TestCase):
         self.assertEqual(walker.movement.position, FieldPosition(3, 2))
         self.assertFalse(walker.movement.is_moving)
         self.assertGreater(game.field.world_y, 16)
+
+    def test_controlled_party_and_actor_moves_cannot_enter_hidden_border(self) -> None:
+        for effect in (MovePartyEffect(Direction.UP, 1), MoveActorEffect("walker", Direction.UP, 1)):
+            with self.subTest(effect=effect):
+                game = self.game()
+                game.field = FieldMovement(game.current_map, start=FieldPosition(2, 1))
+                walker = game.field_actors.actor("walker").movement
+                walker.position = FieldPosition(3, 1)
+                walker.stop()
+                game.event_effect = effect
+                game.event_move_remaining = 1
+                game._abort_event = Mock()
+
+                game.update()
+
+                game._abort_event.assert_called_once()
+                self.assertIn("controlled movement is blocked", str(game._abort_event.call_args.args[0]))
+                self.assertEqual(game.field.position, FieldPosition(2, 1))
+                self.assertEqual(walker.position, FieldPosition(3, 1))
+                self.assertFalse(game.field.is_moving)
+                self.assertFalse(walker.is_moving)
 
     def test_controlled_moves_cannot_enter_another_characters_destination(self) -> None:
         for first_mover in ("party", "actor"):
@@ -1460,9 +1482,10 @@ class GameEventAnimationTest(unittest.TestCase):
         game.event_runner.complete_effect.assert_called_once_with(effect)
         game.event_effect = WaitEffect(180)
         game.event_wait_remaining = 180
+        game.field_actors._random.choice.return_value = Direction.RIGHT
         game.update()
-        self.assertIs(walker.movement.facing, Direction.LEFT)
-        self.assertEqual(walker.movement.world_x, 16 - walker.movement.speed)
+        self.assertIs(walker.movement.facing, Direction.RIGHT)
+        self.assertEqual(walker.movement.world_x, 16 + walker.movement.speed)
 
 
 if __name__ == "__main__":

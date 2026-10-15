@@ -178,7 +178,7 @@ class MapSourceTest(unittest.TestCase):
 
         self.assertEqual(compiled.runtime["area_parent_id"], "test_world")
 
-    def test_requires_at_least_one_screen_and_uses_first_ground_as_town_edge(self) -> None:
+    def test_keeps_minimum_size_and_uses_first_ground_only_as_initial_fill(self) -> None:
         town_tileset = initial_tileset(
             "village",
             "mapchips/village",
@@ -212,12 +212,8 @@ class MapSourceTest(unittest.TestCase):
         )
         source["grounds"][0][4] = "path"
         codes = {item.code for item in validate_map_source(source, town_tileset)}
-        self.assertIn("map_edge_not_base_ground", codes)
-        preview = resolve_map(
-            source,
-            town_tileset,
-            permitted_error_codes=frozenset(("map_edge_not_base_ground",)),
-        )
+        self.assertEqual(codes, set())
+        preview = resolve_map(source, town_tileset)
         self.assertEqual(preview["ground_cells"][4]["layers"][-1]["ground_id"], "path")
 
         with self.assertRaisesRegex(ValueError, "幅16"):
@@ -230,6 +226,42 @@ class MapSourceTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "高さ15"):
             initial_map_source("too_short", town_tileset, "town", 16, 14)
+
+    def test_border_grounds_still_control_the_first_visible_rows_boundary(self) -> None:
+        plain = self.tileset["grounds"][1]
+        plain["boundaries"] = [{
+            "id": "north_edge",
+            "neighbors": {
+                direction: "different" if direction == "n" else "any"
+                for direction in ("n", "ne", "e", "se", "s", "sw", "w", "nw")
+            },
+            "visual": deepcopy(plain["base_visual"]),
+        }]
+        source = initial_map_source("edge_test", self.tileset, "world", 16, 15)
+        source["grounds"][1][1] = "plain"
+        before = resolve_map(source, self.tileset)
+        self.assertEqual(before["ground_cells"][17]["layers"][-1]["rule_id"], "north_edge")
+
+        source["grounds"][0][1] = "plain"
+        after = resolve_map(source, self.tileset)
+
+        self.assertIsNone(after["ground_cells"][17]["layers"][-1]["rule_id"])
+        self.assertEqual(after["ground_cells"][1]["layers"][-1]["rule_id"], "north_edge")
+
+    def test_compiles_non_base_grounds_on_every_edge_for_all_profiles(self) -> None:
+        for profile in ("world", "town", "dungeon"):
+            with self.subTest(profile=profile):
+                tileset = deepcopy(self.tileset)
+                tileset["profile"] = profile
+                source = initial_map_source("edge_test", tileset, profile, 16, 15)
+                source["grounds"] = [["plain"] * 16 for _ in range(15)]
+
+                diagnostics = validate_map_source(source, tileset)
+                self.assertEqual([d for d in diagnostics if d.severity == "error"], [])
+                compiled = compile_map(source, tileset, self.image_path, self.palette_path)
+
+                self.assertEqual(compiled.runtime["size"], [16, 15])
+                self.assertEqual(compiled.runtime["collision_rows"], ["0" * 16] * 15)
 
     def test_validates_and_compiles_actors_and_event_triggers(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
@@ -772,6 +804,30 @@ class MapSourceTest(unittest.TestCase):
         self.assertIn("invalid_arrival_teleport_enabled", codes)
         self.assertIn("arrival_point_blocked", codes)
 
+    def test_rejects_border_entrances_and_arrivals_even_with_passable_overrides(self) -> None:
+        self.tileset["objects"][0]["cells"][0]["collision"] = "passable_override"
+        for profile in ("world", "town", "dungeon"):
+            for position in ([0, 7], [15, 7], [7, 0], [7, 14]):
+                with self.subTest(profile=profile, position=position):
+                    tileset = {**self.tileset, "profile": profile}
+                    source = initial_map_source("edge_test", tileset, profile, 16, 15)
+                    source["objects"] = [{
+                        "id": "bridge", "definition_id": "rock", "origin": position, "order": 0,
+                    }]
+                    source["sites"] = [{
+                        "id": "exit", "anchor": {"kind": "cell", "position": position},
+                        "entrance_offsets": [[0, 0]],
+                        "destination": {"map_id": "elsewhere", "arrival_id": "entrance"},
+                    }]
+                    source["arrival_points"] = [{
+                        "id": "entrance", "position": position, "facing": "down",
+                        "teleport_enabled": False,
+                    }]
+
+                    codes = {d.code for d in validate_map_source(source, tileset)}
+
+                    self.assertEqual(codes, {"site_cell_blocked", "arrival_point_blocked"})
+
     def test_reports_unselected_and_invalid_destinations_for_list_fields(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][2][2] = "plain"
@@ -1075,7 +1131,7 @@ class MapSourceTest(unittest.TestCase):
             item.code for item in validate_map_event_links({"test_world": source}, events)
         })
 
-    def test_rejects_non_sea_world_edge_and_duplicate_object_placement(self) -> None:
+    def test_rejects_duplicate_object_placement_with_a_non_sea_world_edge(self) -> None:
         source = initial_map_source("test_world", self.tileset, "world", 16, 15)
         source["grounds"][0][1] = "plain"
         source["objects"] = [
@@ -1085,8 +1141,7 @@ class MapSourceTest(unittest.TestCase):
 
         codes = {item.code for item in validate_map_source(source, self.tileset)}
 
-        self.assertIn("map_edge_not_base_ground", codes)
-        self.assertIn("duplicate_object_placement", codes)
+        self.assertEqual(codes, {"duplicate_object_placement"})
 
     def test_allows_same_origin_with_different_layer_or_constituent_cells(self) -> None:
         tileset = deepcopy(self.tileset)

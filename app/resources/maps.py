@@ -215,7 +215,8 @@ class CompiledMap:
             raise TypeError("map x must be an integer")
         if not isinstance(y, int) or isinstance(y, bool):
             raise TypeError("map y must be an integer")
-        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+        # The hidden outer cell ring is reserved even for passable overrides.
+        if x < 1 or y < 1 or x >= self.width - 1 or y >= self.height - 1:
             return True
         cell = self.conditional_cells.get((x, y))
         if cell is not None:

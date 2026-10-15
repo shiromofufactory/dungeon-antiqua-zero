@@ -41,7 +41,7 @@ class ActorVisibilityTest(unittest.TestCase):
         self.assertNotIn(FieldPosition(1, 1), self.actors.blocked_positions(excluding="on_actor"))
 
     def test_party_can_enter_hidden_actor_cell_but_visible_actor_blocks_it(self) -> None:
-        party = FieldMovement(self.map_data, start=FieldPosition(0, 1), event_flags=self.flags)
+        party = FieldMovement(self.map_data, start=FieldPosition(0, 1), allow_blocked_start=True, event_flags=self.flags)
         self.flags.add("story.open")
         self.assertFalse(party.update(Direction.RIGHT, blocked_positions=self.actors.blocked_positions()))
         self.flags.clear()
@@ -103,7 +103,7 @@ class ActorVisibilityTest(unittest.TestCase):
                 map_data = replace(self.map_data, actors=(actor,))
                 flags: set[str] = set()
                 actors = FieldActors(map_data, event_flags=flags)
-                field = FieldMovement(map_data, start=FieldPosition(0, 0), event_flags=flags)
+                field = FieldMovement(map_data, start=FieldPosition(0, 0), allow_blocked_start=True, event_flags=flags)
                 px = Mock(frame_count=0)
                 image = Mock(width=48, height=16 if kind in ("prop", "treasure") else 128)
                 renderer = FieldRenderer(map_data, screen_width=64, screen_height=64, pyxel_api=px)

@@ -66,10 +66,47 @@ def compiled_map(
 
 
 class FieldMovementTest(unittest.TestCase):
+    def test_hidden_border_blocks_party_and_both_actor_movement_paths(self) -> None:
+        for profile in ("world", "town", "dungeon"):
+            for position, direction in (
+                ((1, 2), Direction.LEFT), ((3, 2), Direction.RIGHT),
+                ((2, 1), Direction.UP), ((2, 3), Direction.DOWN),
+            ):
+                with self.subTest(profile=profile, position=position):
+                    map_data = replace(
+                        compiled_map(("00000",) * 5, profile=profile),
+                        actors=(MapActor("walker", MapCell(*position), "roaming", 0, "down"),),
+                    )
+                    field = FieldMovement(map_data, start=FieldPosition(*position))
+                    self.assertFalse(field.update(direction))
+                    self.assertEqual(field.position, FieldPosition(*position))
+                    self.assertIs(field.facing, direction)
+
+                    actors = FieldActors(map_data, random_source=Mock(
+                        randint=Mock(return_value=30), choice=Mock(return_value=direction),
+                    ))
+                    self.assertFalse(actors.update(
+                        "walker", direction, party_position=FieldPosition(2, 2),
+                    ))
+                    actors.actor("walker").roam_wait_frames = 0
+                    actors.update_roaming(party_position=FieldPosition(2, 2))
+                    self.assertFalse(actors.actor("walker").movement.is_moving)
+                    self.assertEqual(actors.actor("walker").movement.position, field.position)
+
+    def test_old_border_start_can_return_inside_but_cannot_walk_along_border(self) -> None:
+        map_data = compiled_map(("00000",) * 5)
+        field = FieldMovement(
+            map_data, start=FieldPosition(0, 2), allow_blocked_start=True,
+        )
+        self.assertFalse(field.update(Direction.DOWN))
+        for _ in range(16):
+            field.update(Direction.RIGHT)
+        self.assertEqual(field.position, FieldPosition(1, 2))
+
     def test_town_and_dungeon_move_twice_as_fast_as_world(self) -> None:
         movements = {
             profile: FieldMovement(
-                compiled_map(("000", "000", "000"), profile=profile),
+                compiled_map(("0000",) * 4, profile=profile),
                 start=FieldPosition(1, 1),
             )
             for profile in ("world", "town", "dungeon")
@@ -151,7 +188,7 @@ class FieldMovementTest(unittest.TestCase):
         self.assertIsNone(field.arrived_position)
 
     def test_animation_update_clears_completed_step_without_changing_facing_or_position(self) -> None:
-        field = FieldMovement(compiled_map(("000", "000", "000")),
+        field = FieldMovement(compiled_map(("0000",) * 4),
                               start=FieldPosition(1, 1), speed=16)
         field.update(Direction.RIGHT)
         self.assertTrue(field.is_walking)
@@ -166,7 +203,7 @@ class FieldMovementTest(unittest.TestCase):
         self.assertIs(field.facing, Direction.RIGHT)
 
     def test_animation_update_preserves_paused_step_and_allows_it_to_resume(self) -> None:
-        field = FieldMovement(compiled_map(("000", "000", "000"), profile="town"),
+        field = FieldMovement(compiled_map(("0000",) * 4, profile="town"),
                               start=FieldPosition(1, 1))
         field.update(Direction.RIGHT)
         for frame in range(2, 10):
@@ -237,7 +274,7 @@ class FieldMovementTest(unittest.TestCase):
                 map_data = replace(compiled_map(("000",) * 3, profile=profile), actors=(
                     MapActor("villager", MapCell(1, 2), "roaming", 0, "up"),
                 ))
-                party = FieldMovement(map_data, start=FieldPosition(0, 1))
+                party = FieldMovement(map_data, start=FieldPosition(0, 1), allow_blocked_start=True)
                 party.update(Direction.RIGHT)
                 actors = FieldActors(map_data)
                 self.assertFalse(actors.update("villager", Direction.UP,
@@ -250,7 +287,7 @@ class FieldMovementTest(unittest.TestCase):
             MapActor("first", MapCell(0, 1), "roaming", 0, "right", sprite_source="pc"),
             MapActor("second", MapCell(1, 2), "roaming", 1, "up"),
         ))
-        party = FieldMovement(map_data, start=FieldPosition(2, 1))
+        party = FieldMovement(map_data, start=FieldPosition(2, 1), allow_blocked_start=True)
         actors = FieldActors(map_data)
         self.assertTrue(actors.update("first", Direction.RIGHT, party_position=party.position))
         self.assertFalse(party.update(Direction.LEFT, blocked_positions=actors.blocked_positions()))
@@ -313,7 +350,7 @@ class FieldMovementTest(unittest.TestCase):
         self.assertIs(actors.actor("elder").movement.facing, Direction.UP)
 
     def test_explicit_facing_cancels_an_unfinished_roaming_step_without_changing_cell(self) -> None:
-        map_data = compiled_map(("000", "000", "000"))
+        map_data = compiled_map(("0000",) * 4)
         object.__setattr__(map_data, "actors", (
             MapActor("elder", MapCell(1, 1), "roaming", 0, "up"),
         ))
@@ -365,7 +402,7 @@ class FieldMovementTest(unittest.TestCase):
         self.assertEqual(actors.actor("chest").movement.position, FieldPosition(1, 1))
 
     def test_roaming_actor_chooses_and_starts_an_autonomous_step(self) -> None:
-        map_data = compiled_map(("000", "000", "000"))
+        map_data = compiled_map(("0000",) * 4)
         object.__setattr__(
             map_data,
             "actors",
@@ -439,7 +476,7 @@ class FieldRendererTest(unittest.TestCase):
                     map_data = compiled_map(("000", "000", "000"), objects=(tile,))
                     object.__setattr__(map_data, "object_conditions", MappingProxyType({"rock": MapVisibilityCondition("story.rock", value)}))
                     flags = set()
-                    field = FieldMovement(map_data, start=FieldPosition(0, 0), event_flags=flags)
+                    field = FieldMovement(map_data, start=FieldPosition(0, 0), allow_blocked_start=True, event_flags=flags)
                     renderer = FieldRenderer(map_data, screen_width=48, screen_height=48, pyxel_api=Mock(frame_count=0))
                     renderer._draw_object_tile = Mock()
                     renderer.draw(field, draw_player=False)
@@ -491,7 +528,7 @@ class FieldRendererTest(unittest.TestCase):
 
         renderer.draw(field)
 
-        self.assertEqual(pyxel.blt.call_count, 11)
+        self.assertEqual(pyxel.blt.call_count, 3)
         self.assertEqual(
             pyxel.blt.call_args_list[-2],
             call(8, 8, map_data.atlas, 0, 0, 16, 16, 1),
@@ -515,20 +552,85 @@ class FieldRendererTest(unittest.TestCase):
                     call(8, 8, 0, source_x, 96, 16, 16, 1),
                 )
 
-    def test_clamps_camera_to_map_edges(self) -> None:
-        map_data = compiled_map(("000", "000", "000"))
-        field = FieldMovement(map_data, start=FieldPosition(0, 0))
-        renderer = FieldRenderer(
-            map_data,
-            screen_width=32,
-            screen_height=32,
-            pyxel_api=Mock(),
+    def test_camera_stops_one_cell_inside_every_map_edge_for_all_profiles(self) -> None:
+        for profile in ("world", "town", "dungeon"):
+            map_data = compiled_map(("0" * 8,) * 7, profile=profile)
+            renderer = FieldRenderer(
+                map_data, screen_width=32, screen_height=32, pyxel_api=Mock(),
+            )
+            for position, expected in (
+                ((1, 1), (16, 16)),
+                ((6, 1), (80, 16)),
+                ((1, 5), (16, 64)),
+                ((6, 5), (80, 64)),
+                ((4, 3), (56, 40)),
+            ):
+                with self.subTest(profile=profile, position=position):
+                    field = FieldMovement(map_data, start=FieldPosition(*position))
+                    self.assertEqual(renderer.camera_position(field), expected)
+
+    def test_centers_small_maps_and_clips_all_field_layers_to_the_inner_cells(self) -> None:
+        map_data = compiled_map(("0" * 16,) * 15)
+        map_data = replace(
+            map_data, ground_tiles=tuple(range(240)),
+            atlas_columns=16, atlas_tile_count=240,
+            object_tiles=(
+                MapObjectTile("edge", "edge", 0, 0, "object_overlay", 0, 0, 0),
+                MapObjectTile("inside", "inside", 1, 1, "object_overlay", 0, 0, 1),
+            ),
         )
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data, screen_width=256, screen_height=240, pyxel_api=pyxel,
+        )
+        for position in ((1, 1), (14, 13), (8, 7)):
+            with self.subTest(position=position):
+                field = FieldMovement(map_data, start=FieldPosition(*position))
+                self.assertEqual(renderer.camera_position(field), (0, 0))
+        renderer.draw(field, draw_player=False)
 
-        self.assertEqual(renderer.camera_position(field), (0, 0))
+        pyxel.clip.assert_has_calls([call(16, 16, 224, 208), call()])
+        self.assertEqual(pyxel.method_calls[0], call.clip(16, 16, 224, 208))
+        self.assertEqual(pyxel.method_calls[-1], call.clip())
+        ground_calls = pyxel.blt.call_args_list[:-1]
+        self.assertEqual(len(ground_calls), 14 * 13)
+        self.assertEqual(
+            {(c.args[0], c.args[1]) for c in ground_calls},
+            {(x * 16, y * 16) for y in range(1, 14) for x in range(1, 15)},
+        )
+        self.assertEqual(pyxel.blt.call_args_list[-1].args[:2], (16, 16))
 
-        far_field = FieldMovement(map_data, start=FieldPosition(2, 2))
-        self.assertEqual(renderer.camera_position(far_field), (16, 16))
+    def test_camera_handles_exact_screen_size_and_only_one_small_axis(self) -> None:
+        for size, position, expected in (
+            ((18, 17), (1, 1), (16, 16)),
+            ((18, 17), (16, 15), (16, 16)),
+            ((40, 15), (1, 1), (16, 0)),
+            ((40, 15), (38, 13), (368, 0)),
+            ((16, 40), (1, 1), (0, 16)),
+            ((16, 40), (14, 38), (0, 384)),
+        ):
+            with self.subTest(size=size, position=position):
+                width, height = size
+                map_data = compiled_map(("0" * width,) * height)
+                field = FieldMovement(map_data, start=FieldPosition(*position))
+                renderer = FieldRenderer(
+                    map_data, screen_width=256, screen_height=240, pyxel_api=Mock(),
+                )
+                self.assertEqual(renderer.camera_position(field), expected)
+
+    def test_releases_map_clip_after_a_drawing_error(self) -> None:
+        map_data = compiled_map(("0" * 18,) * 17)
+        field = FieldMovement(map_data, start=FieldPosition(1, 1))
+        pyxel = Mock(frame_count=0)
+        renderer = FieldRenderer(
+            map_data, screen_width=256, screen_height=240, pyxel_api=pyxel,
+        )
+        renderer._draw_ground = Mock(side_effect=RuntimeError("drawing failed"))
+
+        with self.assertRaisesRegex(RuntimeError, "drawing failed"):
+            renderer.draw(field)
+
+        self.assertEqual(pyxel.clip.call_args_list, [call(0, 0, 256, 240), call()])
 
     def test_draws_interior_player_from_battle_sprite_walking_set(self) -> None:
         map_data = compiled_map(("000", "000", "000"), profile="town")
@@ -623,7 +725,7 @@ class FieldRendererTest(unittest.TestCase):
     def test_interior_player_cycles_right_standing_left_standing_while_moving(
         self,
     ) -> None:
-        map_data = compiled_map(("0000", "0000", "0000"), profile="town")
+        map_data = compiled_map(("0000000",) * 3, profile="town")
         field = FieldMovement(map_data, start=FieldPosition(1, 1))
         walking_image = Mock(width=384, height=384)
         pyxel = Mock(frame_count=0)
@@ -634,8 +736,8 @@ class FieldRendererTest(unittest.TestCase):
             pyxel_api=pyxel,
         )
 
-        expected_frames = (32,) * 4 + (16,) * 4 + (0,) * 4 + (16,) * 4
-        self.assertEqual(FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL, 4)
+        expected_frames = (32,) * 8 + (16,) * 8 + (0,) * 8 + (16,) * 8
+        self.assertEqual(FIELD_PLAYER_CHARACTER_ANIMATION_INTERVAL, 8)
         for source_x in expected_frames:
             field.update(Direction.RIGHT)
             pyxel.blt.reset_mock()
@@ -694,7 +796,7 @@ class FieldRendererTest(unittest.TestCase):
                         MapObjectTile("tree_1", "tree", 1, 1, "object_foreground", 0, 0, 1),
                     )
                     map_data = compiled_map(("000", "000", "000"), objects=objects)
-                    field = FieldMovement(map_data, start=FieldPosition(1, character_y))
+                    field = FieldMovement(map_data, start=FieldPosition(1, character_y), allow_blocked_start=True)
                     object.__setattr__(
                         map_data,
                         "actors",
@@ -852,7 +954,7 @@ class FieldRendererTest(unittest.TestCase):
             "actors",
             (MapActor("elder", MapCell(1, 1), "stationary", 0, "down"),),
         )
-        field = FieldMovement(map_data, start=FieldPosition(0, 0))
+        field = FieldMovement(map_data, start=FieldPosition(0, 0), allow_blocked_start=True)
         actors = FieldActors(map_data)
         character_image = Mock(width=48, height=128)
         pyxel = Mock(frame_count=0)
@@ -895,7 +997,7 @@ class FieldRendererTest(unittest.TestCase):
             ),
         )
         map_data = compiled_map(("000", "000", "000"), objects=objects)
-        field = FieldMovement(map_data, start=FieldPosition(1, 2))
+        field = FieldMovement(map_data, start=FieldPosition(1, 2), allow_blocked_start=True)
         pyxel = Mock(frame_count=0)
         renderer = FieldRenderer(
             map_data,
@@ -1040,7 +1142,7 @@ class FieldRendererTest(unittest.TestCase):
         )
 
     def test_actor_character_uses_pc_format_rows_and_walking_frames(self) -> None:
-        map_data = compiled_map(("0000", "0000", "0000"), profile="town")
+        map_data = compiled_map(("00000",) * 5, profile="town")
         movement = FieldMovement(
             map_data,
             start=FieldPosition(1, 1),
@@ -1216,7 +1318,7 @@ class FieldRendererTest(unittest.TestCase):
                 ),
             ),
         )
-        field = FieldMovement(map_data, start=FieldPosition(3, 1))
+        field = FieldMovement(map_data, start=FieldPosition(3, 1), allow_blocked_start=True)
         actors = FieldActors(map_data)
         pc_image = Mock(width=384, height=384)
         pyxel = Mock(frame_count=0)

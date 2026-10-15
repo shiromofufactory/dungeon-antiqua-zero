@@ -43,7 +43,6 @@ DEFAULT_PORT = 8767
 SESSION_CLIENT_HEADER = "map-editor-ui"
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 SITE_NAME_TEXT_PREFIX = "location."
-PREVIEW_PERMITTED_MAP_ERROR_CODES = frozenset(("map_edge_not_base_ground",))
 ACTOR_ASSETS = {
     "prop": {
         "path": Path("actors/props.png"),
@@ -547,11 +546,7 @@ class MapEditorApplication:
         )
         if not tileset_has_errors:
             try:
-                resolved = resolve_map(
-                    current,
-                    tileset,
-                    permitted_error_codes=PREVIEW_PERMITTED_MAP_ERROR_CODES,
-                )
+                resolved = resolve_map(current, tileset)
             except ValueError as error:
                 if has_errors:
                     preview_data = {
@@ -562,11 +557,7 @@ class MapEditorApplication:
                         "event_triggers": [],
                     }
                     try:
-                        resolved = resolve_map(
-                            preview_data,
-                            tileset,
-                            permitted_error_codes=PREVIEW_PERMITTED_MAP_ERROR_CODES,
-                        )
+                        resolved = resolve_map(preview_data, tileset)
                     except ValueError:
                         pass
                 else:
