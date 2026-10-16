@@ -764,7 +764,8 @@ function renderDefinitionList(items, activeIndex, action, addAction, addLabel, r
       title="${index === baseIndex ? "ベース地面は先頭固定です" : "ドラッグで表示順を変更"}">${escapeHtml(item.id || `#${index + 1}`)}${index === baseIndex ? " · ベース" : ""}</button>
   `;
   }).join("");
-  return `<div class="definition-list">${chips}<button type="button" class="definition-chip" data-action="${addAction}">＋ ${addLabel}</button></div>`;
+  const addButton = addAction ? `<button type="button" class="definition-chip" data-action="${addAction}">＋ ${addLabel}</button>` : "";
+  return `<div class="definition-list">${chips}${addButton}</div>`;
 }
 
 function clearDefinitionDropIndicators() {
@@ -941,7 +942,7 @@ function renderBoundaryEditor() {
   return `
     <div class="section">
       <div class="section-title"><h3>対象地面</h3><span class="subtle">親を含むかでsame判定</span></div>
-      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", "add-ground", "地面", "ground", 0)}
+      ${renderDefinitionList(grounds, state.groundIndex, "select-ground", null, "地面", "ground", 0)}
     </div>
     <div class="section">
       <div class="section-title"><h3>境界ルール</h3><span class="subtle">左から順に最初の一致を採用</span></div>
@@ -1494,6 +1495,7 @@ function handleAction(element) {
     state.frameIndex = 0;
     renderAll();
   } else if (action === "add-ground") {
+    if (state.tab !== "ground") return;
     commit(() => {
       const id = uniqueId("ground", grounds);
       grounds.push({ id, parent_id: null, collision: "passable", base_visual: singleTileVisual(), boundaries: [] });
