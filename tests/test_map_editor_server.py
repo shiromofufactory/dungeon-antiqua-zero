@@ -428,8 +428,9 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("function paintGroundRectangle(rect)", script)
         self.assertIn('kind: "ground_rectangle"', script)
         self.assertIn("function drawGroundPaintPreview(context, scale)", script)
-        self.assertIn("function drawObjectPlacementPreview(context, scale)", script)
-        self.assertIn("definition.size[0] * scale", script)
+        self.assertIn("function drawMapCursor(context, scale)", script)
+        self.assertIn("size = definition.size", script)
+        self.assertIn("size[0] * scale", script)
         self.assertIn("context.setLineDash", script)
 
     def test_lists_creates_saves_and_reopens_town_map(self) -> None:

@@ -60,6 +60,7 @@ const state = {
   zoom: 2,
   showGrid: true,
   showCollision: false,
+  showScreenRange: false,
   showGroundOnly: false,
   paused: false,
   animationStartedAt: performance.now(),
@@ -69,6 +70,7 @@ const state = {
   dragScrollTime: null,
   groundPaintRect: null,
   hoveredCell: null,
+  screenRangePointer: null,
   resolveTimer: null,
   resolveRevision: 0,
   siteNameEditing: false,
@@ -338,9 +340,11 @@ function applyDocumentPayload(payload) {
   state.selectionRect = null;
   state.groundPaintRect = null;
   state.hoveredCell = null;
+  state.screenRangePointer = null;
   state.zoom = 2;
   state.showGrid = true;
   state.showCollision = false;
+  state.showScreenRange = false;
   state.showGroundOnly = false;
   restoreUiSettings();
   rawImage.onload = prepareSourceImage;
@@ -405,7 +409,7 @@ function settingsKey() {
 function saveUiSettings() {
   if (!state.data) return;
   try {
-    localStorage.setItem(settingsKey(), JSON.stringify({ zoom: state.zoom, showGrid: state.showGrid, showCollision: state.showCollision, showGroundOnly: state.showGroundOnly }));
+    localStorage.setItem(settingsKey(), JSON.stringify({ zoom: state.zoom, showGrid: state.showGrid, showCollision: state.showCollision, showScreenRange: state.showScreenRange, showGroundOnly: state.showGroundOnly }));
   } catch (_error) {}
 }
 
@@ -416,6 +420,7 @@ function restoreUiSettings() {
     if (Number.isInteger(settings.zoom)) state.zoom = Math.max(1, Math.min(4, settings.zoom));
     if (typeof settings.showGrid === "boolean") state.showGrid = settings.showGrid;
     if (typeof settings.showCollision === "boolean") state.showCollision = settings.showCollision;
+    if (typeof settings.showScreenRange === "boolean") state.showScreenRange = settings.showScreenRange;
     if (typeof settings.showGroundOnly === "boolean") state.showGroundOnly = settings.showGroundOnly;
   } catch (_error) {}
 }
@@ -1183,6 +1188,7 @@ function renderAll() {
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === state.tab));
   byId("grid-toggle").checked = state.showGrid;
   byId("collision-toggle").checked = state.showCollision;
+  byId("screen-range-toggle").checked = state.showScreenRange;
   byId("ground-only-toggle").checked = state.showGroundOnly;
   byId("ground-only-control").hidden = state.tab !== "ground";
   byId("animation-toggle").textContent = state.paused ? "再生" : "一時停止";
@@ -1459,25 +1465,31 @@ function drawGroundPaintPreview(context, scale) {
   context.restore();
 }
 
-function drawObjectPlacementPreview(context, scale) {
-  if (state.tab !== "object" || state.objectLayer === "all" || !state.hoveredCell || state.pointerDrag || state.bulkSelection.length) return;
-  const definition = state.tileset.objects.find((object) => object.id === state.objectId);
-  if (!objectLayerEditable(definition)) return;
-  const selected = currentInstance();
-  if (selected && instanceOccupies(selected, ...state.hoveredCell)) return;
+function drawMapCursor(context, scale) {
+  if (!state.hoveredCell || state.pointerDrag) return;
+  let size = [1, 1];
+  let valid = true;
+  if (state.tab === "object") {
+    if (state.objectLayer === "all" || state.bulkSelection.length) return;
+    const definition = state.tileset.objects.find((object) => object.id === state.objectId);
+    if (!objectLayerEditable(definition)) return;
+    const selected = currentInstance();
+    if (selected && instanceOccupies(selected, ...state.hoveredCell)) return;
+    size = definition.size;
+    valid = objectIntersectsMap(definition, state.hoveredCell)
+      && !objectPlacementConflict(definition, state.hoveredCell);
+  }
   const [x, y] = state.hoveredCell;
-  const valid = objectIntersectsMap(definition, [x, y])
-    && !objectPlacementConflict(definition, [x, y]);
   context.save();
   context.fillStyle = valid ? "rgba(114,183,119,.12)" : "rgba(227,119,107,.14)";
   context.setLineDash([Math.max(4, state.zoom * 3), Math.max(3, state.zoom * 2)]);
-  context.fillRect(x * scale, y * scale, definition.size[0] * scale, definition.size[1] * scale);
+  context.fillRect(x * scale, y * scale, size[0] * scale, size[1] * scale);
   context.strokeStyle = "rgba(12,18,11,.88)";
   context.lineWidth = Math.max(4, state.zoom * 2);
-  context.strokeRect(x * scale + 1, y * scale + 1, definition.size[0] * scale - 2, definition.size[1] * scale - 2);
+  context.strokeRect(x * scale + 1, y * scale + 1, size[0] * scale - 2, size[1] * scale - 2);
   context.strokeStyle = valid ? "#d8ffd9" : "#ff8f84";
   context.lineWidth = Math.max(2, state.zoom);
-  context.strokeRect(x * scale + 1, y * scale + 1, definition.size[0] * scale - 2, definition.size[1] * scale - 2);
+  context.strokeRect(x * scale + 1, y * scale + 1, size[0] * scale - 2, size[1] * scale - 2);
   context.restore();
 }
 
@@ -1513,12 +1525,30 @@ function drawMap(now) {
       drawMapObjectCell(context, cell, scale, now);
     }
   }
+  let visibleLeft = scale;
+  let visibleTop = scale;
+  let visibleRight = targetWidth - scale;
+  let visibleBottom = targetHeight - scale;
+  if (state.showScreenRange && state.screenRangePointer) {
+    const pointer = state.screenRangePointer;
+    const bounds = mapScrollBounds();
+    const cell = pointer.clientX >= bounds.left && pointer.clientX < bounds.right
+      && pointer.clientY >= bounds.top && pointer.clientY < bounds.bottom
+      ? mapCellFromPointer(pointer) : null;
+    if (cell) {
+      // The character's own cell plus 7.5 cells on each side and 7 above/below.
+      visibleLeft = Math.max(visibleLeft, (cell[0] - 7.5) * scale);
+      visibleTop = Math.max(visibleTop, (cell[1] - 7) * scale);
+      visibleRight = Math.min(visibleRight, (cell[0] + 8.5) * scale);
+      visibleBottom = Math.min(visibleBottom, (cell[1] + 8) * scale);
+    }
+  }
   context.save();
   context.fillStyle = "rgba(0,0,0,.55)";
-  context.fillRect(0, 0, targetWidth, scale);
-  context.fillRect(0, targetHeight - scale, targetWidth, scale);
-  context.fillRect(0, scale, scale, targetHeight - scale * 2);
-  context.fillRect(targetWidth - scale, scale, scale, targetHeight - scale * 2);
+  context.fillRect(0, 0, targetWidth, visibleTop);
+  context.fillRect(0, visibleBottom, targetWidth, targetHeight - visibleBottom);
+  context.fillRect(0, visibleTop, visibleLeft, visibleBottom - visibleTop);
+  context.fillRect(visibleRight, visibleTop, targetWidth - visibleRight, visibleBottom - visibleTop);
   context.restore();
   if (!groundOnly) drawTabCellHighlights(context, scale);
   if (!groundOnly && state.tab !== "object") for (const selected of state.data.objects.filter((instance) => instance.id === state.selectedInstanceId || isBulkSelected("object", instance.id))) {
@@ -1553,7 +1583,7 @@ function drawMap(now) {
     context.stroke();
   }
   drawGroundPaintPreview(context, scale);
-  drawObjectPlacementPreview(context, scale);
+  drawMapCursor(context, scale);
   drawSelectedActorSprite(now);
 }
 
@@ -1624,6 +1654,7 @@ function mapCellFromPointer(event, clampToViewport = false) {
 
 function rememberMapPointer(event) {
   state.dragPointer = { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId };
+  state.screenRangePointer = { clientX: event.clientX, clientY: event.clientY };
 }
 
 function stopMapAutoScroll() {
@@ -1666,6 +1697,7 @@ function updateMapPointer(event) {
   const dragging = Boolean(state.pointerDrag || state.pointerStroke);
   const drag = state.pointerDrag || state.pointerStroke;
   if (drag && drag.pointerId !== event.pointerId) return;
+  state.screenRangePointer = { clientX: event.clientX, clientY: event.clientY };
   if (dragging) rememberMapPointer(event);
   const cell = mapCellFromPointer(event, dragging);
   byId("cursor-status").textContent = cell ? `セル ${cell[0]}, ${cell[1]}` : "セル —";
@@ -1677,9 +1709,10 @@ function updateMapPointer(event) {
     else if (state.pointerDrag.kind === "bulk") dragBulkTo(cell);
     else if (state.pointerDrag.kind === "single_selection") dragBulkTo(cell);
     else if (state.pointerDrag.kind === "ground_rectangle") updateGroundRectangle(cell);
+    if (state.showScreenRange) drawMap(performance.now());
     return;
   }
-  if (!state.pointerStroke) drawMap(performance.now());
+  drawMap(performance.now());
   if (!cell || !state.pointerStroke || state.pointerStroke.last === cell.join(",")) return;
   state.pointerStroke.last = cell.join(",");
   if (paintGround(...cell)) {
@@ -3233,7 +3266,9 @@ byId("zoom-in").addEventListener("click", () => { state.zoom = Math.min(4, state
 byId("zoom-out").addEventListener("click", () => { state.zoom = Math.max(1, state.zoom - 1); saveUiSettings(); renderAll(); });
 byId("grid-toggle").addEventListener("change", (event) => { state.showGrid = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
 byId("collision-toggle").addEventListener("change", (event) => { state.showCollision = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
+byId("screen-range-toggle").addEventListener("change", (event) => { state.showScreenRange = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
 byId("ground-only-toggle").addEventListener("change", (event) => { state.showGroundOnly = event.target.checked; saveUiSettings(); drawMap(performance.now()); });
+byId("map-scroll").addEventListener("scroll", () => { if (state.showScreenRange) drawMap(performance.now()); });
 byId("animation-toggle").addEventListener("click", () => {
   state.paused = !state.paused;
   if (!state.paused) state.animationStartedAt = performance.now();
@@ -3328,9 +3363,11 @@ mapCanvas.addEventListener("pointercancel", cancelMapPointer);
 mapCanvas.addEventListener("lostpointercapture", cancelMapPointer);
 mapCanvas.addEventListener("contextmenu", (event) => event.preventDefault());
 mapCanvas.addEventListener("pointerleave", () => {
-  if (state.pointerDrag || state.pointerStroke) return;
-  byId("cursor-status").textContent = "セル —";
-  state.hoveredCell = null;
+  state.screenRangePointer = null;
+  if (!state.pointerDrag && !state.pointerStroke) {
+    byId("cursor-status").textContent = "セル —";
+    state.hoveredCell = null;
+  }
   drawMap(performance.now());
 });
 window.addEventListener("blur", cancelMapPointer);

@@ -79,7 +79,7 @@ test("collision view marks the reserved border even when its ground is passable"
   context.CELL_SIZE = 16;
   for (const name of [
     "drawActorsAndYSortedObjects", "drawTabCellHighlights", "drawTravelMarkers", "drawEventMarkers",
-    "drawRangeSelection", "drawGroundPaintPreview", "drawObjectPlacementPreview", "drawSelectedActorSprite",
+    "drawRangeSelection", "drawGroundPaintPreview", "drawMapCursor", "drawSelectedActorSprite",
   ]) context[name] = () => {};
   const start = source.indexOf("function drawMap(");
   const end = source.indexOf("\nfunction animationLoop(", start);
