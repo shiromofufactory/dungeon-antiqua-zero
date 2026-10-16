@@ -441,7 +441,7 @@ class GameTest(unittest.TestCase):
             [call(FACES_IMAGE_ID)],
         )
         self.assertIs(mock.faces, face_image)
-        self.assertEqual(NEW_GAME_MAP_ID, "faily_village")
+        self.assertEqual(NEW_GAME_MAP_ID, "fairy_village")
         self.assertEqual(
             map_resources_class.return_value.map.call_args_list,
             [call(WORLD_MAP_ID), call(NEW_GAME_MAP_ID)],
@@ -3194,7 +3194,7 @@ class GameTest(unittest.TestCase):
         self.assertFalse(mock.screen_brightness.is_active)
         mock.palette_shifter.set_brightness.assert_called_once_with(0.0)
         mock.bgm.play.assert_called_once_with("da3-town")
-        mock._start_field_event.assert_called_once_with("faily_village.prologue")
+        mock._start_field_event.assert_called_once_with("fairy_village.prologue")
         self.assertEqual(mock.battle_command_memory, BattleCommandMemory())
         self.assertEqual(calls, ["brightness", "bgm", "event"])
 

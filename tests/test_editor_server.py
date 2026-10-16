@@ -28,17 +28,17 @@ class EditorServerTest(unittest.TestCase):
         (data_root / "characters.json").write_text("[]\n", encoding="utf-8")
         (data_root / "items.json").write_text("[]\n", encoding="utf-8")
         (data_root / "shops.json").write_text("[]\n", encoding="utf-8")
+        (data_root / "monsters.json").write_text("[]\n", encoding="utf-8")
 
         events_root = self.content_root / "events"
         events_root.mkdir(parents=True)
         (events_root / "flags.json").write_text("[]\n", encoding="utf-8")
         (events_root / "messages.json").write_text("[]\n", encoding="utf-8")
-        (events_root / "sample.json").write_text(
+        (events_root / "events.json").write_text(
             json.dumps(
                 {
                     "format_version": 1,
-                    "namespace": "sample",
-                    "events": [{"id": "talk", "commands": []}],
+                    "events": [{"id": "sample.talk", "commands": []}],
                 }
             ),
             encoding="utf-8",
@@ -97,7 +97,6 @@ class EditorServerTest(unittest.TestCase):
         self.event_application = EventEditorApplication(
             self.content_root,
             app_root / "events" / "events.json",
-            "sample",
             token="shared-token",
             app_root=app_root,
         )
@@ -168,11 +167,7 @@ class EditorServerTest(unittest.TestCase):
         self.assertNotIn('id="document-path"', tileset_page)
         event_header = event_page.split("</header>", 1)[0]
         self.assertIn('class="header-actions"', event_header)
-        self.assertIn('id="namespace-select"', event_header)
-        self.assertIn('data-action="open-namespace-dialog"', event_header)
         self.assertNotIn("event-context-bar", event_page)
-        self.assertIn('id="namespace-dialog"', event_page)
-        self.assertIn('id="namespace-form"', event_page)
         self.assertIn('id="face-picker-dialog"', event_page)
         for page in (map_page, event_page, tileset_page):
             self.assertIn('id="unsaved-navigation-dialog"', page)
@@ -202,14 +197,10 @@ class EditorServerTest(unittest.TestCase):
         self.assertIn("editorApiPath", self.get_text("/tileset/app.js"))
         self.assertIn("object_id_renames", self.get_text("/tileset/app.js"))
         self.assertIn(".editor-switch", self.get_text("/tileset/styles.css"))
-        self.assertEqual(
-            self.get_text("/map/editor-header.css"),
-            self.get_text("/event/editor-header.css"),
-        )
-        self.assertEqual(
-            self.get_text("/map/editor-header.css"),
-            self.get_text("/tileset/editor-header.css"),
-        )
+        for editor in ("map", "event", "tileset"):
+            header_css = self.get_text(f"/{editor}/editor-header.css")
+            self.assertIn("--editor-header-height", header_css)
+            self.assertIn(".app-header .editor-switch", header_css)
         self.assertIn(
             ".namespace-dialog",
             self.get_text("/event/event-layout.css"),
@@ -250,12 +241,11 @@ class EditorServerTest(unittest.TestCase):
         self.assertNotIn('data-message-field="note"', event_script)
         self.assertNotIn('data-action="move-command-up"', event_script)
         self.assertNotIn('data-action="move-command-down"', event_script)
-        self.assertIn(
-            '$("namespace-select").addEventListener("change"',
-            event_script,
-        )
-        self.assertIn('$("namespace-dialog").showModal()', event_script)
-        self.assertIn('$("namespace-form").addEventListener("submit"', event_script)
+        self.assertIn('id="id-filter"', event_header)
+        self.assertNotIn('id="namespace-select"', event_page)
+        self.assertNotIn('id="namespace-dialog"', event_page)
+        self.assertIn('$("id-filter").addEventListener("input"', event_script)
+
 
         with urlopen(
             f"{self.base_url}/map/api/actor-image?asset=pc_character&token=shared-token",
@@ -298,7 +288,7 @@ class EditorServerTest(unittest.TestCase):
         )
 
         self.assertEqual(map_payload["data"]["map_id"], "test_world")
-        self.assertEqual(event_payload["data"]["namespace"], "sample")
+        self.assertEqual(event_payload["data"]["events"][0]["id"], "sample.talk")
         self.assertEqual(tileset_payload["data"]["tileset_id"], "worldmap")
 
         with self.assertRaises(HTTPError) as context:
@@ -375,7 +365,6 @@ class EditorServerTest(unittest.TestCase):
         event_result = self.post_json(
             "/event/api/validate",
             {
-                "namespace": "sample",
                 "data": event_payload["data"],
                 "flags": event_payload["flags"],
                 "messages": event_payload["messages"],
@@ -406,7 +395,7 @@ class EditorServerTest(unittest.TestCase):
     def test_routes_mission_save_and_validation_through_event_editor(self) -> None:
         payload = self.get_json("/event/api/document?namespace=sample&token=shared-token")
         body = {
-            "namespace": "sample", "data": payload["data"], "flags": payload["flags"],
+            "data": payload["data"], "flags": payload["flags"],
             "messages": [*payload["messages"], {
                 "message_id": "sample.hello", "text_ja": ["こんにちは"],
                 "text_en": [], "text_zhcn": [],

@@ -19,10 +19,7 @@
       </nav>
     </div>
     <div class="header-actions">
-      <div class="namespace-tools">
-        <label>イベントファイル<select id="namespace-select"></select></label>
-        <button type="button" data-action="open-namespace-dialog">新規namespace</button>
-      </div>
+      <label class="id-filter">IDフィルタ<input id="id-filter" type="search" placeholder="IDで絞り込み（例: common）" autocomplete="off" aria-label="IDフィルタ"></label>
       <div class="toolbar"><span id="save-state" class="pill">読み込み中</span><button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直す</button><button id="save" class="primary" disabled>保存・生成</button></div>
     </div>
   </header>
@@ -42,17 +39,6 @@
     <section class="panel editor"><div id="event-editor" class="empty">イベントを選択してください。</div></section>
     <aside class="panel issues"><div class="heading"><h2>問題一覧</h2><span id="issue-count" class="pill">0</span></div><div id="issues"></div></aside>
   </main>
-  <dialog id="namespace-dialog" class="namespace-dialog" aria-labelledby="namespace-dialog-title">
-    <form id="namespace-form">
-      <div class="heading"><h2 id="namespace-dialog-title">新規namespace</h2></div>
-      <label class="field">namespace名<input id="namespace-new" placeholder="例: fairy_village" autocomplete="off"></label>
-      <p>lower_snake_caseで入力してください。</p>
-      <div class="dialog-actions">
-        <button type="button" data-action="cancel-namespace-dialog">キャンセル</button>
-        <button type="submit" class="primary">作成</button>
-      </div>
-    </form>
-  </dialog>
   <dialog id="unsaved-navigation-dialog" class="namespace-dialog" aria-labelledby="unsaved-navigation-dialog-title">
     <div class="navigation-dialog-content">
       <div class="heading"><h2 id="unsaved-navigation-dialog-title">未保存の変更があります</h2></div>

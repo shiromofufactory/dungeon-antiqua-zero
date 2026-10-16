@@ -23,10 +23,9 @@ CATALOGS = {
 def sample_source() -> dict[str, object]:
     return {
         "format_version": 1,
-        "namespace": "sample",
         "events": [
             {
-                "id": "greeting",
+                "id": "sample.greeting",
                 "note": "sample",
                 "commands": [
                     {
@@ -52,6 +51,19 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_complete_ids_with_shared_suffix_compile_without_extra_prefix(self) -> None:
+        source = {"format_version": 1, "events": [
+            {"id": "common.event_0", "commands": [{"command": "end_event"}]},
+            {"id": "forest.event_0", "commands": [{"command": "end_event"}]},
+        ]}
+        compiled = compile_event_sources({"events": source}, **CATALOGS)
+        self.assertEqual(list(compiled["events"]), ["common.event_0", "forest.event_0"])
+        EventCatalog.from_document(compiled)
+        source["events"].append(deepcopy(source["events"][0]))
+        self.assertIn("duplicate_event_id", {
+            item.code for item in validate_event_sources({"events": source}, **CATALOGS)
+        })
+
     def test_reset_game_compiles_and_loads_in_both_contexts_without_attributes(self) -> None:
         source = sample_source()
         source["events"][0]["commands"] = [{"command": "reset_game"}]
@@ -258,7 +270,7 @@ class EventPipelineTest(unittest.TestCase):
             "monster_keys": ["SLIME", "SLIME"],
         }]
         source["events"].append({
-            "id": "guard_opens",
+            "id": "sample.guard_opens",
             "battle_start_id": "shrine_guard",
             "commands": [{"command": "set_flag", "flag_id": "story.met_alvan"}],
         })
@@ -282,7 +294,7 @@ class EventPipelineTest(unittest.TestCase):
             "monster_keys": ["MISSING"],
         }]
         source["events"].append({
-            "id": "again", "battle_start_id": "shrine_guard", "commands": []
+            "id": "sample.again", "battle_start_id": "shrine_guard", "commands": []
         })
 
         codes = {item.code for item in validate_event_sources(
@@ -335,9 +347,9 @@ class EventPipelineTest(unittest.TestCase):
         self.assertEqual(tuple(compiled["events"]), ("sample.greeting",))
         self.assertNotIn("note", compiled["events"]["sample.greeting"])
 
-    def test_rejects_unknown_references_and_namespace_mismatch(self) -> None:
+    def test_rejects_unknown_references_and_invalid_full_id(self) -> None:
         source = sample_source()
-        source["namespace"] = "wrong"
+        source["events"][0]["id"] = "greeting"
         command = source["events"][0]["commands"][0]["else"][0]
         command["message_id"] = "sample.missing"
         source["events"][0]["commands"][0]["condition"]["flag_id"] = (
@@ -350,7 +362,7 @@ class EventPipelineTest(unittest.TestCase):
             if item.severity == "error"
         }
 
-        self.assertIn("namespace_filename_mismatch", codes)
+        self.assertIn("invalid_event_id", codes)
         self.assertIn("unknown_message", codes)
         self.assertIn("unknown_flag", codes)
 

@@ -231,12 +231,12 @@ npm run tools:map-editor -- --map field_01 --tileset dungeon --profile dungeon
 npm run editor -- --editor event
 ```
 
-ヘッダーから既存のnamespaceを切り替え、新しいnamespaceを入力してイベントファイルを新規作成
-できる。namespaceはマップIDと1対1で対応する必要はない。全namespaceから共有するフラグと、
-イベント・ミッション共通のメッセージも同じ画面で作成する。「ミッション」タブでは条件と
-多言語本文を編集し、一覧のドラッグでゲーム内の表示順を変更できる。
+全イベントを `content/events/events.json` にまとめ、`common.event_0` のような完全IDで編集する。
+ヘッダーの「IDフィルタ」はフラグ・イベント・ミッション・メッセージの4タブに共通で、
+入力した文字列をIDに含む項目だけを左の一覧へ表示する。空欄で全件へ戻る。
+「ミッション」タブでは条件と多言語本文を編集し、一覧のドラッグでゲーム内の表示順を変更できる。
 
-保存時に `content/events/<namespace>.json`、`content/events/flags.json`、
+保存時に `content/events/events.json`、`content/events/flags.json`、
 `content/events/messages.json`、`content/events/missions.json` を検証し、成功した
 場合だけ原子的に保存して、Git管理外の `app/events/events.json` と
 `app/events/messages.json` を再生成する。キャラクター、アイテム、イベントメッセージ、BGM、

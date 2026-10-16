@@ -156,18 +156,19 @@ class EventMessagePipelineTest(unittest.TestCase):
         with TemporaryDirectory() as directory:
             self.assertEqual(load_event_messages(Path(directory)), [])
 
-    def test_messages_file_is_not_treated_as_event_namespace(self) -> None:
+    def test_only_unified_events_file_is_loaded(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             events = root / "events"
             events.mkdir()
             (events / "flags.json").write_text("[]", encoding="utf-8")
             (events / "messages.json").write_text("[]", encoding="utf-8")
+            (events / "events.json").write_text("{}", encoding="utf-8")
             (events / "sample.json").write_text("{}", encoding="utf-8")
 
             self.assertEqual(
                 [path.name for path in event_source_paths(root)],
-                ["sample.json"],
+                ["events.json"],
             )
 
 

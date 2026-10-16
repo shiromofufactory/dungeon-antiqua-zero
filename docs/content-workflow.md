@@ -187,7 +187,7 @@ npm run maps:build
 
 ## イベント制作データとゲーム用データ生成
 
-`content/events/<namespace>.json` はイベントエディタまたは人が編集する通常イベントの正本、
+`content/events/events.json` はイベントエディタまたは人が編集する全通常イベントの正本（`id` は `common.event_0` のような完全ID）、
 `content/events/flags.json` は全イベントから共有するグローバルフラグ宣言の正本、
 `content/events/messages.json` はイベント専用の多言語メッセージの正本とする。
 イベントメッセージの任意の顔グラフィック指定も同じレコードが所有し、イベントコマンドには

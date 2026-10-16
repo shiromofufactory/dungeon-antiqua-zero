@@ -130,7 +130,7 @@ class MapEditorServerTest(unittest.TestCase):
         flags_path = self.application.content_root / "events" / "flags.json"
         flags_path.parent.mkdir(parents=True, exist_ok=True)
         flags_path.write_text(json.dumps([{"flag_id": "story.open", "note": "登場"}]), encoding="utf-8")
-        (flags_path.parent / "sample.json").write_text(json.dumps({"format_version": 1, "namespace": "sample", "events": [{"id": "talk", "commands": []}]}), encoding="utf-8")
+        (flags_path.parent / "events.json").write_text(json.dumps({"format_version": 1, "events": [{"id": "sample.talk", "commands": []}]}), encoding="utf-8")
         data = self.application.document_payload()["data"]
         data["actors"] = [{"id": "elder", "position": [2, 2], "kind": "stationary", "sprite_index": 0, "facing": "down", "visibility_condition": {"flag_id": "story.open", "value": True}}]
         data["event_triggers"] = [{"id": "elder_talk", "event_id": "sample.talk", "activations": ["touch", "interact"], "anchor": {"kind": "actor", "actor_id": "elder"}, "offsets": [[0, 0]]}]
@@ -851,12 +851,11 @@ class MapEditorServerTest(unittest.TestCase):
     def test_saves_actor_and_event_trigger_using_defined_event(self) -> None:
         events_dir = self.application.content_root / "events"
         events_dir.mkdir(parents=True)
-        (events_dir / "sample.json").write_text(
+        (events_dir / "events.json").write_text(
             json.dumps(
                 {
                     "format_version": 1,
-                    "namespace": "sample",
-                    "events": [{"id": "talk", "commands": []}],
+                    "events": [{"id": "sample.talk", "commands": []}],
                 }
             ),
             encoding="utf-8",

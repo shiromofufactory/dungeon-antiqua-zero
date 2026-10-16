@@ -18,7 +18,7 @@
 
 ## 使用リソース
 
-- 初期マップIDは `faily_village` とし、`app/maps/faily_village.json` と `faily_village.bin` を読み込む。
+- 初期マップIDは `fairy_village` とし、`app/maps/fairy_village.json` と `fairy_village.bin` を読み込む。
   拠点一覧の参照用に `worldmap` も読み込む。
 - 読み込み時にformat version、寸法、チップ参照、通行行、アニメーション、atlasのSHA-256を検証する。
 - 地面、オブジェクト、アニメーション、通行可否は生成済みデータだけを使い、実行時に
@@ -62,7 +62,7 @@
 
 ## 初期状態
 
-- ニューゲームでは、256×240px、60fpsの妖精の里（`faily_village`）から開始する。
+- ニューゲームでは、256×240px、60fpsの妖精の里（`fairy_village`）から開始する。
 - 開始セルは妖精の里の座標 `(39, 43)` とする。
 - 初期方向は左向きとする。
 - 初期メンバーはフィオラ、セリオンの2名とし、2名とも前列にする。

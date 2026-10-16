@@ -281,7 +281,7 @@ test("area switch saves before loading the selected area", async () => {
   assert.deepEqual(app.loadedMaps, ["current_b2"]);
 });
 
-test("area actor events use the parent map namespace", () => {
+test("area actor events open without initializing the ID filter", () => {
   const source = readFileSync(new URL("../tools/map_editor/static/app.js", import.meta.url), "utf8");
   const helper = source.match(/^const logicalMapId = .*$/m)?.[0];
   assert.ok(helper);
@@ -298,7 +298,8 @@ test("area actor events use the parent map namespace", () => {
   });
   vm.runInContext(`${helper}\n${source.slice(start, end)}`, context);
   context.openNewActorEvent();
-  assert.equal(destination.namespace, "cave");
+  assert.equal(destination.filter, undefined);
+  assert.equal(destination.new_actor_event, "draft");
 });
 
 test("map switch: save completes before loading the requested map", async () => {

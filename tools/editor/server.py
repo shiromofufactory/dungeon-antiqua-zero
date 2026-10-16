@@ -78,11 +78,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=32, help="新規マップの幅（既定: 32）")
     parser.add_argument("--height", type=int, default=24, help="新規マップの高さ（既定: 24）")
     parser.add_argument(
-        "--namespace",
-        default="common",
-        help="最初に表示するイベントnamespace（既定: common）",
-    )
-    parser.add_argument(
         "--content-root", type=Path, default=content_root, help=argparse.SUPPRESS
     )
     parser.add_argument(
@@ -237,10 +232,7 @@ def make_handler(
                     return
                 try:
                     if editor == "event":
-                        namespace = parse_qs(parsed.query).get(
-                            "namespace", [event_application.namespace]
-                        )[0]
-                        payload = event_application.document_payload(namespace)
+                        payload = event_application.document_payload()
                     elif editor == "tileset":
                         tileset_id = parse_qs(parsed.query).get(
                             "tileset", [None]
@@ -359,25 +351,18 @@ def make_handler(
             data = payload.get("data") if isinstance(payload, dict) else None
             flags = payload.get("flags") if isinstance(payload, dict) else None
             messages = payload.get("messages") if isinstance(payload, dict) else None
-            namespace = (
-                payload.get("namespace") if isinstance(payload, dict) else None
-            )
-            if not isinstance(namespace, str) and isinstance(data, dict):
-                namespace = data.get("namespace")
-            if not isinstance(namespace, str):
-                namespace = event_application.namespace
             if flags is None:
                 flags = load_event_flags(event_application.content_root)
             if messages is None:
                 messages = load_event_messages(event_application.content_root)
             if path == "/api/save":
                 return event_application.save(
-                    namespace, data, flags, messages, missions
+                    data, flags, messages, missions
                 )
             return {
                 "saved": False,
                 "diagnostics": event_application.validate(
-                    namespace, data, flags, messages, missions
+                    data, flags, messages, missions
                 ),
             }
 
@@ -518,10 +503,6 @@ def create_server(
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parse_args(raw_argv)
-    namespace_requested = any(
-        argument == "--namespace" or argument.startswith("--namespace=")
-        for argument in raw_argv
-    )
     token = secrets.token_urlsafe(24)
     try:
         map_application = MapEditorApplication(
@@ -539,7 +520,6 @@ def main(argv: list[str] | None = None) -> int:
         event_application = EventEditorApplication(
             args.content_root,
             args.event_runtime,
-            args.namespace,
             token=token,
             app_root=args.app_root,
         )
@@ -567,8 +547,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     actual_port = server.server_address[1]
     query = {"token": token}
-    if args.editor == "event" and namespace_requested:
-        query["namespace"] = args.namespace
     url = (
         f"http://{DEFAULT_HOST}:{actual_port}/{args.editor}/?"
         f"{urlencode(query)}"

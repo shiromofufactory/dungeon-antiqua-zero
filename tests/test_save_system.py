@@ -131,7 +131,7 @@ class SaveSystemTest(unittest.TestCase):
                 self.assertEqual(document["battle_command_memory"], serialized)
 
     def test_legacy_saves_without_battle_memory_restore_empty_choices(self):
-        for version in (1, 2):
+        for version in (1, 2, SAVE_FORMAT_VERSION):
             with self.subTest(version=version):
                 document = self.save_document()
                 document["format_version"] = version
@@ -206,6 +206,67 @@ class SaveSystemTest(unittest.TestCase):
                     skills=self.skills,
                 )
                 self.assertEqual(restored.battle_command_memory.global_command, command)
+
+    def test_migrates_legacy_village_ids_without_changing_source_or_unknown_keys(self) -> None:
+        for version in (1, 2):
+            for include_corrected_ids in (False, True):
+                with self.subTest(version=version, include_corrected_ids=include_corrected_ids):
+                    document = self.save_document()
+                    document["format_version"] = version
+                    document["location"]["map_id"] = "faily_village"
+                    document["event_flags"] = ["faily_village.event_1", "faily_village.event_2", "faily_village.unknown", "quest.unregistered"]
+                    document["opened_treasures"] = [
+                        {"map_id": "faily_village", "treasure_id": "chest_1"},
+                        {"map_id": "forest_nector", "treasure_id": "chest_2"},
+                    ]
+                    document["logs"] = [
+                        {"message_id": "faily_village.opening_1", "arguments": {"TEXT": "faily_village"}},
+                        {"message_id": "forest_nector.message_0_1", "arguments": {}},
+                        {"text_key": "faily_village.ui_text", "arguments": {}},
+                    ]
+                    if include_corrected_ids:
+                        document["event_flags"].append("fairy_village.event_1")
+                        document["opened_treasures"].append({"map_id": "fairy_village", "treasure_id": "chest_1"})
+                    original = json.dumps(document, sort_keys=True)
+                    restored = restore_save_document(
+                        document, character_records=load_mock_character_records(),
+                        items=self.items, skills=self.skills,
+                    )
+                    self.assertEqual(restored.map_id, "fairy_village")
+                    self.assertEqual(restored.save_data.event_flags, {
+                        "fairy_village.event_1", "fairy_village.event_2", "faily_village.unknown", "quest.unregistered",
+                    })
+                    self.assertEqual(restored.save_data.opened_treasures, {
+                        ("fairy_village", "chest_1"), ("forest_nector", "chest_2"),
+                    })
+                    self.assertEqual(restored.save_data.logs, [
+                        {"message_id": "fairy_village.opening_1", "arguments": {"TEXT": "faily_village"}},
+                        document["logs"][1], document["logs"][2],
+                    ])
+                    self.assertEqual(json.dumps(document, sort_keys=True), original)
+                    resaved = create_save_document(
+                        save_data=restored.save_data, active_party=restored.active_party,
+                        character_states=restored.character_states, inventory=restored.inventory,
+                        map_id=restored.map_id, position=restored.position, facing=restored.facing,
+                        battle_command_memory=restored.battle_command_memory,
+                    )
+                    self.assertEqual(resaved["format_version"], 3)
+                    self.assertEqual(resaved["location"]["map_id"], "fairy_village")
+                    self.assertEqual(resaved["logs"][0]["message_id"], "fairy_village.opening_1")
+                    self.assertNotIn("faily_village.event_1", resaved["event_flags"])
+
+    def test_legacy_village_slot_preview_uses_corrected_map_without_rewriting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            for version in (1, 2):
+                document = self.save_document()
+                document["format_version"] = version
+                document["location"]["map_id"] = "faily_village"
+                original = json.dumps(document)
+                repository.slot_path(1).write_text(original)
+                self.assertEqual(repository.summary(1).map_id, "fairy_village")
+                self.assertEqual(repository.load(1), document)
+                self.assertEqual(repository.slot_path(1).read_text(), original)
 
     def test_creates_complete_current_version_document(self) -> None:
         document = self.save_document()
@@ -304,7 +365,7 @@ class SaveSystemTest(unittest.TestCase):
     def test_preview_reads_legacy_locations_and_tolerates_invalid_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = SaveRepository(Path(directory))
-            for version in (1, 2):
+            for version in (1, 2, SAVE_FORMAT_VERSION):
                 document = self.save_document()
                 document["format_version"] = version
                 for location in (

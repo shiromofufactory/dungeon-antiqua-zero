@@ -70,7 +70,7 @@ class StartMenuOverlayTest(unittest.TestCase):
                 "Cerion": FacePosition(32, 0),
             },
             palette_shifter=palette_shifter,
-            location_text_keys={"faily_village": "location.fairy_village"},
+            location_text_keys={"fairy_village": "location.fairy_village"},
             on_new_game=Mock() if on_new_game is None else on_new_game,
             on_load=Mock(return_value=True) if on_load is None else on_load,
             on_delete=Mock(return_value=True) if on_delete is None else on_delete,
@@ -166,7 +166,7 @@ class StartMenuOverlayTest(unittest.TestCase):
         self, _draw_window: Mock, blt: Mock,
     ) -> None:
         slots = list(summaries(1))
-        slots[0] = replace(slots[0], map_id="faily_village")
+        slots[0] = replace(slots[0], map_id="fairy_village")
         overlay = self.create_overlay(
             tuple(slots),
             autosave_summary=SaveSlotSummary(

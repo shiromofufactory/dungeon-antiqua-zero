@@ -3,7 +3,6 @@
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
 
 const CLIENT = "event-editor-ui";
-const NAMESPACE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const UI_STORAGE_KEY = "da0.event-editor.ui.v1";
 const LIST_TABS = ["flag", "event", "mission", "message"];
 const COMMAND_OPTIONS = [
@@ -42,7 +41,7 @@ const state = {
   catalogs: {},
   faceSheet: null,
   diagnostics: [],
-  namespaceOptions: [],
+  filterText: "",
   selectedFlag: 0,
   selectedEvent: 0,
   selectedMessage: 0,
@@ -81,7 +80,6 @@ function saveUiSettings() {
   if (!state.data) return;
   try {
     localStorage.setItem(UI_STORAGE_KEY, JSON.stringify({
-      namespace: state.data.namespace,
       listTab: state.mode,
     }));
   } catch (_error) {}
@@ -161,7 +159,7 @@ async function savePendingActorEventLink() {
   if (!actorExists || !trigger) {
     throw new Error("紐づけ先のactorまたはtriggerが見つかりません。");
   }
-  trigger.event_id = `${state.data.namespace}.${eventId}`;
+  trigger.event_id = eventId;
   const result = await mapApi("/api/save", {
     method: "POST",
     body: JSON.stringify({
@@ -467,14 +465,30 @@ function options(values, selected, empty = "選択してください", label = (
     + all.map((value) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label(value))}${values.includes(value) ? "" : "（不明）"}</option>`).join("");
 }
 
-function renderNamespaceControls() {
-  const values = [...new Set([
-    ...state.namespaceOptions,
-    state.data.namespace,
-  ])].sort();
-  $("namespace-select").innerHTML = values.map((value) =>
-    `<option value="${esc(value)}" ${value === state.data.namespace ? "selected" : ""}>${esc(value)}.json</option>`,
-  ).join("");
+function filteredList(kind) {
+  const fieldName = kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
+  const query = (state.filterText || "").trim().toLowerCase();
+  return listForKind(kind)
+    .map((item, index) => ({item, index}))
+    .filter(({item}) => String(item[fieldName] || "").toLowerCase().includes(query));
+}
+
+function listEnd(kind, rows, emptyLabel) {
+  return rows.length
+    ? renderListDropZone(kind, rows.at(-1).index + 1)
+    : `<div class="empty">${state.filterText?.trim() ? "一致するIDはありません。" : emptyLabel}</div>`;
+}
+
+function setIdFilter(value) {
+  state.filterText = value;
+  clearListItemDrag();
+  renderLists();
+}
+
+function eventIdPrefix() {
+  const map = pendingActorEventDraft?.data;
+  if (map) return map.area_parent_id || map.map_id;
+  return currentEvent()?.id.split(".")[0] || "common";
 }
 
 function canSave() {
@@ -506,6 +520,10 @@ function insertListItem(kind, item) {
   const insertionIndex = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < items.length
     ? selectedIndex + 1 : items.length;
   items.splice(insertionIndex, 0, item);
+  const fieldName = kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
+  if (!String(item[fieldName] || "").toLowerCase().includes((state.filterText || "").trim().toLowerCase())) {
+    state.filterText = "";
+  }
   state[selectionKey] = insertionIndex;
 }
 
@@ -547,8 +565,12 @@ function renderLists() {
     panel.hidden = panel.dataset.listPanel !== state.mode;
   });
 
+  const flags = filteredList("flag");
+  const events = filteredList("event");
+  const missions = filteredList("mission");
+  const messages = filteredList("message");
   $("flags").className = "list";
-  $("flags").innerHTML = state.flags.map((flag, index) => `
+  $("flags").innerHTML = flags.map(({item: flag, index}) => `
     ${renderListDropZone("flag", index)}
     <div class="list-item reorderable-list-item ${state.mode === "flag" && index === state.selectedFlag ? "active" : ""}" data-list-item-kind="flag">
       <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(flag.flag_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="flag" data-index="${index}">⠿</span>
@@ -557,10 +579,10 @@ function renderLists() {
         <small>${esc(noteSummary(flag.note) || "メモなし")}</small>
       </button>
     </div>
-  `).join("") + (state.flags.length ? renderListDropZone("flag", state.flags.length) : '<div class="empty">フラグはありません。</div>');
+  `).join("") + listEnd("flag", flags, "フラグはありません。");
 
   $("events").className = "list";
-  $("events").innerHTML = state.data.events.map((event, index) => `
+  $("events").innerHTML = events.map(({item: event, index}) => `
     ${renderListDropZone("event", index)}
     <div class="list-item reorderable-list-item ${state.mode === "event" && index === state.selectedEvent ? "active" : ""}" data-list-item-kind="event">
       <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(event.id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="event" data-index="${index}">⠿</span>
@@ -569,21 +591,21 @@ function renderLists() {
         <small>${event.commands?.length || 0} commands · ${esc(event.note || "メモなし")}</small>
       </button>
     </div>
-  `).join("") + (state.data.events.length ? renderListDropZone("event", state.data.events.length) : '<div class="empty">イベントはありません。</div>');
+  `).join("") + listEnd("event", events, "イベントはありません。");
 
   if ($("missions")) {
     $("missions").className = "list";
-    $("missions").innerHTML = state.missions.map((mission, index) => `
+    $("missions").innerHTML = missions.map(({item: mission, index}) => `
       ${renderListDropZone("mission", index)}
       <div class="list-item reorderable-list-item ${state.mode === "mission" && index === state.selectedMission ? "active" : ""}" data-list-item-kind="mission">
         <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(mission.id)}を移動" title="ドラッグして表示順を変更" data-list-item-drag data-list-kind="mission" data-index="${index}">⠿</span>
         <button type="button" class="list-item-select" data-action="select-mission" data-index="${index}"><strong>${index + 1}. ${esc(mission.id)}</strong><small>${esc(mission.note || mission.message_id)}</small></button>
       </div>
-    `).join("") + (state.missions.length ? renderListDropZone("mission", state.missions.length) : '<div class="empty">ミッションはありません。</div>');
+    `).join("") + listEnd("mission", missions, "ミッションはありません。");
   }
 
   $("messages").className = "list";
-  $("messages").innerHTML = state.messages.map((message, index) => `
+  $("messages").innerHTML = messages.map(({item: message, index}) => `
     ${renderListDropZone("message", index)}
     <div class="list-item reorderable-list-item ${state.mode === "message" && index === state.selectedMessage ? "active" : ""}" data-list-item-kind="message">
       <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(message.message_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="message" data-index="${index}">⠿</span>
@@ -592,7 +614,7 @@ function renderLists() {
         <small>${esc((message.text_ja || [])[0] || "日本語未入力")}</small>
       </button>
     </div>
-  `).join("") + (state.messages.length ? renderListDropZone("message", state.messages.length) : '<div class="empty">メッセージはありません。</div>');
+  `).join("") + listEnd("message", messages, "メッセージはありません。");
 }
 
 function field(label, html, full = false) {
@@ -773,7 +795,7 @@ function renderEventEditor() {
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("イベントID", `<input data-event-field="id" value="${esc(event.id)}">`)}${field("制作メモ", `<input data-event-field="note" value="${esc(event.note || "")}">`)}<button class="danger" data-action="delete-event">イベントを削除</button></div>
     <div class="event-meta">${field("バトル開始時に発動", `<input type="checkbox" data-event-battle-enabled ${event.battle_start_id !== undefined ? "checked" : ""}>`)}${event.battle_start_id !== undefined ? field("対象バトルID", `<input data-event-field="battle_start_id" value="${esc(event.battle_start_id)}" placeholder="開始コマンドと同じID">`) : ""}</div>
-    <div class="heading"><h2>${esc(state.data.namespace)}.${esc(event.id)}</h2><span class="pill">${event.commands.length} commands</span></div>
+    <div class="heading"><h2>${esc(event.id)}</h2><span class="pill">${event.commands.length} commands</span></div>
     ${renderCommandList(event.commands, "", "コマンドはありません。")}
     ${addCommand()}
   `;
@@ -865,7 +887,7 @@ function renderIssues() {
 }
 
 function render() {
-  renderNamespaceControls();
+  $("id-filter").value = state.filterText;
   renderLists();
   renderEditor();
   renderIssues();
@@ -875,7 +897,7 @@ function render() {
 function addEvent(linkToPendingActor = false) {
   let createdEvent = null;
   commit(() => {
-    createdEvent = {id: uniqueId("event", state.data.events), note: "", commands: []};
+    createdEvent = {id: uniqueId(`${eventIdPrefix()}.event`, state.data.events), note: "", commands: []};
     insertListItem("event", createdEvent);
     state.mode = "event";
     if (linkToPendingActor) state.pendingActorEventId = createdEvent.id;
@@ -952,7 +974,6 @@ function linesFromTextarea(value) {
 
 function requestBody() {
   return JSON.stringify({
-    namespace: state.data.namespace,
     data: state.data,
     flags: state.flags,
     messages: state.messages,
@@ -985,7 +1006,6 @@ async function save() {
       state.dirty = false;
       state.history = [];
       state.future = [];
-      state.namespaceOptions = result.namespace_options || state.namespaceOptions;
       toast(linkedActor
         ? `イベントを保存し、${linkedActor.mapId}のactor ${linkedActor.actorId}へ紐づけました。`
         : "イベント・ミッション・メッセージを保存し、ゲーム用データを生成しました。");
@@ -1011,7 +1031,6 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.catalogs = payload.catalogs;
   state.faceSheet = payload.face_sheet;
   state.diagnostics = payload.diagnostics;
-  state.namespaceOptions = payload.namespace_options || [];
   const requestedEventIndex = selectedEventId === null
     ? -1
     : state.data.events.findIndex((event) => event.id === selectedEventId);
@@ -1027,36 +1046,11 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.future = [];
   normalize();
   const url = new URL(location.href);
-  url.searchParams.set("namespace", state.data.namespace);
+  url.searchParams.delete("namespace");
   if (requestedEventIndex >= 0) url.searchParams.set("event", selectedEventId);
   else url.searchParams.delete("event");
   history.replaceState(null, "", url);
   render();
-}
-
-async function openNamespace(namespace, selectedListTab = state.mode) {
-  if (!NAMESPACE_PATTERN.test(namespace) || ["flags", "messages", "missions"].includes(namespace)) {
-    toast("namespaceはlower_snake_caseで入力してください（flags、messages、missionsは予約名です）。");
-    return false;
-  }
-  if (namespace === state.data.namespace) {
-    toast(`${namespace}.jsonは現在開いています。`);
-    return false;
-  }
-  if (state.dirty && !window.confirm("未保存の変更を破棄してイベントファイルを切り替えますか？")) {
-    renderNamespaceControls();
-    return false;
-  }
-  try {
-    const payload = await api(`/api/document?namespace=${encodeURIComponent(namespace)}`);
-    applyDocument(payload, null, selectedListTab);
-    toast(payload.is_new ? `${namespace}.jsonを新規作成します。` : `${namespace}.jsonへ切り替えました。`);
-    return true;
-  } catch (error) {
-    renderNamespaceControls();
-    toast(error.message);
-    return false;
-  }
 }
 
 document.body.addEventListener("click", (event) => {
@@ -1066,12 +1060,6 @@ document.body.addEventListener("click", (event) => {
   if (action === "select-list-tab") {
     state.mode = target.dataset.listTab;
     render();
-  } else if (action === "open-namespace-dialog") {
-    $("namespace-new").value = "";
-    $("namespace-dialog").showModal();
-    $("namespace-new").focus();
-  } else if (action === "cancel-namespace-dialog") {
-    $("namespace-dialog").close();
   } else if (action === "add-flag") {
     commit(() => {
       insertListItem("flag", {flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
@@ -1117,7 +1105,7 @@ document.body.addEventListener("click", (event) => {
     });
   } else if (action === "add-message") {
     commit(() => {
-      const base = `${state.data.namespace}.message`;
+      const base = `${eventIdPrefix()}.message`;
       insertListItem("message", {
         message_id: uniqueId(base, state.messages, "message_id"),
         text_ja: ["メッセージ"],
@@ -1236,6 +1224,11 @@ function clearCommandDrag() {
   });
 }
 
+function findDropZone(target, selector) {
+  // Keep accepting the highlighted destination after the pointer leaves its frame.
+  return target.closest(selector) || document.querySelector(`${selector}.active`);
+}
+
 $("event-editor").addEventListener("dragstart", (event) => {
   const handle = event.target.closest("[data-command-drag]");
   if (!handle || !event.dataTransfer) return;
@@ -1256,18 +1249,20 @@ $("event-editor").addEventListener("dragstart", (event) => {
   });
 });
 
-$("event-editor").addEventListener("dragover", (event) => {
-  const zone = event.target.closest(".command-drop-zone");
-  if (!zone || !draggedCommand || zone.classList.contains("invalid")) return;
+document.addEventListener("dragover", (event) => {
+  if (!draggedCommand) return;
+  const zone = findDropZone(event.target, ".command-drop-zone:not(.invalid)");
+  if (!zone) return;
   event.preventDefault();
   if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   document.querySelectorAll(".command-drop-zone.active").forEach((node) => node.classList.remove("active"));
   zone.classList.add("active");
 });
 
-$("event-editor").addEventListener("drop", (event) => {
-  const zone = event.target.closest(".command-drop-zone");
-  if (!zone || !draggedCommand || zone.classList.contains("invalid")) return;
+document.addEventListener("drop", (event) => {
+  if (!draggedCommand) return;
+  const zone = document.querySelector(".command-drop-zone.active:not(.invalid)");
+  if (!zone) return;
   event.preventDefault();
   const source = draggedCommand;
   moveCommand(
@@ -1302,18 +1297,20 @@ document.querySelector(".sidebar").addEventListener("dragstart", (event) => {
   document.body.classList.add("list-item-dragging");
 });
 
-document.querySelector(".sidebar").addEventListener("dragover", (event) => {
-  const zone = event.target.closest(".list-drop-zone");
-  if (!zone || !draggedListItem || zone.dataset.listDropKind !== draggedListItem.kind) return;
+document.addEventListener("dragover", (event) => {
+  if (!draggedListItem) return;
+  const zone = findDropZone(event.target, `.list-drop-zone[data-list-drop-kind="${draggedListItem.kind}"]`);
+  if (!zone) return;
   event.preventDefault();
   if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   document.querySelectorAll(".list-drop-zone.active").forEach((node) => node.classList.remove("active"));
   zone.classList.add("active");
 });
 
-document.querySelector(".sidebar").addEventListener("drop", (event) => {
-  const zone = event.target.closest(".list-drop-zone");
-  if (!zone || !draggedListItem || zone.dataset.listDropKind !== draggedListItem.kind) return;
+document.addEventListener("drop", (event) => {
+  if (!draggedListItem) return;
+  const zone = document.querySelector(`.list-drop-zone.active[data-list-drop-kind="${draggedListItem.kind}"]`);
+  if (!zone) return;
   event.preventDefault();
   moveListItem(
     draggedListItem.kind,
@@ -1328,15 +1325,7 @@ document.querySelector(".sidebar").addEventListener("dragend", clearListItemDrag
 $("undo").addEventListener("click", undo);
 $("redo").addEventListener("click", redo);
 $("save").addEventListener("click", save);
-$("namespace-select").addEventListener("change", (event) => {
-  openNamespace(event.target.value);
-});
-$("namespace-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (await openNamespace($("namespace-new").value.trim())) {
-    $("namespace-dialog").close();
-  }
-});
+$("id-filter").addEventListener("input", (event) => setIdFilter(event.target.value));
 $("editor-switch").addEventListener("click", (event) => {
   const link = event.target.closest("a");
   if (!link || !state.dirty) return;
@@ -1374,18 +1363,15 @@ configureEditorNavigation();
     pendingActorEventDraft = loadPendingActorEventDraft();
     actorEventReturnMapId = pendingActorEventDraft?.data?.map_id || null;
     const uiSettings = loadUiSettings();
-    const storedNamespace = typeof uiSettings.namespace === "string"
-      && NAMESPACE_PATTERN.test(uiSettings.namespace)
-      && !["flags", "messages", "missions"].includes(uiSettings.namespace)
-      ? uiSettings.namespace
-      : null;
-    const requestedNamespace = parameters.get("namespace") || storedNamespace;
-    const requestedEvent = parameters.get("event");
+    // Accept older map-editor links while selecting by the complete ID.
+    const namespace = parameters.get("namespace");
+    const event = parameters.get("event");
+    const requestedEvent = event && namespace && !event.includes(".") ? `${namespace}.${event}` : event;
     const requestedListTab = requestedEvent ? "event" : uiSettings.listTab;
-    const query = requestedNamespace ? `?namespace=${encodeURIComponent(requestedNamespace)}` : "";
-    applyDocument(await api(`/api/document${query}`), requestedEvent, requestedListTab);
+    state.filterText = "";
+    applyDocument(await api("/api/document"), requestedEvent, requestedListTab);
     if (pendingActorEventDraftId) {
-      if (!pendingActorEventDraft || pendingActorEventDraft.data?.map_id !== state.data.namespace) {
+      if (!pendingActorEventDraft?.data?.map_id) {
         throw new Error("イベント追加用のマップ内容を復元できませんでした。");
       }
       const created = addEvent(true);

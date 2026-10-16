@@ -19,7 +19,7 @@ const declarations = names.map((name) => {
 
 function editor() {
   const state = {
-    data: { namespace: 'common', events: [] }, flags: [{ flag_id: 'quest.started' }],
+    data: { format_version: 1, events: [] }, flags: [{ flag_id: 'quest.started' }],
     missions: [{ id: 'z_first', message_id: 'mission.first' }, { id: 'a_second', message_id: 'mission.second' }],
     messages: [{ message_id: 'mission.first', text_ja: ['最初'] }, { message_id: 'mission.second', text_ja: ['次'] }],
     selectedFlag: 0, selectedMission: 0, selectedEvent: 0, selectedMessage: 0, mode: 'mission',

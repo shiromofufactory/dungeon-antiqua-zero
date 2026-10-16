@@ -28,7 +28,7 @@ const declarations = names.map((name) => {
 
 function editor() {
   const state = {
-    data: { namespace: 'sample', events: [{ id: 'run', commands: [] }] },
+    data: { format_version: 1, events: [{ id: 'sample.run', commands: [] }] },
     flags: [{ flag_id: 'story.done' }], messages: [], missions: [],
     selectedEvent: 0, selectedFlag: 0, selectedMessage: 0, selectedMission: 0,
     mode: 'event', catalogs: { monster_keys: ['Giant Spider'] },

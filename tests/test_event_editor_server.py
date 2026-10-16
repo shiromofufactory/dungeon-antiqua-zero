@@ -16,7 +16,7 @@ from tools.event_editor.server import EventEditorApplication, create_server
 class EventEditorServerTest(unittest.TestCase):
     def test_reset_game_saves_and_extra_attributes_preserve_last_generation(self) -> None:
         command = {"command": "reset_game"}
-        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "reset", "commands": [command]}]}
+        data = {"format_version": 1, "events": [{"id": "sample.reset", "commands": [command]}]}
         self.assertTrue(self.post_json("/api/save", data)["saved"])
         runtime_before = self.application.runtime_path.read_bytes()
         self.assertEqual(json.loads(runtime_before)["events"]["sample.reset"]["commands"], [command])
@@ -32,7 +32,7 @@ class EventEditorServerTest(unittest.TestCase):
             "command": "branch", "condition": {"type": "any_member_dead"},
             "then": [{"command": "recover_party"}], "else": [],
         }
-        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "recover", "commands": [branch]}]}
+        data = {"format_version": 1, "events": [{"id": "sample.recover", "commands": [branch]}]}
         self.assertTrue(self.post_json("/api/save", data)["saved"])
         runtime_before = self.application.runtime_path.read_bytes()
         self.assertEqual(json.loads(runtime_before)["events"]["sample.recover"]["commands"], [branch])
@@ -45,7 +45,7 @@ class EventEditorServerTest(unittest.TestCase):
 
     def test_saves_bgm_stop_and_rejects_extra_attributes(self) -> None:
         command = {"command": "stop_bgm"}
-        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "stop", "commands": [command]}]}
+        data = {"format_version": 1, "events": [{"id": "sample.stop", "commands": [command]}]}
         self.assertTrue(self.post_json("/api/save", data)["saved"])
         runtime_before = self.application.runtime_path.read_bytes()
         self.assertEqual(json.loads(runtime_before)["events"]["sample.stop"]["commands"], [command])
@@ -55,7 +55,7 @@ class EventEditorServerTest(unittest.TestCase):
 
     def test_screen_effects_save_and_invalid_values_preserve_generated_runtime(self) -> None:
         commands = [{"command": "change_brightness", "percent": 0}, {"command": "shake_screen", "frames": 18}]
-        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "screen", "commands": commands}]}
+        data = {"format_version": 1, "events": [{"id": "sample.screen", "commands": commands}]}
         self.assertTrue(self.post_json("/api/save", data)["saved"])
         runtime_before = self.application.runtime_path.read_bytes()
         self.assertEqual(json.loads(runtime_before)["events"]["sample.screen"]["commands"], commands)
@@ -68,7 +68,7 @@ class EventEditorServerTest(unittest.TestCase):
 
     def test_give_item_saves_message_toggle_and_rejects_nonboolean_setting(self) -> None:
         command = {"command": "give_item", "item_key": "POTION", "quantity": 3, "show_message": True}
-        data = {"format_version": 1, "namespace": "sample", "events": [{"id": "receive", "commands": [command]}]}
+        data = {"format_version": 1, "events": [{"id": "sample.receive", "commands": [command]}]}
         for enabled in (True, False):
             command["show_message"] = enabled
             self.assertTrue(self.post_json("/api/save", data)["saved"])
@@ -83,8 +83,8 @@ class EventEditorServerTest(unittest.TestCase):
 
     def test_wait_saves_integer_frames_and_invalid_duration_keeps_last_generation(self) -> None:
         command = {"command": "wait", "frames": 12}
-        data = {"format_version": 1, "namespace": "sample", "events": [{
-            "id": "pause", "commands": [command],
+        data = {"format_version": 1, "events": [{
+            "id": "sample.pause", "commands": [command],
         }]}
         self.assertTrue(self.post_json("/api/save", data)["saved"])
         runtime_before = self.application.runtime_path.read_bytes()
@@ -100,8 +100,8 @@ class EventEditorServerTest(unittest.TestCase):
             {"command": "face_party", "direction": "right"},
             {"command": "face_actor", "actor_id": "elder", "direction": "up"},
         ]
-        data = {"format_version": 1, "namespace": "sample", "events": [{
-            "id": "turn", "commands": commands,
+        data = {"format_version": 1, "events": [{
+            "id": "sample.turn", "commands": commands,
         }]}
         result = self.post_json("/api/save", data)
         self.assertTrue(result["saved"])
@@ -111,9 +111,8 @@ class EventEditorServerTest(unittest.TestCase):
     def test_validates_empty_then_with_else_without_warning(self) -> None:
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [{
-                "id": "guard",
+                "id": "sample.guard",
                 "commands": [{
                     "command": "branch",
                     "condition": {"type": "flag_set", "flag_id": "story.done"},
@@ -133,14 +132,13 @@ class EventEditorServerTest(unittest.TestCase):
     def test_saves_named_battle_and_battle_start_event(self) -> None:
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [
-                {"id": "begin", "commands": [{
+                {"id": "sample.begin", "commands": [{
                     "command": "start_battle",
                     "battle_id": "shrine_guard",
                     "monster_keys": ["SLIME"],
                 }]},
-                {"id": "opening", "battle_start_id": "shrine_guard", "commands": [
+                {"id": "sample.opening", "battle_start_id": "shrine_guard", "commands": [
                     {"command": "message", "message_id": "sample.hello"}
                 ]},
             ],
@@ -217,7 +215,6 @@ class EventEditorServerTest(unittest.TestCase):
         self.application = EventEditorApplication(
             self.content_root,
             app_root / "events" / "events.json",
-            "sample",
             token="test-token",
             app_root=app_root,
         )
@@ -280,7 +277,7 @@ class EventEditorServerTest(unittest.TestCase):
 
         payload = self.application.document_payload()
         missions = [{"id": "find_elder", "note": "制作メモ", "condition": {"type": "not", "condition": {"type": "flag_set", "flag_id": "story.done"}}, "message_id": "sample.hello"}]
-        result = self.application.save("sample", payload["data"], payload["flags"], payload["messages"], missions)
+        result = self.application.save(payload["data"], payload["flags"], payload["messages"], missions)
         self.assertTrue(result["saved"])
         self.assertEqual(self.application.document_payload()["missions"], missions)
         self.assertNotIn("missions", load_event_sources(self.content_root))
@@ -288,18 +285,18 @@ class EventEditorServerTest(unittest.TestCase):
         catalog = EventCatalog.from_json(self.application.runtime_path)
         self.assertEqual(catalog.missions[0].id, "find_elder")
         for flags, messages in (([], payload["messages"]), (payload["flags"], [])):
-            result = self.application.save("sample", payload["data"], flags, messages, missions)
+            result = self.application.save(payload["data"], flags, messages, missions)
             self.assertFalse(result["saved"])
             self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
         # Old clients omitting missions retain the existing ordered definitions.
-        self.assertTrue(self.application.save("sample", payload["data"], payload["flags"], payload["messages"])["saved"])
+        self.assertTrue(self.application.save(payload["data"], payload["flags"], payload["messages"])["saved"])
         self.assertEqual(self.application.document_payload()["missions"], missions)
 
     def test_serves_new_structured_document_and_requires_token(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
 
         self.assertTrue(payload["is_new"])
-        self.assertEqual(payload["data"]["namespace"], "sample")
+        self.assertEqual(payload["data"], {"format_version": 1, "events": []})
         self.assertEqual(payload["catalogs"]["character_keys"], ["Fiora"])
         self.assertEqual(payload["catalogs"]["item_keys"], ["POTION"])
         self.assertEqual(
@@ -367,10 +364,9 @@ class EventEditorServerTest(unittest.TestCase):
     def test_validates_saves_and_compiles_event_source(self) -> None:
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [
                 {
-                    "id": "hello",
+                    "id": "sample.hello",
                     "note": "挨拶",
                     "commands": [
                         {"command": "message", "message_id": "sample.hello"},
@@ -417,9 +413,8 @@ class EventEditorServerTest(unittest.TestCase):
         flags = [{"flag_id": "quest.alvan_joined", "note": "加入済み"}]
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [{
-                "id": "join_complete",
+                "id": "sample.join_complete",
                 "commands": [{
                     "command": "set_flag",
                     "flag_id": "quest.alvan_joined",
@@ -456,9 +451,8 @@ class EventEditorServerTest(unittest.TestCase):
         ]
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [{
-                "id": "new_message",
+                "id": "sample.new_message",
                 "commands": [{
                     "command": "message",
                     "message_id": "shared.new_message",
@@ -488,10 +482,9 @@ class EventEditorServerTest(unittest.TestCase):
         ]
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [
-                {"id": "second", "commands": [{"command": "end_event"}]},
-                {"id": "first", "commands": [{"command": "end_event"}]},
+                {"id": "sample.second", "commands": [{"command": "end_event"}]},
+                {"id": "sample.first", "commands": [{"command": "end_event"}]},
             ],
         }
         messages = [
@@ -540,38 +533,27 @@ class EventEditorServerTest(unittest.TestCase):
             messages,
         )
 
-    def test_switches_existing_namespace_and_prepares_new_source(self) -> None:
-        other = {
-            "format_version": 1,
-            "namespace": "common",
-            "events": [],
-        }
-        (self.content_root / "events" / "common.json").write_text(
-            json.dumps(other), encoding="utf-8"
-        )
-
-        existing = self.get_json(
-            "/api/document?namespace=common&token=test-token"
-        )
-        new = self.get_json(
-            "/api/document?namespace=new_story&token=test-token"
-        )
-
-        self.assertFalse(existing["is_new"])
-        self.assertEqual(existing["data"], other)
-        self.assertEqual(existing["flags"], new["flags"])
-        self.assertIn("common", existing["namespace_options"])
-        self.assertTrue(new["is_new"])
-        self.assertEqual(new["data"]["namespace"], "new_story")
-        self.assertNotIn("flags", new["data"])
+    def test_all_event_prefixes_share_one_document_and_save_path(self) -> None:
+        data = {"format_version": 1, "events": [
+            {"id": "common.event_0", "commands": [{"command": "end_event"}]},
+            {"id": "forest.event_0", "commands": [{"command": "end_event"}]},
+        ]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        for query in ("", "&namespace=common", "&namespace=new_story"):
+            payload = self.get_json("/api/document?token=test-token" + query)
+            self.assertFalse(payload["is_new"])
+            self.assertEqual(payload["data"], data)
+            self.assertEqual(payload["event_ids"], ["common.event_0", "forest.event_0"])
+        self.assertEqual(self.application.source_path.name, "events.json")
+        self.assertEqual(sorted(path.name for path in self.application.source_path.parent.glob("*.json")),
+                         ["events.json", "flags.json", "messages.json", "missions.json"])
 
     def test_does_not_write_invalid_reference(self) -> None:
         data = {
             "format_version": 1,
-            "namespace": "sample",
             "events": [
                 {
-                    "id": "bad",
+                    "id": "sample.bad",
                     "commands": [
                         {"command": "join_party", "character_key": "Missing"}
                     ],

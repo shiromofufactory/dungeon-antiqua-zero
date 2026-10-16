@@ -48,8 +48,8 @@ else:
     from .inventory import InventorySystem
 
 
-SAVE_FORMAT_VERSION = 2
-SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, SAVE_FORMAT_VERSION))
+SAVE_FORMAT_VERSION = 3
+SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, 2, SAVE_FORMAT_VERSION))
 AUTO_SAVE_SLOT = 0
 SAVE_SLOT_COUNT = 8
 SAVE_DIRECTORY = Path.home() / ".config" / ".pyxel" / "dungeon-antiqua-zero"
@@ -293,6 +293,8 @@ def restore_save_document(
     command_memory = _restore_battle_command_memory(
         document.get("battle_command_memory", {})
     )
+    if format_version < 3:
+        map_id = _migrate_village_ids(save_data, map_id)
     # Reuse the writer's aggregate invariants after every value has been restored.
     create_save_document(
         save_data=save_data,
@@ -315,6 +317,31 @@ def restore_save_document(
         facing=facing,
         battle_command_memory=command_memory,
     )
+
+
+def _canonical_village_map_id(map_id: str) -> str:
+    return "fairy_village" if map_id == "faily_village" else map_id
+
+
+def _migrate_village_ids(save_data: SaveData, map_id: str) -> str:
+    """Correct the v1/v2 village spelling without changing unknown flags or text."""
+
+    flag_aliases = {
+        "faily_village.event_1": "fairy_village.event_1",
+        "faily_village.event_2": "fairy_village.event_2",
+    }
+    save_data.event_flags = {
+        flag_aliases.get(flag_id, flag_id) for flag_id in save_data.event_flags
+    }
+    save_data.opened_treasures = {
+        (_canonical_village_map_id(treasure_map), treasure_id)
+        for treasure_map, treasure_id in save_data.opened_treasures
+    }
+    for entry in save_data.logs:
+        message_id = entry.get("message_id")
+        if isinstance(message_id, str) and message_id.startswith("faily_village."):
+            entry["message_id"] = "fairy_village." + message_id.removeprefix("faily_village.")
+    return _canonical_village_map_id(map_id)
 
 
 def _restore_member(
@@ -1018,6 +1045,8 @@ class SaveRepository:
         )
         location = document.get("location")
         map_id = location.get("map_id") if isinstance(location, Mapping) else None
+        if isinstance(map_id, str) and document["format_version"] < 3:
+            map_id = _canonical_village_map_id(map_id)
         return SaveSlotSummary(
             slot,
             True,

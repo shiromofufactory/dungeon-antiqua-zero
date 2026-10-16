@@ -385,3 +385,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.app-header .id-filter {
+  display: grid;
+  gap: 3px;
+  width: clamp(220px, 24vw, 360px);
+  color: var(--muted);
+  font-size: 10px;
+}

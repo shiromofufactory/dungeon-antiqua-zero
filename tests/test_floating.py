@@ -59,8 +59,8 @@ class FloatingAnimationTest(unittest.TestCase):
     def test_derives_stable_full_cycle_phases_from_entity_identity(self) -> None:
         self.assertEqual(floating_phase_offset("pc:Fiora"), 77)
         self.assertEqual(
-            floating_phase_offset("actor:faily_village:actor_1"),
-            53,
+            floating_phase_offset("actor:fairy_village:actor_1"),
+            68,
         )
         self.assertNotEqual(
             floating_phase_offset("pc:Fiora"),

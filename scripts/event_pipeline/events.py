@@ -78,16 +78,8 @@ def _known_fields(
 
 
 def event_source_paths(content_root: Path) -> tuple[Path, ...]:
-    directory = content_root / "events"
-    return (
-        tuple(
-            path
-            for path in sorted(directory.glob("*.json"))
-            if path.name not in {"flags.json", "messages.json", "missions.json"}
-        )
-        if directory.is_dir()
-        else ()
-    )
+    path = content_root / "events" / "events.json"
+    return (path,) if path.is_file() else ()
 
 
 def load_event_source(path: Path) -> dict[str, Any]:
@@ -341,7 +333,7 @@ def validate_event_sources(
     bgm_ids: Iterable[str] = (),
     se_ids: Iterable[str] = (),
 ) -> list[EventDiagnostic]:
-    """Validate every source together so cross-file IDs are unambiguous."""
+    """Validate full event IDs and references in the authoring document."""
 
     if not isinstance(sources, Mapping):
         raise TypeError("event sources must be a mapping")
@@ -363,34 +355,24 @@ def validate_event_sources(
         if not isinstance(source, Mapping):
             _diagnostic(diagnostics, "error", "invalid_root", root_path, "イベントJSONのルートはobjectである必要があります。")
             continue
-        _known_fields(source, {"format_version", "namespace", "events"}, diagnostics, root_path)
+        _known_fields(source, {"format_version", "events"}, diagnostics, root_path)
         if source.get("format_version") != EVENT_SOURCE_FORMAT_VERSION:
             _diagnostic(diagnostics, "error", "unsupported_format_version", f"{root_path}.format_version", f"対応するformat_versionは{EVENT_SOURCE_FORMAT_VERSION}です。")
-        namespace = source.get("namespace")
-        if not isinstance(namespace, str) or LOCAL_ID_PATTERN.fullmatch(namespace) is None:
-            _diagnostic(diagnostics, "error", "invalid_namespace", f"{root_path}.namespace", "namespaceはlower_snake_caseで指定してください。")
-            namespace = None
-        elif filename != namespace:
-            _diagnostic(diagnostics, "error", "namespace_filename_mismatch", f"{root_path}.namespace", "namespaceをファイル名と一致させてください。")
-
         events = source.get("events")
         if not isinstance(events, list):
             _diagnostic(diagnostics, "error", "invalid_events", f"{root_path}.events", "eventsは配列で指定してください。")
         else:
-            local_ids = set()
             for index, event in enumerate(events):
                 path = f"{root_path}.events[{index}]"
                 if not isinstance(event, Mapping):
                     _diagnostic(diagnostics, "error", "invalid_event", path, "eventはobjectで指定してください。")
                     continue
-                local_id = event.get("id")
-                if not isinstance(local_id, str) or LOCAL_ID_PATTERN.fullmatch(local_id) is None:
-                    _diagnostic(diagnostics, "error", "invalid_event_id", f"{path}.id", "イベントIDはlower_snake_caseで指定してください。")
+                full_id = event.get("id")
+                if not isinstance(full_id, str) or FULL_ID_PATTERN.fullmatch(full_id) is None:
+                    _diagnostic(diagnostics, "error", "invalid_event_id", f"{path}.id", "イベントIDはcommon.event_1のようにドットで区切ったlower_snake_caseで指定してください。")
                     continue
-                full_id = f"{namespace}.{local_id}" if namespace else local_id
-                if local_id in local_ids or full_id in event_ids:
+                if full_id in event_ids:
                     _diagnostic(diagnostics, "error", "duplicate_event_id", f"{path}.id", f"イベントIDが重複しています: {full_id}")
-                local_ids.add(local_id)
                 event_ids.add(full_id)
 
     for filename, source in sources.items():
@@ -445,9 +427,8 @@ def compile_event_sources(
     battle_start_events: dict[str, str] = {}
     for filename in sorted(sources):
         source = sources[filename]
-        namespace = source["namespace"]
         for event in source["events"]:
-            full_id = f"{namespace}.{event['id']}"
+            full_id = event["id"]
             events[full_id] = {"commands": event["commands"]}
             if "battle_start_id" in event:
                 battle_start_events[event["battle_start_id"]] = full_id

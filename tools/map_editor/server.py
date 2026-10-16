@@ -389,9 +389,8 @@ class MapEditorApplication:
 
     def event_definitions(self) -> dict[str, Mapping[str, Any]]:
         return {
-            f"{source.get('namespace')}.{event.get('id')}": event
+            event["id"]: event
             for source in load_event_sources(self.content_root).values()
-            if isinstance(source.get("namespace"), str)
             for event in source.get("events", [])
             if isinstance(event, Mapping) and isinstance(event.get("id"), str)
         }

@@ -120,7 +120,6 @@ function configureEditorNavigation() {
     link.href = editorUrl(link.dataset.editorLink, {
       map: state.data?.map_id,
       tileset: state.data?.tileset_id,
-      namespace: logicalMapId(),
     });
   });
 }
@@ -181,7 +180,6 @@ function openNewActorEvent() {
     return;
   }
   const url = editorUrl("event", {
-    namespace: logicalMapId(),
     new_actor_event: draftId,
   });
   state.dirty = false;
@@ -2800,8 +2798,7 @@ function handleInspectorAction(element) {
   else if (action === "open-actor-event" && currentActor()) {
     const trigger = actorTrigger(currentActor().id);
     if (!trigger?.event_id) return;
-    const [namespace, eventId] = trigger.event_id.split(".", 2);
-    const url = editorUrl("event", { namespace, event: eventId });
+    const url = editorUrl("event", { event: trigger.event_id });
     navigateToEditor(url);
   }
   else if (action === "delete-actor") commit(() => {
@@ -2813,8 +2810,7 @@ function handleInspectorAction(element) {
     state.eventTool = "select";
   });
   else if (action === "open-trigger-event" && currentTrigger()) {
-    const [namespace, eventId] = currentTrigger().event_id.split(".", 2);
-    const url = editorUrl("event", { namespace, event: eventId });
+    const url = editorUrl("event", { event: currentTrigger().event_id });
     navigateToEditor(url);
   }
   else if (action === "delete-trigger") commit(() => {

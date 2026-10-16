@@ -121,8 +121,8 @@ app/maps/
 選択を維持する。切り替え先に選択中の定義がない場合や別タイルセットへ切り替えた場合は、
 地面を先頭、オブジェクトを現在のレイヤーで先頭の定義へ戻す。配置済み実体の選択は解除する。
 
-イベント本文のnamespaceは親マップIDを使用する。各エリアにactorとトリガーを配置できるが、
-「イベントを追加」から開くイベント定義ファイルは親マップで共通とする。
+イベント本文は共通の `content/events/events.json` に保存する。各エリアにactorとトリガーを配置でき、
+「イベントを追加」では親マップIDを新規イベントIDの接頭辞に使う。IDフィルタは空欄で開始する。
 
 オブジェクト実体IDは配置時に定義IDから自動生成する。`origin` は定義の左上起点、`order` は
 レイヤーと下端Y座標が同じ実体間の描画順を表す。背面の `object`、通常の `object_y_sorted` と
@@ -510,7 +510,7 @@ actorの部分表示・選択・範囲外への移動と寸法変更後の保持
 npm run tools:editor
 npm run tools:editor -- --map field_01 --tileset dungeon --profile dungeon
 npm run tools:editor -- --editor tileset --tileset dungeon
-npm run tools:editor -- --editor event --namespace common
+npm run editor -- --editor event
 npm run maps:validate
 npm run maps:build
 ```

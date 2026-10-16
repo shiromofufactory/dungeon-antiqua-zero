@@ -80,7 +80,7 @@ app/
 │   ├── battle_progression.py # 戦闘実績、報酬、熟練度、HP・MP成長の確定
 │   ├── spell_progression.py  # メニュー呪文使用時の熟練度・最大MP成長
 │   ├── auto_recovery.py      # オート回復の1手選択と反復実行（予定）
-│   ├── save.py               # セーブv2とv1移行の変換、検証、スロット永続化
+│   ├── save.py               # セーブv3とv1・v2移行の変換、検証、スロット永続化
 │   ├── settings.py           # 端末設定の読込と原子的な永続化
 │   └── travel.py             # 拠点への入場、テレポート候補と到着地点参照
 ├── ui/
@@ -1358,7 +1358,7 @@ NPCの空き枠へ追加した装備は固定せず、取り外しや
 
 共有経験値は `SaveData.experience` が1つだけ所有し、各 `Member.experience_offset` を加えた値から
 DA2の累計必要経験値式で内部LVを導出する。`Member.internal_level` は現在値のキャッシュであり、
-戦闘報酬確定、加入・再加入、ロード時に再計算する。セーブv2は補正値を保存し、v1からは
+戦闘報酬確定、加入・再加入、ロード時に再計算する。セーブv2以降は補正値を保存し、v1からは
 保存済み内部LVの必要経験値と共有経験値の差を補正値として移行する。
 
 キャラクター正本の `base_str`、`base_agi`、`base_mag` は、変更されない
@@ -1634,10 +1634,11 @@ ZEROはフリーシナリオ、戦闘回数による敵の強化、魔力設備�
 イベント会話は通常UI語彙の `content/data/texts.json` と分離し、
 `content/events/messages.json` から `app/events/messages.json` を生成する。イベント定義は
 `message_id` だけを保持し、顔グラフィックのキャラクターキーはメッセージ定義が所有する。
-Overlayがメッセージ定義から現在言語と顔を解決する。イベントnamespaceはID整理の単位であり、
+Overlayがメッセージ定義から現在言語と顔を解決する。通常イベントの正本は
+`content/events/events.json` に集約し、制作時から完全IDを保持する。接頭辞はID整理の単位であり、
 マップIDとは対応付けない。
 
-イベントフラグ宣言は各イベントnamespaceへ持たせず、`content/events/flags.json` でグローバルに
+イベントフラグ宣言は各イベントへ持たせず、`content/events/flags.json` でグローバルに
 管理する。`flag_id` は全イベントから同じ値を参照し、任意のドット区切り接頭辞は分類目的だけに
 使用する。生成時に宣言済みIDを `app/events/events.json` へ収録する。
 
