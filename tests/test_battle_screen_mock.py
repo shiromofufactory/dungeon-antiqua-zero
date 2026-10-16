@@ -276,6 +276,8 @@ from rendering import (
     CHARACTER_SHADOW_SOURCE_Y,
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
+    FLOATING_CYCLE_FRAMES,
+    FLOATING_PHASE_FRAMES,
     MONSTER_DEATH_BRIGHTEN_FRAME_COUNT,
     MONSTER_DEATH_DISSOLVE_FRAME_COUNT,
     MONSTER_DEATH_PALETTE,
@@ -1396,6 +1398,51 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
+    def test_sleeping_or_paralyzed_fairy_is_grounded_until_recovery(self) -> None:
+        for field, value in (("sleeping", 2), ("paralyzed", True)):
+            with self.subTest(field=field):
+                member = SimpleNamespace(
+                    formation_row=FormationRow.FRONT,
+                    is_dead=False,
+                    is_dying=False,
+                    definition=SimpleNamespace(key="Fiora", race=Race.FAIRY),
+                    sleeping=0,
+                    paralyzed=False,
+                )
+                setattr(member, field, value)
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.character_sprites = object()
+                mock.party_visuals = (
+                    SimpleNamespace(member=member, battle_sprite=0),
+                )
+                mock.phase = BattleMockPhase.COMMAND
+                mock.active_party_index = None
+                mock.defending_party_indexes = {0}
+
+                for frame in range(0, FLOATING_CYCLE_FRAMES, FLOATING_PHASE_FRAMES):
+                    with (
+                        self.subTest(frame=frame),
+                        patch("tools.screen_mocks.battle.pyxel.frame_count", frame),
+                        patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                    ):
+                        mock._draw_party()
+                        blt.assert_called_once_with(
+                            156, 64, mock.character_sprites,
+                            NEAR_DEATH_SPRITE_SOURCE_X, 0, 16, 32, 1,
+                        )
+
+                setattr(member, field, 0)
+                mock.defending_party_indexes.clear()
+                with (
+                    patch("tools.screen_mocks.battle.pyxel.frame_count", 0),
+                    patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                ):
+                    mock._draw_party()
+                self.assertEqual(blt.call_args_list, [
+                    _character_shadow_call(156, 80),
+                    call(156, 62, mock.character_sprites, 0, 0, 16, 32, 1),
+                ])
+
     def test_dying_fairy_floats_with_shadow_during_temporary_damage_pose(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
@@ -1442,7 +1489,6 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_fairy_ailments_do_not_hide_shadow_for_a_floating_pose(self) -> None:
         for field, value in (
-            ("paralyzed", True),
             ("stunned", True),
             ("confused", 1),
         ):

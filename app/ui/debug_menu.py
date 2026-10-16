@@ -17,7 +17,7 @@ from member import (
 )
 from resources import FontResources
 from state import Language, SaveData, Settings
-from systems import DebugPartyEditor, DebugPartyError, InventorySystem
+from systems import DebugPartyEditor, DebugPartyError, EncounterSystem, InventorySystem
 
 from ui import (
     DEFAULT_TEXT_COLOR,
@@ -61,6 +61,7 @@ MAIN_ROWS = tuple(
 MAIN_CURSOR_X = 4
 MAIN_LABEL_X = 6
 MAIN_VALUE_X = 34
+MONSTER_LEVEL_Y = 42
 MEMBER_FIRST_Y = 9
 MEMBER_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 MEMBER_ROW_COUNT = 10
@@ -400,7 +401,20 @@ class DebugMenuOverlay:
                     self.debug_texts.create(values[key], MAIN_VALUE_X, y),
                 )
             )
-        placements.append(self._guide_text())
+        placements.extend(
+            (
+                self.debug_texts.create(
+                    DEBUG_TEXT.monster_level, MAIN_LABEL_X, MONSTER_LEVEL_Y,
+                ),
+                self.debug_texts.create("：", 31, MONSTER_LEVEL_Y),
+                self.debug_texts.create(
+                    format_number(EncounterSystem.dynamic_monster_level()),
+                    MAIN_VALUE_X,
+                    MONSTER_LEVEL_Y,
+                ),
+                self._guide_text(),
+            )
+        )
         self.main_window = self.windows.create(
             *DEBUG_WINDOW_GRID,
             tuple(placements),

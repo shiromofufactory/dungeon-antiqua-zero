@@ -54,6 +54,12 @@ from scenes.battle import (
     BattleCharacter,
     BattlePhase,
     FormationAnimationCompletion,
+    TIMELINE_BASE_X,
+    TIMELINE_BASE_Y,
+    TIMELINE_DROP_DISTANCE,
+    TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT,
+    TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT,
+    TIMELINE_SLOT_SPACING,
     monster_slot_indexes,
 )
 from state import Language, SaveData, Settings
@@ -560,6 +566,139 @@ class BattleEscapeStaggerTest(unittest.TestCase):
         self.assertEqual(len(scene.timeline_advance.after.actors), 2)
 
 
+class BattleTimelineRemovalTest(unittest.TestCase):
+    @staticmethod
+    def _scene(count: int = 8) -> BattleScene:
+        scene = BattleScene.__new__(BattleScene)
+        actors = tuple(SimpleNamespace(icon_x=index * 16, icon_y=0) for index in range(count))
+        scene._timeline_order = TimelineOrder(tuple(
+            TimelineEntry(actor, 10, 64 - index * 4)
+            for index, actor in enumerate(actors)
+        ))
+        scene.timeline = actors
+        scene.timeline_animation_phase = None
+        scene.phase = BattlePhase.COMMAND
+        scene._draw_timeline_entry = Mock()
+        return scene
+
+    def test_removed_icons_fall_together_before_survivors_close_the_gaps(self) -> None:
+        scene = self._scene()
+        actors = scene.timeline
+        scene._remove_timeline_actors((actors[1], actors[3]))
+
+        self.assertEqual(scene.timeline, (actors[0], actors[2], *actors[4:]))
+        self.assertEqual(scene._timeline_order.actors, scene.timeline)
+        animation = scene.timeline_removal_animation
+        for frame in range(TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT + 1):
+            animation.elapsed_frame = frame
+            scene._draw_timeline_entry.reset_mock()
+            scene._draw_timeline()
+            drop_y = TIMELINE_BASE_Y + (
+                TIMELINE_DROP_DISTANCE * frame // TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT
+            )
+            scene._draw_timeline_entry.assert_any_call(actors[1], 90, drop_y)
+            scene._draw_timeline_entry.assert_any_call(actors[3], 130, drop_y)
+            scene._draw_timeline_entry.assert_any_call(actors[2], 110, TIMELINE_BASE_Y)
+            self.assertEqual(animation.elapsed_frame, frame)
+
+        animation.elapsed_frame += TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT // 2
+        scene._draw_timeline_entry.reset_mock()
+        scene._draw_timeline()
+        scene._draw_timeline_entry.assert_any_call(actors[2], 100, TIMELINE_BASE_Y)
+        scene._draw_timeline_entry.assert_any_call(actors[6], 203, TIMELINE_BASE_Y)
+        animation.elapsed_frame += TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT // 2
+        scene._draw_timeline_entry.reset_mock()
+        scene._draw_timeline()
+        for index, actor in enumerate(scene.timeline):
+            scene._draw_timeline_entry.assert_any_call(
+                actor, TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING, TIMELINE_BASE_Y
+            )
+
+    def test_offscreen_removal_does_not_add_animation_or_wait(self) -> None:
+        scene = self._scene()
+        scene._remove_timeline_actors(scene.timeline[6:])
+
+        self.assertEqual(len(scene.timeline), 6)
+        self.assertFalse(scene._update_timeline_removal_animation())
+
+    def test_removal_waits_before_advancing_turn_or_accepting_victory_input(self) -> None:
+        for phase in (BattlePhase.TIMELINE, BattlePhase.VICTORY_SUMMARY):
+            with self.subTest(phase=phase):
+                scene = self._scene()
+                scene.phase = phase
+                scene._remove_timeline_actors((scene.timeline[1],))
+                scene._update_victory_summary = Mock()
+                scene._update_timeline_animation = Mock()
+                input_state = InputState(confirm=InputButton(triggered=True, held=True))
+                for _ in range(
+                    TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT + TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT
+                ):
+                    scene.update(input_state)
+                self.assertIsNone(scene.timeline_removal_animation)
+                scene._update_victory_summary.assert_not_called()
+                scene._update_timeline_animation.assert_not_called()
+                if phase is BattlePhase.VICTORY_SUMMARY:
+                    scene.update(InputState())
+                    scene._update_victory_summary.assert_called_once()
+
+    def test_defeated_party_is_excluded_while_its_icon_remains_for_the_fall(self) -> None:
+        scene = self._scene(3)
+        party = load_mock_party(load_mock_items(), load_mock_skills())[:3]
+        for actor, member in zip(scene.timeline, party):
+            actor.member = member
+        scene.party = party
+        scene.party_visuals = scene.timeline
+        party[1].hp = 0
+
+        scene._remove_defeated_party_from_timeline()
+
+        self.assertEqual(scene.timeline, (scene.party_visuals[0], scene.party_visuals[2]))
+        self.assertIs(scene.timeline_removal_animation.before[1], scene.party_visuals[1])
+        scene._remove_defeated_party_from_timeline()
+        self.assertEqual(scene.timeline_removal_animation.elapsed_frame, 0)
+
+    def test_victory_draws_remaining_icons_without_current_position_marker(self) -> None:
+        scene = self._scene(2)
+        for phase in (BattlePhase.VICTORY_SUMMARY, BattlePhase.RESULT_TRANSITION):
+            scene.phase = phase
+            with patch("scenes.battle.pyxel.blt") as blt:
+                scene._draw_timeline()
+            blt.assert_not_called()
+            for index, actor in enumerate(scene.timeline):
+                scene._draw_timeline_entry.assert_any_call(
+                    actor, TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING, TIMELINE_BASE_Y
+                )
+
+    def test_last_enemy_at_timeline_head_falls_after_poison_or_escape(self) -> None:
+        for cause in ("poison", "escape"):
+            with self.subTest(cause=cause):
+                scene = self._scene(3)
+                enemy, *survivors = scene.timeline
+                enemy.is_alive = False
+                enemy.width = 16
+                scene.monsters = (enemy,)
+                scene._release_palette_variant = Mock()
+                scene._sync_unselectable_target_palette = Mock()
+                scene._begin_hidden_party_victory_return = Mock()
+                scene._clear_damage_popups_for_victory = Mock()
+                if cause == "poison":
+                    scene.monster_death_animation = SimpleNamespace(
+                        update=Mock(), is_finished=True
+                    )
+                    scene.dying_monster_indexes = (0,)
+                    scene.monster_death_from_timeline_head = True
+                    scene._update_monster_death_animation()
+                else:
+                    scene.monster_escape_actor_index = 0
+                    scene.monster_escape_animation_frame = 0
+                    scene._monster_escape_x = Mock(return_value=-16)
+                    scene._update_monster_escape()
+
+                self.assertIs(scene.result, BattleResult.VICTORY)
+                self.assertEqual(scene.timeline, tuple(survivors))
+                self.assertIs(scene.timeline_removal_animation.before[0], enemy)
+
+
 class BattleSceneIntegrationTest(unittest.TestCase):
     def test_victory_wakes_all_members_before_showing_summary(self) -> None:
         party = load_mock_party(load_mock_items(), load_mock_skills())
@@ -577,7 +716,14 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.party_visuals = tuple(
             SimpleNamespace(member=member) for member in scene.party
         )
-        scene.monsters = ()
+        enemy = SimpleNamespace(is_alive=False)
+        scene.monsters = (enemy,)
+        survivors = scene.party_visuals[:3]
+        scene.timeline = (survivors[0], enemy, *survivors[1:])
+        scene._timeline_order = TimelineOrder(tuple(
+            TimelineEntry(actor, 10, 64 - index * 4)
+            for index, actor in enumerate(scene.timeline)
+        ))
         scene.escaped_party_indexes = {4}
         scene.progression = BattleProgression((EnemyProgressionData(1, 0, 1, 0),))
         scene.save_data = SaveData()
@@ -592,6 +738,9 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene._begin_victory_summary()
 
         self.assertIs(scene.phase, BattlePhase.VICTORY_SUMMARY)
+        self.assertEqual(scene.timeline, survivors)
+        self.assertEqual(scene._timeline_order.actors, survivors)
+        self.assertIsNone(scene.timeline_animation_phase)
         self.assertEqual(tuple(member.sleeping for member in party), (0,) * 6)
         self.assertEqual(
             tuple((member.hp, member.poisoned, member.paralyzed) for member in party),

@@ -93,7 +93,7 @@ class EncounterSystem:
     def dynamic_monster_level() -> int:
         """Resolve the provisional dynamic map level."""
 
-        return 1
+        return 2
 
     def generate_formation(
         self,

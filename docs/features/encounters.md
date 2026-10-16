@@ -29,7 +29,7 @@
   `allow_demons`、`allow_humans`、`allow_giants`、`allow_large_animals` で候補の出現可否を持つ。
   悪魔はmonsterの `tribe == "DEMON"`、人間は `tribe` が `HUMAN` または `MAGE`、巨人は
   `tribe == "GIANT"`、大型動物は `large_animal == 1` を対象とする。
-- モンスターレベルが `dynamic` の場合、現時点では常にレベル1として扱う。ゲーム進行度に
+- モンスターレベルが `dynamic` の場合、現時点では常にレベル2として扱う。ゲーム進行度に
   応じた判定規則は別途仕様化した時点で差し替える。
 - 解決済みのマップモンスターレベルを `L` とする。編成の最大出現数 `M` は危険度が
   `high` なら5、`low` なら4とする。候補母集団は `lv == L` とし、危険度が `high` の場合だけ

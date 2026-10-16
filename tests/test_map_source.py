@@ -880,6 +880,7 @@ class MapSourceTest(unittest.TestCase):
         diagnostics = validate_map_source(source, self.tileset)
         messages = {item.code: item.message for item in diagnostics}
 
+        self.assertEqual({item.severity for item in diagnostics}, {"warning"})
         self.assertEqual(
             messages["missing_destination_map_id"],
             "移動先マップを選択してください。",
@@ -896,6 +897,7 @@ class MapSourceTest(unittest.TestCase):
         diagnostics = validate_map_source(source, self.tileset)
         messages = {item.code: item.message for item in diagnostics}
 
+        self.assertEqual({item.severity for item in diagnostics}, {"error"})
         self.assertEqual(
             messages["invalid_destination_map_id"],
             "移動先マップIDが不正です。一覧から選択し直してください。",
@@ -904,6 +906,31 @@ class MapSourceTest(unittest.TestCase):
             messages["invalid_destination_arrival_id"],
             "移動先到着地点IDが不正です。一覧から選択し直してください。",
         )
+
+    def test_incomplete_site_destinations_are_warnings_and_only_complete_sites_are_compiled(self) -> None:
+        from app.resources.maps import MapResources
+        from tests.test_map_resources import FakePyxel
+
+        for profile in ("world", "town", "dungeon"):
+            tileset = {**self.tileset, "profile": profile}
+            for destination in ({"map_id": "", "arrival_id": ""}, {"map_id": "test_world", "arrival_id": ""}, {"map_id": "", "arrival_id": "entrance"}, {"map_id": None, "arrival_id": None}, {}):
+                with self.subTest(profile=profile, destination=destination):
+                    source = initial_map_source("test_world", tileset, profile, 16, 15)
+                    source["grounds"][2][2:4] = ["plain", "plain"]
+                    source["sites"] = [
+                        {"id": "draft", "anchor": {"kind": "cell", "position": [2, 2]}, "entrance_offsets": [[0, 0]], "destination": destination},
+                        {"id": "ready", "anchor": {"kind": "cell", "position": [3, 2]}, "entrance_offsets": [[0, 0]], "destination": {"map_id": "elsewhere", "arrival_id": "entrance"}},
+                    ]
+                    before = deepcopy(source)
+                    diagnostics = validate_map_source(source, tileset)
+                    self.assertTrue(diagnostics)
+                    self.assertEqual({item.severity for item in diagnostics}, {"warning"})
+                    self.assertEqual([site["id"] for site in resolve_map(source, tileset)["sites"]], ["ready"])
+                    compiled = compile_map(source, tileset, self.image_path, self.palette_path)
+                    save_compiled_map(self.root / "test_world.json", compiled)
+                    loaded = MapResources(self.root, pyxel_api=FakePyxel()).map("test_world")
+                    self.assertEqual([site.id for site in loaded.sites], ["ready"])
+                    self.assertEqual(source, before)
 
     def test_validates_site_destinations_across_maps(self) -> None:
         world = initial_map_source("test_world", self.tileset, "world", 16, 15)

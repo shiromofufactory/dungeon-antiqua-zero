@@ -787,6 +787,38 @@ class MapEditorServerTest(unittest.TestCase):
         self.assertIn("この移動口の名称はゲーム中に表示されません。", script)
         self.assertNotIn("拠点はworld profileで編集します。", script)
 
+    def test_saves_incomplete_destinations_and_preserves_them_until_completed(self) -> None:
+        from app.resources.maps import MapResources
+        from app.world_sites import WorldSiteCatalog
+        from tests.test_map_resources import FakePyxel
+
+        for profile, tileset_id in (("world", "worldmap"), ("town", "village")):
+            data = initial_map_source(f"draft_{profile}", self.application.load_tileset(tileset_id), profile, 16, 15)
+            if profile == "world":
+                data["grounds"][2][2:4] = ["plain", "plain"]
+            data["arrival_points"] = [{"id": "entrance", "position": [3, 2], "facing": "down", "teleport_enabled": False, "site_id": None}]
+            data["sites"] = [{"id": "draft_exit", "anchor": {"kind": "cell", "position": [2, 2]}, "entrance_offsets": [[0, 0]], "destination": {}}]
+            names = {"draft_exit": "作成中の拠点"} if profile == "world" else {}
+            for destination in ({"map_id": "", "arrival_id": ""}, {"map_id": data["map_id"], "arrival_id": ""}):
+                with self.subTest(profile=profile, destination=destination):
+                    data["sites"][0]["destination"] = destination
+                    result = self.post_json("/api/save", data, names)
+                    self.assertTrue(result["saved"], result["diagnostics"])
+                    self.assertTrue(result["diagnostics"])
+                    self.assertEqual({issue["severity"] for issue in result["diagnostics"]}, {"warning"})
+                    self.assertEqual(load_map_source(self.application.source_path_for(data["map_id"]))["sites"][0]["destination"], destination)
+                    reopened = self.get_json(f"/api/document?token=test-token&map={data['map_id']}")
+                    self.assertEqual(reopened["data"]["sites"][0]["destination"], destination)
+                    loaded = MapResources(self.application.runtime_path.parent, pyxel_api=FakePyxel()).map(data["map_id"])
+                    self.assertEqual(loaded.sites, ())
+                    self.assertIsNone(WorldSiteCatalog(loaded.sites).entrance_at(2, 2))
+
+            data["sites"][0]["destination"] = {"map_id": data["map_id"], "arrival_id": "entrance"}
+            self.assertTrue(self.post_json("/api/save", data, names)["saved"])
+            loaded = MapResources(self.application.runtime_path.parent, pyxel_api=FakePyxel()).map(data["map_id"])
+            self.assertEqual(loaded.sites[0].destination.arrival_id, "entrance")
+            self.assertIsNotNone(WorldSiteCatalog(loaded.sites).entrance_at(2, 2))
+
     def test_keeps_visual_preview_for_incomplete_site(self) -> None:
         data = self.get_json("/api/document?token=test-token")["data"]
         data["grounds"][2][2] = "plain"

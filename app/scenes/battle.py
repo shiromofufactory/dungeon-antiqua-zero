@@ -771,6 +771,15 @@ class TimelineAnimationPhase(StrEnum):
     INTERRUPT = "interrupt"
 
 
+@dataclass
+class TimelineRemovalAnimation:
+    """Keep removed icons visible while they fall and the remaining gaps close."""
+
+    before: tuple[BattleCharacter | BattleMonster, ...]
+    after: tuple[BattleCharacter | BattleMonster, ...]
+    elapsed_frame: int = 0
+
+
 class FormationAnimationCompletion(StrEnum):
     """Continuation to run after manual or automatic row movement."""
 
@@ -2456,6 +2465,9 @@ class BattleScene:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        if self._update_timeline_removal_animation():
+            self.input_device = input_state.device
+            return
         if getattr(self, "phase", None) is BattlePhase.VICTORY_SUMMARY:
             self.input_device = input_state.device
             self._update_victory_summary(input_state)
@@ -2789,6 +2801,7 @@ class BattleScene:
         self.timeline_animation_phase = None
         self.timeline_animation_frame = 0
         self.timeline_advance = None
+        self.timeline_removal_animation = None
         self.formation_animation_frame = 0
         self.formation_actor_index = None
         self.formation_actor_indexes = ()
@@ -7351,12 +7364,9 @@ class BattleScene:
             False,
         )
         if not from_timeline_head:
-            for dying_index in dying_indexes:
-                self._timeline_order = remove_timeline_actor(
-                    self._timeline_order,
-                    self.monsters[dying_index],
-                )
-            self.timeline = self._timeline_order.actors
+            self._remove_timeline_actors(
+                tuple(self.monsters[index] for index in dying_indexes)
+            )
         self.monster_death_animation = None
         self.monster_death_delay_frames_remaining = 0
         self.dying_monster_indexes = ()
@@ -7387,6 +7397,10 @@ class BattleScene:
         self.auto_battle_active = False
         self.auto_battle_planner = None
 
+        self._remove_timeline_actors(self.monsters)
+        self.timeline_animation_phase = None
+        self.timeline_animation_frame = 0
+        self.timeline_advance = None
         self._begin_hidden_party_victory_return()
         self._clear_damage_popups_for_victory()
         if not all(
@@ -7443,7 +7457,6 @@ class BattleScene:
         self.victory_motion_frame = 0
         self.phase = BattlePhase.VICTORY_SUMMARY
         self.active_party_index = None
-        self.timeline = ()
         self._play_victory_jingle(BATTLE_WIN_BGM_ID)
 
     def _begin_escape_result(self) -> None:
@@ -7821,6 +7834,55 @@ class BattleScene:
         """Read effective agility while retaining lightweight test actors."""
 
         return getattr(actor, "effective_agility", actor.agility)
+
+    def _remove_timeline_actors(
+        self,
+        actors: Sequence[BattleCharacter | BattleMonster],
+    ) -> None:
+        """Exclude actors immediately, retaining only their departing visuals."""
+
+        before = getattr(self, "timeline", ())
+        removed = tuple(
+            entry for entry in before if any(entry is actor for actor in actors)
+        )
+        if not removed:
+            return
+        order = getattr(self, "_timeline_order", None)
+        if order is not None:
+            for actor in removed:
+                order = remove_timeline_actor(order, actor)
+            self._timeline_order = order
+            self.timeline = order.actors
+        else:
+            self.timeline = tuple(
+                entry
+                for entry in before
+                if all(entry is not actor for actor in removed)
+            )
+        animation = getattr(self, "timeline_removal_animation", None)
+        if animation is not None:
+            animation.after = self.timeline
+        elif any(
+            entry is actor
+            for entry in before[:TIMELINE_VISIBLE_ENTRY_COUNT]
+            for actor in removed
+        ):
+            self.timeline_removal_animation = TimelineRemovalAnimation(
+                before, self.timeline
+            )
+
+    def _update_timeline_removal_animation(self) -> bool:
+        """Finish departing icons before accepting input or moving the next turn."""
+
+        animation = getattr(self, "timeline_removal_animation", None)
+        if animation is None:
+            return False
+        animation.elapsed_frame += 1
+        if animation.elapsed_frame >= (
+            TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT + TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT
+        ):
+            self.timeline_removal_animation = None
+        return True
 
     def _start_timeline_removal_animation(self) -> None:
         """Slide the timeline after an escaping actor leaves permanently."""
@@ -10113,20 +10175,7 @@ class BattleScene:
                 for index in range(len(self.party_visuals))
                 if self._party_member_is_dead(index)
             )
-        order = getattr(self, "_timeline_order", None)
-        if order is None:
-            self.timeline = tuple(
-                actor
-                for actor in self.timeline
-                if all(actor is not visual for visual in defeated)
-            )
-            return
-        for visual in defeated:
-            self._timeline_order = remove_timeline_actor(
-                self._timeline_order,
-                visual,
-            )
-        self.timeline = self._timeline_order.actors
+        self._remove_timeline_actors(defeated)
 
     def _reveal_hidden_party_if_all_unavailable(self) -> bool:
         """Match DA2 by revealing everyone when no living member is targetable."""
@@ -11217,7 +11266,8 @@ class BattleScene:
                 ) % 2
                 return pattern * FORMATION_SPRITE_STEP_X
             return SPELL_CAST_SPRITE_SOURCE_X if self.action_uses_cast_pose else 0
-        if getattr(self.party_visuals[index].member, "sleeping", 0):
+        member = self.party_visuals[index].member
+        if getattr(member, "sleeping", 0) or getattr(member, "paralyzed", False):
             return NEAR_DEATH_SPRITE_SOURCE_X
         if index in getattr(self, "defending_party_indexes", ()):
             return DEFEND_SPRITE_SOURCE_X
@@ -12381,10 +12431,9 @@ class BattleScene:
             self.party_target_cursor.draw()
 
     def _draw_timeline(self) -> None:
-        if self.phase in (
-            BattlePhase.VICTORY_SUMMARY,
-            BattlePhase.RESULT_TRANSITION,
-        ):
+        animation = getattr(self, "timeline_removal_animation", None)
+        if animation is not None:
+            self._draw_timeline_removal(animation)
             return
         if self.phase is BattlePhase.ENTRANCE:
             for index, entry in enumerate(self.timeline[:TIMELINE_VISIBLE_ENTRY_COUNT]):
@@ -12460,6 +12509,11 @@ class BattleScene:
                 TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING,
                 TIMELINE_BASE_Y,
             )
+        if self.phase in (
+            BattlePhase.VICTORY_SUMMARY,
+            BattlePhase.RESULT_TRANSITION,
+        ):
+            return
         pyxel.blt(
             TIMELINE_BASE_X + 4,
             TIMELINE_BASE_Y - 4,
@@ -12470,6 +12524,43 @@ class BattleScene:
             8,
             TRANSPARENT_INDEX,
         )
+
+    def _draw_timeline_removal(self, animation: TimelineRemovalAnimation) -> None:
+        """Reverse the interrupt's rise, then slide survivors into the gaps."""
+
+        fall_frame = min(animation.elapsed_frame, TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT)
+        drop = (
+            TIMELINE_DROP_DISTANCE * fall_frame // TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT
+        )
+        slide_frame = max(
+            0, animation.elapsed_frame - TIMELINE_INTERRUPT_ENTRY_FRAME_COUNT
+        )
+        for index, entry in enumerate(animation.before[:TIMELINE_VISIBLE_ENTRY_COUNT]):
+            if all(entry is not actor for actor in animation.after):
+                self._draw_timeline_entry(
+                    entry,
+                    TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING,
+                    TIMELINE_BASE_Y + drop,
+                )
+        for index, entry in enumerate(animation.after[:TIMELINE_VISIBLE_ENTRY_COUNT]):
+            previous_index = next(
+                old_index
+                for old_index, actor in enumerate(animation.before)
+                if entry is actor
+            )
+            start_x = (
+                TIMELINE_BASE_X + previous_index * TIMELINE_SLOT_SPACING
+                if previous_index < TIMELINE_VISIBLE_ENTRY_COUNT
+                else TIMELINE_INCOMING_START_X
+                + (previous_index - TIMELINE_VISIBLE_ENTRY_COUNT) * TIMELINE_SLOT_SPACING
+            )
+            destination_x = TIMELINE_BASE_X + index * TIMELINE_SLOT_SPACING
+            x = start_x + (
+                (destination_x - start_x)
+                * slide_frame
+                // TIMELINE_INTERRUPT_SLIDE_FRAME_COUNT
+            )
+            self._draw_timeline_entry(entry, x, TIMELINE_BASE_Y)
 
     def _draw_timeline_interrupt(self) -> None:
         """Draw the completed actor rising into the order and pushing neighbors."""

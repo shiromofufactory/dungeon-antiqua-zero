@@ -1220,7 +1220,7 @@ def _validate_destination(
         if field_value in (None, ""):
             _diagnostic(
                 diagnostics,
-                "error",
+                "warning",
                 f"missing_destination_{key}",
                 f"{path}.{key}",
                 f"{label}{field_label.removesuffix('ID')}を選択してください。",
@@ -1715,6 +1715,8 @@ def resolve_map(
 
     resolved_sites = []
     for site in data["sites"]:
+        if not all(_valid_id(site["destination"].get(key)) for key in ("map_id", "arrival_id")):
+            continue
         anchor_x, anchor_y = _site_anchor_origin(site, instances_by_id)
         resolved_sites.append({
             "id": site["id"],

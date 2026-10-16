@@ -133,6 +133,7 @@
 - イベント中のフィールドアニメーション・制御移動・非表示actorは `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_actor_visibility tests.test_game_menu` で継続・位置停止・二重更新防止・強制割り込みを回帰検証する。
 - イベント制御actorの外周通過・範囲外の初期配置からの登場と、PC・自律移動の外周禁止、地形・占有・マップ外への移動停止は `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_map_resources tests.test_actor_visibility tests.test_game_menu` で回帰検証する。
 - マップエディタのオブジェクト操作は `node --test tests/test_map_editor_objects.mjs`、制作用マップの検証・生成は `python3 -B -m unittest tests.test_map_source` で回帰検証する。
+- 移動先未選択の移動口の警告・保存・再読込・ゲーム用データへの収録保留と、移動先設定後の有効化は `python3 -B -m unittest tests.test_map_source tests.test_map_editor_server tests.test_map_resources tests.test_world_sites tests.test_game` で回帰検証する。
 - actorのフラグ表示条件は `python3 -B -m unittest tests.test_actor_visibility tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_game tests.test_game_events`、エディタでの指定・解除・Undoは `node --test tests/test_map_editor_objects.mjs` で回帰検証する。
 - オブジェクトのフラグ表示条件は `python3 -B -m unittest tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_field tests.test_game tests.test_game_events` と `node --test tests/test_map_editor_objects.mjs` で保存・条件評価・通行・描画・トリガー・Undoを回帰検証する。
 - マップエディタの地面外周塗布・矩形塗り・Undoは `node --test tests/test_map_editor_grounds.mjs` で回帰検証する。

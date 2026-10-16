@@ -157,8 +157,8 @@ class EncounterSystemTest(unittest.TestCase):
         self.assertTrue(triggered.triggered)
         self.assertEqual(random_source.calls, [(1, 4), (1, 4)])
 
-    def test_dynamic_level_is_provisionally_fixed_at_one(self) -> None:
-        self.assertEqual(EncounterSystem.dynamic_monster_level(), 1)
+    def test_dynamic_level_is_provisionally_fixed_at_two(self) -> None:
+        self.assertEqual(EncounterSystem.dynamic_monster_level(), 2)
 
     def test_accepts_a_doubled_threshold_without_changing_the_count(self) -> None:
         random_source = FixedRandom(4)

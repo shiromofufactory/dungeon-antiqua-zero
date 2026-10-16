@@ -153,6 +153,23 @@ class DebugMenuOverlayTest(unittest.TestCase):
             )
         )
 
+    def test_dynamic_monster_level_is_displayed_without_a_cursor_target(self) -> None:
+        placements = self.screen.main_window.texts
+        label = next(
+            placement for placement in placements
+            if placement.text == DEBUG_TEXT.monster_level
+        )
+        self.assertIn(
+            ("２", 34, label.y),
+            [(placement.text, placement.x, placement.y) for placement in placements],
+        )
+        self.assertFalse(
+            any(target.y == label.y for target in self.screen.main_cursor.targets)
+        )
+        self.screen.main_cursor.select_key("event_flags")
+        self.screen.update(InputState(navigation=Direction.DOWN))
+        self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
+
     def test_event_flags_toggle_live_save_data_and_return_to_main(self) -> None:
         flags = self.save_data.event_flags
         flags.update(("sample.second", "unregistered.legacy"))
