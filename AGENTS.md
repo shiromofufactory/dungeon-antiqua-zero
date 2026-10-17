@@ -147,6 +147,7 @@
 - マップ外周の地面自由化・保存生成とゲーム内の外周非表示・進入禁止・カメラ制限・小さいマップの中央表示は `python3 -B -m unittest tests.test_map_source tests.test_map_editor_server tests.test_map_resources tests.test_field tests.test_game_events tests.test_actor_visibility` で回帰検証する。
 - マップチップ・マップ・イベント間およびマップ・タイルセット選択時の未保存変更の確認と切替、各エディタのブラウザ標準右クリックメニュー抑止は `node --test tests/test_editor_navigation.mjs` で回帰検証する。
 - マップチップエディタのオブジェクト一覧・レイヤー絞り込み・新規作成・並び替えは `node --test tests/test_mapchip_objects.mjs` で回帰検証する。
+- マップチップエディタの地面複製は `node --test tests/test_mapchip_grounds.mjs` でID採番・境界を含む全項目の独立したコピー・ベース地面の保持・Undo／Redoを回帰検証する。
 - ビルドや配布物の生成は、ユーザーが依頼した範囲でのみ行う。
 - Mac・Windowsビルドのモード埋め込み・ZIP内容・署名の呼び出し・Dropbox受け渡し検証・展開・受け取り後の限定削除と更新検出・失敗時の成果物保持は `python3 -B -m unittest tests.test_desktop_build tests.test_windows_build` で検証する。
 

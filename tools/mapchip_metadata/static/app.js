@@ -926,7 +926,10 @@ function renderGroundEditor() {
         <div class="field"><label>通行</label><select data-change="ground-collision"><option value="passable" ${ground.collision === "passable" ? "selected" : ""}>通行可</option><option value="blocked" ${ground.collision === "blocked" ? "selected" : ""}>通行不可</option></select></div>
         <div class="field"><label>境界ルール数</label><input type="text" value="${ground.boundaries.length}" disabled></div>
       </div>
-      <div class="row end" style="margin-top:10px"><button type="button" class="button danger small" data-action="delete-ground" ${grounds.length <= 1 || state.groundIndex === 0 ? "disabled" : ""}>地面を削除</button></div>
+      <div class="row end" style="margin-top:10px">
+        <button type="button" class="button ghost small" data-action="duplicate-ground">地面を複製</button>
+        <button type="button" class="button danger small" data-action="delete-ground" ${grounds.length <= 1 || state.groundIndex === 0 ? "disabled" : ""}>地面を削除</button>
+      </div>
     </div>
     <div class="section">
       <div class="section-title"><h3>通常表示</h3><span class="subtle">境界ルールに一致しない場合</span></div>
@@ -1500,6 +1503,17 @@ function handleAction(element) {
       const id = uniqueId("ground", grounds);
       grounds.push({ id, parent_id: null, collision: "passable", base_visual: singleTileVisual(), boundaries: [] });
       state.groundIndex = grounds.length - 1;
+    });
+  } else if (action === "duplicate-ground") {
+    if (state.tab !== "ground" || !currentGround()) return;
+    commit(() => {
+      const ground = clone(currentGround());
+      ground.id = uniqueId(`${ground.id}_copy`, grounds);
+      grounds.push(ground);
+      state.groundIndex = grounds.length - 1;
+      state.boundaryIndex = 0;
+      state.choiceIndex = 0;
+      state.frameIndex = 0;
     });
   } else if (action === "delete-ground") {
     if (!window.confirm(`地面 ${currentGround().id} を削除しますか？`)) return;
