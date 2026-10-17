@@ -110,12 +110,12 @@ while IFS= read -r -d '' src; do
   if [[ "$mode" == plain ]]; then
     if (( lead_in_ms > 0 )); then
       printf '[%s] ループなし・冒頭無音 %dms → %s\n' "$name" "$lead_in_ms" "$(basename "$out")"
-      ffmpeg -y -hide_banner -loglevel error \
+      ffmpeg -nostdin -y -hide_banner -loglevel error \
         -i "$src" -af "adelay=${lead_in_ms}:all=1" \
         -b:a "$BITRATE" -f mp3 "$tmp_out"
     else
       printf '[%s] ループなし → %s\n' "$name" "$(basename "$out")"
-      ffmpeg -y -hide_banner -loglevel error \
+      ffmpeg -nostdin -y -hide_banner -loglevel error \
         -i "$src" -b:a "$BITRATE" -f mp3 "$tmp_out"
     fi
   else
@@ -127,7 +127,7 @@ while IFS= read -r -d '' src; do
     printf '[%s] %.2fs ×%d + %ds + 無音%ds → %.2fs\n' \
       "$name" "$dur" "$LOOPS" "$FADE" "$PAD" "$total"
 
-    ffmpeg -y -hide_banner -loglevel error \
+    ffmpeg -nostdin -y -hide_banner -loglevel error \
       -stream_loop -1 -t "$body" -i "$src" \
       -af "afade=t=out:st=${fade_start}:d=${FADE},apad=pad_dur=${PAD}" \
       -b:a "$BITRATE" -f mp3 "$tmp_out"
