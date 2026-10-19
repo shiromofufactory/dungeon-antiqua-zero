@@ -103,11 +103,15 @@ def member_can_attack(member: Member) -> bool:
     return member.equipment.weapon_at(EquipmentSlot.RIGHT) is not None
 
 
-def member_can_iai(member: Member) -> bool:
-    """Iai requires a katana in the right hand."""
+def member_can_iai(member: Member, *, attacker_is_front_row: bool) -> bool:
+    """Iai requires a right-hand katana usable from the current battle row."""
 
     weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
-    return weapon is not None and weapon.subtype == "KATANA"
+    return (
+        weapon is not None
+        and weapon.subtype == "KATANA"
+        and (attacker_is_front_row or weapon.reach >= 2)
+    )
 
 
 def selectable_attack_target_indexes(
@@ -253,7 +257,9 @@ def resolve_battle_commands(
                 command,
                 enabled=(
                     (
-                        member_can_iai(member)
+                        member_can_iai(
+                            member, attacker_is_front_row=member_is_front_row
+                        )
                         and any(monster.is_alive for monster in monsters)
                     )
                     if command is BattleCommand.IAI

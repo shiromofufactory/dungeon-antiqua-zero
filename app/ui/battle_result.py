@@ -44,7 +44,6 @@ RESULT_HP_GRID_Y = 5
 RESULT_MP_GRID_Y = 8
 RESULT_WEAPON_GRID_Y = 13
 RESULT_SPELL_GRID_Y = 16
-MISSING_RESULT_SPRITE_CHARACTER_KEYS = frozenset(("Dain",))
 WEAPON_HAND_ORDER = (EquipmentSlot.LEFT, EquipmentSlot.RIGHT)
 SPELL_PROFICIENCY_ORDER = (
     ProficiencyKind.MYSTIC,
@@ -68,9 +67,7 @@ def result_window_grid(member_index: int) -> tuple[int, int, int, int]:
 
 def member_battle_sprite_region(
     member: Member, *, victory_frame: int | None = None,
-) -> tuple[int, int, int, int] | None:
-    if member.definition.key in MISSING_RESULT_SPRITE_CHARACTER_KEYS:
-        return None
+) -> tuple[int, int, int, int]:
     if member.is_dead:
         source_x = RESULT_DEAD_SPRITE_SOURCE_X
         width = RESULT_DEAD_SPRITE_WIDTH
@@ -349,8 +346,6 @@ class BattleResultOverlay:
                     else None
                 ),
             )
-            if source is None:
-                continue
             window_x, window_y, _width, _height = result_window_grid(index)
             pyxel.blt(
                 (window_x + RESULT_CHARACTER_GRID_X) * 4,
@@ -374,7 +369,6 @@ def _interpolated_proficiency(
 
 __all__ = [
     "BattleResultOverlay",
-    "MISSING_RESULT_SPRITE_CHARACTER_KEYS",
     "RESULT_AILMENT_SPRITE_SOURCE_X",
     "RESULT_ANIMATION_FRAME_COUNT",
     "RESULT_INCREMENT_SE_ID",

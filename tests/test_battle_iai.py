@@ -16,7 +16,7 @@ from auto_battle_model import AutoAction
 from battle_commands import BattleCommand
 from battle_physical import PhysicalAttackResult, member_physical_attack
 from input import InputButton, InputState
-from member import EquipmentSlot
+from member import EquipmentSlot, FormationRow
 from scenes.battle import (
     ATTACK_DAMAGE_POPUP_DELAY_FRAME_COUNT,
     ATTACK_POSE_RAISE_FRAME_COUNT,
@@ -47,13 +47,14 @@ class IaiBattleTest(unittest.TestCase):
         member.equipment = member.equipment.replaced(
             {EquipmentSlot.RIGHT: items["KATANA"]}
         )
+        member.formation_row = FormationRow.FRONT
         scene = BattleScene.__new__(BattleScene)
         scene.active_party_index = 0
         scene.party = (member,)
         scene.monsters = (
-            SimpleNamespace(is_alive=True),
-            SimpleNamespace(is_alive=False),
-            SimpleNamespace(is_alive=True),
+            SimpleNamespace(is_alive=True, is_front_row=False),
+            SimpleNamespace(is_alive=False, is_front_row=False),
+            SimpleNamespace(is_alive=True, is_front_row=True),
         )
         scene.target_cursor = Mock(
             targets=tuple(SimpleNamespace(key=index) for index in range(3))
@@ -82,6 +83,39 @@ class IaiBattleTest(unittest.TestCase):
         self.assertEqual(scene.all_target_cursors, ())
         scene._begin_action_return.assert_called_once()
 
+    def test_back_row_short_range_iai_cannot_select_targets_or_execute(self) -> None:
+        items = load_mock_items()
+        member = load_mock_party(
+            items, load_mock_skills(), character_keys=("Fiora",)
+        )[0]
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.RIGHT: items["KATANA"]}
+        )
+        member.formation_row = FormationRow.BACK
+        scene = BattleScene.__new__(BattleScene)
+        scene.active_party_index = 0
+        scene.party = (member,)
+        scene.monsters = (SimpleNamespace(is_alive=True, is_front_row=True),)
+        scene.selectable_target_indexes = (0,)
+        scene.selected_command = BattleCommand.IAI
+
+        self.assertFalse(scene._begin_attack_target_selection(command=BattleCommand.IAI))
+        self.assertFalse(scene._begin_attack_presentation())
+
+        # A temporary front-row promotion must override the saved formation.
+        scene.temporary_front_party_indexes = {0}
+        self.assertEqual(
+            scene._active_member_attack_targets(command=BattleCommand.IAI), (0,)
+        )
+
+        # Surprise can put a normally front-row member in the back row.
+        scene.temporary_front_party_indexes = set()
+        member.formation_row = FormationRow.FRONT
+        scene.surprise_original_front_rows = {0: True}
+        scene.surprise_front_party_indexes = set()
+        self.assertFalse(scene._begin_attack_target_selection(command=BattleCommand.IAI))
+        self.assertFalse(scene._begin_attack_presentation())
+
     def test_iai_uses_katana_poses_and_hits_every_enemy_at_sixty_percent(self) -> None:
         items = load_mock_items()
         skills = load_mock_skills()
@@ -91,12 +125,12 @@ class IaiBattleTest(unittest.TestCase):
         )
         member.skills.append(skills["Iai"])
 
-        def monster() -> SimpleNamespace:
+        def monster(*, front: bool) -> SimpleNamespace:
             state = SimpleNamespace(hp=999, sleeping=0)
             state.take_damage = lambda amount: setattr(state, "hp", state.hp - amount)
             return SimpleNamespace(
                 is_alive=True,
-                is_front_row=True,
+                is_front_row=front,
                 state=state,
                 combat_stats=SimpleNamespace(evasion=0),
                 effective_defense=0,
@@ -110,7 +144,7 @@ class IaiBattleTest(unittest.TestCase):
         scene.active_party_index = 0
         scene.action_party_index = 0
         scene.party = (member,)
-        scene.monsters = (monster(), monster())
+        scene.monsters = (monster(front=False), monster(front=True))
         scene.selectable_target_indexes = (0, 1)
         scene.selected_command = BattleCommand.IAI
         scene.hidden_party_indexes = set()

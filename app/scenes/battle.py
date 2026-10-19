@@ -6902,7 +6902,9 @@ class BattleScene:
         if party_index is None:
             return False
         member = self.party[party_index]
-        if not member_can_iai(member):
+        if not member_can_iai(
+            member, attacker_is_front_row=self._party_member_is_front_row(party_index)
+        ):
             return False
         targets = tuple(
             index
@@ -8680,7 +8682,12 @@ class BattleScene:
             return ()
         actor = self.party[self.active_party_index]
         if command is BattleCommand.IAI:
-            if not member_can_iai(actor):
+            if not member_can_iai(
+                actor,
+                attacker_is_front_row=self._party_member_is_front_row(
+                    self.active_party_index
+                ),
+            ):
                 return ()
             return tuple(
                 index for index, monster in enumerate(self.monsters) if monster.is_alive

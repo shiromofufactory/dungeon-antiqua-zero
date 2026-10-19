@@ -9,7 +9,7 @@ from game_data import create_party, load_items, load_skills, load_spells
 
 from input import InputButton, InputState
 from member import EquipmentSlot, ProficiencyKind
-from resources import FontResources
+from resources import FontResources, TRANSPARENT_INDEX
 from rendering.victory_pose import VICTORY_MOTION_LIMIT, VICTORY_SPRITE_SOURCE_X
 from state import SaveData, Settings
 from systems import BattleProgression, EnemyProgressionData
@@ -68,7 +68,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             ],
         )
 
-    def test_uses_first_battle_pose_and_leaves_dain_artwork_blank(self) -> None:
+    def test_draws_first_battle_pose_for_each_member_including_dain(self) -> None:
         party = create_party(
             load_items(),
             load_skills(),
@@ -78,13 +78,31 @@ class BattleResultOverlayTest(unittest.TestCase):
         self.assertEqual(
             [member_battle_sprite_region(member) for member in party],
             [
-                (0, 0, 16, 32),
-                (0, 32, 16, 32),
-                (0, 64, 16, 32),
-                (0, 96, 16, 32),
-                (0, 128, 16, 32),
-                None,
+                (0, member.definition.battle_sprite * 32, 16, 32)
+                for member in party
             ],
+        )
+        self.assertEqual(member_battle_sprite_region(party[-1]), (0, 192, 16, 32))
+        growth = BattleProgression((EnemyProgressionData(1, 0, 1, 0),)).settle(
+            SaveData(), party
+        )
+        sprites = object()
+        overlay = BattleResultOverlay(
+            party=party,
+            growth=growth,
+            settings=Settings(),
+            fonts=FontResources(),
+            character_sprites=sprites,
+        )
+        with (
+            patch("ui.battle_result.pyxel.cls"),
+            patch("ui.battle_result.pyxel.blt") as blt,
+            patch.object(type(overlay.windows[0]), "draw"),
+        ):
+            overlay.draw()
+        self.assertEqual(blt.call_count, 6)
+        blt.assert_any_call(
+            136, 168, sprites, 0, 192, 16, 32, TRANSPARENT_INDEX
         )
 
     def test_interpolates_for_exactly_thirty_frames(self) -> None:

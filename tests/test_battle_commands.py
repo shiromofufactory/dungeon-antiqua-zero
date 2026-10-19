@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
+
+from tools._bootstrap import APP_ROOT
 
 from battle_commands import (
     BattleCommand,
@@ -219,12 +222,11 @@ class BattleCommandRulesTest(unittest.TestCase):
         )
         self.assertFalse(focus.enabled)
 
-    def test_iai_requires_right_hand_katana_and_reaches_every_living_row(self) -> None:
+    def test_iai_requires_right_hand_katana(self) -> None:
         skills = load_mock_skills()
         items = load_mock_items()
         member = self.party[0]
         member.skills.append(skills["Iai"])
-        member.formation_row = FormationRow.BACK
 
         def iai_enabled() -> bool:
             options = resolve_battle_commands(member, self.party, self.monsters)
@@ -239,6 +241,34 @@ class BattleCommandRulesTest(unittest.TestCase):
             {EquipmentSlot.RIGHT: None}
         )
         self.assertFalse(iai_enabled())
+
+    def test_iai_availability_uses_battle_row_and_right_hand_reach(self) -> None:
+        member = self.party[0]
+        member.skills.append(load_mock_skills()["Iai"])
+        katana = load_mock_items()["KATANA"]
+        # Even when only rear enemies remain, an available Iai reaches them.
+        monsters = (SimpleNamespace(is_front_row=False, is_alive=True),)
+        for stored_row in (FormationRow.FRONT, FormationRow.BACK):
+            for battle_front in (True, False):
+                for reach in (1, 2, 3):
+                    with self.subTest(
+                        stored_row=stored_row, battle_front=battle_front, reach=reach
+                    ):
+                        member.formation_row = stored_row
+                        member.equipment = member.equipment.replaced(
+                            {EquipmentSlot.RIGHT: replace(katana, reach=reach)}
+                        )
+                        options = resolve_battle_commands(
+                            member,
+                            self.party,
+                            monsters,
+                            party_front_rows=(battle_front, True, True),
+                        )
+                        iai = next(
+                            option for option in options
+                            if option.command is BattleCommand.IAI
+                        )
+                        self.assertEqual(iai.enabled, battle_front or reach >= 2)
 
     def test_silence_disables_visible_spell_without_hiding_it(self) -> None:
         commands = resolve_battle_commands(

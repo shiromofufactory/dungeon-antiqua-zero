@@ -739,7 +739,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             character_keys=("Elika",),
             internal_level=20,
         )[0]
-        spec = AutoCombatant.from_member(member, 0, front=False, spells=())
+        spec = AutoCombatant.from_member(member, 0, front=True, spells=())
         enemies = (
             self.enemy(number=5, front=False, max_hp=1000, hp=1000),
             self.enemy(number=6, front=False, max_hp=1000, hp=1000),
@@ -766,6 +766,28 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         )
         self.assertLess(forecast.actors[5].hp, 1000)
         self.assertLess(forecast.actors[6].hp, 1000)
+
+    def test_back_row_iai_candidates_require_long_range_katana(self):
+        member = load_mock_party(
+            self.items,
+            load_mock_skills(),
+            character_keys=("Elika",),
+            internal_level=20,
+        )[0]
+        katana = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+        enemies = (self.enemy(number=5, front=False), self.enemy(number=6))
+        action = AutoAction(BattleCommand.IAI, (5, 6))
+        for reach in (1, 2, 3):
+            with self.subTest(reach=reach):
+                member.equipment = member.equipment.replaced(
+                    {EquipmentSlot.RIGHT: replace(katana, reach=reach)}
+                )
+                spec = AutoCombatant.from_member(member, 0, front=False, spells=())
+                forecast = BattleForecast(self.snapshot(spec, *enemies), 0)
+                self.assertEqual(action in forecast.candidates(0), reach >= 2)
+
+                forecast.actors[0].front = True
+                self.assertIn(action, forecast.candidates(0))
 
     def test_auto_selects_iai_when_it_can_defeat_three_enemies(self):
         member = load_mock_party(
