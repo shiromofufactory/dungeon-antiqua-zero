@@ -329,6 +329,82 @@ class MonsterCallTurnTest(unittest.TestCase):
         self.assertFalse(scene._monster_call_pending)
 
 
+class MonsterPowerHitTest(unittest.TestCase):
+    def test_gigas_loads_power_hit_from_master_data(self) -> None:
+        record = next(
+            record for record in load_record_array("monsters.json")
+            if record["name_en"] == "Gigas"
+        )
+        actor = BattleMonster.from_record(record, is_front_row=True)
+        self.assertIn(MonsterSpecialAction.POWER_HIT, actor.special_actions)
+
+    def test_physical_attacks_use_power_hit_rate_damage_and_sleep_bonus(self) -> None:
+        for mode in ("attack", "charge", "confused"):
+            for power_hit, sleeping, roll, expected_damage in (
+                (False, 0, 0, 11),
+                (True, 0, 9, 44),
+                (True, 0, 10, 11),
+                (False, 2, 20, 15),
+                (True, 2, 39, 58),
+                (True, 2, 40, 15),
+            ):
+                with self.subTest(
+                    mode=mode, power_hit=power_hit, sleeping=sleeping, roll=roll,
+                ):
+                    actor = charge_monster()
+                    actor.combat_stats = MonsterCombatStats(20, 100, 0, 0)
+                    if power_hit:
+                        actor.special_actions += (MonsterSpecialAction.POWER_HIT,)
+                    scene = BattleScene.__new__(BattleScene)
+                    scene.monsters = (actor,)
+                    scene.party = (SimpleNamespace(
+                        sleeping=sleeping,
+                        battle_stats=SimpleNamespace(defense=10, evasion=0),
+                    ),)
+                    scene.defending_party_indexes = set()
+                    scene._covering_member_index = Mock(return_value=0)
+                    scene._monster_attack_target_indexes = Mock(return_value=(0,))
+                    scene._monster_charge_target_indexes = Mock(return_value=(0,))
+                    scene._party_draw_position = Mock(return_value=(188, 176))
+                    scene._show_monster_action_message = Mock()
+                    scene.action_gauge_adjustment = 0.0
+                    target = charge_monster()
+                    target.combat_stats = MonsterCombatStats(0, 0, 10, 0)
+                    target.state.sleeping = sleeping
+                    if mode == "confused":
+                        scene.monsters = (actor, target)
+                    with (
+                        patch(
+                            "scenes.battle.random.choice",
+                            return_value=1 if mode == "confused" else 0,
+                        ),
+                        patch("scenes.battle.random.randint", side_effect=(0, roll)),
+                        patch("scenes.battle.play_se"),
+                    ):
+                        if mode == "attack":
+                            scene._begin_standard_monster_attack(actor)
+                            damage = scene.monster_attack_damage
+                            self.assertEqual(
+                                scene.monster_attack_critical,
+                                expected_damage in (44, 58),
+                            )
+                        elif mode == "charge":
+                            scene._begin_monster_charge(actor)
+                            presentation = scene.monster_charge_presentation
+                            damage = presentation.damage
+                            self.assertEqual(
+                                presentation.is_critical,
+                                expected_damage in (44, 58),
+                            )
+                            # Charge raises attack from 20 to 30 before the same formula.
+                            expected_damage = {11: 22, 44: 65, 15: 29, 58: 87}[expected_damage]
+                        else:
+                            self.assertTrue(scene._begin_confused_monster_action(actor))
+                            result = scene.action_presentation.confused_attack_results[0]
+                            damage = result.damage
+                    self.assertEqual(damage, expected_damage)
+
+
 class MonsterChargePresentationTest(unittest.TestCase):
     def test_approach_starts_at_eight_and_accelerates_every_two_frames(
         self,

@@ -1272,6 +1272,7 @@ class BattleForecast:
             if target is not protected:
                 target.hidden = False
             charged = action is MonsterAction.CHARGE
+            power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
             result = resolve_physical_attack(
                 attack=int(actor.spec.attack * (1.5 if charged else 1)),
                 hit=actor.spec.hit,
@@ -1280,9 +1281,10 @@ class BattleForecast:
                 target_defending=target.defending,
                 target_unable_to_evade=target.focus is not None,
                 target_incapacitated=bool(target.sleeping),
+                attacker_has_power_hit=power_hit,
                 hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
                 critical_roll=int(self.roll(actor, target.spec.number, 3) * 100)
-                if target.sleeping
+                if power_hit or target.sleeping
                 else None,
             )
             effect = actor.spec.effect
@@ -1351,6 +1353,7 @@ class BattleForecast:
         """Apply one forced basic attack without assuming the target's side."""
 
         if actor.spec.enemy:
+            power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
             results = (
                 resolve_physical_attack(
                     attack=actor.spec.attack,
@@ -1360,9 +1363,10 @@ class BattleForecast:
                     hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
                     target_defending=target.defending,
                     target_incapacitated=bool(target.sleeping),
+                    attacker_has_power_hit=power_hit,
                     critical_roll=(
                         int(self.roll(actor, target.spec.number, 3) * 100)
-                        if target.sleeping
+                        if power_hit or target.sleeping
                         else None
                     ),
                 ),

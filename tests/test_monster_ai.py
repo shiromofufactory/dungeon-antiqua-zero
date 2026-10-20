@@ -25,16 +25,18 @@ from resources import load_record_array
 class MonsterSpecialActionDataTest(unittest.TestCase):
     def test_parses_each_one_character_action_at_the_data_boundary(self) -> None:
         self.assertEqual(
-            monster_special_actions_from_record({"special": "逃突援"}),
+            monster_special_actions_from_record({"special": "逃突援呼会"}),
             (
                 MonsterSpecialAction.ESCAPE,
                 MonsterSpecialAction.CHARGE,
                 MonsterSpecialAction.REINFORCE,
+                MonsterSpecialAction.CALL,
+                MonsterSpecialAction.POWER_HIT,
             ),
         )
 
     def test_rejects_unknown_duplicate_or_multiline_actions(self) -> None:
-        for special in ("炎", "突突", "逃\n突", None):
+        for special in ("炎", "突突", "会会", "逃\n突", None):
             with self.subTest(special=special):
                 with self.assertRaises(MonsterDataError):
                     monster_special_actions_from_record({"special": special})
@@ -95,6 +97,20 @@ class MonsterReinforcementRuleTest(unittest.TestCase):
 
 
 class MonsterActionSelectionTest(unittest.TestCase):
+    def test_power_hit_is_passive_and_does_not_add_an_action_candidate(self) -> None:
+        for front, expected in ((True, MonsterAction.ATTACK), (False, MonsterAction.IDLE)):
+            with self.subTest(front=front), patch("monster_ai.random.choice") as choice:
+                action = select_monster_action(
+                    special_actions=(MonsterSpecialAction.POWER_HIT,),
+                    is_front_row=front,
+                    can_attack=front,
+                    can_charge=True,
+                    party_actual_attacks=(),
+                    monster_attack=20,
+                )
+                self.assertIs(action, expected)
+                choice.assert_not_called()
+
     def test_one_spell_and_front_attack_are_two_equal_candidates(self) -> None:
         selected = MonsterSpellAction("SLEEP")
         with patch("monster_ai.random.choice", return_value=selected) as choice:

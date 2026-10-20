@@ -29,7 +29,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.app_root = root / "app"
         character_root = self.content_root / "images" / "characters"
         character_root.mkdir(parents=True)
-        sheet = Image.new("P", (160, 128), 1)
+        sheet = Image.new("P", (160, 224), 1)
         sheet.putpalette([0, 0, 0, 255, 0, 128] + [0, 0, 0] * 254)
         sheet.info["transparency"] = 1
         sheet.putpixel((0, 96), 0)
@@ -42,6 +42,9 @@ class AttackPoseEditorServerTest(unittest.TestCase):
             {"name_en": "Cerion", "name_ja": "セリオン", "battle_sprite": 1, "race": "FAIRY"},
             {"name_en": "Alvan", "name_ja": "アルヴァン", "battle_sprite": 2, "race": "FAIRY"},
             {"name_en": "Elika", "name_ja": "エリカ", "battle_sprite": 3, "race": "HUMAN"},
+            {"name_en": "Dain", "name_ja": "ダイン", "battle_sprite": 6, "race": "DRAGONEWT"},
+            {"name_en": "Alphard", "name_ja": "アルファード", "battle_sprite": 5, "race": "DWARF"},
+            {"name_en": "Liza", "name_ja": "ライザ", "battle_sprite": 4, "race": "ELF"},
         ]), encoding="utf-8")
         (data_root / "texts.json").write_text(json.dumps([
             {"text_key": "race.FAIRY", "text_ja": "ようせい"},
@@ -92,17 +95,17 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         with urlopen(request, timeout=2) as response:
             return json.loads(response.read())
 
-    def test_loads_initial_document_and_four_character_catalog(self) -> None:
+    def test_loads_initial_document_and_five_character_catalog(self) -> None:
         payload = self.get_json("/api/document?token=test-token")
         self.assertTrue(payload["is_new"])
         self.assertEqual(payload["data"]["poses"][0]["id"], "SWORD-1_1")
         self.assertEqual(payload["data"]["poses"][0]["weapon_img"], "SWORD-1")
         self.assertEqual(payload["data"]["poses"][0]["branch"], "1")
         self.assertEqual(payload["weapon_img_options"], ["SWORD-1", "SPEAR-1"])
-        self.assertEqual([item["key"] for item in payload["characters"]], ["Fiora", "Cerion", "Alvan", "Elika"])
-        self.assertEqual(payload["characters"][3]["name"], "エリカ")
-        self.assertEqual(payload["characters"][3]["battle_sprite"], 3)
-        self.assertEqual([item["race"] for item in payload["characters"]], ["FAIRY", "FAIRY", "FAIRY", "HUMAN"])
+        self.assertEqual([item["key"] for item in payload["characters"]], ["Fiora", "Elika", "Dain", "Alphard", "Liza"])
+        self.assertEqual([item["name"] for item in payload["characters"]], ["フィオラ", "エリカ", "ダイン", "アルファード", "ライザ"])
+        self.assertEqual([item["battle_sprite"] for item in payload["characters"]], [0, 3, 6, 5, 4])
+        self.assertEqual([item["race"] for item in payload["characters"]], ["FAIRY", "HUMAN", "DRAGONEWT", "DWARF", "ELF"])
         self.assertEqual(payload["races"][:2], [
             {"key": "FAIRY", "name": "ようせい"},
             {"key": "HUMAN", "name": "にんげん"},
@@ -113,7 +116,7 @@ class AttackPoseEditorServerTest(unittest.TestCase):
         self.assertEqual(context.exception.code, 403)
 
     def test_serves_transparent_sprite_sheets(self) -> None:
-        for endpoint, expected_size in (("characters.png", (160, 128)), ("weapons.png", (256, 16))):
+        for endpoint, expected_size in (("characters.png", (160, 224)), ("weapons.png", (256, 16))):
             with urlopen(f"{self.base_url}/api/{endpoint}?token=test-token", timeout=2) as response:
                 image = Image.open(io.BytesIO(response.read()))
                 self.assertEqual(image.size, expected_size)

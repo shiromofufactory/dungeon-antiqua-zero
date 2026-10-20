@@ -34,7 +34,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8769
 MAX_REQUEST_BYTES = 1024 * 1024
 TRANSPARENT_INDEX = 1
-CHARACTER_KEYS = ("Fiora", "Cerion", "Alvan", "Elika")
+CHARACTER_KEYS = ("Fiora", "Elika", "Dain", "Alphard", "Liza")
 WEAPON_IMG_PATTERN = re.compile(r"[A-Z0-9]+(?:-[A-Z0-9]+)*\Z")
 BRANCH_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 MIME_TYPES = {
@@ -218,8 +218,8 @@ def weapon_strip_png(resource_path: Path, palette_path: Path) -> bytes:
 
 def character_sheet_png(path: Path) -> bytes:
     with Image.open(path) as source:
-        if source.width < 160 or source.height < 128:
-            raise ValueError("ch_battle.gifに4人分の10ポーズがありません。")
+        if source.width < 160 or source.height < 224:
+            raise ValueError("ch_battle.gifにbattle_sprite 0〜6の10ポーズがありません。")
         image = source.convert("RGBA")
     output = io.BytesIO()
     image.save(output, format="PNG")

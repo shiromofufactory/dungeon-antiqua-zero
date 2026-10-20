@@ -8457,6 +8457,7 @@ class BattleScreenMockTest(unittest.TestCase):
         actor = SimpleNamespace(
             combat_stats=SimpleNamespace(hit=90),
             effective_agility=12,
+            special_actions=(),
         )
         coverer = SimpleNamespace(
             hp=100,
@@ -8505,6 +8506,7 @@ class BattleScreenMockTest(unittest.TestCase):
         actor = SimpleNamespace(
             combat_stats=SimpleNamespace(hit=90),
             effective_agility=12,
+            special_actions=(),
         )
         coverer = SimpleNamespace(
             hp=26,

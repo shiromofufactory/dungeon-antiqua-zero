@@ -64,12 +64,13 @@ class MonsterTribe(StrEnum):
 
 
 class MonsterSpecialAction(StrEnum):
-    """Stable one-character monster special-action keys."""
+    """Stable one-character monster special-action and passive-trait keys."""
 
     ESCAPE = "逃"
     CHARGE = "突"
     REINFORCE = "援"
     CALL = "呼"
+    POWER_HIT = "会"
 
 
 def monster_spell_keys_from_record(

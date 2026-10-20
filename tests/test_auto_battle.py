@@ -1024,6 +1024,49 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(monster.confused, 1)
         self.assertLess(forecast.actors[6].hp, other_hp)
 
+    def test_monster_power_hit_forecasts_match_physical_attack_rules(self):
+        for mode in ("attack", "charge", "confused"):
+            for power_hit, sleeping, roll in (
+                (False, 0, 0), (True, 0, 9), (True, 0, 10),
+                (False, 2, 20), (True, 2, 39), (True, 2, 40),
+            ):
+                with self.subTest(
+                    mode=mode, power_hit=power_hit, sleeping=sleeping, roll=roll,
+                ):
+                    specials = (MonsterSpecialAction.POWER_HIT,) if power_hit else ()
+                    if mode == "charge":
+                        specials += (MonsterSpecialAction.CHARGE,)
+                    enemy = self.enemy(front=mode != "charge", special_actions=specials)
+                    member = replace(
+                        self.specs[0], hp=1000, max_hp=1000, defense=10,
+                        evasion=0, agility=20, sleeping=sleeping,
+                    )
+                    other = self.enemy(
+                        6, hp=1000, max_hp=1000, defense=10, sleeping=sleeping,
+                    )
+                    forecast = BattleForecast(self.snapshot(member, enemy, other), 0)
+                    forecast.roll = Mock(
+                        side_effect=lambda _actor, _target, purpose: (
+                            roll / 100 if purpose == 3 else 0.0
+                        ),
+                    )
+                    target = forecast.actors[6 if mode == "confused" else 0]
+                    expected = resolve_physical_attack(
+                        attack=30 if mode == "charge" else 20,
+                        hit=100,
+                        target_defense=10,
+                        target_evasion=0,
+                        hit_roll=0,
+                        target_incapacitated=bool(sleeping),
+                        attacker_has_power_hit=power_hit,
+                        critical_roll=roll,
+                    )
+                    if mode == "confused":
+                        forecast.confused_physical(forecast.actors[5], target)
+                    else:
+                        forecast.enemy_turn(forecast.actors[5])
+                    self.assertEqual(target.hp, 1000 - expected.damage)
+
     def test_guard_cover_and_hide_change_the_actual_damage_recipient(self):
         coverer = replace(self.specs[1], defending=True, cover=0)
         forecast = BattleForecast(

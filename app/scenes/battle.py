@@ -8449,6 +8449,7 @@ class BattleScene:
 
         target_index = random.choice(ally_indexes)
         target = self.monsters[target_index]
+        power_hit = MonsterSpecialAction.POWER_HIT in actor.special_actions
         result = resolve_physical_attack(
             attack=actor.combat_stats.attack,
             hit=actor.combat_stats.hit,
@@ -8456,8 +8457,11 @@ class BattleScene:
             target_evasion=target.combat_stats.evasion,
             hit_roll=random.randint(0, 99),
             target_incapacitated=target.state.sleeping > 0,
+            attacker_has_power_hit=power_hit,
             critical_roll=(
-                random.randint(0, 99) if target.state.sleeping > 0 else None
+                random.randint(0, 99)
+                if power_hit or target.state.sleeping > 0
+                else None
             ),
         )
         effects = self._resolve_monster_attack_effects_against_monster(
@@ -9788,6 +9792,7 @@ class BattleScene:
         target = self.party[target_index]
         target_stats = target.battle_stats
         target_incapacitated = bool(getattr(target, "sleeping", 0))
+        power_hit = MonsterSpecialAction.POWER_HIT in actor.special_actions
         result = resolve_physical_attack(
             attack=attack,
             hit=actor.combat_stats.hit,
@@ -9799,7 +9804,10 @@ class BattleScene:
                 target_index in getattr(self, "focused_target_by_party_index", {})
             ),
             target_incapacitated=target_incapacitated,
-            critical_roll=(random.randint(0, 99) if target_incapacitated else None),
+            attacker_has_power_hit=power_hit,
+            critical_roll=(
+                random.randint(0, 99) if power_hit or target_incapacitated else None
+            ),
         )
         return target_index, result
 
