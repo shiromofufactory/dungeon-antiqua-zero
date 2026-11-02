@@ -438,7 +438,7 @@ class GameTest(unittest.TestCase):
         mock.bgm.play.assert_called_once_with(WELCOME_BGM_ID)
         self.assertEqual(
             images_class.return_value.image.call_args_list,
-            [call(FACES_IMAGE_ID)],
+            [call(FACES_IMAGE_ID)] + [call(f"logo/logo_zero{frame}") for frame in range(1, 7)],
         )
         self.assertIs(mock.faces, face_image)
         self.assertEqual(NEW_GAME_MAP_ID, "fairy_village")

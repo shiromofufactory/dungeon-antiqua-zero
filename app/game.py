@@ -696,6 +696,7 @@ class Game:
         self.title_scene: TitleScene | None = TitleScene(
             texts=self.texts,
             fonts=self.fonts,
+            images=self.images,
             screen_width=SCREEN_WIDTH,
             screen_height=SCREEN_HEIGHT,
         )

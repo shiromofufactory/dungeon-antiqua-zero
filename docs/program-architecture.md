@@ -56,7 +56,7 @@ app/
 ├── main.py                   # Pyxel初期化、共通資産読込、Game生成、pyxel.run
 ├── game.py                   # タイトル・ロード画面・フィールド間の調停とPyxelコールバック
 ├── scenes/
-│   ├── title.py              # 仮タイトルの決定入力と中央の文言描画
+│   ├── title.py              # 仮タイトルのロゴアニメーション、文言描画と決定入力
 │   └── battle.py             # 本編と単独テストで共有する戦闘Scene
 ├── game_data.py              # マスターデータ索引と初期パーティ生成
 ├── battle_commands.py        # 戦闘コマンドの表示・選択可否と攻撃範囲のルール
@@ -1436,7 +1436,7 @@ HP・MP、状態異常、戦闘中補正を全回復してから入口直前へ�
 メインWindowは開いた状態で生成し、アニメーションを繰り返さない。いずれかのWindowが開閉中は入力を受け付けず、
 パーティの顔画像とカーソルも所属Windowが完全に開いてから表示する。
 フィールドと接続済み画面の詳細は [`features/field.md`](./features/field.md) を正本とする。
-起動直後は `scenes/title.py` の `TitleScene` を表示する。Sceneは文言の描画と決定入力を所有し、
+起動直後は `scenes/title.py` の `TitleScene` を表示する。Sceneはロゴアニメーション、文言の描画と決定入力を所有し、
 `Game` は決定後の要求を `GameScreenChange` と標準フェードで調停する。初回と入力種別変更時は
 `ui/control_guide.py` の操作説明Overlayを挟み、試遊版は毎回表示する。確認後、試遊版は既存の
 ニューゲーム開始処理へ直接接続し、ほかのモードは完全暗転時に `ui/start_menu.py` の

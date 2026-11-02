@@ -260,6 +260,19 @@ GitHub-hosted runnerを使う場合は、private submoduleへのアクセス、G
 - [ビルド成果物の受け渡し](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts)
 - [self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)
 
+## アイコンの更新
+
+アイコンの原画像は `icons/icon_new.gif`（正方形の静止画GIF）とする。
+Pillow（`requirements-tools.txt`）を用意して、次を実行する。
+
+```sh
+python3 -B scripts/build-icons.py
+```
+
+透過とドットの輪郭を保つ最近傍補間で、Windows用の `icons/icon.ico`
+（16・32・48・64・128・256px）とMac用の `icons/icon.icns`（32〜1024px）を再生成する。
+両OSのビルドはこれらのファイルを使用する。生成済みの配布物へ反映するには再ビルドが必要。
+
 ## 検証
 
 ```sh
