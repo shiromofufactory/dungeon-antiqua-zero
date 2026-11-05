@@ -90,6 +90,12 @@
     },
     "spell_healing2": {
       "sound": 22
+    },
+    "spell_magic_shield": {
+      "sound": 38
+    },
+    "spell_panacea": {
+      "sound": 22
     }
   }
 }
