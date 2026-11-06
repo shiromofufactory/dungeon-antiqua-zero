@@ -34,6 +34,8 @@ from ui.debug_text import DEBUG_TEXT
 from resources.maps import MapRandomEncounter
 from ui.debug_encounter import DebugEncounterOverlay, DebugEncounterState
 from ui.debug_flags import DebugFlagsOverlay
+from ui.debug_dungeon import DebugDungeonOverlay
+from debug_dungeon import DebugDungeon
 from ui.teleport_menu import (
     TeleportMenuLabels,
     TeleportMenuOverlay,
@@ -52,6 +54,7 @@ MAIN_ITEM_KEYS = (
     "teleport",
     "shop",
     "event_flags",
+    "dungeon",
 )
 MAIN_FIRST_Y = 9
 MAIN_ROWS = tuple(
@@ -119,6 +122,7 @@ class DebugMenuPhase(Enum):
     SHOP = auto()
     ENCOUNTER = auto()
     EVENT_FLAGS = auto()
+    DUNGEON = auto()
     NUMBER = auto()
 
 
@@ -214,6 +218,10 @@ class DebugMenuOverlay:
         encounter_state: DebugEncounterState | None = None,
         on_encounter: Callable[[MapRandomEncounter], bool] | None = None,
         flag_ids: Iterable[str] = (),
+        dungeons: tuple[DebugDungeon, ...] = (),
+        on_dungeon: Callable[[DebugDungeon], None] | None = None,
+        on_dungeon_reset: Callable[[DebugDungeon], None] | None = None,
+        dungeon_error: str | None = None,
     ) -> None:
         if not isinstance(editor, DebugPartyEditor):
             raise TypeError("editor must be a DebugPartyEditor")
@@ -266,6 +274,11 @@ class DebugMenuOverlay:
         self.encounter_menu: DebugEncounterOverlay | None = None
         self.flag_ids = tuple(flag_ids)
         self.flag_menu: DebugFlagsOverlay | None = None
+        self.dungeons = dungeons
+        self.on_dungeon = on_dungeon
+        self.on_dungeon_reset = on_dungeon_reset
+        self.dungeon_error = dungeon_error
+        self.dungeon_menu: DebugDungeonOverlay | None = None
         self.localizer = Localizer(settings.language)
         self.debug_texts = LocalizedWindowTextFactory.from_language(
             fonts,
@@ -378,6 +391,7 @@ class DebugMenuOverlay:
             "shop": self._shop_count_text(),
             "encounter": "",
             "event_flags": DEBUG_TEXT.flag_count(len(self.flag_ids)),
+            "dungeon": str(len(self.dungeons)),
         }
         labels = {
             "party_level": DEBUG_TEXT.party_level,
@@ -389,6 +403,7 @@ class DebugMenuOverlay:
             "shop": DEBUG_TEXT.shop,
             "encounter": DEBUG_TEXT.encounter,
             "event_flags": DEBUG_TEXT.event_flags,
+            "dungeon": DEBUG_TEXT.dungeon,
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.title, 4, 3)
@@ -1245,6 +1260,12 @@ class DebugMenuOverlay:
         if self.phase is DebugMenuPhase.NUMBER:
             self._update_numeric(input_state)
             return False
+        if self.phase is DebugMenuPhase.DUNGEON:
+            if self.dungeon_menu.update(input_state):
+                self.dungeon_menu = None
+                self.phase = DebugMenuPhase.MAIN
+                self._build_main_window(selected_key="dungeon")
+            return False
         if self.phase is DebugMenuPhase.ENCOUNTER:
             if self.encounter_menu.update(input_state):
                 self.encounter_menu = None
@@ -1318,6 +1339,13 @@ class DebugMenuOverlay:
                     fonts=self.fonts, alert=self.alert,
                 )
                 self.phase = DebugMenuPhase.EVENT_FLAGS
+            elif key == "dungeon":
+                self.dungeon_menu = DebugDungeonOverlay(
+                    dungeons=self.dungeons, texts=self.debug_texts, windows=self.windows,
+                    guide=self._guide_text(), on_start=self.on_dungeon,
+                    on_reset=self.on_dungeon_reset, error=self.dungeon_error,
+                )
+                self.phase = DebugMenuPhase.DUNGEON
             elif key == "encounter":
                 self.encounter_menu = DebugEncounterOverlay(
                     state=self.encounter_state, texts=self.debug_texts,
@@ -1334,6 +1362,9 @@ class DebugMenuOverlay:
         return False
 
     def draw(self) -> None:
+        if self.phase is DebugMenuPhase.DUNGEON:
+            self.dungeon_menu.draw()
+            return
         if self.phase is DebugMenuPhase.EVENT_FLAGS:
             self.flag_menu.draw()
             return

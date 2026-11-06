@@ -1548,6 +1548,15 @@ Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受
 セーブ形式は変更しない。操作と画面仕様は [フィールド・メニュー](./features/field.md#設定とデバッグ)
 を参照する。
 
+デバッグ用ダンジョンは `debug_dungeon.py` が定義の検証と1回の入場中の進行を、
+`scenes/debug_dungeon.py` が3択・警告・取得メッセージと描画を所有する。
+Gameは開始・退出Transition、既存BattleSceneと通常メニューへの接続、保存禁止を調停する。
+専用SceneへGameの参照は渡さず、必要なSystemと開始・メニュー・退出コールバックを注入する。
+宝箱は既存TreasureSystemとSaveDataの取得済み記録を専用名前空間で再利用し、
+進行位置やFADE状態をSaveDataへ追加しない。制作元は開発専用の `app/debug/dungeons.json` とし、
+統合Webエディタが同じファイルを検証・保存する。詳細は
+[デバッグ用ダンジョン仕様](./features/debug-dungeons.md)を参照する。
+
 パーティをまたぐデバッグ操作はPyxel非依存の `systems.debug.DebugPartyEditor` が担当する。
 フィオラを必須とし、フィオラを含むパーティ総数を1〜6名に制限する。
 指定したパーティLVをフィオラの内部LVとし、

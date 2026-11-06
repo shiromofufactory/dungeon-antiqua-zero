@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DA ZERO — Debug Dungeon Editor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="identity"><h1>Debug Dungeon Editor</h1><span>Dungeon Antiqua ZERO</span></div>
+    <nav aria-label="エディタ切り替え">
+      <a data-editor="tileset">マップチップ</a><a data-editor="map">マップ</a>
+      <a data-editor="event">イベント</a><a data-editor="dungeon" aria-current="page">ダンジョン試行</a>
+    </nav>
+    <div class="toolbar"><span id="save-state" role="status">読み込み中</span>
+      <button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直す</button>
+      <button id="save" class="primary" disabled>保存</button></div>
+  </header>
+  <main>
+    <aside><div class="heading"><h2>ダンジョン</h2><button id="add-dungeon" disabled>＋ 新規</button></div><div id="dungeons"></div>
+      <p class="hint">ゲーム内の「設定 → デバッグメニュー → ダンジョン試行」から開始できます。保存後、デバッグメニューを開き直すと反映されます。</p>
+    </aside>
+    <section id="workspace"><p class="empty">読み込み中です。</p></section>
+    <aside class="validation"><h2>検証結果</h2><div id="issues" role="status"></div>
+      <p class="hint">宝箱のIDは並べ替えや編集でも維持されます。宝箱を削除して追加し直すと、新しい宝箱になります。</p>
+    </aside>
+  </main>
+  <dialog id="navigation-dialog"><h2>未保存の変更があります</h2><p>保存してからエディタを切り替えますか？</p>
+    <div class="toolbar"><button data-navigation="cancel">キャンセル</button>
+      <button data-navigation="discard">破棄して移動</button><button data-navigation="save" class="primary">保存して移動</button></div>
+  </dialog>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

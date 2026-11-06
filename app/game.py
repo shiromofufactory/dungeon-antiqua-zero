@@ -26,6 +26,8 @@ from ui.debug_menu import DebugMenuOverlay, DebugShopTarget
 from ui.auto_recovery import AutoRecoveryOverlay
 from ui.debug_text import DEBUG_TEXT
 from ui.debug_encounter import DebugEncounterState
+from debug_dungeon import DebugDungeon, DebugDungeonDataError, DungeonStep, load_dungeons, reset_treasures
+from scenes.debug_dungeon import DebugDungeonScene
 from resources.maps import MapRandomEncounter
 from systems.encounter import EncounterGenerationError
 from ui.teleport_menu import TeleportTarget
@@ -420,6 +422,8 @@ class GameScreenChange(Enum):
     SHOW_START_MENU = auto()
     SHOW_CONTROL_GUIDE = auto()
     START_GAME = auto()
+    START_DEBUG_DUNGEON = auto()
+    EXIT_DEBUG_DUNGEON = auto()
 
 
 class MenuAlertEffect:
@@ -641,6 +645,8 @@ class Game:
             self, "debug_encounter_state", DebugEncounterState(),
         )
         self.pending_debug_battle_encounter: BattleEncounter | None = None
+        self.debug_dungeon_scene: DebugDungeonScene | None = None
+        self.pending_debug_dungeon: DebugDungeon | None = None
         self.field_fade_active = False
         self.field_fade_pulse_frame = 0
         self.encounter_transition: EncounterTransition | None = None
@@ -806,7 +812,7 @@ class Game:
             party=self.party[:BATTLE_PARTY_MEMBER_COUNT],
             result_party=self.party,
             save_data=self.save_data,
-            return_bgm_id=self.current_map.bgm_id,
+            return_bgm_id=self._exploration_bgm_id(),
             return_bgm_start_sec=getattr(self, "pending_battle_bgm_start_sec", 0.0),
             encounter=encounter,
             command_memory=memory,
@@ -842,6 +848,9 @@ class Game:
     def _activate_field_fade(self) -> bool:
         """Double the random-encounter threshold until the current floor ends."""
 
+        simulation = getattr(self, "debug_dungeon_scene", None)
+        if simulation is not None:
+            return simulation.progress.activate_fade()
         if getattr(
             getattr(self, "current_map", None), "profile", None
         ) != "dungeon" or getattr(self, "field_fade_active", False):
@@ -999,14 +1008,17 @@ class Game:
     def _begin_random_encounter(self) -> None:
         """Freeze the field and begin the PC-centered encounter transition."""
 
-        camera_x, camera_y = self.field_renderer.camera_position(self.field)
-        pivot_x = self.field.world_x - camera_x + self.current_map.tile_size / 2
-        pivot_y = self.field.world_y - camera_y
-        self.field.stop()
+        if getattr(self, "debug_dungeon_scene", None) is not None:
+            pivot_x, pivot_y = SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2
+        else:
+            camera_x, camera_y = self.field_renderer.camera_position(self.field)
+            pivot_x = self.field.world_x - camera_x + self.current_map.tile_size / 2
+            pivot_y = self.field.world_y - camera_y
+            self.field.stop()
         self.encounter_transition = EncounterTransition(pivot_x, pivot_y)
         self.encounter_snapshot = None
         self.pending_battle_bgm_start_sec = 0.0
-        if self.bgm.current_id == self.current_map.bgm_id:
+        if self.bgm.current_id == self._exploration_bgm_id():
             self.pending_battle_bgm_start_sec = self.bgm.playback_position_sec or 0.0
         self.bgm.play(ENCOUNTER_JINGLE_ID, loop=False)
 
@@ -1315,7 +1327,19 @@ class Game:
             battle_scene.release_palette_variants()
         if result is BattleResult.VICTORY:
             self.save_data.battle_count += 1
-        elif result is BattleResult.DEFEAT:
+        simulation = getattr(self, "debug_dungeon_scene", None)
+        if simulation is not None:
+            simulation.party = self.party
+            simulation.complete_battle()
+            if result is BattleResult.DEFEAT:
+                self._finish_debug_dungeon()
+                self.bgm.set_fade_rate(0.0)
+            elif battle_scene is not None:
+                self.bgm.transition_to(simulation.dungeon.bgm_id, start_sec=battle_scene.return_bgm_start_sec)
+            self.battle_scene = None
+            self._restore_dimmed_palette()
+            return
+        if result is BattleResult.DEFEAT:
             for member in self.party:
                 member.fully_recover()
             destination = self.encounter_system.defeat_return(
@@ -1379,7 +1403,8 @@ class Game:
         raise ValueError(f"cursor key is not registered: {key!r}")
 
     def _manual_save_enabled(self) -> bool:
-        return self.launch_mode is not LaunchMode.EXHIBITION
+        return (self.launch_mode is not LaunchMode.EXHIBITION
+                and getattr(self, "debug_dungeon_scene", None) is None)
 
     def _build_main_windows(
         self,
@@ -2125,7 +2150,7 @@ class Game:
         raise ValueError(f"settings key has no value: {key}")
 
     def _settings_rows(self) -> tuple[tuple[str, int], ...]:
-        if self.launch_mode is LaunchMode.NORMAL:
+        if self.launch_mode is LaunchMode.NORMAL and getattr(self, "debug_dungeon_scene", None) is None:
             return SETTINGS_ROWS
         return tuple((key, y) for key, y in SETTINGS_ROWS if key != "debug")
 
@@ -2263,8 +2288,18 @@ class Game:
         self._build_settings_window()
 
     def _start_debug_menu(self) -> None:
-        if self.launch_mode is not LaunchMode.NORMAL or self.settings_cursor is None:
+        if (self.launch_mode is not LaunchMode.NORMAL or self.settings_cursor is None
+                or getattr(self, "debug_dungeon_scene", None) is not None):
             return
+        dungeon_error = None
+        try:
+            dungeons = load_dungeons(
+                item_keys=self.items, monster_keys={monster.key for monster in self.monsters},
+                bgm_ids={path.stem for path in (Path(__file__).resolve().parent / "audio").glob("*.ogg")},
+            )
+        except DebugDungeonDataError as error:
+            dungeon_error = str(error)
+            dungeons = ()
         self.settings_cursor.active = False
         editor = DebugPartyEditor(
             self.character_records,
@@ -2286,7 +2321,57 @@ class Game:
             encounter_state=self.debug_encounter_state,
             on_encounter=self._start_debug_encounter,
             flag_ids=self.event_catalog.flag_ids,
+            dungeons=dungeons, on_dungeon=self._start_debug_dungeon,
+            on_dungeon_reset=lambda dungeon: reset_treasures(dungeon, self.save_data.opened_treasures),
+            dungeon_error=dungeon_error,
         )
+
+    def _exploration_bgm_id(self) -> str:
+        simulation = getattr(self, "debug_dungeon_scene", None)
+        return simulation.dungeon.bgm_id if simulation is not None else self.current_map.bgm_id
+
+    def _start_debug_dungeon(self, dungeon: DebugDungeon) -> None:
+        self.pending_debug_dungeon = dungeon
+        self._finish_debug_menu(resume_settings=False)
+        self._begin_screen_change(GameScreenChange.START_DEBUG_DUNGEON)
+
+    def _apply_debug_dungeon(self) -> None:
+        if self.pending_debug_dungeon is None:
+            raise RuntimeError("debug dungeon transition has no selected dungeon")
+        self.debug_dungeon_scene = DebugDungeonScene(
+            dungeon=self.pending_debug_dungeon, party=self.party, settings=self.settings,
+            fonts=self.fonts, texts=self.texts, items=self.items, treasure_system=self.treasure_system,
+            on_battle=self._start_debug_dungeon_battle,
+            on_menu=lambda: self._begin_screen_change(GameScreenChange.SHOW_MENU),
+            on_exit=lambda: self._begin_screen_change(GameScreenChange.EXIT_DEBUG_DUNGEON),
+            alert=self.alert,
+        )
+        self.pending_debug_dungeon = None
+        self.showing_field = True
+        self._restore_dimmed_palette()
+        self._build_main_windows(animate=False)
+        self.bgm.play(self.debug_dungeon_scene.dungeon.bgm_id)
+
+    def _start_debug_dungeon_battle(self, step: DungeonStep) -> bool:
+        try:
+            encounter = (self._create_random_battle_encounter(step.encounter)
+                         if step.type == "random_encounter"
+                         else BattleEncounter(step.monster_keys, escape_command_enabled=False))
+        except EncounterGenerationError:
+            return False
+        self.pending_debug_battle_encounter = encounter
+        self.pending_event_battle_id = step.battle_id
+        self._begin_random_encounter()
+        return True
+
+    def _finish_debug_dungeon(self) -> None:
+        for member in self.party:
+            member.fully_recover()
+        self.debug_dungeon_scene = None
+        self._promote_first_recoverable_member()
+        self._build_main_windows(animate=False)
+        self.showing_field = True
+        self.bgm.play(self.current_map.bgm_id)
 
     def _teleport_targets(self) -> tuple[TeleportTarget, ...]:
         """Build localized choices accepted by the real teleport rules."""
@@ -2385,6 +2470,8 @@ class Game:
     def _start_teleport(self, site_id: str, *, source: str) -> bool:
         """Resolve one visited destination and begin the common teleport fade."""
 
+        if getattr(self, "debug_dungeon_scene", None) is not None:
+            return False
         if source not in ("debug", "spell", "item"):
             raise ValueError(f"unsupported teleport source: {source}")
 
@@ -2466,8 +2553,8 @@ class Game:
             palette_shifter=self.palette_shifter,
             inventory_system=inventory_system,
             on_field_fade=self._activate_field_fade,
-            teleport_targets=self._teleport_targets(),
-            on_field_teleport=self._start_item_teleport,
+            teleport_targets=self._teleport_targets() if getattr(self, "debug_dungeon_scene", None) is None else (),
+            on_field_teleport=self._start_item_teleport if getattr(self, "debug_dungeon_scene", None) is None else None,
             on_invalid_action=self.alert.start,
         )
 
@@ -2492,7 +2579,7 @@ class Game:
         )
 
     def _play_field_spell_level_up_jingle(self) -> None:
-        self.bgm.play_once_then("da3-lvup", self.current_map.bgm_id)
+        self.bgm.play_once_then("da3-lvup", self._exploration_bgm_id())
 
     def _finish_auto_recovery(self) -> None:
         self.auto_recovery_screen = None
@@ -2619,7 +2706,12 @@ class Game:
             raise RuntimeError("fade midpoint has no pending field screen change")
         if change is GameScreenChange.SHOW_FIELD:
             self.showing_field = True
-            if getattr(self, "field_fade_active", False):
+            simulation = getattr(self, "debug_dungeon_scene", None)
+            if simulation is not None:
+                simulation.party = self.party
+                simulation.settings = self.settings
+                simulation.refresh()
+            if simulation is None and getattr(self, "field_fade_active", False):
                 self._sync_field_fade_palette()
             else:
                 self._restore_dimmed_palette()
@@ -2688,6 +2780,10 @@ class Game:
             self._apply_pending_teleport()
         elif change is GameScreenChange.START_GAME:
             self._apply_start_game()
+        elif change is GameScreenChange.START_DEBUG_DUNGEON:
+            self._apply_debug_dungeon()
+        elif change is GameScreenChange.EXIT_DEBUG_DUNGEON:
+            self._finish_debug_dungeon()
         elif change is GameScreenChange.SHOW_START_MENU:
             self._show_start_menu()
         elif change is GameScreenChange.SHOW_CONTROL_GUIDE:
@@ -2778,8 +2874,8 @@ class Game:
             palette_shifter=self.palette_shifter,
             member_index=member_index,
             on_field_fade=self._activate_field_fade,
-            teleport_targets=self._teleport_targets(),
-            on_field_teleport=self._start_field_teleport,
+            teleport_targets=self._teleport_targets() if getattr(self, "debug_dungeon_scene", None) is None else (),
+            on_field_teleport=self._start_field_teleport if getattr(self, "debug_dungeon_scene", None) is None else None,
             on_invalid_action=self.alert.start,
             on_spell_level_up=self._play_field_spell_level_up_jingle,
             proficiency_level_limit=self.launch_mode.proficiency_level_limit,
@@ -2812,6 +2908,8 @@ class Game:
         self.command_cursor.active = True
 
     def _save_to_slot(self, slot: int) -> SaveSlotSummary | None:
+        if getattr(self, "debug_dungeon_scene", None) is not None:
+            return None
         try:
             document = create_save_document(
                 save_data=self.save_data,
@@ -3847,6 +3945,7 @@ class Game:
                     "treasure_message",
                     "field_condition_message",
                     "hint_overlay",
+                    "debug_dungeon_scene",
                 )
             )
         )
@@ -3994,6 +4093,10 @@ class Game:
                 self._begin_screen_change(GameScreenChange.CLOSE_SHOP)
             return
         if getattr(self, "showing_field", False):
+            simulation = getattr(self, "debug_dungeon_scene", None)
+            if simulation is not None:
+                simulation.update(input_state)
+                return
             self._update_field_fade_pulse()
             field_birds = getattr(self, "field_birds", None)
             if field_birds is not None:
@@ -4241,6 +4344,13 @@ class Game:
                 shop_screen.draw()
                 return
             if getattr(self, "showing_field", False):
+                simulation = getattr(self, "debug_dungeon_scene", None)
+                if simulation is not None:
+                    simulation.draw()
+                    hint_overlay = getattr(self, "hint_overlay", None)
+                    if hint_overlay is not None:
+                        hint_overlay.draw()
+                    return
                 self._draw_field_screen()
                 return
             item_screen = getattr(self, "item_screen", None)
@@ -4382,7 +4492,11 @@ class Game:
             return
         snapshot = self.encounter_snapshot
         if snapshot is None:
-            self._draw_field_screen(draw_player=False)
+            simulation = getattr(self, "debug_dungeon_scene", None)
+            if simulation is not None:
+                simulation.draw()
+            else:
+                self._draw_field_screen(draw_player=False)
             snapshot = pyxel.Image(SCREEN_WIDTH, SCREEN_HEIGHT)
             snapshot.blt(
                 0,

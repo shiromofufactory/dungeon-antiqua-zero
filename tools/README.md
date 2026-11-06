@@ -19,6 +19,19 @@ Mac配布物はルートの `build.sh` または `npm run build:mac`、Windows�
 受け取ったZIPとチェックサムだけをDropboxから片付ける。モード指定、環境、Dropbox運用は
 [デスクトップビルド](../docs/desktop-build.md) を参照する。
 
+## Debug Dungeon Editor
+
+マップ素材なしで戦闘・宝箱・イベント戦闘の並びを制作する開発用Webエディタ。
+統合エディタのダンジョン試行タブ、または次のコマンドで開く。
+
+```sh
+npm run editor -- --editor dungeon
+```
+
+制作元は `app/debug/dungeons.json`。保存後、ゲーム内のデバッグメニューを開き直して
+「ダンジョン試行」から実行する。詳細は
+[`docs/features/debug-dungeons.md`](../docs/features/debug-dungeons.md)を参照する。
+
 ## 音声変換
 
 `tools/audio_wav/` のWAVから、ゲーム用OGGを `app/audio/`、視聴用MP3を

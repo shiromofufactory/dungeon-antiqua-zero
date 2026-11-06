@@ -1,4 +1,4 @@
-"""Serve the tileset, map, and event editors from one local entry point."""
+"""Serve content and debug dungeon editors from one local entry point."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import webbrowser
 
 from scripts.event_pipeline import load_event_flags, load_event_messages
 from tools.event_editor.server import EventEditorApplication
+from tools.debug_dungeon_editor.server import DebugDungeonEditorApplication
 from tools.map_editor.server import MapEditorApplication
 from tools.mapchip_metadata.server import MetadataApplication
 
@@ -23,11 +24,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8767
 MAX_REQUEST_BYTES = {
+    "dungeon": 4 * 1024 * 1024,
     "event": 8 * 1024 * 1024,
     "map": 32 * 1024 * 1024,
     "tileset": 4 * 1024 * 1024,
 }
 STATIC_ROOTS = {
+    "dungeon": PROJECT_ROOT / "tools" / "debug_dungeon_editor" / "static",
     "event": PROJECT_ROOT / "tools" / "event_editor" / "static",
     "map": PROJECT_ROOT / "tools" / "map_editor" / "static",
     "tileset": PROJECT_ROOT / "tools" / "mapchip_metadata" / "static",
@@ -40,11 +43,13 @@ MIME_TYPES = {
     ".png": "image/png",
 }
 CLIENT_HEADERS = {
+    "dungeon": ("X-Dungeon-Editor-Client", "dungeon-editor-ui"),
     "event": ("X-Event-Editor-Client", "event-editor-ui"),
     "map": ("X-Map-Editor-Client", "map-editor-ui"),
     "tileset": ("X-Mapchip-Client", "mapchip-metadata-ui"),
 }
 TOKEN_HEADERS = {
+    "dungeon": "X-Dungeon-Editor-Token",
     "event": "X-Event-Editor-Token",
     "map": "X-Map-Editor-Token",
     "tileset": "X-Mapchip-Token",
@@ -56,11 +61,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         os.environ.get("DA0_CONTENT_DIR", PROJECT_ROOT / "content")
     ).resolve()
     parser = argparse.ArgumentParser(
-        description="マップチップ、マップ、イベントの各エディタをまとめて起動します。"
+        description="マップチップ、マップ、イベント、ダンジョン試行エディタをまとめて起動します。"
     )
     parser.add_argument(
         "--editor",
-        choices=("tileset", "map", "event"),
+        choices=("tileset", "map", "event", "dungeon"),
         default="map",
         help="最初に表示するエディタ（既定: map）",
     )
@@ -124,6 +129,9 @@ def make_handler(
         "map": map_application,
         "event": event_application,
         "tileset": metadata_application,
+        "dungeon": DebugDungeonEditorApplication(
+            event_application.content_root, event_application.app_root, token=event_application.token,
+        ),
     }
     if len({application.token for application in applications.values()}) != 1:
         raise ValueError("統合エディタでは共通の認証トークンが必要です。")
@@ -170,7 +178,7 @@ def make_handler(
 
         @staticmethod
         def _editor_route(path: str) -> tuple[str, str] | None:
-            for editor in ("tileset", "map", "event"):
+            for editor in ("tileset", "map", "event", "dungeon"):
                 prefix = f"/{editor}"
                 if path == prefix:
                     return editor, ""
@@ -231,7 +239,9 @@ def make_handler(
                     self._error(HTTPStatus.FORBIDDEN, "認証トークンが不正です。")
                     return
                 try:
-                    if editor == "event":
+                    if editor == "dungeon":
+                        payload = application.document_payload()
+                    elif editor == "event":
                         payload = event_application.document_payload()
                     elif editor == "tileset":
                         tileset_id = parse_qs(parsed.query).get(
@@ -473,7 +483,12 @@ def make_handler(
             if not valid_payload:
                 return
             try:
-                if editor == "map":
+                if editor == "dungeon":
+                    data = payload.get("data") if isinstance(payload, dict) else None
+                    application = applications[editor]
+                    response = (application.save(data) if path == "/api/save" else
+                                {"saved": False, "diagnostics": application.validate(data)})
+                elif editor == "map":
                     response = self._map_response(path, payload)
                 elif editor == "tileset":
                     response = self._metadata_response(path, payload)

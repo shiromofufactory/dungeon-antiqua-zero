@@ -51,6 +51,7 @@
 - [効果音](./sound-effects.md)
 - [情報メニュー・ミッション・モンスター図鑑](./information-menu.md)
 - [エンカウントと戦闘復帰](./encounters.md)
+- [デバッグ用ダンジョンシミュレーション](./debug-dungeons.md)
 - [戦闘表示データ](./battle.md)
 - [オートバトル](./auto-battle.md)
 - [オート回復](./auto-recovery.md)

@@ -143,7 +143,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
     def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
         target_y = [target.y for target in self.screen.main_cursor.targets]
 
-        self.assertEqual(len(target_y), 9)
+        self.assertEqual(len(target_y), 10)
         self.assertEqual(self.screen.main_cursor.targets[0].key, "encounter")
         self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
         self.assertTrue(
@@ -166,7 +166,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertFalse(
             any(target.y == label.y for target in self.screen.main_cursor.targets)
         )
-        self.screen.main_cursor.select_key("event_flags")
+        self.screen.main_cursor.select_key("dungeon")
         self.screen.update(InputState(navigation=Direction.DOWN))
         self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
 

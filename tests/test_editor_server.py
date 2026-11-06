@@ -476,6 +476,30 @@ class EditorServerTest(unittest.TestCase):
         self.assertEqual(event_token["token"], "shared-token")
         self.assertEqual(tileset_token["token"], "shared-token")
 
+    def test_dungeon_editor_shares_authentication_and_saves_only_its_debug_source(self) -> None:
+        with self.assertRaises(HTTPError) as error:
+            self.get_json("/dungeon/api/document")
+        self.assertEqual(error.exception.code, 403)
+        payload = self.get_json("/dungeon/api/document?token=shared-token")
+        self.assertEqual(payload["data"], {"format_version": 1, "dungeons": []})
+        self.assertIn("da3-field", payload["catalogs"]["bgm_ids"])
+        data = {"format_version": 1, "dungeons": [{
+            "id": "trial", "name": "調整用", "bgm_id": "da3-field", "steps": [{
+                "id": "chest", "type": "treasure", "contents": {"type": "gold", "amount": 100},
+            }],
+        }]}
+        result = self.post_json("/dungeon/api/save", {"data": data}, "X-Dungeon-Editor-Token")
+        self.assertTrue(result["saved"])
+        path = self.event_application.app_root / "debug" / "dungeons.json"
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), data)
+        data["dungeons"][0]["steps"][0]["contents"]["amount"] = 0
+        result = self.post_json("/dungeon/api/save", {"data": data}, "X-Dungeon-Editor-Token")
+        self.assertFalse(result["saved"])
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["dungeons"][0]["steps"][0]["contents"]["amount"], 100)
+        self.assertIn('type="module"', self.get_text("/dungeon/"))
+        session = self.get_json("/dungeon/api/session-token", {"X-Dungeon-Editor-Client":"dungeon-editor-ui"})
+        self.assertEqual(session["token"], "shared-token")
+
     def test_rejects_applications_with_different_tokens(self) -> None:
         self.event_application.token = "different-token"
 
