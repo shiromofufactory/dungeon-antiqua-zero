@@ -19,6 +19,7 @@ from map_pipeline import (
     validate_tileset,
 )
 from event_pipeline import (
+    load_event_battles,
     compile_event_sources,
     load_event_sources,
     reference_catalogs,
@@ -144,6 +145,7 @@ def main() -> int:
         event_sources = load_event_sources(content_root)
         event_catalog = compile_event_sources(
             event_sources,
+            battles=load_event_battles(content_root),
             **catalogs,
         )
         link_diagnostics.extend(

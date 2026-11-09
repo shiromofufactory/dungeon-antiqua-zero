@@ -1,6 +1,7 @@
 """Authoring-time validation and compilation helpers for event data."""
 
 from .catalogs import reference_catalogs
+from .battles import load_event_battles, save_event_battles, validate_event_battles, event_battle_ids
 from .events import (
     EVENT_SOURCE_FORMAT_VERSION,
     EVENT_RUNTIME_FORMAT_VERSION,
@@ -37,6 +38,10 @@ from .messages import (
 from .missions import load_missions, save_missions, validate_missions
 
 __all__ = (
+    "load_event_battles",
+    "save_event_battles",
+    "validate_event_battles",
+    "event_battle_ids",
     "load_missions",
     "save_missions",
     "validate_missions",

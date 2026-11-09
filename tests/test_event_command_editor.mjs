@@ -12,7 +12,7 @@ assert.notEqual(changeHandlerStart, -1);
 assert.notEqual(changeHandlerEnd, -1);
 const names = [
   'snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize',
-  'currentEvent', 'commandAt', 'conditionAt', 'listAt', 'commandPath', 'fullFlags', 'messageIds',
+  'battleIds', 'currentBattle', 'currentEvent', 'commandAt', 'conditionAt', 'listAt', 'commandPath', 'fullFlags', 'messageIds',
   'field', 'options', 'noteSummary', 'flagOptions', 'renderCommand', 'renderDropZone',
   'renderCommandList', 'addCommand', 'defaultCondition', 'defaultCommand',
   'addDefaultCommand', 'renderCondition',
@@ -31,7 +31,7 @@ function editor() {
     data: { format_version: 1, events: [{ id: 'sample.run', commands: [] }] },
     flags: [{ flag_id: 'story.done' }], messages: [], missions: [],
     selectedEvent: 0, selectedFlag: 0, selectedMessage: 0, selectedMission: 0,
-    mode: 'event', catalogs: { monster_keys: ['Giant Spider'] },
+    mode: 'event', battles: [{battle_id:'guard',monster_keys:['Giant Spider']}], catalogs: { monster_keys: ['Giant Spider'] },
     history: [], future: [], dirty: false,
   };
   let focused = 0;
@@ -63,13 +63,15 @@ test('add button creates a message command with its fields and permits changing 
   context.changeCommandType('0', 'start_battle');
 
   assert.equal(state.data.events[0].commands[0].command, 'start_battle');
-  assert.equal(state.data.events[0].commands[0].monster_keys[0], 'Giant Spider');
+  assert.equal(state.data.events[0].commands[0].battle_id, 'guard');
+  assert.equal('monster_keys' in state.data.events[0].commands[0], false);
   assert.equal(state.dirty, true);
   assert.equal(state.history.length, 2);
   const html = context.renderCommandList(state.data.events[0].commands, '', 'なし');
   assert.match(html, /data-command-type="0"/);
   assert.match(html, /data-command-field="battle_id"/);
-  assert.match(html, /data-battle-monster-index="0"/);
+  assert.doesNotMatch(html, /data-battle-monster-index/);
+  assert.match(html, /<select[^>]*data-command-field="battle_id"/);
   assert.doesNotMatch(html, /data-draft-command/);
 });
 
@@ -286,7 +288,7 @@ test('changing an existing command replaces its fields and undo restores them', 
 
   context.undo();
   assert.equal(state.data.events[0].commands[0].command, 'start_battle');
-  assert.equal(state.data.events[0].commands[0].battle_id, 'battle_1');
+  assert.equal(state.data.events[0].commands[0].battle_id, 'guard');
 });
 
 test('branch commands also default to message and can change type', () => {

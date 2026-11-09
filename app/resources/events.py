@@ -180,14 +180,10 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
             ) or not command["shop_key"]:
                 return False
         elif command_type == "start_battle":
-            lineup = command.get("monster_keys")
             if (
-                set(command) != {"command", "battle_id", "monster_keys"}
+                set(command) != {"command", "battle_id"}
                 or not isinstance(command.get("battle_id"), str)
                 or LOCAL_ID_PATTERN.fullmatch(command["battle_id"]) is None
-                or not isinstance(lineup, list)
-                or not 1 <= len(lineup) <= 5
-                or not all(isinstance(key, str) and key for key in lineup)
             ):
                 return False
         elif command_type in ("move_party", "move_actor", "face_party", "face_actor"):
@@ -235,6 +231,7 @@ class EventCatalog:
         flag_ids: frozenset[str] = frozenset(),
         missions: tuple[MissionDefinition, ...] = (),
         battle_start_events: Mapping[str, str] | None = None,
+        battles: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
         normalized = {} if events is None else dict(events)
         if not all(
@@ -265,6 +262,23 @@ class EventCatalog:
         ):
             raise TypeError("battle start events must reference known events")
         self._battle_start_events = MappingProxyType(triggers)
+        definitions = {} if battles is None else dict(battles)
+        if not all(isinstance(key, str) and LOCAL_ID_PATTERN.fullmatch(key)
+                   and isinstance(lineup, tuple) and 1 <= len(lineup) <= 5
+                   and all(isinstance(monster, str) and monster for monster in lineup)
+                   for key, lineup in definitions.items()):
+            raise EventResourceError("イベントバトルの登録が不正です。")
+        self._battles = MappingProxyType(definitions)
+
+    @property
+    def battle_ids(self) -> tuple[str, ...]:
+        return tuple(self._battles)
+
+    def battle_monster_keys(self, battle_id: str) -> tuple[str, ...]:
+        try:
+            return self._battles[battle_id]
+        except KeyError as error:
+            raise EventResourceError(f"未登録のイベントバトルです: {battle_id}") from error
 
     @property
     def missions(self) -> tuple[MissionDefinition, ...]:
@@ -307,7 +321,7 @@ class EventCatalog:
     def from_document(cls, document: object) -> EventCatalog:
         if not isinstance(document, dict):
             raise EventResourceError("イベントJSONのルートが不正です。")
-        if set(document) - {"missions", "battle_start_events"} != {"format_version", "source_sha256", "flags", "events"}:
+        if set(document) - {"missions", "battle_start_events", "battles"} != {"format_version", "source_sha256", "flags", "events"}:
             raise EventResourceError("イベントJSONのルート属性が不正です。")
         if document.get("format_version") != EVENT_FORMAT_VERSION:
             raise EventResourceError("イベントJSONのformat_versionが不正です。")
@@ -372,7 +386,24 @@ class EventCatalog:
             for battle_id, event_id in battle_start_events.items()
         ):
             raise EventResourceError("バトル開始イベントの定義が不正です。")
-        return cls(loaded, flag_ids=frozenset(flag_values), missions=tuple(missions), battle_start_events=battle_start_events)
+        battles = document.get("battles", {})
+        if not isinstance(battles, dict) or not all(isinstance(lineup, list) for lineup in battles.values()):
+            raise EventResourceError("イベントバトルの登録が不正です。")
+        catalog = cls(loaded, flag_ids=frozenset(flag_values), missions=tuple(missions),
+                      battle_start_events=battle_start_events,
+                      battles={key: tuple(lineup) for key, lineup in battles.items()})
+        def check_references(commands):
+            for command in commands:
+                if command["command"] == "start_battle":
+                    catalog.battle_monster_keys(command["battle_id"])
+                elif command["command"] == "branch":
+                    check_references(command["then"])
+                    check_references(command["else"])
+        for event in loaded.values():
+            check_references(event.commands)
+        for battle_id in battle_start_events:
+            catalog.battle_monster_keys(battle_id)
+        return catalog
 
 
 __all__ = [

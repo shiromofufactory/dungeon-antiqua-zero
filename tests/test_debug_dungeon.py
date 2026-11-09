@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
 from debug_dungeon import (
-    DEFAULT_ENCOUNTER, DebugDungeonDataError, DungeonProgress, parse_dungeons, reset_treasures,
+    DEFAULT_ENCOUNTER, DebugDungeonDataError, DungeonProgress, parse_dungeons as parse_dungeon_document, reset_treasures,
 )
 from game import Game, GameScreenChange
 from input import Direction, InputButton, InputState
@@ -27,12 +27,16 @@ from ui.debug_dungeon import DebugDungeonOverlay
 from ui.debug_text import DEBUG_TEXT
 
 
+def parse_dungeons(document, **catalogs):
+    return parse_dungeon_document(document, battle_ids={"shrine_guard"}, **catalogs)
+
+
 def source():
     return {"format_version": 1, "dungeons": [{
         "id": "trial", "name": "調整用ダンジョン", "bgm_id": "da3-dungeon1", "steps": [
             {"id": "random_1", "type": "random_encounter", "count": 2, "encounter": dict(DEFAULT_ENCOUNTER)},
             {"id": "chest_1", "type": "treasure", "contents": {"type": "gold", "amount": 100}},
-            {"id": "boss_1", "type": "event_battle", "battle_id": "shrine_guard", "monster_keys": ["Giant Spider"]},
+            {"id": "boss_1", "type": "event_battle", "battle_id": "shrine_guard"},
         ],
     }]}
 
@@ -62,7 +66,7 @@ class DebugDungeonDataTest(unittest.TestCase):
                 data = source()
                 mutation(data)
                 with self.assertRaises(DebugDungeonDataError):
-                    parse_dungeons(data, item_keys={"POTION"}, monster_keys={"Giant Spider"}, bgm_ids={"da3-dungeon1"})
+                    parse_dungeons(data, item_keys={"POTION"}, bgm_ids={"da3-dungeon1"})
 
     def test_progress_consumes_exactly_one_battle_and_restarts_on_reentry(self):
         dungeon = parse_dungeons(source())[0]
@@ -223,6 +227,8 @@ class DebugDungeonGameTest(unittest.TestCase):
         game.field = Mock()
         game.field_renderer = Mock()
         game.encounter_system = Mock()
+        game.event_catalog = Mock()
+        game.event_catalog.battle_monster_keys.return_value = ("Giant Spider",)
         game.party = (Mock(),)
         game.battle_scene = Mock(return_bgm_start_sec=12.5)
         game._restore_dimmed_palette = Mock()
@@ -358,12 +364,15 @@ class DebugDungeonEditorTest(unittest.TestCase):
             audio = root / "app" / "audio"
             audio.mkdir(parents=True)
             (audio / "da3-dungeon1.ogg").touch()
+            events = root / "content" / "events"
+            events.mkdir()
+            (events / "battles.json").write_text(json.dumps([{"battle_id":"shrine_guard", "monster_keys":["Giant Spider"]}]))
             app = DebugDungeonEditorApplication(root / "content", root / "app", token="test")
             self.assertEqual(app.document_payload()["data"]["dungeons"], [])
             self.assertTrue(app.save(source())["saved"])
             before = app.source_path.read_bytes()
             bad = source()
-            bad["dungeons"][0]["steps"][2]["monster_keys"] = ["unknown"]
+            bad["dungeons"][0]["steps"][2]["battle_id"] = "unknown"
             result = app.save(bad)
             self.assertFalse(result["saved"])
             self.assertTrue(result["diagnostics"])

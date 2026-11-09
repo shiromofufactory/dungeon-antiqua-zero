@@ -8,7 +8,7 @@ const changeHandlerStart = source.indexOf('$("event-editor").addEventListener("c
 const changeHandlerEnd = source.indexOf('\nfunction clearCommandDrag(', changeHandlerStart + 1);
 assert.notEqual(changeHandlerStart, -1);
 assert.notEqual(changeHandlerEnd, -1);
-const names = ['snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize', 'currentFlag', 'currentMission', 'currentEvent', 'currentMessage', 'listForKind', 'moveListItem', 'commandAt', 'conditionAt', 'defaultCondition', 'newMissionMessage', 'uniqueId', 'linesFromTextarea', 'requestBody', 'renderMissionEditor', 'renderCondition', 'field', 'options', 'noteSummary', 'flagOptions', 'fullFlags', 'messageIds', 'renderMessagePreview'];
+const names = ['snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize', 'currentFlag', 'currentMission', 'currentBattle', 'currentEvent', 'currentMessage', 'listForKind', 'moveListItem', 'commandAt', 'conditionAt', 'defaultCondition', 'newMissionMessage', 'uniqueId', 'linesFromTextarea', 'requestBody', 'renderMissionEditor', 'renderCondition', 'field', 'options', 'noteSummary', 'flagOptions', 'fullFlags', 'messageIds', 'renderMessagePreview'];
 const declarations = names.map((name) => {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1);

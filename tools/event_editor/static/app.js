@@ -4,7 +4,7 @@ document.addEventListener("contextmenu", (event) => event.preventDefault(), { ca
 
 const CLIENT = "event-editor-ui";
 const UI_STORAGE_KEY = "da0.event-editor.ui.v1";
-const LIST_TABS = ["flag", "event", "mission", "message"];
+const LIST_TABS = ["flag", "event", "mission", "message", "battle"];
 const COMMAND_OPTIONS = [
   ["message", "message"],
   ["set_flag", "set_flag"],
@@ -37,6 +37,8 @@ const state = {
   flags: [],
   messages: [],
   missions: [],
+  battles: [],
+  selectedBattle: 0,
   selectedMission: 0,
   catalogs: {},
   faceSheet: null,
@@ -263,6 +265,8 @@ function snapshot() {
     flags: state.flags,
     messages: state.messages,
     missions: state.missions,
+    battles: state.battles,
+    selectedBattle: state.selectedBattle,
     selectedMission: state.selectedMission,
     selectedFlag: state.selectedFlag,
     selectedEvent: state.selectedEvent,
@@ -293,6 +297,8 @@ function restore(value) {
   state.flags = restored.flags;
   state.messages = restored.messages;
   state.missions = restored.missions || [];
+  state.battles = restored.battles || [];
+  state.selectedBattle = restored.selectedBattle || 0;
   state.selectedMission = restored.selectedMission || 0;
   state.selectedFlag = restored.selectedFlag || 0;
   state.selectedEvent = restored.selectedEvent;
@@ -318,6 +324,8 @@ function redo() {
 }
 
 function normalize() {
+  if (!Array.isArray(state.battles)) state.battles = [];
+  state.selectedBattle = Math.max(0, Math.min(state.selectedBattle || 0, state.battles.length - 1));
   if (!Array.isArray(state.missions)) state.missions = [];
   state.selectedMission = Math.max(0, Math.min(state.selectedMission, state.missions.length - 1));
   if (!Array.isArray(state.flags)) state.flags = [];
@@ -336,6 +344,14 @@ function normalize() {
   for (const event of state.data.events) {
     if (!Array.isArray(event.commands)) event.commands = [];
   }
+}
+
+function currentBattle() {
+  return state.battles?.[state.selectedBattle] || null;
+}
+
+function battleIds() {
+  return (state.battles || []).map((battle) => battle.battle_id).filter(Boolean).sort();
 }
 
 function currentFlag() {
@@ -466,7 +482,7 @@ function options(values, selected, empty = "選択してください", label = (
 }
 
 function filteredList(kind) {
-  const fieldName = kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
+  const fieldName = kind === "battle" ? "battle_id" : kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
   const query = (state.filterText || "").trim().toLowerCase();
   return listForKind(kind)
     .map((item, index) => ({item, index}))
@@ -506,6 +522,7 @@ function updateStatus() {
 }
 
 function listForKind(kind) {
+  if (kind === "battle") return state.battles || [];
   if (kind === "flag") return state.flags;
   if (kind === "event") return state.data.events;
   if (kind === "message") return state.messages;
@@ -520,7 +537,7 @@ function insertListItem(kind, item) {
   const insertionIndex = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < items.length
     ? selectedIndex + 1 : items.length;
   items.splice(insertionIndex, 0, item);
-  const fieldName = kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
+  const fieldName = kind === "battle" ? "battle_id" : kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
   if (!String(item[fieldName] || "").toLowerCase().includes((state.filterText || "").trim().toLowerCase())) {
     state.filterText = "";
   }
@@ -536,6 +553,7 @@ function moveListItem(kind, sourceIndex, targetIndex) {
   if (sourceIndex < insertionIndex) insertionIndex -= 1;
   if (sourceIndex === insertionIndex) return false;
 
+  const selectedBattle = currentBattle();
   const selectedFlag = currentFlag();
   const selectedMission = currentMission();
   const selectedEvent = currentEvent();
@@ -543,6 +561,7 @@ function moveListItem(kind, sourceIndex, targetIndex) {
   commit(() => {
     const [item] = items.splice(sourceIndex, 1);
     items.splice(insertionIndex, 0, item);
+    if (selectedBattle) state.selectedBattle = state.battles.indexOf(selectedBattle);
     if (selectedFlag) state.selectedFlag = state.flags.indexOf(selectedFlag);
     if (selectedMission) state.selectedMission = state.missions.indexOf(selectedMission);
     if (selectedEvent) state.selectedEvent = state.data.events.indexOf(selectedEvent);
@@ -602,6 +621,17 @@ function renderLists() {
         <button type="button" class="list-item-select" data-action="select-mission" data-index="${index}"><strong>${index + 1}. ${esc(mission.id)}</strong><small>${esc(mission.note || mission.message_id)}</small></button>
       </div>
     `).join("") + listEnd("mission", missions, "ミッションはありません。");
+  }
+
+  if ($("battles")) {
+    const battles = filteredList("battle");
+    $("battles").className = "list";
+    $("battles").innerHTML = battles.map(({item: battle, index}) => `
+      ${renderListDropZone("battle", index)}
+      <div class="list-item reorderable-list-item ${state.mode === "battle" && index === state.selectedBattle ? "active" : ""}" data-list-item-kind="battle">
+        <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(battle.battle_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="battle" data-index="${index}">⠿</span>
+        <button type="button" class="list-item-select" data-action="select-battle" data-index="${index}"><strong>${esc(battle.battle_id)}</strong><small>${battle.monster_keys?.length || 0}体 · ${esc(battle.note || "メモなし")}</small></button>
+      </div>`).join("") + listEnd("battle", battles, "イベントバトルはありません。");
   }
 
   $("messages").className = "list";
@@ -736,11 +766,8 @@ function renderCommand(command, path, listPath, index) {
   } else if (type === "open_shop") {
     fields = field("ショップID", `<select ${attr("shop_key")}>${options(state.catalogs.shop_keys || [], command.shop_key)}</select>`, true);
   } else if (type === "start_battle") {
-    fields = field("バトルID", `<input ${attr("battle_id")} value="${esc(command.battle_id || "")}" placeholder="例: shrine_guard">`, true)
-      + `<div class="full"><label>敵編成（1〜5体）</label>${(command.monster_keys || []).map((key, monsterIndex) => `
-        <div class="add-row"><select data-battle-monster-index="${monsterIndex}" data-command-path="${esc(path)}">${options(state.catalogs.monster_keys || [], key)}</select>
-        <button class="danger icon" data-action="remove-battle-monster" data-command-path="${esc(path)}" data-index="${monsterIndex}">削除</button></div>
-      `).join("")}<button data-action="add-battle-monster" data-command-path="${esc(path)}" ${(command.monster_keys || []).length >= 5 ? "disabled" : ""}>敵を追加</button></div>`;
+    fields = field("バトルID", `<select ${attr("battle_id")}>${options(battleIds(), command.battle_id)}</select>`, true)
+      + `<p class="compact full">敵編成は「イベントバトル」タブで登録・編集します。</p>`;
   } else if (["move_party", "move_actor", "face_party", "face_actor"].includes(type)) {
     fields = (type.endsWith("_actor") ? field("actor ID", `<select ${attr("actor_id")}>${options(state.catalogs.actor_ids || [], command.actor_id)}</select>`) : "")
       + field("方向", `<select ${attr("direction")}>${options(["up", "right", "down", "left"], command.direction)}</select>`);
@@ -794,7 +821,7 @@ function renderEventEditor() {
   $("event-editor").className = "";
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("イベントID", `<input data-event-field="id" value="${esc(event.id)}">`)}${field("制作メモ", `<input data-event-field="note" value="${esc(event.note || "")}">`)}<button class="danger" data-action="delete-event">イベントを削除</button></div>
-    <div class="event-meta">${field("バトル開始時に発動", `<input type="checkbox" data-event-battle-enabled ${event.battle_start_id !== undefined ? "checked" : ""}>`)}${event.battle_start_id !== undefined ? field("対象バトルID", `<input data-event-field="battle_start_id" value="${esc(event.battle_start_id)}" placeholder="開始コマンドと同じID">`) : ""}</div>
+    <div class="event-meta">${field("バトル開始時に発動", `<input type="checkbox" data-event-battle-enabled ${event.battle_start_id !== undefined ? "checked" : ""}>`)}${event.battle_start_id !== undefined ? field("対象バトルID", `<select data-event-field="battle_start_id">${options(battleIds(), event.battle_start_id)}</select>`) : ""}</div>
     <div class="heading"><h2>${esc(event.id)}</h2><span class="pill">${event.commands.length} commands</span></div>
     ${renderCommandList(event.commands, "", "コマンドはありません。")}
     ${addCommand()}
@@ -864,8 +891,22 @@ function renderFlagEditor() {
   `;
 }
 
+function renderBattleEditor() {
+  const battle = currentBattle();
+  $("event-editor").className = battle ? "" : "empty";
+  if (!battle) { $("event-editor").innerHTML = "イベントバトルを追加・選択してください。"; return; }
+  $("event-editor").innerHTML = `
+    <div class="event-meta">${field("バトルID", `<input data-battle-field="battle_id" value="${esc(battle.battle_id)}">`)}${field("制作メモ", `<input data-battle-field="note" value="${esc(battle.note || "")}">`)}<button class="danger" data-action="delete-battle">イベントバトルを削除</button></div>
+    <h2>敵編成（1〜5体・上から表示順）</h2>
+    <p class="compact">本編イベントとダンジョン試行は、この登録を共通で参照します。同じモンスターを複数指定できます。先頭が64×96の場合は4体までです。</p>
+    ${(battle.monster_keys || []).map((key, index) => `<div class="add-row"><select aria-label="敵${index+1}" data-registered-monster-index="${index}">${options(state.catalogs.monster_keys || [], key)}</select><button data-action="remove-registered-monster" data-index="${index}" ${battle.monster_keys.length <= 1 ? "disabled" : ""}>削除</button></div>`).join("")}
+    <button data-action="add-registered-monster" ${battle.monster_keys.length >= 5 ? "disabled" : ""}>敵を追加</button>`;
+}
+
 function renderEditor() {
-  if (state.mode === "mission") {
+  if (state.mode === "battle") {
+    renderBattleEditor();
+  } else if (state.mode === "mission") {
     renderMissionEditor();
   } else if (state.mode === "message") {
     renderMessageEditor();
@@ -930,7 +971,7 @@ function defaultCommand(type) {
   if (type === "wait" || type === "shake_screen") return {command: type, frames: 6};
   if (type === "recover_party") return {command: type};
   if (type === "open_shop") return one("shop_key", state.catalogs.shop_keys);
-  if (type === "start_battle") return {command: type, battle_id: "battle_1", monster_keys: [state.catalogs.monster_keys?.[0] || ""]};
+  if (type === "start_battle") return {command: type, battle_id: battleIds()[0] || ""};
   if (type === "move_party") return {command: type, direction: "down", steps: 1};
   if (type === "move_actor") return {command: type, actor_id: state.catalogs.actor_ids?.[0] || "", direction: "down", steps: 1};
   if (type === "face_party") return {command: type, direction: "down"};
@@ -978,6 +1019,7 @@ function requestBody() {
     flags: state.flags,
     messages: state.messages,
     missions: state.missions,
+    battles: state.battles,
   });
 }
 
@@ -1027,6 +1069,8 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.flags = payload.flags;
   state.messages = payload.messages;
   state.missions = payload.missions || [];
+  state.battles = payload.battles || [];
+  state.selectedBattle = 0;
   state.selectedMission = 0;
   state.catalogs = payload.catalogs;
   state.faceSheet = payload.face_sheet;
@@ -1150,10 +1194,16 @@ document.body.addEventListener("click", (event) => {
     addDefaultCommand(target.dataset.listPath);
   } else if (action === "delete-command") {
     commit(() => listAt(target.dataset.listPath).splice(Number(target.dataset.index), 1));
-  } else if (action === "add-battle-monster") {
-    commit(() => commandAt(target.dataset.commandPath).monster_keys.push(state.catalogs.monster_keys?.[0] || ""));
-  } else if (action === "remove-battle-monster") {
-    commit(() => commandAt(target.dataset.commandPath).monster_keys.splice(Number(target.dataset.index), 1));
+  } else if (action === "add-battle") {
+    commit(() => { insertListItem("battle", {battle_id: uniqueId("battle", state.battles, "battle_id"), note: "", monster_keys: [state.catalogs.monster_keys?.[0] || ""]}); state.mode = "battle"; });
+  } else if (action === "select-battle") {
+    state.selectedBattle = Number(target.dataset.index); state.mode = "battle"; render();
+  } else if (action === "delete-battle") {
+    commit(() => state.battles.splice(state.selectedBattle, 1));
+  } else if (action === "add-registered-monster") {
+    commit(() => currentBattle().monster_keys.push(state.catalogs.monster_keys?.[0] || ""));
+  } else if (action === "remove-registered-monster") {
+    commit(() => currentBattle().monster_keys.splice(Number(target.dataset.index), 1));
   } else if (action === "add-condition") {
     commit(() => conditionAt(commandAt(target.dataset.commandPath), target.dataset.conditionPath).conditions.push(defaultCondition()));
   } else if (action === "delete-condition") {
@@ -1163,7 +1213,11 @@ document.body.addEventListener("click", (event) => {
 
 $("event-editor").addEventListener("change", (event) => {
   const target = event.target;
-  if (target.dataset.flagField) {
+  if (target.dataset.battleField) {
+    commit(() => { currentBattle()[target.dataset.battleField] = target.value; });
+  } else if (target.dataset.registeredMonsterIndex !== undefined) {
+    commit(() => { currentBattle().monster_keys[Number(target.dataset.registeredMonsterIndex)] = target.value; });
+  } else if (target.dataset.flagField) {
     commit(() => { currentFlag()[target.dataset.flagField] = target.value; });
   } else if (target.dataset.missionField) {
     commit(() => { currentMission()[target.dataset.missionField] = target.value; });
@@ -1177,11 +1231,10 @@ $("event-editor").addEventListener("change", (event) => {
     });
   } else if (target.dataset.eventBattleEnabled !== undefined) {
     commit(() => {
-      if (target.checked) currentEvent().battle_start_id = "battle_1";
+      if (target.checked) currentEvent().battle_start_id = battleIds()[0] || "";
       else delete currentEvent().battle_start_id;
     });
-  } else if (target.dataset.battleMonsterIndex !== undefined) {
-    commit(() => { commandAt(target.dataset.commandPath).monster_keys[Number(target.dataset.battleMonsterIndex)] = target.value; });
+
   } else if (target.dataset.commandType !== undefined) {
     changeCommandType(target.dataset.commandType, target.value);
   } else if (target.dataset.messageField) {

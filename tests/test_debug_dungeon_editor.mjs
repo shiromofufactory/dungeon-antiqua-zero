@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { History, addStep, moveStep, defaultEncounter } from "../tools/debug_dungeon_editor/static/model.js";
 
-const catalogs = { monsters: [{key:"Giant Spider"}], items: [{key:"POTION"}] };
+const catalogs = { battle_ids: ["shared_guard"], monsters: [{key:"Giant Spider"}], items: [{key:"POTION"}] };
 const dungeon = () => ({id:"trial",name:"調整用",bgm_id:"da3-dungeon1",steps:[]});
+
+test("event battles select a shared ID and never copy a lineup into a dungeon", () => {
+  const entry = addStep(dungeon(), "event_battle", catalogs);
+  assert.equal(entry.battle_id, "shared_guard");
+  assert.equal("monster_keys" in entry, false);
+});
 
 test("random settings inherit the preceding encounter at the insertion position as an independent copy", () => {
   const d = dungeon();

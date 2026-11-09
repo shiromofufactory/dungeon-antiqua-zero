@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../tools/event_editor/static/app.js', import.meta.url), 'utf8');
 const names = ['filteredList', 'listEnd', 'setIdFilter', 'listForKind', 'insertListItem', 'moveListItem',
-  'renderLists', 'renderListDropZone', 'currentFlag', 'currentEvent', 'currentMission', 'currentMessage',
+  'renderLists', 'renderListDropZone', 'currentFlag', 'battleIds', 'currentBattle', 'currentEvent', 'currentMission', 'currentMessage',
   'snapshot', 'begin', 'commit', 'restore', 'normalize', 'undo', 'redo', 'uniqueId', 'addEvent',
   'eventIdPrefix', 'requestBody', 'savePendingActorEventLink'];
 const declarations = names.map((name) => {
@@ -19,6 +19,7 @@ const declarations = names.map((name) => {
 function editor() {
   const ids = ['common.first', 'forest.other', 'common.last', 'village.hidden'];
   const state = {
+    battles: [{battle_id:'common_battle_a', monster_keys:['SLIME']}, {battle_id:'forest_battle_b', monster_keys:['SLIME']}, {battle_id:'common_battle_c', monster_keys:['SLIME']}, {battle_id:'forest_battle_d', monster_keys:['SLIME']}], selectedBattle: 2,
     data: { format_version: 1, events: ids.map((id) => ({ id, commands: [], note: 'common note' })) },
     flags: ids.map((id) => ({ flag_id: id, note: 'common note' })),
     missions: ids.map((id) => ({ id: id.replace('.', '_'), message_id: id })),
@@ -31,7 +32,7 @@ function editor() {
     if (!nodes.has(id)) nodes.set(id, { innerHTML: '', className: '' });
     return nodes.get(id);
   };
-  const context = vm.createContext({ state, LIST_TABS: ['flag', 'event', 'mission', 'message'],
+  const context = vm.createContext({ state, LIST_TABS: ['flag', 'event', 'mission', 'message', 'battle'],
     document: { querySelectorAll: () => [] }, $: node, render() {}, schedule() {}, clearListItemDrag() {},
     esc: (value) => String(value ?? ''), noteSummary: (value) => value,
     pendingActorEventDraft: null, pendingActorEventDraftId: null, actorEventReturnMapId: null,
@@ -43,7 +44,7 @@ function editor() {
 
 for (const [kind, idField, listNode] of [
   ['flag', 'flag_id', 'flags'], ['event', 'id', 'events'],
-  ['mission', 'id', 'missions'], ['message', 'message_id', 'messages'],
+  ['mission', 'id', 'missions'], ['message', 'message_id', 'messages'], ['battle', 'battle_id', 'battles'],
 ]) {
   test(`${kind}: ID substring filtering preserves original indices, selection and full save payload`, () => {
     const { state, context, node } = editor();

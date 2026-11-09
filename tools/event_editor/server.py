@@ -14,6 +14,9 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import webbrowser
 
 from scripts.event_pipeline import (
+    load_event_battles,
+    save_event_battles,
+    event_battle_ids,
     load_missions,
     save_missions,
     validate_missions,
@@ -148,6 +151,7 @@ class EventEditorApplication:
         flags: object,
         messages: object,
         missions: object | None = None,
+        battles: object | None = None,
     ) -> list[dict[str, str]]:
         if not isinstance(data, dict):
             return [{
@@ -157,8 +161,9 @@ class EventEditorApplication:
                 "message": "イベントJSONのルートはobjectである必要があります。",
             }]
         missions = load_missions(self.content_root) if missions is None else missions
+        battles = load_event_battles(self.content_root) if battles is None else battles
         catalogs = self.catalogs(flags, messages)
-        return [
+        diagnostics = [
             item.as_dict()
             for item in (
                 *validate_missions(missions, **catalogs),
@@ -169,6 +174,7 @@ class EventEditorApplication:
                 ),
                 *validate_event_sources(
                     self.sources_with(data),
+                    battles=battles,
                     **{
                         key: value
                         for key, value in catalogs.items()
@@ -177,6 +183,17 @@ class EventEditorApplication:
                 ),
             )
         ]
+        debug_path = self.app_root / "debug" / "dungeons.json"
+        if debug_path.is_file():
+            debug_data = json.loads(debug_path.read_text(encoding="utf-8"))
+            registered = event_battle_ids(battles)
+            for dungeon in debug_data.get("dungeons", []):
+                for step in dungeon.get("steps", []):
+                    if step.get("type") == "event_battle" and step.get("battle_id") not in registered:
+                        diagnostics.append({"severity": "error", "code": "referenced_debug_battle",
+                            "path": f"debug_dungeons.{dungeon.get('id')}.{step.get('id')}",
+                            "message": f"ダンジョン試行が未登録のバトルを参照しています: {step.get('battle_id')}"})
+        return diagnostics
 
     def document_payload(self) -> dict[str, object]:
         data, is_new = self.load_source()
@@ -195,6 +212,7 @@ class EventEditorApplication:
             "flags": flags,
             "messages": messages,
             "missions": load_missions(self.content_root),
+            "battles": load_event_battles(self.content_root),
             "catalogs": {
                 key: sorted(values) for key, values in catalogs.items()
             },
@@ -222,9 +240,11 @@ class EventEditorApplication:
         flags: object,
         messages: object,
         missions: object | None = None,
+        battles: object | None = None,
     ) -> dict[str, object]:
         missions = load_missions(self.content_root) if missions is None else missions
-        diagnostics = self.validate(data, flags, messages, missions)
+        battles = load_event_battles(self.content_root) if battles is None else battles
+        diagnostics = self.validate(data, flags, messages, missions, battles)
         if (
             any(item["severity"] == "error" for item in diagnostics)
             or not isinstance(data, dict)
@@ -237,6 +257,7 @@ class EventEditorApplication:
         compiled = compile_event_sources(
             sources,
             missions=missions,
+            battles=battles,
             **{key: value for key, value in catalogs.items() if key != "actor_ids"},
         )
         compiled_messages = compile_event_messages(
@@ -244,6 +265,7 @@ class EventEditorApplication:
             character_keys=catalogs["character_keys"],
         )
         save_missions(self.content_root / "events" / "missions.json", missions)
+        save_event_battles(self.content_root / "events" / "battles.json", battles)
         save_event_source(self.source_path, data)
         save_event_flags(event_flags_path(self.content_root), flags)
         save_event_messages(event_messages_path(self.content_root), messages)
@@ -366,6 +388,7 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
                 self._error(HTTPStatus.BAD_REQUEST, "JSONを読み込めません。")
                 return
             missions = payload.get("missions") if isinstance(payload, dict) else None
+            battles = payload.get("battles") if isinstance(payload, dict) else None
             data = payload.get("data") if isinstance(payload, dict) else None
             flags = payload.get("flags") if isinstance(payload, dict) else None
             messages = (
@@ -385,12 +408,12 @@ def make_handler(application: EventEditorApplication) -> type[BaseHTTPRequestHan
                     return
             try:
                 response = (
-                    application.save(data, flags, messages, missions)
+                    application.save(data, flags, messages, missions, battles)
                     if parsed.path == "/api/save"
                     else {
                         "saved": False,
                         "diagnostics": application.validate(
-                            data, flags, messages, missions
+                            data, flags, messages, missions, battles
                         ),
                     }
                 )

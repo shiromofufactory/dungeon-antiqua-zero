@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from event_pipeline import (
+    load_event_battles,
     event_source_paths,
     load_missions,
     validate_missions,
@@ -49,6 +50,7 @@ def main() -> int:
             ),
             *validate_event_sources(
                 sources,
+                battles=load_event_battles(content_root),
                 **catalogs,
             ),
         ]

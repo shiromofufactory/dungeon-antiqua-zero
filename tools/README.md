@@ -245,16 +245,20 @@ npm run editor -- --editor event
 ```
 
 全イベントを `content/events/events.json` にまとめ、`common.event_0` のような完全IDで編集する。
-ヘッダーの「IDフィルタ」はフラグ・イベント・ミッション・メッセージの4タブに共通で、
+ヘッダーの「IDフィルタ」はフラグ・イベント・ミッション・メッセージ・イベントバトルの5タブに共通で、
 入力した文字列をIDに含む項目だけを左の一覧へ表示する。空欄で全件へ戻る。
 「ミッション」タブでは条件と多言語本文を編集し、一覧のドラッグでゲーム内の表示順を変更できる。
 
 保存時に `content/events/events.json`、`content/events/flags.json`、
-`content/events/messages.json`、`content/events/missions.json` を検証し、成功した
+`content/events/messages.json`、`content/events/missions.json`、`content/events/battles.json` を検証し、成功した
 場合だけ原子的に保存して、Git管理外の `app/events/events.json` と
 `app/events/messages.json` を再生成する。キャラクター、アイテム、イベントメッセージ、BGM、
 SE、宣言済みグローバルフラグは一覧から選択できる。JSONを手編集する場合も
 `python3 -B scripts/validate-events.py` と `npm run events-build` が同じ検証処理を使用する。
+
+イベントバトルの登録・編成編集はイベントエディタの「イベントバトル」タブから行う。
+本編コマンドとダンジョン試行は登録済みIDを選択する。正本と参照検証は
+[イベント仕様](../docs/features/events.md#イベントバトルと戦闘からの起動)を参照する。
 
 ## Battle Test
 

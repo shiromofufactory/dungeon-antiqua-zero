@@ -14,6 +14,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.append(_PROJECT_ROOT)
 
 from event_pipeline import (
+    load_event_battles,
     compile_event_flags,
     compile_event_sources,
     compile_event_messages,
@@ -57,6 +58,7 @@ def main() -> int:
         compiled = compile_event_sources(
             sources,
             missions=missions,
+            battles=load_event_battles(content_root),
             **catalogs,
         )
         compiled_messages = compile_event_messages(

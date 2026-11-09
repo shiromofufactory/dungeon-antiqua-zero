@@ -1081,7 +1081,7 @@ class Game:
         runner = self.event_runner
         if runner is None or getattr(self, "suspended_field_event", None) is not None:
             raise RuntimeError("an event battle is already active")
-        encounter = BattleEncounter(effect.monster_keys, escape_command_enabled=False)
+        encounter = BattleEncounter(self.event_catalog.battle_monster_keys(effect.battle_id), escape_command_enabled=False)
         self.pending_event_battle_encounter = encounter
         self.pending_event_battle_id = effect.battle_id
         self.suspended_field_event = (runner, effect)
@@ -2294,7 +2294,7 @@ class Game:
         dungeon_error = None
         try:
             dungeons = load_dungeons(
-                item_keys=self.items, monster_keys={monster.key for monster in self.monsters},
+                item_keys=self.items, battle_ids=self.event_catalog.battle_ids,
                 bgm_ids={path.stem for path in (Path(__file__).resolve().parent / "audio").glob("*.ogg")},
             )
         except DebugDungeonDataError as error:
@@ -2356,7 +2356,7 @@ class Game:
         try:
             encounter = (self._create_random_battle_encounter(step.encounter)
                          if step.type == "random_encounter"
-                         else BattleEncounter(step.monster_keys, escape_command_enabled=False))
+                         else BattleEncounter(self.event_catalog.battle_monster_keys(step.battle_id), escape_command_enabled=False))
         except EncounterGenerationError:
             return False
         self.pending_debug_battle_encounter = encounter

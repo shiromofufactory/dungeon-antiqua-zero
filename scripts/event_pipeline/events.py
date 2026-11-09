@@ -182,12 +182,11 @@ def _validate_command_list(
     flag_ids: set[str],
     character_keys: set[str],
     item_keys: set[str],
-    monster_keys: set[str],
-    tall_first_monster_keys: set[str],
     shop_keys: set[str],
     message_ids: set[str],
     bgm_ids: set[str],
     se_ids: set[str],
+    battle_ids: set[str],
     depth: int = 0,
     battle_context: bool = False,
 ) -> None:
@@ -248,7 +247,7 @@ def _validate_command_list(
                     and command["else"]
                 ):
                     continue
-                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, monster_keys=monster_keys, tall_first_monster_keys=tall_first_monster_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context)
+                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context, battle_ids=battle_ids)
         elif command_type in ("end_event", "stop_bgm", "reset_game"):
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
@@ -289,19 +288,12 @@ def _validate_command_list(
             if not isinstance(shop_key, str) or shop_key not in shop_keys:
                 _diagnostic(diagnostics, "error", "unknown_shop", f"{command_path}.shop_key", f"存在しないショップです: {shop_key}")
         elif command_type == "start_battle":
-            _known_fields(command, {"command", "battle_id", "monster_keys"}, diagnostics, command_path)
+            _known_fields(command, {"command", "battle_id"}, diagnostics, command_path)
             battle_id = command.get("battle_id")
             if not isinstance(battle_id, str) or LOCAL_ID_PATTERN.fullmatch(battle_id) is None:
-                _diagnostic(diagnostics, "error", "invalid_battle_id", f"{command_path}.battle_id", "バトルIDはlower_snake_caseで指定してください。")
-            lineup = command.get("monster_keys")
-            if not isinstance(lineup, list) or not 1 <= len(lineup) <= 5:
-                _diagnostic(diagnostics, "error", "invalid_monster_lineup", f"{command_path}.monster_keys", "敵は1〜5体指定してください。")
-            else:
-                if len(lineup) == 5 and lineup[0] in tall_first_monster_keys:
-                    _diagnostic(diagnostics, "error", "oversized_monster_lineup", f"{command_path}.monster_keys", "先頭が64×96のモンスターの場合、敵は4体までです。")
-                for monster_index, key in enumerate(lineup):
-                    if not isinstance(key, str) or key not in monster_keys:
-                        _diagnostic(diagnostics, "error", "unknown_monster", f"{command_path}.monster_keys[{monster_index}]", f"存在しないモンスターです: {key}")
+                _diagnostic(diagnostics, "error", "invalid_battle_id", command_path, "バトルIDはlower_snake_caseで指定してください。")
+            elif battle_id not in battle_ids:
+                _diagnostic(diagnostics, "error", "unknown_battle", command_path, f"未登録のイベントバトルです: {battle_id}")
         elif command_type in ("move_party", "move_actor", "face_party", "face_actor"):
             fields = {"command", "direction"}
             if command_type in ("move_party", "move_actor"):
@@ -332,11 +324,16 @@ def validate_event_sources(
     message_ids: Iterable[str] = (),
     bgm_ids: Iterable[str] = (),
     se_ids: Iterable[str] = (),
+    battles: object = None,
 ) -> list[EventDiagnostic]:
     """Validate full event IDs and references in the authoring document."""
 
     if not isinstance(sources, Mapping):
         raise TypeError("event sources must be a mapping")
+    from .battles import event_battle_ids, validate_event_battles
+
+    battle_values = [] if battles is None else battles
+    registered_battles = event_battle_ids(battle_values)
     characters = set(character_keys)
     items = set(item_keys)
     monsters = set(monster_keys)
@@ -345,7 +342,7 @@ def validate_event_sources(
     messages = set(message_ids)
     bgms = set(bgm_ids)
     sounds = set(se_ids)
-    diagnostics: list[EventDiagnostic] = []
+    diagnostics = validate_event_battles(battle_values, monster_keys=monsters, tall_first_monster_keys=tall_monsters)
     flags = set(flag_ids)
     event_ids: set[str] = set()
     battle_start_ids: set[str] = set()
@@ -396,12 +393,14 @@ def validate_event_sources(
                     _diagnostic(diagnostics, "error", "duplicate_battle_start_id", f"{path}.battle_start_id", f"バトル開始イベントが重複しています: {battle_id}")
                 else:
                     battle_start_ids.add(battle_id)
+                    if battle_id not in registered_battles:
+                        _diagnostic(diagnostics, "error", "unknown_battle", path, f"未登録のイベントバトルです: {battle_id}")
             _validate_command_list(
                 event.get("commands"), diagnostics, f"{path}.commands",
-                flag_ids=flags, character_keys=characters, item_keys=items, monster_keys=monsters, tall_first_monster_keys=tall_monsters,
+                flag_ids=flags, character_keys=characters, item_keys=items,
                 shop_keys=shops,
                 message_ids=messages, bgm_ids=bgms, se_ids=sounds,
-                battle_context="battle_start_id" in event,
+                battle_context="battle_start_id" in event, battle_ids=registered_battles,
             )
     return diagnostics
 
@@ -410,13 +409,14 @@ def compile_event_sources(
     sources: Mapping[str, Mapping[str, object]],
     *,
     missions: object = None,
+    battles: object = None,
     **catalogs: Iterable[str],
 ) -> dict[str, object]:
     from .missions import validate_missions
 
     mission_values = [] if missions is None else missions
     diagnostics = [
-        *validate_event_sources(sources, **catalogs),
+        *validate_event_sources(sources, battles=battles, **catalogs),
         *validate_missions(mission_values, **catalogs),
     ]
     errors = [item for item in diagnostics if item.severity == "error"]
@@ -433,7 +433,7 @@ def compile_event_sources(
             if "battle_start_id" in event:
                 battle_start_events[event["battle_start_id"]] = full_id
     canonical = json.dumps(
-        {"sources": sources, "flags": flag_ids, "missions": mission_values},
+        {"sources": sources, "flags": flag_ids, "missions": mission_values, "battles": battles or []},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -447,6 +447,7 @@ def compile_event_sources(
             for mission in mission_values
         ],
         "events": {key: events[key] for key in sorted(events)},
+        "battles": {entry["battle_id"]: entry["monster_keys"] for entry in battles or []},
         "battle_start_events": {key: battle_start_events[key] for key in sorted(battle_start_events)},
     }
 

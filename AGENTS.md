@@ -112,6 +112,7 @@
   この検証コマンドは `package.json` のnpm scriptsへ復元しない。
 - ポータルに関係する変更は `npm run portal:build` を実行し、生成ページを目視確認する。
 - ゲームルールは可能な範囲でPyxel非依存のテストを用意する。
+- 共通イベントバトルの登録・編成検証・本編とダンジョン試行の同一ID解決・参照中の削除拒否は `python3 -B -m unittest tests.test_event_battles tests.test_event_pipeline tests.test_events tests.test_game_events tests.test_debug_dungeon tests.test_event_editor_server tests.test_editor_server`、登録一覧とID選択は `node --test tests/test_event_editor_lists.mjs tests/test_event_command_editor.mjs tests/test_debug_dungeon_editor.mjs` で回帰検証する。
 - デバッグ用ダンジョンの進行・宝箱記録・FADE・保存禁止・退出とゲーム接続は `python3 -B -m unittest tests.test_debug_dungeon tests.test_game tests.test_debug_menu tests.test_game_menu tests.test_encounter tests.test_treasure_system tests.test_game_events tests.test_save_system tests.test_launch_modes tests.test_main tests.test_editor_server`、設定引き継ぎ・並べ替え・Undo／Redoは `node --test tests/test_debug_dungeon_editor.mjs tests/test_editor_navigation.mjs` で回帰検証する。
 - 起動モード・試遊版の初期LVと日本語固定・モード別イベント条件・デバッグ表示は `python3 -B -m unittest tests.test_launch_modes tests.test_main tests.test_game tests.test_events tests.test_event_pipeline tests.test_game_events tests.test_save_system`、条件の編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
 - 起動モード別の武器・呪文・経験値上限と経験値到達色、上限超過NPCの保持、戦闘・メニュー呪文・自動回復への適用は `python3 -B -m unittest tests.test_member tests.test_battle_progression tests.test_spell_progression tests.test_auto_recovery tests.test_spell_menu tests.test_battle_scene tests.test_launch_modes tests.test_game tests.test_save_system` で回帰検証する。

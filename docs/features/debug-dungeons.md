@@ -25,7 +25,7 @@ Google Sheetsへ含めず、エディタとゲームで同じファイルを読�
 |---|---|
 | `random_encounter` | `count`（1〜9999回）、`encounter` |
 | `treasure` | `contents` |
-| `event_battle` | `battle_id`、`monster_keys`（表示順に1〜5体） |
+| `event_battle` | 共通登録から選択する `battle_id` |
 
 `encounter` は [`encounters.md`](./encounters.md) のマップ編成設定と同じ
 `monster_level`、`danger`、`polarity`、悪魔・人間・巨人・大型動物の出現可否を持つ。
@@ -37,7 +37,11 @@ Google Sheetsへ含めず、エディタとゲームで同じファイルを読�
 取得済み記録には `(debug_dungeon.<ダンジョンID>, <ステップID>)` を使用する。
 通常マップIDにはドットを使えないため、実マップの宝箱と衝突しない。
 
-イベント戦闘のID・敵編成と開始イベントは [`events.md`](./events.md#イベントバトルと戦闘からの起動)
+イベント戦闘は `content/events/battles.json` の共通登録をIDだけで参照する。
+敵編成はイベントエディタの「イベントバトル」タブで編集し、ダンジョン試行には複製しない。
+ダンジョン試行エディタでは登録済みIDのリストと読取専用の編成プレビューを表示する。
+共通バトル登録の変更は通常イベントと同様に、保存・生成後のゲーム再起動で反映する。
+ID・敵編成と開始イベントは [`events.md`](./events.md#イベントバトルと戦闘からの起動)
 に従う。不意打ちと通常の逃走コマンドは無効。登録済みの戦闘開始イベントを通常どおり実行する。
 
 不正な形式、重複ID、範囲外の数値、未登録のアイテム・敵・BGMは保存を拒否する。

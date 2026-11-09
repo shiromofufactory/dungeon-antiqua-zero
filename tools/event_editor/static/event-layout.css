@@ -393,3 +393,5 @@
   color: var(--muted);
   font-size: 10px;
 }
+
+.sidebar-tab[data-list-tab="battle"] { grid-column: 1 / -1; }

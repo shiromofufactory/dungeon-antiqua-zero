@@ -528,13 +528,13 @@ class GameEventTriggerTest(unittest.TestCase):
             "format_version": 1,
             "source_sha256": "0" * 64,
             "flags": ["sample.done"],
+            "battles": {"guard": ["SLIME"]},
             "events": {"sample.run": {"commands": [{
                 "command": "branch",
                 "condition": {"type": "flag_set", "flag_id": "sample.done"},
                 "then": [],
                 "else": [{
                     "command": "start_battle", "battle_id": "guard",
-                    "monster_keys": ["SLIME"],
                 }],
             }]}},
         })
@@ -597,7 +597,9 @@ class GameEventTriggerTest(unittest.TestCase):
     def test_named_battle_suspends_field_event_until_result(self) -> None:
         game = Game.__new__(Game)
         runner = Mock()
-        effect = StartBattleEffect("shrine_guard", ("SLIME",))
+        effect = StartBattleEffect("shrine_guard")
+        game.event_catalog = Mock()
+        game.event_catalog.battle_monster_keys.return_value = ("SLIME",)
         game.event_runner = runner
         game.event_effect = effect
         game.event_conversation_actor_id = "villager"

@@ -33,7 +33,7 @@ function numberField(field, label, value, min, max) {
 function catalogOptions(name) { return catalogs[name].map((entry) => [entry.key, `${entry.name} (${entry.key})`]); }
 function summary(entry) {
   if (entry.type === "random_encounter") return `${entry.count}回 · LV ${entry.encounter.monster_level === "dynamic" ? "変動" : entry.encounter.monster_level} · 危険度${entry.encounter.danger === "high" ? "高" : "低"}`;
-  if (entry.type === "event_battle") return `${entry.battle_id} · ${entry.monster_keys.length}体`;
+  if (entry.type === "event_battle") return entry.battle_id;
   return entry.contents.type === "gold" ? `${entry.contents.amount} Gold` : entry.contents.item_key;
 }
 function detail(entry) {
@@ -52,13 +52,13 @@ function detail(entry) {
     html += entry.contents.type === "gold" ? numberField("amount", "金額", entry.contents.amount, 1, 999999)
       : selectField("item_key", "アイテム（1個）", catalogOptions("items"), entry.contents.item_key);
   } else {
-    html = `<label>バトルID<input data-field="battle_id" value="${escapeHtml(entry.battle_id)}" pattern="[a-z][a-z0-9_]*"></label>`;
+    html = selectField("battle_id", "バトルID", [["", "選択してください"], ...catalogs.battle_ids.map((id) => [id,id])], entry.battle_id);
   }
   html = `<div class="fields">${html}</div>`;
   if (entry.type === "event_battle") {
-    html += `<p class="hint">敵編成（1〜5体・上から表示順）。同じモンスターを複数指定できます。戦闘IDに紐づく開始イベントも実行します。</p>`;
-    html += entry.monster_keys.map((key,index) => `<div class="enemy"><select data-enemy-index="${index}" aria-label="敵${index+1}">${optionList(catalogOptions("monsters"),key)}</select><button data-action="remove-enemy" data-index="${index}" ${entry.monster_keys.length <= 1 ? "disabled" : ""}>削除</button></div>`).join("");
-    html += `<button data-action="add-enemy" ${entry.monster_keys.length >= 5 || !catalogs.monsters.length ? "disabled" : ""}>＋ 敵を追加</button>`;
+    const battle = catalogs.battles.find((battle) => battle.battle_id === entry.battle_id);
+    const names = (battle?.monster_keys || []).map((key) => catalogs.monsters.find((monster) => monster.key === key)?.name || key);
+    html += `<p class="hint">${escapeHtml(names.join(" ／ ") || "イベントエディタの「イベントバトル」タブで登録してください。")}</p>`;
   }
   return html;
 }
@@ -158,15 +158,13 @@ document.addEventListener("click", (event) => {
     changed((value) => { const d = dungeon(); const index = d.steps.findIndex((entry) => entry.id === target.dataset.id); d.steps.splice(index,1); value.stepId = d.steps[Math.min(index,d.steps.length-1)]?.id ?? null; });
   } else if (action === "up" || action === "down") {
     changed((value) => { value.stepId = target.dataset.id; moveStep(dungeon(),target.dataset.id,action === "up" ? -1 : 1); });
-  } else if (action === "remove-enemy") { changed(() => step().monster_keys.splice(Number(target.dataset.index),1)); }
-  else if (action === "add-enemy") { changed(() => step().monster_keys.push(catalogs.monsters[0].key)); }
+  }
 });
 
 document.addEventListener("change", (event) => {
   if (!history || saving) return;
   const target = event.target;
   pendingEdit = false;
-  if (target.dataset.enemyIndex !== undefined) { changed(() => { step().monster_keys[Number(target.dataset.enemyIndex)] = target.value; }, false); return; }
   const field = target.dataset.field;
   if (!field) return;
   changed(() => {
@@ -178,7 +176,7 @@ document.addEventListener("change", (event) => {
     else if (field === "item_key") s.contents.item_key = value;
     else if (field === "battle_id") s.battle_id = value;
     else s.encounter[field] = field.startsWith("allow_") ? value === "true" : field === "monster_level" && value !== "dynamic" ? Number(value) : value;
-  }, field === "contents_type");
+  }, field === "contents_type" || field === "battle_id");
 });
 document.addEventListener("input", (event) => {
   if (history && event.target.dataset.field && !saving) { pendingEdit = true; render(false); }

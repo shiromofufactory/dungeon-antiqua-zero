@@ -1,4 +1,121 @@
 {
   "format_version": 1,
-  "dungeons": []
+  "dungeons": [
+    {
+      "id": "dungeon_1ac4aaa0106c4f19a0cd471f59fcfe88",
+      "name": "ヒュドラの洞窟",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "random_encounter_f8720896434b4433a50a0afea7507a5d",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": true,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_f9b2433b916e49c489176c03ef7012ab",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "REMEDY"
+          }
+        },
+        {
+          "id": "treasure_655b047a9743412eb4bb82f29c6dbccc",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "LEATHER ARMOR"
+          }
+        },
+        {
+          "id": "treasure_caac18ab8e814d369be77a70dcd2c6d2",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "POTION"
+          }
+        },
+        {
+          "id": "random_encounter_1de1da76d5474f2fa6667c80af53640a",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": true,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "event_battle_8595a8ddb7f34919a511b5e96f8ba360",
+          "type": "event_battle",
+          "battle_id": "battle_3"
+        },
+        {
+          "id": "random_encounter_c7c30fd6ce26449dbdad0b92cd5eb876",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": true,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_06fd77c937e3499788a89f729d6a1246",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "IRON BANGLE"
+          }
+        },
+        {
+          "id": "treasure_c2e4b56702bb413aa8cf9d0500bd41c7",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "REMEDY"
+          }
+        },
+        {
+          "id": "treasure_2be2307bc245485bb6ecca4c6fb3d589",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "FRUIT of STR"
+          }
+        },
+        {
+          "id": "random_encounter_816e95c1fb214052bc02f7e7ad839f5a",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": true,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        }
+      ]
+    }
+  ]
 }

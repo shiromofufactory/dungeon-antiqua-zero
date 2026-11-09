@@ -76,7 +76,7 @@ Google Sheets ──→ GAS ──→ get-data.mjs ──→ Sheets同期対象J
 イベント定義もGoogle Sheetsとは同期せず、次の経路で利用する。
 
 ```text
-共有リポジトリ events/*.json
+共有リポジトリ events/*.json（battles.jsonの共通イベントバトル登録を含む）
         └──→ event compiler ──→ app/events/events.json ──→ Pyxelゲーム
 ```
 

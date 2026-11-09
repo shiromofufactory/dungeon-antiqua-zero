@@ -92,7 +92,6 @@ class OpenShopEffect:
 @dataclass(frozen=True)
 class StartBattleEffect:
     battle_id: str
-    monster_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -302,9 +301,7 @@ class EventRunner:
                 return OpenShopEffect(str(command["shop_key"]))
             if command_type == "start_battle":
                 self._require_field(command_type)
-                return StartBattleEffect(
-                    str(command["battle_id"]), tuple(command["monster_keys"])
-                )
+                return StartBattleEffect(str(command["battle_id"]))
             if command_type == "face_party":
                 self._require_field(command_type)
                 return FacePartyEffect(self._direction(command["direction"]))

@@ -14,8 +14,7 @@ export function addStep(dungeon, type, catalogs, at = dungeon.steps.length) {
   } else if (type === "treasure") {
     step.contents = { type: "gold", amount: 100 };
   } else if (type === "event_battle") {
-    step.battle_id = "debug_battle";
-    step.monster_keys = catalogs.monsters.length ? [catalogs.monsters[0].key] : [];
+    step.battle_id = catalogs.battle_ids?.[0] || "";
   } else {
     throw new Error("不明なステップ種別です。");
   }

@@ -1643,7 +1643,9 @@ ZEROはフリーシナリオ、戦闘回数による敵の強化、魔力設備�
 イベント会話は通常UI語彙の `content/data/texts.json` と分離し、
 `content/events/messages.json` から `app/events/messages.json` を生成する。イベント定義は
 `message_id` だけを保持し、顔グラフィックのキャラクターキーはメッセージ定義が所有する。
-Overlayがメッセージ定義から現在言語と顔を解決する。通常イベントの正本は
+Overlayがメッセージ定義から現在言語と顔を解決する。イベントバトルの正本は `content/events/battles.json` とし、イベントとダンジョン試行はIDだけを保持する。
+EventCatalogは生成済みのID→編成索引を所有し、Gameが本編・試行のどちらも同じ索引から解決する。
+通常イベントの正本は
 `content/events/events.json` に集約し、制作時から完全IDを保持する。接頭辞はID整理の単位であり、
 マップIDとは対応付けない。
 

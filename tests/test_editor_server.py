@@ -476,6 +476,32 @@ class EditorServerTest(unittest.TestCase):
         self.assertEqual(event_token["token"], "shared-token")
         self.assertEqual(tileset_token["token"], "shared-token")
 
+    def test_shared_battle_registration_updates_both_editors_and_rejects_broken_references(self) -> None:
+        (self.content_root / "data" / "monsters.json").write_text('[{"name_en":"SLIME"}]', encoding="utf-8")
+        data = {"format_version":1,"events":[{"id":"sample.guard","commands":[{
+            "command":"start_battle","battle_id":"shared_guard",
+        }]}]}
+        battles = [{"battle_id":"shared_guard","monster_keys":["SLIME"]}]
+        payload = {"data":data,"flags":[],"messages":[],"missions":[],"battles":battles}
+        self.assertTrue(self.post_json("/event/api/save",payload,"X-Event-Editor-Token")["saved"])
+        debug_payload = self.get_json("/dungeon/api/document?token=shared-token")
+        self.assertEqual(debug_payload["catalogs"]["battle_ids"], ["shared_guard"])
+        trial = {"format_version":1,"dungeons":[{"id":"trial","name":"調整用","bgm_id":"da3-field","steps":[{
+            "id":"boss","type":"event_battle","battle_id":"shared_guard",
+        }]}]}
+        self.assertTrue(self.post_json("/dungeon/api/save",{"data":trial},"X-Dungeon-Editor-Token")["saved"])
+        battles[0]["monster_keys"] = ["SLIME","SLIME"]
+        self.assertTrue(self.post_json("/event/api/save",payload,"X-Event-Editor-Token")["saved"])
+        compiled = self.event_application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(compiled)["battles"]["shared_guard"], ["SLIME","SLIME"])
+        result = self.post_json("/event/api/save",{**payload,"battles":battles * 2},"X-Event-Editor-Token")
+        self.assertFalse(result["saved"])
+        self.assertIn("duplicate_battle_id", {issue["code"] for issue in result["diagnostics"]})
+        result = self.post_json("/event/api/save",{**payload,"battles":[]},"X-Event-Editor-Token")
+        self.assertFalse(result["saved"])
+        self.assertIn("referenced_debug_battle", {issue["code"] for issue in result["diagnostics"]})
+        self.assertEqual(self.event_application.runtime_path.read_bytes(), compiled)
+
     def test_dungeon_editor_shares_authentication_and_saves_only_its_debug_source(self) -> None:
         with self.assertRaises(HTTPError) as error:
             self.get_json("/dungeon/api/document")

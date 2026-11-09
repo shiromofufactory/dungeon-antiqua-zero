@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../tools/event_editor/static/app.js', import.meta.url), 'utf8');
 const names = ['snapshot', 'begin', 'commit', 'restore', 'undo', 'redo', 'normalize',
-  'currentFlag', 'currentEvent', 'currentMission', 'currentMessage', 'listForKind', 'moveListItem',
+  'currentFlag', 'currentBattle', 'currentEvent', 'currentMission', 'currentMessage', 'listForKind', 'moveListItem',
   'commandAt', 'listAt', 'commandPath', 'isDescendantList', 'moveCommand'];
 const declarations = names.map((name) => {
   const start = source.indexOf(`function ${name}(`);

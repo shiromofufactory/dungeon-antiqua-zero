@@ -26,6 +26,7 @@ from map_pipeline import (
     validate_tileset,
 )
 from event_pipeline import (
+    load_event_battles,
     compile_event_sources,
     load_event_sources,
     reference_catalogs,
@@ -73,6 +74,7 @@ def main() -> int:
         catalogs = reference_catalogs(content_root, app_root=PROJECT_ROOT / "app")
         event_catalog = compile_event_sources(
             load_event_sources(content_root),
+            battles=load_event_battles(content_root),
             **catalogs,
         )
         bgm_ids = catalogs["bgm_ids"]

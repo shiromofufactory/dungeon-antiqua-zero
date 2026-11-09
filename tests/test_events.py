@@ -82,6 +82,7 @@ def runtime_document(commands: list[dict[str, object]]) -> dict[str, object]:
         "format_version": 1,
         "source_sha256": "0" * 64,
         "flags": ["sample.done"],
+        "battles": {"guard": ["SLIME"]},
         "events": {"sample.run": {"commands": commands}},
     }
 
@@ -321,14 +322,14 @@ class EventRunnerTest(unittest.TestCase):
             "condition": {"type": "flag_set", "flag_id": "sample.done"},
             "then": [],
             "else": [
-                {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},
+                {"command": "start_battle", "battle_id": "guard"},
                 {"command": "set_flag", "flag_id": "sample.done"},
             ],
         }]
         runner = self.runner(commands)
 
         effect = runner.advance()
-        self.assertEqual(effect, StartBattleEffect("guard", ("SLIME",)))
+        self.assertEqual(effect, StartBattleEffect("guard"))
         runner.complete_effect(effect)
         self.assertIsNone(runner.advance())
         self.assertIn("sample.done", self.save_data.event_flags)
@@ -339,12 +340,12 @@ class EventRunnerTest(unittest.TestCase):
 
     def test_start_battle_waits_and_then_continues(self) -> None:
         runner = self.runner([
-            {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},
+            {"command": "start_battle", "battle_id": "guard"},
             {"command": "set_flag", "flag_id": "sample.done"},
         ])
 
         effect = runner.advance()
-        self.assertEqual(effect, StartBattleEffect("guard", ("SLIME",)))
+        self.assertEqual(effect, StartBattleEffect("guard"))
         self.assertNotIn("sample.done", self.save_data.event_flags)
         runner.complete_effect(effect)
         self.assertIsNone(runner.advance())

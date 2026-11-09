@@ -118,7 +118,7 @@ class EventEditorServerTest(unittest.TestCase):
                     "condition": {"type": "flag_set", "flag_id": "story.done"},
                     "then": [],
                     "else": [
-                        {"command": "start_battle", "battle_id": "guard", "monster_keys": ["SLIME"]},
+                        {"command": "start_battle", "battle_id": "guard"},
                         {"command": "set_flag", "flag_id": "story.done"},
                     ],
                 }],
@@ -136,7 +136,6 @@ class EventEditorServerTest(unittest.TestCase):
                 {"id": "sample.begin", "commands": [{
                     "command": "start_battle",
                     "battle_id": "shrine_guard",
-                    "monster_keys": ["SLIME"],
                 }]},
                 {"id": "sample.opening", "battle_start_id": "shrine_guard", "commands": [
                     {"command": "message", "message_id": "sample.hello"}
@@ -212,6 +211,10 @@ class EventEditorServerTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (self.content_root / "events" / "battles.json").write_text(json.dumps([
+            {"battle_id":"guard", "monster_keys":["SLIME"]},
+            {"battle_id":"shrine_guard", "monster_keys":["SLIME"]},
+        ]), encoding="utf-8")
         self.application = EventEditorApplication(
             self.content_root,
             app_root / "events" / "events.json",
@@ -546,7 +549,7 @@ class EventEditorServerTest(unittest.TestCase):
             self.assertEqual(payload["event_ids"], ["common.event_0", "forest.event_0"])
         self.assertEqual(self.application.source_path.name, "events.json")
         self.assertEqual(sorted(path.name for path in self.application.source_path.parent.glob("*.json")),
-                         ["events.json", "flags.json", "messages.json", "missions.json"])
+                         ["battles.json", "events.json", "flags.json", "messages.json", "missions.json"])
 
     def test_does_not_write_invalid_reference(self) -> None:
         data = {

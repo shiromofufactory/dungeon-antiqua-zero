@@ -36,7 +36,6 @@ class DungeonStep:
     encounter: MapRandomEncounter | None = None
     contents: MapTreasureContents | None = None
     battle_id: str | None = None
-    monster_keys: tuple[str, ...] = ()
 
     def treasure_actor(self) -> MapActor:
         return MapActor(self.id, MapCell(0, 0), "treasure", 0, contents=self.contents)
@@ -80,7 +79,7 @@ def _integer(value: object, low: int, high: int, path: str) -> int:
 
 def parse_dungeons(
     document: object, *, item_keys: Collection[str] | None = None,
-    monster_keys: Collection[str] | None = None, bgm_ids: Collection[str] | None = None,
+    battle_ids: Collection[str] = (), bgm_ids: Collection[str] | None = None,
 ) -> tuple[DebugDungeon, ...]:
     root = _fields(document, {"format_version", "dungeons"}, "root")
     _require(type(root["format_version"]) is int and root["format_version"] == 1,
@@ -110,7 +109,7 @@ def parse_dungeons(
             _require(kind in ("random_encounter", "treasure", "event_battle"),
                      current, "種類が不正です")
             extra = {"random_encounter": {"count", "encounter"},
-                     "treasure": {"contents"}, "event_battle": {"battle_id", "monster_keys"}}[kind]
+                     "treasure": {"contents"}, "event_battle": {"battle_id"}}[kind]
             _fields(step, {"id", "type"} | extra, current)
             step_id = _id(step["id"], current)
             _require(step_id not in step_ids, current, "ステップIDが重複しています")
@@ -140,12 +139,8 @@ def parse_dungeons(
                 steps.append(DungeonStep(step_id, kind, contents=MapTreasureContents(**contents)))
             else:
                 battle_id = _id(step["battle_id"], current)
-                keys = step["monster_keys"]
-                _require(isinstance(keys, list) and 1 <= len(keys) <= 5, current, "敵編成は1〜5体です")
-                _require(all(isinstance(key, str) and bool(key) and
-                             (monster_keys is None or key in monster_keys) for key in keys),
-                         current, "存在するモンスターを指定してください")
-                steps.append(DungeonStep(step_id, kind, battle_id=battle_id, monster_keys=tuple(keys)))
+                _require(battle_id in battle_ids, current, f"未登録のイベントバトルです: {battle_id}")
+                steps.append(DungeonStep(step_id, kind, battle_id=battle_id))
         result.append(DebugDungeon(dungeon_id, raw["name"], bgm, tuple(steps)))
     return tuple(result)
 
