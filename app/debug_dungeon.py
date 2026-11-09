@@ -29,6 +29,34 @@ class DebugDungeonDataError(ValueError):
 
 
 @dataclass(frozen=True)
+class DungeonCheckpoint:
+    """Stable IDs and progress needed to resume a visit between encounters."""
+
+    dungeon_id: str
+    step_id: str | None
+    completed_in_step: int
+    fade_active: bool
+
+    def __post_init__(self) -> None:
+        _id(self.dungeon_id, "debug_dungeon.dungeon_id")
+        if self.step_id is not None:
+            _id(self.step_id, "debug_dungeon.step_id")
+        _integer(self.completed_in_step, 0, 9998, "debug_dungeon.completed_in_step")
+        _require(type(self.fade_active) is bool, "debug_dungeon.fade_active", "booleanが必要です")
+        _require(self.step_id is not None or self.completed_in_step == 0,
+                 "debug_dungeon", "最奥部到達後の回数は0です")
+
+    def to_document(self) -> dict[str, object]:
+        return {"dungeon_id": self.dungeon_id, "step_id": self.step_id,
+                "completed_in_step": self.completed_in_step, "fade_active": self.fade_active}
+
+    @classmethod
+    def from_document(cls, document: object) -> DungeonCheckpoint:
+        values = _fields(document, {"dungeon_id", "step_id", "completed_in_step", "fade_active"}, "debug_dungeon")
+        return cls(**values)
+
+
+@dataclass(frozen=True)
 class DungeonStep:
     id: str
     type: str
@@ -155,7 +183,7 @@ def load_dungeons(path: Path = DEFAULT_PATH, **catalogs) -> tuple[DebugDungeon, 
 
 
 class DungeonProgress:
-    """One visit; only treasure ownership lives beyond this object."""
+    """One visit with a serializable checkpoint between encounters."""
 
     def __init__(self, dungeon: DebugDungeon, *, random_source=None) -> None:
         self.dungeon = dungeon
@@ -163,6 +191,26 @@ class DungeonProgress:
         self.completed_in_step = 0
         self.fade_active = False
         self.random = random_source or random.Random()
+
+    def checkpoint(self) -> DungeonCheckpoint:
+        return DungeonCheckpoint(self.dungeon.id, self.current.id if self.current else None,
+                                 self.completed_in_step, self.fade_active)
+
+    @classmethod
+    def from_checkpoint(cls, dungeon: DebugDungeon, checkpoint: DungeonCheckpoint) -> DungeonProgress:
+        _require(dungeon.id == checkpoint.dungeon_id, "debug_dungeon", "ダンジョンIDが一致しません")
+        progress = cls(dungeon)
+        if checkpoint.step_id is None:
+            progress.index = len(dungeon.steps)
+        else:
+            progress.index = next((index for index, step in enumerate(dungeon.steps)
+                                   if step.id == checkpoint.step_id), -1)
+            _require(progress.index >= 0, "debug_dungeon", "保存したステップが存在しません")
+            _require(checkpoint.completed_in_step < progress.current.count,
+                     "debug_dungeon", "保存した消化回数がステップの範囲外です")
+        progress.completed_in_step = checkpoint.completed_in_step
+        progress.fade_active = checkpoint.fade_active
+        return progress
 
     @property
     def current(self) -> DungeonStep | None:

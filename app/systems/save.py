@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 if __package__ == "systems":
+    from debug_dungeon import DungeonCheckpoint, DebugDungeonDataError
     from battle_command_memory import BattleCommandMemory
     from battle_commands import BattleCommand
     from field import FieldPosition
@@ -28,6 +29,7 @@ if __package__ == "systems":
     from state import AutoRecoveryConfig, AutoRecoveryMethod, Difficulty, SaveData
     from systems.inventory import InventorySystem
 else:
+    from ..debug_dungeon import DungeonCheckpoint, DebugDungeonDataError
     from ..battle_command_memory import BattleCommandMemory
     from ..battle_commands import BattleCommand
     from ..field import FieldPosition
@@ -126,6 +128,7 @@ class LoadedGameState:
     battle_command_memory: BattleCommandMemory = field(
         default_factory=BattleCommandMemory
     )
+    debug_dungeon: DungeonCheckpoint | None = None
 
 
 def restore_save_document(
@@ -307,6 +310,12 @@ def restore_save_document(
         saved_at=timestamp,
         battle_command_memory=command_memory,
     )
+    checkpoint = None
+    if document.get("debug_dungeon") is not None:
+        try:
+            checkpoint = DungeonCheckpoint.from_document(document["debug_dungeon"])
+        except DebugDungeonDataError as error:
+            raise SaveSystemError(str(error)) from error
     return LoadedGameState(
         save_data=save_data,
         active_party=active_party,
@@ -316,6 +325,7 @@ def restore_save_document(
         position=position,
         facing=facing,
         battle_command_memory=command_memory,
+        debug_dungeon=checkpoint,
     )
 
 
@@ -609,6 +619,7 @@ def create_save_document(
     facing: Direction,
     saved_at: datetime | None = None,
     battle_command_memory: BattleCommandMemory | None = None,
+    debug_dungeon: DungeonCheckpoint | None = None,
 ) -> dict[str, object]:
     """Create one complete current-version save document from explicit owners."""
 
@@ -686,7 +697,9 @@ def create_save_document(
         for item in member.equipment.equipped_items()
     )
 
-    return {
+    if debug_dungeon is not None and not isinstance(debug_dungeon, DungeonCheckpoint):
+        raise TypeError("debug_dungeon must be a DungeonCheckpoint or None")
+    document = {
         "format_version": SAVE_FORMAT_VERSION,
         "saved_at": timestamp.isoformat(timespec="seconds"),
         "progress": {
@@ -733,6 +746,9 @@ def create_save_document(
             else battle_command_memory
         ),
     }
+    if debug_dungeon is not None:
+        document["debug_dungeon"] = debug_dungeon.to_document()
+    return document
 
 
 def _restore_battle_command_memory(value: object) -> BattleCommandMemory:

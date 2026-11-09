@@ -2684,6 +2684,7 @@ class GameTest(unittest.TestCase):
             position=FieldPosition(17, 39),
             facing=Direction.LEFT,
             battle_command_memory=mock.battle_command_memory,
+            debug_dungeon=None,
         )
         mock.save_repository.save.assert_called_once_with(3, document)
         self.assertIs(result, summary)
@@ -2763,6 +2764,7 @@ class GameTest(unittest.TestCase):
         mock.items = {"POTION": Mock()}
         mock.skills = {"Two-Handed": Mock()}
         loaded = Mock(
+            debug_dungeon=None,
             map_id="worldmap",
             position=FieldPosition(17, 39),
             facing=Direction.LEFT,
@@ -2807,7 +2809,7 @@ class GameTest(unittest.TestCase):
         shop_system_class: Mock,
     ) -> None:
         mock = Game.__new__(Game)
-        loaded = Mock()
+        loaded = Mock(debug_dungeon=None)
         loaded.save_data = SaveData(gold=321)
         loaded.active_party = (Mock(), Mock())
         loaded.character_states = {"Fiora": loaded.active_party[0]}
@@ -2870,6 +2872,7 @@ class GameTest(unittest.TestCase):
         mock.texts = Mock()
         mock.fonts = Mock()
         mock.pending_loaded_state = Mock(
+            debug_dungeon=None,
             save_data=SaveData(), active_party=(), character_states={},
             inventory=InventorySystem({}),
         )
@@ -2901,6 +2904,7 @@ class GameTest(unittest.TestCase):
         mock.settings = Settings()
         mock._load_mission_hint_shown_this_launch = True
         mock.pending_loaded_state = Mock(
+            debug_dungeon=None,
             save_data=SaveData(), active_party=(), character_states={},
             inventory=InventorySystem({}),
         )

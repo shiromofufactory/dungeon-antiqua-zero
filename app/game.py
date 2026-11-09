@@ -26,7 +26,7 @@ from ui.debug_menu import DebugMenuOverlay, DebugShopTarget
 from ui.auto_recovery import AutoRecoveryOverlay
 from ui.debug_text import DEBUG_TEXT
 from ui.debug_encounter import DebugEncounterState
-from debug_dungeon import DebugDungeon, DebugDungeonDataError, DungeonStep, load_dungeons, reset_treasures
+from debug_dungeon import DebugDungeon, DebugDungeonDataError, DungeonProgress, DungeonStep, load_dungeons, reset_treasures
 from scenes.debug_dungeon import DebugDungeonScene
 from resources.maps import MapRandomEncounter
 from systems.encounter import EncounterGenerationError
@@ -1403,8 +1403,7 @@ class Game:
         raise ValueError(f"cursor key is not registered: {key!r}")
 
     def _manual_save_enabled(self) -> bool:
-        return (self.launch_mode is not LaunchMode.EXHIBITION
-                and getattr(self, "debug_dungeon_scene", None) is None)
+        return self.launch_mode is not LaunchMode.EXHIBITION
 
     def _build_main_windows(
         self,
@@ -2293,10 +2292,7 @@ class Game:
             return
         dungeon_error = None
         try:
-            dungeons = load_dungeons(
-                item_keys=self.items, battle_ids=self.event_catalog.battle_ids,
-                bgm_ids={path.stem for path in (Path(__file__).resolve().parent / "audio").glob("*.ogg")},
-            )
+            dungeons = self._load_debug_dungeons()
         except DebugDungeonDataError as error:
             dungeon_error = str(error)
             dungeons = ()
@@ -2329,6 +2325,12 @@ class Game:
     def _exploration_bgm_id(self) -> str:
         simulation = getattr(self, "debug_dungeon_scene", None)
         return simulation.dungeon.bgm_id if simulation is not None else self.current_map.bgm_id
+
+    def _load_debug_dungeons(self) -> tuple[DebugDungeon, ...]:
+        return load_dungeons(
+            item_keys=self.items, battle_ids=self.event_catalog.battle_ids,
+            bgm_ids={path.stem for path in (APP_ROOT / "audio").glob("*.ogg")},
+        )
 
     def _start_debug_dungeon(self, dungeon: DebugDungeon) -> None:
         self.pending_debug_dungeon = dungeon
@@ -2908,8 +2910,7 @@ class Game:
         self.command_cursor.active = True
 
     def _save_to_slot(self, slot: int) -> SaveSlotSummary | None:
-        if getattr(self, "debug_dungeon_scene", None) is not None:
-            return None
+        simulation = getattr(self, "debug_dungeon_scene", None)
         try:
             document = create_save_document(
                 save_data=self.save_data,
@@ -2920,6 +2921,7 @@ class Game:
                 position=self.field.position,
                 facing=self.field.facing,
                 battle_command_memory=getattr(self, "battle_command_memory", None),
+                debug_dungeon=simulation.progress.checkpoint() if simulation is not None else None,
             )
             summary = self.save_repository.save(slot, document)
         except (SaveSystemError, TypeError, ValueError):
@@ -2931,6 +2933,8 @@ class Game:
     def _auto_save(self) -> None:
         """Persist a completed field arrival without changing the manual slot."""
 
+        if getattr(self, "debug_dungeon_scene", None) is not None:
+            return
         self._save_to_slot(AUTO_SAVE_SLOT)
 
     def _start_new_game(self) -> None:
@@ -2951,6 +2955,16 @@ class Game:
                 items=self.items,
                 skills=self.skills,
             )
+            checkpoint = loaded.debug_dungeon
+            dungeon = None
+            if checkpoint is not None:
+                if self.launch_mode is not LaunchMode.NORMAL:
+                    return False
+                dungeon = next((entry for entry in self._load_debug_dungeons()
+                                if entry.id == checkpoint.dungeon_id), None)
+                if dungeon is None:
+                    return False
+                DungeonProgress.from_checkpoint(dungeon, checkpoint)
             target_map = self.map_resources.map(loaded.map_id)
             target_field = FieldMovement(
                 target_map,
@@ -2967,6 +2981,7 @@ class Game:
         except (SaveSystemError, MapResourceError, TypeError, ValueError):
             return False
         self.pending_loaded_state = loaded
+        self.pending_debug_dungeon = dungeon
         self.pending_loaded_map = target_map
         self.pending_loaded_field = target_field
         self.pending_loaded_renderer = target_renderer
@@ -2986,6 +3001,7 @@ class Game:
 
         loaded = self.pending_loaded_state
         is_new_game = loaded is None
+        self.debug_dungeon_scene = None
         if loaded is not None:
             if (
                 self.pending_loaded_map is None
@@ -3052,7 +3068,11 @@ class Game:
         self.showing_field = True
         self._reset_field_fade()
         self._refresh_site_name_label(force=True)
-        self.bgm.play(self.current_map.bgm_id)
+        if loaded is not None and loaded.debug_dungeon is not None:
+            self._apply_debug_dungeon()
+            self.debug_dungeon_scene.resume(loaded.debug_dungeon)
+        else:
+            self.bgm.play(self.current_map.bgm_id)
         if is_new_game:
             self._start_field_event(NEW_GAME_EVENT_ID)
         elif self.settings.in_game_hints_enabled and not getattr(

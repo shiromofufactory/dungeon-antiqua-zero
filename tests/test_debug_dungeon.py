@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
 from debug_dungeon import (
-    DEFAULT_ENCOUNTER, DebugDungeonDataError, DungeonProgress, parse_dungeons as parse_dungeon_document, reset_treasures,
+    DEFAULT_ENCOUNTER, DebugDungeonDataError, DungeonCheckpoint, DungeonProgress, parse_dungeons as parse_dungeon_document, reset_treasures,
 )
 from game import Game, GameScreenChange
 from input import Direction, InputButton, InputState
@@ -42,6 +42,34 @@ def source():
 
 
 class DebugDungeonDataTest(unittest.TestCase):
+    def test_checkpoint_restores_partial_random_battles_and_fade_by_stable_step_id(self):
+        dungeon = parse_dungeons(source())[0]
+        progress = DungeonProgress(dungeon)
+        progress.complete()
+        progress.activate_fade()
+        checkpoint = DungeonCheckpoint.from_document(progress.checkpoint().to_document())
+        restored = DungeonProgress.from_checkpoint(dungeon, checkpoint)
+        self.assertEqual(restored.index, 0)
+        self.assertEqual(restored.completed_in_step, 1)
+        self.assertTrue(restored.fade_active)
+        reordered = source()
+        steps = reordered["dungeons"][0]["steps"]
+        steps.insert(0, steps.pop(1))
+        restored = DungeonProgress.from_checkpoint(parse_dungeons(reordered)[0], checkpoint)
+        self.assertEqual(restored.index, 1)
+        self.assertEqual(restored.completed_in_step, 1)
+
+    def test_checkpoint_restores_end_and_rejects_missing_steps_and_changed_count(self):
+        dungeon = parse_dungeons(source())[0]
+        finished = DungeonCheckpoint(dungeon.id, None, 0, True)
+        self.assertIsNone(DungeonProgress.from_checkpoint(dungeon, finished).current)
+        for checkpoint in (DungeonCheckpoint("missing", "random_1", 0, False),
+                           DungeonCheckpoint(dungeon.id, "missing", 0, False),
+                           DungeonCheckpoint(dungeon.id, "random_1", 2, False),
+                           DungeonCheckpoint(dungeon.id, "chest_1", 1, False)):
+            with self.subTest(checkpoint=checkpoint), self.assertRaises(DebugDungeonDataError):
+                DungeonProgress.from_checkpoint(dungeon, checkpoint)
+
     def test_rejects_bad_fields_ids_bounds_duplicates_and_references(self):
         mutations = (
             lambda d: d.update(format_version=True),
@@ -135,6 +163,20 @@ class DebugDungeonSceneTest(unittest.TestCase):
         self.assertEqual(self.battle.call_count, 1)
         scene.update(InputState(confirm=InputButton(True, True)))
         self.assertEqual(self.battle.call_count, 2)
+
+    def test_resume_waits_for_choice_without_replaying_the_saved_step(self):
+        scene = self.scene()
+        checkpoint = DungeonCheckpoint(scene.dungeon.id, "random_1", 1, True)
+        scene.resume(checkpoint)
+        scene.update(InputState())
+        self.battle.assert_not_called()
+        self.assertTrue(scene.started)
+        self.assertEqual(scene.progress.completed_in_step, 1)
+        self.assertTrue(scene.progress.fade_active)
+        scene.resume(DungeonCheckpoint(scene.dungeon.id, None, 0, False))
+        scene.update(InputState())
+        self.assertIsNone(scene.progress.current)
+        self.assertNotIn("next", [target.key for target in scene.cursor.targets])
 
     def test_first_event_battle_warns_and_allows_preparation_without_starting(self):
         data = source()
@@ -236,16 +278,80 @@ class DebugDungeonGameTest(unittest.TestCase):
         game._build_main_windows = Mock()
         return game
 
-    def test_active_simulation_disables_all_slot_writes_and_teleport(self):
+    def test_active_simulation_allows_manual_save_but_not_autosave_or_teleport(self):
         game = self.game()
         game.save_repository = Mock()
-        self.assertFalse(game._manual_save_enabled())
-        self.assertIsNone(game._save_to_slot(1))
+        self.assertTrue(game._manual_save_enabled())
         game._auto_save()
         game.save_repository.save.assert_not_called()
         self.assertFalse(game._start_teleport("town", source="spell"))
         game.debug_dungeon_scene.progress.activate_fade.return_value = True
         self.assertTrue(game._activate_field_fade())
+
+    def test_manual_save_keeps_trial_results_and_original_field_location(self):
+        items = load_mock_items()
+        skills = load_mock_skills()
+        party = load_mock_party(items, skills)
+        game = self.game()
+        game.debug_dungeon_scene.progress = DungeonProgress(parse_dungeons(source())[0])
+        game.debug_dungeon_scene.progress.complete()
+        game.debug_dungeon_scene.progress.activate_fade()
+        game.items = items
+        game.skills = skills
+        game.party = party
+        game.character_states = {member.definition.key:member for member in party}
+        game.inventory_system = InventorySystem(items)
+        game.inventory_system.add("POTION", members=party)
+        game.save_data.gold = 345
+        game.save_data.battle_count = 7
+        game.save_data.opened_treasures.add(("debug_dungeon.trial", "chest_1"))
+        game.party[0].hp = 1
+        from field import FieldPosition
+        game.field.position = FieldPosition(3, 4)
+        game.field.facing = Direction.LEFT
+        with TemporaryDirectory() as directory:
+            from systems import SaveRepository
+            game.save_repository = SaveRepository(Path(directory))
+            self.assertIsNotNone(game._save_to_slot(2))
+            self.assertEqual(game.current_save_slot, 2)
+            restored = restore_save_document(game.save_repository.load(2),
+                character_records=load_mock_character_records(), items=items, skills=skills)
+        self.assertEqual((restored.map_id, restored.position, restored.facing),
+                         ("real_map", FieldPosition(3, 4), Direction.LEFT))
+        self.assertEqual(restored.debug_dungeon, game.debug_dungeon_scene.progress.checkpoint())
+        self.assertEqual(restored.active_party[0].hp, 1)
+        self.assertEqual(restored.save_data.gold, 345)
+        self.assertEqual(restored.save_data.battle_count, 7)
+        self.assertIn(("debug_dungeon.trial", "chest_1"), restored.save_data.opened_treasures)
+
+    def test_exhibition_manual_save_restriction_is_preserved(self):
+        game = self.game()
+        game.launch_mode = LaunchMode.EXHIBITION
+        self.assertFalse(game._manual_save_enabled())
+
+    def test_load_rejects_deleted_dungeon_before_staging_a_transition(self):
+        game = self.game()
+        game.character_records = ()
+        game.items = {}
+        game.skills = {}
+        game.save_repository = Mock()
+        game._load_debug_dungeons = Mock(return_value=())
+        game._begin_screen_change = Mock()
+        loaded = SimpleNamespace(debug_dungeon=DungeonCheckpoint("missing", "step", 0, False))
+        with patch("game.restore_save_document", return_value=loaded):
+            self.assertFalse(game._load_from_slot(1))
+        game._begin_screen_change.assert_not_called()
+
+    def test_load_rejects_trial_in_non_debug_modes(self):
+        game = self.game()
+        game.launch_mode = LaunchMode.BETA
+        game.character_records = ()
+        game.items = {}
+        game.skills = {}
+        game.save_repository = Mock()
+        loaded = SimpleNamespace(debug_dungeon=DungeonCheckpoint("trial", "step", 0, False))
+        with patch("game.restore_save_document", return_value=loaded):
+            self.assertFalse(game._load_from_slot(1))
 
     def test_victory_and_escape_return_to_progress_and_preserve_original_map(self):
         for result in (BattleResult.VICTORY, BattleResult.ESCAPED):

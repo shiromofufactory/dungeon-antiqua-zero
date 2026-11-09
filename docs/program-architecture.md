@@ -1550,10 +1550,13 @@ Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受
 
 デバッグ用ダンジョンは `debug_dungeon.py` が定義の検証と1回の入場中の進行を、
 `scenes/debug_dungeon.py` が3択・警告・取得メッセージと描画を所有する。
-Gameは開始・退出Transition、既存BattleSceneと通常メニューへの接続、保存禁止を調停する。
+Gameは開始・退出Transition、既存BattleSceneと通常メニューへの接続、手動保存・復元とオートセーブ抑止を調停する。
 専用SceneへGameの参照は渡さず、必要なSystemと開始・メニュー・退出コールバックを注入する。
 宝箱は既存TreasureSystemとSaveDataの取得済み記録を専用名前空間で再利用し、
-進行位置やFADE状態をSaveDataへ追加しない。制作元は開発専用の `app/debug/dungeons.json` とし、
+進行位置やFADE状態は `DungeonProgress` が所有し、手動保存時に安定IDを持つ不変の `DungeonCheckpoint` を渡す。
+SaveSystemはこれを省略可能な保存属性へ変換し、LoadedGameStateを通して返す。
+Gameは現在の制作定義を検証してからSceneの `resume()` へ渡し、進行を再実行しない。
+通常のSaveDataへScene固有状態を追加しない。制作元は開発専用の `app/debug/dungeons.json` とし、
 統合Webエディタが同じファイルを検証・保存する。詳細は
 [デバッグ用ダンジョン仕様](./features/debug-dungeons.md)を参照する。
 

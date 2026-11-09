@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from debug_dungeon import DebugDungeon, DungeonProgress, DungeonStep
+from debug_dungeon import DebugDungeon, DungeonCheckpoint, DungeonProgress, DungeonStep
 from input import InputState
 from localization import Localizer, format_number
 from resources import play_se
@@ -45,6 +45,11 @@ class DebugDungeonScene:
         # Named battles always offer preparation before the first encounter too.
         if self.progress.current is not None and self.progress.current.type != "event_battle":
             self.advance()
+
+    def resume(self, checkpoint: DungeonCheckpoint) -> None:
+        self.progress = DungeonProgress.from_checkpoint(self.dungeon, checkpoint)
+        self.started = True
+        self.refresh()
 
     def refresh(self) -> None:
         p = self.progress

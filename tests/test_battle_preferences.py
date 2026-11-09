@@ -371,6 +371,7 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
                     )
                     memory = BattleCommandMemory(global_command=command)
                     loaded = SimpleNamespace(
+                        debug_dungeon=None,
                         save_data=SaveData(),
                         active_party=self.party,
                         character_states={m.definition.key: m for m in self.party},

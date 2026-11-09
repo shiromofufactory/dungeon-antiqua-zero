@@ -64,6 +64,14 @@
           "battle_id": "battle_3"
         },
         {
+          "id": "treasure_71fb54ab20e7491992e454c1d79b98f8",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "MANA DROP"
+          }
+        },
+        {
           "id": "random_encounter_c7c30fd6ce26449dbdad0b92cd5eb876",
           "type": "random_encounter",
           "count": 5,

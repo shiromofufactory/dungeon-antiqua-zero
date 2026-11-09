@@ -8,6 +8,7 @@ import unittest
 
 from tools._bootstrap import APP_ROOT
 from battle_command_memory import BattleCommandMemory
+from debug_dungeon import DungeonCheckpoint
 from battle_commands import BattleCommand
 from field import FieldPosition
 from input import Direction
@@ -32,6 +33,35 @@ from tools.screen_mocks._fixtures import (
 
 
 class SaveSystemTest(unittest.TestCase):
+    def test_debug_trial_checkpoints_are_optional_and_preserve_old_saves(self):
+        for version in (1, 2, SAVE_FORMAT_VERSION):
+            with self.subTest(version=version):
+                document = self.save_document()
+                document["format_version"] = version
+                self.assertNotIn("debug_dungeon", document)
+                restored = restore_save_document(document, character_records=load_mock_character_records(),
+                                                 items=self.items, skills=self.skills)
+                self.assertIsNone(restored.debug_dungeon)
+        document = self.save_document()
+        checkpoint = DungeonCheckpoint("trial", "random_1", 3, True)
+        document["debug_dungeon"] = checkpoint.to_document()
+        restored = restore_save_document(document, character_records=load_mock_character_records(),
+                                         items=self.items, skills=self.skills)
+        self.assertEqual(restored.debug_dungeon, checkpoint)
+        self.assertEqual(document["format_version"], 3)
+
+    def test_invalid_debug_trial_checkpoint_is_rejected(self):
+        for changes in ({"dungeon_id":"../trial"}, {"step_id":False},
+                        {"completed_in_step":True}, {"completed_in_step":-1},
+                        {"fade_active":1}, {"step_id":None,"completed_in_step":1},
+                        {"extra":0}):
+            with self.subTest(changes=changes):
+                document = self.save_document()
+                document["debug_dungeon"] = {**DungeonCheckpoint("trial", "random_1", 0, False).to_document(), **changes}
+                with self.assertRaises(SaveSystemError):
+                    restore_save_document(document, character_records=load_mock_character_records(),
+                                          items=self.items, skills=self.skills)
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.items = load_mock_items()
