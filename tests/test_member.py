@@ -5,6 +5,8 @@ import unittest
 from app.item import Item
 from app.localization import Localizer
 from app.member import (
+    Ability,
+    AbilityBonuses,
     AdjustedAbilities,
     BaseAbilities,
     CharacterType,
@@ -666,6 +668,60 @@ class MemberTest(unittest.TestCase):
             self.member.definition.base_abilities,
             BaseAbilities(strength=17, agility=25, magic=24),
         )
+
+    def test_permanent_growth_is_separate_from_base_and_equipment(self) -> None:
+        base = self.member.definition.base_abilities
+        ring = self.item("RING", "ARM", strength_modifier=20, magic_modifier=-2)
+        self.member.equipment = EquipmentSet({EquipmentSlot.ARM: ring})
+        for ability in Ability:
+            with self.subTest(ability=ability):
+                self.assertTrue(self.member.increase_ability(ability))
+
+        self.assertEqual(self.member.ability_bonuses, AbilityBonuses(1, 1, 1))
+        self.assertEqual(self.member.definition.base_abilities, base)
+        self.assertEqual(self.member.adjusted_abilities, AdjustedAbilities(32, 26, 23))
+        self.member.equipment = EquipmentSet()
+        self.assertEqual(self.member.adjusted_abilities, AdjustedAbilities(18, 26, 25))
+
+    def test_permanent_growth_stops_at_32_even_with_negative_equipment(self) -> None:
+        self.member.equipment = EquipmentSet({
+            EquipmentSlot.ARM: self.item(
+                "CURSED RING", "ARM", strength_modifier=-2,
+                agility_modifier=-2, magic_modifier=-2,
+            ),
+        })
+        for ability in Ability:
+            with self.subTest(ability=ability):
+                points = 32 - getattr(self.member.definition.base_abilities, ability.value)
+                for _ in range(points):
+                    self.assertTrue(self.member.can_increase_ability(ability))
+                    self.assertTrue(self.member.increase_ability(ability))
+                bonuses = self.member.ability_bonuses
+                self.assertFalse(self.member.can_increase_ability(ability))
+                self.assertFalse(self.member.increase_ability(ability))
+                self.assertEqual(self.member.ability_bonuses, bonuses)
+                self.assertEqual(getattr(self.member.adjusted_abilities, ability.value), 30)
+
+    def test_permanent_growth_changes_derived_battle_stats(self) -> None:
+        before = self.member.battle_stats
+        agility = self.member.effective_agility
+        self.member.increase_ability(Ability.AGILITY)
+        self.assertEqual(self.member.effective_agility, agility + 1)
+        self.assertEqual(self.member.battle_stats.evasion, before.evasion + 2)
+        self.member.increase_ability(Ability.MAGIC)
+        self.member.increase_ability(Ability.MAGIC)
+        self.assertEqual(self.member.battle_stats.spell_resistance, before.spell_resistance + 1)
+
+    def test_invalid_permanent_bonuses_are_rejected(self) -> None:
+        for value in (-1, 33, True, "1", 1.5):
+            with self.subTest(value=value), self.assertRaises((TypeError, ValueError)):
+                AbilityBonuses(strength=value)
+        with self.assertRaises(ValueError):
+            Member(self.member.definition, ability_bonuses=AbilityBonuses(strength=16))
+        with self.assertRaises(TypeError):
+            Member(self.member.definition, ability_bonuses={"strength": 1})
+        with self.assertRaises(TypeError):
+            self.member.increase_ability("strength")
 
     def test_fiora_initial_growth_state_uses_level_one_formulas(self) -> None:
         self.assertEqual(self.member.internal_level, 1)

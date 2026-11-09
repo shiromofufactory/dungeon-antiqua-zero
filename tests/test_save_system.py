@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools._bootstrap import APP_ROOT
 from battle_command_memory import BattleCommandMemory
@@ -13,7 +14,7 @@ from battle_commands import BattleCommand
 from field import FieldPosition
 from input import Direction
 from state import Difficulty, SaveData
-from member import EquipmentSlot, internal_level_for_experience, required_experience_for_level
+from member import Ability, AbilityBonuses, EquipmentSlot, internal_level_for_experience, required_experience_for_level
 from systems import (
     AUTO_SAVE_SLOT,
     SAVE_FORMAT_VERSION,
@@ -567,6 +568,88 @@ class SaveSystemTest(unittest.TestCase):
             self.assertFalse(repository.summary(3).occupied)
             with self.assertRaises(SaveSystemError):
                 repository.load(3)
+
+    def test_permanent_growth_round_trips_active_and_departed_members_in_all_versions(self) -> None:
+        for version in (1, 2, SAVE_FORMAT_VERSION):
+            with self.subTest(version=version):
+                document = self.save_document()
+                document["format_version"] = version
+                for current in document["party"]["character_states"].values():
+                    current["ability_bonuses"] = {"strength": 1, "agility": 2, "magic": 3}
+                restored = restore_save_document(
+                    document, character_records=load_mock_character_records(),
+                    items=self.items, skills=self.skills,
+                )
+                for member in restored.character_states.values():
+                    self.assertEqual(member.ability_bonuses, AbilityBonuses(1, 2, 3))
+                    for ability in Ability:
+                        expected = min(32, getattr(member.definition.base_abilities, ability.value)
+                                       + getattr(member.ability_bonuses, ability.value)
+                                       + sum(getattr(item, f"{ability.value}_modifier")
+                                             for item in member.equipment.equipped_items()))
+                        self.assertEqual(getattr(member.adjusted_abilities, ability.value), expected)
+                saved = create_save_document(
+                    save_data=restored.save_data, active_party=restored.active_party,
+                    character_states=restored.character_states,
+                    inventory=restored.inventory, map_id=restored.map_id,
+                    position=restored.position, facing=restored.facing,
+                )
+                for key, member in restored.character_states.items():
+                    self.assertEqual(saved["party"]["character_states"][key]["ability_bonuses"],
+                                     {"strength": 1, "agility": 2, "magic": 3})
+
+    def test_invalid_permanent_growth_save_data_is_rejected(self) -> None:
+        for bonuses in (
+            {}, {"strength": 0, "agility": 0},
+            {"strength": 0, "agility": 0, "magic": 0, "other": 1},
+            *({"strength": value, "agility": 0, "magic": 0}
+              for value in (-1, True, "1", 1.5, 33, 32)),
+        ):
+            with self.subTest(bonuses=bonuses):
+                document = self.save_document()
+                document["party"]["character_states"]["Fiora"]["ability_bonuses"] = bonuses
+                with self.assertRaises(SaveSystemError):
+                    restore_save_document(
+                        document, character_records=load_mock_character_records(),
+                        items=self.items, skills=self.skills,
+                    )
+
+    @patch("ui.item_menu.play_se")
+    def test_fruit_used_from_menu_persists_with_consumed_inventory(self, _play) -> None:
+        from input import InputButton, InputState
+        from tests.ui_test_support import ItemMenuHarness
+        from ui.item_menu import ItemSelectionPhase
+
+        menu = ItemMenuHarness()
+        target = menu.party[0]
+        for key in ("FRUIT of STR", "FRUIT of AGI", "FRUIT of MAG"):
+            menu.phase = ItemSelectionPhase.ITEM
+            menu.selected_item_index = next(
+                index for index, item in enumerate(menu.inventory) if item.key == key
+            )
+            menu.scroll_offset = menu.selected_item_index
+            menu._build_item_windows()
+            menu.update(InputState(confirm=InputButton(True, True)))
+            menu.update(InputState(confirm=InputButton(True, True)))
+            menu.update(InputState(confirm=InputButton(True, True)))
+        document = create_save_document(
+            save_data=SaveData(), active_party=menu.party,
+            character_states={member.definition.key: member for member in menu.party},
+            inventory=menu.inventory_system, map_id="worldmap",
+            position=FieldPosition(17, 39), facing=Direction.LEFT,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SaveRepository(Path(directory))
+            repository.save(1, document)
+            restored = restore_save_document(
+                repository.load(1), character_records=load_mock_character_records(),
+                items=self.items, skills=self.skills,
+            )
+        member = restored.character_states[target.definition.key]
+        self.assertEqual(member.ability_bonuses, AbilityBonuses(1, 1, 1))
+        self.assertEqual(member.adjusted_abilities, target.adjusted_abilities)
+        for key in ("FRUIT of STR", "FRUIT of AGI", "FRUIT of MAG"):
+            self.assertEqual(restored.inventory.quantity(key), 0)
 
     def test_restore_rejects_corrupt_member_before_returning_state(self) -> None:
         document = self.save_document()

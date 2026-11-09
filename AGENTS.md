@@ -128,6 +128,7 @@
 - イベントの明るさ変更・横揺れは `python3 -B -m unittest tests.test_screen_effects tests.test_palette tests.test_game_events tests.test_game_menu` で補間・パレット合成・位置復元・割り込み停止を回帰検証する。
 - イベントのBGM停止は `python3 -B -m unittest tests.test_audio_resources tests.test_events tests.test_game_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu` でフェードアウト・予約解除・停止保持・次曲再生・割り込み停止を回帰検証する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。
+- 3種類の能力上昇アイテムは `python3 -B -m unittest tests.test_member tests.test_item_menu tests.test_save_system tests.test_status_menu tests.test_equipment_menu tests.test_game` で対象選択・1上昇・上限32・装備補正との分離・消費と中断・v1〜v3の保存復元を回帰検証する。
 - 妖精の里のID表記修正とセーブv1・v2からv3への移行は `python3 -B -m unittest tests.test_save_system tests.test_game tests.test_start_menu tests.test_floating` で現在地・進行フラグ・宝箱・会話ログ・保存地点名を検証する。
 - 強制割り込みゲームメニューは `python3 -B -m unittest tests.test_game_menu tests.test_input tests.test_audio_resources` で停止・復帰・BGM保持を回帰検証する。
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。

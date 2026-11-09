@@ -611,7 +611,7 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 `PaletteShifter` で暗く描画する。カテゴリ選択中と道具選択中は顔色を変更しない。
 毒・麻痺アイコンの状態判定と顔右上脇への描画も `PartyStatusPanel` が所有し、アイテム画面と
 呪文画面が個別に座標や描画順を持たないようにする。
-フィールドでの回復アイテム使用、対象選択、消費規則は
+フィールドでの回復・能力上昇アイテム使用、対象選択、消費規則は
 [`features/field.md`](./features/field.md) を正本とする。
 
 所持品はアイテムキーから個数への辞書として `InventorySystem` が保持する。同一品の上限は
@@ -1364,9 +1364,14 @@ DA2の累計必要経験値式で内部LVを導出する。`Member.internal_leve
 キャラクター正本の `base_str`、`base_agi`、`base_mag` は、変更されない
 `CharacterDefinition.base_abilities` として保持する。画面やゲームルールは基礎値を
 直接使わず、`Member.adjusted_abilities` を参照する。調整後能力値は現在装備している全品の
-`str`、`agi`、`mag` をそれぞれ基礎値へ合算し、上限を32とする。装備による負の補正も
-そのまま合算する。将来追加するアイテムによる永続上昇も後者の計算へ追加し、正本由来の
-基礎値とは混在させない。
+`str`、`agi`、`mag` と、`Member.ability_bonuses` の永続上昇量をそれぞれ基礎値へ合算し、
+上限を32とする。装備による負の補正もそのまま合算する。永続上昇量は不変値オブジェクト
+`AbilityBonuses` に保持し、`Member.increase_ability()` が該当能力を1増やした値へ置き換える。
+基礎値＋永続上昇量の上限判定もMemberが担当し、装備補正とは独立させる。
+装備補正を除いた現在値が必要な表示は `Member.permanent_abilities` を参照する。
+`ItemMenuOverlay` は既存のアイテム使用先の効果種別を `Ability` へ対応させ、対象選択・
+`InventorySystem` による消費・結果通知を調停する。`systems/save.py` は上昇量を既存の
+`ability_bonuses` と相互変換し、正本由来の基礎値や装備補正を保存値へ混在させない。
 
 現在HP、最大HP、現在MP、最大MPは可変な `Member` 状態とする。能力値やHP・MPを
 Python上で保持するときは整数のままとし、画面へ渡す時点で共通の

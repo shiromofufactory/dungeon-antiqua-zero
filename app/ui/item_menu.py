@@ -16,7 +16,7 @@ from input import InputState
 from item import Item, ItemEquipType
 from item_detail import item_detail_lines
 from localization import Localizer, format_number
-from member import Member
+from member import Ability, Member
 from rendering import PaletteShifter
 from resources import FontResources, play_se
 from spell import Spell, SpellAction
@@ -34,6 +34,8 @@ from ui import (
 from ui.party_status import PartyStatusPanel
 from ui.teleport_menu import TeleportMenuOverlay, TeleportTarget
 from ui.text_layout import right_aligned_grid_x
+from ui.tagged_text import tagged_text_width
+from ui.window import TEXT_GRID_X
 
 FACES_IMAGE_ID = "faces/faces"
 CATEGORY_WINDOW_GRID = (14, 0, 36, 5)
@@ -73,8 +75,16 @@ DROP_CONFIRM_NO_Y = 5
 HEALING_SE_ID = "spell_healing1"
 TELEPORT_RING_KEY = "TELEPORT RING"
 FIELD_USE_ITEM_KEYS = frozenset(
-    ("POTION", "MANA DROP", "DIVINE TEAR", "DARK CHRISM", TELEPORT_RING_KEY)
+    (
+        "POTION", "MANA DROP", "DIVINE TEAR", "DARK CHRISM", TELEPORT_RING_KEY,
+        "FRUIT of STR", "FRUIT of AGI", "FRUIT of MAG",
+    )
 )
+GROWTH_ABILITY_BY_ACTION = {
+    SpellAction.STRENGTH_UP: Ability.STRENGTH,
+    SpellAction.AGILITY_UP: Ability.AGILITY,
+    SpellAction.MAGIC_UP: Ability.MAGIC,
+}
 
 
 @dataclass(frozen=True)
@@ -175,6 +185,7 @@ class ItemMenuOverlay:
         self.on_field_teleport = on_field_teleport
         self.on_invalid_action = on_invalid_action
         self.teleport_menu: TeleportMenuOverlay | None = None
+        self.ability_notice_window = None
         self.phase = ItemSelectionPhase.CATEGORY
         self.selected_item_index = 0
         self.scroll_offset = 0
@@ -514,6 +525,7 @@ class ItemMenuOverlay:
                 SpellAction.REVIVE,
                 SpellAction.FADE,
                 SpellAction.TELEPORT,
+                *GROWTH_ABILITY_BY_ACTION,
             )
             or (
                 spell.action is SpellAction.FADE
@@ -548,10 +560,15 @@ class ItemMenuOverlay:
         return spell.intensity == 0 and self._has_curable_ailment(target)
 
     def _usable_target_indexes(self, spell: Spell) -> tuple[int, ...]:
+        ability = GROWTH_ABILITY_BY_ACTION.get(spell.action)
         return tuple(
             index
             for index, target in enumerate(self.party_panel.party)
-            if self._can_use_recovery_on_target(spell, target)
+            if (
+                target.hp > 0 and target.can_increase_ability(ability)
+                if ability is not None
+                else self._can_use_recovery_on_target(spell, target)
+            )
         )
 
     def _notify_invalid_action(self) -> None:
@@ -585,7 +602,7 @@ class ItemMenuOverlay:
         self.item_list_window.active = True
         self.member_cursor.active = False
 
-    def _refresh_after_recovery_item(
+    def _refresh_after_target_item(
         self,
         item: Item,
         spell: Spell,
@@ -606,7 +623,10 @@ class ItemMenuOverlay:
         can_reuse = item in items and bool(self._usable_target_indexes(spell))
         self.phase = (
             ItemSelectionPhase.TARGET
-            if can_reuse and len(self.party_panel.party) > 1
+            if can_reuse and (
+                len(self.party_panel.party) > 1
+                or spell.action in GROWTH_ABILITY_BY_ACTION
+            )
             else ItemSelectionPhase.ITEM
         )
         self._build_item_windows()
@@ -624,7 +644,7 @@ class ItemMenuOverlay:
             )
         self._build_party_panel(selected_target_index=next_target_index)
 
-    def _use_selected_recovery_item(self) -> bool:
+    def _use_selected_target_item(self) -> bool:
         item = self.selected_item
         spell = self._field_use_spell(item)
         selected_target = self.member_cursor.selected_key
@@ -642,6 +662,10 @@ class ItemMenuOverlay:
         if not target_indexes or any(index not in usable for index in target_indexes):
             self._notify_invalid_action()
             return False
+
+        ability = GROWTH_ABILITY_BY_ACTION.get(spell.action)
+        if ability is not None:
+            return self._use_growth_item(item, spell, ability, selected_target)
 
         for index in target_indexes:
             target = self.party_panel.party[index]
@@ -670,7 +694,43 @@ class ItemMenuOverlay:
             self._notify_invalid_action()
             return False
         play_se(HEALING_SE_ID)
-        self._refresh_after_recovery_item(item, spell, selected_target)
+        self._refresh_after_target_item(item, spell, selected_target)
+        return True
+
+    def _use_growth_item(
+        self, item: Item, spell: Spell, ability: Ability, target_index: int
+    ) -> bool:
+        """Apply one permanent point and consume only an accepted use."""
+
+        target = self.party_panel.party[target_index]
+        value = getattr(target.permanent_abilities, ability.value) + 1
+        notice = self.texts.formatted_text(
+            "item.ability_increased", self.localizer,
+            {
+                "ABILITY": self.texts.text(f"status.{ability.value}", self.localizer),
+                "VALUE": format_number(value),
+            },
+        )
+        if not notice:
+            raise ItemMenuDataError("能力上昇用テキストが見つかりません")
+        placement = self.localized_texts.create(notice, 2, 2)
+        text_width = tagged_text_width(
+            placement.text, placement.font, font_spans=placement.font_spans,
+        )
+        width = (text_width + TEXT_GRID_X - 1) // TEXT_GRID_X + 4
+        if width > 64:
+            raise ItemMenuDataError("能力上昇の通知が画面幅を超えています")
+        window = self._window_factory.create(
+            (64 - width) // 2, 27, width, 7, (placement,),
+        )
+        if item.breaks_on_use and not self.inventory_system.remove(item):
+            self._notify_invalid_action()
+            return False
+        if not target.increase_ability(ability):
+            raise RuntimeError("accepted growth item could not increase ability")
+        self._refresh_after_target_item(item, spell, target_index)
+        self.ability_notice_window = window
+        play_se(HEALING_SE_ID)
         return True
 
     def _use_selected_fade_item(self) -> bool:
@@ -848,6 +908,11 @@ class ItemMenuOverlay:
     def update(self, input_state: InputState) -> bool:
         """Update selection and report whether the menu should be restored."""
 
+        if self.ability_notice_window is not None:
+            if input_state.confirm.triggered:
+                self.ability_notice_window = None
+            return False
+
         if self.teleport_menu is not None:
             if self.teleport_menu.update(input_state):
                 self.teleport_menu = None
@@ -865,7 +930,7 @@ class ItemMenuOverlay:
                 return False
             self.member_cursor.update(input_state.navigation)
             if input_state.confirm.triggered:
-                self._use_selected_recovery_item()
+                self._use_selected_target_item()
             return False
 
         if self.phase is ItemSelectionPhase.CATEGORY:
@@ -940,6 +1005,8 @@ class ItemMenuOverlay:
             self.drop_confirmation_choice_window.draw()
         if self.drop_confirmation_cursor is not None:
             self.drop_confirmation_cursor.draw()
+        if self.ability_notice_window is not None:
+            self.ability_notice_window.draw()
 
 
 __all__ = [

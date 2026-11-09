@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
 from types import MappingProxyType
 from typing import Mapping, TypeVar
@@ -504,6 +504,31 @@ class BaseAbilities:
     magic: int
 
 
+class Ability(StrEnum):
+    """Stable ability names shared by growth effects and save data."""
+
+    STRENGTH = "strength"
+    AGILITY = "agility"
+    MAGIC = "magic"
+
+
+@dataclass(frozen=True)
+class AbilityBonuses:
+    """Permanent growth kept separately from character and equipment data."""
+
+    strength: int = 0
+    agility: int = 0
+    magic: int = 0
+
+    def __post_init__(self) -> None:
+        for ability in Ability:
+            value = getattr(self, ability.value)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"ability bonus {ability.value} must be an integer")
+            if not 0 <= value <= MAX_ABILITY:
+                raise ValueError(f"ability bonus {ability.value} is out of range")
+
+
 @dataclass(frozen=True)
 class AdjustedAbilities:
     """Current ability values after applying runtime adjustments."""
@@ -754,10 +779,20 @@ class Member:
     proficiencies: dict[ProficiencyKind, Proficiency] = field(
         default_factory=dict,
     )
+    ability_bonuses: AbilityBonuses = field(default_factory=AbilityBonuses)
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
             raise TypeError("definition must be a CharacterDefinition")
+        if not isinstance(self.ability_bonuses, AbilityBonuses):
+            raise TypeError("ability_bonuses must be AbilityBonuses")
+        for ability in Ability:
+            if (
+                getattr(self.definition.base_abilities, ability.value)
+                + getattr(self.ability_bonuses, ability.value)
+                > MAX_ABILITY
+            ):
+                raise ValueError(f"permanent {ability.value} must not exceed {MAX_ABILITY}")
         if (
             isinstance(self.internal_level, bool)
             or not isinstance(self.internal_level, int)
@@ -1075,10 +1110,39 @@ class Member:
         )
 
     @property
+    def permanent_abilities(self) -> AdjustedAbilities:
+        """Return base plus permanent growth without equipment modifiers."""
+
+        base = self.definition.base_abilities
+        return AdjustedAbilities(
+            strength=base.strength + self.ability_bonuses.strength,
+            agility=base.agility + self.ability_bonuses.agility,
+            magic=base.magic + self.ability_bonuses.magic,
+        )
+
+    def can_increase_ability(self, ability: Ability) -> bool:
+        """Check the permanent cap independently of current equipment."""
+
+        if not isinstance(ability, Ability):
+            raise TypeError("ability must be an Ability")
+        return getattr(self.permanent_abilities, ability.value) < MAX_ABILITY
+
+    def increase_ability(self, ability: Ability) -> bool:
+        """Apply one point of permanent growth, or leave capped state intact."""
+
+        if not self.can_increase_ability(ability):
+            return False
+        self.ability_bonuses = replace(
+            self.ability_bonuses,
+            **{ability.value: getattr(self.ability_bonuses, ability.value) + 1},
+        )
+        return True
+
+    @property
     def adjusted_abilities(self) -> AdjustedAbilities:
         """Return current abilities without mutating their master-data base."""
 
-        base = self.definition.base_abilities
+        base = self.permanent_abilities
         equipment = self.equipment.equipped_items()
         return AdjustedAbilities(
             strength=min(

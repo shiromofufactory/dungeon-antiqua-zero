@@ -15,9 +15,12 @@ if __package__ == "systems":
     from field import FieldPosition
     from input import Direction
     from member import (
+        Ability,
+        AbilityBonuses,
         BATTLE_PARTY_MEMBER_COUNT,
         FIORA_CHARACTER_KEY,
         MAX_PARTY_MEMBER_COUNT,
+        MAX_ABILITY,
         EquipmentSet,
         EquipmentSlot,
         FormationRow,
@@ -35,9 +38,12 @@ else:
     from ..field import FieldPosition
     from ..input import Direction
     from ..member import (
+        Ability,
+        AbilityBonuses,
         BATTLE_PARTY_MEMBER_COUNT,
         FIORA_CHARACTER_KEY,
         MAX_PARTY_MEMBER_COUNT,
+        MAX_ABILITY,
         EquipmentSet,
         EquipmentSlot,
         FormationRow,
@@ -419,11 +425,24 @@ def _restore_member(
         )
 
     bonuses = _required_mapping(state, "ability_bonuses", f"member {key}")
-    if set(bonuses) != {"strength", "agility", "magic"} or any(
-        _non_negative_int(bonuses, name, f"member {key} ability bonuses") != 0
-        for name in ("strength", "agility", "magic")
-    ):
-        raise SaveSystemError("non-zero ability bonuses are not supported yet")
+    if set(bonuses) != {ability.value for ability in Ability}:
+        raise SaveSystemError(f"member {key} ability bonuses are incomplete")
+    bonus_values = {
+        ability.value: _non_negative_int(
+            bonuses, ability.value, f"member {key} ability bonuses"
+        )
+        for ability in Ability
+    }
+    try:
+        ability_bonuses = AbilityBonuses(**bonus_values)
+        for ability in Ability:
+            if (
+                getattr(initial.definition.base_abilities, ability.value)
+                + bonus_values[ability.value] > MAX_ABILITY
+            ):
+                raise ValueError(f"permanent {ability.value} exceeds {MAX_ABILITY}")
+    except (TypeError, ValueError) as error:
+        raise SaveSystemError(f"member {key} ability bonuses are invalid") from error
     event_spell_keys = _string_list(
         state.get("event_spell_keys"),
         f"member {key}.event_spell_keys",
@@ -455,6 +474,7 @@ def _restore_member(
         skills=member_skills,
         equipment=equipment,
         proficiencies=proficiencies,
+        ability_bonuses=ability_bonuses,
     )
     member.refresh_internal_level(shared_experience)
     return member
@@ -845,7 +865,10 @@ def _serialize_member(member: Member) -> dict[str, object]:
         "formation_row": member.formation_row.value,
         "poisoned": member.poisoned,
         "paralyzed": member.paralyzed,
-        "ability_bonuses": {"strength": 0, "agility": 0, "magic": 0},
+        "ability_bonuses": {
+            ability.value: getattr(member.ability_bonuses, ability.value)
+            for ability in Ability
+        },
         "skill_keys": sorted(skill.key for skill in member.skills),
         "event_spell_keys": [],
         "equipment": equipment,

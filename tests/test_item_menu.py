@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 import unittest
 from unittest.mock import Mock, call, patch
 
@@ -54,6 +55,7 @@ from ui.teleport_menu import TeleportTarget
 from tests.ui_test_support import ItemMenuHarness
 from state import Language, Settings
 from systems import InventorySystem
+from member import Ability, AbilityBonuses, EquipmentSet, EquipmentSlot
 
 
 class ItemMenuTest(unittest.TestCase):
@@ -1156,6 +1158,140 @@ class ItemMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
         self.assertEqual(mock.inventory_system.quantity("POTION"), 1)
         invalid_action.assert_called_once_with()
+
+    def test_growth_fruits_increase_selected_ability_and_consume_one(self) -> None:
+        for key, ability in (
+            ("FRUIT of STR", Ability.STRENGTH),
+            ("FRUIT of AGI", Ability.AGILITY),
+            ("FRUIT of MAG", Ability.MAGIC),
+        ):
+            for language in Language:
+                with self.subTest(key=key, language=language):
+                    mock = ItemMenuHarness(settings=Settings(language=language))
+                    target = mock.party_panel.party[1]
+                    before = target.adjusted_abilities
+                    other_bonuses = mock.party_panel.party[0].ability_bonuses
+                    self.select_item(mock, key)
+                    mock.update(InputState(confirm=InputButton(True, True)))
+                    self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+                    mock.member_cursor.select_key(1)
+                    with patch("ui.item_menu.play_se") as play:
+                        mock.update(InputState(confirm=InputButton(True, True)))
+                    self.assertEqual(
+                        target.adjusted_abilities,
+                        replace(before, **{ability.value: getattr(before, ability.value) + 1}),
+                    )
+                    self.assertEqual(getattr(target.ability_bonuses, ability.value), 1)
+                    self.assertEqual(mock.party_panel.party[0].ability_bonuses, other_bonuses)
+                    self.assertEqual(mock.inventory_system.quantity(key), 0)
+                    self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+                    notice = mock.ability_notice_window
+                    self.assertIsNotNone(notice)
+                    self.assertTrue(notice.texts[0].text)
+                    self.assertGreaterEqual(notice.x, 0)
+                    self.assertLessEqual(notice.x + notice.width, 64)
+                    play.assert_called_once_with(HEALING_SE_ID)
+                    mock.update(InputState(confirm=InputButton(held=True)))
+                    self.assertIs(mock.ability_notice_window, notice)
+                    mock.update(InputState(confirm=InputButton(True, True)))
+                    self.assertIsNone(mock.ability_notice_window)
+                    self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+
+    def test_growth_target_cancellation_preserves_inventory_and_abilities(self) -> None:
+        mock = ItemMenuHarness()
+        self.select_item(mock, "FRUIT of STR")
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(cancel=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.inventory_system.quantity("FRUIT of STR"), 1)
+        self.assertTrue(all(member.ability_bonuses == AbilityBonuses() for member in mock.party))
+
+    def test_growth_rejects_dead_and_capped_targets_and_skips_them_initially(self) -> None:
+        invalid = Mock()
+        mock = ItemMenuHarness(on_invalid_action=invalid)
+        for member in mock.party_panel.party:
+            member.ability_bonuses = AbilityBonuses(
+                strength=32 - member.definition.base_abilities.strength,
+            )
+        mock.party_panel.party[1].ability_bonuses = AbilityBonuses()
+        mock.party_panel.party[1].hp = 0
+        self.select_item(mock, "FRUIT of STR")
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        invalid.assert_called_once_with()
+        mock.party_panel.party[2].ability_bonuses = AbilityBonuses()
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(mock.member_cursor.selected_key, 2)
+        self.assertEqual(mock.dimmed_member_indexes, frozenset(range(len(mock.party_panel.party))) - {2})
+        for index in (0, 1):
+            mock.member_cursor.select_key(index)
+            mock.update(InputState(confirm=InputButton(True, True)))
+            self.assertIsNone(mock.ability_notice_window)
+            self.assertEqual(mock.inventory_system.quantity("FRUIT of STR"), 1)
+        self.assertEqual(invalid.call_count, 3)
+
+    @patch("ui.item_menu.play_se")
+    def test_growth_reuses_remaining_fruit_and_advances_after_target_reaches_cap(self, _play) -> None:
+        mock = ItemMenuHarness()
+        mock.inventory_system.add("FRUIT of STR")
+        target = mock.party_panel.party[0]
+        target.ability_bonuses = AbilityBonuses(
+            strength=31 - target.definition.base_abilities.strength,
+        )
+        self.select_item(mock, "FRUIT of STR")
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(target.adjusted_abilities.strength, 32)
+        self.assertEqual(mock.inventory_system.quantity("FRUIT of STR"), 1)
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 1)
+        # Closing the notice must not apply a second use.
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(mock.inventory_system.quantity("FRUIT of STR"), 1)
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(mock.party_panel.party[1].ability_bonuses.strength, 1)
+        self.assertEqual(mock.inventory_system.quantity("FRUIT of STR"), 0)
+
+    @patch("ui.item_menu.play_se")
+    def test_growth_can_improve_permanent_ability_when_equipment_already_caps_display(self, _play) -> None:
+        mock = ItemMenuHarness()
+        target = mock.party_panel.party[0]
+        ring = replace(mock.items["TELEPORT RING"], strength_modifier=32)
+        target.equipment = EquipmentSet({EquipmentSlot.ARM: ring})
+        self.assertEqual(target.adjusted_abilities.strength, 32)
+        self.select_item(mock, "FRUIT of STR")
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(target.ability_bonuses.strength, 1)
+        target.equipment = EquipmentSet()
+        self.assertEqual(target.adjusted_abilities.strength, target.definition.base_abilities.strength + 1)
+
+    def test_failed_growth_consumption_preserves_ability(self) -> None:
+        invalid = Mock()
+        mock = ItemMenuHarness(on_invalid_action=invalid)
+        self.select_item(mock, "FRUIT of STR")
+        mock.update(InputState(confirm=InputButton(True, True)))
+        with patch.object(mock.inventory_system, "remove", return_value=False):
+            mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(mock.party_panel.party[0].ability_bonuses, AbilityBonuses())
+        self.assertEqual(mock.inventory_system.quantity("FRUIT of STR"), 1)
+        self.assertIsNone(mock.ability_notice_window)
+        invalid.assert_called_once_with()
+
+    @patch("ui.item_menu.play_se")
+    def test_single_member_can_use_remaining_fruit_repeatedly(self, _play) -> None:
+        party = ItemMenuHarness().party[:1]
+        mock = ItemMenuHarness(party=party)
+        mock.inventory_system.add("FRUIT of MAG")
+        self.select_item(mock, "FRUIT of MAG")
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 0)
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertEqual(party[0].ability_bonuses.magic, 2)
+        self.assertEqual(mock.inventory_system.quantity("FRUIT of MAG"), 0)
 
     def test_other_field_item_effects_remain_unsupported(self) -> None:
         invalid_action = Mock()
