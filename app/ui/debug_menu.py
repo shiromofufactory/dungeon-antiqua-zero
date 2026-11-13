@@ -57,14 +57,14 @@ MAIN_ITEM_KEYS = (
     "dungeon",
 )
 MAIN_FIRST_Y = 9
+MONSTER_LEVEL_Y = 42
 MAIN_ROWS = tuple(
     (key, MAIN_FIRST_Y + index * DEBUG_ROW_HEIGHT)
     for index, key in enumerate(MAIN_ITEM_KEYS)
-)
+) + (("monster_level", MONSTER_LEVEL_Y),)
 MAIN_CURSOR_X = 4
 MAIN_LABEL_X = 6
 MAIN_VALUE_X = 34
-MONSTER_LEVEL_Y = 42
 MEMBER_FIRST_Y = 9
 MEMBER_ROW_HEIGHT = DEBUG_ROW_HEIGHT
 MEMBER_ROW_COUNT = 10
@@ -216,6 +216,7 @@ class DebugMenuOverlay:
         shop_targets: Iterable[DebugShopTarget] = (),
         on_shop: Callable[[str], bool] | None = None,
         encounter_state: DebugEncounterState | None = None,
+        encounter_system: EncounterSystem | None = None,
         on_encounter: Callable[[MapRandomEncounter], bool] | None = None,
         flag_ids: Iterable[str] = (),
         dungeons: tuple[DebugDungeon, ...] = (),
@@ -270,6 +271,7 @@ class DebugMenuOverlay:
         self.shop_targets = registered_shops
         self.on_shop = on_shop
         self.encounter_state = encounter_state or DebugEncounterState()
+        self.encounter_system = encounter_system or EncounterSystem()
         self.on_encounter = on_encounter
         self.encounter_menu: DebugEncounterOverlay | None = None
         self.flag_ids = tuple(flag_ids)
@@ -392,6 +394,9 @@ class DebugMenuOverlay:
             "encounter": "",
             "event_flags": DEBUG_TEXT.flag_count(len(self.flag_ids)),
             "dungeon": str(len(self.dungeons)),
+            "monster_level": format_number(
+                self.encounter_system.dynamic_monster_level(self.save_data),
+            ),
         }
         labels = {
             "party_level": DEBUG_TEXT.party_level,
@@ -404,6 +409,7 @@ class DebugMenuOverlay:
             "encounter": DEBUG_TEXT.encounter,
             "event_flags": DEBUG_TEXT.event_flags,
             "dungeon": DEBUG_TEXT.dungeon,
+            "monster_level": DEBUG_TEXT.monster_level,
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.title, 4, 3)
@@ -416,20 +422,7 @@ class DebugMenuOverlay:
                     self.debug_texts.create(values[key], MAIN_VALUE_X, y),
                 )
             )
-        placements.extend(
-            (
-                self.debug_texts.create(
-                    DEBUG_TEXT.monster_level, MAIN_LABEL_X, MONSTER_LEVEL_Y,
-                ),
-                self.debug_texts.create("：", 31, MONSTER_LEVEL_Y),
-                self.debug_texts.create(
-                    format_number(EncounterSystem.dynamic_monster_level()),
-                    MAIN_VALUE_X,
-                    MONSTER_LEVEL_Y,
-                ),
-                self._guide_text(),
-            )
-        )
+        placements.append(self._guide_text())
         self.main_window = self.windows.create(
             *DEBUG_WINDOW_GRID,
             tuple(placements),
@@ -1089,6 +1082,8 @@ class DebugMenuOverlay:
             entry = NumericEntry(MIN_INTERNAL_LEVEL, MAX_INTERNAL_LEVEL, 2)
         elif target == "gold":
             entry = NumericEntry(0, MAX_GOLD, 6)
+        elif target == "monster_level":
+            entry = NumericEntry(2, 9, 1)
         else:
             raise ValueError(f"unsupported numeric target: {target}")
         self.phase = DebugMenuPhase.NUMBER
@@ -1124,6 +1119,7 @@ class DebugMenuOverlay:
             "gold": DEBUG_TEXT.gold,
             "hp": DEBUG_TEXT.hp,
             "mp": DEBUG_TEXT.mp,
+            "monster_level": DEBUG_TEXT.monster_level,
         }
         label = labels[self.numeric_target]
         digits = self.numeric_entry.digits
@@ -1195,6 +1191,8 @@ class DebugMenuOverlay:
             self.editor.set_baseline_level(value)
         elif target == "gold":
             self.save_data.gold = value
+        elif target == "monster_level":
+            self.encounter_system.set_debug_monster_level(self.save_data, value)
         elif target == "hp" and self.numeric_member_key is not None:
             self.editor.set_member_hp(self.numeric_member_key, value)
         elif target == "mp" and self.numeric_member_key is not None:
@@ -1353,7 +1351,7 @@ class DebugMenuOverlay:
                     on_start=self.on_encounter, alert=self.alert,
                 )
                 self.phase = DebugMenuPhase.ENCOUNTER
-            elif isinstance(key, str) and key in ("party_level", "gold"):
+            elif isinstance(key, str) and key in ("party_level", "gold", "monster_level"):
                 self._open_numeric(key)
             else:
                 self.alert.start()

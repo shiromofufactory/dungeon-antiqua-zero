@@ -1545,6 +1545,14 @@ Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受
 遭遇Transitionへ接続する。設定はSaveData／Settingsへ含めない。詳細は
 [エンカウント仕様](./features/encounters.md#デバッグエンカウント)を参照する。
 
+変動モンスターレベルは `SaveData.monster_level` が所有し、デバッグ編集の結果も同じ値へ反映する。
+`EncounterSystem.dynamic_monster_level(save_data)` は現在のSaveDataから値を解決し、
+`set_debug_monster_level(save_data, level)` は境界を検証して更新する。System内に値を複製せず、
+ロードでSaveDataが置き換わった後も、表示と通常・デバッグ・ダンジョン試行の遭遇生成は
+同じ現在値を使う。Settingsには保存しない。数値入力とカーソルは引き続きOverlayが所有する。
+保存項目と互換性は [セーブデータ仕様](./features/save-data.md#共有進行状態)、操作は
+[フィールド・メニュー仕様](./features/field.md#設定とデバッグ)を参照する。
+
 デバッグのイベントフラグ編集は `ui/debug_flags.py` が一覧、ページ、選択行、入力と描画を
 所有する。Gameは読み込み済み `EventCatalog.flag_ids` と既存のSaveDataをデバッグメニューへ
 注入するだけとし、項目ごとの変更処理は持たない。フラグ画面は登録IDだけを編集し、

@@ -11,12 +11,14 @@ if __package__ == "systems":
     from input import Direction
     from monster import MonsterDefinition, MonsterTribe
     from resistance import ResistanceType
+    from state import SaveData
     from resources.maps import CompiledMap, MapRandomEncounter, MapResourceError, MapResources
 else:
     from ..field import FieldPosition
     from ..input import Direction
     from ..monster import MonsterDefinition, MonsterTribe
     from ..resistance import ResistanceType
+    from ..state import SaveData
     from ..resources.maps import CompiledMap, MapRandomEncounter, MapResourceError, MapResources
 
 
@@ -90,10 +92,20 @@ class EncounterSystem:
         return EncounterAdvance(count=advanced, triggered=False)
 
     @staticmethod
-    def dynamic_monster_level() -> int:
-        """Resolve the provisional dynamic map level."""
+    def dynamic_monster_level(save_data: SaveData) -> int:
+        """Resolve the dynamic map level from the current playthrough."""
 
-        return 2
+        return save_data.monster_level
+
+    @staticmethod
+    def set_debug_monster_level(save_data: SaveData, level: int) -> None:
+        """Update the persisted dynamic encounter level through the debug menu."""
+
+        if isinstance(level, bool) or not isinstance(level, int):
+            raise TypeError("debug monster level must be an integer")
+        if not 2 <= level <= 9:
+            raise ValueError("debug monster level must be from 2 to 9")
+        save_data.monster_level = level
 
     def generate_formation(
         self,

@@ -280,6 +280,7 @@ class SaveData:
     experience: int = 0
     battle_count: int = 0
     encounter_count: int = 0
+    monster_level: int = 2
     difficulty: Difficulty = Difficulty.NORMAL
     play_time_frames: int = 0
     auto_recovery: AutoRecoveryConfig = field(default_factory=AutoRecoveryConfig)
@@ -304,6 +305,10 @@ class SaveData:
                 raise ValueError(f"{name} must not be negative")
         if not isinstance(self.difficulty, Difficulty):
             raise TypeError("difficulty must be a Difficulty")
+        if isinstance(self.monster_level, bool) or not isinstance(self.monster_level, int):
+            raise TypeError("monster_level must be an integer")
+        if not 2 <= self.monster_level <= 9:
+            raise ValueError("monster_level must be from 2 to 9")
         if not isinstance(self.auto_recovery, AutoRecoveryConfig):
             raise TypeError("auto_recovery must be AutoRecoveryConfig")
         if not isinstance(self.event_flags, set) or not all(

@@ -2810,7 +2810,9 @@ class GameTest(unittest.TestCase):
     ) -> None:
         mock = Game.__new__(Game)
         loaded = Mock(debug_dungeon=None)
-        loaded.save_data = SaveData(gold=321)
+        loaded.save_data = SaveData(gold=321, monster_level=8)
+        mock.save_data = SaveData(monster_level=4)
+        mock.encounter_system = EncounterSystem()
         loaded.active_party = (Mock(), Mock())
         loaded.character_states = {"Fiora": loaded.active_party[0]}
         loaded.inventory = InventorySystem({})
@@ -2834,6 +2836,7 @@ class GameTest(unittest.TestCase):
         mock._apply_start_game()
 
         self.assertIs(mock.save_data, loaded.save_data)
+        self.assertEqual(mock.encounter_system.dynamic_monster_level(mock.save_data), 8)
         self.assertIs(mock.party, loaded.active_party)
         self.assertIs(mock.character_states, loaded.character_states)
         self.assertIs(mock.inventory_system, loaded.inventory)
@@ -3580,6 +3583,7 @@ class GameTest(unittest.TestCase):
                 )
                 mock.monsters = (Mock(),)
                 mock.encounter_system = Mock()
+                mock.save_data = SaveData(monster_level=3)
                 mock.encounter_system.dynamic_monster_level.return_value = 3
                 mock.encounter_system.generate_formation.return_value.monster_keys = ("SLIME",)
                 settings = MapRandomEncounter(
@@ -3588,12 +3592,31 @@ class GameTest(unittest.TestCase):
 
                 result = mock._create_random_battle_encounter(settings)
 
-                mock.encounter_system.dynamic_monster_level.assert_called_once_with()
+                mock.encounter_system.dynamic_monster_level.assert_called_once_with(mock.save_data)
                 mock.encounter_system.generate_formation.assert_called_once_with(
                     mock.monsters, settings, monster_level=3,
                 )
                 self.assertEqual(result.monster_keys, ("SLIME",))
                 self.assertEqual(result.surprise_enabled, danger == "high")
+
+    def test_debug_monster_level_applies_only_to_dynamic_encounters(self) -> None:
+        game = Game.__new__(Game)
+        game.encounter_system = EncounterSystem()
+        game.save_data = SaveData(monster_level=9)
+        game.encounter_system.generate_formation = Mock(
+            return_value=SimpleNamespace(monster_keys=("SLIME",)),
+        )
+        game.monsters = (Mock(),)
+        for level, expected in (("dynamic", 9), (1, 1), (4, 4)):
+            with self.subTest(level=level):
+                settings = MapRandomEncounter(level, "low", "neutral", False, False, False, True)
+                game.current_map = SimpleNamespace(random_encounter=settings)
+                for requested in (None, settings):
+                    game._create_random_battle_encounter(requested)
+                    self.assertEqual(
+                        game.encounter_system.generate_formation.call_args.kwargs["monster_level"],
+                        expected,
+                    )
 
     def test_debug_encounter_transition_uses_prepared_formation(self) -> None:
         from scenes.battle import BattleEncounter

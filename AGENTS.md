@@ -134,6 +134,7 @@
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。
 - フィールド待機時の操作ナビは `python3 -B -m unittest tests.test_field_menu_guide` で待機時間・入力種別・表示抑止を回帰検証する。
 - デバッグのイベントフラグ編集は `python3 -B -m unittest tests.test_debug_flags tests.test_debug_menu tests.test_launch_modes tests.test_game tests.test_actor_visibility tests.test_game_events tests.test_save_system` でON/OFF・100件のページ切替・未登録ID保持・戻る操作・ゲームへの接続を回帰検証する。
+- デバッグの変動モンスターレベル編集は `python3 -B -m unittest tests.test_game tests.test_debug_menu tests.test_encounter tests.test_debug_dungeon tests.test_launch_modes tests.test_save_system tests.test_state` で2〜9の入力・範囲外拒否・キャンセル・メニュー再表示時の保持・固定レベル指定との分離・手動／オートセーブとロード・旧セーブの初期値補完を回帰検証する。
 - フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
 - イベント中のフィールドアニメーション・制御移動・非表示actorは `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_actor_visibility tests.test_game_menu` で継続・位置停止・二重更新防止・強制割り込みを回帰検証する。

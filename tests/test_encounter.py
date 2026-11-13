@@ -9,6 +9,7 @@ from unittest.mock import Mock
 from app.field import FieldPosition
 from app.input import Direction
 from app.monster import MonsterDefinition
+from app.state import SaveData
 from app.rendering import (
     ENCOUNTER_BLACK_COLOR,
     ENCOUNTER_FADE_FRAME_COUNT,
@@ -158,7 +159,27 @@ class EncounterSystemTest(unittest.TestCase):
         self.assertEqual(random_source.calls, [(1, 4), (1, 4)])
 
     def test_dynamic_level_is_provisionally_fixed_at_two(self) -> None:
-        self.assertEqual(EncounterSystem.dynamic_monster_level(), 2)
+        self.assertEqual(EncounterSystem().dynamic_monster_level(SaveData()), 2)
+
+    def test_debug_dynamic_level_accepts_two_through_nine_for_one_save(self) -> None:
+        system = EncounterSystem()
+        save_data = SaveData()
+        for level in range(2, 10):
+            system.set_debug_monster_level(save_data, level)
+            self.assertEqual(system.dynamic_monster_level(save_data), level)
+        self.assertEqual(EncounterSystem().dynamic_monster_level(save_data), 9)
+        self.assertEqual(system.dynamic_monster_level(SaveData()), 2)
+
+    def test_invalid_debug_level_does_not_replace_current_value(self) -> None:
+        system = EncounterSystem()
+        save_data = SaveData(monster_level=5)
+        for level, error in (
+            (0, ValueError), (1, ValueError), (10, ValueError),
+            (True, TypeError), (2.0, TypeError), ("3", TypeError),
+        ):
+            with self.subTest(level=level), self.assertRaises(error):
+                system.set_debug_monster_level(save_data, level)
+            self.assertEqual(system.dynamic_monster_level(save_data), 5)
 
     def test_accepts_a_doubled_threshold_without_changing_the_count(self) -> None:
         random_source = FixedRandom(4)

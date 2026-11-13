@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from itertools import pairwise
+from pathlib import Path
 from unittest.mock import Mock
 
 from input import Direction, InputButton, InputState
+from field import FieldPosition
+from localization import format_number
 from resources import FontResources, FontRole
 from state import Language, SaveData, Settings
-from systems import DebugPartyEditor, InventorySystem
+from systems import (
+    AUTO_SAVE_SLOT, DebugPartyEditor, InventorySystem, SaveRepository,
+    create_save_document, restore_save_document,
+)
 from ui.debug_menu import (
     MAX_GOLD,
     DebugItemPane,
@@ -143,17 +150,17 @@ class DebugMenuOverlayTest(unittest.TestCase):
     def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
         target_y = [target.y for target in self.screen.main_cursor.targets]
 
-        self.assertEqual(len(target_y), 10)
+        self.assertEqual(len(target_y), 11)
         self.assertEqual(self.screen.main_cursor.targets[0].key, "encounter")
         self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
         self.assertTrue(
             all(
                 next_y - current_y == 3
-                for current_y, next_y in pairwise(target_y)
+                for current_y, next_y in pairwise(target_y[:-1])
             )
         )
 
-    def test_dynamic_monster_level_is_displayed_without_a_cursor_target(self) -> None:
+    def test_dynamic_monster_level_is_displayed_and_selectable(self) -> None:
         placements = self.screen.main_window.texts
         label = next(
             placement for placement in placements
@@ -163,12 +170,111 @@ class DebugMenuOverlayTest(unittest.TestCase):
             ("２", 34, label.y),
             [(placement.text, placement.x, placement.y) for placement in placements],
         )
-        self.assertFalse(
-            any(target.y == label.y for target in self.screen.main_cursor.targets)
+        self.assertIn(
+            ("monster_level", label.y),
+            [(target.key, target.y) for target in self.screen.main_cursor.targets],
         )
         self.screen.main_cursor.select_key("dungeon")
         self.screen.update(InputState(navigation=Direction.DOWN))
+        self.assertEqual(self.screen.main_cursor.selected_key, "monster_level")
+        self.screen.update(InputState(navigation=Direction.DOWN))
         self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
+
+    def test_monster_level_numeric_input_applies_two_through_nine(self) -> None:
+        for level in range(2, 10):
+            with self.subTest(level=level):
+                self.screen.main_cursor.select_key("monster_level")
+                self.screen.update(self.confirm())
+                self.assertIs(self.screen.phase, DebugMenuPhase.NUMBER)
+                self.screen.numeric_cursor.select_key(str(level))
+                self.screen.update(self.confirm())
+                self.assertEqual(self.screen.numeric_cursor.selected_key, "confirm")
+                self.screen.update(self.confirm())
+                self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+                self.assertEqual(self.screen.main_cursor.selected_key, "monster_level")
+                self.assertEqual(self.screen.encounter_system.dynamic_monster_level(self.save_data), level)
+                self.assertEqual(self.save_data.monster_level, level)
+                self.assertIn(
+                    (format_number(level), 34, 42),
+                    [(text.text, text.x, text.y) for text in self.screen.main_window.texts],
+                )
+
+    def test_monster_level_rejects_empty_zero_and_one_and_cancel_preserves_value(self) -> None:
+        self.screen.encounter_system.set_debug_monster_level(self.save_data, 6)
+        for digits in ("", "0", "1"):
+            with self.subTest(digits=digits):
+                self.alert.reset_mock()
+                self.screen._open_numeric("monster_level")
+                if digits:
+                    self.screen.numeric_cursor.select_key(digits)
+                    self.screen.update(self.confirm())
+                self.screen.numeric_cursor.select_key("confirm")
+                self.screen.update(self.confirm())
+                self.assertIs(self.screen.phase, DebugMenuPhase.NUMBER)
+                self.alert.start.assert_called_once_with()
+                self.assertEqual(self.screen.encounter_system.dynamic_monster_level(self.save_data), 6)
+                if digits:
+                    self.screen.update(self.cancel())
+                self.screen.update(self.cancel())
+                self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
+                self.assertEqual(self.screen.main_cursor.selected_key, "monster_level")
+        self.screen._open_numeric("monster_level")
+        self.screen.numeric_cursor.select_key("9")
+        self.screen.update(self.confirm())
+        self.screen.update(self.cancel())
+        self.screen.update(self.cancel())
+        self.assertEqual(self.screen.encounter_system.dynamic_monster_level(self.save_data), 6)
+
+    def test_monster_level_is_retained_when_overlay_reopens_with_saved_state(self) -> None:
+        self.screen.main_cursor.select_key("monster_level")
+        self.screen.update(self.confirm())
+        self.screen.numeric_cursor.select_key("9")
+        self.screen.update(self.confirm())
+        self.screen.update(self.confirm())
+        self.assertTrue(self.screen.update(self.cancel()))
+        reopened = DebugMenuOverlay(
+            editor=self.editor, inventory_system=self.inventory,
+            save_data=self.save_data, settings=self.screen.settings,
+            fonts=self.screen.fonts, alert=self.alert,
+        )
+        self.assertIn(
+            ("９", 34, 42),
+            [(text.text, text.x, text.y) for text in reopened.main_window.texts],
+        )
+
+    def test_edited_monster_level_is_displayed_after_saving_and_loading(self) -> None:
+        self.screen.main_cursor.select_key("monster_level")
+        self.screen.update(self.confirm())
+        self.screen.numeric_cursor.select_key("8")
+        self.screen.update(self.confirm())
+        self.screen.update(self.confirm())
+        document = create_save_document(
+            save_data=self.save_data, active_party=self.screen.party,
+            character_states={member.definition.key: member for member in self.screen.party},
+            inventory=self.inventory, map_id="worldmap",
+            position=FieldPosition(1, 1), facing=Direction.DOWN,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for slot in (AUTO_SAVE_SLOT, 1):
+                with self.subTest(slot=slot):
+                    SaveRepository(Path(directory)).save(slot, document)
+                    restored = restore_save_document(
+                        SaveRepository(Path(directory)).load(slot),
+                        character_records=load_mock_character_records(),
+                        items=load_mock_items(), skills=load_mock_skills(),
+                    )
+                    reopened = DebugMenuOverlay(
+                        editor=self.editor, inventory_system=restored.inventory,
+                        save_data=restored.save_data, settings=self.screen.settings,
+                        fonts=self.screen.fonts, alert=self.alert,
+                    )
+                    self.assertIn(
+                        ("８", 34, 42),
+                        [(text.text, text.x, text.y) for text in reopened.main_window.texts],
+                    )
+                    self.assertEqual(
+                        reopened.encounter_system.dynamic_monster_level(restored.save_data), 8,
+                    )
 
     def test_event_flags_toggle_live_save_data_and_return_to_main(self) -> None:
         flags = self.save_data.event_flags

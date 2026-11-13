@@ -1064,7 +1064,7 @@ class Game:
             raise RuntimeError("current dungeon has no random encounter settings")
         monster_level = settings.monster_level
         if monster_level == "dynamic":
-            monster_level = self.encounter_system.dynamic_monster_level()
+            monster_level = self.encounter_system.dynamic_monster_level(self.save_data)
         formation = self.encounter_system.generate_formation(
             self.monsters,
             settings,
@@ -2315,6 +2315,7 @@ class Game:
             shop_targets=self._debug_shop_targets(),
             on_shop=self._start_debug_shop,
             encounter_state=self.debug_encounter_state,
+            encounter_system=self.encounter_system,
             on_encounter=self._start_debug_encounter,
             flag_ids=self.event_catalog.flag_ids,
             dungeons=dungeons, on_dungeon=self._start_debug_dungeon,

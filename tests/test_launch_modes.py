@@ -543,6 +543,7 @@ class LaunchModeGameTest(unittest.TestCase):
 
         self.assertIs(overlay.call_args.kwargs["flag_ids"], game.event_catalog.flag_ids)
         self.assertIs(overlay.call_args.kwargs["save_data"], game.save_data)
+        self.assertIs(overlay.call_args.kwargs["encounter_system"], game.encounter_system)
 
     def test_only_exhibition_save_command_is_disabled_in_all_languages(self) -> None:
         for mode in LaunchMode:

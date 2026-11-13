@@ -124,6 +124,125 @@
           }
         }
       ]
+    },
+    {
+      "id": "dungeon_b8071247a1f64307980f6f768c338410",
+      "name": "賢者の祠",
+      "bgm_id": "da3-dungeon2",
+      "steps": [
+        {
+          "id": "random_encounter_e670ab90e309475eb56d61b37aff62e4",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "low",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": true,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_fb7d035765314f88a8188ba0d0095550",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "BOOK of FIRE"
+          }
+        },
+        {
+          "id": "treasure_074728a50939431eac901e5277b91e11",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "POTION"
+          }
+        },
+        {
+          "id": "random_encounter_6e7aaf91fffb4db28b7fc3859dcf144c",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": true,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_c30f82010f674745a6d8cccc1eac6fb8",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "MANA DROP"
+          }
+        },
+        {
+          "id": "treasure_4fff946d494c4a8a9eefdb9acc105549",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "GOBLIN SLAYER"
+          }
+        },
+        {
+          "id": "random_encounter_47817f0c58e54d1e94009b5756d30fa6",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": true,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_c85a1ebf2fb74a40a2cdac4143c6b6c4",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "FRUIT of STR"
+          }
+        },
+        {
+          "id": "treasure_69c4ee3f3a5c48678a2a388ff1ef5df5",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "SNAKE CAP"
+          }
+        },
+        {
+          "id": "random_encounter_d14275c3f62f4d019fb52ccd0d4425ec",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": true,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_97664dda59a547fc88645549ca89ca35",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "CURSED NECKLACE"
+          }
+        }
+      ]
     }
   ]
 }

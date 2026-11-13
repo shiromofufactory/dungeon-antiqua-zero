@@ -1264,7 +1264,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
         encounter = game._create_random_battle_encounter()
 
-        game.encounter_system.dynamic_monster_level.assert_called_once_with()
+        game.encounter_system.dynamic_monster_level.assert_called_once_with(game.save_data)
         game.encounter_system.generate_formation.assert_called_once_with(
             game.monsters,
             game.current_map.random_encounter,

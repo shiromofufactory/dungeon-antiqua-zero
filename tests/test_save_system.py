@@ -69,7 +69,7 @@ class SaveSystemTest(unittest.TestCase):
         cls.skills = load_mock_skills()
         cls.all_members = load_mock_party(cls.items, cls.skills)
 
-    def save_document(self, memory=None) -> dict[str, object]:
+    def save_document(self, memory=None, *, monster_level=7) -> dict[str, object]:
         inventory = InventorySystem(self.items)
         party = self.all_members[:2]
         character_states = {
@@ -81,6 +81,7 @@ class SaveSystemTest(unittest.TestCase):
                 experience=456,
                 battle_count=7,
                 encounter_count=83,
+                monster_level=monster_level,
                 difficulty=Difficulty.HARD,
                 play_time_frames=890,
                 event_flags={"prologue_complete", "fairy_saved"},
@@ -311,6 +312,7 @@ class SaveSystemTest(unittest.TestCase):
                 "experience": 456,
                 "battle_count": 7,
                 "encounter_count": 83,
+                "monster_level": 7,
                 "difficulty": "hard",
                 "play_time_frames": 890,
             },
@@ -478,6 +480,7 @@ class SaveSystemTest(unittest.TestCase):
 
         self.assertEqual(restored.save_data.gold, 123)
         self.assertEqual(restored.save_data.encounter_count, 83)
+        self.assertEqual(restored.save_data.monster_level, 7)
         self.assertEqual(restored.save_data.difficulty, Difficulty.HARD)
         self.assertEqual(restored.save_data.play_time_frames, 890)
         self.assertEqual(
@@ -509,6 +512,7 @@ class SaveSystemTest(unittest.TestCase):
             saved_at=datetime.fromisoformat(document["saved_at"]),
         )
         self.assertEqual(round_tripped["progress"]["play_time_frames"], 890)
+        self.assertEqual(round_tripped["progress"]["monster_level"], 7)
         for state in round_tripped["party"]["character_states"].values():
             self.assertEqual(
                 state["internal_level"],
@@ -541,6 +545,47 @@ class SaveSystemTest(unittest.TestCase):
                 required_experience_for_level(saved_level)
                 - document["progress"]["experience"],
             )
+
+    def test_monster_level_round_trips_through_manual_and_auto_slots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for level in range(2, 10):
+                for slot in (AUTO_SAVE_SLOT, 1):
+                    with self.subTest(level=level, slot=slot):
+                        repository = SaveRepository(Path(directory))
+                        repository.save(slot, self.save_document(monster_level=level))
+                        document = SaveRepository(Path(directory)).load(slot)
+                        restored = restore_save_document(
+                            document, character_records=load_mock_character_records(),
+                            items=self.items, skills=self.skills,
+                        )
+                        self.assertEqual(restored.save_data.monster_level, level)
+
+    def test_legacy_saves_without_monster_level_default_to_two(self) -> None:
+        for version in (1, 2, SAVE_FORMAT_VERSION):
+            with self.subTest(version=version):
+                document = self.save_document()
+                document["format_version"] = version
+                del document["progress"]["monster_level"]
+                if version == 1:
+                    for state in document["party"]["character_states"].values():
+                        del state["experience_offset"]
+                restored = restore_save_document(
+                    document, character_records=load_mock_character_records(),
+                    items=self.items, skills=self.skills,
+                )
+                self.assertEqual(restored.save_data.monster_level, 2)
+                self.assertNotIn("monster_level", document["progress"])
+
+    def test_invalid_saved_monster_levels_are_rejected(self) -> None:
+        for value in (None, True, "2", 2.0, -1, 0, 1, 10):
+            with self.subTest(value=value):
+                document = self.save_document()
+                document["progress"]["monster_level"] = value
+                with self.assertRaisesRegex(SaveSystemError, "progress.monster_level"):
+                    restore_save_document(
+                        document, character_records=load_mock_character_records(),
+                        items=self.items, skills=self.skills,
+                    )
 
     def test_legacy_version_one_save_defaults_missing_encounter_count(self) -> None:
         document = self.save_document()

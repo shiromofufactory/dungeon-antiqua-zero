@@ -136,6 +136,7 @@ class SaveDataTest(unittest.TestCase):
         self.assertEqual(save_data.experience, 0)
         self.assertEqual(save_data.battle_count, 0)
         self.assertEqual(save_data.encounter_count, 0)
+        self.assertEqual(save_data.monster_level, 2)
         self.assertEqual(save_data.difficulty, Difficulty.NORMAL)
         self.assertEqual(save_data.play_time_frames, 0)
         self.assertEqual(save_data.event_flags, set())
@@ -166,6 +167,11 @@ class SaveDataTest(unittest.TestCase):
             {"experience": True},
             {"battle_count": -1},
             {"encounter_count": -1},
+            {"monster_level": 1},
+            {"monster_level": 10},
+            {"monster_level": True},
+            {"monster_level": "2"},
+            {"monster_level": 2.0},
             {"play_time_frames": "0"},
             {"difficulty": "normal"},
             {"event_flags": ["prologue_complete"]},

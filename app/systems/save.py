@@ -175,6 +175,7 @@ def restore_save_document(
         gold=_non_negative_int(progress, "gold", "progress"),
         experience=_non_negative_int(progress, "experience", "progress"),
         battle_count=_non_negative_int(progress, "battle_count", "progress"),
+        monster_level=_restore_monster_level(progress.get("monster_level", 2)),
         encounter_count=_optional_non_negative_int(
             progress,
             "encounter_count",
@@ -538,6 +539,12 @@ def _integer(value: Mapping[str, object], key: str, label: str) -> int:
     return current
 
 
+def _restore_monster_level(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 9:
+        raise SaveSystemError("progress.monster_level must be an integer from 2 to 9")
+    return value
+
+
 def _optional_non_negative_int(
     value: Mapping[str, object],
     key: str,
@@ -727,6 +734,7 @@ def create_save_document(
             "experience": save_data.experience,
             "battle_count": save_data.battle_count,
             "encounter_count": save_data.encounter_count,
+            "monster_level": _restore_monster_level(save_data.monster_level),
             "difficulty": save_data.difficulty.value,
             "play_time_frames": save_data.play_time_frames,
         },
