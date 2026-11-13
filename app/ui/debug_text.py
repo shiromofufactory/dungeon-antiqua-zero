@@ -14,6 +14,7 @@ class DebugText:
     settings_menu: str = "デバッグメニュー"
     title: str = "デバッグメニュー"
     party_level: str = "パーティＬＶ"
+    battle_count: str = "しょうりすう"
     gold: str = "Ｇｏｌｄ"
     members: str = "メンバー"
     member_status: str = "メンバー状態"

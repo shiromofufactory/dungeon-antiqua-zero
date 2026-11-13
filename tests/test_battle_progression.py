@@ -46,19 +46,49 @@ def member_record(key: str, *, level_difference: int = 0) -> dict[str, object]:
 
 
 class ExperienceCurveTest(unittest.TestCase):
-    def test_uses_da2_cumulative_thresholds(self) -> None:
-        self.assertEqual(required_experience_for_level(17), 2954)
-        self.assertEqual(required_experience_for_level(18), 3786)
-        self.assertEqual(internal_level_for_experience(3785), 17)
-        self.assertEqual(internal_level_for_experience(3786), 18)
+    def test_uses_plan_a_cumulative_thresholds(self) -> None:
+        for level, experience in (
+            (1, 0), (2, 42), (3, 88), (5, 198), (10, 716),
+            (20, 7056), (30, 46036), (40, 156575), (70, 585314),
+            (99, 999898),
+        ):
+            with self.subTest(level=level):
+                self.assertEqual(required_experience_for_level(level), experience)
+
+    def test_all_level_boundaries_resolve_before_and_at_threshold(self) -> None:
+        self.assertEqual(internal_level_for_experience(-1), 1)
+        self.assertEqual(internal_level_for_experience(0), 1)
+        for level in range(2, 100):
+            with self.subTest(level=level):
+                threshold = required_experience_for_level(level)
+                self.assertGreater(threshold, required_experience_for_level(level - 1))
+                self.assertEqual(internal_level_for_experience(threshold - 1), level - 1)
+                self.assertEqual(internal_level_for_experience(threshold), level)
+        self.assertEqual(internal_level_for_experience(999999), 99)
+
+    def test_level_41_onward_uses_a_constant_interval(self) -> None:
+        for level in range(41, 99):
+            with self.subTest(level=level):
+                self.assertEqual(
+                    required_experience_for_level(level + 1)
+                    - required_experience_for_level(level),
+                    14296,
+                )
 
     def test_joining_offset_anchors_level_18_at_shared_experience_10(self) -> None:
         member = Member.from_record_at_internal_level(member_record("Alvan"), 18)
 
         member.set_joining_experience_offset(10)
 
-        self.assertEqual(member.experience_offset, 3776)
+        self.assertEqual(
+            member.experience_offset, required_experience_for_level(18) - 10
+        )
         self.assertEqual(member.refresh_internal_level(10), 18)
+        next_level_experience = (
+            required_experience_for_level(19) - member.experience_offset
+        )
+        self.assertEqual(member.refresh_internal_level(next_level_experience - 1), 18)
+        self.assertEqual(member.refresh_internal_level(next_level_experience), 19)
 
 
 class BattleProgressionTest(unittest.TestCase):
@@ -337,7 +367,7 @@ class BattleProgressionTest(unittest.TestCase):
                         self.assertEqual((proficiency.level, proficiency.progress), npc_before[index])
 
     def test_experience_ceiling_awards_only_remaining_points_and_keeps_gold(self) -> None:
-        for limit, expected_level in ((500, 10), (5000, 19), (999999, 99)):
+        for limit, expected_level in ((500, 8), (5000, 18), (999999, 99)):
             with self.subTest(limit=limit):
                 member = Member.from_record(member_record("Fighter"))
                 save_data = SaveData(experience=limit - 5)
@@ -364,11 +394,12 @@ class BattleProgressionTest(unittest.TestCase):
 
     def test_experience_already_over_ceiling_is_preserved_without_reward(self) -> None:
         member = Member.from_record(member_record("Fighter"))
-        save_data = SaveData(experience=6085)
+        experience = required_experience_for_level(20)
+        save_data = SaveData(experience=experience)
         growth = BattleProgression((EnemyProgressionData(5, 4, 4, 0),)).settle(
             save_data, (member,), experience_limit=5000
         )
-        self.assertEqual(save_data.experience, 6085)
+        self.assertEqual(save_data.experience, experience)
         self.assertEqual(growth.experience_gained, 0)
         self.assertEqual(member.internal_level, 20)
 

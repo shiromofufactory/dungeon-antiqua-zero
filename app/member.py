@@ -196,7 +196,7 @@ _TWO_HANDED_SKILL_KINDS = frozenset(
 
 
 def required_experience_for_level(level: int) -> int:
-    """Return DA2's cumulative experience threshold for one internal level."""
+    """Return ZERO's cumulative experience threshold for one internal level."""
 
     if isinstance(level, bool) or not isinstance(level, int):
         raise TypeError("level must be an integer")
@@ -212,12 +212,14 @@ def required_experience_for_level(level: int) -> int:
         else:
             factor = max(1.0, 1.4 - (previous_level - 1) / 100)
             increment = int(increment * factor)
-        total += increment
+        # Plan A: normalize DA2's 935,322 total toward 999,900, adding
+        # 30 per step. Round each scaled step half up using integer arithmetic.
+        total += (increment * 996960 + 935322 // 2) // 935322 + 30
     return total
 
 
 def internal_level_for_experience(experience: int) -> int:
-    """Resolve the highest internal level whose DA2 threshold is reached."""
+    """Resolve the highest internal level whose ZERO threshold is reached."""
 
     if isinstance(experience, bool) or not isinstance(experience, int):
         raise TypeError("experience must be an integer")

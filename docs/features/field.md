@@ -458,9 +458,17 @@ Esc／Startで開くゲームメニューは、通常メニューや設定画面
   最終的には通常モードも非表示にする。起動オプションは [起動モード仕様](./launch-modes.md) を参照する。
 - デバッグメニューのメイン項目は12pxの行送りで表示する。今後項目が増える場合も、
   一覧の標準行送りには同じ値を使う。
+  メインの順序は `DEBUG_TEXT.encounter`、`dungeon`、`teleport`、`shop`、空行、
+  `party_level`、`gold`、`items`、`members`、`member_status`、`event_flags`、
+  `battle_count`、`monster_level` とする（すべて `DEBUG_TEXT` のフィールド）。
+  先頭は相対Y=9、空行はY=21、末尾はY=45とし、ラベルはX=6に置く。
+  現在値は `party_level`、`battle_count`、`monster_level` の3行だけに表示し、
+  区切りはX=31、値はX=34とする。他の行はラベルのみ表示する。
+  `battle_count` は `SaveData.battle_count` の勝利数を表示する専用行で、編集できず、
+  上下移動では空行とともに飛ばす。メインの `DEBUG_TEXT.close_guide` は右上のX=40、Y=3に置く。
 - デバッグメニューではパーティLV、Gold、メンバー構成、メンバー状態、アイテム取得、
   テレポート、ショップ、エンカウント、イベントフラグを操作できる。
-- デバッグメイン下部の相対Y=42へ `DEBUG_TEXT.monster_level` と、エンカウントの「変動」を
+- デバッグメイン下部の相対Y=45へ `DEBUG_TEXT.monster_level` と、エンカウントの「変動」を
   解決した現在のレベルを表示する。ラベルはX=6、区切りはX=31、値はX=34とする。
   カーソル対象へ含め、決定で既存の数値入力画面を開いて2〜9の1桁を入力する。
   空入力・0・1はエラー通知して入力画面に留まり、確定すると同じ行を選択したメインへ戻る。

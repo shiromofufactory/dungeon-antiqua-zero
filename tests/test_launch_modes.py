@@ -300,7 +300,7 @@ class LaunchModeGameTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 game = self.game(mode)
                 level = 3 if mode is LaunchMode.EXHIBITION else 1
-                experience = 26 if mode is LaunchMode.EXHIBITION else 0
+                experience = 88 if mode is LaunchMode.EXHIBITION else 0
                 self.assertEqual(game.save_data.experience, experience)
                 for member in game.party:
                     expected = level if member.definition.key == FIORA_CHARACTER_KEY else member.definition.joining_internal_level(level)
@@ -327,7 +327,7 @@ class LaunchModeGameTest(unittest.TestCase):
             items=game.items, skills=game.skills,
         )
         fiora = restored.character_states[FIORA_CHARACTER_KEY]
-        self.assertEqual(restored.save_data.experience, 26)
+        self.assertEqual(restored.save_data.experience, 88)
         self.assertEqual(fiora.experience_offset, 0)
         self.assertEqual(fiora.internal_level, 3)
         self.assertEqual(fiora.refresh_internal_level(required_experience_for_level(4) - 1), 3)
@@ -363,7 +363,7 @@ class LaunchModeGameTest(unittest.TestCase):
 
     def test_exhibition_battle_rewards_add_to_initial_shared_experience(self) -> None:
         game = self.game(LaunchMode.EXHIBITION)
-        for expected_experience, expected_level in ((41, 3), (56, 4)):
+        for expected_experience, expected_level in ((103, 3), (118, 3), (133, 3), (148, 4)):
             progression = BattleProgression((EnemyProgressionData(5, 4, 4, 0),))
             growth = progression.settle(game.save_data, game.party)
             self.assertEqual(growth.experience_gained, 15)
@@ -420,7 +420,7 @@ class LaunchModeGameTest(unittest.TestCase):
 
     def test_capped_experience_and_growth_survive_save_restore(self) -> None:
         for mode, limit, expected_level in (
-            (LaunchMode.EXHIBITION, 500, 10), (LaunchMode.DEMO, 5000, 19),
+            (LaunchMode.EXHIBITION, 500, 8), (LaunchMode.DEMO, 5000, 18),
         ):
             with self.subTest(mode=mode):
                 game = self.game(mode)
@@ -458,7 +458,7 @@ class LaunchModeGameTest(unittest.TestCase):
                 game._return_to_start_without_window_restart()
                 self.assertIs(game.launch_mode, mode)
                 self.assertEqual(game.party[0].internal_level, 3 if mode is LaunchMode.EXHIBITION else 1)
-                self.assertEqual(game.save_data.experience, 26 if mode is LaunchMode.EXHIBITION else 0)
+                self.assertEqual(game.save_data.experience, 88 if mode is LaunchMode.EXHIBITION else 0)
                 self.assertIsNotNone(game.title_scene)
                 self.assertIsNone(game.start_screen)
 
@@ -514,7 +514,7 @@ class LaunchModeGameTest(unittest.TestCase):
                     self.assertIsNone(game.battle_scene)
                     self.assertEqual(game.save_data.gold, 0)
                     self.assertEqual(game.save_data.event_flags, set())
-                    self.assertEqual(game.save_data.experience, 26 if mode is LaunchMode.EXHIBITION else 0)
+                    self.assertEqual(game.save_data.experience, 88 if mode is LaunchMode.EXHIBITION else 0)
                     game.save_repository.save.assert_not_called()
                     if battle is not None:
                         battle.release_palette_variants.assert_called_once_with()

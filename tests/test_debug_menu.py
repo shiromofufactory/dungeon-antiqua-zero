@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 import tempfile
-from itertools import pairwise
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -147,17 +146,66 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertEqual(self.save_data.gold, 654321)
         self.assertIs(self.screen.phase, DebugMenuPhase.MAIN)
 
-    def test_main_items_use_the_standard_twelve_pixel_row_spacing(self) -> None:
-        target_y = [target.y for target in self.screen.main_cursor.targets]
-
-        self.assertEqual(len(target_y), 11)
-        self.assertEqual(self.screen.main_cursor.targets[0].key, "encounter")
+    def test_main_order_has_a_blank_row_and_skips_the_read_only_victory_count(self) -> None:
+        self.assertEqual(
+            [(target.key, target.y) for target in self.screen.main_cursor.targets],
+            [
+                ("encounter", 9), ("dungeon", 12), ("teleport", 15), ("shop", 18),
+                ("party_level", 24), ("gold", 27), ("items", 30),
+                ("members", 33), ("member_status", 36), ("event_flags", 39),
+                ("monster_level", 45),
+            ],
+        )
         self.assertEqual(self.screen.main_cursor.selected_key, "encounter")
-        self.assertTrue(
-            all(
-                next_y - current_y == 3
-                for current_y, next_y in pairwise(target_y[:-1])
-            )
+        self.screen.main_cursor.select_key("shop")
+        self.screen.update(InputState(navigation=Direction.DOWN))
+        self.assertEqual(self.screen.main_cursor.selected_key, "party_level")
+        self.screen.main_cursor.select_key("event_flags")
+        self.screen.update(InputState(navigation=Direction.DOWN))
+        self.assertEqual(self.screen.main_cursor.selected_key, "monster_level")
+        self.screen.update(InputState(navigation=Direction.UP))
+        self.assertEqual(self.screen.main_cursor.selected_key, "event_flags")
+
+    def test_main_shows_values_only_for_level_victories_and_monster_level(self) -> None:
+        self.save_data.battle_count = 12345
+        self.save_data.gold = 654321
+        self.screen._build_main_window()
+
+        self.assertEqual(
+            [(text.text, text.x, text.y) for text in self.screen.main_window.texts
+             if text.x in (31, 34)],
+            [
+                ("：", 31, 24), (format_number(self.editor.baseline_level), 34, 24),
+                ("：", 31, 42), (format_number(12345), 34, 42),
+                ("：", 31, 45), ("２", 34, 45),
+            ],
+        )
+        self.assertIn(
+            ("しょうりすう", 6, 42),
+            [(text.text, text.x, text.y) for text in self.screen.main_window.texts],
+        )
+        self.assertIsNone(self.screen.numeric_entry)
+        self.assertEqual(self.save_data.battle_count, 12345)
+
+    def test_main_close_guide_is_at_the_upper_right(self) -> None:
+        guide = self.screen._guide_text(3, x=40)
+        self.assertIn(guide, self.screen.main_window.texts)
+        self.assertNotIn(self.screen._guide_text(), self.screen.main_window.texts)
+
+    def test_victory_count_is_zero_initially_and_refreshed_when_reopened(self) -> None:
+        self.assertIn(
+            ("０", 34, 42),
+            [(text.text, text.x, text.y) for text in self.screen.main_window.texts],
+        )
+        self.save_data.battle_count = 7
+        reopened = DebugMenuOverlay(
+            editor=self.editor, inventory_system=self.inventory,
+            save_data=self.save_data, settings=self.screen.settings,
+            fonts=self.screen.fonts, alert=self.alert,
+        )
+        self.assertIn(
+            ("７", 34, 42),
+            [(text.text, text.x, text.y) for text in reopened.main_window.texts],
         )
 
     def test_dynamic_monster_level_is_displayed_and_selectable(self) -> None:
@@ -174,7 +222,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
             ("monster_level", label.y),
             [(target.key, target.y) for target in self.screen.main_cursor.targets],
         )
-        self.screen.main_cursor.select_key("dungeon")
+        self.screen.main_cursor.select_key("event_flags")
         self.screen.update(InputState(navigation=Direction.DOWN))
         self.assertEqual(self.screen.main_cursor.selected_key, "monster_level")
         self.screen.update(InputState(navigation=Direction.DOWN))
@@ -195,7 +243,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
                 self.assertEqual(self.screen.encounter_system.dynamic_monster_level(self.save_data), level)
                 self.assertEqual(self.save_data.monster_level, level)
                 self.assertIn(
-                    (format_number(level), 34, 42),
+                    (format_number(level), 34, 45),
                     [(text.text, text.x, text.y) for text in self.screen.main_window.texts],
                 )
 
@@ -238,7 +286,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
             fonts=self.screen.fonts, alert=self.alert,
         )
         self.assertIn(
-            ("９", 34, 42),
+            ("９", 34, 45),
             [(text.text, text.x, text.y) for text in reopened.main_window.texts],
         )
 
@@ -269,7 +317,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
                         fonts=self.screen.fonts, alert=self.alert,
                     )
                     self.assertIn(
-                        ("８", 34, 42),
+                        ("８", 34, 45),
                         [(text.text, text.x, text.y) for text in reopened.main_window.texts],
                     )
                     self.assertEqual(

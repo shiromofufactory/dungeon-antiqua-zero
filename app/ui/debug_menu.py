@@ -46,22 +46,25 @@ DEBUG_WINDOW_GRID = (2, 2, 60, 56)
 DEBUG_ROW_HEIGHT = 3
 MAIN_ITEM_KEYS = (
     "encounter",
-    "party_level",
-    "gold",
-    "members",
-    "member_status",
-    "items",
+    "dungeon",
     "teleport",
     "shop",
+    None,
+    "party_level",
+    "gold",
+    "items",
+    "members",
+    "member_status",
     "event_flags",
-    "dungeon",
+    "battle_count",
+    "monster_level",
 )
 MAIN_FIRST_Y = 9
-MONSTER_LEVEL_Y = 42
 MAIN_ROWS = tuple(
     (key, MAIN_FIRST_Y + index * DEBUG_ROW_HEIGHT)
     for index, key in enumerate(MAIN_ITEM_KEYS)
-) + (("monster_level", MONSTER_LEVEL_Y),)
+    if key is not None
+)
 MAIN_CURSOR_X = 4
 MAIN_LABEL_X = 6
 MAIN_VALUE_X = 34
@@ -357,43 +360,26 @@ class DebugMenuOverlay:
     def _member_count_text(self) -> str:
         return DEBUG_TEXT.member_count(self.editor.other_member_count)
 
-    def _teleport_count_text(self) -> str:
-        return DEBUG_TEXT.teleport_count(len(self.teleport_targets))
-
-    def _shop_count_text(self) -> str:
-        return DEBUG_TEXT.shop_count(len(self.shop_targets))
-
-    def _item_count_text(self) -> str:
-        return DEBUG_TEXT.item_count(len(self.inventory_system.items))
-
     def _party_member_count_text(self) -> str:
         return DEBUG_TEXT.party_member_count(len(self.editor.party))
 
     def _member_skill_count_text(self, member: Member) -> str:
         return DEBUG_TEXT.skill_count(len(member.skills))
 
-    def _guide_text(self, y: int = GUIDE_Y) -> WindowText:
+    def _guide_text(self, y: int = GUIDE_Y, *, x: int = GUIDE_X) -> WindowText:
         return self.debug_texts.create(
             DEBUG_TEXT.close_guide.replace(
                 "%CANCEL%",
                 input_icon_tag(InputAction.CANCEL, InputDevice.KEYBOARD),
             ),
-            GUIDE_X,
+            x,
             y,
         )
 
     def _build_main_window(self, selected_key: str = "encounter") -> None:
         values = {
             "party_level": format_number(self.editor.baseline_level),
-            "gold": format_number(self.save_data.gold),
-            "members": self._member_count_text(),
-            "member_status": self._party_member_count_text(),
-            "items": self._item_count_text(),
-            "teleport": self._teleport_count_text(),
-            "shop": self._shop_count_text(),
-            "encounter": "",
-            "event_flags": DEBUG_TEXT.flag_count(len(self.flag_ids)),
-            "dungeon": str(len(self.dungeons)),
+            "battle_count": format_number(self.save_data.battle_count),
             "monster_level": format_number(
                 self.encounter_system.dynamic_monster_level(self.save_data),
             ),
@@ -409,20 +395,22 @@ class DebugMenuOverlay:
             "encounter": DEBUG_TEXT.encounter,
             "event_flags": DEBUG_TEXT.event_flags,
             "dungeon": DEBUG_TEXT.dungeon,
+            "battle_count": DEBUG_TEXT.battle_count,
             "monster_level": DEBUG_TEXT.monster_level,
         }
         placements = [
             self.debug_texts.create(DEBUG_TEXT.title, 4, 3)
         ]
         for key, y in MAIN_ROWS:
-            placements.extend(
-                (
-                    self.debug_texts.create(labels[key], MAIN_LABEL_X, y),
-                    self.debug_texts.create("" if key == "encounter" else "：", 31, y),
-                    self.debug_texts.create(values[key], MAIN_VALUE_X, y),
+            placements.append(self.debug_texts.create(labels[key], MAIN_LABEL_X, y))
+            if key in values:
+                placements.extend(
+                    (
+                        self.debug_texts.create("：", 31, y),
+                        self.debug_texts.create(values[key], MAIN_VALUE_X, y),
+                    )
                 )
-            )
-        placements.append(self._guide_text())
+        placements.append(self._guide_text(3, x=40))
         self.main_window = self.windows.create(
             *DEBUG_WINDOW_GRID,
             tuple(placements),
@@ -430,7 +418,8 @@ class DebugMenuOverlay:
         )
         self.main_cursor = self.main_window.set_cursor(
             tuple(
-                CursorTarget(MAIN_CURSOR_X, y, key=key) for key, y in MAIN_ROWS
+                CursorTarget(MAIN_CURSOR_X, y, key=key)
+                for key, y in MAIN_ROWS if key != "battle_count"
             )
         )
         self._select_cursor_key(self.main_cursor, selected_key)
