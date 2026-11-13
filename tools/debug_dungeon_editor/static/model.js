@@ -5,6 +5,19 @@ export const defaultEncounter = Object.freeze({
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 export const newId = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
+export function stepRanges(dungeon) {
+  let completed = 0;
+  return dungeon.steps.map((step) => {
+    const first = completed + 1;
+    completed += step.type === "random_encounter" ? step.count : 1;
+    return { first, last: completed };
+  });
+}
+
+export function stepLabel(range) {
+  return range.first === range.last ? `${range.first}` : `${range.first}〜${range.last}`;
+}
+
 export function addStep(dungeon, type, catalogs, at = dungeon.steps.length) {
   const step = { id: newId(type), type };
   if (type === "random_encounter") {
@@ -15,7 +28,7 @@ export function addStep(dungeon, type, catalogs, at = dungeon.steps.length) {
     step.contents = { type: "gold", amount: 100 };
   } else if (type === "event_battle") {
     step.battle_id = catalogs.battle_ids?.[0] || "";
-  } else {
+  } else if (type !== "healing_spring") {
     throw new Error("不明なステップ種別です。");
   }
   dungeon.steps.splice(at, 0, step);

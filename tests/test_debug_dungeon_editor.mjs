@@ -1,9 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { History, addStep, moveStep, defaultEncounter } from "../tools/debug_dungeon_editor/static/model.js";
+import { History, addStep, moveStep, defaultEncounter, stepRanges, stepLabel } from "../tools/debug_dungeon_editor/static/model.js";
 
 const catalogs = { battle_ids: ["shared_guard"], monsters: [{key:"Giant Spider"}], items: [{key:"POTION"}] };
 const dungeon = () => ({id:"trial",name:"調整用",bgm_id:"da3-dungeon1",steps:[]});
+
+test("step numbering counts every random battle and follows count changes and reordering", () => {
+  const d = dungeon();
+  const random = addStep(d, "random_encounter", catalogs);
+  const chest = addStep(d, "treasure", catalogs);
+  assert.deepEqual(stepRanges(d).map(stepLabel), ["1〜5", "6"]);
+  random.count = 2;
+  assert.deepEqual(stepRanges(d).map(stepLabel), ["1〜2", "3"]);
+  moveStep(d, chest.id, -1);
+  assert.deepEqual(stepRanges(d).map(stepLabel), ["1", "2〜3"]);
+});
+
+test("healing springs insert, reorder and undo as single steps without editable event data", () => {
+  const d = dungeon();
+  addStep(d, "random_encounter", catalogs);
+  addStep(d, "treasure", catalogs);
+  const h = new History({format_version:1,dungeons:[d]});
+  h.change((state) => addStep(state.data.dungeons[0], "healing_spring", catalogs, 1));
+  const spring = h.value.data.dungeons[0].steps[1];
+  assert.deepEqual(Object.keys(spring).sort(), ["id", "type"]);
+  assert.deepEqual(stepRanges(h.value.data.dungeons[0]).map(stepLabel), ["1〜5", "6", "7"]);
+  h.undo();
+  assert.equal(h.value.data.dungeons[0].steps.length, 2);
+  h.redo();
+  assert.deepEqual(h.value.data.dungeons[0].steps[1], spring);
+  moveStep(h.value.data.dungeons[0], spring.id, -1);
+  assert.deepEqual(stepRanges(h.value.data.dungeons[0]).map(stepLabel), ["1", "2〜6", "7"]);
+});
 
 test("event battles select a shared ID and never copy a lineup into a dungeon", () => {
   const entry = addStep(dungeon(), "event_battle", catalogs);

@@ -14,11 +14,11 @@ from debug_dungeon import (
 )
 from game import Game, GameScreenChange
 from input import Direction, InputButton, InputState
-from resources import FontResources
+from resources import EventCatalog, FontResources
 from scenes import BattleEncounter, BattlePhase, BattleResult
 from scenes.debug_dungeon import DebugDungeonScene
 from state import Language, LaunchMode, SaveData, Settings
-from systems import InventorySystem, TreasureSystem, create_save_document, restore_save_document
+from systems import InventorySystem, PartySystem, TreasureSystem, create_save_document, restore_save_document
 from text_catalog import TextCatalog
 from tools.debug_dungeon_editor.server import DebugDungeonEditorApplication
 from tools.screen_mocks._fixtures import load_mock_character_records, load_mock_items, load_mock_party, load_mock_skills
@@ -42,6 +42,35 @@ def source():
 
 
 class DebugDungeonDataTest(unittest.TestCase):
+    def test_random_battles_each_count_as_a_step_including_after_resume(self):
+        data = source()
+        data["dungeons"][0]["steps"] = data["dungeons"][0]["steps"][:2]
+        data["dungeons"][0]["steps"][0]["count"] = 5
+        dungeon = parse_dungeons(data)[0]
+        self.assertEqual(dungeon.total_steps, 6)
+        progress = DungeonProgress(dungeon)
+        for number in range(1, 7):
+            self.assertEqual(progress.step_number, number)
+            restored = DungeonProgress.from_checkpoint(dungeon, progress.checkpoint())
+            self.assertEqual(restored.step_number, number)
+            progress.complete()
+        self.assertIsNone(progress.current)
+        self.assertEqual(progress.step_number, 6)
+
+    def test_healing_spring_has_one_step_and_no_custom_event_or_count(self):
+        data = source()
+        steps = data["dungeons"][0]["steps"]
+        steps[:] = [{"id": "spring", "type": "healing_spring"}]
+        dungeon = parse_dungeons(data)[0]
+        self.assertEqual(dungeon.total_steps, 1)
+        self.assertEqual(DungeonProgress(dungeon).remaining_battles, 0)
+        for extra in ({"event_id": "other.event"}, {"count": 2}):
+            steps[0].update(extra)
+            with self.assertRaises(DebugDungeonDataError):
+                parse_dungeons(data)
+            for key in extra:
+                del steps[0][key]
+
     def test_checkpoint_restores_partial_random_battles_and_fade_by_stable_step_id(self):
         dungeon = parse_dungeons(source())[0]
         progress = DungeonProgress(dungeon)
@@ -140,6 +169,7 @@ class DebugDungeonSceneTest(unittest.TestCase):
         self.fonts = FontResources()
         self.settings = Settings()
         self.battle = Mock(return_value=True)
+        self.event = Mock(return_value=True)
         self.menu = Mock()
         self.exit = Mock()
 
@@ -148,8 +178,53 @@ class DebugDungeonSceneTest(unittest.TestCase):
             dungeon=parse_dungeons(data or source())[0], party=self.party,
             settings=self.settings, fonts=self.fonts, texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
             items=self.items, treasure_system=self.treasures,
-            on_battle=self.battle, on_menu=self.menu, on_exit=self.exit, alert=Mock(),
+            on_battle=self.battle, on_event=self.event, on_menu=self.menu, on_exit=self.exit, alert=Mock(),
         )
+
+    def test_progress_display_counts_individual_battles_without_separate_battle_counter(self):
+        scene = self.scene()
+        scene.resume(DungeonCheckpoint(scene.dungeon.id, "random_1", 1, False))
+        texts = [text.text for text in scene.window.texts]
+        self.assertIn("ステップ　２／４", texts)
+        self.assertFalse(any("ランダム戦闘" in text or "残り戦闘" in text for text in texts))
+
+    def test_healing_spring_calls_common_event_and_waits_before_completing(self):
+        data = source()
+        data["dungeons"][0]["steps"].insert(0, {"id": "spring", "type": "healing_spring"})
+        scene = self.scene(data)
+        scene.update(InputState())
+        self.event.assert_called_once_with("common.event_1")
+        self.assertTrue(scene.waiting_for_event)
+        self.assertEqual(scene.progress.current.id, "spring")
+        scene.update(InputState(menu=InputButton(True, True)))
+        scene.advance()
+        self.menu.assert_not_called()
+        self.event.assert_called_once()
+        scene.complete_event(succeeded=True)
+        self.assertEqual(scene.progress.current.id, "random_1")
+        self.assertEqual(scene.progress.step_number, 2)
+        self.battle.assert_not_called()
+
+    def test_healing_spring_failure_and_checkpoint_keep_the_step_available(self):
+        data = source()
+        data["dungeons"][0]["steps"] = [{"id": "spring", "type": "healing_spring"}]
+        scene = self.scene(data)
+        scene.resume(DungeonCheckpoint("trial", "spring", 0, True))
+        scene.update(InputState())
+        self.event.assert_not_called()
+        self.event.return_value = False
+        scene.advance()
+        self.assertFalse(scene.waiting_for_event)
+        self.assertEqual(scene.progress.current.id, "spring")
+        self.event.return_value = True
+        scene.advance()
+        scene.complete_event(succeeded=False)
+        self.assertEqual(scene.progress.current.id, "spring")
+        self.assertEqual(scene.notice, DEBUG_TEXT.dungeon_event_error)
+        scene.advance()
+        scene.complete_event(succeeded=True)
+        self.assertIsNone(scene.progress.current)
+        self.assertNotIn("next", [target.key for target in scene.cursor.targets])
 
     def test_starts_one_battle_then_waits_for_the_next_choice(self):
         scene = self.scene()
@@ -259,6 +334,57 @@ class DebugDungeonSceneTest(unittest.TestCase):
 
 
 class DebugDungeonGameTest(unittest.TestCase):
+    @patch("game.EventMessageOverlay")
+    @patch("game.play_se")
+    def test_common_spring_runs_through_game_loop_and_recovers_after_message(self, play, message):
+        game = self.game()
+        game.items = load_mock_items()
+        game.skills = load_mock_skills()
+        game.party = load_mock_party(game.items, game.skills)
+        game.character_states = {m.definition.key: m for m in game.party}
+        game.party_system = PartySystem(character_records=load_mock_character_records(),
+            items=game.items, skills=game.skills, active_party=game.party)
+        game.inventory_system = InventorySystem(game.items)
+        game.event_catalog = EventCatalog.from_json()
+        game.event_runner = None
+        game.event_message = None
+        game.settings = Settings()
+        game.selected_member_index = 0
+        for name in ("event_messages", "fonts", "faces", "character_face_positions",
+                     "palette_shifter", "alert", "input_reader", "field_actors"):
+            setattr(game, name, Mock())
+        game.input_reader.poll.return_value = InputState(menu=InputButton(True, True))
+        game.showing_field = True
+        game._update_game_menu = Mock(return_value=False)
+        game._update_battle_scene = Mock(return_value=False)
+        game._update_fade = Mock(return_value=False)
+        game._update_field_menu_guide = Mock()
+        game.debug_dungeon_scene.waiting_for_event = True
+        for member in game.party:
+            member.hp = 1
+            member.mp = 0
+        self.assertTrue(game._start_field_event("common.event_1"))
+        play.assert_called_once_with("spell_healing1")
+        self.assertIsNotNone(game.event_screen_flash)
+        message.return_value.update.return_value = False
+        for _ in range(120):
+            game.update()
+            if game.event_message is not None:
+                break
+        self.assertIsNotNone(game.event_message)
+        self.assertEqual(message.call_args.kwargs["message_id"], "common.message_1")
+        self.assertTrue(all(member.hp == 1 and member.mp == 0 for member in game.party))
+        game.debug_dungeon_scene.complete_event.assert_not_called()
+        message.return_value.update.return_value = True
+        game.update()
+        self.assertTrue(all(member.hp == member.max_hp and member.mp == member.max_mp for member in game.party))
+        self.assertIsNone(game.event_runner)
+        self.assertIsNone(game.event_screen_flash)
+        game.debug_dungeon_scene.complete_event.assert_called_once_with(succeeded=True)
+        game.debug_dungeon_scene.update.assert_not_called()
+        game.field.update.assert_not_called()
+        game.field_actors.update_roaming.assert_not_called()
+
     def game(self):
         game = Game.__new__(Game)
         game.launch_mode = LaunchMode.NORMAL

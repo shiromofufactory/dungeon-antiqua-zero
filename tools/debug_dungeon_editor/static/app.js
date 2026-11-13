@@ -1,4 +1,4 @@
-import { History, addStep, moveStep, newId, clone } from "./model.js";
+import { History, addStep, moveStep, newId, clone, stepRanges, stepLabel } from "./model.js";
 
 const byId = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -8,7 +8,7 @@ let validationRevision = 0, validationTimer;
 const state = () => history.value;
 const dungeon = () => state().data.dungeons.find((entry) => entry.id === state().dungeonId);
 const step = () => dungeon()?.steps.find((entry) => entry.id === state().stepId);
-const labels = { random_encounter: "ランダムエンカウント", treasure: "宝箱", event_battle: "イベント戦闘" };
+const labels = { random_encounter: "ランダムエンカウント", treasure: "宝箱", event_battle: "イベント戦闘", healing_spring: "回復の泉" };
 
 async function api(path, data) {
   const response = await fetch(`/dungeon/api/${path}`, {
@@ -34,6 +34,7 @@ function catalogOptions(name) { return catalogs[name].map((entry) => [entry.key,
 function summary(entry) {
   if (entry.type === "random_encounter") return `${entry.count}回 · LV ${entry.encounter.monster_level === "dynamic" ? "変動" : entry.encounter.monster_level} · 危険度${entry.encounter.danger === "high" ? "高" : "低"}`;
   if (entry.type === "event_battle") return entry.battle_id;
+  if (entry.type === "healing_spring") return "パーティのHP・MP全快";
   return entry.contents.type === "gold" ? `${entry.contents.amount} Gold` : entry.contents.item_key;
 }
 function detail(entry) {
@@ -51,8 +52,10 @@ function detail(entry) {
     html = selectField("contents_type", "中身", [["gold","Gold"],["item","アイテム"]], entry.contents.type);
     html += entry.contents.type === "gold" ? numberField("amount", "金額", entry.contents.amount, 1, 999999)
       : selectField("item_key", "アイテム（1個）", catalogOptions("items"), entry.contents.item_key);
-  } else {
+  } else if (entry.type === "event_battle") {
     html = selectField("battle_id", "バトルID", [["", "選択してください"], ...catalogs.battle_ids.map((id) => [id,id])], entry.battle_id);
+  } else if (entry.type === "healing_spring") {
+    html = '<p class="hint">パーティのHP・MPを全快します。</p>';
   }
   html = `<div class="fields">${html}</div>`;
   if (entry.type === "event_battle") {
@@ -78,17 +81,18 @@ function render(rebuild = true) {
     });
     document.querySelectorAll("[data-step]").forEach((button) => {
       const index = dungeon()?.steps.findIndex((candidate) => candidate.id === button.dataset.step);
-      if (index >= 0) { const entry = dungeon().steps[index]; button.textContent = `${index+1}. ${labels[entry.type]} ${summary(entry)}`; }
+      if (index >= 0) { const entry = dungeon().steps[index]; button.textContent = `${stepLabel(stepRanges(dungeon())[index])}. ${labels[entry.type]} ${summary(entry)}`; }
     });
     return;
   }
   byId("dungeons").innerHTML = state().data.dungeons.map((entry) => `<button data-dungeon="${entry.id}" class="${entry.id === state().dungeonId ? "selected" : ""}">${escapeHtml(entry.name)}</button>`).join("") || '<p class="hint">「＋ 新規」でダンジョンを作成します。</p>';
   const d = dungeon();
   if (!d) { byId("workspace").innerHTML = '<p class="empty">ダンジョンを選択してください。</p>'; return; }
+  const ranges = stepRanges(d);
   byId("workspace").innerHTML = `<div class="heading"><h2>入口から最奥部まで</h2><button data-action="delete-dungeon" class="danger">ダンジョンを削除</button></div>
     <div class="metadata"><label>ダンジョン名<input data-field="name" maxlength="24" value="${escapeHtml(d.name)}"></label>${selectField("bgm_id","探索中のBGM",catalogs.bgm_ids.map((key)=>[key,key]),d.bgm_id)}<span class="muted source-id">ID: ${d.id}</span></div>
-    <div class="add-step"><span>選択行の後に追加：</span><button data-add="random_encounter">＋ ランダム戦闘</button><button data-add="treasure">＋ 宝箱</button><button data-add="event_battle">＋ イベント戦闘</button></div>
-    <div>${d.steps.map((entry,index) => `<article class="step ${entry.id === state().stepId ? "selected" : ""}"><button class="step-title" data-step="${entry.id}">${index+1}. ${labels[entry.type]} <span class="muted">${escapeHtml(summary(entry))}</span></button><div class="toolbar"><button data-action="up" data-id="${entry.id}" ${index===0 ? "disabled":""} aria-label="上へ移動">↑</button><button data-action="down" data-id="${entry.id}" ${index===d.steps.length-1 ? "disabled":""} aria-label="下へ移動">↓</button><button data-action="delete-step" data-id="${entry.id}">削除</button></div>${entry.id === state().stepId ? `<div class="step-detail">${detail(entry)}</div>` : ""}</article>`).join("") || '<p class="empty">戦闘や宝箱を追加してください。</p>'}</div>`;
+    <div class="add-step"><span>選択行の後に追加：</span><button data-add="random_encounter">＋ ランダム戦闘</button><button data-add="treasure">＋ 宝箱</button><button data-add="event_battle">＋ イベント戦闘</button><button data-add="healing_spring">＋ 回復の泉</button></div>
+    <div>${d.steps.map((entry,index) => `<article class="step ${entry.id === state().stepId ? "selected" : ""}"><button class="step-title" data-step="${entry.id}">${stepLabel(ranges[index])}. ${labels[entry.type]} <span class="muted">${escapeHtml(summary(entry))}</span></button><div class="toolbar"><button data-action="up" data-id="${entry.id}" ${index===0 ? "disabled":""} aria-label="上へ移動">↑</button><button data-action="down" data-id="${entry.id}" ${index===d.steps.length-1 ? "disabled":""} aria-label="下へ移動">↓</button><button data-action="delete-step" data-id="${entry.id}">削除</button></div>${entry.id === state().stepId ? `<div class="step-detail">${detail(entry)}</div>` : ""}</article>`).join("") || '<p class="empty">戦闘や宝箱を追加してください。</p>'}</div>`;
 }
 
 function showIssues(issues) {

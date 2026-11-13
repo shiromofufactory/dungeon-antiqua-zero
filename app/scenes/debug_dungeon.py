@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from debug_dungeon import DebugDungeon, DungeonCheckpoint, DungeonProgress, DungeonStep
+from debug_dungeon import HEALING_SPRING_EVENT_ID, DebugDungeon, DungeonCheckpoint, DungeonProgress, DungeonStep
 from input import InputState
 from localization import Localizer, format_number
 from resources import play_se
@@ -17,6 +17,7 @@ from ui.debug_text import DEBUG_TEXT
 class DebugDungeonScene:
     def __init__(self, *, dungeon: DebugDungeon, party, settings, fonts, texts, items,
                  treasure_system, on_battle: Callable[[DungeonStep], bool],
+                 on_event: Callable[[str], bool],
                  on_menu: Callable[[], None], on_exit: Callable[[], None], alert) -> None:
         self.progress = DungeonProgress(dungeon)
         self.party = party
@@ -26,12 +27,14 @@ class DebugDungeonScene:
         self.items = items
         self.treasure_system = treasure_system
         self.on_battle = on_battle
+        self.on_event = on_event
         self.on_menu = on_menu
         self.on_exit = on_exit
         self.alert = alert
         self.message: MessageOverlay | None = None
         self.notice = ""
         self.waiting_for_battle = False
+        self.waiting_for_event = False
         self.started = False
         self.placements = LocalizedWindowTextFactory.from_language(fonts, Language.JAPANESE)
         self.windows = WindowFactory(fonts.font_for(Language.JAPANESE))
@@ -57,17 +60,16 @@ class DebugDungeonScene:
         placements = [
             self.placements.create(self.dungeon.name, 4, 3),
             self.placements.create(DEBUG_TEXT.dungeon_progress.format(
-                current=min(p.index + 1, len(self.dungeon.steps)), total=len(self.dungeon.steps)), 4, 8),
-            self.placements.create(DEBUG_TEXT.dungeon_remaining.format(count=p.remaining_battles), 4, 12),
+                current=p.step_number, total=self.dungeon.total_steps), 4, 8),
         ]
         if p.fade_active:
-            placements.append(self.placements.create(DEBUG_TEXT.dungeon_fade_active, 30, 12))
+            placements.append(self.placements.create(DEBUG_TEXT.dungeon_fade_active, 4, 12))
         if step is not None and step.type == "event_battle":
             summary = DEBUG_TEXT.dungeon_warning
         elif step is None:
             summary = DEBUG_TEXT.dungeon_finished
-        elif step.type == "random_encounter":
-            summary = DEBUG_TEXT.dungeon_random.format(current=p.completed_in_step + 1, total=step.count)
+        elif step.type == "healing_spring":
+            summary = DEBUG_TEXT.dungeon_healing_spring
         else:
             summary = ""
         placements.extend((self.placements.create(summary, 4, 17,
@@ -95,9 +97,15 @@ class DebugDungeonScene:
 
     def advance(self) -> None:
         step = self.progress.current
-        if step is None or self.waiting_for_battle:
+        if step is None or self.waiting_for_battle or self.waiting_for_event:
             return
-        if step.type == "treasure":
+        if step.type == "healing_spring":
+            if self.on_event(HEALING_SPRING_EVENT_ID):
+                self.waiting_for_event = True
+            else:
+                self.notice = DEBUG_TEXT.dungeon_event_error
+                self.refresh()
+        elif step.type == "treasure":
             self._open_treasure(step)
             self.progress.complete()
             self.refresh()
@@ -118,6 +126,17 @@ class DebugDungeonScene:
         self.waiting_for_battle = False
         self.progress.complete()
         self.notice = DEBUG_TEXT.dungeon_battle_finished
+        self.refresh()
+
+    def complete_event(self, *, succeeded: bool) -> None:
+        if not self.waiting_for_event:
+            raise RuntimeError("debug dungeon has no active event")
+        self.waiting_for_event = False
+        if succeeded:
+            self.progress.complete()
+            self.notice = ""
+        else:
+            self.notice = DEBUG_TEXT.dungeon_event_error
         self.refresh()
 
     def _open_treasure(self, step: DungeonStep) -> None:
@@ -151,7 +170,7 @@ class DebugDungeonScene:
             if self.message.update(input_state):
                 self.message = None
             return
-        if self.waiting_for_battle:
+        if self.waiting_for_battle or self.waiting_for_event:
             return
         if input_state.menu.triggered:
             self.on_menu()

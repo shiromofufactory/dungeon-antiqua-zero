@@ -1573,6 +1573,8 @@ Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受
 `scenes/debug_dungeon.py` が3択・警告・取得メッセージと描画を所有する。
 Gameは開始・退出Transition、既存BattleSceneと通常メニューへの接続、手動保存・復元とオートセーブ抑止を調停する。
 専用SceneへGameの参照は渡さず、必要なSystemと開始・メニュー・退出コールバックを注入する。
+回復の泉はイベント開始コールバックを通して既存のEventRunnerへ接続し、Gameがイベントの
+更新・メッセージ描画と終了通知を調停する。試行イベント中は退避中のフィールドを更新しない。
 宝箱は既存TreasureSystemとSaveDataの取得済み記録を専用名前空間で再利用し、
 進行位置やFADE状態は `DungeonProgress` が所有し、手動保存時に安定IDを持つ不変の `DungeonCheckpoint` を渡す。
 SaveSystemはこれを省略可能な保存属性へ変換し、LoadedGameStateを通して返す。

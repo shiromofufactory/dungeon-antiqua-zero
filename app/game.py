@@ -2345,6 +2345,7 @@ class Game:
             dungeon=self.pending_debug_dungeon, party=self.party, settings=self.settings,
             fonts=self.fonts, texts=self.texts, items=self.items, treasure_system=self.treasure_system,
             on_battle=self._start_debug_dungeon_battle,
+            on_event=self._start_field_event,
             on_menu=lambda: self._begin_screen_change(GameScreenChange.SHOW_MENU),
             on_exit=lambda: self._begin_screen_change(GameScreenChange.EXIT_DEBUG_DUNGEON),
             alert=self.alert,
@@ -4116,6 +4117,13 @@ class Game:
         if getattr(self, "showing_field", False):
             simulation = getattr(self, "debug_dungeon_scene", None)
             if simulation is not None:
+                if simulation.waiting_for_event:
+                    if getattr(self, "event_runner", None) is not None:
+                        self._update_event(input_state)
+                    if self.event_runner is None:
+                        simulation.party = self.party
+                        simulation.complete_event(succeeded=self.last_event_error is None)
+                    return
                 simulation.update(input_state)
                 return
             self._update_field_fade_pulse()
@@ -4368,6 +4376,9 @@ class Game:
                 simulation = getattr(self, "debug_dungeon_scene", None)
                 if simulation is not None:
                     simulation.draw()
+                    event_message = getattr(self, "event_message", None)
+                    if event_message is not None:
+                        event_message.draw()
                     hint_overlay = getattr(self, "hint_overlay", None)
                     if hint_overlay is not None:
                         hint_overlay.draw()

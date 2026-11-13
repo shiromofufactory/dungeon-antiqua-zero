@@ -64,6 +64,10 @@
           "battle_id": "battle_3"
         },
         {
+          "id": "healing_spring_05cf16a1a1cb4ccbb59dfadff64ab977",
+          "type": "healing_spring"
+        },
+        {
           "id": "treasure_71fb54ab20e7491992e454c1d79b98f8",
           "type": "treasure",
           "contents": {

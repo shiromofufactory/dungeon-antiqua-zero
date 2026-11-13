@@ -16,6 +16,7 @@ else:
 
 
 DEFAULT_PATH = Path(__file__).resolve().parent / "debug" / "dungeons.json"
+HEALING_SPRING_EVENT_ID = "common.event_1"
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DEFAULT_ENCOUNTER = {
     "monster_level": 1, "danger": "low", "polarity": "neutral",
@@ -77,6 +78,10 @@ class DebugDungeon:
     steps: tuple[DungeonStep, ...]
 
     @property
+    def total_steps(self) -> int:
+        return sum(step.count for step in self.steps)
+
+    @property
     def treasure_map_id(self) -> str:
         # A dot prevents collisions with real map IDs (which use underscores).
         return f"debug_dungeon.{self.id}"
@@ -134,10 +139,10 @@ def parse_dungeons(
             current = f"{path}.steps[{step_index}]"
             _require(isinstance(step, dict), current, "objectが必要です")
             kind = step.get("type")
-            _require(kind in ("random_encounter", "treasure", "event_battle"),
+            _require(kind in ("random_encounter", "treasure", "event_battle", "healing_spring"),
                      current, "種類が不正です")
             extra = {"random_encounter": {"count", "encounter"},
-                     "treasure": {"contents"}, "event_battle": {"battle_id"}}[kind]
+                     "treasure": {"contents"}, "event_battle": {"battle_id"}, "healing_spring": set()}[kind]
             _fields(step, {"id", "type"} | extra, current)
             step_id = _id(step["id"], current)
             _require(step_id not in step_ids, current, "ステップIDが重複しています")
@@ -165,10 +170,12 @@ def parse_dungeons(
                     _require(contents["type"] == "item" and isinstance(key, str) and bool(key)
                              and (item_keys is None or key in item_keys), current, "アイテムが不正です")
                 steps.append(DungeonStep(step_id, kind, contents=MapTreasureContents(**contents)))
-            else:
+            elif kind == "event_battle":
                 battle_id = _id(step["battle_id"], current)
                 _require(battle_id in battle_ids, current, f"未登録のイベントバトルです: {battle_id}")
                 steps.append(DungeonStep(step_id, kind, battle_id=battle_id))
+            else:
+                steps.append(DungeonStep(step_id, kind))
         result.append(DebugDungeon(dungeon_id, raw["name"], bgm, tuple(steps)))
     return tuple(result)
 
@@ -215,6 +222,11 @@ class DungeonProgress:
     @property
     def current(self) -> DungeonStep | None:
         return self.dungeon.steps[self.index] if self.index < len(self.dungeon.steps) else None
+
+    @property
+    def step_number(self) -> int:
+        completed = sum(step.count for step in self.dungeon.steps[:self.index]) + self.completed_in_step
+        return min(completed + 1, self.dungeon.total_steps)
 
     @property
     def remaining_battles(self) -> int:
