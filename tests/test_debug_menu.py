@@ -66,6 +66,7 @@ class DebugMenuOverlayTest(unittest.TestCase):
             items=items,
             skills=skills,
             party=party,
+            shared_experience=0,
         )
         self.inventory = InventorySystem(items)
         self.save_data = SaveData()

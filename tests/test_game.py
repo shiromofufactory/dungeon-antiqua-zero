@@ -94,7 +94,7 @@ from rendering import (
     ScreenBrightness,
 )
 from scenes import BattlePhase, BattleResult
-from state import DisplayMode, Language, SaveData, Settings
+from state import DisplayMode, Language, LaunchMode, SaveData, Settings
 from systems import AUTO_SAVE_SLOT, EncounterSystem, EventContext, InventorySystem, SaveSystemError
 from ui import (
     DEFAULT_TEXT_COLOR,
@@ -4186,6 +4186,19 @@ class GameTest(unittest.TestCase):
         mock.update()
 
         mock._start_debug_menu.assert_called_once_with()
+
+    def test_debug_party_editor_receives_current_shared_experience(self) -> None:
+        game = Mock(
+            launch_mode=LaunchMode.NORMAL,
+            debug_dungeon_scene=None,
+            save_data=SaveData(experience=1693),
+        )
+        with patch("game.DebugPartyEditor") as editor, patch("game.DebugMenuOverlay") as overlay:
+            Game._start_debug_menu(game)
+
+        self.assertEqual(editor.call_args.kwargs["shared_experience"], 1693)
+        self.assertIs(overlay.call_args.kwargs["editor"], editor.return_value)
+        self.assertEqual(game.save_data.experience, 1693)
 
     def test_language_setting_cycles_like_da2_and_rebuilds_windows(self) -> None:
         mock = Game.__new__(Game)

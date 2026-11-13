@@ -2302,6 +2302,7 @@ class Game:
             items=self.items,
             skills=self.skills,
             party=self.party,
+            shared_experience=self.save_data.experience,
         )
         self.debug_screen = DebugMenuOverlay(
             editor=editor,

@@ -48,6 +48,7 @@ class DebugPartyEditor:
         items: Mapping[str, Item],
         skills: Mapping[str, Skill],
         party: Sequence[Member],
+        shared_experience: int,
     ) -> None:
         if not isinstance(character_records, Sequence):
             raise TypeError("character_records must be a sequence")
@@ -68,6 +69,10 @@ class DebugPartyEditor:
             isinstance(member, Member) for member in party
         ):
             raise TypeError("party must be a sequence of Member values")
+        if isinstance(shared_experience, bool) or not isinstance(shared_experience, int):
+            raise TypeError("shared_experience must be an integer")
+        if shared_experience < 0:
+            raise ValueError("shared_experience must not be negative")
 
         records_by_key: dict[str, Mapping[str, object]] = {}
         definitions: list[CharacterDefinition] = []
@@ -102,6 +107,7 @@ class DebugPartyEditor:
         self._definitions = tuple(definitions)
         self._items = items
         self._skills = skills
+        self._shared_experience = shared_experience
         self._party_by_key = party_by_key
         self._party_order = party_order
         self._baseline_level = party_by_key[FIORA_CHARACTER_KEY].internal_level
@@ -254,6 +260,7 @@ class DebugPartyEditor:
             items=self._items,
             skills=self._skills,
         )
+        member.set_joining_experience_offset(self._shared_experience)
         if formation_row is not None:
             member.formation_row = formation_row
         return member

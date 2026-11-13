@@ -1590,6 +1590,10 @@ Gameは現在の制作定義を検証してからSceneの `resume()` へ渡し�
 マスターデータから再生成し、武器・呪文熟練度、最大HP・MP、現在HP・MPを指定LV相当に戻す。
 通常加入時のフィオラLV1固定規則は変更せず、明示LVでの再生成には
 `Member.from_record_at_internal_level()` を使う。
+Gameはデバッグ開始時の共有経験値を数値として `DebugPartyEditor` へ渡す。
+同Editorは新規生成したMemberだけ `set_joining_experience_offset()` で現在の共有経験値へ
+対応付ける。既存Memberの補正値と `SaveData.experience` は変更しない。
+具体的な編集後の振る舞いは [設定とデバッグ](./features/field.md#設定とデバッグ) を参照する。
 現在HP・MPの境界検証と毒・麻痺の付与・解除も `DebugPartyEditor` が担当する。
 毒・麻痺はHPとは独立して自由に切り替えられるデバッグ状態とし、HPを0にする操作では
 自動解除しない。パーティLVの変更では従来どおりMemberを再生成するため、個別編集値も初期化する。
