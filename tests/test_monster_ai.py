@@ -25,13 +25,14 @@ from resources import load_record_array
 class MonsterSpecialActionDataTest(unittest.TestCase):
     def test_parses_each_one_character_action_at_the_data_boundary(self) -> None:
         self.assertEqual(
-            monster_special_actions_from_record({"special": "逃突援呼会"}),
+            monster_special_actions_from_record({"special": "逃突援呼会毒"}),
             (
                 MonsterSpecialAction.ESCAPE,
                 MonsterSpecialAction.CHARGE,
                 MonsterSpecialAction.REINFORCE,
                 MonsterSpecialAction.CALL,
                 MonsterSpecialAction.POWER_HIT,
+                MonsterSpecialAction.POISON_BREATH,
             ),
         )
 

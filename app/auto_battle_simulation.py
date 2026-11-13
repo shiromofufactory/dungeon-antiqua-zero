@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from math import floor
 
 if __package__:
+    from .battle_breath import resolve_poison_breath
     from .auto_battle_model import (
         CASE_COUNT,
         AutoAction,
@@ -54,6 +55,7 @@ if __package__:
     from .resistance import ResistanceType
     from .spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 else:
+    from battle_breath import resolve_poison_breath
     from auto_battle_model import (
         CASE_COUNT,
         AutoAction,
@@ -1199,6 +1201,7 @@ class BattleForecast:
             is_front_row=actor.front,
             can_attack=bool(melee),
             can_charge=bool(available),
+            can_breathe=bool(available),
             spell_keys=spell_keys,
             escape_eligible=escape,
         )
@@ -1213,6 +1216,22 @@ class BattleForecast:
         delay = 0
         if action is MonsterAction.ESCAPE:
             actor.removed = True
+        elif action is MonsterAction.POISON_BREATH:
+            for target in available:
+                result = resolve_poison_breath(
+                    attack=actor.spec.attack,
+                    hp=actor.hp,
+                    max_hp=actor.max_hp,
+                    target_spell_defense=target.spec.spell_defense,
+                    poison_resistant=ResistanceType.POISON in target.spec.resistances,
+                    random_factor=self.roll(actor, target.spec.number, 5),
+                    poison_roll=int(self.roll(actor, target.spec.number, 4) * 10),
+                )
+                target.damage(result.damage)
+                if result.poisoned and target.is_alive:
+                    target.poisoned = True
+                if result.damage > 0:
+                    target.interrupt_focus()
         elif isinstance(action, MonsterSpellAction):
             spell = self.spells[action.spell_key]
             if not silenced and actor.mp >= spell.mp:

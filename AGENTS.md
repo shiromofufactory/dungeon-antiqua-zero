@@ -119,6 +119,7 @@
 - 仮タイトル・モード別の開始経路・押しっぱなし入力・タイトル復帰は `python3 -B -m unittest tests.test_title tests.test_start_menu tests.test_launch_modes tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - 開始時の操作説明・入力種別変更・初回判定・試遊版での毎回表示・端末設定の互換性は `python3 -B -m unittest tests.test_control_guide tests.test_launch_modes tests.test_state tests.test_settings_system tests.test_title tests.test_start_menu tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
+- モンスターの毒のブレスは `python3 -B -m unittest tests.test_battle_poison_breath tests.test_monster_ai tests.test_battle_monster_specials tests.test_battle_monster_spells tests.test_auto_battle tests.test_battle_scene` で全体対象・威力・毒付与・耐性・演出時間・背景色の復帰・行動候補と予測を回帰検証する。
 - 戦闘設定とコマンド記憶は `python3 -B -m unittest tests.test_battle_preferences tests.test_state tests.test_settings_system tests.test_game` で設定互換性・即時保存・復元を回帰検証する。
 - セーブ形式と戦闘コマンド記憶の永続化は `python3 -B -m unittest tests.test_save_system tests.test_battle_preferences tests.test_game` でスロット保存・ロード・旧形式互換を回帰検証する。
 - ミッションの検証・条件判定・情報メニュー表示は `python3 -B -m unittest tests.test_missions tests.test_information_menu tests.test_event_editor_server tests.test_editor_server`、エディタ操作は `node --test tests/test_mission_editor.mjs` で回帰検証する。

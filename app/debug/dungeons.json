@@ -241,6 +241,11 @@
             "type": "item",
             "item_key": "CURSED NECKLACE"
           }
+        },
+        {
+          "id": "event_battle_115e1637ddd24937bba7e32a0c7d119a",
+          "type": "event_battle",
+          "battle_id": "battle_4"
         }
       ]
     }

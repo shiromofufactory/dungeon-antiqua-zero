@@ -1221,6 +1221,11 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 基本AIは残MPと沈黙状態を候補選択へ使わず、選択後の共通発動処理が戦闘ごとの沈黙状態と
 現在MPをこの順に検査し、発動時だけMPを消費する。
 
+モンスターの毒のブレスは `battle_breath.py` がPyxel非依存のダメージ・毒付与・耐性判定を
+所有し、BattleSceneとオートバトル予測が同じ関数を呼ぶ。BattleSceneは対象の抽出、
+結果反映のタイミングと背景専用の色合成を所有する。状態異常の付与と死亡時の解除は
+既存のMemberへ委ねる。詳細な振る舞いは [`features/battle.md`](./features/battle.md) を参照する。
+
 モンスターのお宝定義は `treasure_item` をアイテム安定キー、`treasure_rate` を0から16の
 16分率として読込境界で検証する。戦闘終了後のドロップ判定と報酬確定は
 `BattleProgression` 相当のPyxel非依存Systemが所有し、BattleSceneは判定結果の表示だけを
