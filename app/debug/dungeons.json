@@ -195,6 +195,10 @@
           }
         },
         {
+          "id": "healing_spring_5ffbec55f3144370bba92107e61c7580",
+          "type": "healing_spring"
+        },
+        {
           "id": "random_encounter_47817f0c58e54d1e94009b5756d30fa6",
           "type": "random_encounter",
           "count": 5,

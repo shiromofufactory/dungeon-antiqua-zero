@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 if __package__ == "":
     from item import AdditionalEffect
+    from monster import MonsterTribe
+    from resistance import ResistanceType
 else:
     from .item import AdditionalEffect
+    from .monster import MonsterTribe
+    from .resistance import ResistanceType
 
 
 DEFENDING_HIT_VALUE_THRESHOLD = 25
@@ -60,6 +65,25 @@ def _nonnegative_integer(value: int, name: str) -> int:
     if value < 0:
         raise ValueError(f"{name} must not be negative")
     return value
+
+
+def physical_weapon_is_effective(
+    *,
+    effective_tribe: MonsterTribe | None,
+    target_tribe: MonsterTribe | None,
+    attribute: ResistanceType | None,
+    target_weaknesses: Collection[ResistanceType],
+    target_resistances: Collection[ResistanceType],
+) -> bool:
+    """Combine tribe and attribute effectiveness into one non-stacking bonus."""
+
+    return (
+        effective_tribe is not None and effective_tribe == target_tribe
+    ) or (
+        attribute is not None
+        and attribute in target_weaknesses
+        and attribute not in target_resistances
+    )
 
 
 def member_physical_attack(
@@ -320,6 +344,7 @@ __all__ = [
     "PhysicalAdditionalEffectResult",
     "PhysicalAttackResult",
     "member_physical_attack",
+    "physical_weapon_is_effective",
     "resolve_physical_additional_effect",
     "resolve_physical_attack",
 ]

@@ -531,8 +531,10 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 属性武器による通常攻撃も、`AttackAttribute` を対応する `ResistanceType` へ変換して開示対象とする。
 通常攻撃系のターゲット選択中は、右手武器の変換後属性が開示済みの場合だけ既存の
 `WEAK` / `RESIST` ターゲット表示へ反映する。
-物理攻撃計算は属性特効の命中値加算・確定会心を `battle_physical.py` で解決し、BattleSceneは
-武器属性と対象の弱点・耐性の照合、追加効果への特効情報の伝達、`WEAK` 表示を担当する。
+種族特効・属性特効の共通判定と、重複しない命中値加算・確定会心は `battle_physical.py` が所有する。
+BattleMonsterは検証済みの `MonsterTribe` を保持し、BattleSceneは武器・対象の情報を共通判定へ渡して、
+追加効果への特効情報の伝達と `WEAK` 表示を担当する。オートバトルは `AutoWeapon` に武器の特効種族、
+`AutoCombatant` に開示済みの敵種族だけを保持し、物理ダメージと追加効果の予測に同じ判定を使う。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。

@@ -909,7 +909,7 @@ class ItemMenuOverlay:
         """Update selection and report whether the menu should be restored."""
 
         if self.ability_notice_window is not None:
-            if input_state.confirm.triggered:
+            if input_state.confirm.triggered or input_state.cancel.triggered:
                 self.ability_notice_window = None
             return False
 

@@ -35,7 +35,7 @@ from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import TimelineEntry, TimelineOrder
 from item import AdditionalEffect
 from member import EquipmentSlot
-from monster import MonsterSpecialAction
+from monster import MonsterSpecialAction, MonsterTribe
 from monster_ai import MonsterSpellAction
 from resistance import ResistanceType
 from spell import SpellAction, SpellType
@@ -110,6 +110,96 @@ class AutoBattleFixtures:
 
 
 class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
+    def test_member_snapshot_preserves_each_hands_effective_tribe(self):
+        member = load_mock_party(
+            self.items, load_mock_skills(), character_keys=("Fiora",)
+        )[0]
+        member.skills.append(load_mock_skills()["Dual-Wield"])
+        member.equipment = member.equipment.replaced({
+            EquipmentSlot.RIGHT: self.items["GOBLIN SLAYER"],
+            EquipmentSlot.LEFT: self.items["IRON SWORD"],
+        })
+        spec = AutoCombatant.from_member(member, 0, front=True, spells=())
+        self.assertEqual(
+            tuple(w.effective_tribe for w in spec.weapons),
+            (MonsterTribe.GOBLIN, None),
+        )
+
+    def test_forecast_tribe_bonus_matches_attribute_bonus_without_stacking(self):
+        action = AutoAction(BattleCommand.ATTACK, (5,))
+        for command in (BattleCommand.ATTACK, BattleCommand.AIM, BattleCommand.FOCUS,
+                        BattleCommand.AMBUSH, BattleCommand.IAI):
+            action = replace(action, command=command)
+            results = []
+            for tribe, attribute in (
+                (None, None),
+                (MonsterTribe.GOBLIN, None),
+                (None, ResistanceType.FIRE),
+                (MonsterTribe.GOBLIN, ResistanceType.FIRE),
+            ):
+                actor = replace(self.specs[0], weapons=(AutoWeapon(
+                    attack=100, hit=100, iai_attack=60,
+                    effective_tribe=tribe, attribute=attribute,
+                ),))
+                enemy = self.enemy(tribe=MonsterTribe.GOBLIN,
+                                   weaknesses=frozenset((ResistanceType.FIRE,)))
+                forecast = BattleForecast(self.snapshot(actor, enemy), 0)
+                forecast.roll = lambda *args: 0.99
+                results.append(forecast.physical_results(
+                    forecast.actors[0], forecast.actors[5], action,
+                )[0])
+            with self.subTest(command=command):
+                normal, tribe, attribute, both = results
+                self.assertEqual(tribe, attribute)
+                self.assertEqual(both, tribe)
+                self.assertEqual(tribe.hit_value, normal.hit_value + 60)
+                self.assertTrue(tribe.critical)
+                self.assertGreater(tribe.damage, normal.damage)
+
+    def test_forecast_tribe_and_attribute_additional_effects_do_not_stack(self):
+        # Boss death protection leaves zero points after critical and one
+        # effectiveness bonus. A second bonus would incorrectly kill it.
+        for attribute in (None, ResistanceType.FIRE):
+            actor = replace(self.specs[0], weapons=(AutoWeapon(
+                attack=1, hit=100, effective_tribe=MonsterTribe.GOBLIN,
+                attribute=attribute, effect=AdditionalEffect.DEATH,
+            ),))
+            enemy = self.enemy(
+                tribe=MonsterTribe.GOBLIN, boss=True,
+                weaknesses=frozenset((ResistanceType.FIRE,)),
+            )
+            forecast = BattleForecast(self.snapshot(actor, enemy), 0)
+            forecast.roll = lambda *args: 0.99
+            forecast.physical(forecast.actors[0], AutoAction(BattleCommand.ATTACK, (5,)))
+            self.assertTrue(forecast.actors[5].is_alive)
+
+    def test_forecast_unrevealed_or_different_tribe_has_no_bonus(self):
+        actor = replace(self.specs[0], weapons=(AutoWeapon(
+            attack=100, hit=100, effective_tribe=MonsterTribe.GOBLIN,
+        ),))
+        for tribe in (None, MonsterTribe.ANIMAL):
+            forecast = BattleForecast(self.snapshot(actor, self.enemy(tribe=tribe)), 0)
+            forecast.roll = lambda *args: 0.99
+            result = forecast.physical_results(
+                forecast.actors[0], forecast.actors[5], AutoAction(BattleCommand.ATTACK, (5,)),
+            )[0]
+            self.assertEqual(result.hit_value, 1)
+            self.assertFalse(result.critical)
+
+    def test_confused_forecast_against_enemy_keeps_species_status_bonus(self):
+        actor = replace(self.specs[0], weapons=(AutoWeapon(
+            attack=1, hit=100, effective_tribe=MonsterTribe.GOBLIN,
+            effect=AdditionalEffect.POISON,
+        ),))
+        enemy = self.enemy(
+            tribe=MonsterTribe.GOBLIN, boss=True,
+            resistances=frozenset((ResistanceType.POISON,)),
+        )
+        forecast = BattleForecast(self.snapshot(actor, enemy), 0)
+        forecast.roll = lambda *args: 0.99
+        forecast.confused_physical(forecast.actors[0], forecast.actors[5])
+        self.assertTrue(forecast.actors[5].poisoned)
+
     def test_score_rounding_and_safety_bucket_boundaries(self):
         self.assertEqual(round_score(1.23445), 1.2345)
         self.assertEqual(round_score(-1.23445), -1.2345)
@@ -1394,12 +1484,16 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         enemy = first.combatants[-1]
         self.assertIsNone(enemy.hp)
         self.assertIsNone(enemy.max_hp)
+        self.assertIsNone(enemy.tribe)
         self.assertFalse(enemy.resistances)
         self.assertFalse(enemy.weaknesses)
         self.assertEqual(enemy.net_damage, 33)
         self.assertEqual(enemy.healing, 2)
         self.assertEqual(enemy.mp, max(0, scene.monsters[0].max_mp - 3))
         scene.save_data.monster_records["Giant Spider"] = {"profile"}
+        self.assertEqual(
+            scene._auto_battle_snapshot().combatants[-1].tribe, MonsterTribe.ANIMAL
+        )
         self.assertIsNotNone(scene._auto_battle_snapshot().combatants[-1].max_hp)
         scene.identified_monster_indexes.add(0)
         self.assertEqual(

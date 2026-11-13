@@ -5176,6 +5176,10 @@ class BattleScreenMockTest(unittest.TestCase):
 
         mock.inventory_system = InventorySystem.with_one_each(items)
         mock.localizer = Localizer(Language.JAPANESE)
+        from resources import FontResources
+
+        mock.fonts = FontResources()
+        mock.settings = Settings()
         mock.item_window = Mock()
         mock.item_window.set_cursor.return_value = Mock()
         mock._refresh_item_guide = Mock()

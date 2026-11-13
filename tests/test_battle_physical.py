@@ -4,10 +4,48 @@ import unittest
 
 from app.battle_physical import (
     member_physical_attack,
+    physical_weapon_is_effective,
     resolve_physical_additional_effect,
     resolve_physical_attack,
 )
 from app.item import AdditionalEffect
+from app.monster import MonsterTribe
+from app.resistance import ResistanceType
+
+
+class PhysicalWeaponEffectivenessTest(unittest.TestCase):
+    def test_matches_each_tribe_and_never_matches_unknown_tribes(self) -> None:
+        for weapon_tribe in (None, *MonsterTribe):
+            for target_tribe in (None, *MonsterTribe):
+                with self.subTest(weapon=weapon_tribe, target=target_tribe):
+                    self.assertEqual(
+                        physical_weapon_is_effective(
+                            effective_tribe=weapon_tribe,
+                            target_tribe=target_tribe,
+                            attribute=None,
+                            target_weaknesses=(),
+                            target_resistances=(),
+                        ),
+                        weapon_tribe is not None and weapon_tribe == target_tribe,
+                    )
+
+    def test_attribute_resistance_only_cancels_attribute_effectiveness(self) -> None:
+        for tribe, resisted, expected in (
+            (None, False, True),
+            (None, True, False),
+            (MonsterTribe.GOBLIN, True, True),
+        ):
+            with self.subTest(tribe=tribe, resisted=resisted):
+                self.assertEqual(
+                    physical_weapon_is_effective(
+                        effective_tribe=tribe,
+                        target_tribe=MonsterTribe.GOBLIN,
+                        attribute=ResistanceType.FIRE,
+                        target_weaknesses=(ResistanceType.FIRE,),
+                        target_resistances=(ResistanceType.FIRE,) if resisted else (),
+                    ),
+                    expected,
+                )
 
 
 class MemberPhysicalAttackTest(unittest.TestCase):

@@ -18,7 +18,7 @@ if __package__:
         ProficiencyAptitude,
         ProficiencyKind,
     )
-    from .monster import MonsterSpecialAction
+    from .monster import MonsterSpecialAction, MonsterTribe
     from .resistance import ResistanceType
     from .spell import Spell
     from .state import SpellMode
@@ -33,7 +33,7 @@ else:
         ProficiencyAptitude,
         ProficiencyKind,
     )
-    from monster import MonsterSpecialAction
+    from monster import MonsterSpecialAction, MonsterTribe
     from resistance import ResistanceType
     from spell import Spell
     from state import SpellMode
@@ -71,6 +71,7 @@ class AutoWeapon:
     attribute: ResistanceType | None = None
     effect: AdditionalEffect | None = None
     iai_attack: int | None = None
+    effective_tribe: MonsterTribe | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,7 @@ class AutoCombatant:
     hp_displayed: bool = False
     net_damage: int = 0
     species_key: str = ""
+    tribe: MonsterTribe | None = None
 
     @classmethod
     def from_member(
@@ -177,6 +179,7 @@ class AutoCombatant:
                         else None
                     ),
                     effect=weapon.additional_effect,
+                    effective_tribe=weapon.effective_tribe,
                     iai_attack=(
                         member_physical_attack(
                             attack * 60 // 100,

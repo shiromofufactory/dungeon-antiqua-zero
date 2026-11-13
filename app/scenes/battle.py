@@ -74,6 +74,7 @@ from battle_physical import (
     PHYSICAL_STATUS_EFFECTS,
     PhysicalAttackResult,
     member_physical_attack,
+    physical_weapon_is_effective,
     resolve_physical_additional_effect,
     resolve_physical_attack,
 )
@@ -118,6 +119,7 @@ from monster import (
     MonsterBattleState,
     MonsterCombatStats,
     MonsterSpecialAction,
+    MonsterTribe,
     monster_shadow_from_record,
     monster_spell_keys_from_record,
     monster_special_actions_from_record,
@@ -186,6 +188,7 @@ from ui import (
     tagged_text_width,
 )
 from item_detail import ItemDetailContext, item_detail_lines
+from ui.text_layout import right_aligned_grid_x
 from rendering.victory_pose import (
     VICTORY_MOTION_LIMIT,
     VICTORY_SPRITE_SOURCE_X,
@@ -1555,6 +1558,7 @@ class BattleMonster:
     weaknesses: frozenset[ResistanceType] = field(default_factory=frozenset)
     resistances: frozenset[ResistanceType] = field(default_factory=frozenset)
     shadow: int = 0
+    tribe: MonsterTribe | None = None
     initial_is_front_row: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -1572,6 +1576,10 @@ class BattleMonster:
         if not isinstance(is_front_row, bool):
             raise TypeError("monster formation row must be a boolean")
         key = _required_text(record, "name_en", "monster")
+        try:
+            tribe = MonsterTribe(record.get("tribe"))
+        except (TypeError, ValueError) as error:
+            raise BattleDataError(f"{key}.tribe is invalid") from error
         image_id = record.get("image_id")
         if isinstance(image_id, bool) or not isinstance(image_id, (str, int)):
             raise BattleDataError(f"{key}.image_id must be a string or integer")
@@ -1631,6 +1639,7 @@ class BattleMonster:
             weaknesses=resistances_from_tolerance(weakness),
             resistances=resistances_from_tolerance(tolerance),
             shadow=shadow,
+            tribe=tribe,
         )
 
     @property
@@ -3272,6 +3281,7 @@ class BattleScene:
                         r for r in monster.weaknesses if r.value in fields
                     ),
                     shadow=monster.is_shadow if "profile" in fields else False,
+                    tribe=monster.tribe if "profile" in fields else None,
                     boss=monster.is_boss,
                     poisoned=monster.state.poisoned,
                     healing=monster.combat_stats.healing,
@@ -4221,6 +4231,9 @@ class BattleScene:
         self.item_window.set_vertical_navigation_pressed()
         self.item_window.clear_texts()
         self.item_window.clear_cursor()
+        count_texts = LocalizedWindowTextFactory.from_language(
+            self.fonts, self.settings.language
+        )
         for row, candidate in enumerate(visible):
             item = candidate.item
             y = ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT
@@ -4236,9 +4249,15 @@ class BattleScene:
                 ),
             )
             if not candidate.is_equipped:
+                count_text = ascii_to_fullwidth(str(self.inventory_system.quantity(item)))
                 self.item_window.add_text(
-                    ascii_to_fullwidth(str(self.inventory_system.quantity(item))),
-                    ITEM_COUNT_X,
+                    count_text,
+                    right_aligned_grid_x(
+                        count_text,
+                        reference_text="０",
+                        reference_x=ITEM_COUNT_X,
+                        font=count_texts,
+                    ),
                     y,
                 )
         self.item_cursor = self.item_window.set_cursor(
@@ -6823,10 +6842,12 @@ class BattleScene:
                 attack *= FOCUS_ATTACK_MULTIPLIER
             weapon_has_power_hit = weapon.special is ItemSpecial.POWER_HIT
             weapon_attribute = WEAPON_ATTRIBUTE_RESISTANCE.get(weapon.attack_attribute)
-            weapon_effective = bool(
-                weapon_attribute is not None
-                and weapon_attribute in monster.weaknesses
-                and weapon_attribute not in monster.resistances
+            weapon_effective = physical_weapon_is_effective(
+                effective_tribe=weapon.effective_tribe,
+                target_tribe=getattr(monster, "tribe", None),
+                attribute=weapon_attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
             )
             result = resolve_physical_attack(
                 attack=attack,
@@ -6957,10 +6978,12 @@ class BattleScene:
         )
         for target_order, index in enumerate(targets):
             monster = self.monsters[index]
-            effective = bool(
-                attribute is not None
-                and attribute in monster.weaknesses
-                and attribute not in monster.resistances
+            effective = physical_weapon_is_effective(
+                effective_tribe=weapon.effective_tribe,
+                target_tribe=getattr(monster, "tribe", None),
+                attribute=attribute,
+                target_weaknesses=monster.weaknesses,
+                target_resistances=monster.resistances,
             )
             result = resolve_physical_attack(
                 attack=attack,

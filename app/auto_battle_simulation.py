@@ -35,6 +35,7 @@ if __package__:
     )
     from .battle_physical import (
         PHYSICAL_STATUS_EFFECTS,
+        physical_weapon_is_effective,
         resolve_physical_additional_effect,
         resolve_physical_attack,
     )
@@ -84,6 +85,7 @@ else:
     )
     from battle_physical import (
         PHYSICAL_STATUS_EFFECTS,
+        physical_weapon_is_effective,
         resolve_physical_additional_effect,
         resolve_physical_attack,
     )
@@ -822,10 +824,12 @@ class BattleForecast:
                 attack = weapon.iai_attack
             elif action.command is BattleCommand.FOCUS:
                 attack *= 2
-            effective = (
-                weapon.attribute is not None
-                and weapon.attribute in target.spec.weaknesses
-                and weapon.attribute not in target.spec.resistances
+            effective = physical_weapon_is_effective(
+                effective_tribe=weapon.effective_tribe,
+                target_tribe=target.spec.tribe,
+                attribute=weapon.attribute,
+                target_weaknesses=target.spec.weaknesses,
+                target_resistances=target.spec.resistances,
             )
             results.append(
                 resolve_physical_attack(
@@ -894,8 +898,13 @@ class BattleForecast:
                     target_is_resistant=resistance in target.spec.resistances,
                     critical=result.critical,
                     attacker_hidden=hidden,
-                    weapon_effective=weapon.attribute in target.spec.weaknesses
-                    and weapon.attribute not in target.spec.resistances,
+                    weapon_effective=physical_weapon_is_effective(
+                        effective_tribe=weapon.effective_tribe,
+                        target_tribe=target.spec.tribe,
+                        attribute=weapon.attribute,
+                        target_weaknesses=target.spec.weaknesses,
+                        target_resistances=target.spec.resistances,
+                    ),
                     stacked_death=stacked,
                 ).success
                 if successful and target.is_alive:
@@ -1447,6 +1456,17 @@ class BattleForecast:
                     ),
                     target_defending=target.defending,
                     critical=result.critical,
+                    weapon_effective=(
+                        not actor.spec.enemy
+                        and target.spec.enemy
+                        and physical_weapon_is_effective(
+                            effective_tribe=actor.spec.weapons[hand].effective_tribe,
+                            target_tribe=target.spec.tribe,
+                            attribute=actor.spec.weapons[hand].attribute,
+                            target_weaknesses=target.spec.weaknesses,
+                            target_resistances=target.spec.resistances,
+                        )
+                    ),
                     stacked_death=stacked,
                 ).success
                 if success:
