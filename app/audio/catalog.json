@@ -10,6 +10,9 @@
     "battle_hit": {
       "sound": 12
     },
+    "battle_drain": {
+      "sound": 51
+    },
     "battle_poison_breath": {
       "sound": 13
     },

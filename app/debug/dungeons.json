@@ -251,6 +251,14 @@
           }
         },
         {
+          "id": "treasure_99601047b5cf487cbf216bd808ab1551",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "IRON KUNAI"
+          }
+        },
+        {
           "id": "event_battle_115e1637ddd24937bba7e32a0c7d119a",
           "type": "event_battle",
           "battle_id": "battle_4"
@@ -294,7 +302,7 @@
             "polarity": "yin",
             "allow_demons": false,
             "allow_humans": true,
-            "allow_giants": true,
+            "allow_giants": false,
             "allow_large_animals": true
           }
         },
@@ -324,7 +332,7 @@
             "polarity": "yin",
             "allow_demons": false,
             "allow_humans": true,
-            "allow_giants": true,
+            "allow_giants": false,
             "allow_large_animals": true
           }
         }

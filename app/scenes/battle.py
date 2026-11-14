@@ -73,6 +73,7 @@ from battle_speed import (
 from battle_physical import (
     PHYSICAL_STATUS_EFFECTS,
     PhysicalAttackResult,
+    drain_healing_amount,
     member_physical_attack,
     physical_weapon_is_effective,
     resolve_physical_additional_effect,
@@ -213,6 +214,10 @@ BATTLE_BOSS_BGM_ID = "da3-battle2"
 BATTLE_WIN_BGM_ID = "da3-win"
 BATTLE_LEVEL_UP_BGM_ID = "da3-lvup"
 BATTLE_HIT_SE_ID = "battle_hit"
+BATTLE_DRAIN_SE_ID = "battle_drain"
+MONSTER_DRAIN_PATTERNS = (0, 1, 2, 2, 1, 0)
+MONSTER_DRAIN_PATTERN_FRAME_COUNT = 2
+MONSTER_DRAIN_HEAL_DELAY = 10  # DA2's five frames at 60 fps.
 BATTLE_POISON_BREATH_SE_ID = "battle_poison_breath"
 POISON_BREATH_TINT_FRAME_COUNT = 16
 # DA2 palette color 2; ZERO's reordered palette uses gray at that index.
@@ -1059,6 +1064,22 @@ class BattleConfusedAttackResult:
     popup_y: int
     effect_row: int | None
     additional_effects: tuple[AdditionalEffect, ...] = ()
+    drain_actor_index: int | None = None
+
+
+@dataclass
+class BattleMonsterDrainPresentation:
+    """DA2's six-step flight and delayed recovery number for one enemy hit."""
+
+    actor_index: int
+    amount: int
+    start_x: int
+    start_y: int
+    end_x: int
+    end_y: int
+    elapsed_frame: int = 0
+    healing_applied: bool = False
+    popup_started: bool = False
 
 
 @dataclass
@@ -1376,6 +1397,7 @@ class BattleMonsterChargePresentation:
     return_frame_count: int
     jump_height: int
     additional_effects: tuple[AdditionalEffect, ...] = ()
+    draining: bool = False
     elapsed_frame: int = 0
     damage_applied: bool = False
 
@@ -2258,6 +2280,7 @@ class BattleScene:
         self.monster_attack_additional_effects: tuple[AdditionalEffect, ...] = ()
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
+        self.monster_drain_presentation: BattleMonsterDrainPresentation | None = None
         self.monster_action: MonsterActionChoice | None = None
         self.monster_charge_presentation: BattleMonsterChargePresentation | None = None
         self.monster_escape_actor_index: int | None = None
@@ -2534,6 +2557,7 @@ class BattleScene:
         self._clear_interrupted_focus_states()
         self._update_focus_wait_animation()
         self._update_healing_popups()
+        self._update_monster_drain()
         self._update_spell_damage_popups()
         self._update_affinity_popups()
         if hasattr(self, "active_party_cursor_frame"):
@@ -2827,6 +2851,7 @@ class BattleScene:
         self.monster_attack_additional_effects = ()
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
+        self.monster_drain_presentation = None
         self.monster_action = None
         self.monster_charge_presentation = None
         self.monster_escape_actor_index = None
@@ -6072,7 +6097,15 @@ class BattleScene:
                 )
             )
             if result.is_hit:
-                play_se(BATTLE_HIT_SE_ID)
+                if result.drain_actor_index is not None:
+                    actor = self.monsters[result.drain_actor_index]
+                    self._begin_monster_drain(
+                        actor, result.damage, result.popup_x, result.popup_y
+                    )
+                    self._apply_monster_drain_healing()
+                    play_se(BATTLE_DRAIN_SE_ID)
+                else:
+                    play_se(BATTLE_HIT_SE_ID)
 
     def _delay_slow_target(self, target: Member | BattleMonster) -> None:
         """Reflect a successful SLOW in its target's waiting turn immediately."""
@@ -7957,10 +7990,11 @@ class BattleScene:
         self._refresh_party_text_colors()
 
     def _active_party_cursor_is_visible(self) -> bool:
-        """Return whether command input is pending for the current actor."""
+        """Return whether manual command input is pending for the current actor."""
 
         return (
-            self.phase
+            not getattr(self, "auto_battle_active", False)
+            and self.phase
             in (
                 BattlePhase.COMMAND,
                 BattlePhase.ITEM,
@@ -8538,6 +8572,10 @@ class BattleScene:
                     popup_y=base_y + target.height - 8,
                     effect_row=CONFUSED_MONSTER_ATTACK_EFFECT_ROW,
                     additional_effects=effects,
+                    drain_actor_index=(
+                        actor_index if actor.additional_effect is AdditionalEffect.DRAIN
+                        and result.damage > 0 else None
+                    ),
                 ),
             ),
             result_start_frame=1,
@@ -9995,7 +10033,15 @@ class BattleScene:
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         if result.hit:
-            play_se(BATTLE_HIT_SE_ID)
+            if actor.additional_effect is AdditionalEffect.DRAIN and result.damage > 0:
+                position = self._party_draw_position(target_index)
+                if position is not None:
+                    self._begin_monster_drain(
+                        actor, result.damage, position[0] + 14, position[1] + 16
+                    )
+                play_se(BATTLE_DRAIN_SE_ID)
+            else:
+                play_se(BATTLE_HIT_SE_ID)
 
     def _begin_monster_charge(self, actor: BattleMonster) -> None:
         """Start a ranged 1.5x charge toward one living party member."""
@@ -10038,6 +10084,7 @@ class BattleScene:
                 target_index,
                 result,
             ),
+            draining=actor.additional_effect is AdditionalEffect.DRAIN,
         )
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT
         self._show_monster_action_message("battle.monster.charge")
@@ -10103,7 +10150,17 @@ class BattleScene:
                 presentation.additional_effects,
             )
             if presentation.damage > 0:
-                play_se(BATTLE_HIT_SE_ID)
+                if presentation.draining:
+                    actor = self.monsters[presentation.actor_index]
+                    position = self._party_draw_position(presentation.target_index)
+                    if position is not None:
+                        self._begin_monster_drain(
+                            actor, presentation.damage, position[0] + 14, position[1] + 16
+                        )
+                        self._apply_monster_drain_healing()
+                    play_se(BATTLE_DRAIN_SE_ID)
+                else:
+                    play_se(BATTLE_HIT_SE_ID)
         elif presentation.damage_applied:
             self.monster_attack_animation_frame += 1
         if presentation.completed:
@@ -10167,6 +10224,7 @@ class BattleScene:
                 target_index,
                 getattr(self, "monster_attack_additional_effects", ()),
             )
+        self._apply_monster_drain_healing()
         self.monster_attack_target_index = None
         self.monster_attack_damage = None
         self.monster_attack_critical = False
@@ -10203,6 +10261,68 @@ class BattleScene:
             self._begin_defeat_message()
             return
         self._start_timeline_animation()
+
+    def _begin_monster_drain(
+        self, actor: BattleMonster, damage: int, source_x: int, source_y: int,
+    ) -> None:
+        amount = drain_healing_amount(
+            damage=damage, hp=actor.state.hp, max_hp=actor.state.max_hp
+        )
+        if amount == 0:
+            return
+        actor_index = self._monster_index(actor)
+        x, y = self._monster_base_position(actor_index)
+        self.monster_drain_presentation = BattleMonsterDrainPresentation(
+            actor_index, amount, source_x, source_y,
+            x + actor.width // 2, y + actor.height - 24,
+        )
+
+    def _apply_monster_drain_healing(self) -> None:
+        presentation = getattr(self, "monster_drain_presentation", None)
+        if presentation is None or presentation.healing_applied:
+            return
+        presentation.healing_applied = True
+        restored = self.monsters[presentation.actor_index].state.apply_healing(
+            presentation.amount
+        )
+        observations = getattr(self, "auto_battle_observations", None)
+        if observations is not None:
+            observations.damage(presentation.actor_index, -restored)
+
+    def _update_monster_drain(self) -> None:
+        presentation = getattr(self, "monster_drain_presentation", None)
+        if presentation is None:
+            return
+        presentation.elapsed_frame += 1
+        if (
+            presentation.elapsed_frame >= MONSTER_DRAIN_HEAL_DELAY
+            and not presentation.popup_started
+        ):
+            presentation.popup_started = True
+            self.healing_popups.append(BattleHealingPopup(
+                presentation.end_x, presentation.end_y + 16, presentation.amount
+            ))
+        if (
+            presentation.elapsed_frame
+            >= len(MONSTER_DRAIN_PATTERNS) * MONSTER_DRAIN_PATTERN_FRAME_COUNT
+            and presentation.healing_applied
+        ):
+            self.monster_drain_presentation = None
+
+    def _draw_monster_drain(self) -> None:
+        presentation = getattr(self, "monster_drain_presentation", None)
+        if presentation is None:
+            return
+        step = presentation.elapsed_frame // MONSTER_DRAIN_PATTERN_FRAME_COUNT
+        if step >= len(MONSTER_DRAIN_PATTERNS):
+            return
+        rate = step / 5
+        x = presentation.start_x + (presentation.end_x - presentation.start_x) * rate
+        y = presentation.start_y + (presentation.end_y - presentation.start_y) * rate
+        pyxel.blt(
+            x - 12, y - 8, 0, MONSTER_DRAIN_PATTERNS[step] * 24, 48,
+            24, 16, TRANSPARENT_INDEX,
+        )
 
     def _apply_monster_attack_damage(self, target_index: int, damage: int) -> None:
         """Apply a resolved enemy hit at its presentation's impact frame."""
@@ -10470,6 +10590,7 @@ class BattleScene:
         self._draw_healing_popups()
         self._draw_party_attack_damage()
         self._draw_monster_attack_result()
+        self._draw_monster_drain()
         self._draw_additional_effect_markers()
         self._draw_critical_markers()
         self._draw_timeline()

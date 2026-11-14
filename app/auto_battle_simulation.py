@@ -35,6 +35,7 @@ if __package__:
     )
     from .battle_physical import (
         PHYSICAL_STATUS_EFFECTS,
+        drain_healing_amount,
         physical_weapon_is_effective,
         resolve_physical_additional_effect,
         resolve_physical_attack,
@@ -85,6 +86,7 @@ else:
     )
     from battle_physical import (
         PHYSICAL_STATUS_EFFECTS,
+        drain_healing_amount,
         physical_weapon_is_effective,
         resolve_physical_additional_effect,
         resolve_physical_attack,
@@ -1331,6 +1333,7 @@ class BattleForecast:
                 ).success
             else:
                 success = False
+            self.apply_monster_drain(actor, result.damage)
             target.damage(result.damage)
             if success and target.is_alive:
                 self.apply_extra(actor, target, effect)
@@ -1338,6 +1341,13 @@ class BattleForecast:
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
+
+    @staticmethod
+    def apply_monster_drain(actor: ForecastActor, damage: int) -> None:
+        if actor.spec.enemy and actor.spec.effect is AdditionalEffect.DRAIN:
+            actor.hp += drain_healing_amount(
+                damage=damage, hp=actor.hp, max_hp=actor.max_hp
+            )
 
     def confused_turn(self, actor: ForecastActor) -> None:
         """Forecast DA2's forced same-side basic attack for one confused actor."""
@@ -1433,6 +1443,7 @@ class BattleForecast:
         for hand, (result, candidates) in enumerate(zip(results, effect_sources)):
             if not target.is_alive or not result.hit:
                 continue
+            self.apply_monster_drain(actor, result.damage)
             target.damage(result.damage)
             for effect, stacked in candidates:
                 if not target.is_alive:

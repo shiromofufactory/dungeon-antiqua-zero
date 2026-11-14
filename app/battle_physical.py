@@ -59,6 +59,14 @@ class PhysicalAdditionalEffectResult:
     success_rate: float
 
 
+def drain_healing_amount(*, damage: int, hp: int, max_hp: int) -> int:
+    """DA2 drains the resolved damage, including overkill, up to missing HP."""
+
+    if damage < 0 or not 0 <= hp <= max_hp:
+        raise ValueError("invalid drain damage or attacker HP")
+    return min(damage, max_hp - hp) if hp > 0 else 0
+
+
 def _nonnegative_integer(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer")
@@ -343,6 +351,7 @@ __all__ = [
     "PHYSICAL_STATUS_EFFECTS",
     "PhysicalAdditionalEffectResult",
     "PhysicalAttackResult",
+    "drain_healing_amount",
     "member_physical_attack",
     "physical_weapon_is_effective",
     "resolve_physical_additional_effect",
