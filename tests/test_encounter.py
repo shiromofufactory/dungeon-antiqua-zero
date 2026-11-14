@@ -437,6 +437,54 @@ class EncounterSystemTest(unittest.TestCase):
 
         self.assertEqual(tuple(item.key for item, _weight in pool), ("Small Animal",))
 
+    def test_bosses_are_excluded_from_regular_and_early_candidates(self) -> None:
+        for danger in ("low", "high"):
+            with self.subTest(danger=danger):
+                random_source = ScriptedRandom(
+                    randrange_values=(0,),
+                    randint_values=(1, 5 if danger == "high" else 4),
+                )
+                system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+                formation = system.generate_formation(
+                    (
+                        monster("Boss", is_boss=1),
+                        monster("Early Boss", is_boss=1, lv=4, early_appear=1),
+                        monster("Regular", is_boss=0),
+                    ),
+                    encounter_settings(danger=danger),
+                    monster_level=3,
+                )
+
+                self.assertEqual(formation.monster_keys, ("Regular",))
+
+    def test_boss_only_candidates_raise_generation_error(self) -> None:
+        system = EncounterSystem()
+
+        with self.assertRaises(EncounterGenerationError):
+            system.generate_formation(
+                (monster("Boss", is_boss=1),),
+                encounter_settings(),
+                monster_level=3,
+            )
+
+    def test_master_data_bosses_are_excluded_at_every_encounter_level(self) -> None:
+        monsters = tuple(
+            MonsterDefinition.from_record(record)
+            for record in load_record_array("monsters.json")
+        )
+        boss_keys = {monster.key for monster in monsters if monster.is_boss}
+        self.assertTrue(boss_keys)
+        system = EncounterSystem()
+
+        for level in range(1, 10):
+            for danger in ("low", "high"):
+                with self.subTest(level=level, danger=danger):
+                    pool = system._weighted_pool(
+                        monsters, encounter_settings(danger=danger), level,
+                    )
+                    self.assertTrue(boss_keys.isdisjoint(item.key for item, _ in pool))
+
     def test_large_animal_on_adds_an_early_next_level_candidate(self) -> None:
         monsters = (
             monster("Level 3", large_animal=0),

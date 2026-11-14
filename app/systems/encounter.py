@@ -192,6 +192,8 @@ class EncounterSystem:
         pool: list[tuple[MonsterDefinition, int]] = []
         included_keys: set[str] = set()
         for monster in monsters:
+            if monster.is_boss:
+                continue
             level_matches = monster.level == monster_level
             early_matches = (
                 settings.danger == "high"
