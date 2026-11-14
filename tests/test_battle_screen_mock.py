@@ -134,6 +134,7 @@ from tools.screen_mocks.battle import (
     PARTY_ENTRANCE_START_X,
     PARTY_ENTRANCE_STAGGER_FRAME_COUNT,
     PARTY_CONDITION_ICON_OFFSET_X,
+    MONSTER_CONDITION_ICON_OFFSET_X,
     PARALYZE_ICON_SIZE,
     PARALYZE_ICON_SOURCE_X,
     PARALYZE_ICON_SOURCE_Y,
@@ -141,13 +142,11 @@ from tools.screen_mocks.battle import (
     POISON_ICON_SOURCE_X,
     POISON_ICON_SOURCE_Y,
     POISON_ICON_PATTERN_FRAME_COUNT,
-    POISON_MONSTER_OFFSET_X,
     STUN_ICON_SIZE,
     STUN_ICON_SOURCE_X,
     STUN_ICON_SOURCE_Y,
     STUN_MARKER_SOURCE_X,
     STUN_MARKER_SOURCE_Y,
-    STUN_MONSTER_OFFSET_X,
     BATTLE_POPUP_FRAME_COUNT,
     ACTION_MOVE_DISTANCE,
     ACTION_MOVE_SPEED,
@@ -164,11 +163,9 @@ from tools.screen_mocks.battle import (
     CONFUSE_ICON_SIZE,
     CONFUSE_ICON_SOURCE_X,
     CONFUSE_ICON_SOURCE_Y,
-    CONFUSE_MONSTER_OFFSET_X,
     SILENCE_ICON_SIZE,
     SILENCE_ICON_SOURCE_X,
     SILENCE_ICON_SOURCE_Y,
-    SILENCE_MONSTER_OFFSET_X,
     SILENCE_MAX_TURNS,
     SILENCE_MIN_TURNS,
     HASTE_ICON_PATTERN_FRAME_COUNTS,
@@ -6725,7 +6722,7 @@ class BattleScreenMockTest(unittest.TestCase):
                     1,
                 ),
                 call(
-                    52,
+                    4 + MONSTER_CONDITION_ICON_OFFSET_X,
                     MONSTER_POSITIONS[0][1],
                     0,
                     SLEEP_ICON_SOURCE_X + SLEEP_ICON_SIZE,
@@ -6775,7 +6772,7 @@ class BattleScreenMockTest(unittest.TestCase):
                     1,
                 ),
                 call(
-                    4 + CONFUSE_MONSTER_OFFSET_X,
+                    4 + MONSTER_CONDITION_ICON_OFFSET_X,
                     MONSTER_POSITIONS[0][1],
                     0,
                     expected_source_x,
@@ -6816,7 +6813,7 @@ class BattleScreenMockTest(unittest.TestCase):
             1,
         )
 
-    def test_monster_protection_and_speed_icons_share_da2_row(self) -> None:
+    def test_monster_protection_and_speed_icons_share_upper_row(self) -> None:
         for defense in (1, 2):
             for speed in (-1, 0, 1, 2):
                 with self.subTest(defense=defense, speed=speed):
@@ -6832,8 +6829,8 @@ class BattleScreenMockTest(unittest.TestCase):
                         patch("tools.screen_mocks.battle.pyxel.blt") as blt,
                     ):
                         mock._draw_speed_modifier_icons()
-                    x = 4 + monster.width - 24
-                    y = MONSTER_POSITIONS[0][1] + monster.height
+                    x = 4 + MONSTER_CONDITION_ICON_OFFSET_X
+                    y = MONSTER_POSITIONS[0][1]
                     expected = [call(x, y, 0, 72, 128, 8, 8, 1)]
                     if speed:
                         interval = (
@@ -6854,7 +6851,7 @@ class BattleScreenMockTest(unittest.TestCase):
                         mock._draw_speed_modifier_icons()
                     blt.assert_not_called()
 
-    def test_slow_icon_uses_da2_bank_zero_animation_below_monster(self) -> None:
+    def test_slow_icon_uses_da2_bank_zero_animation_at_monster_top(self) -> None:
         self.assertEqual((SPEED_ICON_SOURCE_X, SPEED_ICON_NEGATIVE_SOURCE_Y), (96, 136))
         self.assertEqual(SPEED_ICON_TRANSPARENT_INDEX, 1)
 
@@ -6874,8 +6871,8 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_speed_modifier_icons()
 
         blt.assert_called_once_with(
-            4 + monster.width - 24,
-            MONSTER_POSITIONS[0][1] + monster.height,
+            4 + MONSTER_CONDITION_ICON_OFFSET_X,
+            MONSTER_POSITIONS[0][1],
             0,
             SPEED_ICON_SOURCE_X + SPEED_ICON_SIZE,
             SPEED_ICON_NEGATIVE_SOURCE_Y,
@@ -6910,7 +6907,7 @@ class BattleScreenMockTest(unittest.TestCase):
                     mock._draw_speed_modifier_icons()
                     self.assertEqual(blt.call_count, 2)
 
-    def test_break_icon_uses_da2_negative_defense_animation_below_monster(
+    def test_break_icon_uses_da2_negative_defense_animation_at_monster_top(
         self,
     ) -> None:
         self.assertEqual(
@@ -6934,8 +6931,8 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_speed_modifier_icons()
 
         blt.assert_called_once_with(
-            4 + monster.width - 24,
-            MONSTER_POSITIONS[0][1] + monster.height,
+            4 + MONSTER_CONDITION_ICON_OFFSET_X,
+            MONSTER_POSITIONS[0][1],
             0,
             PROTECTION_ICON_SOURCE_X + PROTECTION_ICON_SIZE,
             DEFENSE_DOWN_ICON_SOURCE_Y,
@@ -6994,7 +6991,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_poison_icons()
 
         blt.assert_called_once_with(
-            4 + POISON_MONSTER_OFFSET_X,
+            4 + MONSTER_CONDITION_ICON_OFFSET_X,
             MONSTER_POSITIONS[0][1],
             0,
             POISON_ICON_SOURCE_X,
@@ -7095,7 +7092,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_stun_icons()
 
         blt.assert_called_once_with(
-            4 + STUN_MONSTER_OFFSET_X,
+            4 + MONSTER_CONDITION_ICON_OFFSET_X,
             MONSTER_POSITIONS[0][1],
             0,
             STUN_ICON_SOURCE_X,
@@ -7119,7 +7116,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._draw_silence_icons()
 
         blt.assert_called_once_with(
-            4 + SILENCE_MONSTER_OFFSET_X,
+            4 + MONSTER_CONDITION_ICON_OFFSET_X,
             MONSTER_POSITIONS[0][1],
             0,
             SILENCE_ICON_SOURCE_X,
@@ -7132,6 +7129,138 @@ class BattleScreenMockTest(unittest.TestCase):
             (SILENCE_ICON_SOURCE_X, SILENCE_ICON_SOURCE_Y),
             (56, 16),
         )
+
+    def test_monster_ailments_and_modifiers_share_one_compact_upper_row(self) -> None:
+        for width in (64, 96):
+            for height in (64, 96):
+                for condition in ("sleeping", "confused"):
+                    with self.subTest(width=width, height=height, condition=condition):
+                        monster = replace(_damage_test_monster(), width=width, height=height)
+                        monster.state.poisoned = True
+                        setattr(monster.state, condition, 2)
+                        monster.state.silenced = 4
+                        monster.state.stunned = True
+                        monster.state.defense_modifier = -1
+                        monster.state.speed_modifier = -1
+                        mock = BattleScreenMock.__new__(BattleScreenMock)
+                        mock.monsters = (monster,)
+
+                        with (
+                            patch("tools.screen_mocks.battle.pyxel.frame_count", 8),
+                            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                            patch("tools.screen_mocks.battle.pyxel.dither"),
+                        ):
+                            mock._draw_sleeping_icons()
+                            mock._draw_confusion_icons()
+                            mock._draw_silence_icons()
+                            mock._draw_poison_icons()
+                            mock._draw_stun_icons()
+                            mock._draw_speed_modifier_icons()
+
+                        # Six simultaneous markers fit both image widths and stay
+                        # in the same row regardless of the monster's height.
+                        x = 20 if width == 64 else 28
+                        sleep_or_confuse_source = (
+                            (40, 136) if condition == "sleeping" else (136, 128)
+                        )
+                        sources = (
+                            (32, 16), sleep_or_confuse_source, (56, 16),
+                            (224, 16), (64, 136), (96, 136),
+                        )
+                        self.assertEqual(
+                            sorted(blt.call_args_list, key=lambda item: item.args[0]),
+                            [
+                                call(x + slot * 8, 48, 0, sx, sy, 8, 8, 1)
+                                for slot, (sx, sy) in enumerate(sources)
+                            ],
+                        )
+                        self.assertLessEqual(x + 6 * 8, 4 + width)
+
+    def test_vertically_adjacent_monster_markers_do_not_overlap(self) -> None:
+        for height in (64, 96):
+            with self.subTest(height=height):
+                upper = replace(_damage_test_monster(), height=height)
+                lower = _damage_test_monster(1)
+                upper.state.defense_modifier = -1
+                upper.state.speed_modifier = -1
+                lower.state.poisoned = True
+                lower.state.apply_sleep(2)
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.monsters = (upper, lower)
+                mock.monster_positions = ((4, 16), (4, 16 + height))
+
+                with (
+                    patch("tools.screen_mocks.battle.pyxel.frame_count", 8),
+                    patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                    patch("tools.screen_mocks.battle.pyxel.dither"),
+                ):
+                    mock._draw_speed_modifier_icons()
+                    mock._draw_sleeping_icons()
+                    mock._draw_poison_icons()
+
+                self.assertEqual(
+                    sorted(item.args[:2] for item in blt.call_args_list),
+                    [(28, 16), (28, 16 + height), (36, 16), (36, 16 + height)],
+                )
+
+    def test_poison_blink_keeps_other_monster_markers_stationary(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.poisoned = True
+        monster.state.silenced = 4
+        monster.state.defense_modifier = -1
+        monster.state.speed_modifier = 1
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+
+        for frame in (0, 8):
+            with (
+                self.subTest(frame=frame),
+                patch("tools.screen_mocks.battle.pyxel.frame_count", frame),
+                patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+                patch("tools.screen_mocks.battle.pyxel.dither"),
+            ):
+                mock._draw_poison_icons()
+                mock._draw_silence_icons()
+                mock._draw_speed_modifier_icons()
+                positions = [item.args[:2] for item in blt.call_args_list]
+                expected = [(36, 48), (44, 48), (52, 48)]
+                if frame:
+                    expected.insert(0, (28, 48))
+                self.assertEqual(positions, expected)
+
+        monster.state.poisoned = False
+        with patch("tools.screen_mocks.battle.pyxel.blt") as blt:
+            mock._draw_silence_icons()
+            mock._draw_speed_modifier_icons()
+        self.assertEqual(
+            [item.args[:2] for item in blt.call_args_list],
+            [(28, 48), (36, 48), (44, 48)],
+        )
+
+    def test_dead_monster_hides_all_condition_markers(self) -> None:
+        monster = _damage_test_monster()
+        monster.state.poisoned = True
+        monster.state.sleeping = 2
+        monster.state.silenced = 4
+        monster.state.stunned = True
+        monster.state.defense_modifier = 1
+        monster.state.speed_modifier = 1
+        monster.state.hp = 0
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.monsters = (monster,)
+
+        with (
+            patch("tools.screen_mocks.battle.pyxel.blt") as blt,
+            patch("tools.screen_mocks.battle.pyxel.dither") as dither,
+        ):
+            mock._draw_sleeping_icons()
+            mock._draw_confusion_icons()
+            mock._draw_silence_icons()
+            mock._draw_poison_icons()
+            mock._draw_stun_icons()
+            mock._draw_speed_modifier_icons()
+        blt.assert_not_called()
+        dither.assert_not_called()
 
     def test_spell_cast_popup_shows_icon_and_name_at_minimum_top_right_width(self) -> None:
         spell = load_mock_spells()["FIRE1"]

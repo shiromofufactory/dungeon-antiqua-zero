@@ -137,6 +137,34 @@ class BattleEncounterTest(unittest.TestCase):
 
         self.assertEqual(monster_slot_indexes(monsters), (0, 1, 2, 3, 4))
 
+    def test_three_monsters_start_with_two_front_and_one_rear(self) -> None:
+        for first_height in (64, 96):
+            with self.subTest(first_height=first_height):
+                monsters = (
+                    SimpleNamespace(width=64, height=first_height),
+                    SimpleNamespace(width=64, height=64),
+                    SimpleNamespace(width=64, height=64),
+                )
+
+                slots = monster_slot_indexes(monsters)
+
+                self.assertEqual(slots, (0, 2, 3))
+                self.assertEqual(
+                    tuple(MONSTER_POSITIONS[index] for index in slots),
+                    ((4, 48), (68, 16), (68, 80)),
+                )
+                self.assertEqual(
+                    _battle_start_front_monster_indexes(slots), frozenset((1, 2))
+                )
+
+    def test_other_standard_lineups_keep_their_initial_slots(self) -> None:
+        for count in (0, 1, 2, 4, 5):
+            with self.subTest(count=count):
+                monsters = tuple(
+                    SimpleNamespace(width=64, height=64) for _ in range(count)
+                )
+                self.assertEqual(monster_slot_indexes(monsters), tuple(range(count)))
+
     def test_64_by_96_first_monster_skips_the_second_rear_slot(self) -> None:
         monsters = (
             SimpleNamespace(width=64, height=96),

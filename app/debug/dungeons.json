@@ -278,6 +278,57 @@
           "battle_id": "battle_7"
         }
       ]
+    },
+    {
+      "id": "dungeon_afb78f20495443adb6e147d07665675e",
+      "name": "漆黒の森",
+      "bgm_id": "da3-forest",
+      "steps": [
+        {
+          "id": "random_encounter_41fce003958a49278947e2541ad6ecef",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "low",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": true,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_2bad3e436a3e4eee827fd4217887f7ea",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "POTION"
+          }
+        },
+        {
+          "id": "treasure_97cf0e003ad84d818e95b5d93c3ce0ce",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DARK CHRISM"
+          }
+        },
+        {
+          "id": "random_encounter_e4cbc459592446208b0249baf737ad81",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": true,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        }
+      ]
     }
   ]
 }

@@ -55,6 +55,8 @@ from scenes.battle import (
     REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT,
     BattleMonster,
     BattlePhase,
+    _battle_start_front_monster_indexes,
+    monster_slot_indexes,
 )
 from state import Language
 from systems import BattleProgression, EnemyProgressionData
@@ -79,6 +81,57 @@ def charge_monster(*, is_front_row: bool = True) -> BattleMockMonster:
 
 
 class MonsterReinforcementTest(unittest.TestCase):
+    def test_fourth_monster_joins_rear_without_moving_initial_three(self) -> None:
+        record = next(
+            record for record in load_record_array("monsters.json")
+            if record["name_en"] == "Giant Spider"
+        )
+        definition = MonsterDefinition.from_record(record)
+        for same_monster in (False, True):
+            with self.subTest(same_monster=same_monster):
+                scene = BattleScene.__new__(BattleScene)
+                slots = monster_slot_indexes((definition,) * 3)
+                front_indexes = _battle_start_front_monster_indexes(slots)
+                scene.monsters = tuple(
+                    BattleMonster.from_record(record, is_front_row=index in front_indexes)
+                    for index in range(3)
+                )
+                initial_monsters = scene.monsters
+                initial_positions = tuple(MONSTER_POSITIONS[slot] for slot in slots)
+                scene.monster_slot_indexes = slots
+                scene.monster_positions = initial_positions
+                scene.monster_records_by_key = {definition.key: record}
+                scene.monster_definitions_by_key = {definition.key: definition}
+                scene.monster_image_resources = Mock()
+                scene.monster_window_factory = Mock()
+                scene.monster_name_windows = []
+                scene.monster_name_texts = []
+                scene.monster_images = {}
+                scene.localizer = Localizer(Language.JAPANESE)
+                scene.monster_record_system = Mock()
+                scene.target_window = Mock()
+                scene.reinforcement_entrance_frames = {}
+                scene.progression = Mock()
+                scene.progression.register_enemy.return_value = 3
+                scene._timeline_order = TimelineOrder(tuple(
+                    TimelineEntry(monster, monster.agility, 64)
+                    for monster in scene.monsters
+                ))
+
+                self.assertTrue(scene._add_monster_ally(
+                    initial_monsters[0], same_monster=same_monster
+                ))
+
+                self.assertEqual(scene.monster_slot_indexes, (0, 2, 3, 1))
+                self.assertEqual(scene.monsters[:3], initial_monsters)
+                self.assertEqual(scene.monster_positions[:3], initial_positions)
+                self.assertEqual(scene.monster_positions[3], (4, 112))
+                self.assertEqual(
+                    tuple(monster.is_front_row for monster in scene.monsters),
+                    (False, True, True, False),
+                )
+                self.assertEqual(scene._monster_ally_slot(), 4)
+
     def test_reinforcement_waits_twelve_frames_after_entrance(self) -> None:
         actor = charge_monster()
         actor.special_actions = (MonsterSpecialAction.REINFORCE,)

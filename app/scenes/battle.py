@@ -449,17 +449,14 @@ CONFUSE_ICON_SOURCE_Y = 128
 CONFUSE_ICON_SIZE = 8
 CONFUSE_ICON_PATTERN_COUNT = 4
 CONFUSE_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
-CONFUSE_MONSTER_OFFSET_X = 48
 SILENCE_MIN_TURNS = 4
 SILENCE_MAX_TURNS = 6
 SILENCE_ICON_SOURCE_X = 56
 SILENCE_ICON_SOURCE_Y = 16
 SILENCE_ICON_SIZE = 8
-SILENCE_MONSTER_OFFSET_X = 36
 POISON_ICON_SOURCE_X = 32
 POISON_ICON_SOURCE_Y = 16
 POISON_ICON_SIZE = 8
-POISON_MONSTER_OFFSET_X = 24
 POISON_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
 POISON_ICON_DITHER_RATES = (0.0, 0.5, 1.0, 0.5)
 PARALYZE_ICON_SOURCE_X = 40
@@ -468,7 +465,16 @@ PARALYZE_ICON_SIZE = 8
 STUN_ICON_SOURCE_X = 224
 STUN_ICON_SOURCE_Y = 16
 STUN_ICON_SIZE = 8
-STUN_MONSTER_OFFSET_X = 32
+MONSTER_CONDITION_ICON_OFFSET_X = 24
+MONSTER_CONDITION_ICON_FIELDS = (
+    "poisoned",
+    "sleeping",
+    "confused",
+    "silenced",
+    "stunned",
+    "defense_modifier",
+    "speed_modifier",
+)
 PARTY_CONDITION_ICON_OFFSET_X = 12
 PARTY_CONDITION_ICON_FIELDS = (
     "silenced",
@@ -1808,6 +1814,8 @@ def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
     first = monsters[0]
     first_size = (getattr(first, "width", None), getattr(first, "height", None))
     if first_size != TALL_FIRST_MONSTER_SIZE:
+        if len(monsters) == 3:
+            return (0, 2, 3)
         return tuple(range(len(monsters)))
     if len(monsters) > len(TALL_FIRST_MONSTER_SLOT_INDEXES):
         raise BattleDataError(
@@ -11926,9 +11934,9 @@ class BattleScene:
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.sleeping:
                 continue
-            _base_x, y = self._monster_base_position(index)
+            x, y = self._monster_condition_icon_position(index, "sleeping")
             pyxel.blt(
-                self._monster_draw_x(index) + 48,
+                x,
                 y,
                 0,
                 source_x,
@@ -11966,9 +11974,9 @@ class BattleScene:
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.confused:
                 continue
-            _base_x, y = self._monster_base_position(index)
+            x, y = self._monster_condition_icon_position(index, "confused")
             pyxel.blt(
-                self._monster_draw_x(index) + CONFUSE_MONSTER_OFFSET_X,
+                x,
                 y,
                 0,
                 source_x,
@@ -12037,8 +12045,8 @@ class BattleScene:
                 continue
             if self._monster_draw_position(index) != self._monster_base_position(index):
                 continue
-            _base_x, y = self._monster_base_position(index)
             if defense_modifier:
+                x, y = self._monster_condition_icon_position(index, "defense_modifier")
                 defense_interval = (
                     DEFENSE_DOWN_ICON_PATTERN_FRAME_COUNT
                     if defense_modifier < 0
@@ -12048,8 +12056,8 @@ class BattleScene:
                     pyxel.frame_count // defense_interval
                 ) % PROTECTION_ICON_PATTERN_COUNT
                 pyxel.blt(
-                    self._monster_draw_x(index) + monster.width - 24,
-                    y + monster.height,
+                    x,
+                    y,
                     0,
                     PROTECTION_ICON_SOURCE_X + defense_pattern * PROTECTION_ICON_SIZE,
                     (
@@ -12063,6 +12071,7 @@ class BattleScene:
                 )
             if modifier == 0:
                 continue
+            x, y = self._monster_condition_icon_position(index, "speed_modifier")
             frame_count = (
                 SLOW_ICON_PATTERN_FRAME_COUNT
                 if modifier < 0
@@ -12075,10 +12084,8 @@ class BattleScene:
                 else SPEED_ICON_POSITIVE_SOURCE_Y
             )
             pyxel.blt(
-                self._monster_draw_x(index)
-                + monster.width
-                - (16 if defense_modifier else 24),
-                y + monster.height,
+                x,
+                y,
                 0,
                 SPEED_ICON_SOURCE_X + pattern * SPEED_ICON_SIZE,
                 source_y,
@@ -12109,9 +12116,9 @@ class BattleScene:
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.silenced:
                 continue
-            _base_x, y = self._monster_base_position(index)
+            x, y = self._monster_condition_icon_position(index, "silenced")
             pyxel.blt(
-                self._monster_draw_x(index) + SILENCE_MONSTER_OFFSET_X,
+                x,
                 y,
                 0,
                 SILENCE_ICON_SOURCE_X,
@@ -12159,9 +12166,9 @@ class BattleScene:
                     TRANSPARENT_INDEX,
                 )
             for index, monster in poisoned:
-                _base_x, y = self._monster_base_position(index)
+                x, y = self._monster_condition_icon_position(index, "poisoned")
                 pyxel.blt(
-                    self._monster_draw_x(index) + POISON_MONSTER_OFFSET_X,
+                    x,
                     y,
                     0,
                     POISON_ICON_SOURCE_X,
@@ -12218,9 +12225,9 @@ class BattleScene:
         for index, monster in enumerate(getattr(self, "monsters", ())):
             if not monster.is_alive or not monster.state.stunned:
                 continue
-            _base_x, y = self._monster_base_position(index)
+            x, y = self._monster_condition_icon_position(index, "stunned")
             pyxel.blt(
-                self._monster_draw_x(index) + STUN_MONSTER_OFFSET_X,
+                x,
                 y,
                 0,
                 STUN_ICON_SOURCE_X,
@@ -12229,6 +12236,31 @@ class BattleScene:
                 STUN_ICON_SIZE,
                 TRANSPARENT_INDEX,
             )
+
+    def _monster_condition_icon_position(
+        self,
+        index: int,
+        condition: str,
+    ) -> tuple[int, int]:
+        """Place an active monster marker in the shared row at its image top."""
+
+        monster = self.monsters[index]
+        active_fields = tuple(
+            field for field in MONSTER_CONDITION_ICON_FIELDS
+            if getattr(monster.state, field, 0)
+        )
+        # Count blinking poison even while invisible so the other icons stay put.
+        row_width = len(active_fields) * SLEEP_ICON_SIZE
+        offset_x = min(
+            MONSTER_CONDITION_ICON_OFFSET_X, max(0, monster.width - row_width)
+        )
+        _base_x, y = self._monster_base_position(index)
+        return (
+            self._monster_draw_x(index)
+            + offset_x
+            + active_fields.index(condition) * SLEEP_ICON_SIZE,
+            y,
+        )
 
     def _party_condition_icon_position(
         self,
