@@ -7,14 +7,14 @@ from unittest.mock import Mock, patch
 from tools._bootstrap import APP_ROOT  # noqa: F401
 from auto_battle_model import AutoBattleObservations
 from auto_battle_simulation import BattleForecast
-from battle_physical import drain_healing_amount, resolve_physical_attack
+from battle_physical import PhysicalAttackResult, drain_healing_amount, resolve_physical_attack
 from item import AdditionalEffect
 from monster import MonsterSpecialAction
 from resistance import ResistanceType
 from resources import load_record_array
 from resources.audio import sound_effect_definition
 from scenes.battle import (
-    BATTLE_DRAIN_SE_ID, BattleMonster, MONSTER_DRAIN_HEAL_DELAY,
+    ATTACK_CRITICAL_SE_ID, BATTLE_DRAIN_SE_ID, BattleMonster, MONSTER_DRAIN_HEAL_DELAY,
 )
 from tests.test_auto_battle import AutoBattleFixtures
 from tests.test_battle_monster_spells import spell_scene
@@ -78,6 +78,40 @@ class MonsterDrainTest(unittest.TestCase):
         self.assertEqual(actor.state.hp, 1 + amount)
         self.assertTrue(presentation.healing_applied)
         self.assertEqual(scene.auto_battle_observations.enemy_net_damage, {0: -amount})
+
+    def test_critical_sound_replaces_hit_or_drain_for_every_monster_attack_path(self):
+        for mode in ("attack", "charge", "confused"):
+            for draining in (False, True):
+                with self.subTest(mode=mode, draining=draining):
+                    scene, actor = self.scene()
+                    if not draining:
+                        actor = replace(actor, additional_effect=None)
+                    scene.monsters = (actor,)
+                    result = PhysicalAttackResult(True, 7, 100.0, 100.0, critical=True)
+                    with patch("scenes.battle.resolve_physical_attack", return_value=result), \
+                         patch("scenes.battle.random.choice", side_effect=lambda indexes: indexes[0]), \
+                         patch("scenes.battle.play_se") as sound:
+                        if mode == "attack":
+                            scene._begin_standard_monster_attack(actor)
+                            scene._finish_monster_attack()
+                        elif mode == "charge":
+                            scene._begin_monster_charge(actor)
+                            presentation = scene.monster_charge_presentation
+                            for _ in range(presentation.approach_frame_count - 1):
+                                scene._update_monster_charge()
+                            sound.assert_not_called()
+                            scene._update_monster_charge()
+                            scene._update_monster_charge()
+                        else:
+                            target = replace(actor, state=replace(actor.state, hp=20))
+                            scene.monsters = (actor, target)
+                            scene._monster_draw_x = Mock(return_value=4)
+                            scene._begin_confused_monster_action(actor)
+                            self.assertTrue(scene.action_presentation.confused_attack_results[0].is_critical)
+                            scene._apply_action_results(scene.action_presentation)
+                            scene._apply_action_results(scene.action_presentation)
+                        sound.assert_called_once_with(ATTACK_CRITICAL_SE_ID)
+                    self.assertEqual(actor.state.hp, 8 if draining else 1)
 
     def test_full_hp_keeps_drain_sound_but_omits_flight_and_recovery(self):
         scene, actor = self.scene()

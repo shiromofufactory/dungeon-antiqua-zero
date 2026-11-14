@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from inspect import signature
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
@@ -36,6 +36,9 @@ from rendering import (
 )
 from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
+    ATTACK_BLUNT_SE_ID,
+    ATTACK_CRITICAL_SE_ID,
+    ATTACK_SLASH_SE_ID,
     BATTLE_BGM_ID,
     BATTLE_BOSS_BGM_ID,
     BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
@@ -52,6 +55,8 @@ from scenes.battle import (
     UNSELECTABLE_TARGET_PALETTE,
     _battle_start_front_monster_indexes,
     BattleCharacter,
+    BattleAttackPresentation,
+    BattleAttackStrike,
     BattlePhase,
     FormationAnimationCompletion,
     TIMELINE_BASE_X,
@@ -73,6 +78,81 @@ from systems import (
 from text_catalog import TextCatalog
 from ui import LocalizedWindowTextFactory, POSITIVE_COLOR
 from ui.tagged_text import TextColor, split_tagged_text
+
+
+class BattlePhysicalSoundTest(unittest.TestCase):
+    def scene(self, strikes, *, is_iai=False, target_side="enemy"):
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = tuple(
+            SimpleNamespace(is_alive=True, is_front_row=True, state=Mock())
+            for _ in range(2)
+        )
+        scene.party = (SimpleNamespace(hp=100, take_damage=Mock()),)
+        scene._apply_additional_effects_to_monster = Mock(return_value=())
+        scene._apply_additional_effects_to_member = Mock(return_value=())
+        scene._refresh_party_hp_text = Mock()
+        scene._begin_action_return = Mock()
+        scene.attack_presentation = BattleAttackPresentation(
+            0, strikes, is_iai=is_iai, target_side=target_side
+        )
+        return scene
+
+    @staticmethod
+    def strike(*, critical=False, hit=True, frame=1, se_id=ATTACK_SLASH_SE_ID):
+        return BattleAttackStrike(
+            damage=7 if hit else 0, poses=(), effect_row=None,
+            motion_start_frame=0, hit_start_frame=frame,
+            is_hit=hit, is_critical=critical, sound_effect_id=se_id,
+        )
+
+    def test_dual_wield_plays_each_hands_normal_or_critical_sound_once(self):
+        for target_side in ("enemy", "ally"):
+            for critical_hand in (None, 0, 1):
+                with self.subTest(target_side=target_side, critical_hand=critical_hand):
+                    sounds = (ATTACK_SLASH_SE_ID, ATTACK_BLUNT_SE_ID)
+                    scene = self.scene(tuple(
+                        self.strike(critical=index == critical_hand, frame=1 + index * 2,
+                                    se_id=se_id)
+                        for index, se_id in enumerate(sounds)
+                    ), target_side=target_side)
+                    with patch("scenes.battle.play_se") as sound:
+                        for _ in range(4):
+                            scene._update_attack_presentation()
+                    self.assertEqual(sound.call_args_list, [
+                        call(ATTACK_CRITICAL_SE_ID if index == critical_hand else se_id)
+                        for index, se_id in enumerate(sounds)
+                    ])
+
+    def test_critical_flag_on_a_miss_does_not_play_sound(self):
+        scene = self.scene((self.strike(critical=True, hit=False),))
+        with patch("scenes.battle.play_se") as sound:
+            scene._update_attack_presentation()
+            scene._update_attack_presentation()
+        sound.assert_not_called()
+        scene.monsters[0].state.take_damage.assert_not_called()
+
+    def test_iai_plays_one_sound_at_last_impact_using_any_successful_critical(self):
+        for critical_hand, critical_hit in ((None, True), (0, True), (1, True), (0, False)):
+            with self.subTest(critical_hand=critical_hand, critical_hit=critical_hit):
+                strikes = tuple(
+                    self.strike(critical=index == critical_hand,
+                                hit=critical_hit if index == critical_hand else True,
+                                frame=1 + index * 2)
+                    for index in range(2)
+                )
+                for index, strike in enumerate(strikes):
+                    strike.target_index = index
+                scene = self.scene(strikes, is_iai=True)
+                with patch("scenes.battle.play_se") as sound:
+                    scene._update_attack_presentation()
+                    scene._update_attack_presentation()
+                    sound.assert_not_called()
+                    scene._update_attack_presentation()
+                    scene._update_attack_presentation()
+                sound.assert_called_once_with(
+                    ATTACK_CRITICAL_SE_ID
+                    if critical_hand is not None and critical_hit else ATTACK_SLASH_SE_ID
+                )
 
 
 class BattlePaletteLifecycleTest(unittest.TestCase):

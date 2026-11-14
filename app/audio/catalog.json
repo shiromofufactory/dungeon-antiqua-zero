@@ -8,7 +8,7 @@
       "sound": 6
     },
     "battle_hit": {
-      "sound": 12
+      "wav": "battle_hit.wav"
     },
     "battle_drain": {
       "sound": 51
@@ -17,7 +17,7 @@
       "sound": 13
     },
     "battle_monster_death": {
-      "sound": 10
+      "wav": "battle_monster_death.wav"
     },
     "battle_monster_escape": {
       "sound": 49
@@ -35,10 +35,13 @@
       "sound": 20
     },
     "battle_weapon_slash": {
-      "sound": 11
+      "wav": "battle_weapon_slash.wav"
     },
     "battle_weapon_blunt": {
-      "sound": 29
+      "wav": "battle_weapon_blunt.wav"
+    },
+    "battle_critical_hit": {
+      "wav": "battle_critical_hit.wav"
     },
     "field_poison": {
       "sound": 43
@@ -56,19 +59,19 @@
       "sound": 25
     },
     "spell_fire1": {
-      "wav": "Fire1.wav"
+      "wav": "spell_fire1.wav"
     },
     "spell_slow": {
-      "wav": "Slow.wav"
+      "wav": "spell_slow.wav"
     },
     "spell_healing1": {
-      "wav": "Healing1.wav"
+      "wav": "spell_healing1.wav"
     },
     "spell_protection": {
       "sound": 38
     },
     "spell_poison1": {
-      "wav": "Poison1.wav"
+      "wav": "spell_poison1.wav"
     },
     "spell_sleep": {
       "sound": 16

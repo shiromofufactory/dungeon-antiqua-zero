@@ -10,7 +10,7 @@
   "format_version": 2,
   "sound_effects": {
     "equip_complete": {"sound": 6},
-    "spell_healing1": {"wav": "Healing1.wav"}
+    "spell_healing1": {"wav": "spell_healing1.wav"}
   }
 }
 ```
@@ -20,8 +20,10 @@
 - `channel` は定義しない。`sound` と `wav` の両方、絶対パス、親ディレクトリ参照、
   存在しないWAVは検証エラーとする。
 
-配置済みの `fire1.wav`、`Slow.wav`、`Poison1.wav`、`Healing1.wav` は、それぞれ
+配置済みの `spell_fire1.wav`、`spell_slow.wav`、`spell_poison1.wav`、`spell_healing1.wav` は、それぞれ
 `spell_fire1`、`spell_slow`、`spell_poison1`、`spell_healing1` へ割り当てる。
+`battle_hit`、`battle_monster_death`、`battle_weapon_slash`、`battle_weapon_blunt`、
+`battle_critical_hit` は、それぞれ同名のWAVへ割り当てる。
 WAVはゲーム用素材として直接読み込み、BGMのOGG変換処理へ含めない。
 SE IDは呪文エフェクトとイベントから引き続き参照し、音源の切替時に参照側を書き換えない。
 再生元や再生状態はセーブデータへ保存しない。
@@ -32,7 +34,8 @@ SE IDは呪文エフェクトとイベントから引き続き参照し、音源
 - 新しいSEは再生中のSEを置き換える。同時再生用のチャンネル割り当ては行わない。
 - BGMは専用チャンネル2を使い、SEの再生・音量変更で中断しない。
 - ゲームのSE音量は既存の `Settings.se_volume` に従い、チャンネル0のゲインへ適用する。
-  WAVのみ基準ゲインの1.5倍とし、Pyxel Soundへ切り替えた際は基準ゲインへ戻す。
+  WAVのみ基準ゲインの4倍とし、音量0〜4のゲインを通常再生時のBGMと同じ
+  `0.0, 0.2, 0.4, 0.6, 0.8` にする。Pyxel Soundへ切り替えた際は基準ゲインへ戻す。
   音量0はどちらも無音のままとする。エディタの試聴にはこの補正を適用しない。
   倍率は `app/resources/audio.py` の `WAV_SE_VOLUME_MULTIPLIER` で調整できる。
   `1.0`が補正なし、`1.5`が50%増、`2.0`が2倍となり、変更はゲームの再起動後に反映する。

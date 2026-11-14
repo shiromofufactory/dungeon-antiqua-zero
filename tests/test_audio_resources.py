@@ -36,7 +36,7 @@ class FakeSound:
 
 
 class SoundEffectPlayerTest(unittest.TestCase):
-    def test_game_volume_boosts_only_wav_and_restores_synth_gain(self) -> None:
+    def test_game_wav_volume_matches_bgm_and_restores_synth_gain(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / "hit.wav").touch()
@@ -48,18 +48,19 @@ class SoundEffectPlayerTest(unittest.TestCase):
             synth = SoundEffectDefinition.from_record("equip", {"sound": 6})
 
             for volume, wav_gain, synth_gain in (
-                (0, 0.0, 0.0), (1, 0.075, 0.05), (2, 0.15, 0.10),
-                (3, 0.225, 0.15), (4, 0.30, 0.20),
+                (0, 0.0, 0.0), (1, 0.2, 0.05), (2, 0.4, 0.10),
+                (3, 0.6, 0.15), (4, 0.8, 0.20),
             ):
                 with self.subTest(volume=volume):
                     player.set_volume(volume)
                     player.play(wav)
                     self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, wav_gain)
+                    self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, BGM_VOLUME_GAINS[volume])
                     player.play(synth)
                     self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, synth_gain)
             player.play(wav)
             player.set_volume(3)
-            self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, 0.225)
+            self.assertAlmostEqual(px.channels[SE_CHANNEL].gain, 0.6)
             player.set_volume(0)
             self.assertEqual(px.channels[SE_CHANNEL].gain, 0.0)
             self.assertEqual([channel.gain for index, channel in enumerate(px.channels) if index != SE_CHANNEL], [0.42] * 3)
@@ -350,14 +351,17 @@ class BgmPlayerTest(unittest.TestCase):
             }
             <= set(list_se_ids())
         )
-        self.assertEqual(sound_effect_definition("spell_healing1").wav, "Healing1.wav")
+        self.assertEqual(sound_effect_definition("spell_healing1").wav, "spell_healing1.wav")
         self.assertEqual(sound_effect_definition("battle_escape").sound, 26)
         self.assertEqual(sound_effect_definition("battle_focus").sound, 37)
         self.assertEqual(sound_effect_definition("battle_hide").sound, 30)
         self.assertEqual(sound_effect_definition("battle_identify").sound, 20)
-        self.assertEqual(sound_effect_definition("battle_monster_death").sound, 10)
-        self.assertEqual(sound_effect_definition("battle_weapon_slash").sound, 11)
-        self.assertEqual(sound_effect_definition("battle_weapon_blunt").sound, 29)
+        for se_id in (
+            "battle_hit", "battle_monster_death", "battle_weapon_slash",
+            "battle_weapon_blunt", "battle_critical_hit",
+        ):
+            with self.subTest(se_id=se_id):
+                self.assertEqual(sound_effect_definition(se_id).wav, f"{se_id}.wav")
         self.assertEqual(sound_effect_definition("result_increment").sound, 2)
         self.assertEqual(sound_effect_definition("save_complete").sound, 6)
         self.assertEqual(sound_effect_definition("equip_complete").sound, 6)

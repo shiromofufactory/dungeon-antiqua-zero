@@ -16,8 +16,8 @@ else:
 
 SE_CHANNEL = 0
 SE_VOLUME_GAINS = (0.0, 0.05, 0.10, 0.15, 0.20)
-# ゲーム内のWAV効果音だけに適用する倍率。1.0で補正なし、1.5で50%増。
-WAV_SE_VOLUME_MULTIPLIER = 1.5
+# ゲーム内のWAV効果音だけに適用する倍率。4.0で各音量のゲインをBGMと揃える。
+WAV_SE_VOLUME_MULTIPLIER = 4.0
 BGM_CHANNEL = 2
 BGM_VOLUME_GAINS = (0.0, 0.2, 0.4, 0.6, 0.8)
 BGM_STOP_FADE_FRAMES = 30
