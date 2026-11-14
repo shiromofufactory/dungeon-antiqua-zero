@@ -256,6 +256,28 @@
           "battle_id": "battle_4"
         }
       ]
+    },
+    {
+      "id": "dungeon_f24942637aae42358f796a6815b9fe5b",
+      "name": "リアンノル襲撃",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "event_battle_8cf8b98aa630497f90263883c93808de",
+          "type": "event_battle",
+          "battle_id": "battle_5"
+        },
+        {
+          "id": "event_battle_077849fbe8994afba9975b4c25e6e284",
+          "type": "event_battle",
+          "battle_id": "battle_6"
+        },
+        {
+          "id": "event_battle_65d1b258d6214be2b75f42cdace67ad1",
+          "type": "event_battle",
+          "battle_id": "battle_7"
+        }
+      ]
     }
   ]
 }

@@ -859,9 +859,13 @@ class BattleScreenMockTest(unittest.TestCase):
             [monster.state.hp for monster in mock.monsters],
             [25, 25, 25, 20, 20],
         )
+        monster_records = {
+            record["name_en"]: record
+            for record in load_record_array("monsters.json")
+        }
         self.assertEqual(
             [monster.agility for monster in mock.monsters],
-            [15, 15, 15, 12, 12],
+            [monster_records[key]["agi"] for key in BATTLE_MOCK_MONSTER_KEYS],
         )
         self.assertEqual(
             mock.monsters[0].combat_stats,
@@ -5069,10 +5073,10 @@ class BattleScreenMockTest(unittest.TestCase):
                 if candidate.item.subtype == "BOOK"
             ),
             (
+                "BOOK of DUNES",
+                "BOOK of SPARK",
                 "BOOK of FIRE",
                 "BOOK of SLEEP",
-                "BOOK of SPARK",
-                "BOOK of DUNES",
                 "BOOK of WRING",
                 "BOOK of DOOM",
             ),
@@ -5332,7 +5336,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertIs(mock.spell_type, spells["HEALING1"].type)
         self.assertEqual(
             [target.key for target in mock.spell_cursor.targets],
-            ["HEALING1", "PROTECTION", "CURE", "SILENCE"],
+            ["HEALING1", "CURE", "PROTECTION", "SILENCE"],
         )
 
     def test_unaffordable_spells_remain_navigable_and_alert_on_confirm(self) -> None:
@@ -5348,7 +5352,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.active_party_index = 0
         spells = load_mock_spells()
         mock.spell_candidates = tuple(
-            spells[key] for key in ("FIRE1", "SLOW", "HEALING1", "PROTECTION")
+            spells[key] for key in ("FIRE1", "SLOW", "HEALING1", "CURE")
         )
         mock.spell_type = spells["FIRE1"].type
         mock.spell_scroll_offset = 0
@@ -5367,7 +5371,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._move_spell(Direction.DOWN))
         self.assertEqual(mock.selected_spell.key, "SLOW")
         self.assertTrue(mock._move_spell(Direction.RIGHT))
-        self.assertEqual(mock.selected_spell.key, "PROTECTION")
+        self.assertEqual(mock.selected_spell.key, "CURE")
 
         self.assertFalse(mock._use_selected_spell())
         self.assertEqual(mock.party[0].mp, 1)
@@ -5574,7 +5578,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_unconfirmed_spell_does_not_set_delay(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.party = (SimpleNamespace(mp=0),)
+        mock.party = (SimpleNamespace(mp=0, silenced=0),)
         mock.active_party_index = 0
         mock.pending_item_candidate = None
         mock.pending_spell = load_mock_spells()["FIRE1"]

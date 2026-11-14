@@ -320,7 +320,7 @@ PARTY_ENTRANCE_COMPLETE_FRAME = (
     PARTY_ENTRANCE_FRAME_COUNT + 2 * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
 )
 DA2_VICTORY_RETURN_SPEED = 4
-VICTORY_RETURN_SPEED = DA2_VICTORY_RETURN_SPEED * DA2_REFERENCE_FPS // FPS
+VICTORY_RETURN_SPEED = 2 * DA2_VICTORY_RETURN_SPEED * DA2_REFERENCE_FPS // FPS
 VICTORY_RETURN_START_X = SCREEN_WIDTH
 TIMELINE_ENTRANCE_FRAME_COUNT = 10
 TIMELINE_ENTRANCE_STAGGER_FRAME_COUNT = 2
@@ -7577,7 +7577,7 @@ class BattleScene:
         hidden.clear()
 
     def _update_hidden_party_victory_return(self) -> bool:
-        """Advance hidden survivors leftward at DA2's converted run speed."""
+        """Advance hidden survivors leftward at twice DA2's converted run speed."""
 
         returning = getattr(self, "victory_returning_party_indexes", None)
         if not returning:

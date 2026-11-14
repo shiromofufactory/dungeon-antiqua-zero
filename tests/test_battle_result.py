@@ -157,7 +157,7 @@ class BattleResultOverlayTest(unittest.TestCase):
         self.assertEqual(len(overlay.spell_learned_popup.notices), 2)
         self.assertEqual(
             tuple(spell.key for _, spell in overlay.spell_learned_popup.notices),
-            ("PROTECTION", "CURE"),
+            ("CURE", "PROTECTION"),
         )
         for _frame in range(RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT):
             self.assertFalse(overlay.update(InputState()))
