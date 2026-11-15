@@ -29,6 +29,7 @@
     "attack-poses:validate": "python3 -B scripts/compile-attack-poses.py --validate-only",
     "attack-poses:build": "python3 -B scripts/compile-attack-poses.py",
     "pyxel-edit": "pyxel edit app/assets",
+    "sound-test": "python3 -B -m tools.sound_test",
     "editor": "python3 -B -m tools.editor",
     "test-battle": "npm run spell-effects:build && npm run attack-poses:build && python3 -B -m tools.screen_mocks.battle",
     "attack-pose-editor": "python3 -B -m tools.attack_pose_editor",

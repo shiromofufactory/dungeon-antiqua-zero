@@ -415,6 +415,9 @@ actorの画像範囲とマップの重なりの判定はPyxel非依存の `app/a
 イベントと呪文エフェクトの生成処理からも共有し、Pyxelを初期化せず検証できる。
 ゲームは設定のSE音量を同Playerへ通知し、Playerが音源種別に応じた利得を適用する。
 ゲーム音量を指定しない制作ツールでは、試聴用チャンネルの利得を維持する。
+`tools/sound_test` は候補一覧・選択・操作状態だけを所有し、ゲームと同じ音量を指定した
+`BgmPlayer` と `SoundEffectPlayer` へ再生を委譲する。素材やカタログ・端末設定は書き換えない。
+操作と検証は [サウンドテスト](./features/sound-test.md) を参照する。
 SE定義・共通チャンネル・割り込み・制作操作は
 [`features/sound-effects.md`](./features/sound-effects.md) を正本とする。
 
