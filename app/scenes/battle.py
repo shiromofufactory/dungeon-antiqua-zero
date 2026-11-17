@@ -13,6 +13,14 @@ from typing import Callable, TypeVar
 
 import pyxel
 
+from battle_layout import (
+    MONSTER_AREA_BOTTOM,
+    MONSTER_POSITIONS,
+    TALL_MONSTER_SIZE as TALL_FIRST_MONSTER_SIZE,
+    TALL_MONSTER_SLOT_INDEXES as TALL_FIRST_MONSTER_SLOT_INDEXES,
+    is_tall_monster,
+    monster_layout,
+)
 from auto_battle import AutoBattlePlanner
 from auto_battle_model import (
     AutoAction,
@@ -244,9 +252,6 @@ ACTIVE_PARTY_CURSOR_MIN_BASE_RATE = 0.5
 ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT = 90
 ACTIVE_PARTY_CURSOR_HALF_CYCLE_FRAME_COUNT = ACTIVE_PARTY_CURSOR_CYCLE_FRAME_COUNT // 2
 ACTIVE_PARTY_CURSOR_OFFSETS = ((-8, 0), (16, 0), (-8, 24), (16, 24))
-MONSTER_POSITIONS = ((4, 48), (4, 112), (68, 16), (68, 80), (68, 144))
-TALL_FIRST_MONSTER_SIZE = (64, 96)
-TALL_FIRST_MONSTER_SLOT_INDEXES = (0, 2, 3, 4)
 TIMELINE_BASE_X = 70
 TIMELINE_BASE_Y = 220
 TIMELINE_SLOT_SPACING = 20
@@ -1837,19 +1842,10 @@ def _battle_start_front_monster_indexes(
 def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
     """Select presentation slots for the encountered monster image sizes."""
 
-    if not monsters:
-        return ()
-    first = monsters[0]
-    first_size = (getattr(first, "width", None), getattr(first, "height", None))
-    if first_size != TALL_FIRST_MONSTER_SIZE:
-        if len(monsters) == 3:
-            return (0, 2, 3)
-        return tuple(range(len(monsters)))
-    if len(monsters) > len(TALL_FIRST_MONSTER_SLOT_INDEXES):
-        raise BattleDataError(
-            "a battle with a 64x96 first monster supports at most 4 monsters"
-        )
-    return TALL_FIRST_MONSTER_SLOT_INDEXES[: len(monsters)]
+    try:
+        return monster_layout(monsters).slot_indexes
+    except ValueError as error:
+        raise BattleDataError(str(error)) from error
 
 
 class BattleScene:
@@ -2103,9 +2099,7 @@ class BattleScene:
                     f"{monster.key}.spells contains unknown spell keys: "
                     f"{', '.join(unknown_spell_keys)}"
                 )
-        self.monster_positions = tuple(
-            MONSTER_POSITIONS[index] for index in self.monster_slot_indexes
-        )
+        self.monster_positions = monster_layout(encounter_definitions).positions
         self.monster_record_system.register_encounter(
             monster.key for monster in self.monsters
         )
@@ -9230,10 +9224,19 @@ class BattleScene:
     def _monster_ally_slot(self) -> int | None:
         """Find the first unoccupied display slot, including defeated slots."""
 
+        placement = self._monster_ally_placement(self.monsters[0])
+        return None if placement is None else placement[0]
+
+    def _monster_ally_placement(
+        self, target: object,
+    ) -> tuple[int, tuple[int, int]] | None:
+        """Fit a new image without moving or overlapping surviving enemies."""
+
         available_slots = (
             TALL_FIRST_MONSTER_SLOT_INDEXES
-            if (self.monsters[0].width, self.monsters[0].height)
-            == TALL_FIRST_MONSTER_SIZE
+            if is_tall_monster(target) or any(
+                is_tall_monster(monster) for monster in self.monsters
+            )
             else tuple(range(len(MONSTER_POSITIONS)))
         )
         occupied_slots = {
@@ -9241,18 +9244,41 @@ class BattleScene:
             for monster, slot in zip(self.monsters, self.monster_slot_indexes)
             if monster.is_alive
         }
-        slot = next(
-            (slot for slot in available_slots if slot not in occupied_slots),
-            None,
+        living = tuple(
+            (monster, slot, self._monster_base_position(index))
+            for index, (monster, slot) in enumerate(
+                zip(self.monsters, self.monster_slot_indexes)
+            )
+            if monster.is_alive
         )
-        return slot
+        width = getattr(target, "width", 64)
+        height = getattr(target, "height", 64)
+        for slot in available_slots:
+            if slot in occupied_slots:
+                continue
+            x, y = MONSTER_POSITIONS[slot]
+            if slot >= 2:
+                preceding_bottom = max(
+                    (py + monster.height
+                     for monster, other_slot, (_px, py) in living
+                     if 2 <= other_slot < slot),
+                    default=y,
+                )
+                y = max(y, preceding_bottom)
+            if y + height > MONSTER_AREA_BOTTOM:
+                continue
+            if any(
+                x < px + monster.width and px < x + width
+                and y < py + monster.height and py < y + height
+                for monster, _other_slot, (px, py) in living
+            ):
+                continue
+            return slot, (x, y)
+        return None
 
     def _add_monster_ally(self, actor: BattleMonster, *, same_monster: bool) -> bool:
         """Register a new ally with independent timeline and reward identity."""
 
-        slot = self._monster_ally_slot()
-        if slot is None:
-            return False
         caller = self.monster_definitions_by_key[actor.key]
         target = (
             caller
@@ -9262,6 +9288,10 @@ class BattleScene:
                 tuple(self.monster_definitions_by_key.values()),
             )
         )
+        placement = self._monster_ally_placement(target)
+        if placement is None:
+            return False
+        slot, position = placement
         record = self.monster_records_by_key[target.key]
         monster = BattleMonster.from_record(
             record,
@@ -9272,7 +9302,6 @@ class BattleScene:
         self.monster_slot_indexes += (slot,)
         self._refresh_monster_rows_from_slots()
         self.reinforcement_entrance_frames[index] = 0
-        position = MONSTER_POSITIONS[slot]
         self.monster_positions += (position,)
         self.monster_images[target.key] = self.monster_image_resources.image(
             target.image_resource_id
@@ -12725,9 +12754,7 @@ class BattleScene:
             monsters = getattr(self, "monsters", ())
             if not monsters:
                 return MONSTER_POSITIONS[index]
-            positions = tuple(
-                MONSTER_POSITIONS[slot] for slot in monster_slot_indexes(monsters)
-            )
+            positions = monster_layout(monsters).positions
         return positions[index]
 
     @staticmethod

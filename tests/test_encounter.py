@@ -31,6 +31,7 @@ from app.resources.maps import (
 )
 from app.systems import (
     ENCOUNTER_THRESHOLD,
+    EncounterFormation,
     EncounterGenerationError,
     EncounterSystem,
 )
@@ -132,6 +133,172 @@ def dungeon_map(
 
 
 class EncounterSystemTest(unittest.TestCase):
+    def test_two_gigas_limit_the_following_small_group_to_one(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1, 0), randint_values=(2, 1, 1, 5),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (
+                monster("Gigas", width=64, height=96, max_occ=2),
+                monster("Small", width=64, height=64, max_occ=3),
+            ),
+            encounter_settings(), monster_level=3, living_member_count=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Gigas", "Gigas", "Small"))
+        self.assertEqual(random_source.randint_calls, [(1, 2), (1, 5), (1, 1), (1, 5)])
+
+    def test_small_group_limits_a_later_tall_group_before_drawing_its_size(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1, 0), randint_values=(2, 1, 1, 5),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (
+                monster("Small", width=64, height=64, max_occ=2),
+                monster("Gigas", width=64, height=96, max_occ=2),
+            ),
+            encounter_settings(), monster_level=3, living_member_count=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Small", "Small", "Gigas"))
+        self.assertEqual(random_source.randint_calls[2], (1, 1))
+
+    def test_no_more_groups_are_added_when_the_tall_layout_is_full(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 1, 0, 1, 0), randint_values=(2, 1, 1, 1),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (
+                monster("Gigas", width=64, height=96, max_occ=2),
+                monster("Small", width=64, height=64),
+                monster("Other", width=64, height=64),
+            ),
+            encounter_settings(), monster_level=3, living_member_count=3,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Gigas", "Gigas", "Small"))
+        self.assertEqual(random_source.randint_values, [])
+
+    def test_party_size_reroll_probabilities_cover_every_random_outcome(self) -> None:
+        for member_count, enemy_count, numerator, denominator in (
+            (1, 5, 2, 2), (2, 5, 1, 2), (4, 1, 1, 3), (5, 1, 2, 3),
+        ):
+            for roll in range(denominator):
+                with self.subTest(member_count=member_count, roll=roll):
+                    random_source = ScriptedRandom(
+                        randrange_values=(roll,), randint_values=(),
+                    )
+                    system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+                    candidate = EncounterFormation(("Pack",) * enemy_count)
+                    replacement = EncounterFormation(("Other",) * 3)
+                    system._generate_candidate_formation = Mock(
+                        side_effect=(candidate, replacement),
+                    )
+
+                    formation = system.generate_formation(
+                        (monster("Pack"),), encounter_settings(),
+                        monster_level=3, living_member_count=member_count,
+                    )
+
+                    rerolled = roll < numerator
+                    self.assertEqual(formation, replacement if rerolled else candidate)
+                    self.assertEqual(
+                        system._generate_candidate_formation.call_count,
+                        2 if rerolled else 1,
+                    )
+                    self.assertEqual(random_source.randrange_calls, [denominator])
+
+    def test_other_party_sizes_and_enemy_counts_do_not_draw_reroll_randomness(self) -> None:
+        for member_count in range(6):
+            for enemy_count in range(1, 6):
+                if (member_count in (1, 2) and enemy_count == 5) or (
+                    member_count in (4, 5) and enemy_count == 1
+                ):
+                    continue
+                with self.subTest(member_count=member_count, enemy_count=enemy_count):
+                    random_source = ScriptedRandom(randrange_values=(), randint_values=())
+                    system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+                    candidate = EncounterFormation(("Pack",) * enemy_count)
+                    system._generate_candidate_formation = Mock(return_value=candidate)
+
+                    self.assertEqual(
+                        system.generate_formation(
+                            (monster("Pack"),), encounter_settings(),
+                            monster_level=3, living_member_count=member_count,
+                        ),
+                        candidate,
+                    )
+                    system._generate_candidate_formation.assert_called_once()
+                    self.assertEqual(random_source.randrange_calls, [])
+
+    def test_rerolls_repeat_until_a_formation_is_accepted(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 0, 0, 1, 0),
+            randint_values=(5, 5, 5, 5, 2, 5),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Pack", max_occ=5),), encounter_settings(),
+            monster_level=3, living_member_count=1,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Pack",) * 2)
+        self.assertEqual(random_source.randrange_values, [])
+        self.assertEqual(random_source.randint_values, [])
+
+    def test_reroll_restores_original_level_and_tribe_candidates(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 0, 0, 0, 2),
+            randint_values=(1, 1, 4, 5, 1, 5),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (
+                monster("Human", tribe="HUMAN"),
+                monster("Goblin", tribe="GOBLIN"),
+                monster("Pack", lv=2, max_occ=4),
+            ),
+            encounter_settings(), monster_level=3, living_member_count=1,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Goblin",))
+        self.assertEqual(random_source.randrange_calls, [4, 2, 2, 2, 4])
+
+    def test_low_danger_rerolls_single_enemy_with_the_same_occurrence_limit(self) -> None:
+        random_source = ScriptedRandom(
+            randrange_values=(0, 0, 0), randint_values=(1, 4, 2, 4),
+        )
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+        formation = system.generate_formation(
+            (monster("Pack", max_occ=3),), encounter_settings(danger="low"),
+            monster_level=3, living_member_count=5,
+        )
+
+        self.assertEqual(formation.monster_keys, ("Pack", "Pack"))
+        self.assertEqual(random_source.randint_calls, [(1, 2), (1, 4)] * 2)
+        self.assertEqual(random_source.randrange_calls, [2, 3, 2])
+
+    def test_invalid_living_member_count_is_rejected_before_drawing(self) -> None:
+        random_source = ScriptedRandom(randrange_values=(), randint_values=())
+        system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+        for count in (-1, 6, True, 2.0, "3"):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                system.generate_formation(
+                    (monster("Pack"),), encounter_settings(),
+                    monster_level=3, living_member_count=count,  # type: ignore[arg-type]
+                )
+        self.assertEqual(random_source.randrange_calls, [])
+        self.assertEqual(random_source.randint_calls, [])
+
     def test_disabled_random_encounters_do_not_generate_or_draw_random_values(self) -> None:
         random_source = ScriptedRandom(randrange_values=(), randint_values=())
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
@@ -140,6 +307,7 @@ class EncounterSystemTest(unittest.TestCase):
             system.generate_formation(
                 (monster("Level 3"),), encounter_settings(enabled=False),
                 monster_level=3,
+                living_member_count=3,
             )
 
         self.assertEqual(random_source.randrange_calls, [])
@@ -217,6 +385,7 @@ class EncounterSystemTest(unittest.TestCase):
             monsters,
             encounter_settings(),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Early Level 4",))
@@ -234,6 +403,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Pack", max_occ=5),),
             encounter_settings(danger="low"),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Pack", "Pack", "Pack"))
@@ -253,6 +423,7 @@ class EncounterSystemTest(unittest.TestCase):
             ),
             encounter_settings(),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(
@@ -271,6 +442,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Pack", max_occ=4), monster("Other", max_occ=2)),
             encounter_settings(),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Pack",) * 4)
@@ -286,6 +458,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Pack", max_occ=5), monster("Other", max_occ=3)),
             encounter_settings(danger="low"),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Pack",) * 3)
@@ -301,6 +474,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Pack", max_occ=2),),
             encounter_settings(),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Pack", "Pack"))
@@ -317,6 +491,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Boar", max_occ=3), monster("Other", max_occ=2)),
             encounter_settings(),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(
@@ -335,6 +510,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Boar", max_occ=3),),
             encounter_settings(),
             monster_level=3,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Boar",) * 3)
@@ -350,6 +526,7 @@ class EncounterSystemTest(unittest.TestCase):
             (monster("Level 1", lv=1), monster("Other Level 1", lv=1)),
             encounter_settings(),
             monster_level=1,
+            living_member_count=3,
         )
 
         self.assertEqual(formation.monster_keys, ("Level 1", "Other Level 1"))
@@ -386,6 +563,7 @@ class EncounterSystemTest(unittest.TestCase):
                     ),
                     encounter_settings(),
                     monster_level=3,
+                    living_member_count=3,
                 )
 
                 self.assertEqual(formation.monster_keys, ("Selected", "Other"))
@@ -410,6 +588,7 @@ class EncounterSystemTest(unittest.TestCase):
                     ),
                     encounter_settings(),
                     monster_level=3,
+                    living_member_count=3,
                 )
 
                 self.assertEqual(formation.monster_keys, ("Selected", "Other"))
@@ -454,6 +633,7 @@ class EncounterSystemTest(unittest.TestCase):
                     ),
                     encounter_settings(danger=danger),
                     monster_level=3,
+                    living_member_count=3,
                 )
 
                 self.assertEqual(formation.monster_keys, ("Regular",))
@@ -466,6 +646,7 @@ class EncounterSystemTest(unittest.TestCase):
                 (monster("Boss", is_boss=1),),
                 encounter_settings(),
                 monster_level=3,
+                living_member_count=3,
             )
 
     def test_master_data_bosses_are_excluded_at_every_encounter_level(self) -> None:
@@ -598,6 +779,7 @@ class EncounterSystemTest(unittest.TestCase):
                 (monster("Demon", tribe="DEMON"),),
                 encounter_settings(allow_demons=False),
                 monster_level=3,
+                living_member_count=3,
             )
 
     def test_finds_nearest_outward_exit_and_lands_before_trigger_cell(self) -> None:

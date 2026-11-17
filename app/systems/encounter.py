@@ -7,15 +7,19 @@ from dataclasses import dataclass
 import random
 
 if __package__ == "systems":
+    from battle_layout import is_tall_monster, monster_layout
     from field import FieldPosition
     from input import Direction
+    from member import BATTLE_PARTY_MEMBER_COUNT
     from monster import MonsterDefinition, MonsterTribe
     from resistance import ResistanceType
     from state import SaveData
     from resources.maps import CompiledMap, MapRandomEncounter, MapResourceError, MapResources
 else:
+    from ..battle_layout import is_tall_monster, monster_layout
     from ..field import FieldPosition
     from ..input import Direction
+    from ..member import BATTLE_PARTY_MEMBER_COUNT
     from ..monster import MonsterDefinition, MonsterTribe
     from ..resistance import ResistanceType
     from ..state import SaveData
@@ -113,8 +117,9 @@ class EncounterSystem:
         settings: MapRandomEncounter,
         *,
         monster_level: int,
+        living_member_count: int,
     ) -> EncounterFormation:
-        """Build one weighted, at-most-five-monster random formation."""
+        """Build a random formation, rerolling for the living battle party size."""
 
         if not isinstance(settings, MapRandomEncounter):
             raise TypeError("encounter settings must be a MapRandomEncounter")
@@ -130,8 +135,36 @@ class EncounterSystem:
             or not 1 <= monster_level <= 9
         ):
             raise ValueError("monster level must be from 1 to 9")
+        if (
+            isinstance(living_member_count, bool)
+            or not isinstance(living_member_count, int)
+            or not 0 <= living_member_count <= BATTLE_PARTY_MEMBER_COUNT
+        ):
+            raise ValueError("living member count must be from 0 to 5")
 
-        keys: list[str] = []
+        while True:
+            formation = self._generate_candidate_formation(
+                monsters, settings, monster_level=monster_level,
+            )
+            monster_count = len(formation.monster_keys)
+            if monster_count == 5 and living_member_count in (1, 2):
+                if self._random.randrange(2) < 3 - living_member_count:
+                    continue
+            elif monster_count == 1 and living_member_count in (4, 5):
+                if self._random.randrange(3) < living_member_count - 3:
+                    continue
+            return formation
+
+    def _generate_candidate_formation(
+        self,
+        monsters: tuple[MonsterDefinition, ...],
+        settings: MapRandomEncounter,
+        *,
+        monster_level: int,
+    ) -> EncounterFormation:
+        """Build one complete candidate from the original map level."""
+
+        selected_monsters: list[MonsterDefinition] = []
         selected_keys: set[str] = set()
         excluded_tribes: set[MonsterTribe] = set()
         current_level = monster_level
@@ -152,7 +185,7 @@ class EncounterSystem:
                 if monster.key not in selected_keys
             )
             if not weighted_pool:
-                if not keys:
+                if not selected_monsters:
                     raise EncounterGenerationError(
                         "random encounter settings have no eligible monsters"
                     )
@@ -162,24 +195,37 @@ class EncounterSystem:
             maximum = selected.max_occurrence
             if settings.danger == "low":
                 maximum = (maximum + 1) // 2
+            if is_tall_monster(selected) or any(
+                is_tall_monster(monster) for monster in selected_monsters
+            ):
+                maximum = min(maximum, maximum_monsters - len(selected_monsters))
+                while maximum > 0:
+                    try:
+                        monster_layout(tuple(selected_monsters) + (selected,) * maximum)
+                    except ValueError:
+                        maximum -= 1
+                    else:
+                        break
+                if maximum == 0:
+                    break
             occurrence = self._random.randint(1, maximum)
-            if len(keys) + occurrence > maximum_monsters:
+            if len(selected_monsters) + occurrence > maximum_monsters:
                 break
 
-            keys.extend((selected.key,) * occurrence)
+            selected_monsters.extend((selected,) * occurrence)
             selected_keys.add(selected.key)
             if selected.tribe in UNDEAD_GOBLIN_TRIBES:
                 excluded_tribes.update(HUMAN_MAGE_TRIBES)
             elif selected.tribe in HUMAN_MAGE_TRIBES:
                 excluded_tribes.update(UNDEAD_GOBLIN_TRIBES)
 
-            remaining = maximum_monsters - len(keys)
+            remaining = maximum_monsters - len(selected_monsters)
             if remaining < self._random.randint(1, maximum_monsters):
                 break
             if self._random.randrange(2) == 0:
                 current_level = max(1, current_level - 1)
 
-        return EncounterFormation(tuple(keys))
+        return EncounterFormation(tuple(monster.key for monster in selected_monsters))
 
     def _weighted_pool(
         self,

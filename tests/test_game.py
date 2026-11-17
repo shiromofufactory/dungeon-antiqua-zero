@@ -3582,6 +3582,8 @@ class GameTest(unittest.TestCase):
                     ),
                 )
                 mock.monsters = (Mock(),)
+                mock.party = (Mock(is_alive=True),) * 3
+                mock.debug_screen = None
                 mock.encounter_system = Mock()
                 mock.save_data = SaveData(monster_level=3)
                 mock.encounter_system.dynamic_monster_level.return_value = 3
@@ -3594,10 +3596,34 @@ class GameTest(unittest.TestCase):
 
                 mock.encounter_system.dynamic_monster_level.assert_called_once_with(mock.save_data)
                 mock.encounter_system.generate_formation.assert_called_once_with(
-                    mock.monsters, settings, monster_level=3,
+                    mock.monsters, settings, monster_level=3, living_member_count=3,
                 )
                 self.assertEqual(result.monster_keys, ("SLIME",))
                 self.assertEqual(result.surprise_enabled, danger == "high")
+
+    def test_random_encounter_counts_only_living_non_reserve_members(self) -> None:
+        settings = MapRandomEncounter(3, "high", "neutral", True, True, True, True)
+        for debug in (False, True):
+            for living_count in range(6):
+                with self.subTest(debug=debug, living_count=living_count):
+                    game = Game.__new__(Game)
+                    party = tuple(
+                        Mock(is_alive=index < living_count, paralyzed=True)
+                        for index in range(5)
+                    ) + (Mock(is_alive=True),)
+                    game.party = (Mock(is_alive=True),) if debug else party
+                    game.debug_screen = SimpleNamespace(party=party) if debug else None
+                    game.current_map = SimpleNamespace(random_encounter=settings)
+                    game.monsters = (Mock(),)
+                    game.encounter_system = Mock()
+                    game.encounter_system.generate_formation.return_value.monster_keys = ("SLIME",)
+
+                    game._create_random_battle_encounter(settings if debug else None)
+
+                    game.encounter_system.generate_formation.assert_called_once_with(
+                        game.monsters, settings, monster_level=3,
+                        living_member_count=living_count,
+                    )
 
     def test_debug_monster_level_applies_only_to_dynamic_encounters(self) -> None:
         game = Game.__new__(Game)
@@ -3607,6 +3633,8 @@ class GameTest(unittest.TestCase):
             return_value=SimpleNamespace(monster_keys=("SLIME",)),
         )
         game.monsters = (Mock(),)
+        game.party = (Mock(is_alive=True),) * 3
+        game.debug_screen = None
         for level, expected in (("dynamic", 9), (1, 1), (4, 4)):
             with self.subTest(level=level):
                 settings = MapRandomEncounter(level, "low", "neutral", False, False, False, True)

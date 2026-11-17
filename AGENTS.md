@@ -141,6 +141,7 @@
 - デバッグのイベントフラグ編集は `python3 -B -m unittest tests.test_debug_flags tests.test_debug_menu tests.test_launch_modes tests.test_game tests.test_actor_visibility tests.test_game_events tests.test_save_system` でON/OFF・100件のページ切替・未登録ID保持・戻る操作・ゲームへの接続を回帰検証する。
 - デバッグの変動モンスターレベル編集は `python3 -B -m unittest tests.test_game tests.test_debug_menu tests.test_encounter tests.test_debug_dungeon tests.test_launch_modes tests.test_save_system tests.test_state` で2〜9の入力・範囲外拒否・キャンセル・メニュー再表示時の保持・固定レベル指定との分離・手動／オートセーブとロード・旧セーブの初期値補完を回帰検証する。
 - フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。
+- 64×96pxの敵を含む編成の出現数上限・並び順によらない非重複配置・画面内収容と仲間呼びは `python3 -B -m unittest tests.test_encounter tests.test_battle_scene tests.test_battle_monster_specials` で回帰検証する。
 - Pyxel描画に関わる変更は、起動確認に加えて該当画面を目視確認する。
 - イベント中のフィールドアニメーション・制御移動・非表示actorは `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_actor_visibility tests.test_game_menu` で継続・位置停止・二重更新防止・強制割り込みを回帰検証する。
 - イベント制御actorの外周通過・範囲外の初期配置からの登場と、PC・自律移動の外周禁止、地形・占有・マップ外への移動停止は `python3 -B -m unittest tests.test_game_events tests.test_field tests.test_map_resources tests.test_actor_visibility tests.test_game_menu` で回帰検証する。

@@ -35,6 +35,7 @@ from tools.screen_mocks.battle import (
     monster_charge_approach_frame_count,
 )
 from battle_physical import member_physical_attack
+from battle_layout import monster_layout
 from battle_timeline import TimelineEntry, TimelineOrder
 from localization import Localizer
 from member import EquipmentSlot
@@ -81,6 +82,30 @@ def charge_monster(*, is_front_row: bool = True) -> BattleMockMonster:
 
 
 class MonsterReinforcementTest(unittest.TestCase):
+    def test_reinforcements_respect_tall_image_height_and_reuse_fallen_space(self):
+        tall = SimpleNamespace(width=64, height=96, is_alive=True)
+        small = SimpleNamespace(width=64, height=64, is_alive=True)
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = (tall, tall, small)
+        layout = monster_layout(scene.monsters)
+        scene.monster_slot_indexes = layout.slot_indexes
+        scene.monster_positions = layout.positions
+
+        self.assertIsNone(scene._monster_ally_placement(small))
+        small.is_alive = False
+        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 112)))
+
+    def test_reinforcement_below_a_tall_front_enemy_uses_its_actual_bottom(self):
+        scene = BattleScene.__new__(BattleScene)
+        tall = SimpleNamespace(width=64, height=96, is_alive=True)
+        scene.monsters = (tall, tall)
+        layout = monster_layout(scene.monsters)
+        scene.monster_slot_indexes = layout.slot_indexes
+        scene.monster_positions = layout.positions
+        small = SimpleNamespace(width=64, height=64)
+
+        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 112)))
+
     def test_fourth_monster_joins_rear_without_moving_initial_three(self) -> None:
         record = next(
             record for record in load_record_array("monsters.json")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from inspect import signature
+from itertools import permutations
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -23,6 +24,7 @@ from game import (
 from input import Direction, InputButton, InputState
 from localization import Localizer
 from member import FormationRow
+from battle_layout import MONSTER_AREA_BOTTOM, monster_layout
 from resources import FontResources
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
@@ -269,6 +271,38 @@ class BattleEncounterTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supports at most 4 monsters"):
             monster_slot_indexes(monsters)
 
+    def test_two_tall_monsters_and_one_small_monster_fit_without_overlap(self) -> None:
+        for heights in set(permutations((96, 96, 64))):
+            with self.subTest(heights=heights):
+                monsters = tuple(SimpleNamespace(width=64, height=h) for h in heights)
+                layout = monster_layout(monsters)
+                self.assertEqual(monster_slot_indexes(monsters), layout.slot_indexes)
+                self.assertEqual(
+                    {position for position in layout.positions},
+                    {(4, 48), (68, 16), (68, 112)},
+                )
+                for index, ((x, y), monster) in enumerate(zip(layout.positions, monsters)):
+                    self.assertLessEqual(y + monster.height, MONSTER_AREA_BOTTOM)
+                    for (other_x, other_y), other in zip(
+                        layout.positions[index + 1:], monsters[index + 1:]
+                    ):
+                        self.assertTrue(
+                            x + monster.width <= other_x or other_x + other.width <= x
+                            or y + monster.height <= other_y or other_y + other.height <= y
+                        )
+                front = _battle_start_front_monster_indexes(layout.slot_indexes)
+                self.assertEqual(
+                    front,
+                    frozenset(i for i, (x, _y) in enumerate(layout.positions) if x == 68),
+                )
+
+    def test_two_tall_monsters_cannot_be_combined_with_two_small_monsters(self) -> None:
+        for heights in set(permutations((96, 96, 64, 64))):
+            with self.subTest(heights=heights), self.assertRaises(ValueError):
+                monster_slot_indexes(tuple(
+                    SimpleNamespace(width=64, height=h) for h in heights
+                ))
+
 
 class BattleSurpriseIntegrationTest(unittest.TestCase):
     @staticmethod
@@ -381,6 +415,8 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
 
     def test_low_danger_encounter_does_not_draw_or_skip_party_turns(self) -> None:
         game = Game.__new__(Game)
+        game.debug_screen = None
+        game.party = (Mock(is_alive=True),) * 3
         game.current_map = SimpleNamespace(
             random_encounter=SimpleNamespace(monster_level=1, danger="low")
         )
@@ -1359,6 +1395,8 @@ class BattleSceneIntegrationTest(unittest.TestCase):
 
     def test_game_resolves_dynamic_map_level_and_enables_surprise(self) -> None:
         game = Game.__new__(Game)
+        game.debug_screen = None
+        game.party = (Mock(is_alive=True),) * 3
         game.current_map = SimpleNamespace(
             random_encounter=SimpleNamespace(monster_level="dynamic", danger="high")
         )
@@ -1377,6 +1415,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
             game.monsters,
             game.current_map.random_encounter,
             monster_level=3,
+            living_member_count=3,
         )
         self.assertEqual(encounter.monster_keys, ("Giant Spider", "Coyote"))
         self.assertTrue(encounter.surprise_enabled)

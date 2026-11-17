@@ -1065,10 +1065,14 @@ class Game:
         monster_level = settings.monster_level
         if monster_level == "dynamic":
             monster_level = self.encounter_system.dynamic_monster_level(self.save_data)
+        party = self.party if self.debug_screen is None else self.debug_screen.party
         formation = self.encounter_system.generate_formation(
             self.monsters,
             settings,
             monster_level=monster_level,
+            living_member_count=sum(
+                member.is_alive for member in party[:BATTLE_PARTY_MEMBER_COUNT]
+            ),
         )
         return BattleEncounter(
             formation.monster_keys,

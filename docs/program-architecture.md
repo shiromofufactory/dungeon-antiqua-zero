@@ -522,7 +522,12 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 
 戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。逃走とフェードの確定では同Systemが経験値、Gold、お宝、最大HPを除外し、熟練度と最大MPだけを反映する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利・逃走演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。リザルトと本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
-武器使用実績は同Systemがキャラクター・武器種ごとに対象敵LV、撃破したモンスターの識別キー集合、
+敵画像の寸法に応じた配置と収容可否は、Pyxel非依存の `app/battle_layout.py` が所有する。
+`EncounterSystem` は同じ計算で追加グループの出現上限を決め、`BattleScene` は返された
+スロットと座標を描画・隊列判定へ使う。仲間呼びは既存位置を保ったまま空き領域を検証する。
+配置条件と座標の正本は [戦闘仕様](./features/battle.md#モンスター)を参照する。
+
+武器使用実績は `BattleProgression` がキャラクター・武器種ごとに対象敵LV、撃破したモンスターの識別キー集合、
 会心の有無を保持し、戦闘終了時に熟練度の加算値を計算する。`BattleScene` は物理攻撃と装備武器使用の
 結果から実績だけを渡す。計算式と記録対象の詳細は [`features/battle.md`](./features/battle.md#勝利報酬と成長記録)
 を参照する。
@@ -1559,6 +1564,11 @@ Scene切り替えはTransitionとして調停する。拠点名Windowやフェ�
 Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受けて通常の `EncounterSystem` と
 遭遇Transitionへ接続する。設定はSaveData／Settingsへ含めない。詳細は
 [エンカウント仕様](./features/encounters.md#デバッグエンカウント)を参照する。
+
+ランダム編成の人数補正では、Gameが通常のパーティまたはデバッグ画面で編集中のパーティから
+控えと死亡者を除いた人数を求め、`EncounterSystem.generate_formation()` へ渡す。
+編成の生成と再抽選の判定・繰り返しはSystemが所有し、GameやUIを逆参照しない。
+再抽選の条件は [エンカウント仕様](./features/encounters.md#ランダムエンカウント)を参照する。
 
 変動モンスターレベルは `SaveData.monster_level` が所有し、デバッグ編集の結果も同じ値へ反映する。
 `EncounterSystem.dynamic_monster_level(save_data)` は現在のSaveDataから値を解決し、
