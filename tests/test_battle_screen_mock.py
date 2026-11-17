@@ -3182,6 +3182,90 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertEqual(monster.state.hp, starting_hp - 10)
                 play_se.assert_called_once_with(ATTACK_SLASH_SE_ID)
 
+    def test_dual_wield_throwing_uses_left_branches_and_waits_for_arrival(self) -> None:
+        items = load_mock_items()
+        for right_key in ("KATANA", "IRON KUNAI"):
+            for left_key in ("POISON KUNAI", "SHURIKENS"):
+                for target_side in ("enemy", "ally"):
+                    with self.subTest(right=right_key, left=left_key, target=target_side):
+                        party = load_mock_party(
+                            items,
+                            load_mock_skills(),
+                            character_keys=("Kagetora", "Cerion"),
+                            internal_level=MAX_INTERNAL_LEVEL,
+                        )
+                        member = party[0]
+                        right = (
+                            member.equipment.weapon_at(EquipmentSlot.RIGHT)
+                            if right_key == "KATANA" else items[right_key]
+                        )
+                        left = items[left_key]
+                        member.equipment = member.equipment.replaced({
+                            EquipmentSlot.RIGHT: right,
+                            EquipmentSlot.LEFT: left,
+                        })
+                        mock = BattleScreenMock.__new__(BattleScreenMock)
+                        mock.party = party
+                        mock.phase = BattleMockPhase.TARGET
+                        mock.active_party_index = 0
+                        mock.monsters = (_damage_test_monster(),)
+                        mock.attack_poses = {
+                            f"{weapon.weapon_img}_{branch}": AttackPoseDefinition(
+                                f"{weapon.weapon_img}_{branch}", weapon.weapon_img,
+                                branch, 3 if branch in ("1", "4") else 2,
+                                (AttackWeaponSprite(int(branch), -14, 5, "front", False, False),),
+                                {member.definition.race: 4},
+                            )
+                            for weapon in (right, left)
+                            for branch in ("1", "2", "3", "4", "5", "6")
+                        }
+                        mock.selected_command = BattleCommand.ATTACK
+                        mock.selectable_target_indexes = (0,)
+                        mock.selected_target_index = 0
+                        mock.target_cursor = Mock(active=True)
+                        mock.command_cursor = Mock(active=True)
+                        mock.command_window = Mock()
+                        mock.defending_party_indexes = set()
+                        mock.hidden_party_indexes = set()
+                        mock._refresh_monster_name_colors = Mock()
+                        mock._refresh_party_hp_text = Mock()
+                        mock._resolve_member_attack_additional_effects = Mock(return_value=())
+                        mock._resolve_member_attack_effects_against_member = Mock(return_value=())
+                        with patch(
+                            "scenes.battle.resolve_physical_attack",
+                            return_value=SimpleNamespace(hit=True, damage=10, critical=False),
+                        ):
+                            if target_side == "enemy":
+                                self.assertTrue(mock._begin_attack_presentation())
+                            else:
+                                self.assertTrue(mock._begin_confused_member_friendly_attack(0, 1))
+                        presentation = mock.attack_presentation
+                        first, followup = presentation.strikes
+                        self.assertEqual(tuple(p.branch for p in first.poses), ("1", "2"))
+                        self.assertEqual(tuple(p.branch for p in followup.poses), ("4", "5"))
+                        self.assertEqual(tuple(p.image for p in followup.projectile_sprites), (5, 6))
+                        self.assertEqual(followup.projectile_sprites[0].position_y, 9)
+                        self.assertEqual(
+                            followup.motion_start_frame,
+                            first.motion_end_frame + DUAL_WIELD_ATTACK_INTERVAL_FRAME_COUNT,
+                        )
+                        self.assertGreater(followup.projectile_frame_count, 0)
+                        self.assertEqual(followup.hit_start_frame, followup.projectile_end_frame - 1)
+                        self.assertEqual(followup.projectile_at(followup.projectile_start_frame).image, 5)
+                        self.assertEqual(followup.projectile_at(followup.projectile_start_frame + 2).image, 6)
+                        if right_key == "IRON KUNAI":
+                            self.assertEqual(tuple(p.image for p in first.projectile_sprites), (2, 3))
+                        target = mock.monsters[0] if target_side == "enemy" else party[1]
+                        starting_hp = target.state.hp if target_side == "enemy" else target.hp
+                        with patch("scenes.battle.play_se"):
+                            for _ in range(followup.hit_start_frame - 1):
+                                mock._update_attack_presentation()
+                            hp_before = target.state.hp if target_side == "enemy" else target.hp
+                            self.assertEqual(hp_before, starting_hp - 10)
+                            mock._update_attack_presentation()
+                        hp_after = target.state.hp if target_side == "enemy" else target.hp
+                        self.assertEqual(hp_after, starting_hp - 20)
+
     def test_dual_wield_followup_still_attacks_without_authored_poses(self) -> None:
         items = load_mock_items()
         member = load_mock_party(

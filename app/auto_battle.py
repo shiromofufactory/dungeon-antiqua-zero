@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal
 
 if __package__:
@@ -199,6 +200,22 @@ class AutoBattlePlanner:
         eligible = [e for e in evaluations if not e.exclusion]
         if not eligible:
             raise RuntimeError("auto battle must have a legal defensive fallback")
+
+        alternatives = [
+            e for e in eligible if e.action.command is not BattleCommand.DEFEND
+        ]
+        if alternatives:
+            alternative = min(alternatives, key=lambda e: e.selection_key(snapshot))
+            safety = alternative.selection_key(snapshot)[:2]
+            evaluations = [
+                replace(e, exclusion="defend_no_safety_improvement")
+                if not e.exclusion
+                and e.action.command is BattleCommand.DEFEND
+                and e.selection_key(snapshot)[:2] >= safety
+                else e
+                for e in evaluations
+            ]
+            eligible = [e for e in evaluations if not e.exclusion]
 
         best = min(eligible, key=lambda e: e.selection_key(snapshot))
         return AutoBattleDecision(best.action, tuple(evaluations), tuple(excluded))

@@ -6887,7 +6887,7 @@ class BattleScene:
                     left_weapon,
                     member_stats.attack_left,
                     member_stats.hit_left.total,
-                    ("3", "4"),
+                    ("4", "5") if left_weapon.subtype == "THROWING" else ("3", "4"),
                 )
             )
 
@@ -6905,8 +6905,9 @@ class BattleScene:
                     getattr(self, "attack_poses", {}),
                     weapon.weapon_img,
                     race=self.party[self.active_party_index].definition.race,
+                    branches=("5", "6") if pose_branches == ("4", "5") else ("2", "3"),
                 )
-                if weapon.subtype == "THROWING" and pose_branches == ("1", "2")
+                if weapon.subtype == "THROWING"
                 else ()
             )
             projectile_frame_count = self._throwing_projectile_frame_count(
@@ -8465,7 +8466,7 @@ class BattleScene:
                     left_weapon,
                     actor_stats.attack_left,
                     actor_stats.hit_left.total,
-                    ("3", "4"),
+                    ("4", "5") if left_weapon.subtype == "THROWING" else ("3", "4"),
                 )
             )
 
@@ -8496,8 +8497,9 @@ class BattleScene:
                     getattr(self, "attack_poses", {}),
                     weapon.weapon_img,
                     race=self.party[actor_index].definition.race,
+                    branches=("5", "6") if pose_branches == ("4", "5") else ("2", "3"),
                 )
-                if weapon.subtype == "THROWING" and pose_branches == ("1", "2")
+                if weapon.subtype == "THROWING"
                 else ()
             )
             projectile_frame_count = self._throwing_projectile_frame_count(

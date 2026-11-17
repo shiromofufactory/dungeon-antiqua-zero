@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from app.item import Item
 from app.member import EquipmentSlot, Member, ProficiencyKind
@@ -251,6 +252,49 @@ class InventorySystemTest(unittest.TestCase):
         self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), spear)
         self.assertEqual(inventory.quantity(dagger), 1)
         self.assertEqual(inventory.quantity(spear), 0)
+
+    def test_auto_equip_accounts_for_cursed_necklace_penalties(self) -> None:
+        necklace = Item.from_record({
+            "name_en": "CURSED NECKLACE", "type1": "HEAD",
+            "type2": "GENERAL", "rst": 5, "tolerance": "乱死",
+            "atk": 0, "hit": 0, "dfc": 0, "eva": 0,
+            "str": -2, "agi": -2,
+        })
+        cap = equipment("LEATHER CAP", "HEAD", "GENERAL", defense=2)
+        hachimaki = Item.from_record({
+            "name_en": "HACHIMAKI", "type1": "HEAD",
+            "type2": "GENERAL", "dfc": 1, "tolerance": "眠",
+            "atk": 0, "hit": 0, "rst": 0, "eva": 0,
+        })
+        actor = member(initial={EquipmentSlot.HEAD: necklace})
+        inventory = InventorySystem(
+            {gear.key: gear for gear in (necklace, cap, hachimaki)},
+            {cap.key: 1, hachimaki.key: 1},
+        )
+
+        self.assertAlmostEqual(inventory._armor_score(necklace) - 0.01, -0.4)
+        self.assertTrue(inventory.auto_equip(actor))
+        self.assertIs(actor.equipment.item_at(EquipmentSlot.HEAD), hachimaki)
+        self.assertEqual(inventory.quantity(necklace), 1)
+
+    def test_auto_equip_adds_each_signed_ability_modifier(self) -> None:
+        for modifier in ("strength_modifier", "agility_modifier", "magic_modifier"):
+            for value in (-2, 2):
+                with self.subTest(modifier=modifier, value=value):
+                    plain = equipment("PLAIN", "HEAD", "GENERAL", defense=2)
+                    modified = replace(plain, key="MODIFIED", **{modifier: value})
+                    actor = member()
+                    inventory = InventorySystem(
+                        {plain.key: plain, modified.key: modified},
+                        {plain.key: 1, modified.key: 1},
+                    )
+
+                    inventory.auto_equip(actor)
+
+                    self.assertIs(
+                        actor.equipment.item_at(EquipmentSlot.HEAD),
+                        modified if value > 0 else plain,
+                    )
 
     def test_left_hand_weapon_requires_dual_wield(self) -> None:
         dagger = equipment("DAGGER", "RIGHT", "KNIFE", attack=8, hit=100)

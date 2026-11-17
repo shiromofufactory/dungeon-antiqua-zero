@@ -424,6 +424,9 @@ class InventorySystem:
             + item.defense
             + (item.evasion + item.spell_resistance) / 5
             + len(item.resistances) * 1.3
+            + item.strength_modifier
+            + item.agility_modifier
+            + item.magic_modifier
         )
 
     def _increase(self, key: str, quantity: int = 1) -> None:

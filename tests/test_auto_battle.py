@@ -240,6 +240,70 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(score(kills=0.4, damage=0.5), 42)
         self.assertEqual(score(kills=0.3, damage=0.6), 36)
 
+    def test_defend_requires_better_safety_bucket_than_attack(self):
+        # A durable counterattacker rewards guarding in the raw score. Only
+        # an improvement in defeat/death buckets should justify that choice.
+        for hp, enemy_attack, expected, safety_index in (
+            (250, 30, BattleCommand.ATTACK, None),
+            (100, 30, BattleCommand.ATTACK, None),
+            (20, 30, BattleCommand.DEFEND, 1),
+            (250, 80, BattleCommand.DEFEND, 0),
+            (250, 150, BattleCommand.ATTACK, None),
+        ):
+            with self.subTest(hp=hp, enemy_attack=enemy_attack):
+                actor = replace(
+                    self.specs[0], hp=hp, max_hp=250, spells=(),
+                    skills=frozenset(), weapons=(AutoWeapon(80, 100),),
+                )
+                ally = replace(
+                    self.specs[2], hp=250, max_hp=250, spells=(),
+                    skills=frozenset(),
+                )
+                enemy = self.enemy(
+                    hp=1800, max_hp=1800, attack=enemy_attack,
+                    special_actions=(
+                        MonsterSpecialAction.COUNTER,
+                        MonsterSpecialAction.POWER_HIT,
+                    ),
+                )
+                snapshot = self.snapshot(
+                    actor, ally, enemy,
+                    gauges=((0, 64), (5, 63), (2, 62)),
+                    policy=AutoBattlePolicy(SpellMode.NEVER),
+                )
+                result = decide_auto_battle(snapshot)
+                attack = next(e for e in result.evaluations
+                              if e.action.command is BattleCommand.ATTACK)
+                defend = next(e for e in result.evaluations
+                              if e.action.command is BattleCommand.DEFEND)
+                self.assertGreater(defend.score, attack.score)
+                self.assertEqual(result.action.command, expected)
+                if safety_index is None:
+                    self.assertEqual(defend.selection_key(snapshot)[:2],
+                                     attack.selection_key(snapshot)[:2])
+                    self.assertEqual(defend.exclusion,
+                                     "defend_no_safety_improvement")
+                else:
+                    self.assertLess(defend.selection_key(snapshot)[safety_index],
+                                    attack.selection_key(snapshot)[safety_index])
+                    self.assertEqual(defend.exclusion, "")
+
+    def test_defend_remains_fallback_when_no_other_action_is_available(self):
+        actor = replace(
+            self.specs[0], front=False, spells=(), skills=frozenset(),
+            equipment=self.specs[0].equipment.replaced({
+                EquipmentSlot.RIGHT: self.items["IRON SWORD"],
+                EquipmentSlot.LEFT: None,
+            }),
+        )
+        result = decide_auto_battle(self.snapshot(
+            actor, self.specs[2], self.enemy(),
+            policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+        ))
+        self.assertEqual(result.action.command, BattleCommand.DEFEND)
+        self.assertEqual(len(result.evaluations), 1)
+        self.assertEqual(result.evaluations[0].exclusion, "")
+
     def test_urgent_heal_is_chosen_before_immediately_dangerous_enemy(self):
         healer = replace(self.specs[1], hp=25)
         enemy = self.enemy(attack=40, hp=1000, max_hp=1000)

@@ -226,8 +226,9 @@ def throwing_projectile_sequence(
     weapon_img: str,
     *,
     race: str = "",
+    branches: tuple[str, str] = ("2", "3"),
 ) -> tuple[AttackWeaponSprite, ...]:
-    """Return the authored branch-2/3 weapon sprites used during a throw."""
+    """Return flight sprites: branches 2/3 for right, 5/6 for left."""
 
     return tuple(
         replace(
@@ -237,7 +238,7 @@ def throwing_projectile_sequence(
         for pose in attack_sequence(
             poses,
             weapon_img,
-            branches=("2", "3"),
+            branches=branches,
         )
         if pose.weapons
     )

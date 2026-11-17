@@ -138,6 +138,26 @@ class AttackPoseTest(unittest.TestCase):
             (10, 12),
         )
 
+    def test_left_throw_uses_only_branches_five_and_six_with_race_offsets(self) -> None:
+        source = document()
+        for branch, image, offset in (("5", 7, 4), ("6", 9, -2)):
+            source["poses"].append({
+                **source["poses"][0],
+                "id": f"SPEAR-1_{branch}",
+                "branch": branch,
+                "race_y_offsets": {"HUMAN": offset},
+                "weapons": [{**source["poses"][0]["weapons"][0], "image": image}],
+            })
+        sprites = throwing_projectile_sequence(
+            parse_attack_poses(source), "SPEAR-1", race="HUMAN", branches=("5", "6"),
+        )
+        self.assertEqual(tuple(sprite.image for sprite in sprites), (7, 9))
+        self.assertEqual(tuple(sprite.position_y for sprite in sprites), (10, 4))
+        self.assertEqual(
+            throwing_projectile_sequence(parse_attack_poses(document()), "SPEAR-1", branches=("5", "6")),
+            (),
+        )
+
     def test_race_y_offsets_round_trip_and_adjust_projectile_start(self) -> None:
         source = document()
         source["poses"][0]["race_y_offsets"] = {"FAIRY": -4, "HUMAN": 2}
