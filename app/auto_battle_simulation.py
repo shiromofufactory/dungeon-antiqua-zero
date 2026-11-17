@@ -39,6 +39,8 @@ if __package__:
         physical_weapon_is_effective,
         resolve_physical_additional_effect,
         resolve_physical_attack,
+        counter_attack_succeeds,
+        resolve_earthquake_attack,
     )
     from .battle_speed import SLOW_GAUGE_ADJUSTMENT, modified_agility
     from .battle_timeline import (
@@ -90,6 +92,8 @@ else:
         physical_weapon_is_effective,
         resolve_physical_additional_effect,
         resolve_physical_attack,
+        counter_attack_succeeds,
+        resolve_earthquake_attack,
     )
     from battle_speed import SLOW_GAUGE_ADJUSTMENT, modified_agility
     from battle_timeline import (
@@ -857,21 +861,46 @@ class BattleForecast:
         return results
 
     def physical(self, actor, action):
+        counters = []
         for number in action.targets:
-            self._physical_target(actor, self.actors[number], action)
+            target = self.actors[number]
+            if self._physical_target(actor, target, action):
+                counters.append(target)
+            promote_rear_monsters_if_front_empty(self.enemy_actors)
         actor.hidden = False
+        for defender in counters:
+            if not actor.is_alive:
+                break
+            if not defender.is_alive or defender.sleeping or defender.confused or defender.stunned:
+                continue
+            target = self.covering(actor.spec.number)
+            target.hidden = False
+            self.enemy_physical(defender, target)
 
     def _physical_target(self, actor, target, action):
         # Live execution resolves both hands before applying either result.
         results = self.physical_results(actor, target, action)
         hidden = actor.hidden
+        counter = False
         for hand, (weapon, result) in enumerate(zip(actor.spec.weapons, results)):
             self.reveal(target, "profile")
             if weapon.attribute is not None:
                 self.reveal(target, weapon.attribute.value)
-            if not target.is_alive or not result.hit:
+            if not target.is_alive:
                 continue
-            target.damage(result.damage)
+            if result.hit:
+                target.damage(result.damage)
+            if hand == 0 and target.spec.enemy and MonsterSpecialAction.COUNTER in target.spec.special_actions:
+                counter = counter_attack_succeeds(
+                    attacker_agility=actor.agility, defender_agility=target.agility,
+                    attacker_front=actor.front, defender_front=target.front,
+                    defender_actionable=target.is_alive and not (
+                        target.sleeping or target.confused or target.stunned
+                    ),
+                    roll=int(self.roll(actor, target.spec.number, 16) * 20),
+                )
+            if not result.hit:
+                continue
             effects = []
             if weapon.effect in PHYSICAL_STATUS_EFFECTS:
                 effects.append(
@@ -911,6 +940,7 @@ class BattleForecast:
                 ).success
                 if successful and target.is_alive:
                     self.apply_extra(actor, target, effect)
+        return counter
 
     def apply_extra(self, actor, target, effect):
         if effect is AdditionalEffect.DEATH:
@@ -1213,6 +1243,7 @@ class BattleForecast:
             can_attack=bool(melee),
             can_charge=bool(available),
             can_breathe=bool(available),
+            can_earthquake=bool(self.allies()),
             intelligence=actor.spec.intelligence,
             fire_breath_effective=any(
                 ResistanceType.FIRE not in target.spec.resistances
@@ -1232,6 +1263,24 @@ class BattleForecast:
         delay = 0
         if action is MonsterAction.ESCAPE:
             actor.removed = True
+        elif action is MonsterAction.EARTHQUAKE:
+            for target in self.allies():
+                result = resolve_earthquake_attack(
+                    attack=actor.spec.attack, hit=actor.spec.hit,
+                    target_defense=target.defense, target_defending=target.defending,
+                    hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
+                )
+                stun = resolve_physical_additional_effect(
+                    effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
+                    effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
+                    target_is_member=True,
+                    target_is_resistant=ResistanceType.STUN in target.spec.resistances,
+                    target_defending=target.defending,
+                ).success
+                target.damage(result.damage)
+                if stun and target.is_alive:
+                    target.stunned = True
+                target.interrupt_focus()
         elif action in (MonsterAction.POISON_BREATH, MonsterAction.FIRE_BREATH):
             for target in available:
                 arguments = dict(
@@ -1316,45 +1365,48 @@ class BattleForecast:
             if target is not protected:
                 target.hidden = False
             charged = action is MonsterAction.CHARGE
-            power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
-            result = resolve_physical_attack(
-                attack=int(actor.spec.attack * (1.5 if charged else 1)),
-                hit=actor.spec.hit,
-                target_defense=target.defense,
-                target_evasion=target.evasion,
-                target_defending=target.defending,
-                target_unable_to_evade=target.focus is not None,
-                target_incapacitated=bool(target.sleeping),
-                attacker_has_power_hit=power_hit,
-                hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
-                critical_roll=int(self.roll(actor, target.spec.number, 3) * 100)
-                if power_hit or target.sleeping
-                else None,
-            )
-            effect = actor.spec.effect
-            if effect in PHYSICAL_STATUS_EFFECTS and (
-                result.hit or (target.defending and result.hit_value >= 0)
-            ):
-                success = resolve_physical_additional_effect(
-                    effect=effect,
-                    adjusted_hit=result.adjusted_hit,
-                    effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
-                    target_is_member=True,
-                    target_is_resistant=EFFECT_RESISTANCE[effect]
-                    in target.spec.resistances,
-                    target_defending=target.defending,
-                    critical=result.critical,
-                ).success
-            else:
-                success = False
-            self.apply_monster_drain(actor, result.damage)
-            target.damage(result.damage)
-            if success and target.is_alive:
-                self.apply_extra(actor, target, effect)
-            target.interrupt_focus()
+            self.enemy_physical(actor, target, charged=charged)
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
+
+    def enemy_physical(self, actor, target, *, charged=False):
+        power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
+        result = resolve_physical_attack(
+            attack=int(actor.spec.attack * (1.5 if charged else 1)),
+            hit=actor.spec.hit,
+            target_defense=target.defense,
+            target_evasion=target.evasion,
+            target_defending=target.defending,
+            target_unable_to_evade=target.focus is not None,
+            target_incapacitated=bool(target.sleeping),
+            attacker_has_power_hit=power_hit,
+            hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
+            critical_roll=int(self.roll(actor, target.spec.number, 3) * 100)
+            if power_hit or target.sleeping
+            else None,
+        )
+        effect = actor.spec.effect
+        if effect in PHYSICAL_STATUS_EFFECTS and (
+            result.hit or (target.defending and result.hit_value >= 0)
+        ):
+            success = resolve_physical_additional_effect(
+                effect=effect,
+                adjusted_hit=result.adjusted_hit,
+                effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
+                target_is_member=True,
+                target_is_resistant=EFFECT_RESISTANCE[effect]
+                in target.spec.resistances,
+                target_defending=target.defending,
+                critical=result.critical,
+            ).success
+        else:
+            success = False
+        self.apply_monster_drain(actor, result.damage)
+        target.damage(result.damage)
+        if success and target.is_alive:
+            self.apply_extra(actor, target, effect)
+        target.interrupt_focus()
 
     @staticmethod
     def apply_monster_drain(actor: ForecastActor, damage: int) -> None:

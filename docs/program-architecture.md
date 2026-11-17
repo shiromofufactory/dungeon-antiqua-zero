@@ -1250,6 +1250,14 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 または `MonsterCombatStats` から入力値を組み立て、0～99の命中乱数を明示的に渡す。
 演出側は計算結果の命中可否とダメージだけを受け取り、同じ式を重複実装しない。
 
+モンスターの反撃確率と地震の物理ダメージも `battle_physical.py` が所有し、BattleSceneと
+オートバトル予測が共有する。反撃はSceneが元の味方手番に紐づく予約キューを持ち、
+敵の通常手番・ゲージを進めずに通常攻撃の演出を実行する。死亡した元の行動者は
+次の参加者を消費せずタイムラインから除外する。
+地震のスタンと画面揺れは `BattleActionPresentation` が保持し、Gameと単独戦闘起動口は
+Sceneの `screen_shake_offset` を既存のカメラへ合成する。Gameは揺れの乱数や時間を所有しない。
+詳細は [`features/battle.md`](./features/battle.md) を参照する。
+
 情報サブメニュー、会話ログ、モンスター図鑑は `ui/information_menu.py` のOverlayが入力、
 一覧カーソル、開示段階、Window構成、モンスター画像描画を所有する。会話ログは
 `SaveData.logs` の安定キーと引数を現在言語で解決し、日本語本文にはイベントメッセージと同じ
@@ -1592,6 +1600,8 @@ Gameは開始・退出Transition、既存BattleSceneと通常メニューへの�
 専用SceneへGameの参照は渡さず、必要なSystemと開始・メニュー・退出コールバックを注入する。
 回復の泉はイベント開始コールバックを通して既存のEventRunnerへ接続し、Gameがイベントの
 更新・メッセージ描画と終了通知を調停する。試行イベント中は退避中のフィールドを更新しない。
+イベント戦闘の勝利フラグはSceneへ注入した `SaveData.event_flags` を参照・更新し、
+Gameから渡される勝敗で確定する。個々のフラグIDをGameの分岐へ埋め込まない。
 宝箱は既存TreasureSystemとSaveDataの取得済み記録を専用名前空間で再利用し、
 進行位置やFADE状態は `DungeonProgress` が所有し、手動保存時に安定IDを持つ不変の `DungeonCheckpoint` を渡す。
 SaveSystemはこれを省略可能な保存属性へ変換し、LoadedGameStateを通して返す。

@@ -43,6 +43,11 @@ export function moveStep(dungeon, id, distance) {
   dungeon.steps.splice(target, 0, step);
 }
 
+export function setBattleFlag(step, flagId) {
+  if (flagId) step.flag_id = flagId;
+  else delete step.flag_id;
+}
+
 export class History {
   constructor(data) {
     this.value = { data: clone(data), dungeonId: data.dungeons[0]?.id ?? null, stepId: null };

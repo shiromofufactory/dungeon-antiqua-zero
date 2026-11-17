@@ -176,7 +176,8 @@ class BattleTestApp(BattleScene):
         if alert is None:
             super().draw()
             return
-        pyxel.camera(alert.camera_x, 0)
+        quake_x, quake_y = self.screen_shake_offset
+        pyxel.camera(alert.camera_x + quake_x, quake_y)
         try:
             super().draw()
         finally:

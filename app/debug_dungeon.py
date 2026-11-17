@@ -10,8 +10,10 @@ import re
 from typing import Collection
 
 if __package__:
+    from .resources.events import FLAG_ID_PATTERN
     from .resources.maps import MapActor, MapCell, MapRandomEncounter, MapTreasureContents
 else:
+    from resources.events import FLAG_ID_PATTERN
     from resources.maps import MapActor, MapCell, MapRandomEncounter, MapTreasureContents
 
 
@@ -65,6 +67,7 @@ class DungeonStep:
     encounter: MapRandomEncounter | None = None
     contents: MapTreasureContents | None = None
     battle_id: str | None = None
+    flag_id: str | None = None
 
     def treasure_actor(self) -> MapActor:
         return MapActor(self.id, MapCell(0, 0), "treasure", 0, contents=self.contents)
@@ -113,6 +116,7 @@ def _integer(value: object, low: int, high: int, path: str) -> int:
 def parse_dungeons(
     document: object, *, item_keys: Collection[str] | None = None,
     battle_ids: Collection[str] = (), bgm_ids: Collection[str] | None = None,
+    flag_ids: Collection[str] = (),
 ) -> tuple[DebugDungeon, ...]:
     root = _fields(document, {"format_version", "dungeons"}, "root")
     _require(type(root["format_version"]) is int and root["format_version"] == 1,
@@ -143,6 +147,8 @@ def parse_dungeons(
                      current, "種類が不正です")
             extra = {"random_encounter": {"count", "encounter"},
                      "treasure": {"contents"}, "event_battle": {"battle_id"}, "healing_spring": set()}[kind]
+            if kind == "event_battle" and "flag_id" in step:
+                extra = extra | {"flag_id"}
             _fields(step, {"id", "type"} | extra, current)
             step_id = _id(step["id"], current)
             _require(step_id not in step_ids, current, "ステップIDが重複しています")
@@ -173,7 +179,11 @@ def parse_dungeons(
             elif kind == "event_battle":
                 battle_id = _id(step["battle_id"], current)
                 _require(battle_id in battle_ids, current, f"未登録のイベントバトルです: {battle_id}")
-                steps.append(DungeonStep(step_id, kind, battle_id=battle_id))
+                flag_id = step.get("flag_id")
+                _require(flag_id is None or (isinstance(flag_id, str)
+                         and FLAG_ID_PATTERN.fullmatch(flag_id) is not None and flag_id in flag_ids),
+                         current, "登録済みのフラグを指定してください")
+                steps.append(DungeonStep(step_id, kind, battle_id=battle_id, flag_id=flag_id))
             else:
                 steps.append(DungeonStep(step_id, kind))
         result.append(DebugDungeon(dungeon_id, raw["name"], bgm, tuple(steps)))

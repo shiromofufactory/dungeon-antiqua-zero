@@ -1334,7 +1334,7 @@ class Game:
         simulation = getattr(self, "debug_dungeon_scene", None)
         if simulation is not None:
             simulation.party = self.party
-            simulation.complete_battle()
+            simulation.complete_battle(victory=result is BattleResult.VICTORY)
             if result is BattleResult.DEFEAT:
                 self._finish_debug_dungeon()
                 self.bgm.set_fade_rate(0.0)
@@ -2335,6 +2335,7 @@ class Game:
     def _load_debug_dungeons(self) -> tuple[DebugDungeon, ...]:
         return load_dungeons(
             item_keys=self.items, battle_ids=self.event_catalog.battle_ids,
+            flag_ids=self.event_catalog.flag_ids,
             bgm_ids={path.stem for path in (APP_ROOT / "audio").glob("*.ogg")},
         )
 
@@ -2348,6 +2349,7 @@ class Game:
             raise RuntimeError("debug dungeon transition has no selected dungeon")
         self.debug_dungeon_scene = DebugDungeonScene(
             dungeon=self.pending_debug_dungeon, party=self.party, settings=self.settings,
+            event_flags=self.save_data.event_flags,
             fonts=self.fonts, texts=self.texts, items=self.items, treasure_system=self.treasure_system,
             on_battle=self._start_debug_dungeon_battle,
             on_event=self._start_field_event,
@@ -4338,7 +4340,9 @@ class Game:
             menu.draw()
             return
         shake = getattr(self, "event_screen_shake", None)
-        pyxel.camera(self.alert.camera_x + (0 if shake is None else shake.camera_x), 0)
+        battle = getattr(self, "battle_scene", None)
+        quake_x, quake_y = battle.screen_shake_offset if isinstance(battle, BattleScene) else (0, 0)
+        pyxel.camera(self.alert.camera_x + (0 if shake is None else shake.camera_x) + quake_x, quake_y)
         try:
             if getattr(self, "encounter_transition", None) is not None:
                 self._draw_encounter_transition()

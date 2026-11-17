@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 if __package__ == "":
     from item import AdditionalEffect
@@ -340,6 +340,42 @@ def resolve_physical_additional_effect(
     )
 
 
+def resolve_earthquake_attack(
+    *, attack: int, hit: int, target_defense: int, hit_roll: int,
+    target_defending: bool = False,
+) -> PhysicalAttackResult:
+    """Use 60% attack and normal damage, bypassing evasion and criticals.
+
+    Guard halves damage without its extra evasion check, so even a zero-
+    damage result remains a hit for the ordinary additional-effect rules.
+    """
+
+    result = resolve_physical_attack(
+        attack=_nonnegative_integer(attack, "attack") * 3 // 5,
+        hit=hit, target_defense=target_defense, target_evasion=0,
+        hit_roll=hit_roll, target_unable_to_evade=True,
+    )
+    return replace(result, damage=result.damage // 2 if target_defending else result.damage)
+
+
+def counter_attack_succeeds(
+    *, attacker_agility: int, defender_agility: int,
+    attacker_front: bool, defender_front: bool, defender_actionable: bool,
+    roll: int, defender_reach: int = 1,
+) -> bool:
+    """DA2's twenty-step speed-ratio check; misses can also provoke a counter."""
+
+    if not 0 <= roll <= 19:
+        raise ValueError("counter roll must be from 0 to 19")
+    if not defender_actionable or (
+        defender_reach < 2 and not (attacker_front and defender_front)
+    ):
+        return False
+    attacker_agility = max(1, attacker_agility)
+    defender_agility = max(1, defender_agility)
+    return int(10 * defender_agility / (attacker_agility + defender_agility)) > roll
+
+
 __all__ = [
     "DA2_CRITICAL_RATE_UNIT",
     "DA2_EFFECTIVE_HIT_VALUE_BONUS",
@@ -352,6 +388,8 @@ __all__ = [
     "PhysicalAdditionalEffectResult",
     "PhysicalAttackResult",
     "drain_healing_amount",
+    "counter_attack_succeeds",
+    "resolve_earthquake_attack",
     "member_physical_attack",
     "physical_weapon_is_effective",
     "resolve_physical_additional_effect",

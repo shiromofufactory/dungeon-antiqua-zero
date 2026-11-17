@@ -1,4 +1,4 @@
-import { History, addStep, moveStep, newId, clone, stepRanges, stepLabel } from "./model.js";
+import { History, addStep, moveStep, newId, clone, stepRanges, stepLabel, setBattleFlag } from "./model.js";
 
 const byId = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -33,7 +33,7 @@ function numberField(field, label, value, min, max) {
 function catalogOptions(name) { return catalogs[name].map((entry) => [entry.key, `${entry.name} (${entry.key})`]); }
 function summary(entry) {
   if (entry.type === "random_encounter") return `${entry.count}回 · LV ${entry.encounter.monster_level === "dynamic" ? "変動" : entry.encounter.monster_level} · 危険度${entry.encounter.danger === "high" ? "高" : "低"}`;
-  if (entry.type === "event_battle") return entry.battle_id;
+  if (entry.type === "event_battle") return entry.battle_id + (entry.flag_id ? ` · フラグ: ${entry.flag_id}` : "");
   if (entry.type === "healing_spring") return "パーティのHP・MP全快";
   return entry.contents.type === "gold" ? `${entry.contents.amount} Gold` : entry.contents.item_key;
 }
@@ -54,6 +54,10 @@ function detail(entry) {
       : selectField("item_key", "アイテム（1個）", catalogOptions("items"), entry.contents.item_key);
   } else if (entry.type === "event_battle") {
     html = selectField("battle_id", "バトルID", [["", "選択してください"], ...catalogs.battle_ids.map((id) => [id,id])], entry.battle_id);
+    const flags = catalogs.flags.map((flag) => [flag.flag_id, flag.note ? `${flag.flag_id} — ${flag.note}` : flag.flag_id]);
+    if (entry.flag_id && !flags.some(([id]) => id === entry.flag_id)) flags.push([entry.flag_id, `${entry.flag_id}（未登録）`]);
+    html += selectField("flag_id", "勝利フラグ（任意）", [["", "未指定"], ...flags], entry.flag_id ?? "");
+    html += '<p class="hint">勝利時にフラグをONにします。既にONの場合は戦闘を回避します。</p>';
   } else if (entry.type === "healing_spring") {
     html = '<p class="hint">パーティのHP・MPを全快します。</p>';
   }
@@ -179,6 +183,7 @@ document.addEventListener("change", (event) => {
     else if (field === "amount") s.contents.amount = Number(value);
     else if (field === "item_key") s.contents.item_key = value;
     else if (field === "battle_id") s.battle_id = value;
+    else if (field === "flag_id") setBattleFlag(s, value);
     else s.encounter[field] = field.startsWith("allow_") ? value === "true" : field === "monster_level" && value !== "dynamic" ? Number(value) : value;
   }, field === "contents_type" || field === "battle_id");
 });

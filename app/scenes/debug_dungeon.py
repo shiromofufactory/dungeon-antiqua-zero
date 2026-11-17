@@ -15,12 +15,13 @@ from ui.debug_text import DEBUG_TEXT
 
 
 class DebugDungeonScene:
-    def __init__(self, *, dungeon: DebugDungeon, party, settings, fonts, texts, items,
+    def __init__(self, *, dungeon: DebugDungeon, party, event_flags: set[str], settings, fonts, texts, items,
                  treasure_system, on_battle: Callable[[DungeonStep], bool],
                  on_event: Callable[[str], bool],
                  on_menu: Callable[[], None], on_exit: Callable[[], None], alert) -> None:
         self.progress = DungeonProgress(dungeon)
         self.party = party
+        self.event_flags = event_flags
         self.settings = settings
         self.fonts = fonts
         self.texts = texts
@@ -46,8 +47,14 @@ class DebugDungeonScene:
 
     def start(self) -> None:
         # Named battles always offer preparation before the first encounter too.
-        if self.progress.current is not None and self.progress.current.type != "event_battle":
+        if self.progress.current is not None and (
+                self.progress.current.type != "event_battle" or self._event_battle_cleared()):
             self.advance()
+
+    def _event_battle_cleared(self) -> bool:
+        step = self.progress.current
+        return bool(step is not None and step.type == "event_battle"
+                    and step.flag_id is not None and step.flag_id in self.event_flags)
 
     def resume(self, checkpoint: DungeonCheckpoint) -> None:
         self.progress = DungeonProgress.from_checkpoint(self.dungeon, checkpoint)
@@ -64,7 +71,9 @@ class DebugDungeonScene:
         ]
         if p.fade_active:
             placements.append(self.placements.create(DEBUG_TEXT.dungeon_fade_active, 4, 12))
-        if step is not None and step.type == "event_battle":
+        if self._event_battle_cleared():
+            summary = DEBUG_TEXT.dungeon_battle_cleared
+        elif step is not None and step.type == "event_battle":
             summary = DEBUG_TEXT.dungeon_warning
         elif step is None:
             summary = DEBUG_TEXT.dungeon_finished
@@ -73,7 +82,8 @@ class DebugDungeonScene:
         else:
             summary = ""
         placements.extend((self.placements.create(summary, 4, 17,
-                               color=NEGATIVE_COLOR if step is not None and step.type == "event_battle" else DEFAULT_TEXT_COLOR),
+                               color=NEGATIVE_COLOR if step is not None and step.type == "event_battle"
+                               and not self._event_battle_cleared() else DEFAULT_TEXT_COLOR),
                            self.placements.create(self.notice, 4, 21)))
         localizer = Localizer(self.settings.language)
         member_texts = LocalizedWindowTextFactory.from_language(self.fonts, self.settings.language)
@@ -99,7 +109,11 @@ class DebugDungeonScene:
         step = self.progress.current
         if step is None or self.waiting_for_battle or self.waiting_for_event:
             return
-        if step.type == "healing_spring":
+        if self._event_battle_cleared():
+            self.progress.complete()
+            self.notice = DEBUG_TEXT.dungeon_battle_skipped
+            self.refresh()
+        elif step.type == "healing_spring":
             if self.on_event(HEALING_SPRING_EVENT_ID):
                 self.waiting_for_event = True
             else:
@@ -120,10 +134,13 @@ class DebugDungeonScene:
             self.alert.start()
             self.refresh()
 
-    def complete_battle(self) -> None:
+    def complete_battle(self, *, victory: bool) -> None:
         if not self.waiting_for_battle:
             raise RuntimeError("debug dungeon has no active battle")
         self.waiting_for_battle = False
+        step = self.progress.current
+        if victory and step.type == "event_battle" and step.flag_id is not None:
+            self.event_flags.add(step.flag_id)
         self.progress.complete()
         self.notice = DEBUG_TEXT.dungeon_battle_finished
         self.refresh()

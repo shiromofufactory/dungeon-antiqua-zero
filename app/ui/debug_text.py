@@ -64,6 +64,8 @@ class DebugText:
     dungeon_healing_spring: str = "次は回復の泉です"
     dungeon_event_error: str = "イベントを実行できません。設定を確認してください"
     dungeon_battle_finished: str = "戦闘が終了しました"
+    dungeon_battle_cleared: str = "次のイベント戦闘はクリア済みです"
+    dungeon_battle_skipped: str = "クリア済みのイベント戦闘を回避しました"
     dungeon_error: str = "敵編成を生成できません。設定を確認してください"
     encounter_settings: str = "エンカウント設定"
     monster_level: str = "モンスターレベル"

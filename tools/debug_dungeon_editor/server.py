@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 from threading import Lock
 
 from app.debug_dungeon import parse_dungeons
-from scripts.event_pipeline import load_event_battles, event_battle_ids
+from scripts.event_pipeline import load_event_battles, event_battle_ids, load_event_flags
 
 
 class DebugDungeonEditorApplication:
@@ -26,6 +26,7 @@ class DebugDungeonEditorApplication:
         result["bgm_ids"] = sorted(path.stem for path in (self.app_root / "audio").glob("*.ogg"))
         result["battles"] = load_event_battles(self.content_root)
         result["battle_ids"] = sorted(event_battle_ids(result["battles"]))
+        result["flags"] = load_event_flags(self.content_root)
         return result
 
     def validate(self, data):
@@ -33,6 +34,7 @@ class DebugDungeonEditorApplication:
         try:
             parse_dungeons(data, item_keys={item["key"] for item in catalogs["items"]},
                            battle_ids=catalogs["battle_ids"],
+                           flag_ids={flag["flag_id"] for flag in catalogs["flags"]},
                            bgm_ids=catalogs["bgm_ids"])
         except ValueError as error:
             return [{"severity": "error", "message": str(error)}]

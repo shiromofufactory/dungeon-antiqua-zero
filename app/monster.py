@@ -73,6 +73,8 @@ class MonsterSpecialAction(StrEnum):
     POWER_HIT = "会"
     POISON_BREATH = "毒"
     FIRE_BREATH = "炎"
+    COUNTER = "反"
+    EARTHQUAKE = "地"
 
 
 def monster_spell_keys_from_record(

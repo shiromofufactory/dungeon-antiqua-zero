@@ -28,6 +28,7 @@ from ui.debug_text import DEBUG_TEXT
 
 
 def parse_dungeons(document, **catalogs):
+    catalogs.setdefault("flag_ids", {"trial.guard", "other.flag"})
     return parse_dungeon_document(document, battle_ids={"shrine_guard"}, **catalogs)
 
 
@@ -42,6 +43,23 @@ def source():
 
 
 class DebugDungeonDataTest(unittest.TestCase):
+    def test_event_battle_flag_is_optional_and_must_reference_registered_flag(self):
+        data = source()
+        boss = data["dungeons"][0]["steps"][2]
+        self.assertIsNone(parse_dungeons(data)[0].steps[2].flag_id)
+        boss["flag_id"] = None
+        self.assertIsNone(parse_dungeons(data)[0].steps[2].flag_id)
+        boss["flag_id"] = "trial.guard"
+        self.assertEqual(parse_dungeons(data)[0].steps[2].flag_id, "trial.guard")
+        for flag in ("missing.flag", "", "bad flag", True, 3, [], {}):
+            with self.subTest(flag=flag), self.assertRaises(DebugDungeonDataError):
+                boss["flag_id"] = flag
+                parse_dungeons(data)
+        data["dungeons"][0]["steps"][0]["flag_id"] = "trial.guard"
+        boss.pop("flag_id")
+        with self.assertRaises(DebugDungeonDataError):
+            parse_dungeons(data)
+
     def test_random_battles_each_count_as_a_step_including_after_resume(self):
         data = source()
         data["dungeons"][0]["steps"] = data["dungeons"][0]["steps"][:2]
@@ -176,6 +194,7 @@ class DebugDungeonSceneTest(unittest.TestCase):
     def scene(self, data=None):
         return DebugDungeonScene(
             dungeon=parse_dungeons(data or source())[0], party=self.party,
+            event_flags=self.save_data.event_flags,
             settings=self.settings, fonts=self.fonts, texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
             items=self.items, treasure_system=self.treasures,
             on_battle=self.battle, on_event=self.event, on_menu=self.menu, on_exit=self.exit, alert=Mock(),
@@ -233,7 +252,7 @@ class DebugDungeonSceneTest(unittest.TestCase):
         self.assertEqual(scene.progress.completed_in_step, 0)
         scene.update(InputState(confirm=InputButton(True, True)))
         self.assertEqual(self.battle.call_count, 1)
-        scene.complete_battle()
+        scene.complete_battle(victory=True)
         scene.update(InputState())
         self.assertEqual(self.battle.call_count, 1)
         scene.update(InputState(confirm=InputButton(True, True)))
@@ -267,9 +286,79 @@ class DebugDungeonSceneTest(unittest.TestCase):
         scene.refresh()
         scene.update(InputState(confirm=InputButton(True, True)))
         self.battle.assert_called_once()
-        scene.complete_battle()
+        scene.complete_battle(victory=True)
         self.assertNotIn("next", [target.key for target in scene.cursor.targets])
         self.assertIn(DEBUG_TEXT.dungeon_finished, [text.text for text in scene.window.texts])
+
+    def test_event_battle_flag_is_set_only_on_victory(self):
+        for victory in (False, True):
+            for flag_id in (None, "trial.guard"):
+                with self.subTest(victory=victory, flag_id=flag_id):
+                    self.save_data.event_flags.clear()
+                    self.save_data.event_flags.add("other.flag")
+                    data = source()
+                    boss = data["dungeons"][0]["steps"][2]
+                    if flag_id:
+                        boss["flag_id"] = flag_id
+                    data["dungeons"][0]["steps"] = [boss]
+                    scene = self.scene(data)
+                    scene.start()
+                    scene.advance()
+                    self.assertEqual(self.save_data.event_flags, {"other.flag"})
+                    scene.complete_battle(victory=victory)
+                    expected = {"other.flag", "trial.guard"} if victory and flag_id else {"other.flag"}
+                    self.assertEqual(self.save_data.event_flags, expected)
+                    self.assertIsNone(scene.progress.current)
+
+    def test_cleared_event_battle_skips_one_step_on_entry_and_resume_without_battle_or_rewards(self):
+        data = source()
+        boss = data["dungeons"][0]["steps"][2]
+        boss["flag_id"] = "trial.guard"
+        data["dungeons"][0]["steps"] = [boss, {**boss, "id": "boss_2"}]
+        self.save_data.event_flags.update({"trial.guard", "other.flag"})
+        scene = self.scene(data)
+        self.assertNotIn(DEBUG_TEXT.dungeon_warning, [text.text for text in scene.window.texts])
+        scene.update(InputState())
+        self.assertEqual(scene.progress.current.id, "boss_2")
+        self.assertEqual(scene.progress.step_number, 2)
+        self.assertEqual(scene.notice, DEBUG_TEXT.dungeon_battle_skipped)
+        checkpoint = scene.progress.checkpoint()
+        restored = self.scene(data)
+        restored.resume(checkpoint)
+        restored.update(InputState())
+        self.assertEqual(restored.progress.current.id, "boss_2")
+        restored.advance()
+        self.assertIsNone(restored.progress.current)
+        self.assertNotIn("next", [target.key for target in restored.cursor.targets])
+        self.battle.assert_not_called()
+        self.assertEqual(self.save_data.battle_count, 0)
+        self.assertEqual(self.save_data.gold, 0)
+        self.assertEqual(self.save_data.event_flags, {"trial.guard", "other.flag"})
+
+    def test_clearing_battle_flag_allows_reentry_and_unflagged_battles_still_run(self):
+        data = source()
+        boss = data["dungeons"][0]["steps"][2]
+        boss["flag_id"] = "trial.guard"
+        data["dungeons"][0]["steps"] = [boss]
+        self.save_data.event_flags.add("trial.guard")
+        self.save_data.event_flags.remove("trial.guard")
+        scene = self.scene(data)
+        scene.update(InputState())
+        self.assertIn(DEBUG_TEXT.dungeon_warning, [text.text for text in scene.window.texts])
+        scene.advance()
+        self.assertTrue(scene.waiting_for_battle)
+        self.battle.assert_called_once()
+        scene.complete_battle(victory=True)
+        reentered = self.scene(data)
+        reentered.update(InputState())
+        self.assertIsNone(reentered.progress.current)
+        self.assertEqual(self.battle.call_count, 1)
+        boss.pop("flag_id")
+        unflagged = self.scene(data)
+        unflagged.update(InputState())
+        unflagged.advance()
+        self.assertTrue(unflagged.waiting_for_battle)
+        self.assertEqual(self.battle.call_count, 2)
 
     @patch("scenes.debug_dungeon.play_se")
     def test_treasure_is_not_duplicated_after_reentry_or_reordering(self, _play):
@@ -318,6 +407,7 @@ class DebugDungeonSceneTest(unittest.TestCase):
 
     def test_reset_and_save_roundtrip_preserve_other_dungeons_and_game_progress(self):
         dungeon = parse_dungeons(source())[0]
+        self.save_data.event_flags.add("trial.guard")
         self.save_data.opened_treasures = {(dungeon.treasure_map_id, "chest_1"),
                                          ("real_map", "chest_1"), ("debug_dungeon.other", "chest_2")}
         from field import FieldPosition
@@ -329,7 +419,9 @@ class DebugDungeonSceneTest(unittest.TestCase):
         loaded = restore_save_document(document, character_records=load_mock_character_records(),
                                        items=self.items, skills=self.skills)
         self.assertEqual(loaded.save_data.opened_treasures, self.save_data.opened_treasures)
+        self.assertEqual(loaded.save_data.event_flags, {"trial.guard"})
         reset_treasures(dungeon, self.save_data.opened_treasures)
+        self.assertEqual(self.save_data.event_flags, {"trial.guard"})
         self.assertEqual(self.save_data.opened_treasures, {("real_map", "chest_1"), ("debug_dungeon.other", "chest_2")})
 
 
@@ -486,7 +578,7 @@ class DebugDungeonGameTest(unittest.TestCase):
                 simulation = game.debug_dungeon_scene
                 game.battle_return_result = result
                 game._apply_battle_return()
-                simulation.complete_battle.assert_called_once()
+                simulation.complete_battle.assert_called_once_with(victory=result is BattleResult.VICTORY)
                 self.assertEqual(game.save_data.battle_count, int(result is BattleResult.VICTORY))
                 game.encounter_system.defeat_return.assert_not_called()
                 game.field.update.assert_not_called()
@@ -495,8 +587,10 @@ class DebugDungeonGameTest(unittest.TestCase):
 
     def test_defeat_exits_and_recovers_without_resolving_a_real_dungeon_exit(self):
         game = self.game()
+        simulation = game.debug_dungeon_scene
         game.battle_return_result = BattleResult.DEFEAT
         game._apply_battle_return()
+        simulation.complete_battle.assert_called_once_with(victory=False)
         self.assertIsNone(game.debug_dungeon_scene)
         game.party[0].fully_recover.assert_called_once()
         game.encounter_system.defeat_return.assert_not_called()
@@ -602,7 +696,16 @@ class DebugDungeonEditorTest(unittest.TestCase):
             app = DebugDungeonEditorApplication(root / "content", root / "app", token="test")
             self.assertEqual(app.document_payload()["data"]["dungeons"], [])
             self.assertTrue(app.save(source())["saved"])
+            (events / "flags.json").write_text(json.dumps([{"flag_id":"trial.guard", "note":"守衛を撃破"}]))
+            flagged = source()
+            flagged["dungeons"][0]["steps"][2]["flag_id"] = "trial.guard"
+            self.assertTrue(app.save(flagged)["saved"])
+            self.assertEqual(app.document_payload()["data"], flagged)
+            self.assertEqual(app.catalogs()["flags"][0]["flag_id"], "trial.guard")
             before = app.source_path.read_bytes()
+            flagged["dungeons"][0]["steps"][2]["flag_id"] = "missing.flag"
+            self.assertFalse(app.save(flagged)["saved"])
+            self.assertEqual(app.source_path.read_bytes(), before)
             bad = source()
             bad["dungeons"][0]["steps"][2]["battle_id"] = "unknown"
             result = app.save(bad)

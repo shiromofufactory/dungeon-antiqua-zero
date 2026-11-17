@@ -388,6 +388,101 @@
           }
         }
       ]
+    },
+    {
+      "id": "dungeon_8398dc7b8a87473481aad37e33213d05",
+      "name": "アイゼンタール鉱山（赤）",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "event_battle_f01075b1bd174eb181450dbaa6714b97",
+          "type": "event_battle",
+          "battle_id": "battle_8",
+          "flag_id": "eisental_mine.boss_1"
+        },
+        {
+          "id": "random_encounter_17562ea3f4084dba8420640120e3f9cc",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 4,
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_7febaecb219f4566ae8fb6f14b4bd595",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "POISON KUNAI"
+          }
+        },
+        {
+          "id": "treasure_d3aa8ec4ab0c43379cd6cab518b29611",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "REMEDY"
+          }
+        },
+        {
+          "id": "random_encounter_2807954e3339449a8acc0ca1f6e8a42a",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 4,
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_539eebdc2c344fa0a09950b857b963df",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "MAGE MASHER"
+          }
+        },
+        {
+          "id": "treasure_2a04db41ff00413ba281d936c4659c97",
+          "type": "treasure",
+          "contents": {
+            "type": "gold",
+            "amount": 700
+          }
+        },
+        {
+          "id": "random_encounter_eabf12a518c94284919cf9489d6c5c4c",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 4,
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_8adcc30158bf4908a9221d7ee4d4f708",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DIVINE TEAR"
+          }
+        }
+      ]
     }
   ]
 }

@@ -80,6 +80,8 @@ from battle_speed import (
 )
 from battle_physical import (
     PHYSICAL_STATUS_EFFECTS,
+    counter_attack_succeeds,
+    resolve_earthquake_attack,
     PhysicalAttackResult,
     drain_healing_amount,
     member_physical_attack,
@@ -228,6 +230,8 @@ MONSTER_DRAIN_PATTERN_FRAME_COUNT = 2
 MONSTER_DRAIN_HEAL_DELAY = 10  # DA2's five frames at 60 fps.
 BATTLE_POISON_BREATH_SE_ID = "battle_poison_breath"
 BATTLE_FIRE_BREATH_SE_ID = "battle_fire_breath"
+BATTLE_EARTHQUAKE_SE_ID = "battle_earthquake"
+EARTHQUAKE_SHAKE_AMPLITUDE = 3
 BREATH_TINT_FRAME_COUNT = 16
 # DA2 palette color 2; ZERO's reordered palette uses gray at that index.
 POISON_BREATH_TINT_COLOR = 0x7E2072
@@ -934,6 +938,12 @@ class BattlePoisonResult:
 
 
 @dataclass(frozen=True)
+class BattlePartyStunResult:
+    target_index: int
+    success: bool
+
+
+@dataclass(frozen=True)
 class BattleProtectionResult:
     """One guaranteed PROTECTION stage waiting for its timed application."""
 
@@ -1116,6 +1126,9 @@ class BattleActionPresentation:
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_damage_results: tuple[BattleSpellDamageResult, ...] = ()
     party_poison_results: tuple[BattlePoisonResult, ...] = ()
+    party_stun_results: tuple[BattlePartyStunResult, ...] = ()
+    earthquake: bool = False
+    shake_offset: tuple[int, int] = (0, 0)
     breath_tint_color: int | None = None
     party_silence_results: tuple[BattlePartySilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
@@ -1137,11 +1150,11 @@ class BattleActionPresentation:
     def party_damage_motion_visible(self, index: int) -> bool:
         visible = (
             self.elapsed_frame < self.result_start_frame
-            if self.breath_tint_color is not None else self.results_applied
+            if self.breath_tint_color is not None or self.earthquake else self.results_applied
         )
         return visible and any(
             result.target_index == index
-            and (self.breath_tint_color is not None or result.damage > 0)
+            and (self.breath_tint_color is not None or self.earthquake or result.damage > 0)
             for result in self.party_damage_results
         )
 
@@ -2281,6 +2294,10 @@ class BattleScene:
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         self.monster_drain_presentation: BattleMonsterDrainPresentation | None = None
+        self.pending_monster_counters: list[tuple[int, int]] = []
+        self.monster_counter_actor_index: int | None = None
+        self.monster_counter_target_index: int | None = None
+        self.counter_defeated_turn_actor = False
         self.monster_action: MonsterActionChoice | None = None
         self.monster_charge_presentation: BattleMonsterChargePresentation | None = None
         self.monster_escape_actor_index: int | None = None
@@ -2852,6 +2869,10 @@ class BattleScene:
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         self.monster_drain_presentation = None
+        self.pending_monster_counters: list[tuple[int, int]] = []
+        self.monster_counter_actor_index: int | None = None
+        self.monster_counter_target_index: int | None = None
+        self.counter_defeated_turn_actor = False
         self.monster_action = None
         self.monster_charge_presentation = None
         self.monster_escape_actor_index = None
@@ -5998,7 +6019,7 @@ class BattleScene:
 
         for result in presentation.party_damage_results:
             self._apply_monster_attack_damage(result.target_index, result.damage)
-            if presentation.breath_tint_color is None:
+            if presentation.breath_tint_color is None and not presentation.earthquake:
                 damage_popups.append(
                     BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage)
                 )
@@ -6006,6 +6027,10 @@ class BattleScene:
         for result in presentation.party_poison_results:
             if result.success:
                 self.party[result.target_index].apply_poison()
+
+        for result in presentation.party_stun_results:
+            if result.success:
+                self._apply_additional_effects_to_member(result.target_index, (AdditionalEffect.STUN,))
 
         for result in presentation.party_silence_results:
             if result.success:
@@ -6294,6 +6319,14 @@ class BattleScene:
             self._complete_current_turn()
             return
         presentation.update()
+        if presentation.earthquake:
+            presentation.shake_offset = (
+                (
+                    random.randint(-EARTHQUAKE_SHAKE_AMPLITUDE, EARTHQUAKE_SHAKE_AMPLITUDE),
+                    random.randint(-EARTHQUAKE_SHAKE_AMPLITUDE, EARTHQUAKE_SHAKE_AMPLITUDE),
+                )
+                if presentation.elapsed_frame < presentation.result_start_frame else (0, 0)
+            )
         if presentation.breath_tint_color is not None:
             self._sync_breath_background(presentation)
         if (
@@ -7258,6 +7291,8 @@ class BattleScene:
                         observations = getattr(self, "auto_battle_observations", None)
                         if observations is not None:
                             observations.damage(strike_target_index, strike.damage)
+                        if presentation.is_iai or strike is presentation.strikes[0]:
+                            self._queue_monster_counter(strike_target_index)
                         strike.additional_effects = (
                             self._apply_additional_effects_to_monster(
                                 strike_target_index,
@@ -7278,6 +7313,10 @@ class BattleScene:
                         self._play_physical_hit_se(
                             strike.sound_effect_id, is_critical=strike.is_critical
                         )
+                elif targets_enemy and (
+                    presentation.is_iai or strike is presentation.strikes[0]
+                ):
+                    self._queue_monster_counter(strike_target_index)
                 strike.damage_applied = True
             if (
                 strike.is_hit
@@ -7871,6 +7910,8 @@ class BattleScene:
         return True
 
     def _complete_current_turn(self) -> None:
+        if self._begin_pending_monster_counter():
+            return
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
@@ -7913,7 +7954,11 @@ class BattleScene:
         self._close_spell_windows()
         self.command_guide_window.close_immediately()
         self.command_guide_window.clear_texts()
-        self._start_timeline_animation()
+        if getattr(self, "counter_defeated_turn_actor", False):
+            self.counter_defeated_turn_actor = False
+            self._start_timeline_removal_animation()
+        else:
+            self._start_timeline_animation()
 
     def _start_timeline_animation(self) -> None:
         actor = self._timeline_order.entries[0].actor
@@ -8776,6 +8821,8 @@ class BattleScene:
 
         if not actor.is_front_row:
             return True
+        if MonsterSpecialAction.EARTHQUAKE in actor.special_actions and self._active_party_indexes():
+            return True
         if self._monster_attack_target_indexes(actor):
             return True
         if any(
@@ -9109,6 +9156,9 @@ class BattleScene:
 
     def _update_monster_action(self) -> None:
         self.command_window.update(None)
+        if getattr(self, "monster_counter_actor_index", None) is not None:
+            self._update_monster_counter()
+            return
         if getattr(self, "monster_charge_presentation", None) is not None:
             self._update_monster_charge()
             return
@@ -9198,6 +9248,10 @@ class BattleScene:
             return
         if action is MonsterAction.FIRE_BREATH:
             if not self._begin_monster_fire_breath(actor):
+                self._start_timeline_animation()
+            return
+        if action is MonsterAction.EARTHQUAKE:
+            if not self._begin_monster_earthquake(actor):
                 self._start_timeline_animation()
             return
         if isinstance(action, MonsterSpellAction):
@@ -9413,6 +9467,7 @@ class BattleScene:
             can_attack=bool(self._monster_attack_target_indexes(actor)),
             can_charge=bool(self._monster_charge_target_indexes()),
             can_breathe=bool(self._monster_charge_target_indexes()),
+            can_earthquake=bool(self._active_party_indexes()),
             fire_breath_effective=any(
                 ResistanceType.FIRE not in self.party[index].resistances
                 for index in self._monster_charge_target_indexes()
@@ -9493,6 +9548,52 @@ class BattleScene:
         return tuple(
             index for index, monster in enumerate(self.monsters) if monster.is_alive
         )
+
+    @property
+    def screen_shake_offset(self) -> tuple[int, int]:
+        presentation = getattr(self, "action_presentation", None)
+        if presentation is not None and presentation.earthquake:
+            return presentation.shake_offset
+        return (0, 0)
+
+    def _begin_monster_earthquake(self, actor: BattleMonster) -> bool:
+        indexes = self._active_party_indexes()
+        if not indexes:
+            return False
+        damages = []
+        stuns = []
+        for index in indexes:
+            member = self.party[index]
+            defending = index in self.defending_party_indexes
+            result = resolve_earthquake_attack(
+                attack=actor.combat_stats.attack, hit=actor.combat_stats.hit,
+                target_defense=member.battle_stats.defense,
+                target_defending=defending, hit_roll=random.randint(0, 99),
+            )
+            stun = resolve_physical_additional_effect(
+                effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
+                effect_roll=random.randint(0, 99), target_is_member=True,
+                target_is_resistant=ResistanceType.STUN in member.resistances,
+                target_defending=defending,
+            )
+            x, y = self._party_draw_position(index) or (self._party_sprite_x(index), PARTY_SPRITE_Y[index])
+            damages.append(BattleSpellDamageResult(
+                index, result.damage, SpellAffinity.NORMAL,
+                x + 6, y + 16, x + 8 - AFFINITY_ICON_WIDTH // 2, y - 8,
+            ))
+            stuns.append(BattlePartyStunResult(index, stun.success))
+        self.action_presentation = BattleActionPresentation(
+            (), party_damage_results=tuple(damages), party_stun_results=tuple(stuns),
+            earthquake=True, result_start_frame=DAMAGE_POPUP_FRAME_COUNT,
+            post_effect_wait_frame_count=DAMAGE_POPUP_FRAME_COUNT,
+        )
+        self.phase = BattlePhase.ACTION_PRESENTATION
+        self.spell_damage_popups.extend(
+            BattleSpellDamagePopup(r.popup_x, r.popup_y, r.damage) for r in damages
+        )
+        self._show_monster_action_message("battle.monster.earthquake")
+        play_se(BATTLE_EARTHQUAKE_SE_ID)
+        return True
 
     def _begin_monster_poison_breath(self, actor: BattleMonster) -> bool:
         return self._begin_monster_breath(actor, poisonous=True)
@@ -10097,10 +10198,74 @@ class BattleScene:
         )
         return (effect,) if resolution.success else ()
 
-    def _begin_standard_monster_attack(self, actor: BattleMonster) -> None:
+    def _queue_monster_counter(self, monster_index: int) -> None:
+        actor = self.monsters[monster_index]
+        if not isinstance(actor, BattleMonster) or MonsterSpecialAction.COUNTER not in actor.special_actions:
+            return
+        party_index = getattr(self, "active_party_index", None)
+        if party_index is None:
+            return
+        member = self.party[party_index]
+        if counter_attack_succeeds(
+            attacker_agility=member.effective_agility,
+            defender_agility=actor.effective_agility,
+            attacker_front=self._party_member_is_front_row(party_index),
+            defender_front=actor.is_front_row,
+            defender_actionable=self._monster_can_counter(actor),
+            roll=random.randint(0, 19),
+        ):
+            pending = getattr(self, "pending_monster_counters", None)
+            if pending is None:
+                pending = self.pending_monster_counters = []
+            pending.append((monster_index, party_index))
+
+    @staticmethod
+    def _monster_can_counter(actor: BattleMonster) -> bool:
+        return actor.is_alive and not (
+            actor.state.sleeping or actor.state.confused or actor.state.stunned
+        )
+
+    def _begin_pending_monster_counter(self) -> bool:
+        pending = getattr(self, "pending_monster_counters", [])
+        while pending:
+            actor_index, party_index = pending.pop(0)
+            if not self._monster_can_counter(self.monsters[actor_index]):
+                continue
+            if self._member_is_dead(self.party[party_index]):
+                continue
+            self.monster_counter_actor_index = actor_index
+            self.monster_counter_target_index = party_index
+            self.monster_attack_target_index = None
+            self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
+            self.blinking_monster_index = actor_index
+            self.phase = BattlePhase.MONSTER_ACTION
+            return True
+        return False
+
+    def _update_monster_counter(self) -> None:
+        if self.monster_attack_target_index is not None:
+            self.monster_attack_animation_frame += 1
+            if self.monster_attack_animation_frame >= self._monster_attack_animation_frame_count():
+                self._finish_monster_attack()
+            return
+        self.monster_blink_frames_remaining = max(0, self.monster_blink_frames_remaining - 1)
+        if self.monster_blink_frames_remaining:
+            return
+        self.blinking_monster_index = None
+        actor = self.monsters[self.monster_counter_actor_index]
+        self._show_monster_action_message("battle.monster.counter")
+        if hasattr(self, "progression"):
+            self.progression.record_enemy_action(self.monster_counter_actor_index)
+        self._begin_standard_monster_attack(
+            actor, target_indexes=(self.monster_counter_target_index,),
+        )
+
+    def _begin_standard_monster_attack(
+        self, actor: BattleMonster, *, target_indexes: tuple[int, ...] | None = None,
+    ) -> None:
         target_index, result = self._resolve_monster_attack(
             actor,
-            self._monster_attack_target_indexes(actor),
+            self._monster_attack_target_indexes(actor) if target_indexes is None else target_indexes,
             attack=actor.combat_stats.attack,
         )
         self.monster_attack_target_index = target_index
@@ -10327,6 +10492,21 @@ class BattleScene:
         self.protected_party_index = None
         self.covering_party_index = None
         self._reveal_hidden_party_if_all_unavailable()
+        if getattr(self, "monster_counter_actor_index", None) is not None:
+            self.monster_counter_actor_index = None
+            self.monster_counter_target_index = None
+            self.monster_drain_presentation = None
+            head = self.timeline[0]
+            if isinstance(head, BattleCharacter) and self._member_is_dead(head.member):
+                self.counter_defeated_turn_actor = True
+            else:
+                self._remove_defeated_party_from_timeline()
+            if self._party_is_defeated():
+                self.pending_monster_counters = []
+                self._begin_defeat_message()
+            else:
+                self._complete_current_turn()
+            return
         if self._member_is_dead(self.party[target_index]):
             self.defending_party_indexes.discard(target_index)
             getattr(self, "cover_target_by_party_index", {}).pop(
@@ -11120,7 +11300,7 @@ class BattleScene:
             if (
                 self.phase is BattlePhase.ACTION_PRESENTATION
                 and action_presentation is not None
-                and action_presentation.breath_tint_color is not None
+                and (action_presentation.breath_tint_color is not None or action_presentation.earthquake)
                 and action_presentation.party_damage_motion_visible(index)
             ):
                 shake_index = (
