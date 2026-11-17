@@ -23,6 +23,7 @@ class MonsterAction(StrEnum):
     CHARGE = "charge"
     CALL = "call"
     POISON_BREATH = "poison_breath"
+    FIRE_BREATH = "fire_breath"
     IDLE = "idle"
 
 
@@ -123,6 +124,7 @@ def monster_action_candidates(
     can_attack: bool, can_charge: bool, spell_keys: Sequence[str],
     escape_eligible: bool, call_eligible: bool = False,
     can_breathe: bool = False,
+    intelligence: int = 0, fire_breath_effective: bool = True,
 ) -> tuple[MonsterActionChoice, ...]:
     """Share candidate construction between live AI and deterministic forecasts."""
 
@@ -135,6 +137,11 @@ def monster_action_candidates(
         candidates.append(MonsterAction.CALL)
     if MonsterSpecialAction.POISON_BREATH in special_actions and can_breathe:
         candidates.append(MonsterAction.POISON_BREATH)
+    if (
+        MonsterSpecialAction.FIRE_BREATH in special_actions and can_breathe
+        and (intelligence != 7 or fire_breath_effective)
+    ):
+        candidates.append(MonsterAction.FIRE_BREATH)
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     if is_front_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
@@ -155,6 +162,7 @@ def select_monster_action(
     call_slot: int | None = None,
     intelligence: int = 0,
     can_breathe: bool = False,
+    fire_breath_effective: bool = True,
 ) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including call and ZERO's charge.
 
@@ -216,6 +224,7 @@ def select_monster_action(
         can_attack=can_attack, can_charge=can_charge, spell_keys=spell_keys,
         escape_eligible=escape_eligible, call_eligible=call_eligible,
         can_breathe=can_breathe,
+        intelligence=intelligence, fire_breath_effective=fire_breath_effective,
     )
 
     if not candidates:

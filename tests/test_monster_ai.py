@@ -25,7 +25,7 @@ from resources import load_record_array
 class MonsterSpecialActionDataTest(unittest.TestCase):
     def test_parses_each_one_character_action_at_the_data_boundary(self) -> None:
         self.assertEqual(
-            monster_special_actions_from_record({"special": "逃突援呼会毒"}),
+            monster_special_actions_from_record({"special": "逃突援呼会毒炎"}),
             (
                 MonsterSpecialAction.ESCAPE,
                 MonsterSpecialAction.CHARGE,
@@ -33,11 +33,12 @@ class MonsterSpecialActionDataTest(unittest.TestCase):
                 MonsterSpecialAction.CALL,
                 MonsterSpecialAction.POWER_HIT,
                 MonsterSpecialAction.POISON_BREATH,
+                MonsterSpecialAction.FIRE_BREATH,
             ),
         )
 
     def test_rejects_unknown_duplicate_or_multiline_actions(self) -> None:
-        for special in ("炎", "突突", "会会", "逃\n突", None):
+        for special in ("未", "突突", "会会", "逃\n突", None):
             with self.subTest(special=special):
                 with self.assertRaises(MonsterDataError):
                     monster_special_actions_from_record({"special": special})

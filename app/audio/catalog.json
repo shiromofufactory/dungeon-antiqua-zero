@@ -16,6 +16,9 @@
     "battle_poison_breath": {
       "sound": 13
     },
+    "battle_fire_breath": {
+      "sound": 13
+    },
     "battle_monster_death": {
       "wav": "battle_monster_death.wav"
     },

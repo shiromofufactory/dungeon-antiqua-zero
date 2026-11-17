@@ -303,7 +303,7 @@
             "allow_demons": false,
             "allow_humans": true,
             "allow_giants": false,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {
@@ -333,6 +333,57 @@
             "allow_demons": false,
             "allow_humans": true,
             "allow_giants": false,
+            "allow_large_animals": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "dungeon_611363b45e5940d09f9a94b76c04adb9",
+      "name": "大雪原",
+      "bgm_id": "da3-snowfield",
+      "steps": [
+        {
+          "id": "random_encounter_d4240ba9f2ee4c3f93baf4b63d9f6b9d",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "low",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_772354244b754fe1856dd246fc83c56c",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DIVINE TEAR"
+          }
+        },
+        {
+          "id": "treasure_e28af56f1b9c4e57ae43c1c5c41f74c4",
+          "type": "treasure",
+          "contents": {
+            "type": "gold",
+            "amount": 900
+          }
+        },
+        {
+          "id": "random_encounter_6886a92b9609438ab7a28b38e1adb220",
+          "type": "random_encounter",
+          "count": 10,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
             "allow_large_animals": true
           }
         }

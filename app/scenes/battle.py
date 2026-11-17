@@ -30,7 +30,7 @@ from attack_pose import (
     throwing_projectile_sequence,
 )
 from battle_command_memory import BattleCommandMemory
-from battle_breath import resolve_poison_breath
+from battle_breath import resolve_fire_breath, resolve_poison_breath
 from battle_commands import (
     BattleCommand,
     BattleCommandContext,
@@ -219,9 +219,12 @@ MONSTER_DRAIN_PATTERNS = (0, 1, 2, 2, 1, 0)
 MONSTER_DRAIN_PATTERN_FRAME_COUNT = 2
 MONSTER_DRAIN_HEAL_DELAY = 10  # DA2's five frames at 60 fps.
 BATTLE_POISON_BREATH_SE_ID = "battle_poison_breath"
-POISON_BREATH_TINT_FRAME_COUNT = 16
+BATTLE_FIRE_BREATH_SE_ID = "battle_fire_breath"
+BREATH_TINT_FRAME_COUNT = 16
 # DA2 palette color 2; ZERO's reordered palette uses gray at that index.
 POISON_BREATH_TINT_COLOR = 0x7E2072
+# DA2 palette color 30, independent of ZERO's palette ordering.
+FIRE_BREATH_TINT_COLOR = 0x990000
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT = 12
 BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
@@ -1108,7 +1111,7 @@ class BattleActionPresentation:
     silence_results: tuple[BattleSilenceResult, ...] = ()
     party_damage_results: tuple[BattleSpellDamageResult, ...] = ()
     party_poison_results: tuple[BattlePoisonResult, ...] = ()
-    poison_breath: bool = False
+    breath_tint_color: int | None = None
     party_silence_results: tuple[BattlePartySilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_confuse_results: tuple[BattlePartyConfuseResult, ...] = ()
@@ -1129,10 +1132,11 @@ class BattleActionPresentation:
     def party_damage_motion_visible(self, index: int) -> bool:
         visible = (
             self.elapsed_frame < self.result_start_frame
-            if self.poison_breath else self.results_applied
+            if self.breath_tint_color is not None else self.results_applied
         )
         return visible and any(
-            result.target_index == index and (self.poison_breath or result.damage > 0)
+            result.target_index == index
+            and (self.breath_tint_color is not None or result.damage > 0)
             for result in self.party_damage_results
         )
 
@@ -6000,7 +6004,7 @@ class BattleScene:
 
         for result in presentation.party_damage_results:
             self._apply_monster_attack_damage(result.target_index, result.damage)
-            if not presentation.poison_breath:
+            if presentation.breath_tint_color is None:
                 damage_popups.append(
                     BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage)
                 )
@@ -6296,8 +6300,8 @@ class BattleScene:
             self._complete_current_turn()
             return
         presentation.update()
-        if presentation.poison_breath:
-            self._sync_poison_breath_background(presentation)
+        if presentation.breath_tint_color is not None:
+            self._sync_breath_background(presentation)
         if (
             not presentation.results_applied
             and presentation.elapsed_frame >= presentation.result_start_frame
@@ -8787,6 +8791,7 @@ class BattleScene:
             return True
         if any(action in actor.special_actions for action in (
             MonsterSpecialAction.CHARGE, MonsterSpecialAction.POISON_BREATH,
+            MonsterSpecialAction.FIRE_BREATH,
         )):
             return bool(self._monster_charge_target_indexes())
         return MonsterSpecialAction.ESCAPE in actor.special_actions and bool(
@@ -9197,6 +9202,10 @@ class BattleScene:
             if not self._begin_monster_poison_breath(actor):
                 self._start_timeline_animation()
             return
+        if action is MonsterAction.FIRE_BREATH:
+            if not self._begin_monster_fire_breath(actor):
+                self._start_timeline_animation()
+            return
         if isinstance(action, MonsterSpellAction):
             spell = self.spells[action.spell_key]
             if not self._begin_monster_spell(
@@ -9375,6 +9384,10 @@ class BattleScene:
             can_attack=bool(self._monster_attack_target_indexes(actor)),
             can_charge=bool(self._monster_charge_target_indexes()),
             can_breathe=bool(self._monster_charge_target_indexes()),
+            fire_breath_effective=any(
+                ResistanceType.FIRE not in self.party[index].resistances
+                for index in self._monster_charge_target_indexes()
+            ),
             party_actual_attacks=party_attacks,
             monster_attack=actor.combat_stats.attack,
             spell_keys=self._targetable_monster_spell_keys(actor),
@@ -9453,7 +9466,13 @@ class BattleScene:
         )
 
     def _begin_monster_poison_breath(self, actor: BattleMonster) -> bool:
-        """Start DA2's simultaneous all-party damage and purple background tint."""
+        return self._begin_monster_breath(actor, poisonous=True)
+
+    def _begin_monster_fire_breath(self, actor: BattleMonster) -> bool:
+        return self._begin_monster_breath(actor, poisonous=False)
+
+    def _begin_monster_breath(self, actor: BattleMonster, *, poisonous: bool) -> bool:
+        """Start DA2's simultaneous all-party damage and background tint."""
 
         indexes = self._monster_charge_target_indexes()
         if not indexes:
@@ -9462,15 +9481,24 @@ class BattleScene:
         poisons = []
         for index in indexes:
             member = self.party[index]
-            result = resolve_poison_breath(
+            arguments = dict(
                 attack=actor.combat_stats.attack,
                 hp=actor.state.hp,
                 max_hp=actor.state.max_hp,
                 target_spell_defense=member.battle_stats.spell_resistance,
-                poison_resistant=ResistanceType.POISON in member.resistances,
                 random_factor=random.random(),
-                poison_roll=random.randint(0, 9),
             )
+            if poisonous:
+                result = resolve_poison_breath(
+                    **arguments,
+                    poison_resistant=ResistanceType.POISON in member.resistances,
+                    poison_roll=random.randint(0, 9),
+                )
+            else:
+                result = resolve_fire_breath(
+                    **arguments,
+                    fire_resistant=ResistanceType.FIRE in member.resistances,
+                )
             position = self._party_draw_position(index)
             if position is None:
                 continue
@@ -9480,15 +9508,18 @@ class BattleScene:
                 index, result.damage, affinity, x + 6, y + 16,
                 x + 8 - AFFINITY_ICON_WIDTH // 2, y - 8,
             ))
-            poisons.append(BattlePoisonResult(index, result.poisoned))
+            if poisonous:
+                poisons.append(BattlePoisonResult(index, result.poisoned))
         presentation = BattleActionPresentation(
             (),
             party_damage_results=tuple(damages),
             party_poison_results=tuple(poisons),
-            poison_breath=True,
+            breath_tint_color=(
+                POISON_BREATH_TINT_COLOR if poisonous else FIRE_BREATH_TINT_COLOR
+            ),
             result_start_frame=DAMAGE_POPUP_FRAME_COUNT,
             post_effect_wait_frame_count=(
-                DAMAGE_POPUP_FRAME_COUNT + POISON_BREATH_TINT_FRAME_COUNT
+                DAMAGE_POPUP_FRAME_COUNT + BREATH_TINT_FRAME_COUNT
             ),
         )
         self.action_presentation = presentation
@@ -9501,18 +9532,20 @@ class BattleScene:
             BattleAffinityPopup(result.affinity_x, result.affinity_y, result.affinity)
             for result in damages if result.affinity is SpellAffinity.RESIST
         )
-        self._sync_poison_breath_background(presentation)
-        self._show_monster_action_message("battle.monster.poison_breath")
-        play_se(BATTLE_POISON_BREATH_SE_ID)
+        self._sync_breath_background(presentation)
+        self._show_monster_action_message(
+            "battle.monster.poison_breath" if poisonous else "battle.monster.fire_breath"
+        )
+        play_se(BATTLE_POISON_BREATH_SE_ID if poisonous else BATTLE_FIRE_BREATH_SE_ID)
         return True
 
-    def _sync_poison_breath_background(
+    def _sync_breath_background(
         self, presentation: BattleActionPresentation,
     ) -> None:
         """Update only the background palette; draw never advances the tint."""
 
         elapsed = presentation.elapsed_frame
-        duration = POISON_BREATH_TINT_FRAME_COUNT
+        duration = BREATH_TINT_FRAME_COUNT
         progress = min(elapsed / duration, 1.0)
         if elapsed >= presentation.result_start_frame:
             progress = max(0.0, 1 - (elapsed - presentation.result_start_frame) / duration)
@@ -9521,7 +9554,7 @@ class BattleScene:
         self.palette_shifter.define_mix(
             SPELL_EFFECT_FLASH_PALETTE,
             base_rate=0.7 + cos(progress * pi) * 0.3,
-            target_color=POISON_BREATH_TINT_COLOR,
+            target_color=presentation.breath_tint_color,
         )
 
     def _begin_monster_spell(
@@ -10750,7 +10783,7 @@ class BattleScene:
 
     def _draw_background(self) -> None:
         presentation = getattr(self, "action_presentation", None)
-        if presentation is not None and presentation.poison_breath:
+        if presentation is not None and presentation.breath_tint_color is not None:
             with self.palette_shifter.shifted(SPELL_EFFECT_FLASH_PALETTE):
                 self._draw_background_image()
         else:
@@ -11058,7 +11091,7 @@ class BattleScene:
             if (
                 self.phase is BattlePhase.ACTION_PRESENTATION
                 and action_presentation is not None
-                and action_presentation.poison_breath
+                and action_presentation.breath_tint_color is not None
                 and action_presentation.party_damage_motion_visible(index)
             ):
                 shake_index = (
