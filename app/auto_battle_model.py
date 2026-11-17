@@ -17,6 +17,7 @@ if __package__:
         Member,
         ProficiencyAptitude,
         ProficiencyKind,
+        Race,
     )
     from .monster import MonsterSpecialAction, MonsterTribe
     from .resistance import ResistanceType
@@ -32,6 +33,7 @@ else:
         Member,
         ProficiencyAptitude,
         ProficiencyKind,
+        Race,
     )
     from monster import MonsterSpecialAction, MonsterTribe
     from resistance import ResistanceType
@@ -132,6 +134,9 @@ class AutoCombatant:
     net_damage: int = 0
     species_key: str = ""
     tribe: MonsterTribe | None = None
+    floating: bool = False
+    slow_turns: int = 0
+    defense_down_turns: int = 0
 
     @classmethod
     def from_member(
@@ -216,6 +221,7 @@ class AutoCombatant:
             max_mp=member.max_mp,
             mp=member.mp,
             front=front,
+            floating=member.definition.race is Race.FAIRY,
             alive=member.is_alive,
             agility=member.adjusted_abilities.agility,
             magic=member.adjusted_abilities.magic,
@@ -240,6 +246,8 @@ class AutoCombatant:
             stunned=member.stunned,
             protection=member.protection_level,
             speed=member.speed_modifier,
+            slow_turns=member.slow_turns,
+            defense_down_turns=member.defense_down_turns,
             healing=member.battle_healing,
             hidden=hidden,
             defending=defending,

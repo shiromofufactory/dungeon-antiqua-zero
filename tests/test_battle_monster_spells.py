@@ -128,7 +128,7 @@ class MonsterSpellTest(unittest.TestCase):
 
         with (
             patch("scenes.battle.random.choice", return_value=1),
-            patch("scenes.battle.random.randint", return_value=0) as randint,
+            patch("scenes.battle.random.randint", side_effect=lambda low, high: low) as randint,
         ):
             self.assertTrue(mock._begin_monster_spell(actor, spell))
             assert mock.action_presentation is not None
@@ -141,7 +141,7 @@ class MonsterSpellTest(unittest.TestCase):
             self.assertFalse(presentation.party_slow_results[0].success)
             self.assertEqual(presentation.spell_effects, ())
             mock._apply_action_results(presentation)
-            randint.assert_called_once_with(0, 19)
+            self.assertEqual(randint.call_args_list, [((0, 19),), ((4, 6),)])
 
         self.assertEqual(target.speed_modifier, -1)
         self.assertEqual([popup.is_miss for popup in mock.spell_damage_popups], [True])
@@ -280,6 +280,133 @@ class MonsterSpellTest(unittest.TestCase):
         mock._monster_attack_target_indexes = Mock(return_value=())
 
         self.assertTrue(mock._monster_can_attempt_action(actor))
+
+
+class BattleDebuffRecoveryTest(unittest.TestCase):
+    def states(self):
+        actor = spellcaster(magic=7, spell_key="SLOW")
+        scene = spell_scene(actor)
+        return ((scene.party[0], "protection_level"), (actor.state, "defense_modifier"))
+
+    def test_runtime_spells_and_physical_effects_draw_four_to_six_turns(self):
+        from item import AdditionalEffect
+        from scenes.battle import (
+            BattleActionPresentation, BattleSlowResult, BattleBreakResult,
+            BattlePartySlowResult, BattlePartyBreakResult,
+        )
+
+        for duration in (4, 6):
+            monster = spellcaster(magic=7, spell_key="SLOW")
+            scene = spell_scene(monster)
+            scene._delay_slow_target = Mock()
+            presentation = BattleActionPresentation(
+                (), slow_results=(BattleSlowResult(0, True, 0, 0),),
+                break_results=(BattleBreakResult(0, True, 0, 0),),
+                party_slow_results=(BattlePartySlowResult(0, True, 0, 0),),
+                party_break_results=(BattlePartyBreakResult(0, True, 0, 0),),
+            )
+            with patch("scenes.battle.random.randint", return_value=duration) as draw:
+                scene._apply_action_results(presentation)
+            self.assertEqual(draw.call_count, 4)
+            for args in draw.call_args_list:
+                self.assertEqual(args.args, (4, 6))
+            for state in (scene.party[0], monster.state):
+                self.assertEqual((state.slow_turns, state.defense_down_turns), (duration, duration))
+            scene.party[0].clear_temporary_battle_conditions()
+            monster.state.restore()
+            with patch("scenes.battle.random.randint", return_value=duration):
+                scene._apply_additional_effects_to_monster(0, (AdditionalEffect.DEFENSE_DOWN,))
+                scene._apply_additional_effects_to_member(0, (AdditionalEffect.DEFENSE_DOWN,))
+            self.assertEqual(scene.party[0].defense_down_turns, duration)
+            self.assertEqual(monster.state.defense_down_turns, duration)
+
+    def test_debuffs_recover_independently_after_four_to_six_own_turns(self):
+        for duration in (4, 5, 6):
+            for state, defense in self.states():
+                with self.subTest(duration=duration, state=type(state).__name__):
+                    state.apply_slow(duration)
+                    state.apply_defense_down(6)
+                    state.apply_silence(duration)
+                    state.take_damage(1)
+                    for turn in range(1, 7):
+                        state.elapse_debuff_turn()
+                        state.elapse_silence_turn()
+                        self.assertEqual(state.slow_turns, max(0, duration - turn))
+                        self.assertEqual(state.speed_modifier, -1 if turn < duration else 0)
+                        self.assertEqual(getattr(state, defense), -1 if turn < 6 else 0)
+                        self.assertEqual(state.slow_turns, state.silenced)
+
+    def test_failed_reapplication_preserves_remaining_duration(self):
+        for state, _ in self.states():
+            state.apply_slow(4)
+            state.apply_defense_down(4)
+            state.elapse_debuff_turn()
+            self.assertFalse(state.apply_slow(6))
+            self.assertFalse(state.apply_defense_down(6))
+            if isinstance(state, Member):
+                self.assertFalse(state.apply_armor_break(6))
+            self.assertEqual((state.slow_turns, state.defense_down_turns), (3, 3))
+
+    def test_positive_buffs_survive_turns_and_cancel_pending_debuff_timers(self):
+        for state, defense in self.states():
+            state.apply_slow(4)
+            state.apply_haste()
+            state.apply_haste()
+            state.apply_haste()
+            if isinstance(state, Member):
+                state.apply_defense_down(4)
+                state.apply_protection()
+                state.apply_protection()
+                state.apply_protection()
+            for _ in range(8):
+                state.elapse_debuff_turn()
+            self.assertEqual(state.speed_modifier, 2)
+            self.assertEqual(getattr(state, defense), 2 if isinstance(state, Member) else 0)
+            self.assertEqual((state.slow_turns, state.defense_down_turns), (0, 0))
+            state.apply_slow(6)
+            self.assertEqual((state.speed_modifier, state.slow_turns), (0, 0))
+            if isinstance(state, Member):
+                state.apply_armor_break(6)
+                self.assertEqual((state.protection_level, state.defense_down_turns), (0, 0))
+
+    def test_death_and_battle_cleanup_discard_debuff_timers(self):
+        for cleanup in ("damage", "poison", "defeat", "reset"):
+            for state, defense in self.states():
+                state.apply_slow(6)
+                state.apply_defense_down(6)
+                if cleanup == "damage":
+                    state.take_damage(state.hp)
+                elif cleanup == "poison":
+                    state.take_poison_damage(state.hp)
+                elif cleanup == "defeat":
+                    state.defeat()
+                elif isinstance(state, Member):
+                    state.clear_temporary_battle_conditions()
+                else:
+                    state.restore()
+                self.assertEqual((state.slow_turns, state.defense_down_turns), (0, 0))
+                self.assertEqual((state.speed_modifier, getattr(state, defense)), (0, 0))
+
+    def test_turn_completion_recovers_both_sides_before_timeline_reinsertion(self):
+        from scenes.battle import BattleCharacter
+
+        for side in ("ally", "enemy"):
+            monster = spellcaster(magic=7, spell_key="SLOW")
+            scene = spell_scene(monster)
+            member = scene.party[0]
+            actor = BattleCharacter(member, 0, 0, 0) if side == "ally" else monster
+            state = member if side == "ally" else monster.state
+            state.apply_slow(1)
+            state.apply_defense_down(1)
+            scene._timeline_order = TimelineOrder((TimelineEntry(actor, 12, 64),))
+            scene.command_cursor = Mock()
+            scene.command_window = Mock()
+            scene._refresh_party_text_colors = Mock()
+            scene._start_timeline_animation()
+            self.assertEqual((state.slow_turns, state.defense_down_turns), (0, 0))
+            self.assertEqual(state.speed_modifier, 0)
+            self.assertEqual(scene.timeline_advance.after.entries[0].agility,
+                             member.effective_agility if side == "ally" else monster.agility)
 
 
 class MonsterDamageSpellTest(unittest.TestCase):

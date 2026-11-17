@@ -1001,6 +1001,47 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         )
         self.assertEqual(result, expected)
 
+    def test_snapshot_and_forecast_preserve_independent_debuff_durations(self):
+        member = replace(self.party[0])
+        member.apply_slow(5)
+        member.apply_defense_down(6)
+        spec = AutoCombatant.from_member(member, 0, front=True, spells=())
+        self.assertEqual((spec.slow_turns, spec.defense_down_turns), (5, 6))
+        forecast = BattleForecast(self.snapshot(spec, self.enemy()), 0)
+        actor = forecast.actors[0]
+        for turn in range(1, 7):
+            forecast.execute(0, AutoAction(BattleCommand.DEFEND))
+            self.assertEqual(actor.speed, -1 if turn < 5 else 0)
+            self.assertEqual(actor.protection, -1 if turn < 6 else 0)
+        self.assertEqual((member.slow_turns, member.defense_down_turns), (5, 6))
+
+    def test_forecast_debuffs_expire_on_skipped_confused_and_normal_enemy_turns(self):
+        for changes in ({}, {"stunned": True}, {"sleeping": 2}, {"confused": 2}):
+            enemy = self.enemy(speed=-1, protection=-1, slow_turns=1,
+                               defense_down_turns=1, **changes)
+            forecast = BattleForecast(self.snapshot(self.specs[0], enemy,
+                active=5, gauges=((5, 64), (0, 54))), 0)
+            forecast.step({5: 1.0})
+            actor = forecast.actors[5]
+            self.assertEqual((actor.speed, actor.protection), (0, 0))
+            self.assertEqual((actor.slow_turns, actor.defense_down_turns), (0, 0))
+
+    def test_forecast_draws_debuff_duration_like_silence_and_retains_buffs(self):
+        for roll, duration in ((0.0, 4), (0.5, 5), (0.999, 6)):
+            for spell_key in ("SLOW", "ARMOR BREAK"):
+                forecast = BattleForecast(self.snapshot(self.specs[0], self.enemy(defense=20)), 0)
+                actor, target = forecast.actors[0], forecast.actors[5]
+                with (patch.object(forecast, "roll", return_value=roll),
+                      patch.object(forecast, "status_success", return_value=True)):
+                    forecast.cast(actor, AutoAction(BattleCommand.SPELL, (5,), spell_key))
+                self.assertEqual(target.slow_turns if spell_key == "SLOW" else target.defense_down_turns,
+                                 duration)
+            forecast = BattleForecast(self.snapshot(replace(self.specs[0], speed=2, protection=2), self.enemy()), 0)
+            actor = forecast.actors[0]
+            for _ in range(7):
+                forecast.execute(0, AutoAction(BattleCommand.DEFEND))
+            self.assertEqual((actor.speed, actor.protection), (2, 2))
+
     def test_slow_delays_current_turn_and_future_reinsertion(self):
         forecast = BattleForecast(self.snapshot(
             self.specs[0], self.enemy(), self.enemy(number=6),

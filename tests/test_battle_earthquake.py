@@ -8,17 +8,27 @@ from tools._bootstrap import APP_ROOT  # noqa: F401
 from auto_battle_simulation import BattleForecast
 from battle_physical import resolve_earthquake_attack
 from game import Game
-from member import FormationRow
+from member import FormationRow, Race
 from monster import MonsterSpecialAction
 from monster_ai import MonsterAction, monster_action_candidates
 from resistance import ResistanceType
 from resources import load_record_array
-from scenes.battle import BattleMonster, DAMAGE_POPUP_FRAME_COUNT
+from scenes.battle import (
+    BattleMonster, DAMAGE_POPUP_FRAME_COUNT, EARTHQUAKE_SHAKE_FRAME_COUNT,
+    EARTHQUAKE_SHAKE_AMPLITUDE,
+)
 from tests import test_battle_poison_breath as poison_tests
 from tests.test_auto_battle import AutoBattleFixtures
 
 
 class EarthquakeRuleTest(unittest.TestCase):
+    def test_floating_targets_always_miss(self):
+        result = resolve_earthquake_attack(
+            attack=96, hit=100, target_defense=0, hit_roll=0, target_floating=True,
+        )
+        self.assertFalse(result.hit)
+        self.assertEqual(result.damage, 0)
+
     def test_sixty_percent_physical_defense_always_hits_without_critical(self):
         for roll in range(100):
             for defending in (False, True):
@@ -56,7 +66,11 @@ class EarthquakeRuleTest(unittest.TestCase):
 
 
 class EarthquakeSceneTest(unittest.TestCase):
-    scene = poison_tests.PoisonBreathSceneTest.scene
+    def scene(self):
+        scene, actor = poison_tests.PoisonBreathSceneTest().scene()
+        for member in scene.party:
+            member.definition = replace(member.definition, race=Race.HUMAN)
+        return scene, actor
 
     def begin(self, scene, actor, *, stun_roll=0):
         actor.special_actions = (MonsterSpecialAction.POWER_HIT, MonsterSpecialAction.EARTHQUAKE)
@@ -66,7 +80,7 @@ class EarthquakeSceneTest(unittest.TestCase):
             self.assertTrue(scene._begin_monster_earthquake(actor))
         sound.assert_called_once_with("battle_earthquake")
 
-    def test_damage_and_stun_apply_once_after_simultaneous_presentation(self):
+    def test_shake_finishes_before_damage_popups_then_waits_for_their_completion(self):
         scene, actor = self.scene()
         scene.defending_party_indexes = set()
         hp = tuple(m.hp for m in scene.party)
@@ -74,10 +88,12 @@ class EarthquakeSceneTest(unittest.TestCase):
         presentation = scene.action_presentation
         scene._show_monster_action_message.assert_called_once_with("battle.monster.earthquake")
         self.assertEqual(actor.state.mp, 0)
-        self.assertEqual(len(scene.spell_damage_popups), 2)
-        with patch("scenes.battle.random.randint", return_value=2):
-            for _ in range(DAMAGE_POPUP_FRAME_COUNT - 1):
+        self.assertEqual(scene.spell_damage_popups, [])
+        self.assertFalse(presentation.party_damage_motion_visible(0))
+        with patch("scenes.battle.random.randint", return_value=2) as shake_roll:
+            for _ in range(EARTHQUAKE_SHAKE_FRAME_COUNT - 1):
                 scene._update_action_presentation()
+            shake_roll.assert_called_with(-EARTHQUAKE_SHAKE_AMPLITUDE, EARTHQUAKE_SHAKE_AMPLITUDE)
         self.assertEqual(tuple(m.hp for m in scene.party), hp)
         self.assertFalse(any(m.stunned for m in scene.party))
         self.assertEqual(scene.screen_shake_offset, (2, 2))
@@ -87,6 +103,14 @@ class EarthquakeSceneTest(unittest.TestCase):
             self.assertTrue(scene.party[i].stunned)
         self.assertEqual(len(scene.spell_damage_popups), 2)
         self.assertEqual(scene.screen_shake_offset, (0, 0))
+        self.assertTrue(presentation.party_damage_motion_visible(0))
+        scene._complete_current_turn.assert_not_called()
+        with patch("scenes.battle.random.randint") as shake_roll:
+            for _ in range(DAMAGE_POPUP_FRAME_COUNT):
+                scene._update_spell_damage_popups()
+                scene._update_action_presentation()
+            shake_roll.assert_not_called()
+        self.assertEqual(scene.spell_damage_popups, [])
         scene._complete_current_turn.assert_called_once_with()
 
     def test_stun_uses_existing_probability_resistance_and_guard(self):
@@ -101,7 +125,7 @@ class EarthquakeSceneTest(unittest.TestCase):
                 self.begin(scene, actor, stun_roll=roll)
             self.assertEqual(tuple(r.success for r in scene.action_presentation.party_stun_results), (success, success))
 
-    def test_hidden_rear_and_flying_members_remain_targets(self):
+    def test_hidden_and_rear_grounded_members_remain_targets(self):
         scene, actor = self.scene()
         scene.defending_party_indexes = set()
         scene.hidden_party_indexes.add(0)
@@ -111,6 +135,30 @@ class EarthquakeSceneTest(unittest.TestCase):
         self.assertEqual(tuple(r.target_index for r in scene.action_presentation.party_damage_results), (0, 1))
         scene._apply_action_results(scene.action_presentation)
         self.assertTrue(all(m.stunned for m in scene.party))
+
+    def test_fairy_miss_after_shake_preserves_hp_conditions_and_pose(self):
+        scene, actor = self.scene()
+        member = scene.party[0]
+        member.definition = replace(member.definition, race=Race.FAIRY)
+        member.sleeping = 2
+        member.confused = 2
+        hp = member.hp
+        scene.defending_party_indexes = set()
+        scene.focused_target_by_party_index = {0: 0}
+        with patch("scenes.battle.random.randint", return_value=0), patch("scenes.battle.play_se"):
+            self.assertTrue(scene._begin_monster_earthquake(actor))
+            presentation = scene.action_presentation
+            self.assertEqual(scene.spell_damage_popups, [])
+            for _ in range(EARTHQUAKE_SHAKE_FRAME_COUNT):
+                scene._update_action_presentation()
+        self.assertEqual(member.hp, hp)
+        self.assertEqual((member.sleeping, member.confused), (2, 2))
+        self.assertFalse(member.stunned)
+        self.assertEqual(scene.focused_target_by_party_index[0], 0)
+        self.assertTrue(scene.spell_damage_popups[0].is_miss)
+        self.assertFalse(scene.spell_damage_popups[1].is_miss)
+        self.assertFalse(presentation.party_damage_motion_visible(0))
+        self.assertTrue(presentation.party_damage_motion_visible(1))
 
     def test_dead_and_escaped_members_are_excluded_and_no_targets_skips(self):
         for condition in ("dead", "escaped"):
@@ -143,7 +191,7 @@ class EarthquakeSceneTest(unittest.TestCase):
         scene, actor = self.scene()
         scene.defending_party_indexes = set()
         self.begin(scene, actor)
-        scene.action_presentation.shake_offset = (3, -2)
+        scene.action_presentation.shake_offset = (2, -2)
         scene.draw = Mock()
         game = Game.__new__(Game)
         game.alert = Mock(camera_x=1)
@@ -151,18 +199,18 @@ class EarthquakeSceneTest(unittest.TestCase):
         with patch("game.pyxel.camera") as camera, patch("game.pyxel.cls"):
             game.draw()
             game.draw()
-        self.assertEqual(camera.call_args_list, [call(4, -2), call(), call(4, -2), call()])
+        self.assertEqual(camera.call_args_list, [call(3, -2), call(), call(3, -2), call()])
         self.assertEqual(scene.action_presentation.elapsed_frame, 0)
-        self.assertEqual(scene.screen_shake_offset, (3, -2))
+        self.assertEqual(scene.screen_shake_offset, (2, -2))
 
 
 class EarthquakeForecastTest(AutoBattleFixtures, unittest.TestCase):
     def test_forecast_has_guaranteed_physical_damage_and_ordinary_stun(self):
         enemy = self.enemy(front=False, attack=96,
                            special_actions=(MonsterSpecialAction.POWER_HIT, MonsterSpecialAction.EARTHQUAKE))
-        ally = replace(self.specs[0], hp=100, max_hp=100, defense=10, evasion=1000, hidden=True)
+        ally = replace(self.specs[0], hp=100, max_hp=100, defense=10, evasion=1000, hidden=True, floating=False)
         immune = replace(self.specs[1], hp=100, max_hp=100, defense=10,
-                         resistances=frozenset((ResistanceType.STUN,)))
+                         resistances=frozenset((ResistanceType.STUN,)), floating=False)
         forecast = BattleForecast(self.snapshot(ally, immune, enemy), 0)
         forecast.roll = lambda actor, target, purpose: 0.99 if purpose == 2 else 0.0
         forecast.enemy_turn(forecast.actors[5])
@@ -170,6 +218,24 @@ class EarthquakeForecastTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(forecast.actors[0].hp, 100 - expected)
         self.assertTrue(forecast.actors[0].stunned)
         self.assertFalse(forecast.actors[1].stunned)
+
+    def test_member_snapshot_and_forecast_keep_fairies_immune_to_damage_and_stun(self):
+        fairy = self.specs[0]
+        self.assertTrue(fairy.floating)
+        grounded = replace(self.specs[1], floating=False, hp=100, max_hp=100, defense=10)
+        enemy = self.enemy(front=False, attack=96,
+                           special_actions=(MonsterSpecialAction.EARTHQUAKE,))
+        forecast = BattleForecast(self.snapshot(fairy, grounded, enemy), 0)
+        forecast.roll = lambda *args: 0.0
+        forecast.actors[0].sleeping = 2
+        forecast.actors[0].focus = 5
+        forecast.enemy_turn(forecast.actors[5])
+        self.assertEqual(forecast.actors[0].hp, fairy.hp)
+        self.assertEqual(forecast.actors[0].sleeping, 2)
+        self.assertEqual(forecast.actors[0].focus, 5)
+        self.assertFalse(forecast.actors[0].stunned)
+        self.assertLess(forecast.actors[1].hp, 100)
+        self.assertTrue(forecast.actors[1].stunned)
 
 
 if __name__ == "__main__":

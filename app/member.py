@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Mapping, TypeVar
 
 if __package__ == "":
+    from battle_magic import SILENCE_MIN_TURNS
     from battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -19,6 +20,7 @@ if __package__ == "":
     from skill import Skill
     from text_catalog import TextCatalog
 else:
+    from .battle_magic import SILENCE_MIN_TURNS
     from .battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -782,6 +784,8 @@ class Member:
         default_factory=dict,
     )
     ability_bonuses: AbilityBonuses = field(default_factory=AbilityBonuses)
+    slow_turns: int = 0
+    defense_down_turns: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
@@ -872,7 +876,9 @@ class Member:
         for name in ("poisoned", "paralyzed", "stunned"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a boolean")
-        for name in ("sleeping", "confused", "silenced"):
+        for name in (
+            "sleeping", "confused", "silenced", "slow_turns", "defense_down_turns",
+        ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")
@@ -1280,6 +1286,8 @@ class Member:
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
+        self.slow_turns = 0
+        self.defense_down_turns = 0
 
     def apply_healing(self, amount: int, *, cure_ailments: bool = False) -> int:
         """Apply a non-negative recovery and optionally clear all ailments."""
@@ -1411,6 +1419,18 @@ class Member:
         self.silenced = max(0, self.silenced - 1)
         return active
 
+    def elapse_debuff_turn(self) -> None:
+        """Recover negative speed/defense stages after this actor's action."""
+
+        for modifier, timer in (
+            ("speed_modifier", "slow_turns"),
+            ("protection_level", "defense_down_turns"),
+        ):
+            remaining = max(0, getattr(self, timer) - 1)
+            setattr(self, timer, remaining)
+            if remaining == 0 and getattr(self, modifier) < 0:
+                setattr(self, modifier, 0)
+
     def elapse_sleep_turn(self) -> bool:
         """Consume one sleeping action and report whether it was skipped."""
 
@@ -1441,32 +1461,51 @@ class Member:
         if self.protection_level >= MAX_PROTECTION_LEVEL:
             return False
         self.protection_level += 1
+        self.defense_down_turns = 0
         return True
 
-    def apply_defense_down(self) -> bool:
+    def apply_defense_down(self, turns: int = SILENCE_MIN_TURNS) -> bool:
         """Lower DA2's defense stage once, cancelling protection first."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
 
         if self.protection_level <= MIN_PROTECTION_LEVEL or not self.is_alive:
             return False
         self.protection_level -= 1
+        self.defense_down_turns = turns if self.protection_level < 0 else 0
         return True
 
-    def apply_armor_break(self) -> bool:
+    def apply_armor_break(self, turns: int = SILENCE_MIN_TURNS) -> bool:
         """Apply DA2's BREAK rule, cancelling every positive defense stage."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
 
         if self.protection_level <= MIN_PROTECTION_LEVEL or not self.is_alive:
             return False
         self.protection_level = (
             0 if self.protection_level > 0 else MIN_PROTECTION_LEVEL
         )
+        self.defense_down_turns = turns if self.protection_level < 0 else 0
         return True
 
-    def apply_slow(self) -> bool:
+    def apply_slow(self, turns: int = SILENCE_MIN_TURNS) -> bool:
         """Apply DA2's SLOW state or cancel any positive HASTE state."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
 
         if self.speed_modifier <= MIN_SPEED_MODIFIER:
             return False
         self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
+        self.slow_turns = turns if self.speed_modifier < 0 else 0
         return True
 
     def apply_haste(self) -> bool:
@@ -1475,6 +1514,7 @@ class Member:
         if self.speed_modifier >= MAX_SPEED_MODIFIER or not self.is_alive:
             return False
         self.speed_modifier += 1
+        self.slow_turns = 0
         return True
 
     def defeat(self) -> None:
@@ -1501,6 +1541,8 @@ class Member:
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
+        self.slow_turns = 0
+        self.defense_down_turns = 0
 
     def recover_world_map_entry_ailments(self) -> None:
         """Restore points and clear non-death conditions on world-map entry."""
@@ -1516,6 +1558,8 @@ class Member:
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
+        self.slow_turns = 0
+        self.defense_down_turns = 0
 
     def fully_recover(self) -> None:
         """Restore HP and MP and clear every current abnormal condition."""
@@ -1530,6 +1574,8 @@ class Member:
         self.stunned = False
         self.protection_level = 0
         self.speed_modifier = 0
+        self.slow_turns = 0
+        self.defense_down_turns = 0
 
     def proficiency(self, kind: ProficiencyKind) -> Proficiency:
         """Return the current proficiency for one stable kind."""

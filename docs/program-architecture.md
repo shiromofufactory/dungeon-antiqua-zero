@@ -585,6 +585,9 @@ Sound自体の編集責務はPyxel Editorに残す。
 状態異常呪文で共有する。毒の手番開始ダメージ量も同モジュールで求め、毒状態そのものと睡眠を
 解除しない毒ダメージ反映は `Member` または `MonsterBattleState` が所有する。
 速度補正から実効素早さを求める共通ルールはPyxel非依存の `app/battle_speed.py` が所有する。
+速度・防御低下の残り手番数と解除は `Member` と `MonsterBattleState` が戦闘中だけ所有し、
+`BattleScene` は付与時の期間抽選と本人の手番完了時の減算を呼び出す。
+オートバトルのスナップショットは残り手番数を複製し、予測側の状態だけを進める。
 味方の速度補正は `Member`、敵の速度補正は `MonsterBattleState` が戦闘中だけ保持し、
 `BattleScene` は現在の実効素早さをタイムライン再挿入と物理攻撃へ渡す。
 待機中の個体に対するゲージ補正と安定した並べ替えはPyxel非依存の `app/battle_timeline.py` が
@@ -1256,6 +1259,8 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 次の参加者を消費せずタイムラインから除外する。
 地震のスタンと画面揺れは `BattleActionPresentation` が保持し、Gameと単独戦闘起動口は
 Sceneの `screen_shake_offset` を既存のカメラへ合成する。Gameは揺れの乱数や時間を所有しない。
+妖精の地震回避は種族によるルールとして判定し、予測用の `AutoCombatant.floating` にも渡す。
+描画ポーズや浮遊アニメーションの現在フレームを、命中判定の根拠にしない。
 詳細は [`features/battle.md`](./features/battle.md) を参照する。
 
 情報サブメニュー、会話ログ、モンスター図鑑は `ui/information_menu.py` のOverlayが入力、

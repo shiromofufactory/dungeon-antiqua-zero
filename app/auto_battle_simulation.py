@@ -24,6 +24,8 @@ if __package__:
         selectable_attack_target_indexes,
     )
     from .battle_magic import (
+        SILENCE_MIN_TURNS,
+        SILENCE_MAX_TURNS,
         battle_healing_amount,
         member_spell_ability,
         member_spell_modifier,
@@ -77,6 +79,8 @@ else:
         selectable_attack_target_indexes,
     )
     from battle_magic import (
+        SILENCE_MIN_TURNS,
+        SILENCE_MAX_TURNS,
         battle_healing_amount,
         member_spell_ability,
         member_spell_modifier,
@@ -183,6 +187,8 @@ class ForecastActor:
     cover: int | None
     focus: int | None
     removed: bool = False
+    slow_turns: int = 0
+    defense_down_turns: int = 0
 
     @classmethod
     def create(cls, spec: AutoCombatant, prior: float, case: int) -> ForecastActor:
@@ -211,6 +217,8 @@ class ForecastActor:
             spec.defending,
             spec.cover,
             spec.focus,
+            slow_turns=spec.slow_turns,
+            defense_down_turns=spec.defense_down_turns,
         )
 
     @property
@@ -271,6 +279,7 @@ class ForecastActor:
             self.sleeping = self.confused = self.silenced = self.protection = (
                 self.speed
             ) = 0
+            self.slow_turns = self.defense_down_turns = 0
             self.focus = self.cover = None
         return old - self.hp
 
@@ -970,7 +979,12 @@ class BattleForecast:
                 target.silenced, 4 + int(self.roll(actor, target.spec.number, 11) * 3)
             )
         elif effect is AdditionalEffect.DEFENSE_DOWN:
-            target.protection = max(-1, target.protection - 1)
+            if target.protection > -1:
+                target.protection -= 1
+                target.defense_down_turns = (
+                    self.debuff_turns(actor, target)
+                    if target.protection < 0 else 0
+                )
         target.interrupt_focus()
 
     def heal_result(self, actor, target, spell, u):
@@ -1006,8 +1020,10 @@ class BattleForecast:
                     target.sleeping = target.confused = 0
             elif spell.action is SpellAction.PROTECTION:
                 target.protection = min(2, target.protection + 1)
+                target.defense_down_turns = 0
             elif spell.action is SpellAction.HASTE:
                 target.speed = min(2, target.speed + 1)
+                target.slow_turns = 0
             elif spell.action is SpellAction.CURE:
                 target.poisoned = target.paralyzed = False
                 target.sleeping = target.confused = 0
@@ -1016,6 +1032,7 @@ class BattleForecast:
                 target.poisoned = target.paralyzed = target.stunned = False
                 target.sleeping = target.confused = target.silenced = 0
                 target.protection = target.speed = 0
+                target.slow_turns = target.defense_down_turns = 0
                 target.hidden = False
                 target.focus = target.cover = None
                 if target.spec.number not in self.order.actors:
@@ -1074,10 +1091,14 @@ class BattleForecast:
                         elif spell.action is SpellAction.CONFUSE:
                             self.apply_extra(actor, target, AdditionalEffect.CONFUSE)
                         elif spell.action is SpellAction.SLOW:
-                            self.apply_slow(target)
+                            self.apply_slow(target, actor)
                         elif spell.action is SpellAction.BREAK:
                             target.protection = (
                                 0 if target.protection > 0 else -1
+                            )
+                            target.defense_down_turns = (
+                                self.debuff_turns(actor, target)
+                                if target.protection < 0 else 0
                             )
                         elif spell.action is SpellAction.SILENCE:
                             target.silenced = max(
@@ -1091,12 +1112,23 @@ class BattleForecast:
                             target.poisoned = True
         actor.hidden = False
 
-    def apply_slow(self, target: ForecastActor) -> None:
+    def debuff_turns(self, actor: ForecastActor, target: ForecastActor) -> int:
+        return SILENCE_MIN_TURNS + int(
+            self.roll(actor, target.spec.number, 11)
+            * (SILENCE_MAX_TURNS - SILENCE_MIN_TURNS + 1)
+        )
+
+    def apply_slow(
+        self, target: ForecastActor, actor: ForecastActor | None = None,
+    ) -> None:
         """Use the live speed stages and immediate waiting-gauge penalty."""
 
         if not target.is_alive or target.speed <= -1:
             return
         target.speed = 0 if target.speed > 0 else -1
+        target.slow_turns = (
+            self.debuff_turns(actor or target, target) if target.speed < 0 else 0
+        )
         for index, entry in enumerate(self.order.entries):
             if entry.actor == target.spec.number:
                 self.order = adjust_timeline_entry_gauge(
@@ -1269,7 +1301,10 @@ class BattleForecast:
                     attack=actor.spec.attack, hit=actor.spec.hit,
                     target_defense=target.defense, target_defending=target.defending,
                     hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
+                    target_floating=target.spec.floating,
                 )
+                if not result.hit:
+                    continue
                 stun = resolve_physical_additional_effect(
                     effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
                     effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
@@ -1353,10 +1388,14 @@ class BattleForecast:
                             elif spell.action is SpellAction.SILENCE:
                                 self.apply_extra(actor, target, AdditionalEffect.SILENCE)
                             elif spell.action is SpellAction.SLOW:
-                                self.apply_slow(target)
+                                self.apply_slow(target, actor)
                             else:
                                 target.protection = (
                                     0 if target.protection > 0 else -1
+                                )
+                                target.defense_down_turns = (
+                                    self.debuff_turns(actor, target)
+                                    if target.protection < 0 else 0
                                 )
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
             targets = available if action is MonsterAction.CHARGE else melee
@@ -1618,6 +1657,13 @@ class BattleForecast:
                 a.hidden = False
 
     def advance(self, actor, delay):
+        for modifier, timer in (
+            ("speed", "slow_turns"), ("protection", "defense_down_turns"),
+        ):
+            remaining = max(0, getattr(actor, timer) - 1)
+            setattr(actor, timer, remaining)
+            if remaining == 0 and getattr(actor, modifier) < 0:
+                setattr(actor, modifier, 0)
         if not actor.spec.enemy:
             actor.silenced = max(0, actor.silenced - 1)
         key = (

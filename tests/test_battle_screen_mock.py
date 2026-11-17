@@ -559,6 +559,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.attack_presentation = None
         mock.monster_attack_target_index = 0
         mock.monster_attack_critical = True
+        mock.monster_attack_damage = 10
         mock.monster_attack_animation_frame = 0
         mock.party_visuals = (
             SimpleNamespace(member=SimpleNamespace(formation_row=FormationRow.FRONT)),

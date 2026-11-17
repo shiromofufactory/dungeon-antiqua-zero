@@ -9,11 +9,13 @@ from types import MappingProxyType
 from typing import Protocol
 
 if __package__ == "":
+    from battle_magic import SILENCE_MIN_TURNS
     from battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
     )
 else:
+    from .battle_magic import SILENCE_MIN_TURNS
     from .battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -328,6 +330,8 @@ class MonsterBattleState:
     stunned: bool = False
     defense_modifier: int = 0
     speed_modifier: int = 0
+    slow_turns: int = 0
+    defense_down_turns: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.max_hp, bool) or not isinstance(self.max_hp, int):
@@ -364,6 +368,12 @@ class MonsterBattleState:
             raise TypeError("silenced must be an integer")
         if self.silenced < 0:
             raise ValueError("silenced must not be negative")
+        for name in ("slow_turns", "defense_down_turns"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value < 0:
+                raise ValueError(f"{name} must not be negative")
         if not isinstance(self.stunned, bool):
             raise TypeError("stunned must be a boolean")
         if (
@@ -424,6 +434,8 @@ class MonsterBattleState:
             self.stunned = False
             self.defense_modifier = 0
             self.speed_modifier = 0
+            self.slow_turns = 0
+            self.defense_down_turns = 0
         return previous - self.hp
 
     def apply_healing(self, amount: int) -> int:
@@ -496,7 +508,21 @@ class MonsterBattleState:
             self.stunned = False
             self.defense_modifier = 0
             self.speed_modifier = 0
+            self.slow_turns = 0
+            self.defense_down_turns = 0
         return previous - self.hp
+
+    def elapse_debuff_turn(self) -> None:
+        """Recover negative speed/defense stages after this actor's action."""
+
+        for modifier, timer in (
+            ("speed_modifier", "slow_turns"),
+            ("defense_modifier", "defense_down_turns"),
+        ):
+            remaining = max(0, getattr(self, timer) - 1)
+            setattr(self, timer, remaining)
+            if remaining == 0 and getattr(self, modifier) < 0:
+                setattr(self, modifier, 0)
 
     def elapse_sleep_turn(self) -> bool:
         """Consume one sleeping action and report whether it was skipped."""
@@ -543,12 +569,18 @@ class MonsterBattleState:
         self.stunned = False
         return True
 
-    def apply_defense_down(self) -> bool:
-        """Apply DA2's single persistent physical-defense reduction."""
+    def apply_defense_down(self, turns: int = SILENCE_MIN_TURNS) -> bool:
+        """Apply DA2's single temporary physical-defense reduction."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
 
         if self.defense_modifier < 0 or not self.is_alive:
             return False
         self.defense_modifier = -1
+        self.defense_down_turns = turns
         return True
 
     def modified_defense(self, base_defense: int) -> int:
@@ -562,12 +594,18 @@ class MonsterBattleState:
             return base_defense
         return max(0, int((base_defense - 10) * 0.5))
 
-    def apply_slow(self) -> bool:
+    def apply_slow(self, turns: int = SILENCE_MIN_TURNS) -> bool:
         """Apply SLOW once, cancelling a positive speed modifier first."""
+
+        if isinstance(turns, bool) or not isinstance(turns, int):
+            raise TypeError("turns must be an integer")
+        if turns <= 0:
+            raise ValueError("turns must be positive")
 
         if self.speed_modifier <= MIN_SPEED_MODIFIER:
             return False
         self.speed_modifier = 0 if self.speed_modifier > 0 else MIN_SPEED_MODIFIER
+        self.slow_turns = turns if self.speed_modifier < 0 else 0
         return True
 
     def apply_haste(self) -> bool:
@@ -576,6 +614,7 @@ class MonsterBattleState:
         if self.speed_modifier >= MAX_SPEED_MODIFIER or not self.is_alive:
             return False
         self.speed_modifier += 1
+        self.slow_turns = 0
         return True
 
     def spend_mp(self, amount: int) -> bool:
@@ -600,6 +639,8 @@ class MonsterBattleState:
         self.stunned = False
         self.defense_modifier = 0
         self.speed_modifier = 0
+        self.slow_turns = 0
+        self.defense_down_turns = 0
 
     def restore(self) -> None:
         """Restore initial HP when restarting a battle fixture."""
@@ -613,6 +654,8 @@ class MonsterBattleState:
         self.stunned = False
         self.defense_modifier = 0
         self.speed_modifier = 0
+        self.slow_turns = 0
+        self.defense_down_turns = 0
 
 
 def promote_rear_monsters_if_front_empty(

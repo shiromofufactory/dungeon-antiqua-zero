@@ -51,6 +51,8 @@ from battle_commands import (
 )
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
+    SILENCE_MIN_TURNS,
+    SILENCE_MAX_TURNS,
     SpellAffinity,
     battle_healing_amount,
     member_spell_ability,
@@ -231,7 +233,8 @@ MONSTER_DRAIN_HEAL_DELAY = 10  # DA2's five frames at 60 fps.
 BATTLE_POISON_BREATH_SE_ID = "battle_poison_breath"
 BATTLE_FIRE_BREATH_SE_ID = "battle_fire_breath"
 BATTLE_EARTHQUAKE_SE_ID = "battle_earthquake"
-EARTHQUAKE_SHAKE_AMPLITUDE = 3
+EARTHQUAKE_SHAKE_AMPLITUDE = 2
+EARTHQUAKE_SHAKE_FRAME_COUNT = 35
 BREATH_TINT_FRAME_COUNT = 16
 # DA2 palette color 2; ZERO's reordered palette uses gray at that index.
 POISON_BREATH_TINT_COLOR = 0x7E2072
@@ -467,8 +470,6 @@ CONFUSE_ICON_SOURCE_Y = 128
 CONFUSE_ICON_SIZE = 8
 CONFUSE_ICON_PATTERN_COUNT = 4
 CONFUSE_ICON_PATTERN_FRAME_COUNT = 4 * FPS // DA2_REFERENCE_FPS
-SILENCE_MIN_TURNS = 4
-SILENCE_MAX_TURNS = 6
 SILENCE_ICON_SOURCE_X = 56
 SILENCE_ICON_SOURCE_Y = 16
 SILENCE_ICON_SIZE = 8
@@ -879,6 +880,7 @@ class BattleSpellDamageResult:
     popup_y: int
     affinity_x: int
     affinity_y: int
+    is_miss: bool = False
 
 
 @dataclass(frozen=True)
@@ -1150,10 +1152,11 @@ class BattleActionPresentation:
     def party_damage_motion_visible(self, index: int) -> bool:
         visible = (
             self.elapsed_frame < self.result_start_frame
-            if self.breath_tint_color is not None or self.earthquake else self.results_applied
+            if self.breath_tint_color is not None else self.results_applied
         )
         return visible and any(
             result.target_index == index
+            and not result.is_miss
             and (self.breath_tint_color is not None or self.earthquake or result.damage > 0)
             for result in self.party_damage_results
         )
@@ -3344,6 +3347,8 @@ class BattleScene:
                     stunned=monster.state.stunned,
                     protection=monster.state.defense_modifier,
                     speed=monster.state.speed_modifier,
+                    slow_turns=monster.state.slow_turns,
+                    defense_down_turns=monster.state.defense_down_turns,
                     known_fields=fields,
                     hp_displayed=hp_shown,
                     net_damage=observations.enemy_net_damage.get(index, 0),
@@ -5968,7 +5973,9 @@ class BattleScene:
                 monster.state.apply_poison()
         for result in presentation.slow_results:
             monster = self.monsters[result.target_index]
-            if result.success and monster.state.apply_slow():
+            if result.success and monster.state.apply_slow(
+                random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+            ):
                 self._delay_slow_target(monster)
             else:
                 damage_popups.append(
@@ -5982,7 +5989,9 @@ class BattleScene:
         for result in presentation.break_results:
             monster = self.monsters[result.target_index]
             if result.success:
-                monster.state.apply_defense_down()
+                monster.state.apply_defense_down(
+                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                )
             else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
@@ -6019,9 +6028,9 @@ class BattleScene:
 
         for result in presentation.party_damage_results:
             self._apply_monster_attack_damage(result.target_index, result.damage)
-            if presentation.breath_tint_color is None and not presentation.earthquake:
+            if presentation.breath_tint_color is None:
                 damage_popups.append(
-                    BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage)
+                    BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage, is_miss=result.is_miss)
                 )
 
         for result in presentation.party_poison_results:
@@ -6070,7 +6079,9 @@ class BattleScene:
                 )
         for result in presentation.party_slow_results:
             member = self.party[result.target_index]
-            if result.success and member.apply_slow():
+            if result.success and member.apply_slow(
+                random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+            ):
                 self._delay_slow_target(member)
             else:
                 damage_popups.append(
@@ -6084,7 +6095,9 @@ class BattleScene:
         for result in presentation.party_break_results:
             member = self.party[result.target_index]
             if result.success:
-                member.apply_armor_break()
+                member.apply_armor_break(
+                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                )
             else:
                 damage_popups.append(
                     BattleSpellDamagePopup(
@@ -7234,7 +7247,9 @@ class BattleScene:
             elif effect is AdditionalEffect.STUN:
                 changed = monster.state.apply_stun()
             elif effect is AdditionalEffect.DEFENSE_DOWN:
-                changed = monster.state.apply_defense_down()
+                changed = monster.state.apply_defense_down(
+                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                )
             if changed:
                 applied.append(effect)
         if applied:
@@ -7964,6 +7979,9 @@ class BattleScene:
         actor = self._timeline_order.entries[0].actor
         if isinstance(actor, BattleCharacter) and isinstance(actor.member, Member):
             actor.member.elapse_silence_turn()
+            actor.member.elapse_debuff_turn()
+        elif isinstance(actor, BattleMonster):
+            actor.state.elapse_debuff_turn()
         self.timeline_advance = complete_timeline_action(
             self._timeline_order,
             current_agility=self._actor_agility(actor),
@@ -9569,28 +9587,27 @@ class BattleScene:
                 attack=actor.combat_stats.attack, hit=actor.combat_stats.hit,
                 target_defense=member.battle_stats.defense,
                 target_defending=defending, hit_roll=random.randint(0, 99),
+                target_floating=self._party_member_is_fairy(index),
             )
-            stun = resolve_physical_additional_effect(
+            stun_success = result.hit and resolve_physical_additional_effect(
                 effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
                 effect_roll=random.randint(0, 99), target_is_member=True,
                 target_is_resistant=ResistanceType.STUN in member.resistances,
                 target_defending=defending,
-            )
+            ).success
             x, y = self._party_draw_position(index) or (self._party_sprite_x(index), PARTY_SPRITE_Y[index])
             damages.append(BattleSpellDamageResult(
                 index, result.damage, SpellAffinity.NORMAL,
                 x + 6, y + 16, x + 8 - AFFINITY_ICON_WIDTH // 2, y - 8,
+                is_miss=not result.hit,
             ))
-            stuns.append(BattlePartyStunResult(index, stun.success))
+            stuns.append(BattlePartyStunResult(index, stun_success))
         self.action_presentation = BattleActionPresentation(
             (), party_damage_results=tuple(damages), party_stun_results=tuple(stuns),
-            earthquake=True, result_start_frame=DAMAGE_POPUP_FRAME_COUNT,
-            post_effect_wait_frame_count=DAMAGE_POPUP_FRAME_COUNT,
+            earthquake=True, result_start_frame=EARTHQUAKE_SHAKE_FRAME_COUNT,
+            post_effect_wait_frame_count=EARTHQUAKE_SHAKE_FRAME_COUNT + DAMAGE_POPUP_FRAME_COUNT,
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
-        self.spell_damage_popups.extend(
-            BattleSpellDamagePopup(r.popup_x, r.popup_y, r.damage) for r in damages
-        )
         self._show_monster_action_message("battle.monster.earthquake")
         play_se(BATTLE_EARTHQUAKE_SE_ID)
         return True
@@ -10270,7 +10287,8 @@ class BattleScene:
         )
         self.monster_attack_target_index = target_index
         self.monster_attack_damage = result.damage
-        self.monster_attack_critical = getattr(result, "critical", False)
+        # Guard can turn a critical roll into a miss; only show landed damage.
+        self.monster_attack_critical = bool(getattr(result, "critical", False) and result.damage > 0)
         self.monster_attack_additional_effects = (
             self._resolve_monster_attack_additional_effects(
                 actor,
@@ -10280,7 +10298,7 @@ class BattleScene:
         )
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
-        if result.hit:
+        if result.hit and result.damage > 0:
             if actor.additional_effect is AdditionalEffect.DRAIN and result.damage > 0:
                 position = self._party_draw_position(target_index)
                 if position is not None:
@@ -10322,7 +10340,7 @@ class BattleScene:
             actor_index=actor_index,
             target_index=target_index,
             damage=result.damage,
-            is_critical=getattr(result, "critical", False),
+            is_critical=bool(getattr(result, "critical", False) and result.damage > 0),
             start_x=start_x,
             start_y=start_y,
             target_x=target_x,
@@ -10675,7 +10693,9 @@ class BattleScene:
                     changed = True
             elif effect is AdditionalEffect.DEFENSE_DOWN:
                 if isinstance(member, Member):
-                    changed = member.apply_defense_down()
+                    changed = member.apply_defense_down(
+                        random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                    )
             if changed:
                 applied.append(effect)
         if applied:
@@ -11034,6 +11054,7 @@ class BattleScene:
             getattr(self, "phase", None) is BattlePhase.MONSTER_ACTION
             and getattr(self, "monster_attack_target_index", None) is not None
             and bool(getattr(self, "monster_attack_critical", False))
+            and bool(getattr(self, "monster_attack_damage", 0))
             and 0
             <= getattr(self, "monster_attack_animation_frame", -1)
             < CRITICAL_FLASH_FRAME_COUNT
@@ -11085,6 +11106,7 @@ class BattleScene:
             getattr(self, "phase", None) is BattlePhase.MONSTER_ACTION
             and target_index is not None
             and bool(getattr(self, "monster_attack_critical", False))
+            and bool(getattr(self, "monster_attack_damage", 0))
             and 0 <= animation_frame < CRITICAL_MARKER_FRAME_COUNT
         ):
             position = self._party_draw_position(target_index)

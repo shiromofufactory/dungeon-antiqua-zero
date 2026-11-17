@@ -11,6 +11,9 @@ else:
     from .resistance import ResistanceType
 
 
+SILENCE_MIN_TURNS = 4
+SILENCE_MAX_TURNS = 6
+
 DA2_DEFAULT_ITEM_SPELL_ABILITY = 20
 DA2_MINIMUM_HEAL_RATE = 0.8
 DA2_HEAL_RATE_RANGE = 0.4

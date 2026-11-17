@@ -342,14 +342,16 @@ def resolve_physical_additional_effect(
 
 def resolve_earthquake_attack(
     *, attack: int, hit: int, target_defense: int, hit_roll: int,
-    target_defending: bool = False,
+    target_defending: bool = False, target_floating: bool = False,
 ) -> PhysicalAttackResult:
-    """Use 60% attack and normal damage, bypassing evasion and criticals.
+    """Miss floating targets; otherwise use 60% attack without evasion or criticals.
 
     Guard halves damage without its extra evasion check, so even a zero-
     damage result remains a hit for the ordinary additional-effect rules.
     """
 
+    if target_floating:
+        return PhysicalAttackResult(hit=False, damage=0, adjusted_hit=float(hit), hit_value=0)
     result = resolve_physical_attack(
         attack=_nonnegative_integer(attack, "attack") * 3 // 5,
         hit=hit, target_defense=target_defense, target_evasion=0,
