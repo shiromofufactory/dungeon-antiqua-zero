@@ -2423,6 +2423,7 @@ class BattleScene:
         self.surprise_roll: SurpriseRoll | None = None
         self.surprise_prevented_by_index: int | None = None
         self.surprise_pending_party_indexes: set[int] = set()
+        self.surprise_deferred_party_indexes: set[int] = set()
         self.surprise_original_front_rows: dict[int, bool] = {}
         self.surprise_front_party_indexes: set[int] | None = None
         self.surprise_temporary_front_party_indexes: set[int] = set()
@@ -3013,6 +3014,7 @@ class BattleScene:
         self.surprise_roll = None
         self.surprise_prevented_by_index = None
         self.surprise_pending_party_indexes = set()
+        self.surprise_deferred_party_indexes = set()
         self.surprise_original_front_rows = {}
         self.surprise_front_party_indexes = None
         self.surprise_temporary_front_party_indexes = set(
@@ -3378,6 +3380,7 @@ class BattleScene:
             frozenset(
                 t.value for t, k in SPELL_PROFICIENCY_BY_TYPE.items() if k in used
             ),
+            surprise_deferred=frozenset(self.surprise_deferred_party_indexes),
         )
 
     def _update_auto_thinking(self) -> None:
@@ -3793,43 +3796,63 @@ class BattleScene:
         self._restore_surprise_formation(completion)
         return True
 
-    def _skip_surprised_party_turn(self, party_index: int) -> bool:
+    def _skip_surprised_party_turn(
+        self, party_index: int, *, status_skips_turn: bool = False,
+    ) -> bool:
         """Consume one surprise handoff, including repeated-turn failsafe skips."""
 
         if not getattr(self, "surprise_active", False):
             return False
+        if status_skips_turn or self._member_focus_is_interrupted(self.party[party_index]):
+            self.surprise_deferred_party_indexes.add(party_index)
         self.surprise_pending_party_indexes.discard(party_index)
         if self.surprise_pending_party_indexes:
             self._start_timeline_animation()
         else:
             self._restore_surprise_formation(
-                FormationAnimationCompletion.START_TIMELINE
+                FormationAnimationCompletion.START_TIMELINE,
             )
         return True
 
     def _restore_surprise_formation(
         self,
         completion: FormationAnimationCompletion,
+        *,
+        party_indexes: tuple[int, ...] | None = None,
     ) -> None:
-        """Remove the battle-only back-attack rows and continue the timeline."""
+        """Restore ready members, retaining back-attack rows until recovery."""
 
         active_indexes = self._active_party_indexes()
+        restoring_indexes = tuple(
+            index
+            for index in (active_indexes if party_indexes is None else party_indexes)
+            if index in self.surprise_original_front_rows
+            and (
+                party_indexes is not None
+                or index not in getattr(self, "surprise_deferred_party_indexes", set())
+            )
+            and not self._member_focus_is_interrupted(self.party[index])
+        )
         start_x_by_index = {
             index: self._party_sprite_x(index) for index in active_indexes
         }
         self.surprise_active = False
         self.surprise_pending_party_indexes.clear()
-        self.surprise_front_party_indexes = None
-        self.temporary_front_party_indexes.clear()
-        self.temporary_front_party_indexes.update(
-            self.surprise_temporary_front_party_indexes
-        )
+        for index in restoring_indexes:
+            self.surprise_original_front_rows.pop(index)
+            getattr(self, "surprise_deferred_party_indexes", set()).discard(index)
+            if index in self.surprise_temporary_front_party_indexes:
+                self.temporary_front_party_indexes.add(index)
+            else:
+                self.temporary_front_party_indexes.discard(index)
+        if not self.surprise_original_front_rows:
+            self.surprise_front_party_indexes = None
         if active_indexes and not any(
             self._party_member_is_front_row(index) for index in active_indexes
         ):
             # Preserve the ordinary battle invariant without walking a member
             # backward only to promote them again on the next handoff.
-            self.temporary_front_party_indexes.update(active_indexes)
+            self.temporary_front_party_indexes.update(restoring_indexes)
         destination_x_by_index = {
             index: self._party_sprite_x(index) for index in active_indexes
         }
@@ -3838,7 +3861,6 @@ class BattleScene:
             for index in active_indexes
             if start_x_by_index[index] != destination_x_by_index[index]
         )
-        self.surprise_original_front_rows = {}
         if not moving_indexes:
             self._continue_after_formation(completion)
             return
@@ -8336,6 +8358,19 @@ class BattleScene:
                 for index, visual in enumerate(self.party_visuals)
                 if visual is actor
             )
+            if (
+                not getattr(self, "surprise_active", False)
+                and self.active_party_index
+                in getattr(self, "surprise_original_front_rows", {})
+                and not self._member_focus_is_interrupted(actor.member)
+            ):
+                # Restore before turn-start effects so resuming the same head
+                # cannot apply poison, recovery, or status timers twice.
+                self._restore_surprise_formation(
+                    FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD,
+                    party_indexes=(self.active_party_index,),
+                )
+                return
             self.blinking_monster_index = None
             self.monster_blink_frames_remaining = 0
             self.defending_party_indexes.discard(self.active_party_index)
@@ -8372,7 +8407,9 @@ class BattleScene:
                     None,
                 )
                 status_skips_turn = True
-            if self._skip_surprised_party_turn(self.active_party_index):
+            if self._skip_surprised_party_turn(
+                self.active_party_index, status_skips_turn=status_skips_turn,
+            ):
                 return
             if status_skips_turn:
                 self._start_timeline_animation()

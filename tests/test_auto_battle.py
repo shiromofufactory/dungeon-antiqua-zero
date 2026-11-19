@@ -1254,6 +1254,48 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         enemy.damage(1)
         self.assertEqual(enemy.sleeping, 0)
 
+    def test_surprise_forecast_defers_rows_until_first_actionable_turn(self):
+        for status, value in (
+            ("sleeping", 2), ("sleeping", 1), ("paralyzed", True),
+            ("confused", 2), ("stunned", True),
+        ):
+            with self.subTest(status=status, value=value):
+                snapshot = replace(
+                    self.snapshot(
+                        replace(self.specs[0], front=False),
+                        replace(self.specs[1], front=True, **{status: value}),
+                        self.enemy(),
+                    ),
+                    surprise_pending=frozenset((0, 1)),
+                    surprise_original_rows=((0, True), (1, False)),
+                )
+                forecast = BattleForecast(snapshot, 0)
+                front, rear = forecast.actors[0], forecast.actors[1]
+                self.assertTrue(forecast.prepare_turn(rear))
+                self.assertTrue(forecast.prepare_turn(front))
+                self.assertTrue(front.front)
+                self.assertTrue(rear.front)
+                self.assertEqual(forecast.original_rows, {1: False})
+
+                setattr(rear, status, 0)
+                forecast.normalize()
+                self.assertTrue(rear.front)
+                self.assertFalse(forecast.prepare_turn(rear))
+                self.assertFalse(rear.front)
+                self.assertEqual(forecast.original_rows, {})
+
+    def test_surprise_forecast_keeps_deferred_rows_from_snapshot(self):
+        snapshot = replace(
+            self.snapshot(self.specs[0], self.specs[1], self.enemy()),
+            surprise_original_rows=((1, False),),
+            surprise_deferred=frozenset((1,)),
+        )
+        forecast = BattleForecast(snapshot, 0)
+        forecast.normalize()
+        self.assertTrue(forecast.actors[1].front)
+        self.assertFalse(forecast.prepare_turn(forecast.actors[1]))
+        self.assertFalse(forecast.actors[1].front)
+
     def test_enemy_turn_healing_matches_poison_net_change_and_caps_hp(self):
         for healing, poisoned, weak, hp, expected in (
             (1, False, False, 10, 18),
@@ -1641,6 +1683,7 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             "defending_party_indexes",
             "identified_monster_indexes",
             "surprise_pending_party_indexes",
+            "surprise_deferred_party_indexes",
             "temporary_front_party_indexes",
         ):
             setattr(scene, name, set())

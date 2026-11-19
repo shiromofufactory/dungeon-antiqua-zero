@@ -338,6 +338,7 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         )
         scene.temporary_front_party_indexes = set()
         scene.escaped_party_indexes = set()
+        scene.surprise_deferred_party_indexes = set()
         return scene
 
     def test_surprise_inverts_mixed_rows_without_mutating_members(self) -> None:
@@ -542,6 +543,68 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         self.assertTrue(scene._party_member_is_front_row(1))
         self.assertIs(living_rear.formation_row, FormationRow.BACK)
         scene._start_timeline_animation.assert_called_once_with()
+
+    def test_incapacitated_member_restores_on_first_actionable_turn(self) -> None:
+        for status, value in (
+            ("sleeping", 2), ("sleeping", 1), ("paralyzed", True),
+            ("confused", 2), ("stunned", True),
+        ):
+            with self.subTest(status=status, value=value):
+                front = self._member(10, FormationRow.FRONT)
+                rear = self._member(10, FormationRow.BACK)
+                setattr(rear, status, value)
+                scene = self._scene(front, rear)
+                scene.party_visuals = tuple(
+                    BattleCharacter(member, 0, 0, index)
+                    for index, member in enumerate(scene.party)
+                )
+                scene.defending_party_indexes = set()
+                scene.command_cursor = Mock()
+                scene.command_window = Mock()
+                scene.initial_global_command_pending = False
+                for method in (
+                    "_remove_defeated_party_from_timeline",
+                    "_refresh_party_text_colors", "_start_timeline_animation",
+                    "_hide_command_guide", "_refresh_command_options",
+                    "_select_initial_member_command", "_refresh_input_guide",
+                ):
+                    setattr(scene, method, Mock())
+                scene._party_is_defeated = Mock(return_value=False)
+                scene._apply_turn_start_hp_change = Mock(return_value=False)
+                scene._begin_focused_attack = Mock(return_value=False)
+                with patch("scenes.battle.pyxel.rndi", return_value=0):
+                    scene._prepare_surprise()
+
+                # The disabled member receives their initial handoff first.
+                scene.timeline = (scene.party_visuals[1], scene.party_visuals[0])
+                scene._activate_timeline_head()
+                scene.timeline = tuple(scene.party_visuals)
+                scene._activate_timeline_head()
+                for _frame in range(8):
+                    scene._update_formation_animation()
+
+                self.assertFalse(scene.surprise_active)
+                self.assertTrue(scene._party_member_is_front_row(0))
+                self.assertTrue(scene._party_member_is_front_row(1))
+                self.assertEqual(scene.surprise_original_front_rows, {1: False})
+                scene.command_window.open.assert_not_called()
+
+                # Recovery itself leaves the effective row unchanged.
+                setattr(rear, status, 0)
+                self.assertTrue(scene._party_member_is_front_row(1))
+                scene.timeline = (scene.party_visuals[1], scene.party_visuals[0])
+                scene._activate_timeline_head()
+                self.assertEqual(scene.formation_actor_indexes, (1,))
+                self.assertEqual(scene._apply_turn_start_hp_change.call_count, 2)
+                for _frame in range(8):
+                    scene._update_formation_animation()
+
+                self.assertFalse(scene._party_member_is_front_row(1))
+                self.assertEqual(scene.surprise_original_front_rows, {})
+                self.assertEqual(scene._apply_turn_start_hp_change.call_count, 3)
+                scene.command_window.open.assert_called_once_with()
+                self.assertEqual(scene._start_timeline_animation.call_count, 2)
+                self.assertIs(rear.formation_row, FormationRow.BACK)
 
 
 class BattleEscapeStaggerTest(unittest.TestCase):

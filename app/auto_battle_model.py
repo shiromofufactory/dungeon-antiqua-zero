@@ -266,6 +266,7 @@ class AutoBattleSnapshot:
     surprise_pending: frozenset[int] = frozenset()
     surprise_original_rows: tuple[tuple[int, bool], ...] = ()
     used_spell_types: frozenset[str] = frozenset()
+    surprise_deferred: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
         numbers = {c.number for c in self.combatants}

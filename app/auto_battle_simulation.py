@@ -339,6 +339,7 @@ class BattleForecast:
                 self.known.setdefault(species, set()).update(actor.spec.known_fields)
         self.hp_shown = {n for n, a in self.actors.items() if a.spec.hp_displayed}
         self.surprise = set(snapshot.surprise_pending)
+        self.surprise_deferred = set(snapshot.surprise_deferred)
         self.original_rows = dict(snapshot.surprise_original_rows)
         self.info = 0.0
         self.died: set[int] = set()
@@ -1633,6 +1634,8 @@ class BattleForecast:
         if not actor.spec.enemy:
             actor.defending = False
             actor.cover = None
+            if not self.surprise:
+                self.restore_surprise_rows((actor,))
         poison = (
             poison_tick_damage(
                 max_hp=actor.max_hp,
@@ -1662,7 +1665,14 @@ class BattleForecast:
             skipped = True
         if not actor.spec.enemy and self.surprise:
             # While anyone still owes a surprise skip, repeated fast turns skip too.
+            if skipped or actor.confused:
+                self.surprise_deferred.add(actor.spec.number)
             self.surprise.discard(actor.spec.number)
+            if not self.surprise:
+                self.restore_surprise_rows(
+                    a for a in self.allies()
+                    if a.spec.number not in self.surprise_deferred
+                )
             skipped = True
         if skipped and not actor.spec.enemy:
             actor.focus = None
@@ -1672,17 +1682,33 @@ class BattleForecast:
             self.normalize()
         return skipped or not actor.is_alive
 
+    def restore_surprise_rows(self, actors):
+        restored = []
+        for actor in actors:
+            if (
+                actor.spec.number in self.original_rows
+                and actor.is_alive
+                and not (actor.sleeping or actor.paralyzed or actor.confused or actor.stunned)
+            ):
+                actor.front = self.original_rows.pop(actor.spec.number)
+                self.surprise_deferred.discard(actor.spec.number)
+                restored.append(actor)
+        if restored and not any(a.front for a in self.allies()):
+            for actor in restored:
+                actor.front = True
+
     def normalize(self):
         for n, a in self.actors.items():
             if not a.is_alive and n in self.original_alive:
                 self.died.add(n)
         allies = self.allies()
         self.defeated |= not allies or all(a.paralyzed for a in allies)
+        surprise_was_active = bool(self.surprise)
         self.surprise.intersection_update(a.spec.number for a in allies)
-        if not self.surprise and self.original_rows:
-            for n, front in self.original_rows.items():
-                self.actors[n].front = front
-            self.original_rows.clear()
+        if surprise_was_active and not self.surprise:
+            self.restore_surprise_rows(
+                a for a in allies if a.spec.number not in self.surprise_deferred
+            )
         if allies and not any(a.front for a in allies):
             for a in allies:
                 a.front = True
