@@ -166,8 +166,6 @@ from tools.screen_mocks.battle import (
     SILENCE_ICON_SIZE,
     SILENCE_ICON_SOURCE_X,
     SILENCE_ICON_SOURCE_Y,
-    SILENCE_MAX_TURNS,
-    SILENCE_MIN_TURNS,
     HASTE_ICON_PATTERN_FRAME_COUNTS,
     SLOW_ICON_PATTERN_FRAME_COUNT,
     SPEED_ICON_NEGATIVE_SOURCE_Y,
@@ -6344,7 +6342,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock._refresh_party_hp_text.assert_called_once_with(1)
 
-    def test_silence_uses_authored_rate_and_applies_da2_duration(self) -> None:
+    def test_silence_uses_authored_rate_and_duration_for_target_resistance(self) -> None:
         spell = load_mock_spells()["SILENCE"]
         monster = _damage_test_monster()
         monster.spell_keys = ("SLEEP",)
@@ -6360,21 +6358,16 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.monsters = (monster,)
         mock.spell_damage_popups = []
 
-        with patch(
-            "scenes.battle.random.randint",
-            side_effect=(0, SILENCE_MAX_TURNS),
-        ) as randint:
-            results = mock._resolve_silence_results(spell, (0,))
-        mock._apply_action_results(
-            BattleActionPresentation((), silence_results=results)
-        )
-
-        self.assertEqual(monster.state.silenced, SILENCE_MAX_TURNS)
         self.assertEqual(spell.rate, 12)
-        self.assertEqual(
-            randint.call_args_list,
-            [call(0, 19), call(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)],
-        )
+        for resistances, bounds in (((), (4, 5)), ((ResistanceType.DEATH,), (3, 4))):
+            with self.subTest(resistances=resistances):
+                monster.resistances = frozenset(resistances)
+                monster.state.silenced = 0
+                with patch("scenes.battle.random.randint", side_effect=(0, bounds[1])) as randint:
+                    results = mock._resolve_silence_results(spell, (0,))
+                mock._apply_action_results(BattleActionPresentation((), silence_results=results))
+                self.assertEqual(monster.state.silenced, bounds[1])
+                self.assertEqual(randint.call_args_list, [call(0, 19), call(*bounds)])
 
     def test_cure_cursor_visits_healthy_members_but_haste_skips_maximum(self) -> None:
         spells = load_mock_spells()
@@ -8586,10 +8579,11 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.timeline = (actor,)
         mock.party = (
             SimpleNamespace(hp=0, formation_row=FormationRow.FRONT),
-            SimpleNamespace(hp=30, formation_row=FormationRow.BACK),
+            SimpleNamespace(hp=30, formation_row=FormationRow.BACK, resistances=frozenset()),
             SimpleNamespace(
                 hp=30,
                 formation_row=FormationRow.FRONT,
+                resistances=frozenset(),
                 battle_stats=SimpleNamespace(defense=5, evasion=10),
             ),
         )
@@ -8655,6 +8649,7 @@ class BattleScreenMockTest(unittest.TestCase):
             SimpleNamespace(
                 hp=30,
                 formation_row=FormationRow.FRONT,
+                resistances=frozenset(),
                 battle_stats=SimpleNamespace(defense=0, evasion=0),
             ),
         )
@@ -8852,6 +8847,7 @@ class BattleScreenMockTest(unittest.TestCase):
             SimpleNamespace(
                 hp=30,
                 formation_row=FormationRow.FRONT,
+                resistances=frozenset(),
                 battle_stats=SimpleNamespace(defense=0, evasion=100),
             ),
         )
@@ -8899,6 +8895,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 hp=30,
                 sleeping=2,
                 formation_row=FormationRow.FRONT,
+                resistances=frozenset(),
                 battle_stats=SimpleNamespace(defense=0, evasion=100),
             ),
         )
@@ -11090,7 +11087,8 @@ class BattleScreenMockTest(unittest.TestCase):
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.monsters = (monster,)
 
-        with patch("scenes.battle.random.randint", side_effect=(0, 5)):
+        monster.resistances = frozenset((ResistanceType.DEATH,))
+        with patch("scenes.battle.random.randint", side_effect=(0, 3)) as randint:
             effects = mock._resolve_member_attack_additional_effects(
                 member,
                 weapon,
@@ -11101,7 +11099,28 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertEqual(effects, (AdditionalEffect.SILENCE,))
         self.assertEqual(applied, (AdditionalEffect.SILENCE,))
-        self.assertEqual(monster.state.silenced, 5)
+        self.assertEqual(monster.state.silenced, 3)
+        self.assertEqual(randint.call_args_list, [call(0, 99), call(3, 4)])
+
+    def test_weapon_stun_uses_death_resistance_independently_of_boss_flag(self) -> None:
+        monster = _damage_test_monster()
+        member = SimpleNamespace(has_skill=Mock(return_value=False))
+        weapon = load_mock_items()["BRONZE SPEAR"]
+        result = SimpleNamespace(hit=True, adjusted_hit=100, critical=False)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+
+        for is_boss, resistances, expected in (
+            (True, (), (AdditionalEffect.STUN,)),
+            (False, (ResistanceType.DEATH,), ()),
+        ):
+            with self.subTest(is_boss=is_boss, resistances=resistances):
+                monster.is_boss = is_boss
+                monster.resistances = frozenset(resistances)
+                with patch("scenes.battle.random.randint", return_value=15):
+                    effects = mock._resolve_member_attack_additional_effects(
+                        member, weapon, monster, result,
+                    )
+                self.assertEqual(effects, expected)
 
     def test_silence_additional_effect_ignores_a_monster_without_spells(self) -> None:
         monster = _damage_test_monster()

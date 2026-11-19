@@ -147,9 +147,9 @@ class StatusMenuTest(unittest.TestCase):
                 (1, 44, 12),
                 (3, 64, 16),
                 (18, 220, 30),
-                (8, 115, 15),
+                (6, 96, 13),
                 (11, 171, 0),
-                (11, 174, 19),
+                (8, 139, 16),
             ],
         )
         self.assertEqual(
@@ -220,7 +220,7 @@ class StatusMenuTest(unittest.TestCase):
         self.assertEqual(placed[(6, 52)], "%AXE%：０－００")
         self.assertEqual(placed[(20, 52)], "%HAMMER%：０－００")
         self.assertEqual(placed[(34, 52)], "%THROWING%：１－００")
-        self.assertEqual(placed[(48, 52)], "%ROD%：０－００")
+        self.assertEqual(placed[(48, 52)], "%ROD%：１－００")
         self.assertEqual(placed[(6, 55)], "%WAND%：１－００")
         self.assertEqual(placed[(20, 55)], "%MYSTIC%：１－００")
         self.assertEqual(placed[(34, 55)], "%SACRED%：０－００")
@@ -231,13 +231,13 @@ class StatusMenuTest(unittest.TestCase):
             (34, 49),
             (6, 52),
             (20, 52),
-            (48, 52),
             (34, 55),
         ):
             self.assertEqual(placements[position].color, DISABLED_COLOR)
         for position in (
             (48, 49),
             (34, 52),
+            (48, 52),
             (6, 55),
             (20, 55),
             (48, 55),

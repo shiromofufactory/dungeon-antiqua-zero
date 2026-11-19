@@ -133,7 +133,7 @@ class ShopPartyPanel:
             pyxel.text(
                 face_x + SHOP_PARTY_E_RIGHT_OFFSET,
                 SHOP_PARTY_ICON_Y - 3,
-                "Ｅ" if marker is ShopEquipmentMarker.EQUIPPED else "－",
+                "Ｅ" if marker is ShopEquipmentMarker.EQUIPPED else "ー",
                 DEFAULT_TEXT_COLOR,
                 self.japanese_font,
             )

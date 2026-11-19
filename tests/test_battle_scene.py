@@ -262,14 +262,27 @@ class BattleEncounterTest(unittest.TestCase):
             ((4, 48), (68, 16), (68, 80), (68, 144)),
         )
 
-    def test_64_by_96_first_monster_rejects_a_fifth_monster(self) -> None:
+    def test_64_by_96_first_monster_leaves_out_a_fifth_monster(self) -> None:
         monsters = tuple(
             SimpleNamespace(width=64, height=96 if index == 0 else 64)
             for index in range(5)
         )
 
-        with self.assertRaisesRegex(ValueError, "supports at most 4 monsters"):
-            monster_slot_indexes(monsters)
+        layout = monster_layout(monsters)
+        self.assertEqual(layout.monster_indexes, (0, 1, 2, 3))
+        self.assertEqual(layout.slot_indexes, (0, 2, 3, 4))
+
+    def test_tall_second_monster_stays_in_front_of_the_first(self) -> None:
+        monsters = (
+            SimpleNamespace(width=64, height=64),
+            SimpleNamespace(width=64, height=96),
+        )
+
+        layout = monster_layout(monsters)
+
+        self.assertEqual(layout.monster_indexes, (0, 1))
+        self.assertEqual(layout.positions, ((4, 48), (68, 16)))
+        self.assertEqual(_battle_start_front_monster_indexes(layout.slot_indexes), {1})
 
     def test_two_tall_monsters_and_one_small_monster_fit_without_overlap(self) -> None:
         for heights in set(permutations((96, 96, 64))):
@@ -277,10 +290,8 @@ class BattleEncounterTest(unittest.TestCase):
                 monsters = tuple(SimpleNamespace(width=64, height=h) for h in heights)
                 layout = monster_layout(monsters)
                 self.assertEqual(monster_slot_indexes(monsters), layout.slot_indexes)
-                self.assertEqual(
-                    {position for position in layout.positions},
-                    {(4, 48), (68, 16), (68, 112)},
-                )
+                self.assertEqual(layout.monster_indexes, (0, 1, 2))
+                self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 16 + heights[1])))
                 for index, ((x, y), monster) in enumerate(zip(layout.positions, monsters)):
                     self.assertLessEqual(y + monster.height, MONSTER_AREA_BOTTOM)
                     for (other_x, other_y), other in zip(
@@ -296,12 +307,22 @@ class BattleEncounterTest(unittest.TestCase):
                     frozenset(i for i, (x, _y) in enumerate(layout.positions) if x == 68),
                 )
 
-    def test_two_tall_monsters_cannot_be_combined_with_two_small_monsters(self) -> None:
-        for heights in set(permutations((96, 96, 64, 64))):
-            with self.subTest(heights=heights), self.assertRaises(ValueError):
-                monster_slot_indexes(tuple(
-                    SimpleNamespace(width=64, height=h) for h in heights
-                ))
+    def test_rear_second_slot_can_fit_an_enemy_after_front_slots_fill(self) -> None:
+        monsters = tuple(SimpleNamespace(width=64, height=h) for h in (64, 96, 96, 64))
+
+        layout = monster_layout(monsters)
+
+        self.assertEqual(layout.monster_indexes, (0, 1, 2, 3))
+        self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 112), (4, 112)))
+
+    def test_skips_a_wide_monster_and_still_places_the_next_monster(self) -> None:
+        wide = SimpleNamespace(width=96, height=64)
+        small = SimpleNamespace(width=64, height=64)
+
+        layout = monster_layout((wide, small, wide, small))
+
+        self.assertEqual(layout.monster_indexes, (0, 1, 3))
+        self.assertEqual(layout.positions, ((4, 48), (68, 112), (4, 112)))
 
 
 class BattleSurpriseIntegrationTest(unittest.TestCase):

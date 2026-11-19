@@ -355,7 +355,7 @@ class AutoRecoveryTest(unittest.TestCase):
         expected = {
             Language.JAPANESE: "きずぐすりを　１こ　つかった（のこり　２こ）",
             Language.ENGLISH: "１　ＰＯＴＩＯＮｓ　ｕｓｅｄ（２　ｌｅｆｔ）",
-            Language.SIMPLIFIED_CHINESE: "使用了1个POTION（剩余2个）",
+            Language.SIMPLIFIED_CHINESE: "使用了１个ＰＯＴＩＯＮ（剩余２个）",
         }
         for language, message in expected.items():
             with self.subTest(language=language):

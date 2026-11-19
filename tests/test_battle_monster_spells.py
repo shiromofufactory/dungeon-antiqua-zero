@@ -220,7 +220,7 @@ class MonsterSpellTest(unittest.TestCase):
             self.assertFalse(presentation.party_slow_results[0].success)
             self.assertEqual(presentation.spell_effects, ())
             mock._apply_action_results(presentation)
-            self.assertEqual(randint.call_args_list, [((0, 19),), ((4, 6),)])
+        self.assertEqual(randint.call_args_list, [((0, 19),), ((4, 5),)])
 
         self.assertEqual(target.speed_modifier, -1)
         self.assertEqual([popup.is_miss for popup in mock.spell_damage_popups], [True])
@@ -367,15 +367,19 @@ class BattleDebuffRecoveryTest(unittest.TestCase):
         scene = spell_scene(actor)
         return ((scene.party[0], "protection_level"), (actor.state, "defense_modifier"))
 
-    def test_runtime_spells_and_physical_effects_draw_four_to_six_turns(self):
+    def test_runtime_spells_and_physical_effects_draw_turns_for_target_resistance(self):
         from item import AdditionalEffect
         from scenes.battle import (
             BattleActionPresentation, BattleSlowResult, BattleBreakResult,
             BattlePartySlowResult, BattlePartyBreakResult,
         )
 
-        for duration in (4, 6):
+        for resistances, bounds, duration in (
+            (frozenset(), (4, 5), 5),
+            (frozenset((ResistanceType.DEATH,)), (3, 4), 3),
+        ):
             monster = spellcaster(magic=7, spell_key="SLOW")
+            monster.resistances = resistances
             scene = spell_scene(monster)
             scene._delay_slow_target = Mock()
             presentation = BattleActionPresentation(
@@ -384,35 +388,37 @@ class BattleDebuffRecoveryTest(unittest.TestCase):
                 party_slow_results=(BattlePartySlowResult(0, True, 0, 0),),
                 party_break_results=(BattlePartyBreakResult(0, True, 0, 0),),
             )
-            with patch("scenes.battle.random.randint", return_value=duration) as draw:
+            with (
+                patch.object(Member, "resistances", new_callable=PropertyMock,
+                             return_value=resistances),
+                patch("scenes.battle.random.randint", return_value=duration) as draw,
+            ):
                 scene._apply_action_results(presentation)
-            self.assertEqual(draw.call_count, 4)
-            for args in draw.call_args_list:
-                self.assertEqual(args.args, (4, 6))
-            for state in (scene.party[0], monster.state):
-                self.assertEqual((state.slow_turns, state.defense_down_turns), (duration, duration))
-            scene.party[0].clear_temporary_battle_conditions()
-            monster.state.restore()
-            with patch("scenes.battle.random.randint", return_value=duration):
+                for state in (scene.party[0], monster.state):
+                    self.assertEqual((state.slow_turns, state.defense_down_turns), (duration, duration))
+                scene.party[0].clear_temporary_battle_conditions()
+                monster.state.restore()
                 scene._apply_additional_effects_to_monster(0, (AdditionalEffect.DEFENSE_DOWN,))
                 scene._apply_additional_effects_to_member(0, (AdditionalEffect.DEFENSE_DOWN,))
+            self.assertEqual(draw.call_count, 6)
+            self.assertTrue(all(args.args == bounds for args in draw.call_args_list))
             self.assertEqual(scene.party[0].defense_down_turns, duration)
             self.assertEqual(monster.state.defense_down_turns, duration)
 
-    def test_debuffs_recover_independently_after_four_to_six_own_turns(self):
-        for duration in (4, 5, 6):
+    def test_debuffs_recover_independently_after_own_turns(self):
+        for duration in (3, 4, 5):
             for state, defense in self.states():
                 with self.subTest(duration=duration, state=type(state).__name__):
                     state.apply_slow(duration)
-                    state.apply_defense_down(6)
+                    state.apply_defense_down(5)
                     state.apply_silence(duration)
                     state.take_damage(1)
-                    for turn in range(1, 7):
+                    for turn in range(1, 6):
                         state.elapse_debuff_turn()
                         state.elapse_silence_turn()
                         self.assertEqual(state.slow_turns, max(0, duration - turn))
                         self.assertEqual(state.speed_modifier, -1 if turn < duration else 0)
-                        self.assertEqual(getattr(state, defense), -1 if turn < 6 else 0)
+                        self.assertEqual(getattr(state, defense), -1 if turn < 5 else 0)
                         self.assertEqual(state.slow_turns, state.silenced)
 
     def test_failed_reapplication_preserves_remaining_duration(self):
@@ -731,13 +737,18 @@ class IntelligentMonsterSpellTest(unittest.TestCase):
             choose.assert_called_once_with((0, 1))
         self.assertEqual(scene.action_presentation.party_break_results[0].target_index, 0)
 
-    def test_silence_applies_four_to_six_turns_only_to_casters_and_respects_resistance(self):
+    def test_silence_applies_target_duration_only_to_casters_and_respects_resistance(self):
         actor, scene = self.scene("SILENCE")
         scene._member_can_cast_spells = Mock(side_effect=lambda member: member is scene.party[1])
-        with patch("scenes.battle.random.randint", side_effect=(0, 6)):
+        with (
+            patch.object(Member, "resistances", new_callable=PropertyMock,
+                         return_value=frozenset({ResistanceType.DEATH})),
+            patch("scenes.battle.random.randint", side_effect=(0, 3)) as draw,
+        ):
             scene._begin_monster_spell(actor, scene.spells["SILENCE"])
+        self.assertEqual([args.args for args in draw.call_args_list], [(0, 19), (3, 4)])
         scene._apply_action_results(scene.action_presentation)
-        self.assertEqual(tuple(m.silenced for m in scene.party), (0, 6))
+        self.assertEqual(tuple(m.silenced for m in scene.party), (0, 3))
         self.assertEqual([p.is_miss for p in scene.spell_damage_popups], [True])
         actor, scene = self.scene("SILENCE")
         scene._member_can_cast_spells = Mock(return_value=True)

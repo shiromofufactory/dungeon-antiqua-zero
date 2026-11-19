@@ -17,6 +17,7 @@ from ui.shop_party import (
     ShopEquipmentMarker,
     ShopPartyPanel,
 )
+from ui.text_format import pad
 from ui.shop import (
     QUANTITY_ARROW_HEIGHT,
     QUANTITY_ARROW_LEFT_X,
@@ -62,7 +63,7 @@ from ui.shop import (
 )
 from input import Direction, InputButton, InputState
 from member import EquipmentSlot
-from resources import FontResources
+from resources import FontResources, load_record_array
 from state import SaveData, Settings
 from systems import MAX_GOLD, InventorySystem, ShopSystem
 from text_catalog import TextCatalog
@@ -156,17 +157,11 @@ class ShopMenuTest(unittest.TestCase):
         )
         self.assertNotIn(self.screen.party_window, self.screen.windows)
         self.assertEqual(SHOP_MESSAGE_WINDOW_GRID, (0, 47, 64, 13))
+        shop_record = load_record_array("shops.json")[0]
+        self.assertEqual(self.screen.shop.key, shop_record["shop_key"])
         self.assertEqual(
             [item.key for item in self.screen.shop.items],
-            [
-                "POTION",
-                "REMEDY",
-                "MANA DROP",
-                "DAGGER",
-                "WAND of POISON",
-                "ROBE",
-                "LEATHER CAP",
-            ],
+            shop_record["items"],
         )
         self.assertFalse(hasattr(self.screen, "shopkeeper_face"))
 
@@ -259,9 +254,9 @@ class ShopMenuTest(unittest.TestCase):
     def test_quantity_selection_works_for_non_first_shop_items(self) -> None:
         self.screen.update(InputState(confirm=InputButton(triggered=True)))
 
-        for expected_key in ("REMEDY", "MANA DROP"):
+        for item in self.shops[0].items[1:3]:
             self.screen.update(InputState(navigation=Direction.DOWN))
-            self.assertEqual(self.screen.selected_item.key, expected_key)
+            self.assertEqual(self.screen.selected_item.key, item.key)
 
             self.screen.update(InputState(confirm=InputButton(triggered=True)))
 
@@ -440,6 +435,8 @@ class ShopMenuTest(unittest.TestCase):
 
         self.screen.update(InputState(navigation=Direction.DOWN))
         self.screen.update(InputState(navigation=Direction.DOWN))
+        item = self.shops[0].items[2]
+        self.assertEqual(self.screen.selected_item.key, item.key)
 
         summary = {
             (text.x, text.y): text.text
@@ -447,7 +444,7 @@ class ShopMenuTest(unittest.TestCase):
         }
         self.assertEqual(
             summary[(SHOP_BUY_PRICE_X, SHOP_BUY_PRICE_Y)],
-            "　　２０００　Ｇｏｌｄ",
+            f"{pad(item.price, 6)}　Ｇｏｌｄ",
         )
         self.assertEqual(
             summary[(SHOP_BUY_OWNED_X, SHOP_BUY_OWNED_Y)],

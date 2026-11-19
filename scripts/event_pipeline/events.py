@@ -319,7 +319,6 @@ def validate_event_sources(
     character_keys: Iterable[str] = (),
     item_keys: Iterable[str] = (),
     monster_keys: Iterable[str] = (),
-    tall_first_monster_keys: Iterable[str] = (),
     shop_keys: Iterable[str] = (),
     message_ids: Iterable[str] = (),
     bgm_ids: Iterable[str] = (),
@@ -337,12 +336,11 @@ def validate_event_sources(
     characters = set(character_keys)
     items = set(item_keys)
     monsters = set(monster_keys)
-    tall_monsters = set(tall_first_monster_keys)
     shops = set(shop_keys)
     messages = set(message_ids)
     bgms = set(bgm_ids)
     sounds = set(se_ids)
-    diagnostics = validate_event_battles(battle_values, monster_keys=monsters, tall_first_monster_keys=tall_monsters)
+    diagnostics = validate_event_battles(battle_values, monster_keys=monsters)
     flags = set(flag_ids)
     event_ids: set[str] = set()
     battle_start_ids: set[str] = set()

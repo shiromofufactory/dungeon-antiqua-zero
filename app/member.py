@@ -9,9 +9,9 @@ from typing import Mapping, TypeVar
 
 if __package__ == "":
     from battle_magic import (
+        DEFAULT_DEBUFF_MIN_TURNS,
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
-        SILENCE_MIN_TURNS,
         modified_defense,
     )
     from battle_speed import (
@@ -26,9 +26,9 @@ if __package__ == "":
     from text_catalog import TextCatalog
 else:
     from .battle_magic import (
+        DEFAULT_DEBUFF_MIN_TURNS,
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
-        SILENCE_MIN_TURNS,
         modified_defense,
     )
     from .battle_speed import (
@@ -1472,7 +1472,7 @@ class Member:
         self.defense_down_turns = 0
         return True
 
-    def apply_defense_down(self, turns: int = SILENCE_MIN_TURNS) -> bool:
+    def apply_defense_down(self, turns: int = DEFAULT_DEBUFF_MIN_TURNS) -> bool:
         """Lower DA2's defense stage once, cancelling protection first."""
 
         if isinstance(turns, bool) or not isinstance(turns, int):
@@ -1486,7 +1486,7 @@ class Member:
         self.defense_down_turns = turns if self.protection_level < 0 else 0
         return True
 
-    def apply_armor_break(self, turns: int = SILENCE_MIN_TURNS) -> bool:
+    def apply_armor_break(self, turns: int = DEFAULT_DEBUFF_MIN_TURNS) -> bool:
         """Apply DA2's BREAK rule, cancelling every positive defense stage."""
 
         if isinstance(turns, bool) or not isinstance(turns, int):
@@ -1502,7 +1502,7 @@ class Member:
         self.defense_down_turns = turns if self.protection_level < 0 else 0
         return True
 
-    def apply_slow(self, turns: int = SILENCE_MIN_TURNS) -> bool:
+    def apply_slow(self, turns: int = DEFAULT_DEBUFF_MIN_TURNS) -> bool:
         """Apply DA2's SLOW state or cancel any positive HASTE state."""
 
         if isinstance(turns, bool) or not isinstance(turns, int):

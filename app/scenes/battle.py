@@ -14,11 +14,9 @@ from typing import Callable, TypeVar
 import pyxel
 
 from battle_layout import (
-    MONSTER_AREA_BOTTOM,
     MONSTER_POSITIONS,
-    TALL_MONSTER_SIZE as TALL_FIRST_MONSTER_SIZE,
-    TALL_MONSTER_SLOT_INDEXES as TALL_FIRST_MONSTER_SLOT_INDEXES,
-    is_tall_monster,
+    MonsterPlacement,
+    find_monster_placement,
     monster_layout,
 )
 from auto_battle import AutoBattlePlanner
@@ -51,10 +49,9 @@ from battle_commands import (
 )
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
-    SILENCE_MIN_TURNS,
-    SILENCE_MAX_TURNS,
     SpellAffinity,
     battle_healing_amount,
+    debuff_turn_range,
     member_spell_ability,
     member_spell_modifier,
     poison_tick_damage,
@@ -1864,10 +1861,7 @@ def _battle_start_front_monster_indexes(
 def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
     """Select presentation slots for the encountered monster image sizes."""
 
-    try:
-        return monster_layout(monsters).slot_indexes
-    except ValueError as error:
-        raise BattleDataError(str(error)) from error
+    return monster_layout(monsters).slot_indexes
 
 
 class BattleScene:
@@ -2096,16 +2090,20 @@ class BattleScene:
             )
             for key in encounter.monster_keys
         )
-        self.monster_slot_indexes = monster_slot_indexes(encounter_definitions)
+        layout = monster_layout(encounter_definitions)
+        if not layout.monster_indexes:
+            raise BattleDataError("no enemy image fits the battle screen")
+        self.monster_slot_indexes = layout.slot_indexes
+        self.monster_positions = layout.positions
         front_monster_indexes = _battle_start_front_monster_indexes(
             self.monster_slot_indexes
         )
         self.monsters = tuple(
             BattleMonster.from_record(
-                _record_for_key(monsters_by_key, key, label="monster"),
+                monsters_by_key[encounter_definitions[encounter_index].key],
                 is_front_row=index in front_monster_indexes,
             )
-            for index, key in enumerate(encounter.monster_keys)
+            for index, encounter_index in enumerate(layout.monster_indexes)
         )
         self.initial_monsters = self.monsters
         self.reinforcement_entrance_frames: dict[int, int] = {}
@@ -2121,7 +2119,6 @@ class BattleScene:
                     f"{monster.key}.spells contains unknown spell keys: "
                     f"{', '.join(unknown_spell_keys)}"
                 )
-        self.monster_positions = monster_layout(encounter_definitions).positions
         self.monster_record_system.register_encounter(
             monster.key for monster in self.monsters
         )
@@ -3347,7 +3344,6 @@ class BattleScene:
                     ),
                     shadow=monster.is_shadow if "profile" in fields else False,
                     tribe=monster.tribe if "profile" in fields else None,
-                    boss=monster.is_boss,
                     poisoned=monster.state.poisoned,
                     healing=monster.combat_stats.healing,
                     sleeping=monster.state.sleeping,
@@ -5749,7 +5745,7 @@ class BattleScene:
                     target_index=index,
                     success=success,
                     turns=(
-                        random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                        random.randint(*debuff_turn_range(monster.resistances))
                         if success
                         else 0
                     ),
@@ -6049,7 +6045,7 @@ class BattleScene:
         for result in presentation.slow_results:
             monster = self.monsters[result.target_index]
             if result.success and monster.state.apply_slow(
-                random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                random.randint(*debuff_turn_range(monster.resistances))
             ):
                 self._delay_slow_target(monster)
             else:
@@ -6065,7 +6061,7 @@ class BattleScene:
             monster = self.monsters[result.target_index]
             if result.success:
                 monster.state.apply_defense_down(
-                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS),
+                    random.randint(*debuff_turn_range(monster.resistances)),
                     armor_break=True,
                 )
             else:
@@ -6175,7 +6171,7 @@ class BattleScene:
         for result in presentation.party_slow_results:
             member = self.party[result.target_index]
             if result.success and member.apply_slow(
-                random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                random.randint(*debuff_turn_range(member.resistances))
             ):
                 self._delay_slow_target(member)
             else:
@@ -6191,7 +6187,7 @@ class BattleScene:
             member = self.party[result.target_index]
             if result.success:
                 member.apply_armor_break(
-                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                    random.randint(*debuff_turn_range(member.resistances))
                 )
             else:
                 damage_popups.append(
@@ -7293,7 +7289,7 @@ class BattleScene:
                 adjusted_hit=result.adjusted_hit,
                 effect_roll=effect_roll,
                 target_is_member=False,
-                target_is_boss=monster.is_boss,
+                target_has_boss_resistance=ResistanceType.DEATH in monster.resistances,
                 target_is_weak=(
                     resistance is not None and resistance in monster.weaknesses
                 ),
@@ -7338,13 +7334,13 @@ class BattleScene:
                 changed = monster.state.apply_poison()
             elif effect is AdditionalEffect.SILENCE and monster.spell_keys:
                 changed = monster.state.apply_silence(
-                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                    random.randint(*debuff_turn_range(monster.resistances))
                 )
             elif effect is AdditionalEffect.STUN:
                 changed = monster.state.apply_stun()
             elif effect is AdditionalEffect.DEFENSE_DOWN:
                 changed = monster.state.apply_defense_down(
-                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                    random.randint(*debuff_turn_range(monster.resistances))
                 )
             if changed:
                 applied.append(effect)
@@ -8694,6 +8690,7 @@ class BattleScene:
         if not result.hit and not hit_reached_guard:
             return ()
         effect_roll = random.randint(0, 99)
+        target_resistances = target.resistances
         successful: list[AdditionalEffect] = []
         for effect, stacked_death in candidates:
             resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
@@ -8702,8 +8699,9 @@ class BattleScene:
                 adjusted_hit=result.adjusted_hit,
                 effect_roll=effect_roll,
                 target_is_member=True,
+                target_has_boss_resistance=ResistanceType.DEATH in target_resistances,
                 target_is_resistant=(
-                    resistance is not None and resistance in target.resistances
+                    resistance is not None and resistance in target_resistances
                 ),
                 target_defending=target_defending,
                 critical=result.critical,
@@ -8795,7 +8793,7 @@ class BattleScene:
             adjusted_hit=result.adjusted_hit,
             effect_roll=random.randint(0, 99),
             target_is_member=False,
-            target_is_boss=target.is_boss,
+            target_has_boss_resistance=ResistanceType.DEATH in target.resistances,
             target_is_weak=(resistance is not None and resistance in target.weaknesses),
             target_is_resistant=(
                 resistance is not None and resistance in target.resistances
@@ -9416,49 +9414,17 @@ class BattleScene:
     ) -> tuple[int, tuple[int, int]] | None:
         """Fit a new image without moving or overlapping surviving enemies."""
 
-        available_slots = (
-            TALL_FIRST_MONSTER_SLOT_INDEXES
-            if is_tall_monster(target) or any(
-                is_tall_monster(monster) for monster in self.monsters
+        occupied = tuple(
+            MonsterPlacement(
+                slot, *self._monster_base_position(index), monster.width, monster.height
             )
-            else tuple(range(len(MONSTER_POSITIONS)))
-        )
-        occupied_slots = {
-            slot
-            for monster, slot in zip(self.monsters, self.monster_slot_indexes)
-            if monster.is_alive
-        }
-        living = tuple(
-            (monster, slot, self._monster_base_position(index))
             for index, (monster, slot) in enumerate(
                 zip(self.monsters, self.monster_slot_indexes)
             )
             if monster.is_alive
         )
-        width = getattr(target, "width", 64)
-        height = getattr(target, "height", 64)
-        for slot in available_slots:
-            if slot in occupied_slots:
-                continue
-            x, y = MONSTER_POSITIONS[slot]
-            if slot >= 2:
-                preceding_bottom = max(
-                    (py + monster.height
-                     for monster, other_slot, (_px, py) in living
-                     if 2 <= other_slot < slot),
-                    default=y,
-                )
-                y = max(y, preceding_bottom)
-            if y + height > MONSTER_AREA_BOTTOM:
-                continue
-            if any(
-                x < px + monster.width and px < x + width
-                and y < py + monster.height and py < y + height
-                for monster, _other_slot, (px, py) in living
-            ):
-                continue
-            return slot, (x, y)
-        return None
+        placement = find_monster_placement(target, occupied)
+        return None if placement is None else (placement.slot, (placement.x, placement.y))
 
     def _add_monster_ally(self, actor: BattleMonster, *, same_monster: bool) -> bool:
         """Register a new ally with independent timeline and reward identity."""
@@ -9699,6 +9665,7 @@ class BattleScene:
         stuns = []
         for index in indexes:
             member = self.party[index]
+            resistances = member.resistances
             defending = index in self.defending_party_indexes
             result = resolve_earthquake_attack(
                 attack=actor.combat_stats.attack, hit=actor.combat_stats.hit,
@@ -9709,7 +9676,8 @@ class BattleScene:
             stun_success = result.hit and resolve_physical_additional_effect(
                 effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
                 effect_roll=random.randint(0, 99), target_is_member=True,
-                target_is_resistant=ResistanceType.STUN in member.resistances,
+                target_has_boss_resistance=ResistanceType.DEATH in resistances,
+                target_is_resistant=ResistanceType.STUN in resistances,
                 target_defending=defending,
             ).success
             x, y = self._party_draw_position(index) or (self._party_sprite_x(index), PARTY_SPRITE_Y[index])
@@ -10034,7 +10002,7 @@ class BattleScene:
                         index,
                         success,
                         (
-                            random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                            random.randint(*debuff_turn_range(member.resistances))
                             if success
                             else 0
                         ),
@@ -10330,6 +10298,7 @@ class BattleScene:
             adjusted_hit=result.adjusted_hit,
             effect_roll=random.randint(0, 99),
             target_is_member=True,
+            target_has_boss_resistance=ResistanceType.DEATH in target_resistances,
             target_is_resistant=(
                 resistance is not None and resistance in target_resistances
             ),
@@ -10820,7 +10789,7 @@ class BattleScene:
             elif effect is AdditionalEffect.DEFENSE_DOWN:
                 if isinstance(member, Member):
                     changed = member.apply_defense_down(
-                        random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                        random.randint(*debuff_turn_range(member.resistances))
                     )
             if changed:
                 applied.append(effect)

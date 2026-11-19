@@ -13,7 +13,6 @@ CATALOGS = {
     "item_keys": {"POTION"},
     "monster_keys": {"SLIME"},
     "battles": [{"battle_id":"guard", "monster_keys":["SLIME"]}, {"battle_id":"shrine_guard", "monster_keys":["SLIME", "SLIME"]}],
-    "tall_first_monster_keys": {"TREANT"},
     "shop_keys": {"FAIRY_HAMLET_ITEMS"},
     "message_ids": {"sample.greeting"},
     "bgm_ids": {"field/world"},
@@ -319,18 +318,19 @@ class EventPipelineTest(unittest.TestCase):
 
         self.assertIn("field_only_battle_command", codes)
 
-    def test_rejects_five_monsters_after_tall_first_monster(self) -> None:
+    def test_compiles_all_five_monsters_with_tall_monster_first(self) -> None:
         source = sample_source()
         source["events"][0]["commands"] = [{
             "command": "start_battle", "battle_id": "forest_guard",
         }]
-        catalogs = {**CATALOGS, "monster_keys": {"TREANT", "SLIME"}, "battles": [{"battle_id":"forest_guard", "monster_keys":["TREANT", "SLIME", "SLIME", "SLIME", "SLIME"]}]}
+        lineup = ["TREANT", "SLIME", "SLIME", "SLIME", "SLIME"]
+        catalogs = {**CATALOGS, "monster_keys": {"TREANT", "SLIME"}, "battles": [
+            {"battle_id": "forest_guard", "monster_keys": lineup},
+        ]}
 
-        codes = {item.code for item in validate_event_sources(
-            {"sample": source}, **catalogs
-        )}
+        compiled = compile_event_sources({"sample": source}, **catalogs)
 
-        self.assertIn("oversized_monster_lineup", codes)
+        self.assertEqual(compiled["battles"]["forest_guard"], lineup)
 
     def test_validates_and_compiles_fully_qualified_ids(self) -> None:
         sources = {"sample": sample_source()}

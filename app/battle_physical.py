@@ -20,6 +20,7 @@ DA2_CRITICAL_RATE_UNIT = 0.1
 DA2_EFFECTIVE_HIT_VALUE_BONUS = 60
 DA2_MEMBER_STATUS_BASE_RATE = 12
 DA2_MONSTER_STATUS_BASE_RATE = 30
+STUN_BASE_RATE = 20
 DA2_MEMBER_DEATH_BASE_RATE = 6
 DA2_MONSTER_DEATH_BASE_RATE = 10
 
@@ -249,7 +250,7 @@ def resolve_physical_additional_effect(
     adjusted_hit: float,
     effect_roll: int,
     target_is_member: bool,
-    target_is_boss: bool = False,
+    target_has_boss_resistance: bool = False,
     target_is_weak: bool = False,
     target_is_resistant: bool = False,
     target_defending: bool = False,
@@ -259,12 +260,7 @@ def resolve_physical_additional_effect(
     weapon_effective: bool = False,
     stacked_death: bool = False,
 ) -> PhysicalAdditionalEffectResult:
-    """Resolve DA2's point gate and percentage roll for one hit effect.
-
-    ZERO intentionally gives STUN the ordinary non-death status calculation,
-    rather than DA2's special Pinshot percentages.  Like DA2, PARALIZE never
-    affects a monster target.
-    """
+    """Resolve the point gate and percentage roll for one hit effect."""
 
     if not isinstance(effect, AdditionalEffect):
         raise TypeError("effect must be an AdditionalEffect")
@@ -282,7 +278,7 @@ def resolve_physical_additional_effect(
         raise ValueError("effect_roll must be from 0 to 99")
     for value, name in (
         (target_is_member, "target_is_member"),
-        (target_is_boss, "target_is_boss"),
+        (target_has_boss_resistance, "target_has_boss_resistance"),
         (target_is_weak, "target_is_weak"),
         (target_is_resistant, "target_is_resistant"),
         (target_defending, "target_defending"),
@@ -305,32 +301,35 @@ def resolve_physical_additional_effect(
     activation_points += int(attacker_hidden)
     if target_is_resistant:
         activation_points -= 1 if is_death else 2
-    if target_is_boss:
+    if target_has_boss_resistance:
         activation_points -= 3 if is_death else 1
     if target_defending:
         activation_points -= 2
 
-    if critical or target_is_weak:
-        success_rate = 100.0
+    if effect is AdditionalEffect.STUN:
+        base_rate = STUN_BASE_RATE
     elif is_death:
         base_rate = (
             DA2_MEMBER_DEATH_BASE_RATE
             if target_is_member
             else DA2_MONSTER_DEATH_BASE_RATE
         )
-        success_rate = max(base_rate * adjusted_hit / 100, base_rate)
     else:
         base_rate = (
             DA2_MEMBER_STATUS_BASE_RATE
             if target_is_member
             else DA2_MONSTER_STATUS_BASE_RATE
         )
-        if (
-            target_is_boss
-            and effect is not AdditionalEffect.DEFENSE_DOWN
-        ):
-            base_rate /= 2
-        success_rate = max(base_rate * adjusted_hit / 100, base_rate)
+    if (
+        target_has_boss_resistance
+        and not is_death
+        and effect is not AdditionalEffect.DEFENSE_DOWN
+    ):
+        base_rate /= 2
+    success_rate = (
+        100.0 if critical or target_is_weak
+        else max(base_rate * adjusted_hit / 100, base_rate)
+    )
 
     return PhysicalAdditionalEffectResult(
         effect,

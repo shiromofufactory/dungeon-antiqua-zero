@@ -117,7 +117,7 @@ class SpellMenuTest(unittest.TestCase):
         self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
         self.assertEqual(placements[(PARTY_TEXT_X + 12, PARTY_HP_Y)], "ＨＰ　６４")
         self.assertEqual(placements[(PARTY_TEXT_X + 24, PARTY_HP_Y)], "ＨＰ２２０")
-        self.assertEqual(placements[(PARTY_TEXT_X + 36, PARTY_HP_Y)], "ＨＰ１１５")
+        self.assertEqual(placements[(PARTY_TEXT_X + 36, PARTY_HP_Y)], "ＨＰ　９６")
         self.assertEqual(placements[(PARTY_TEXT_X + 48, PARTY_HP_Y)], "ＨＰ１７１")
         self.assertEqual(placements[(PARTY_TEXT_X + 2, PARTY_MAX_HP_Y)], "／　４４")
 
@@ -400,7 +400,7 @@ class SpellMenuTest(unittest.TestCase):
         self.assertEqual(mock.member_cursor.selected_key, 0)
         self.assertIn(mock.proficiency_window, mock.windows)
         self.assertIsNotNone(mock.spell_learned_popup)
-        self.assertIn("プロテクション", mock.spell_learned_popup.window.texts[0].text)
+        self.assertIn("キュアー", mock.spell_learned_popup.window.texts[0].text)
         mock.update(InputState(confirm=InputButton(True, True)))
         self.assertIsNone(mock.spell_learned_popup)
         level_up_jingle.assert_called_once_with()

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import random
 
 if __package__ == "systems":
-    from battle_layout import is_tall_monster, monster_layout
+    from battle_layout import monster_layout
     from field import FieldPosition
     from input import Direction
     from member import BATTLE_PARTY_MEMBER_COUNT
@@ -16,7 +16,7 @@ if __package__ == "systems":
     from state import SaveData
     from resources.maps import CompiledMap, MapRandomEncounter, MapResourceError, MapResources
 else:
-    from ..battle_layout import is_tall_monster, monster_layout
+    from ..battle_layout import monster_layout
     from ..field import FieldPosition
     from ..input import Direction
     from ..member import BATTLE_PARTY_MEMBER_COUNT
@@ -195,19 +195,6 @@ class EncounterSystem:
             maximum = selected.max_occurrence
             if settings.danger == "low":
                 maximum = (maximum + 1) // 2
-            if is_tall_monster(selected) or any(
-                is_tall_monster(monster) for monster in selected_monsters
-            ):
-                maximum = min(maximum, maximum_monsters - len(selected_monsters))
-                while maximum > 0:
-                    try:
-                        monster_layout(tuple(selected_monsters) + (selected,) * maximum)
-                    except ValueError:
-                        maximum -= 1
-                    else:
-                        break
-                if maximum == 0:
-                    break
             occurrence = self._random.randint(1, maximum)
             if len(selected_monsters) + occurrence > maximum_monsters:
                 break
@@ -225,7 +212,12 @@ class EncounterSystem:
             if self._random.randrange(2) == 0:
                 current_level = max(1, current_level - 1)
 
-        return EncounterFormation(tuple(monster.key for monster in selected_monsters))
+        placed_indexes = monster_layout(selected_monsters).monster_indexes
+        if not placed_indexes:
+            raise EncounterGenerationError("no enemy image fits the battle screen")
+        return EncounterFormation(tuple(
+            selected_monsters[index].key for index in placed_indexes
+        ))
 
     def _weighted_pool(
         self,

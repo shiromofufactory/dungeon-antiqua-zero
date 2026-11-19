@@ -15,14 +15,13 @@ def load_event_battles(content_root: Path) -> object:
 
 
 def validate_event_battles(
-    battles: object, *, monster_keys: Iterable[str] = (),
-    tall_first_monster_keys: Iterable[str] = (), **unused,
+    battles: object, *, monster_keys: Iterable[str] = (), **unused,
 ) -> list[EventDiagnostic]:
     diagnostics: list[EventDiagnostic] = []
     if not isinstance(battles, list):
         _diagnostic(diagnostics, "error", "invalid_battles", "battles", "イベントバトルは配列で指定してください。")
         return diagnostics
-    seen, monsters, tall = set(), set(monster_keys), set(tall_first_monster_keys)
+    seen, monsters = set(), set(monster_keys)
     for index, battle in enumerate(battles):
         path = f"battles[{index}]"
         if not isinstance(battle, dict):
@@ -45,8 +44,6 @@ def validate_event_battles(
         for i, key in enumerate(lineup):
             if not isinstance(key, str) or key not in monsters:
                 _diagnostic(diagnostics, "error", "unknown_monster", f"{path}.monster_keys[{i}]", f"存在しないモンスターです: {key}")
-        if len(lineup) == 5 and isinstance(lineup[0], str) and lineup[0] in tall:
-            _diagnostic(diagnostics, "error", "oversized_monster_lineup", path, "先頭が64×96のモンスターの場合、敵は4体までです。")
     return diagnostics
 
 

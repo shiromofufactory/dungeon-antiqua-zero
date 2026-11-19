@@ -78,10 +78,11 @@ class BattleTribeTest(unittest.TestCase):
                 if command is BattleCommand.IAI:
                     weapon = replace(weapon, subtype="KATANA")
                 scene = self.scene(weapon, command=command)
+                scene.party[0].skills.append(self.skills["Lethal"])
                 if command is BattleCommand.IAI:
                     scene.party[0].skills.append(self.skills["Iai"])
                 scene.monsters[0].weaknesses = frozenset((ResistanceType.FIRE,))
-                scene.monsters[0].is_boss = True
+                scene.monsters[0].resistances = frozenset((ResistanceType.DEATH,))
                 with patch("scenes.battle.random.randint", return_value=0):
                     self.assertTrue(scene._begin_attack_presentation())
                 results.append(scene.attack_presentation.strikes[0])
@@ -119,8 +120,7 @@ class BattleTribeTest(unittest.TestCase):
         weapon = replace(self.items["GOBLIN SLAYER"], additional_effect=AdditionalEffect.POISON)
         scene = self.scene(weapon)
         monster = scene.monsters[0]
-        monster.is_boss = True
-        monster.resistances = frozenset((ResistanceType.POISON,))
+        monster.resistances = frozenset((ResistanceType.POISON, ResistanceType.DEATH))
         with patch("scenes.battle.random.randint", return_value=0):
             self.assertTrue(scene._begin_attack_presentation())
         self.assertEqual(scene.attack_presentation.strikes[0].additional_effects,

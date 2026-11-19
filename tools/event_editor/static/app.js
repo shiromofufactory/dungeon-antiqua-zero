@@ -897,8 +897,8 @@ function renderBattleEditor() {
   if (!battle) { $("event-editor").innerHTML = "イベントバトルを追加・選択してください。"; return; }
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("バトルID", `<input data-battle-field="battle_id" value="${esc(battle.battle_id)}">`)}${field("制作メモ", `<input data-battle-field="note" value="${esc(battle.note || "")}">`)}<button class="danger" data-action="delete-battle">イベントバトルを削除</button></div>
-    <h2>敵編成（1〜5体・上から表示順）</h2>
-    <p class="compact">本編イベントとダンジョン試行は、この登録を共通で参照します。同じモンスターを複数指定できます。先頭が64×96の場合は4体までです。</p>
+    <h2>敵編成（1〜5体・上から配置）</h2>
+    <p class="compact">本編イベントとダンジョン試行で共通の編成です。同じモンスターを複数指定できます。画面内に収まらない敵は戦闘開始時に除外します。</p>
     ${(battle.monster_keys || []).map((key, index) => `<div class="add-row"><select aria-label="敵${index+1}" data-registered-monster-index="${index}">${options(state.catalogs.monster_keys || [], key)}</select><button data-action="remove-registered-monster" data-index="${index}" ${battle.monster_keys.length <= 1 ? "disabled" : ""}>削除</button></div>`).join("")}
     <button data-action="add-registered-monster" ${battle.monster_keys.length >= 5 ? "disabled" : ""}>敵を追加</button>`;
 }

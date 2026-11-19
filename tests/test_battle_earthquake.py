@@ -113,15 +113,17 @@ class EarthquakeSceneTest(unittest.TestCase):
         self.assertEqual(scene.spell_damage_popups, [])
         scene._complete_current_turn.assert_called_once_with()
 
-    def test_stun_uses_existing_probability_resistance_and_guard(self):
-        for roll, resistant, defending, success in (
-            (11, False, False, True), (12, False, False, False),
-            (0, True, False, False), (0, False, True, False),
+    def test_stun_uses_updated_probability_resistance_and_guard(self):
+        for roll, resistances, defending, success in (
+            (19, (), False, True), (20, (), False, False),
+            (9, (ResistanceType.DEATH,), False, True),
+            (10, (ResistanceType.DEATH,), False, False),
+            (0, (ResistanceType.STUN,), False, False), (0, (), True, False),
         ):
             scene, actor = self.scene()
             scene.defending_party_indexes = {0, 1} if defending else set()
             with patch.object(type(scene.party[0]), "resistances", new_callable=PropertyMock,
-                              return_value=frozenset((ResistanceType.STUN,)) if resistant else frozenset()):
+                              return_value=frozenset(resistances)):
                 self.begin(scene, actor, stun_roll=roll)
             self.assertEqual(tuple(r.success for r in scene.action_presentation.party_stun_results), (success, success))
 

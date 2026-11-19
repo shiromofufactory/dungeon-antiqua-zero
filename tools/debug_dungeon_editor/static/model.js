@@ -35,12 +35,13 @@ export function addStep(dungeon, type, catalogs, at = dungeon.steps.length) {
   return step;
 }
 
-export function moveStep(dungeon, id, distance) {
-  const index = dungeon.steps.findIndex((step) => step.id === id);
-  const target = index + distance;
-  if (index < 0 || target < 0 || target >= dungeon.steps.length) return;
-  const [step] = dungeon.steps.splice(index, 1);
-  dungeon.steps.splice(target, 0, step);
+export function moveListItem(entries, id, dropIndex) {
+  const index = entries.findIndex((entry) => entry.id === id);
+  if (index < 0 || !Number.isInteger(dropIndex) || dropIndex < 0 || dropIndex > entries.length) return;
+  const target = dropIndex > index ? dropIndex - 1 : dropIndex;
+  if (target === index) return;
+  const [entry] = entries.splice(index, 1);
+  entries.splice(target, 0, entry);
 }
 
 export function setBattleFlag(step, flagId) {

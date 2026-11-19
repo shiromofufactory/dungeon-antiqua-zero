@@ -115,7 +115,6 @@ class AutoCombatant:
     resistances: frozenset[ResistanceType] = frozenset()
     weaknesses: frozenset[ResistanceType] = frozenset()
     shadow: bool = False
-    boss: bool = False
     poisoned: bool = False
     sleeping: int = 0
     silenced: int = 0

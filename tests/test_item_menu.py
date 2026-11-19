@@ -52,6 +52,7 @@ from ui.item_menu import (
     ItemSelectionPhase,
 )
 from ui.teleport_menu import TeleportTarget
+from ui.text_format import pad
 from tests.ui_test_support import ItemMenuHarness
 from state import Language, Settings
 from systems import InventorySystem
@@ -61,6 +62,7 @@ from member import Ability, AbilityBonuses, EquipmentSet, EquipmentSlot
 class ItemMenuTest(unittest.TestCase):
     def test_builds_da2_layout_with_every_defined_item_owned_once(self) -> None:
         mock = ItemMenuHarness()
+        total = pad(len(mock.items), 3)
 
         self.assertEqual(
             tuple(
@@ -80,9 +82,8 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(ITEM_LIST_WINDOW_GRID, (0, 5, 32, 39))
         self.assertEqual(ITEM_INFO_WINDOW_GRID, (31, 5, 33, 39))
         self.assertEqual(CATEGORY_TEXT_X, (4, 14, 24))
-        self.assertEqual(len(mock.items), 123)
-        self.assertEqual(len(mock.inventory), len(mock.items))
-        self.assertEqual(set(mock.item_counts.values()), {1})
+        self.assertCountEqual((item.key for item in mock.inventory), mock.items)
+        self.assertEqual(mock.item_counts, dict.fromkeys(mock.items, 1))
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
         self.assertEqual(mock.category, ItemCategory.USE)
         self.assertTrue(mock.category_cursor.active)
@@ -127,7 +128,7 @@ class ItemMenuTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "きろくずみ：",
-                "１２３／１２３",
+                f"{total}／{total}",
             ],
         )
         self.assertEqual(
@@ -229,19 +230,11 @@ class ItemMenuTest(unittest.TestCase):
         mock = ItemMenuHarness()
 
         self.select_item(mock, "BOOK of FIRE")
-        lines = [text.text for text in mock.item_info_window.texts]
-        self.assertIn("つかうと%MYSTIC%ファイア１", lines)
-        self.assertIn("てき１たいに%FIRE%ほのおぞくせいの", lines)
-        self.assertNotIn("てき１たいに", lines)
-        description = next(
-            text
-            for text in mock.item_info_window.texts
-            if text.text == "てき１たいに%FIRE%ほのおぞくせいの"
-        )
-        spell_name = next(
-            text
-            for text in mock.item_info_window.texts
-            if text.text == "つかうと%MYSTIC%ファイア１"
+        spell_name, description, second_line = mock.item_info_window.texts[-3:]
+        self.assertEqual(spell_name.text, "つかうと%MYSTIC%ファイア２")
+        self.assertEqual(
+            (description.text, second_line.text),
+            ("てきすべてに%FIRE%ほのおぞくせいの", "ダメージ（ばいりつ：３０）"),
         )
         self.assertEqual(
             description.y - spell_name.y,
@@ -791,6 +784,7 @@ class ItemMenuTest(unittest.TestCase):
 
     def test_category_summary_shows_only_recorded_count_after_item_drop(self) -> None:
         mock = ItemMenuHarness()
+        total = pad(len(mock.items), 3)
         mock.update(InputState(navigation=Direction.RIGHT))
         mock.update(InputState(confirm=InputButton(True, True)))
         mock.update(InputState(confirm=InputButton(True, True)))
@@ -802,7 +796,7 @@ class ItemMenuTest(unittest.TestCase):
             [text.text for text in mock.item_info_window.texts],
             [
                 "きろくずみ：",
-                "１２３／１２３",
+                f"{total}／{total}",
             ],
         )
 

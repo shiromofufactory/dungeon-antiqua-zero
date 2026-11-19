@@ -68,9 +68,8 @@ class ItemDetailTest(unittest.TestCase):
     def test_spell_book_shows_normal_spell_name_and_description(self) -> None:
         lines = self.detail("BOOK of FIRE").lines
 
-        self.assertIn("つかうと%MYSTIC%ファイア１", lines)
-        self.assertIn("てき１たいに%FIRE%ほのおぞくせいの", lines)
-        description_index = lines.index("てき１たいに%FIRE%ほのおぞくせいの")
+        self.assertIn("つかうと%MYSTIC%ファイア２", lines)
+        description_index = lines.index("てきすべてに%FIRE%ほのおぞくせいの")
         self.assertEqual(lines[description_index - 1], "")
         self.assertNotIn("（こわれる）", lines)
 

@@ -236,16 +236,17 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertGreater(tribe.damage, normal.damage)
 
     def test_forecast_tribe_and_attribute_additional_effects_do_not_stack(self):
-        # Boss death protection leaves zero points after critical and one
-        # effectiveness bonus. A second bonus would incorrectly kill it.
+        # Death resistance leaves zero points after stacked death, critical,
+        # and one effectiveness bonus. A second bonus would kill the target.
         for attribute in (None, ResistanceType.FIRE):
             actor = replace(self.specs[0], weapons=(AutoWeapon(
                 attack=1, hit=100, effective_tribe=MonsterTribe.GOBLIN,
                 attribute=attribute, effect=AdditionalEffect.DEATH,
-            ),))
+            ),), skills=frozenset(("Lethal",)))
             enemy = self.enemy(
-                tribe=MonsterTribe.GOBLIN, boss=True,
+                tribe=MonsterTribe.GOBLIN,
                 weaknesses=frozenset((ResistanceType.FIRE,)),
+                resistances=frozenset((ResistanceType.DEATH,)),
             )
             forecast = BattleForecast(self.snapshot(actor, enemy), 0)
             forecast.roll = lambda *args: 0.99
@@ -271,8 +272,8 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             effect=AdditionalEffect.POISON,
         ),))
         enemy = self.enemy(
-            tribe=MonsterTribe.GOBLIN, boss=True,
-            resistances=frozenset((ResistanceType.POISON,)),
+            tribe=MonsterTribe.GOBLIN,
+            resistances=frozenset((ResistanceType.POISON, ResistanceType.DEATH)),
         )
         forecast = BattleForecast(self.snapshot(actor, enemy), 0)
         forecast.roll = lambda *args: 0.99
@@ -1170,20 +1171,26 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             self.assertEqual((actor.slow_turns, actor.defense_down_turns), (0, 0))
 
     def test_forecast_draws_debuff_duration_like_silence_and_retains_buffs(self):
-        for roll, duration in ((0.0, 4), (0.5, 5), (0.999, 6)):
-            for spell_key in ("SLOW", "ARMOR BREAK"):
-                forecast = BattleForecast(self.snapshot(self.specs[0], self.enemy(defense=20)), 0)
-                actor, target = forecast.actors[0], forecast.actors[5]
-                with (patch.object(forecast, "roll", return_value=roll),
-                      patch.object(forecast, "status_success", return_value=True)):
-                    forecast.cast(actor, AutoAction(BattleCommand.SPELL, (5,), spell_key))
-                self.assertEqual(target.slow_turns if spell_key == "SLOW" else target.defense_down_turns,
-                                 duration)
-            forecast = BattleForecast(self.snapshot(replace(self.specs[0], speed=2, protection=2), self.enemy()), 0)
-            actor = forecast.actors[0]
-            for _ in range(7):
-                forecast.execute(0, AutoAction(BattleCommand.DEFEND))
-            self.assertEqual((actor.speed, actor.protection), (2, 2))
+        for resistances, minimum in (((), 4), ((ResistanceType.DEATH,), 3)):
+            enemy = self.enemy(defense=20, spells=(self.spells["FREEZE1"],),
+                               resistances=frozenset(resistances))
+            for roll, duration in ((0.0, minimum), (0.999, minimum + 1)):
+                for spell_key, timer in (
+                    ("SLOW", "slow_turns"), ("ARMOR BREAK", "defense_down_turns"),
+                    ("SILENCE", "silenced"),
+                ):
+                    with self.subTest(resistances=resistances, roll=roll, spell=spell_key):
+                        forecast = BattleForecast(self.snapshot(self.specs[0], enemy), 0)
+                        actor, target = forecast.actors[0], forecast.actors[5]
+                        with (patch.object(forecast, "roll", return_value=roll),
+                              patch.object(forecast, "status_success", return_value=True)):
+                            forecast.cast(actor, AutoAction(BattleCommand.SPELL, (5,), spell_key))
+                        self.assertEqual(getattr(target, timer), duration)
+        forecast = BattleForecast(self.snapshot(replace(self.specs[0], speed=2, protection=2), self.enemy()), 0)
+        actor = forecast.actors[0]
+        for _ in range(7):
+            forecast.execute(0, AutoAction(BattleCommand.DEFEND))
+        self.assertEqual((actor.speed, actor.protection), (2, 2))
 
     def test_slow_delays_current_turn_and_future_reinsertion(self):
         forecast = BattleForecast(self.snapshot(
@@ -1670,7 +1677,9 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             if r["name_en"] == "Giant Spider"
         )
         scene.monsters = (
-            BattleMonster.from_record({**record, "healing": 2}, is_front_row=True),
+            BattleMonster.from_record(
+                {**record, "healing": 2, "tolerance": "死"}, is_front_row=True
+            ),
         )
         scene.party = self.party[:1]
         scene.party_visuals = (Mock(member=scene.party[0]),)
@@ -1722,6 +1731,10 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             scene._auto_battle_snapshot().combatants[-1].tribe, MonsterTribe.ANIMAL
         )
         self.assertIsNotNone(scene._auto_battle_snapshot().combatants[-1].max_hp)
+        scene.save_data.monster_records["Giant Spider"].add("DEATH")
+        self.assertIn(
+            ResistanceType.DEATH, scene._auto_battle_snapshot().combatants[-1].resistances
+        )
         scene.identified_monster_indexes.add(0)
         self.assertEqual(
             scene._auto_battle_snapshot().combatants[-1].hp, scene.monsters[0].state.hp

@@ -133,9 +133,9 @@ def dungeon_map(
 
 
 class EncounterSystemTest(unittest.TestCase):
-    def test_two_gigas_limit_the_following_small_group_to_one(self) -> None:
+    def test_small_group_is_drawn_at_full_size_then_trimmed_to_fit(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(0, 1, 0), randint_values=(2, 1, 1, 5),
+            randrange_values=(0, 1, 0), randint_values=(2, 1, 2, 5),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
@@ -148,11 +148,11 @@ class EncounterSystemTest(unittest.TestCase):
         )
 
         self.assertEqual(formation.monster_keys, ("Gigas", "Gigas", "Small"))
-        self.assertEqual(random_source.randint_calls, [(1, 2), (1, 5), (1, 1), (1, 5)])
+        self.assertEqual(random_source.randint_calls, [(1, 2), (1, 5), (1, 3), (1, 5)])
 
-    def test_small_group_limits_a_later_tall_group_before_drawing_its_size(self) -> None:
+    def test_second_group_can_use_the_rear_slot_when_both_tall_enemies_fit(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(0, 1, 0), randint_values=(2, 1, 1, 5),
+            randrange_values=(0, 1, 0), randint_values=(2, 1, 2, 5),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
@@ -164,26 +164,26 @@ class EncounterSystemTest(unittest.TestCase):
             encounter_settings(), monster_level=3, living_member_count=3,
         )
 
-        self.assertEqual(formation.monster_keys, ("Small", "Small", "Gigas"))
-        self.assertEqual(random_source.randint_calls[2], (1, 1))
+        self.assertEqual(formation.monster_keys, ("Small", "Small", "Gigas", "Gigas"))
+        self.assertEqual(random_source.randint_calls[2], (1, 2))
 
-    def test_no_more_groups_are_added_when_the_tall_layout_is_full(self) -> None:
+    def test_party_size_reroll_counts_only_monsters_that_can_fit(self) -> None:
         random_source = ScriptedRandom(
-            randrange_values=(0, 1, 0, 1, 0), randint_values=(2, 1, 1, 1),
+            randrange_values=(0, 1, 0), randint_values=(2, 1, 3, 1),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
 
         formation = system.generate_formation(
             (
                 monster("Gigas", width=64, height=96, max_occ=2),
-                monster("Small", width=64, height=64),
-                monster("Other", width=64, height=64),
+                monster("Small", width=64, height=64, max_occ=3),
             ),
-            encounter_settings(), monster_level=3, living_member_count=3,
+            encounter_settings(), monster_level=3, living_member_count=1,
         )
 
         self.assertEqual(formation.monster_keys, ("Gigas", "Gigas", "Small"))
         self.assertEqual(random_source.randint_values, [])
+        self.assertEqual(random_source.randrange_values, [])
 
     def test_party_size_reroll_probabilities_cover_every_random_outcome(self) -> None:
         for member_count, enemy_count, numerator, denominator in (

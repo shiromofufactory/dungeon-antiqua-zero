@@ -1,9 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { History, addStep, moveStep, defaultEncounter, stepRanges, stepLabel, setBattleFlag } from "../tools/debug_dungeon_editor/static/model.js";
+import { History, addStep, moveListItem, defaultEncounter, stepRanges, stepLabel, setBattleFlag } from "../tools/debug_dungeon_editor/static/model.js";
 
 const catalogs = { battle_ids: ["shared_guard"], monsters: [{key:"Giant Spider"}], items: [{key:"POTION"}] };
 const dungeon = () => ({id:"trial",name:"調整用",bgm_id:"da3-dungeon1",steps:[]});
+
+test("dungeon order is saved and undoable while retaining the selected dungeon and step", () => {
+  const first = dungeon();
+  const chest = addStep(first, "treasure", catalogs);
+  const second = { ...dungeon(), id: "second" };
+  const third = { ...dungeon(), id: "third" };
+  const h = new History({ format_version: 1, dungeons: [first, second, third] });
+  h.value.stepId = chest.id;
+  const move = (id, dropIndex) => h.change((state) => moveListItem(state.data.dungeons, id, dropIndex));
+
+  move(first.id, -1);
+  move(first.id, 4);
+  move(second.id, 1);
+  move(second.id, 2);
+  move("missing", 0);
+  assert.equal(h.past.length, 0);
+  assert.equal(h.dirty, false);
+
+  move(third.id, 0);
+  assert.deepEqual(h.value.data.dungeons, [third, first, second]);
+  assert.equal(h.value.dungeonId, first.id);
+  assert.equal(h.value.stepId, chest.id);
+  assert.equal(h.dirty, true);
+  h.undo();
+  assert.deepEqual(h.value.data.dungeons, [first, second, third]);
+  assert.equal(h.dirty, false);
+  h.redo();
+  const submitted = JSON.parse(JSON.stringify(h.value.data));
+  assert.deepEqual(submitted.dungeons, [third, first, second]);
+  h.markSaved(submitted);
+  assert.equal(h.dirty, false);
+
+  move(third.id, 3);
+  assert.deepEqual(h.value.data.dungeons, [first, second, third]);
+  assert.equal(h.dirty, true);
+});
 
 test("step numbering counts every random battle and follows count changes and reordering", () => {
   const d = dungeon();
@@ -12,7 +48,7 @@ test("step numbering counts every random battle and follows count changes and re
   assert.deepEqual(stepRanges(d).map(stepLabel), ["1〜5", "6"]);
   random.count = 2;
   assert.deepEqual(stepRanges(d).map(stepLabel), ["1〜2", "3"]);
-  moveStep(d, chest.id, -1);
+  moveListItem(d.steps, chest.id, 0);
   assert.deepEqual(stepRanges(d).map(stepLabel), ["1", "2〜3"]);
 });
 
@@ -29,7 +65,7 @@ test("healing springs insert, reorder and undo as single steps without editable 
   assert.equal(h.value.data.dungeons[0].steps.length, 2);
   h.redo();
   assert.deepEqual(h.value.data.dungeons[0].steps[1], spring);
-  moveStep(h.value.data.dungeons[0], spring.id, -1);
+  moveListItem(h.value.data.dungeons[0].steps, spring.id, 0);
   assert.deepEqual(stepRanges(h.value.data.dungeons[0]).map(stepLabel), ["1", "2〜6", "7"]);
 });
 
@@ -48,7 +84,7 @@ test("optional battle flag can be selected, cleared and restored through history
   const steps = () => h.value.data.dungeons[0].steps;
   h.change(() => setBattleFlag(steps()[0], "trial.guard"));
   assert.equal(steps()[0].flag_id, "trial.guard");
-  h.change(() => moveStep(h.value.data.dungeons[0], battle.id, 1));
+  h.change(() => moveListItem(steps(), battle.id, steps().length));
   assert.equal(steps()[1].flag_id, "trial.guard");
   h.change(() => setBattleFlag(steps()[1], ""));
   assert.equal("flag_id" in steps()[1], false);
@@ -83,7 +119,7 @@ test("treasure identity survives reordering, deletion and undo/redo", () => {
   const h = new History({format_version:1,dungeons:[d]});
   h.value.dungeonId = d.id;
   h.value.stepId = chest.id;
-  h.change((state) => moveStep(state.data.dungeons[0],chest.id,1));
+  h.change((state) => moveListItem(state.data.dungeons[0].steps, chest.id, 2));
   assert.equal(h.value.data.dungeons[0].steps[1].id,chest.id);
   assert.equal(h.dirty,true);
   h.undo();

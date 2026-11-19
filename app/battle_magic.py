@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -11,8 +12,7 @@ else:
     from .resistance import ResistanceType
 
 
-SILENCE_MIN_TURNS = 4
-SILENCE_MAX_TURNS = 6
+DEFAULT_DEBUFF_MIN_TURNS = 4
 MIN_PROTECTION_LEVEL = -1
 MAX_PROTECTION_LEVEL = 2
 
@@ -23,6 +23,13 @@ SPELL_DAMAGE_MINIMUM_RATE = 0.20
 SPELL_DAMAGE_RATE_RANGE = 0.05
 DA2_POISON_DAMAGE_DENOMINATOR = 16
 DA2_BATTLE_HEALING_DENOMINATOR = 16
+
+
+def debuff_turn_range(resistances: Collection[ResistanceType]) -> tuple[int, int]:
+    """Return the inclusive duration range for silence and stat debuffs."""
+
+    minimum = DEFAULT_DEBUFF_MIN_TURNS - int(ResistanceType.DEATH in resistances)
+    return minimum, minimum + 1
 
 
 def modified_defense(base_defense: int, protection_level: int) -> int:

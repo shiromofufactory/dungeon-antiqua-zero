@@ -508,7 +508,8 @@
         {
           "id": "event_battle_80672d17668047d3bfbc0ebff02c360c",
           "type": "event_battle",
-          "battle_id": "battle_9"
+          "battle_id": "battle_9",
+          "flag_id": "eisental_mine.boss_2"
         },
         {
           "id": "random_encounter_bfd3e793e6b14463bd5fb4fe1c661c15",
@@ -607,6 +608,33 @@
             "type": "item",
             "item_key": "WHITE ORE"
           }
+        }
+      ]
+    },
+    {
+      "id": "dungeon_b40b88c112da45b093dea86e82ffb113",
+      "name": "リンデン攻防戦",
+      "bgm_id": "da3-battle2",
+      "steps": [
+        {
+          "id": "event_battle_f6eb930b0eff4f52adffefe75fea9ec5",
+          "type": "event_battle",
+          "battle_id": "battle_13"
+        },
+        {
+          "id": "event_battle_49ce73a7dd6b4e0cacaf0509107a3d7c",
+          "type": "event_battle",
+          "battle_id": "battle_14"
+        },
+        {
+          "id": "event_battle_a69a43002bbc41289770dd51a3b875ad",
+          "type": "event_battle",
+          "battle_id": "battle_15"
+        },
+        {
+          "id": "event_battle_c7e22cf627344a69bf0c9d7f25c15dc6",
+          "type": "event_battle",
+          "battle_id": "battle_16"
         }
       ]
     }

@@ -358,42 +358,47 @@ class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
         self.assertEqual(result.success_rate, 34.5)
         self.assertTrue(result.success)
 
-    def test_boss_halves_ordinary_status_rate(self) -> None:
+    def test_boss_resistance_halves_ordinary_status_rate(self) -> None:
         result = resolve_physical_additional_effect(
-            effect=AdditionalEffect.STUN,
+            effect=AdditionalEffect.POISON,
             adjusted_hit=115,
             effect_roll=17,
             target_is_member=False,
-            target_is_boss=True,
+            target_has_boss_resistance=True,
         )
 
         self.assertEqual(result.activation_points, 1)
         self.assertEqual(result.success_rate, 17.25)
         self.assertTrue(result.success)
 
-    def test_boss_does_not_halve_da2_defense_down_rate(self) -> None:
+    def test_boss_resistance_does_not_halve_defense_down_rate(self) -> None:
         result = resolve_physical_additional_effect(
             effect=AdditionalEffect.DEFENSE_DOWN,
             adjusted_hit=115,
             effect_roll=34,
             target_is_member=False,
-            target_is_boss=True,
+            target_has_boss_resistance=True,
         )
 
         self.assertEqual(result.activation_points, 1)
         self.assertEqual(result.success_rate, 34.5)
         self.assertTrue(result.success)
 
-    def test_stun_does_not_use_da2_pinshot_guarantee(self) -> None:
-        result = resolve_physical_additional_effect(
-            effect=AdditionalEffect.STUN,
-            adjusted_hit=100,
-            effect_roll=30,
-            target_is_member=False,
-        )
-
-        self.assertEqual(result.success_rate, 30)
-        self.assertFalse(result.success)
+    def test_stun_rate_scales_with_accuracy_and_boss_resistance(self) -> None:
+        for hit, resistance, rate in (
+            (80, False, 20), (120, False, 24), (80, True, 10), (120, True, 12),
+        ):
+            for roll in (rate - 1, rate):
+                with self.subTest(hit=hit, resistance=resistance, roll=roll):
+                    result = resolve_physical_additional_effect(
+                        effect=AdditionalEffect.STUN,
+                        adjusted_hit=hit,
+                        effect_roll=roll,
+                        target_is_member=False,
+                        target_has_boss_resistance=resistance,
+                    )
+                    self.assertEqual(result.success_rate, rate)
+                    self.assertEqual(result.success, roll < rate)
 
     def test_silence_uses_the_ordinary_status_rate(self) -> None:
         result = resolve_physical_additional_effect(
@@ -467,7 +472,7 @@ class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
             adjusted_hit=130,
             effect_roll=0,
             target_is_member=False,
-            target_is_boss=True,
+            target_has_boss_resistance=True,
             target_is_weak=True,
             critical=True,
         )

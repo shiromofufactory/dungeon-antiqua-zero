@@ -523,8 +523,8 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 戦闘の単独確認起点は `tools/screen_mocks/battle.py` に置く。仕様が確定して本編でも使う入力、状態、描画は `app/` のScene、Field、Renderer、Overlayまたは表示部品へ置き、テスト起点から本番部品へリソースと疑似状態を注入して確認する。戦闘は `app/scenes/battle.py` の `BattleScene` が処理を所有し、`tools/screen_mocks/battle.py` はPyxel初期化、疑似パーティ・敵編成の構築、入力ポーリング、単独終了だけを担当する。本編の `Game` は現在の `InputState` とセッション状態を渡して同じSceneを利用し、ゲーム本体から `tools/` を参照しない。敵行動数と武器・呪文使用実績の集約、共有経験値・Gold・熟練度・最大HP/MPの成長対象確定はPyxel非依存の `systems/battle_progression.py` が所有する。逃走とフェードの確定では同Systemが経験値、Gold、お宝、最大HPを除外し、熟練度と最大MPだけを反映する。最大HP/MPの理論値と1回の成長上限は、戦闘とメニュー呪文使用で同じ規則を使うため `Member` が所有する。`BattleScene` はその記録契機、勝利・逃走演出、戦闘画面からリザルトへのフェードを調停する。6人リザルトのWindow、色、12フレームの待機、30フレーム補間、表示数値が変化したフレームのSE再生は `ui/battle_result.py` が所有する。リザルトと本編に接続済みのメニュー画面には単独モックを置かず、ゲーム内動線と `app/ui/` を直接対象にした回帰テストで確認する。
 
 敵画像の寸法に応じた配置と収容可否は、Pyxel非依存の `app/battle_layout.py` が所有する。
-`EncounterSystem` は同じ計算で追加グループの出現上限を決め、`BattleScene` は返された
-スロットと座標を描画・隊列判定へ使う。仲間呼びは既存位置を保ったまま空き領域を検証する。
+`EncounterSystem` は抽選後に配置できた個体の数で再抽選を判定する。`BattleScene` は配置結果を使って
+戦闘に参加する個体、描画座標、隊列を決める。仲間呼びは既存位置を保ったまま空き領域を検証する。
 配置条件と座標の正本は [戦闘仕様](./features/battle.md#モンスター)を参照する。
 
 武器使用実績は `BattleProgression` がキャラクター・武器種ごとに対象敵LV、撃破したモンスターの識別キー集合、

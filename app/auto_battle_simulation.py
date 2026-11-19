@@ -26,9 +26,8 @@ if __package__:
     from .battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
-        SILENCE_MIN_TURNS,
-        SILENCE_MAX_TURNS,
         battle_healing_amount,
+        debuff_turn_range,
         member_spell_ability,
         member_spell_modifier,
         modified_defense,
@@ -84,9 +83,8 @@ else:
     from battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
-        SILENCE_MIN_TURNS,
-        SILENCE_MAX_TURNS,
         battle_healing_amount,
+        debuff_turn_range,
         member_spell_ability,
         member_spell_modifier,
         modified_defense,
@@ -954,7 +952,7 @@ class BattleForecast:
                         self.roll(actor, target.spec.number, 4 + hand * 3) * 100
                     ),
                     target_is_member=False,
-                    target_is_boss=target.spec.boss,
+                    target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
                     target_is_weak=resistance in target.spec.weaknesses,
                     target_is_resistant=resistance in target.spec.resistances,
                     critical=result.critical,
@@ -997,7 +995,7 @@ class BattleForecast:
             and target.spec.spells
         ):
             target.silenced = max(
-                target.silenced, 4 + int(self.roll(actor, target.spec.number, 11) * 3)
+                target.silenced, self.debuff_turns(actor, target)
             )
         elif effect is AdditionalEffect.DEFENSE_DOWN:
             if target.protection > -1:
@@ -1128,19 +1126,16 @@ class BattleForecast:
                         elif spell.action is SpellAction.SILENCE:
                             target.silenced = max(
                                 target.silenced,
-                                4
-                                + int(
-                                    self.roll(actor, target.spec.number, 11) * 3
-                                ),
+                                self.debuff_turns(actor, target),
                             )
                         if spell.attribute is ResistanceType.POISON:
                             target.poisoned = True
         actor.hidden = False
 
     def debuff_turns(self, actor: ForecastActor, target: ForecastActor) -> int:
-        return SILENCE_MIN_TURNS + int(
-            self.roll(actor, target.spec.number, 11)
-            * (SILENCE_MAX_TURNS - SILENCE_MIN_TURNS + 1)
+        minimum, maximum = debuff_turn_range(target.spec.resistances)
+        return minimum + int(
+            self.roll(actor, target.spec.number, 11) * (maximum - minimum + 1)
         )
 
     def apply_slow(
@@ -1334,6 +1329,7 @@ class BattleForecast:
                     effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
                     effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
                     target_is_member=True,
+                    target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
                     target_is_resistant=ResistanceType.STUN in target.spec.resistances,
                     target_defending=target.defending,
                 ).success
@@ -1477,6 +1473,7 @@ class BattleForecast:
                 adjusted_hit=result.adjusted_hit,
                 effect_roll=int(self.roll(actor, target.spec.number, 4 + roll_offset) * 100),
                 target_is_member=True,
+                target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
                 target_is_resistant=EFFECT_RESISTANCE[effect]
                 in target.spec.resistances,
                 target_defending=target.defending,
@@ -1602,7 +1599,7 @@ class BattleForecast:
                         self.roll(actor, target.spec.number, 4 + hand * 3) * 100
                     ),
                     target_is_member=not target.spec.enemy,
-                    target_is_boss=target.spec.boss,
+                    target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
                     target_is_weak=(
                         resistance is not None
                         and resistance in target.spec.weaknesses

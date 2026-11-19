@@ -10,9 +10,9 @@ from typing import Protocol
 
 if __package__ == "":
     from battle_magic import (
+        DEFAULT_DEBUFF_MIN_TURNS,
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
-        SILENCE_MIN_TURNS,
         modified_defense,
     )
     from battle_speed import (
@@ -21,9 +21,9 @@ if __package__ == "":
     )
 else:
     from .battle_magic import (
+        DEFAULT_DEBUFF_MIN_TURNS,
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
-        SILENCE_MIN_TURNS,
         modified_defense,
     )
     from .battle_speed import (
@@ -595,7 +595,7 @@ class MonsterBattleState:
         return True
 
     def apply_defense_down(
-        self, turns: int = SILENCE_MIN_TURNS, *, armor_break: bool = False,
+        self, turns: int = DEFAULT_DEBUFF_MIN_TURNS, *, armor_break: bool = False,
     ) -> bool:
         """Lower defense by one stage, or remove all protection with BREAK."""
 
@@ -622,7 +622,7 @@ class MonsterBattleState:
             raise ValueError("base_defense must not be negative")
         return modified_defense(base_defense, self.defense_modifier)
 
-    def apply_slow(self, turns: int = SILENCE_MIN_TURNS) -> bool:
+    def apply_slow(self, turns: int = DEFAULT_DEBUFF_MIN_TURNS) -> bool:
         """Apply SLOW once, cancelling a positive speed modifier first."""
 
         if isinstance(turns, bool) or not isinstance(turns, int):

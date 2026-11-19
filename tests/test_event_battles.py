@@ -53,11 +53,11 @@ class EventBattleTest(unittest.TestCase):
             (BATTLES * 2, "duplicate_battle_id"),
             ([{**BATTLES[0], "monster_keys": []}], "invalid_monster_lineup"),
             ([{**BATTLES[0], "monster_keys": ["unknown"]}], "unknown_monster"),
-            ([{**BATTLES[0], "monster_keys": ["TREANT"] * 5}], "oversized_monster_lineup"),
+            ([{**BATTLES[0], "monster_keys": ["TREANT"] * 6}], "invalid_monster_lineup"),
         ]
         for battles, code in cases:
             with self.subTest(code=code):
-                issues = validate_event_battles(battles, monster_keys={"SLIME", "TREANT"}, tall_first_monster_keys={"TREANT"})
+                issues = validate_event_battles(battles, monster_keys={"SLIME", "TREANT"})
                 self.assertIn(code, {issue.code for issue in issues})
 
     def test_unknown_reference_and_inline_lineup_are_rejected(self):

@@ -83,6 +83,7 @@ from resources import (
     MapDestination,
     MapRandomEncounter,
     WorldSite,
+    load_record_array,
 )
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
@@ -579,7 +580,10 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(mock.equipment_screen)
         self.assertIsNone(mock.status_screen)
         self.assertIsNone(mock.spell_screen)
-        self.assertEqual(len(mock.spells), 40)
+        self.assertEqual(
+            set(mock.spells),
+            {record["name_en"] for record in load_record_array("spells.json")},
+        )
         self.assertEqual(mock.selected_member_index, 0)
         self.assertIs(mock.party_window, party_window)
         self.assertIs(mock.info_window, info_window)

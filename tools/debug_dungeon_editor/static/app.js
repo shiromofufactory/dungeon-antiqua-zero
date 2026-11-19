@@ -1,10 +1,11 @@
-import { History, addStep, moveStep, newId, clone, stepRanges, stepLabel, setBattleFlag } from "./model.js";
+import { History, addStep, moveListItem, newId, clone, stepRanges, stepLabel, setBattleFlag } from "./model.js";
 
 const byId = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 let token = new URL(location.href).searchParams.get("token") || "";
-let history, catalogs, saving = false, navigationUrl = null, pendingEdit = false;
+let history, catalogs, battlesById, saving = false, navigationUrl = null, pendingEdit = false;
 let validationRevision = 0, validationTimer;
+let listDrag = null;
 const state = () => history.value;
 const dungeon = () => state().data.dungeons.find((entry) => entry.id === state().dungeonId);
 const step = () => dungeon()?.steps.find((entry) => entry.id === state().stepId);
@@ -31,9 +32,14 @@ function numberField(field, label, value, min, max) {
   return `<label>${label}<input data-field="${field}" type="number" min="${min}" max="${max}" value="${value}"></label>`;
 }
 function catalogOptions(name) { return catalogs[name].map((entry) => [entry.key, `${entry.name} (${entry.key})`]); }
+function battleLabel(id) {
+  const rawNote = battlesById.get(id)?.note;
+  const note = typeof rawNote === "string" ? rawNote.trim() : "";
+  return note ? `${id}（${note}）` : id;
+}
 function summary(entry) {
   if (entry.type === "random_encounter") return `${entry.count}回 · LV ${entry.encounter.monster_level === "dynamic" ? "変動" : entry.encounter.monster_level} · 危険度${entry.encounter.danger === "high" ? "高" : "低"}`;
-  if (entry.type === "event_battle") return entry.battle_id + (entry.flag_id ? ` · フラグ: ${entry.flag_id}` : "");
+  if (entry.type === "event_battle") return battleLabel(entry.battle_id) + (entry.flag_id ? ` · フラグ: ${entry.flag_id}` : "");
   if (entry.type === "healing_spring") return "パーティのHP・MP全快";
   return entry.contents.type === "gold" ? `${entry.contents.amount} Gold` : entry.contents.item_key;
 }
@@ -53,7 +59,7 @@ function detail(entry) {
     html += entry.contents.type === "gold" ? numberField("amount", "金額", entry.contents.amount, 1, 999999)
       : selectField("item_key", "アイテム（1個）", catalogOptions("items"), entry.contents.item_key);
   } else if (entry.type === "event_battle") {
-    html = selectField("battle_id", "バトルID", [["", "選択してください"], ...catalogs.battle_ids.map((id) => [id,id])], entry.battle_id);
+    html = selectField("battle_id", "バトルID", [["", "選択してください"], ...catalogs.battle_ids.map((id) => [id, battleLabel(id)])], entry.battle_id);
     const flags = catalogs.flags.map((flag) => [flag.flag_id, flag.note ? `${flag.flag_id} — ${flag.note}` : flag.flag_id]);
     if (entry.flag_id && !flags.some(([id]) => id === entry.flag_id)) flags.push([entry.flag_id, `${entry.flag_id}（未登録）`]);
     html += selectField("flag_id", "勝利フラグ（任意）", [["", "未指定"], ...flags], entry.flag_id ?? "");
@@ -63,11 +69,22 @@ function detail(entry) {
   }
   html = `<div class="fields">${html}</div>`;
   if (entry.type === "event_battle") {
-    const battle = catalogs.battles.find((battle) => battle.battle_id === entry.battle_id);
+    const battle = battlesById.get(entry.battle_id);
     const names = (battle?.monster_keys || []).map((key) => catalogs.monsters.find((monster) => monster.key === key)?.name || key);
     html += `<p class="hint">${escapeHtml(names.join(" ／ ") || "イベントエディタの「イベントバトル」タブで登録してください。")}</p>`;
   }
   return html;
+}
+
+function renderDragHandle(id, list, count) {
+  const canMove = !saving && count > 1;
+  return `<button type="button" class="list-drag-handle" id="drag-${list}-${id}" data-drag-id="${id}" draggable="${canMove}"
+    ${canMove ? "" : "disabled"} aria-label="並べ替え" aria-describedby="${list}-${id}" aria-keyshortcuts="ArrowUp ArrowDown"
+    title="ドラッグまたは上下キーで移動">⠿</button>`;
+}
+
+function renderDropZone(index) {
+  return `<div class="list-drop-zone" data-drop-index="${index}"></div>`;
 }
 
 function render(rebuild = true) {
@@ -89,14 +106,37 @@ function render(rebuild = true) {
     });
     return;
   }
-  byId("dungeons").innerHTML = state().data.dungeons.map((entry) => `<button data-dungeon="${entry.id}" class="${entry.id === state().dungeonId ? "selected" : ""}">${escapeHtml(entry.name)}</button>`).join("") || '<p class="hint">「＋ 新規」でダンジョンを作成します。</p>';
+  clearListDrag();
+  const dungeons = state().data.dungeons;
+  const dungeonRows = dungeons.map((entry, index) => {
+    const id = escapeHtml(entry.id);
+    return `${renderDropZone(index)}
+      <div class="dungeon-row ${entry.id === state().dungeonId ? "selected" : ""}" data-reorder-row>
+        ${renderDragHandle(id, "dungeon", dungeons.length)}
+        <button id="dungeon-${id}" data-dungeon="${id}">${escapeHtml(entry.name)}</button>
+      </div>`;
+  }).join("");
+  byId("dungeons").innerHTML = dungeonRows
+    ? dungeonRows + renderDropZone(dungeons.length)
+    : '<p class="hint">「＋ 新規」でダンジョンを作成します。</p>';
   const d = dungeon();
   if (!d) { byId("workspace").innerHTML = '<p class="empty">ダンジョンを選択してください。</p>'; return; }
   const ranges = stepRanges(d);
+  const stepRows = d.steps.map((entry, index) => {
+    const id = escapeHtml(entry.id);
+    const selected = entry.id === state().stepId;
+    return `${renderDropZone(index)}
+      <article class="step ${selected ? "selected" : ""}" data-reorder-row>
+        ${renderDragHandle(id, "step", d.steps.length)}
+        <button class="step-title" id="step-${id}" data-step="${id}">${stepLabel(ranges[index])}. ${labels[entry.type]} <span class="muted">${escapeHtml(summary(entry))}</span></button>
+        <div class="toolbar"><button data-action="delete-step" data-id="${id}">削除</button></div>
+        ${selected ? `<div class="step-detail">${detail(entry)}</div>` : ""}
+      </article>`;
+  }).join("");
   byId("workspace").innerHTML = `<div class="heading"><h2>入口から最奥部まで</h2><button data-action="delete-dungeon" class="danger">ダンジョンを削除</button></div>
     <div class="metadata"><label>ダンジョン名<input data-field="name" maxlength="24" value="${escapeHtml(d.name)}"></label>${selectField("bgm_id","探索中のBGM",catalogs.bgm_ids.map((key)=>[key,key]),d.bgm_id)}<span class="muted source-id">ID: ${d.id}</span></div>
     <div class="add-step"><span>選択行の後に追加：</span><button data-add="random_encounter">＋ ランダム戦闘</button><button data-add="treasure">＋ 宝箱</button><button data-add="event_battle">＋ イベント戦闘</button><button data-add="healing_spring">＋ 回復の泉</button></div>
-    <div>${d.steps.map((entry,index) => `<article class="step ${entry.id === state().stepId ? "selected" : ""}"><button class="step-title" data-step="${entry.id}">${stepLabel(ranges[index])}. ${labels[entry.type]} <span class="muted">${escapeHtml(summary(entry))}</span></button><div class="toolbar"><button data-action="up" data-id="${entry.id}" ${index===0 ? "disabled":""} aria-label="上へ移動">↑</button><button data-action="down" data-id="${entry.id}" ${index===d.steps.length-1 ? "disabled":""} aria-label="下へ移動">↓</button><button data-action="delete-step" data-id="${entry.id}">削除</button></div>${entry.id === state().stepId ? `<div class="step-detail">${detail(entry)}</div>` : ""}</article>`).join("") || '<p class="empty">戦闘や宝箱を追加してください。</p>'}</div>`;
+    <div data-reorder-list="step">${stepRows ? stepRows + renderDropZone(d.steps.length) : '<p class="empty">戦闘や宝箱を追加してください。</p>'}</div>`;
 }
 
 function showIssues(issues) {
@@ -164,10 +204,56 @@ document.addEventListener("click", (event) => {
     changed((value) => { value.data.dungeons = value.data.dungeons.filter((entry) => entry.id !== value.dungeonId); value.dungeonId = value.data.dungeons[0]?.id ?? null; value.stepId = null; });
   } else if (action === "delete-step") {
     changed((value) => { const d = dungeon(); const index = d.steps.findIndex((entry) => entry.id === target.dataset.id); d.steps.splice(index,1); value.stepId = d.steps[Math.min(index,d.steps.length-1)]?.id ?? null; });
-  } else if (action === "up" || action === "down") {
-    changed((value) => { value.stepId = target.dataset.id; moveStep(dungeon(),target.dataset.id,action === "up" ? -1 : 1); });
   }
 });
+
+function reorderEntries(list) {
+  return list.dataset.reorderList === "dungeon" ? state().data.dungeons : dungeon().steps;
+}
+
+function clearListDrag() {
+  if (!listDrag) return;
+  const { list, row, zone } = listDrag;
+  listDrag = null;
+  list.classList.remove("list-item-dragging");
+  row.classList.remove("dragging");
+  zone?.classList.remove("active");
+}
+
+document.addEventListener("dragstart", (event) => {
+  const handle = event.target.closest("[data-drag-id]");
+  if (!handle?.draggable || saving || !event.dataTransfer) return;
+  const row = handle.closest("[data-reorder-row]");
+  const list = row.parentElement;
+  clearListDrag();
+  listDrag = { list, row, id: handle.dataset.dragId, zone: null };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", listDrag.id);
+  row.classList.add("dragging");
+  list.classList.add("list-item-dragging");
+});
+document.addEventListener("dragover", (event) => {
+  if (!listDrag) return;
+  const zone = event.target.closest("[data-drop-index]");
+  // Match the event editor: retain the highlighted insertion point outside its frame.
+  if (zone?.parentElement === listDrag.list && zone !== listDrag.zone) {
+    listDrag.zone?.classList.remove("active");
+    zone.classList.add("active");
+    listDrag.zone = zone;
+  }
+  if (!listDrag.zone) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+});
+document.addEventListener("drop", (event) => {
+  if (!listDrag) return;
+  const { list, id, zone } = listDrag;
+  clearListDrag();
+  if (!zone) return;
+  event.preventDefault();
+  changed(() => moveListItem(reorderEntries(list), id, Number(zone.dataset.dropIndex)));
+});
+document.addEventListener("dragend", clearListDrag);
 
 document.addEventListener("change", (event) => {
   if (!history || saving) return;
@@ -192,6 +278,18 @@ document.addEventListener("input", (event) => {
 });
 document.addEventListener("focusout", () => { if (history && pendingEdit) { pendingEdit = false; render(false); } });
 document.addEventListener("keydown", (event) => {
+  const handle = event.target.closest("[data-drag-id]");
+  if (handle?.draggable && !saving && !listDrag && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+      && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    event.preventDefault();
+    const entries = reorderEntries(handle.closest("[data-reorder-list]"));
+    const index = entries.findIndex((entry) => entry.id === handle.dataset.dragId);
+    const dropIndex = index + (event.key === "ArrowUp" ? -1 : 2);
+    if (dropIndex < 0 || dropIndex > entries.length) return;
+    changed(() => moveListItem(entries, handle.dataset.dragId, dropIndex));
+    byId(handle.id).focus();
+    return;
+  }
   if (!(event.metaKey || event.ctrlKey) || !history) return;
   const key = event.key.toLowerCase();
   if (key === "s") { event.preventDefault(); document.activeElement?.blur(); void save(); }
@@ -208,6 +306,9 @@ async function initialize() {
     document.querySelectorAll("[data-editor]").forEach((link) => { const url = new URL(`/${link.dataset.editor}/`,location.origin); url.searchParams.set("token",token); link.href = url.href; });
     const payload = await api("document");
     catalogs = payload.catalogs;
+    const battles = Array.isArray(catalogs.battles) ? catalogs.battles : [];
+    battlesById = new Map(battles.filter((battle) => typeof battle?.battle_id === "string")
+      .map((battle) => [battle.battle_id, battle]));
     history = new History(payload.data);
     showIssues(payload.diagnostics);
     render();

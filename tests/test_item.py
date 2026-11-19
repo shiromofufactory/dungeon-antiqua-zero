@@ -306,7 +306,7 @@ class ItemTest(unittest.TestCase):
         )
         self.assertEqual(
             self.item.localized_name(Localizer(Language.SIMPLIFIED_CHINESE)),
-            "DAYBRINGER",
+            "ＤＡＹＢＲＩＮＧＥＲ",
         )
 
     def test_rejects_missing_lookup_key(self) -> None:
