@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from unittest.mock import Mock, patch
@@ -21,6 +22,13 @@ from tests.test_battle_monster_spells import spell_scene
 
 
 class DrainRuleTest(unittest.TestCase):
+    def test_all_shared_and_runtime_monsters_can_initialize_battle_state(self):
+        for path in (APP_ROOT.parent / "content/data/monsters.json",
+                     APP_ROOT / "data/monsters.json"):
+            for record in json.loads(path.read_text(encoding="utf-8")):
+                with self.subTest(path=path, monster=record["name_en"]):
+                    BattleMonster.from_record(record, is_front_row=True)
+
     def test_damage_is_capped_by_missing_hp_including_overkill(self):
         for damage, hp, expected in ((0, 10, 0), (7, 10, 7), (99, 10, 10),
                                      (99, 20, 0), (99, 0, 0)):
@@ -34,9 +42,9 @@ class DrainRuleTest(unittest.TestCase):
 
 
 class MonsterDrainTest(unittest.TestCase):
-    def scene(self, *, hp=1):
+    def scene(self, *, hp=1, monster_key="ヴァンパイアバット"):
         record = next(r for r in load_record_array("monsters.json")
-                      if r["name_en"] == "ヴァンパイアバット")
+                      if r["name_en"] == monster_key)
         actor = BattleMonster.from_record(record, is_front_row=True)
         self.assertIs(actor.additional_effect, AdditionalEffect.DRAIN)
         actor.state.hp = hp
@@ -64,20 +72,22 @@ class MonsterDrainTest(unittest.TestCase):
         return sound
 
     def test_attack_recovers_once_and_updates_observed_hp(self):
-        scene, actor = self.scene()
-        sound = self.begin(scene, actor)
-        damage = scene.monster_attack_damage
-        amount = min(damage, actor.state.max_hp - 1)
-        presentation = scene.monster_drain_presentation
-        self.assertEqual(actor.state.hp, 1)
-        sound.assert_called_once_with(BATTLE_DRAIN_SE_ID)
-        hp = scene.party[0].hp
-        scene._finish_monster_attack()
-        scene._apply_monster_drain_healing()
-        self.assertEqual(scene.party[0].hp, max(0, hp - damage))
-        self.assertEqual(actor.state.hp, 1 + amount)
-        self.assertTrue(presentation.healing_applied)
-        self.assertEqual(scene.auto_battle_observations.enemy_net_damage, {0: -amount})
+        for key in ("ヴァンパイアバット", "Lesser Vampire"):
+            with self.subTest(monster=key):
+                scene, actor = self.scene(monster_key=key)
+                sound = self.begin(scene, actor)
+                damage = scene.monster_attack_damage
+                amount = min(damage, actor.state.max_hp - 1)
+                presentation = scene.monster_drain_presentation
+                self.assertEqual(actor.state.hp, 1)
+                sound.assert_called_once_with(BATTLE_DRAIN_SE_ID)
+                hp = scene.party[0].hp
+                scene._finish_monster_attack()
+                scene._apply_monster_drain_healing()
+                self.assertEqual(scene.party[0].hp, max(0, hp - damage))
+                self.assertEqual(actor.state.hp, 1 + amount)
+                self.assertTrue(presentation.healing_applied)
+                self.assertEqual(scene.auto_battle_observations.enemy_net_damage, {0: -amount})
 
     def test_critical_sound_replaces_hit_or_drain_for_every_monster_attack_path(self):
         for mode in ("attack", "charge", "confused"):
