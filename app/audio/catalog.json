@@ -114,6 +114,9 @@
     },
     "spell_freeze2": {
       "sound": 15
+    },
+    "spell_fire2": {
+      "sound": 13
     }
   }
 }
