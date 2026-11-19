@@ -820,6 +820,7 @@ class FormationAnimationCompletion(StrEnum):
     START_TIMELINE = "start_timeline"
     START_TIMELINE_REMOVAL = "start_timeline_removal"
     ACTIVATE_TIMELINE_HEAD = "activate_timeline_head"
+    CONTINUE_MONSTER_ATTACK = "continue_monster_attack"
 
 
 @dataclass(frozen=True)
@@ -840,6 +841,7 @@ class BattleHealingResult:
     cures_ailments: bool
     popup_x: int
     popup_y: int
+    target_is_monster: bool = False
 
 
 @dataclass(frozen=True)
@@ -950,6 +952,7 @@ class BattleProtectionResult:
     """One guaranteed PROTECTION stage waiting for its timed application."""
 
     target_index: int
+    target_is_monster: bool = False
 
 
 @dataclass(frozen=True)
@@ -957,6 +960,7 @@ class BattleHasteResult:
     """One guaranteed HASTE stage waiting for its timed application."""
 
     target_index: int
+    target_is_monster: bool = False
 
 
 @dataclass(frozen=True)
@@ -1138,6 +1142,8 @@ class BattleActionPresentation:
     party_slow_results: tuple[BattlePartySlowResult, ...] = ()
     party_break_results: tuple[BattlePartyBreakResult, ...] = ()
     confused_attack_results: tuple[BattleConfusedAttackResult, ...] = ()
+    drain_party_index: int | None = None
+    drain_monster_index: int | None = None
     fade_escape: bool = False
     result_start_frame: int = 0
     post_effect_wait_frame_count: int = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
@@ -4170,6 +4176,14 @@ class BattleScene:
             self._start_timeline_removal_animation()
         elif completion is FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD:
             self._activate_timeline_head()
+        elif completion is FormationAnimationCompletion.CONTINUE_MONSTER_ATTACK:
+            actor = self.timeline[0]
+            targets = self._monster_attack_target_indexes(actor)
+            if targets:
+                self.phase = BattlePhase.MONSTER_ACTION
+                self._begin_standard_monster_attack(actor, target_indexes=targets)
+            else:
+                self._start_timeline_animation()
         else:
             raise RuntimeError("unknown formation animation completion")
 
@@ -5305,6 +5319,9 @@ class BattleScene:
             cure_results=cure_results,
             revive_results=revive_results,
             silence_results=silence_results,
+            drain_party_index=(
+                self.active_party_index if spell.action is SpellAction.BLOOD_SUCK else None
+            ),
             fade_escape=spell.action in (SpellAction.FADE, SpellAction.TELEPORT),
             result_start_frame=result_start_frame,
         )
@@ -5370,28 +5387,42 @@ class BattleScene:
         self,
         spell: Spell,
         indexes: tuple[int, ...],
+        *,
+        monster_caster: BattleMonster | None = None,
     ) -> tuple[BattleHealingResult, ...]:
-        """Resolve each HEAL target without mutating party state yet."""
+        """Resolve each HEAL target without mutating its state yet."""
 
         if spell.action is not SpellAction.HEAL:
             return ()
         if spell.to_enemy:
             raise BattleDataError("HEAL spells must target allies")
-        if self.active_party_index is None:
-            raise RuntimeError("HEAL requires an active party member")
-
-        actor = self.party[self.active_party_index]
-        ability = (
-            DA2_DEFAULT_ITEM_SPELL_ABILITY
-            if spell.type is SpellType.ITEM
-            else member_spell_ability(
+        if spell.type is SpellType.ITEM:
+            ability = DA2_DEFAULT_ITEM_SPELL_ABILITY
+        elif monster_caster is not None:
+            ability = monster_caster.magic
+        else:
+            if self.active_party_index is None:
+                raise RuntimeError("HEAL requires an active party member")
+            actor = self.party[self.active_party_index]
+            ability = member_spell_ability(
                 magic=actor.adjusted_abilities.magic,
                 internal_level=actor.internal_level,
             )
-        )
         results: list[BattleHealingResult] = []
         for index in indexes:
-            target = self.party[index]
+            if monster_caster is not None:
+                monster = self.monsters[index]
+                target = monster.state
+                _, y = self._monster_base_position(index)
+                popup_x = self._monster_draw_x(index) + monster.width // 2
+                popup_y = y + monster.height - 8
+            else:
+                target = self.party[index]
+                position = self._party_draw_position(index)
+                if position is None:
+                    continue
+                x, y = position
+                popup_x, popup_y = x + 6, y + 16
             resolution = resolve_healing(
                 intensity=spell.intensity,
                 ability=ability,
@@ -5399,17 +5430,14 @@ class BattleScene:
                 max_hp=target.max_hp,
                 random_factor=random.random(),
             )
-            position = self._party_draw_position(index)
-            if position is None:
-                continue
-            x, y = position
             results.append(
                 BattleHealingResult(
                     target_index=index,
                     amount=resolution.amount,
                     cures_ailments=resolution.cures_ailments,
-                    popup_x=x + 6,
-                    popup_y=y + 16,
+                    popup_x=popup_x,
+                    popup_y=popup_y,
+                    target_is_monster=monster_caster is not None,
                 )
             )
         return tuple(results)
@@ -5595,6 +5623,8 @@ class BattleScene:
         self,
         spell: Spell,
         indexes: tuple[int, ...],
+        *,
+        target_is_monster: bool = False,
     ) -> tuple[BattleProtectionResult, ...]:
         """Resolve DA2's guaranteed one-stage defense increase."""
 
@@ -5602,12 +5632,14 @@ class BattleScene:
             return ()
         if spell.to_enemy:
             raise BattleDataError("PROTECTION spells must target allies")
-        return tuple(BattleProtectionResult(index) for index in indexes)
+        return tuple(BattleProtectionResult(index, target_is_monster) for index in indexes)
 
     def _resolve_haste_results(
         self,
         spell: Spell,
         indexes: tuple[int, ...],
+        *,
+        target_is_monster: bool = False,
     ) -> tuple[BattleHasteResult, ...]:
         """Resolve DA2's guaranteed one-stage speed increase."""
 
@@ -5615,7 +5647,7 @@ class BattleScene:
             return ()
         if spell.to_enemy:
             raise BattleDataError("HASTE spells must target allies")
-        return tuple(BattleHasteResult(index) for index in indexes)
+        return tuple(BattleHasteResult(index, target_is_monster) for index in indexes)
 
     def _resolve_cure_results(
         self,
@@ -5715,7 +5747,7 @@ class BattleScene:
     ) -> tuple[BattleSpellDamageResult, ...]:
         """Resolve each DAMAGE target without mutating monster state yet."""
 
-        if spell.action is not SpellAction.DAMAGE:
+        if spell.action not in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK):
             return ()
         if not spell.to_enemy:
             raise BattleDataError("DAMAGE spells must target enemies")
@@ -5897,12 +5929,17 @@ class BattleScene:
             popups = []
             self.healing_popups = popups
         for result in presentation.healing_results:
-            member = self.party[result.target_index]
-            member.apply_healing(
-                result.amount,
-                cure_ailments=result.cures_ailments,
+            index = result.target_index
+            target = self.monsters[index].state if result.target_is_monster else self.party[index]
+            recovered = target.apply_healing(
+                result.amount, cure_ailments=result.cures_ailments,
             )
-            self._refresh_party_hp_text(result.target_index)
+            if result.target_is_monster:
+                observations = getattr(self, "auto_battle_observations", None)
+                if observations is not None and recovered:
+                    observations.damage(index, -recovered)
+            else:
+                self._refresh_party_hp_text(index)
             if result.amount > 0:
                 popups.append(
                     BattleHealingPopup(
@@ -5928,9 +5965,12 @@ class BattleScene:
         if damage_popups is None:
             damage_popups = []
             self.spell_damage_popups = damage_popups
+        drained = 0
         for result in presentation.damage_results:
             monster = self.monsters[result.target_index]
-            monster.state.take_damage(result.damage)
+            damage = monster.state.take_damage(result.damage)
+            if presentation.drain_party_index is not None:
+                drained += damage
             observations = getattr(self, "auto_battle_observations", None)
             if observations is not None:
                 observations.damage(result.target_index, result.damage)
@@ -5941,6 +5981,19 @@ class BattleScene:
                     result.damage,
                 )
             )
+        if presentation.drain_party_index is not None and drained:
+            index = presentation.drain_party_index
+            member = self.party[index]
+            restored = member.apply_healing(
+                drain_healing_amount(damage=drained, hp=member.hp, max_hp=member.max_hp)
+            )
+            if restored:
+                self._refresh_party_hp_text(index)
+                position = self._party_draw_position(index)
+                if position is not None:
+                    x, y = position
+                    popups.append(BattleHealingPopup(x + 6, y + 16, restored))
+            play_se(BATTLE_DRAIN_SE_ID)
         for result in presentation.sleep_results:
             monster = self.monsters[result.target_index]
             if result.success:
@@ -5990,7 +6043,8 @@ class BattleScene:
             monster = self.monsters[result.target_index]
             if result.success:
                 monster.state.apply_defense_down(
-                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS)
+                    random.randint(SILENCE_MIN_TURNS, SILENCE_MAX_TURNS),
+                    armor_break=True,
                 )
             else:
                 damage_popups.append(
@@ -6002,9 +6056,19 @@ class BattleScene:
                     )
                 )
         for result in presentation.protection_results:
-            self.party[result.target_index].apply_protection()
+            target = (
+                self.monsters[result.target_index].state
+                if result.target_is_monster
+                else self.party[result.target_index]
+            )
+            target.apply_protection()
         for result in presentation.haste_results:
-            self.party[result.target_index].apply_haste()
+            target = (
+                self.monsters[result.target_index].state
+                if result.target_is_monster
+                else self.party[result.target_index]
+            )
+            target.apply_haste()
         for result in presentation.cure_results:
             self.party[result.target_index].cure_ailments()
         for result in presentation.revive_results:
@@ -6026,12 +6090,21 @@ class BattleScene:
                     )
                 )
 
+        drained = 0
         for result in presentation.party_damage_results:
-            self._apply_monster_attack_damage(result.target_index, result.damage)
+            damage = self._apply_monster_attack_damage(result.target_index, result.damage)
+            if presentation.drain_monster_index is not None:
+                drained += damage
             if presentation.breath_tint_color is None:
                 damage_popups.append(
                     BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage, is_miss=result.is_miss)
                 )
+        if presentation.drain_monster_index is not None and drained:
+            actor = self.monsters[presentation.drain_monster_index]
+            source = presentation.party_damage_results[0]
+            self._begin_monster_drain(actor, drained, source.popup_x, source.popup_y)
+            self._apply_monster_drain_healing()
+            play_se(BATTLE_DRAIN_SE_ID)
 
         for result in presentation.party_poison_results:
             if result.success:
@@ -9565,9 +9638,14 @@ class BattleScene:
             return tuple(
                 index for index in self._active_party_indexes() if index not in hidden
             )
-        return tuple(
-            index for index, monster in enumerate(self.monsters) if monster.is_alive
-        )
+        living = tuple(index for index, monster in enumerate(self.monsters) if monster.is_alive)
+        if spell.action is SpellAction.HASTE:
+            return tuple(i for i in living if self.monsters[i].state.speed_modifier < MAX_SPEED_MODIFIER)
+        if spell.action is SpellAction.PROTECTION:
+            return tuple(i for i in living if self.monsters[i].state.defense_modifier < MAX_PROTECTION_LEVEL)
+        if spell.action is SpellAction.HEAL:
+            return tuple(i for i in living if self.monsters[i].state.hp < self.monsters[i].state.max_hp)
+        return living
 
     @property
     def screen_shake_offset(self) -> tuple[int, int]:
@@ -9815,7 +9893,13 @@ class BattleScene:
         )
         self.action_presentation = BattleActionPresentation(
             tuple(effects),
+            healing_results=self._resolve_healing_results(spell, indexes, monster_caster=actor),
+            protection_results=self._resolve_protection_results(spell, indexes, target_is_monster=True),
             party_damage_results=party_damage_results,
+            drain_monster_index=(
+                self._monster_index(actor) if spell.action is SpellAction.BLOOD_SUCK else None
+            ),
+            haste_results=self._resolve_haste_results(spell, indexes, target_is_monster=True),
             party_silence_results=party_silence_results,
             party_sleep_results=party_sleep_results,
             party_confuse_results=party_confuse_results,
@@ -9857,7 +9941,7 @@ class BattleScene:
     ) -> tuple[BattleSpellDamageResult, ...]:
         """Resolve enemy DAMAGE with the same rule as player offensive magic."""
 
-        if spell.action is not SpellAction.DAMAGE or not spell.to_enemy:
+        if spell.action not in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK) or not spell.to_enemy:
             return ()
         results: list[BattleSpellDamageResult] = []
         for index in indexes:
@@ -10508,6 +10592,11 @@ class BattleScene:
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         self.monster_charge_presentation = None
+        completion = FormationAnimationCompletion.START_TIMELINE
+        if getattr(self, "monster_action", None) is MonsterAction.ATTACK:
+            actor = self.timeline[0]
+            if MonsterSpecialAction.DOUBLE_ATTACK in actor.special_actions:
+                completion = FormationAnimationCompletion.CONTINUE_MONSTER_ATTACK
         self.monster_action = None
         self.protected_party_index = None
         self.covering_party_index = None
@@ -10540,18 +10629,14 @@ class BattleScene:
                 else:
                     self._begin_defeat_message()
                 return
-            if self._prune_surprise_pending_party(
-                FormationAnimationCompletion.START_TIMELINE
-            ):
+            if self._prune_surprise_pending_party(completion):
                 return
-            if self._begin_front_promotion_if_needed(
-                FormationAnimationCompletion.START_TIMELINE
-            ):
+            if self._begin_front_promotion_if_needed(completion):
                 return
         elif self._party_is_defeated():
             self._begin_defeat_message()
             return
-        self._start_timeline_animation()
+        self._continue_after_formation(completion)
 
     def _begin_monster_drain(
         self, actor: BattleMonster, damage: int, source_x: int, source_y: int,
@@ -10615,12 +10700,13 @@ class BattleScene:
             24, 16, TRANSPARENT_INDEX,
         )
 
-    def _apply_monster_attack_damage(self, target_index: int, damage: int) -> None:
+    def _apply_monster_attack_damage(self, target_index: int, damage: int) -> int:
         """Apply a resolved enemy hit at its presentation's impact frame."""
 
         if damage <= 0:
-            return
+            return 0
         member = self.party[target_index]
+        previous_hp = member.hp
         if isinstance(member, Member):
             member.take_damage(damage)
         else:
@@ -10635,6 +10721,7 @@ class BattleScene:
                 target_index,
                 None,
             )
+        return previous_hp - member.hp
 
     def _apply_additional_effects_to_member(
         self,

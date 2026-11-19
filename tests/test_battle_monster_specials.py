@@ -483,6 +483,61 @@ class MonsterPowerHitTest(unittest.TestCase):
                     self.assertEqual(damage, expected_damage)
 
 
+class MonsterDoubleAttackTest(unittest.TestCase):
+    def test_second_attack_waits_for_rear_promotion_and_uses_same_turn(self):
+        record = next(
+            record for record in load_record_array("monsters.json")
+            if record["name_en"] == "Lesser Dragon"
+        )
+        actor = BattleMonster.from_record(record, is_front_row=True)
+        self.assertIn(MonsterSpecialAction.DOUBLE_ATTACK, actor.special_actions)
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = (actor,)
+        scene.party = (
+            SimpleNamespace(hp=1, is_front_row=True),
+            SimpleNamespace(hp=30, is_front_row=False),
+        )
+        scene.timeline = (actor,)
+        scene.phase = BattlePhase.MONSTER_ACTION
+        scene.monster_attack_target_index = None
+        scene.monster_blink_frames_remaining = 0
+        scene.command_window = Mock()
+        scene.command_cursor = Mock()
+        scene.defending_party_indexes = set()
+        scene.progression = Mock()
+        scene._refresh_party_hp_text = Mock()
+        scene._refresh_party_text_colors = Mock()
+        scene._party_sprite_x = Mock(return_value=188)
+        scene._remove_defeated_party_from_timeline = Mock()
+        scene._start_timeline_animation = Mock()
+        scene._select_monster_action = Mock(return_value=MonsterAction.ATTACK)
+        scene._resolve_monster_attack = Mock(side_effect=(
+            (0, SimpleNamespace(hit=True, damage=1)),
+            (1, SimpleNamespace(hit=True, damage=7)),
+        ))
+        scene._resolve_monster_attack_additional_effects = Mock(return_value=())
+
+        with patch("scenes.battle.play_se"):
+            scene._update_monster_action()
+            scene._finish_monster_attack()
+            self.assertEqual(scene.party[0].hp, 0)
+            self.assertIs(scene.phase, BattlePhase.FORMATION)
+            scene._start_timeline_animation.assert_not_called()
+            while scene.phase is BattlePhase.FORMATION:
+                scene._update_formation_animation()
+            self.assertEqual(scene.monster_attack_target_index, 1)
+            scene._finish_monster_attack()
+
+        self.assertEqual(
+            [call.args[1] for call in scene._resolve_monster_attack.call_args_list],
+            [(0,), (1,)],
+        )
+        self.assertEqual(scene.party[1].hp, 23)
+        scene._select_monster_action.assert_called_once_with(actor)
+        scene.progression.record_enemy_action.assert_called_once_with(0)
+        scene._start_timeline_animation.assert_called_once_with()
+
+
 class MonsterChargePresentationTest(unittest.TestCase):
     def test_approach_starts_at_eight_and_accelerates_every_two_frames(
         self,

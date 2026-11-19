@@ -36,7 +36,7 @@ from battle_timeline import TimelineEntry, TimelineOrder
 from item import AdditionalEffect
 from member import EquipmentSlot
 from monster import MonsterSpecialAction, MonsterTribe
-from monster_ai import MonsterSpellAction
+from monster_ai import MonsterAction, MonsterSpellAction
 from resistance import ResistanceType
 from spell import SpellAction, SpellType
 
@@ -110,6 +110,85 @@ class AutoBattleFixtures:
 
 
 class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
+    def test_enemy_forecast_protection_and_healing_affect_living_monster_targets(self):
+        protection, heal = (self.spells[key] for key in ("PROTECTION", "HEALING1"))
+        caster = self.enemy(
+            mp=20, max_mp=20, magic=12, protection=2, spells=(protection, heal),
+        )
+        target = self.enemy(number=6, defense=8, hp=100, protection=1)
+        forecast = BattleForecast(self.snapshot(caster, self.specs[0], target, active=5), 0)
+        actor = forecast.actors[5]
+        target = forecast.actors[6]
+        forecast.roll = Mock(return_value=0.5)
+
+        self.assertEqual(forecast.spell_targets(actor, protection), (6,))
+        with patch(
+            "auto_battle_simulation.monster_action_candidates",
+            return_value=(MonsterSpellAction(protection.key),),
+        ):
+            forecast.enemy_turn(actor)
+        self.assertEqual((target.protection, target.defense), (2, 27))
+
+        self.assertEqual(forecast.spell_targets(actor, heal), (6,))
+        with patch(
+            "auto_battle_simulation.monster_action_candidates",
+            return_value=(MonsterSpellAction(heal.key),),
+        ):
+            forecast.enemy_turn(actor)
+        self.assertEqual(target.hp, 120)
+        self.assertEqual(actor.mp, 20 - protection.mp - heal.mp)
+        self.assertEqual(forecast.spell_targets(actor, heal), ())
+
+    def test_enemy_forecast_applies_haste_and_steals_only_hp_lost(self):
+        haste = self.spells["HASTE"]
+        blood_suck = self.spells["BLOOD SUCK"]
+        actor_spec = self.enemy(
+            hp=50, mp=11, max_mp=11, magic=15, speed=-1, slow_turns=4,
+            spells=(haste, blood_suck),
+        )
+        waiting = self.enemy(number=6, speed=2)
+        ally = replace(self.specs[0], hp=3)
+        forecast = BattleForecast(self.snapshot(actor_spec, ally, waiting, active=5), 0)
+        actor = forecast.actors[5]
+        ally = forecast.actors[0]
+        forecast.roll = Mock(return_value=0.5)
+
+        self.assertEqual(forecast.spell_targets(actor, haste), (5,))
+        with patch(
+            "auto_battle_simulation.monster_action_candidates",
+            return_value=(MonsterSpellAction(haste.key),),
+        ):
+            forecast.enemy_turn(actor)
+        self.assertEqual((actor.speed, actor.slow_turns, actor.mp), (0, 0, 7))
+
+        with patch(
+            "auto_battle_simulation.monster_action_candidates",
+            return_value=(MonsterSpellAction(blood_suck.key),),
+        ):
+            forecast.enemy_turn(actor)
+        self.assertEqual((actor.hp, actor.mp, ally.hp), (53, 2, 0))
+
+    def test_enemy_double_attack_forecast_retargets_after_front_member_dies(self):
+        front = replace(self.specs[0], hp=1)
+        rear = replace(self.specs[1], front=False)
+        enemy = self.enemy(attack=100, special_actions=(MonsterSpecialAction.DOUBLE_ATTACK,))
+        forecast = BattleForecast(self.snapshot(
+            enemy, front, rear, active=5,
+        ), 0)
+        actor = forecast.actors[5]
+
+        with (
+            patch("auto_battle_simulation.monster_action_candidates", return_value=(MonsterAction.ATTACK,)),
+            patch.object(forecast, "roll", return_value=0.0) as roll,
+        ):
+            forecast.enemy_turn(actor)
+
+        self.assertEqual(forecast.actors[0].hp, 0)
+        self.assertLess(forecast.actors[1].hp, rear.hp)
+        roll.assert_any_call(actor, 0, 2)
+        roll.assert_any_call(actor, 1, 7)
+        self.assertEqual(forecast.turns[5], 1)
+
     def test_member_snapshot_preserves_each_hands_effective_tribe(self):
         member = load_mock_party(
             self.items, load_mock_skills(), character_keys=("Fiora",)

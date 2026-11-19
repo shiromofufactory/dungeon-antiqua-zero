@@ -24,11 +24,14 @@ if __package__:
         selectable_attack_target_indexes,
     )
     from .battle_magic import (
+        DA2_DEFAULT_ITEM_SPELL_ABILITY,
+        MAX_PROTECTION_LEVEL,
         SILENCE_MIN_TURNS,
         SILENCE_MAX_TURNS,
         battle_healing_amount,
         member_spell_ability,
         member_spell_modifier,
+        modified_defense,
         poison_tick_damage,
         resolve_healing,
         resolve_spell_damage,
@@ -44,7 +47,7 @@ if __package__:
         counter_attack_succeeds,
         resolve_earthquake_attack,
     )
-    from .battle_speed import SLOW_GAUGE_ADJUSTMENT, modified_agility
+    from .battle_speed import MAX_SPEED_MODIFIER, SLOW_GAUGE_ADJUSTMENT, modified_agility
     from .battle_timeline import (
         GAUGE_READY_VALUE,
         TimelineEntry,
@@ -79,11 +82,14 @@ else:
         selectable_attack_target_indexes,
     )
     from battle_magic import (
+        DA2_DEFAULT_ITEM_SPELL_ABILITY,
+        MAX_PROTECTION_LEVEL,
         SILENCE_MIN_TURNS,
         SILENCE_MAX_TURNS,
         battle_healing_amount,
         member_spell_ability,
         member_spell_modifier,
+        modified_defense,
         poison_tick_damage,
         resolve_healing,
         resolve_spell_damage,
@@ -99,7 +105,7 @@ else:
         counter_attack_succeeds,
         resolve_earthquake_attack,
     )
-    from battle_speed import SLOW_GAUGE_ADJUSTMENT, modified_agility
+    from battle_speed import MAX_SPEED_MODIFIER, SLOW_GAUGE_ADJUSTMENT, modified_agility
     from battle_timeline import (
         GAUGE_READY_VALUE,
         TimelineEntry,
@@ -122,6 +128,7 @@ ALLY_SPELL_ACTIONS = frozenset(
     (
         SpellAction.HEAL,
         SpellAction.DAMAGE,
+        SpellAction.BLOOD_SUCK,
         SpellAction.SLEEP,
         SpellAction.CONFUSE,
         SpellAction.SLOW,
@@ -249,11 +256,7 @@ class ForecastActor:
 
     @property
     def defense(self) -> int:
-        base = self.spec.defense
-        if self.spec.enemy:
-            return max(0, int((base - 10) * 0.5)) if self.protection < 0 else base
-        d = -2 if self.protection < 0 else self.protection
-        return max(0, int((base + 5 * d) * (1 + d / 4)))
+        return modified_defense(self.spec.defense, self.protection)
 
     @property
     def evasion(self) -> int:
@@ -282,6 +285,17 @@ class ForecastActor:
             self.slow_turns = self.defense_down_turns = 0
             self.focus = self.cover = None
         return old - self.hp
+
+    def drain(self, damage: int) -> None:
+        self.hp += drain_healing_amount(damage=damage, hp=self.hp, max_hp=self.max_hp)
+
+    def apply_haste(self) -> None:
+        self.speed = min(MAX_SPEED_MODIFIER, self.speed + 1)
+        self.slow_turns = 0
+
+    def apply_protection(self) -> None:
+        self.protection = min(MAX_PROTECTION_LEVEL, self.protection + 1)
+        self.defense_down_turns = 0
 
     def interrupt_focus(self) -> None:
         if (
@@ -385,6 +399,12 @@ class BattleForecast:
                 if spell.to_enemy
                 else self.enemies()
             )
+            if spell.action is SpellAction.HASTE:
+                targets = tuple(a for a in targets if a.speed < MAX_SPEED_MODIFIER)
+            elif spell.action is SpellAction.PROTECTION:
+                targets = tuple(a for a in targets if a.protection < MAX_PROTECTION_LEVEL)
+            elif spell.action is SpellAction.HEAL:
+                targets = tuple(a for a in targets if a.hp < a.max_hp)
         elif spell.to_enemy:
             targets = self.enemies()
             if spell.action is SpellAction.SLOW:
@@ -411,9 +431,9 @@ class BattleForecast:
                     if not a.hidden or (not spell.to_all and a is actor)
                 )
             if spell.action is SpellAction.PROTECTION:
-                targets = tuple(a for a in targets if a.protection < 2)
+                targets = tuple(a for a in targets if a.protection < MAX_PROTECTION_LEVEL)
             elif spell.action is SpellAction.HASTE:
-                targets = tuple(a for a in targets if a.speed < 2)
+                targets = tuple(a for a in targets if a.speed < MAX_SPEED_MODIFIER)
             elif spell.action is SpellAction.CURE:
                 targets = tuple(a for a in targets if self.cure_spell_curable(a))
         return tuple(a.spec.number for a in targets)
@@ -988,13 +1008,14 @@ class BattleForecast:
         target.interrupt_focus()
 
     def heal_result(self, actor, target, spell, u):
-        ability = (
-            20
-            if spell.type is SpellType.ITEM
-            else member_spell_ability(
+        if spell.type is SpellType.ITEM:
+            ability = DA2_DEFAULT_ITEM_SPELL_ABILITY
+        elif actor.spec.enemy:
+            ability = actor.spec.magic
+        else:
+            ability = member_spell_ability(
                 magic=actor.spec.magic, internal_level=actor.spec.internal_level
             )
-        )
         return resolve_healing(
             intensity=spell.intensity,
             ability=ability,
@@ -1002,6 +1023,13 @@ class BattleForecast:
             max_hp=target.max_hp,
             random_factor=u,
         )
+
+    def apply_spell_healing(self, actor, target, spell, u):
+        result = self.heal_result(actor, target, spell, u)
+        target.hp = min(target.max_hp, target.hp + result.amount)
+        if result.cures_ailments:
+            target.poisoned = target.paralyzed = target.stunned = False
+            target.sleeping = target.confused = target.silenced = 0
 
     def cast(self, actor, action):
         spell = self.spells[action.spell_key]
@@ -1013,17 +1041,11 @@ class BattleForecast:
                     self.reveal(target, spell.attribute.value)
             u = self.roll(actor, n, 8)
             if spell.action is SpellAction.HEAL:
-                result = self.heal_result(actor, target, spell, u)
-                target.hp = min(target.max_hp, target.hp + result.amount)
-                if result.cures_ailments:
-                    target.poisoned = target.paralyzed = target.stunned = False
-                    target.sleeping = target.confused = 0
+                self.apply_spell_healing(actor, target, spell, u)
             elif spell.action is SpellAction.PROTECTION:
-                target.protection = min(2, target.protection + 1)
-                target.defense_down_turns = 0
+                target.apply_protection()
             elif spell.action is SpellAction.HASTE:
-                target.speed = min(2, target.speed + 1)
-                target.slow_turns = 0
+                target.apply_haste()
             elif spell.action is SpellAction.CURE:
                 target.poisoned = target.paralyzed = False
                 target.sleeping = target.confused = 0
@@ -1055,7 +1077,7 @@ class BattleForecast:
                     spell_level=level,
                     internal_level=actor.spec.internal_level,
                 )
-                if spell.action is SpellAction.DAMAGE:
+                if spell.action in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK):
                     result = resolve_spell_damage(
                         intensity=spell.intensity,
                         spell_modifier=modifier,
@@ -1067,7 +1089,9 @@ class BattleForecast:
                         flying_effective=spell.effective_race == "FLYING",
                         random_factor=u,
                     )
-                    target.damage(result.damage)
+                    drained = target.damage(result.damage)
+                    if spell.action is SpellAction.BLOOD_SUCK:
+                        actor.drain(drained)
                 if target.is_alive and (
                     spell.action
                     in (
@@ -1348,7 +1372,16 @@ class BattleForecast:
                 targets = spell_targets[spell.key]
                 if not spell.to_all and len(targets) > 1:
                     targets = (targets[int(self.roll(actor, 0, 1) * len(targets))],)
-                if spell.to_enemy and spell.action is SpellAction.DAMAGE:
+                if not spell.to_enemy:
+                    for n in targets:
+                        target = self.actors[n]
+                        if spell.action is SpellAction.HASTE:
+                            target.apply_haste()
+                        elif spell.action is SpellAction.PROTECTION:
+                            target.apply_protection()
+                        elif spell.action is SpellAction.HEAL:
+                            self.apply_spell_healing(actor, target, spell, self.roll(actor, n, 8))
+                if spell.to_enemy and spell.action in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK):
                     for n in targets:
                         target = self.actors[n]
                         result = resolve_spell_damage(
@@ -1360,7 +1393,9 @@ class BattleForecast:
                             target_resistances=target.spec.resistances,
                             random_factor=self.roll(actor, target.spec.number, 5),
                         )
-                        target.damage(result.damage)
+                        drained = target.damage(result.damage)
+                        if spell.action is SpellAction.BLOOD_SUCK:
+                            actor.drain(drained)
                         target.interrupt_focus()
                 if spell.to_enemy and spell.action in ENEMY_SPELL_ACTIONS:
                     for n in targets:
@@ -1398,18 +1433,25 @@ class BattleForecast:
                                     if target.protection < 0 else 0
                                 )
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
-            targets = available if action is MonsterAction.CHARGE else melee
-            protected = targets[int(self.roll(actor, 0, 1) * len(targets))]
-            target = self.covering(protected.spec.number)
-            if target is not protected:
-                target.hidden = False
             charged = action is MonsterAction.CHARGE
-            self.enemy_physical(actor, target, charged=charged)
+            self.enemy_attack(actor, available if charged else melee, charged=charged)
+            if not charged and MonsterSpecialAction.DOUBLE_ATTACK in actor.spec.special_actions:
+                self.normalize()
+                targets = tuple(a for a in self.allies() if a.front and not a.hidden)
+                if targets and not self.party_defeated:
+                    self.enemy_attack(actor, targets, roll_offset=5)
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
 
-    def enemy_physical(self, actor, target, *, charged=False):
+    def enemy_attack(self, actor, targets, *, charged=False, roll_offset=0):
+        protected = targets[int(self.roll(actor, 0, 1 + roll_offset) * len(targets))]
+        target = self.covering(protected.spec.number)
+        if target is not protected:
+            target.hidden = False
+        self.enemy_physical(actor, target, charged=charged, roll_offset=roll_offset)
+
+    def enemy_physical(self, actor, target, *, charged=False, roll_offset=0):
         power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
         result = resolve_physical_attack(
             attack=int(actor.spec.attack * (1.5 if charged else 1)),
@@ -1420,8 +1462,8 @@ class BattleForecast:
             target_unable_to_evade=target.focus is not None,
             target_incapacitated=bool(target.sleeping),
             attacker_has_power_hit=power_hit,
-            hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
-            critical_roll=int(self.roll(actor, target.spec.number, 3) * 100)
+            hit_roll=int(self.roll(actor, target.spec.number, 2 + roll_offset) * 100),
+            critical_roll=int(self.roll(actor, target.spec.number, 3 + roll_offset) * 100)
             if power_hit or target.sleeping
             else None,
         )
@@ -1432,7 +1474,7 @@ class BattleForecast:
             success = resolve_physical_additional_effect(
                 effect=effect,
                 adjusted_hit=result.adjusted_hit,
-                effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
+                effect_roll=int(self.roll(actor, target.spec.number, 4 + roll_offset) * 100),
                 target_is_member=True,
                 target_is_resistant=EFFECT_RESISTANCE[effect]
                 in target.spec.resistances,
@@ -1450,9 +1492,7 @@ class BattleForecast:
     @staticmethod
     def apply_monster_drain(actor: ForecastActor, damage: int) -> None:
         if actor.spec.enemy and actor.spec.effect is AdditionalEffect.DRAIN:
-            actor.hp += drain_healing_amount(
-                damage=damage, hp=actor.hp, max_hp=actor.max_hp
-            )
+            actor.drain(damage)
 
     def confused_turn(self, actor: ForecastActor) -> None:
         """Forecast DA2's forced same-side basic attack for one confused actor."""

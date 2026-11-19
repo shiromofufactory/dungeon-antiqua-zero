@@ -13,6 +13,8 @@ else:
 
 SILENCE_MIN_TURNS = 4
 SILENCE_MAX_TURNS = 6
+MIN_PROTECTION_LEVEL = -1
+MAX_PROTECTION_LEVEL = 2
 
 DA2_DEFAULT_ITEM_SPELL_ABILITY = 20
 DA2_MINIMUM_HEAL_RATE = 0.8
@@ -21,6 +23,13 @@ SPELL_DAMAGE_MINIMUM_RATE = 0.20
 SPELL_DAMAGE_RATE_RANGE = 0.05
 DA2_POISON_DAMAGE_DENOMINATOR = 16
 DA2_BATTLE_HEALING_DENOMINATOR = 16
+
+
+def modified_defense(base_defense: int, protection_level: int) -> int:
+    """Calculate effective defense from the shared battle defense stages."""
+
+    stage = -2 if protection_level < 0 else protection_level
+    return max(0, int((base_defense + stage * 5) * (1 + stage / 4)))
 
 
 class SpellAffinity(StrEnum):

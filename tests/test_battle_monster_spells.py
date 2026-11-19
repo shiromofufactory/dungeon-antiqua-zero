@@ -20,10 +20,12 @@ from tools.screen_mocks.battle import (
 )
 from monster import MonsterBattleState, MonsterCombatStats
 from monster_ai import MonsterSpellAction
-from battle_magic import resolve_spell_damage, SpellAffinity
+from battle_magic import resolve_healing, resolve_spell_damage, SpellAffinity
 from member import Member, FormationRow
 from battle_timeline import TimelineEntry, TimelineOrder
+from resources import load_record_array
 from resistance import ResistanceType
+from scenes.battle import BattleMonster
 
 
 def spellcaster(
@@ -78,6 +80,83 @@ def spell_scene(actor: BattleMockMonster) -> BattleScreenMock:
 
 
 class MonsterSpellTest(unittest.TestCase):
+    def test_priest_protection_cancels_defense_down_and_gives_effective_defense(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Priest")
+        actor = BattleMonster.from_record(record, is_front_row=True)
+        actor.state.apply_defense_down(5)
+        scene = spell_scene(actor)
+        spell = scene.spells["PROTECTION"]
+        for old_stage, expected_defense in ((-1, 8), (0, 16), (1, 27)):
+            self.assertIn(spell.key, actor.spell_keys)
+            self.assertEqual(scene._eligible_monster_spell_targets(actor, spell), (0,))
+            self.assertTrue(scene._begin_monster_spell(actor, spell))
+            self.assertEqual(actor.state.defense_modifier, old_stage)
+            scene._update_action_presentation()
+            self.assertEqual(actor.state.defense_modifier, old_stage + 1)
+            self.assertEqual(actor.state.defense_down_turns, 0)
+            self.assertEqual(actor.effective_defense, expected_defense)
+        self.assertEqual(actor.state.mp, 1)
+        self.assertEqual(scene._monster_spell_target_indexes(spell), ())
+        self.assertTrue(actor.state.apply_defense_down(5, armor_break=True))
+        self.assertEqual((actor.state.defense_modifier, actor.state.defense_down_turns), (0, 0))
+
+    def test_monster_heal_uses_magic_and_observes_actual_hp_recovered(self):
+        actor = spellcaster(magic=14, spell_key="HEALING1")
+        target = spellcaster(magic=0, spell_key="HASTE")
+        target.state.take_damage(3)
+        target.state.apply_poison()
+        defeated = spellcaster(magic=0, spell_key="HASTE")
+        defeated.state.defeat()
+        scene = spell_scene(actor)
+        scene.monsters = (actor, target, defeated)
+        scene.auto_battle_observations = Mock()
+        spell = scene.spells["HEALING1"]
+        expected = resolve_healing(
+            intensity=spell.intensity, ability=14, current_hp=17, max_hp=20,
+            random_factor=0.5,
+        ).amount
+        self.assertEqual(scene._monster_spell_target_indexes(spell), (1,))
+        with patch("scenes.battle.random.random", return_value=0.5):
+            self.assertTrue(scene._begin_monster_spell(actor, spell))
+        self.assertEqual(target.state.hp, 17)
+        self.assertEqual(actor.state.mp, 12 - spell.mp)
+        presentation = scene.action_presentation
+        scene._update_action_presentation()
+        scene._apply_action_results(presentation)
+        self.assertEqual(target.state.hp, 20)
+        self.assertTrue(target.state.poisoned)
+        self.assertEqual(scene.healing_popups[0].amount, expected)
+        scene.auto_battle_observations.damage.assert_called_once_with(1, -3)
+        self.assertFalse(scene._begin_monster_spell(actor, spell))
+
+    def test_poltergeist_haste_uses_speed_stages_without_moving_waiting_target(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Poltergeist")
+        actor = BattleMonster.from_record(record, is_front_row=True)
+        target = spellcaster(magic=0, spell_key="HASTE")
+        target.state.apply_slow()
+        actor.state.speed_modifier = 2
+        scene = spell_scene(actor)
+        scene.monsters = (actor, target)
+        order = TimelineOrder((
+            TimelineEntry(actor, actor.agility, 64),
+            TimelineEntry(target, target.agility, 50),
+        ))
+        scene._timeline_order = order
+        spell = scene.spells["HASTE"]
+        for expected in (0, 1, 2):
+            self.assertEqual(scene._monster_spell_target_indexes(spell), (1,))
+            self.assertTrue(scene._begin_monster_spell(actor, spell))
+            self.assertEqual(target.state.speed_modifier, expected - 1)
+            scene._update_action_presentation()
+            self.assertEqual(target.state.speed_modifier, expected)
+            self.assertEqual(target.state.slow_turns, 0)
+            self.assertEqual(target.effective_agility, target.agility + expected * 8)
+            self.assertIs(scene._timeline_order, order)
+            self.assertEqual(actor.state.mp, 0)
+            actor.state.mp = actor.state.max_mp
+        self.assertFalse(scene._begin_monster_spell(actor, spell))
+        self.assertEqual(actor.state.mp, 4)
+
     def test_single_target_slow_uses_random_living_member_and_monster_magic(
         self,
     ) -> None:
@@ -410,6 +489,65 @@ class BattleDebuffRecoveryTest(unittest.TestCase):
 
 
 class MonsterDamageSpellTest(unittest.TestCase):
+    def test_party_blood_suck_respects_dark_affinity_and_caps_healing(self):
+        target = spellcaster(magic=0, spell_key="HASTE")
+        target.resistances = frozenset({ResistanceType.DARK})
+        scene = spell_scene(target)
+        caster = scene.party[0]
+        caster.hp = caster.max_hp - 1
+        scene.active_party_index = 0
+        scene.action_targets_enemy = True
+        scene.action_targets_all = False
+        scene.selected_target_index = 0
+        scene.target_cursor = Mock()
+        scene.party_target_cursor = None
+        scene._refresh_monster_name_colors = Mock()
+        spell = scene.spells["BLOOD SUCK"]
+
+        with (
+            patch("scenes.battle.random.random", return_value=0.5),
+            patch("scenes.battle.play_se"),
+        ):
+            self.assertTrue(scene._begin_action_presentation(spell))
+            result, = scene.action_presentation.damage_results
+            self.assertIs(result.affinity, SpellAffinity.RESIST)
+            self.assertGreater(result.damage, 1)
+            scene._update_action_presentation()
+
+        self.assertEqual(target.state.hp, max(0, target.state.max_hp - result.damage))
+        self.assertEqual(caster.hp, caster.max_hp)
+        self.assertEqual(scene.healing_popups[0].amount, 1)
+
+    def test_mage_dwarf_blood_suck_heals_only_actual_hp_lost_once(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "メイジドワーフ")
+        actor = BattleMonster.from_record(record, is_front_row=True)
+        actor.state.take_damage(30)
+        actor.state.apply_poison()
+        scene = spell_scene(actor)
+        target = scene.party[0]
+        target.hp = 2
+        hp = actor.state.hp
+        scene.auto_battle_observations = Mock()
+
+        with (
+            patch("scenes.battle.random.choice", return_value=0),
+            patch("scenes.battle.random.random", return_value=0.5),
+            patch("scenes.battle.play_se") as play_se,
+        ):
+            self.assertEqual(actor.state.mp, 11)
+            self.assertTrue(scene._begin_monster_spell(actor, scene.spells["BLOOD SUCK"]))
+            self.assertEqual(actor.state.mp, 6)
+            presentation = scene.action_presentation
+            self.assertGreater(presentation.party_damage_results[0].damage, 2)
+            self.assertEqual((target.hp, actor.state.hp), (2, hp))
+            scene._update_action_presentation()
+            scene._apply_action_results(presentation)
+
+        self.assertEqual((target.hp, actor.state.hp), (0, hp + 2))
+        self.assertTrue(actor.state.poisoned)
+        scene.auto_battle_observations.damage.assert_called_once_with(0, -2)
+        play_se.assert_called_once_with("battle_drain")
+
     def test_fire_and_freeze_use_shared_damage_rule_and_apply_once_at_result_time(self):
         for key in ("FIRE1", "FREEZE1"):
             with self.subTest(spell=key):

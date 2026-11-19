@@ -9,13 +9,23 @@ from types import MappingProxyType
 from typing import Protocol
 
 if __package__ == "":
-    from battle_magic import SILENCE_MIN_TURNS
+    from battle_magic import (
+        MAX_PROTECTION_LEVEL,
+        MIN_PROTECTION_LEVEL,
+        SILENCE_MIN_TURNS,
+        modified_defense,
+    )
     from battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
     )
 else:
-    from .battle_magic import SILENCE_MIN_TURNS
+    from .battle_magic import (
+        MAX_PROTECTION_LEVEL,
+        MIN_PROTECTION_LEVEL,
+        SILENCE_MIN_TURNS,
+        modified_defense,
+    )
     from .battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -77,6 +87,7 @@ class MonsterSpecialAction(StrEnum):
     FIRE_BREATH = "炎"
     COUNTER = "反"
     EARTHQUAKE = "地"
+    DOUBLE_ATTACK = "連"
 
 
 def monster_spell_keys_from_record(
@@ -381,8 +392,8 @@ class MonsterBattleState:
             or not isinstance(self.defense_modifier, int)
         ):
             raise TypeError("defense_modifier must be an integer")
-        if self.defense_modifier not in (-1, 0):
-            raise ValueError("defense_modifier must be -1 or 0")
+        if not MIN_PROTECTION_LEVEL <= self.defense_modifier <= MAX_PROTECTION_LEVEL:
+            raise ValueError("defense_modifier must be from -1 to 2")
         if (
             isinstance(self.speed_modifier, bool)
             or not isinstance(self.speed_modifier, int)
@@ -438,18 +449,23 @@ class MonsterBattleState:
             self.defense_down_turns = 0
         return previous - self.hp
 
-    def apply_healing(self, amount: int) -> int:
-        """Recover living monsters up to max HP without changing ailments."""
+    def apply_healing(self, amount: int, *, cure_ailments: bool = False) -> int:
+        """Recover living monsters up to max HP and optionally cure ailments."""
 
         if isinstance(amount, bool) or not isinstance(amount, int):
             raise TypeError("healing amount must be an integer")
         if amount < 0:
             raise ValueError("healing amount must not be negative")
+        if not isinstance(cure_ailments, bool):
+            raise TypeError("cure_ailments must be a boolean")
         if not self.is_alive:
             return 0
         previous = self.hp
         assert previous is not None
         self.hp = min(self.max_hp, previous + amount)
+        if cure_ailments:
+            self.poisoned = self.stunned = False
+            self.sleeping = self.confused = self.silenced = 0
         return self.hp - previous
 
     def apply_sleep(self, turns: int) -> None:
@@ -569,8 +585,19 @@ class MonsterBattleState:
         self.stunned = False
         return True
 
-    def apply_defense_down(self, turns: int = SILENCE_MIN_TURNS) -> bool:
-        """Apply DA2's single temporary physical-defense reduction."""
+    def apply_protection(self) -> bool:
+        """Raise defense by one stage and clear any defense-down timer."""
+
+        if self.defense_modifier >= MAX_PROTECTION_LEVEL or not self.is_alive:
+            return False
+        self.defense_modifier += 1
+        self.defense_down_turns = 0
+        return True
+
+    def apply_defense_down(
+        self, turns: int = SILENCE_MIN_TURNS, *, armor_break: bool = False,
+    ) -> bool:
+        """Lower defense by one stage, or remove all protection with BREAK."""
 
         if isinstance(turns, bool) or not isinstance(turns, int):
             raise TypeError("turns must be an integer")
@@ -579,20 +606,21 @@ class MonsterBattleState:
 
         if self.defense_modifier < 0 or not self.is_alive:
             return False
-        self.defense_modifier = -1
-        self.defense_down_turns = turns
+        if armor_break and self.defense_modifier > 0:
+            self.defense_modifier = 0
+        else:
+            self.defense_modifier -= 1
+        self.defense_down_turns = turns if self.defense_modifier < 0 else 0
         return True
 
     def modified_defense(self, base_defense: int) -> int:
-        """Return base defense after DA2's negative defense-stage formula."""
+        """Return base defense adjusted by the current battle stage."""
 
         if isinstance(base_defense, bool) or not isinstance(base_defense, int):
             raise TypeError("base_defense must be an integer")
         if base_defense < 0:
             raise ValueError("base_defense must not be negative")
-        if self.defense_modifier >= 0:
-            return base_defense
-        return max(0, int((base_defense - 10) * 0.5))
+        return modified_defense(base_defense, self.defense_modifier)
 
     def apply_slow(self, turns: int = SILENCE_MIN_TURNS) -> bool:
         """Apply SLOW once, cancelling a positive speed modifier first."""

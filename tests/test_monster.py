@@ -83,7 +83,7 @@ class MonsterSpellDefinitionTest(unittest.TestCase):
         goblin = MonsterDefinition.from_record(records["Goblin"])
         treant = MonsterDefinition.from_record(records["Treant"])
 
-        self.assertEqual((goblin.magic, goblin.intelligence), (0, 0))
+        self.assertEqual((goblin.magic, goblin.intelligence), (13, 0))
         self.assertEqual(goblin.spell_keys, ("SLOW",))
         self.assertEqual((treant.magic, treant.intelligence), (15, 0))
         self.assertEqual(treant.spell_keys, ("SLEEP",))

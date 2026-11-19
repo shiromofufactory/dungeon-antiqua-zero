@@ -8,7 +8,12 @@ from types import MappingProxyType
 from typing import Mapping, TypeVar
 
 if __package__ == "":
-    from battle_magic import SILENCE_MIN_TURNS
+    from battle_magic import (
+        MAX_PROTECTION_LEVEL,
+        MIN_PROTECTION_LEVEL,
+        SILENCE_MIN_TURNS,
+        modified_defense,
+    )
     from battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -20,7 +25,12 @@ if __package__ == "":
     from skill import Skill
     from text_catalog import TextCatalog
 else:
-    from .battle_magic import SILENCE_MIN_TURNS
+    from .battle_magic import (
+        MAX_PROTECTION_LEVEL,
+        MIN_PROTECTION_LEVEL,
+        SILENCE_MIN_TURNS,
+        modified_defense,
+    )
     from .battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -125,8 +135,6 @@ MAX_INTERNAL_LEVEL = 99
 MAX_HP = 999
 MAX_MP = 255
 MAX_ABILITY = 32
-MIN_PROTECTION_LEVEL = -1
-MAX_PROTECTION_LEVEL = 2
 EQUIPMENT_RECORD_FIELDS = MappingProxyType(
     {
         EquipmentSlot.RIGHT: "equip_right",
@@ -1801,16 +1809,7 @@ class Member:
 
         armor = self.equipment.armor_items()
         base_defense = sum(item.defense for item in armor)
-        defense_level = (
-            -2 if self.protection_level < 0 else self.protection_level
-        )
-        defense = max(
-            0,
-            int(
-                (base_defense + defense_level * 5)
-                * (1.0 + defense_level / 4)
-            ),
-        )
+        defense = modified_defense(base_defense, self.protection_level)
         abilities = self.adjusted_abilities
         agility_bonus = max(0, (self.effective_agility - 20) * 2)
         evasion = max(

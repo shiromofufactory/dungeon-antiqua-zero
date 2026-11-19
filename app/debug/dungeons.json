@@ -481,6 +481,132 @@
             "type": "item",
             "item_key": "DIVINE TEAR"
           }
+        },
+        {
+          "id": "treasure_e478a15b890f4323b790115afb24cf59",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "RED ORE"
+          }
+        },
+        {
+          "id": "treasure_0212010af2ff43c59809bb627c93b62a",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "RED ORE"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dungeon_367fd9f2203249e4add0029b051b536a",
+      "name": "アイゼンタール鉱山（白）",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "event_battle_80672d17668047d3bfbc0ebff02c360c",
+          "type": "event_battle",
+          "battle_id": "battle_9"
+        },
+        {
+          "id": "random_encounter_bfd3e793e6b14463bd5fb4fe1c661c15",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 5,
+            "danger": "low",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_0995e81f818544a0b47119c39f4b3b81",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "BOOK of DOOM"
+          }
+        },
+        {
+          "id": "treasure_a3381579dce44f07b43b03c4ccf9030f",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DWARVEN AXE"
+          }
+        },
+        {
+          "id": "random_encounter_878fb725e4754d8bacaf28c414b7c5f3",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 5,
+            "danger": "low",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_f1da165370574e5c9480a1688294e509",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "MANA DROP"
+          }
+        },
+        {
+          "id": "treasure_dc3c820bc586411ba0e7b14c420a7516",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "ICING BLADE!"
+          }
+        },
+        {
+          "id": "random_encounter_2abbaee4352646c086c63b2167cc1bb2",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 5,
+            "danger": "low",
+            "polarity": "yin",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_38f3638c7b294eac93a641ace2c6e164",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DIVINE TEAR"
+          }
+        },
+        {
+          "id": "treasure_01fea150af98471fafd51c4ab0d130ef",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "WHITE ORE"
+          }
+        },
+        {
+          "id": "treasure_25033387919847e7a00c52e9a3702562",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "WHITE ORE"
+          }
         }
       ]
     }
