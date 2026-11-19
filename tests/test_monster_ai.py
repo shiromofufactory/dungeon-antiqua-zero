@@ -99,6 +99,30 @@ class MonsterReinforcementRuleTest(unittest.TestCase):
 
 
 class MonsterActionSelectionTest(unittest.TestCase):
+    def test_intelligence_two_rear_waits_only_without_an_eligible_action(self):
+        for intelligence, spell_keys, can_charge, expected in (
+            (1, ("SLOW",), False, (MonsterSpellAction("SLOW"), MonsterAction.IDLE)),
+            (2, (), False, (MonsterAction.IDLE,)),
+            (2, ("SLOW",), False, (MonsterSpellAction("SLOW"),)),
+            (3, (), True, (MonsterAction.CHARGE,)),
+            (2, ("SLOW",), True, (MonsterAction.CHARGE, MonsterSpellAction("SLOW"))),
+        ):
+            with (
+                self.subTest(intelligence=intelligence, spells=spell_keys, can_charge=can_charge),
+                patch("monster_ai.random.choice", side_effect=lambda candidates: candidates[-1]) as choose,
+            ):
+                result = select_monster_action(
+                    special_actions=(MonsterSpecialAction.CHARGE,),
+                    is_front_row=False, can_attack=False, can_charge=can_charge,
+                    party_actual_attacks=(), monster_attack=20,
+                    spell_keys=spell_keys, intelligence=intelligence,
+                )
+                self.assertEqual(result, expected[-1])
+                if len(expected) > 1:
+                    choose.assert_called_once_with(list(expected))
+                else:
+                    choose.assert_not_called()
+
     def test_power_hit_is_passive_and_does_not_add_an_action_candidate(self) -> None:
         for front, expected in ((True, MonsterAction.ATTACK), (False, MonsterAction.IDLE)):
             with self.subTest(front=front), patch("monster_ai.random.choice") as choice:

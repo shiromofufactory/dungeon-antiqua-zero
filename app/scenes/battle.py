@@ -65,8 +65,10 @@ from monster_ai import (
     MonsterAction,
     MonsterActionChoice,
     MonsterSpellAction,
+    MonsterSpellCandidate,
     MonsterSpellTarget,
-    monster_spell_candidate_targets,
+    evaluate_monster_spell,
+    prefer_monster_targets,
     reinforcement_arrives,
     reinforcement_target,
     select_monster_action,
@@ -9549,7 +9551,7 @@ class BattleScene:
         self,
         actor: BattleMonster,
     ) -> MonsterActionChoice | None:
-        """Evaluate structured specials and choose one equal-weight candidate."""
+        """Evaluate spells and specials before choosing one action."""
 
         party_attacks: tuple[int, ...] = ()
         if MonsterSpecialAction.ESCAPE in actor.special_actions:
@@ -9557,6 +9559,11 @@ class BattleScene:
                 self._member_actual_physical_attack(self.party[index])
                 for index in self._active_party_indexes()
             )
+        spell_keys = self._targetable_monster_spell_keys(actor)
+        priority_spell_key = next(
+            (key for key in spell_keys if self._monster_spell_candidates[key].priority),
+            None,
+        )
         return select_monster_action(
             special_actions=actor.special_actions,
             is_front_row=actor.is_front_row,
@@ -9570,7 +9577,8 @@ class BattleScene:
             ),
             party_actual_attacks=party_attacks,
             monster_attack=actor.combat_stats.attack,
-            spell_keys=self._targetable_monster_spell_keys(actor),
+            spell_keys=spell_keys,
+            priority_spell_key=priority_spell_key,
             call_slot=(
                 self._monster_ally_slot()
                 if MonsterSpecialAction.CALL in actor.special_actions
@@ -9583,14 +9591,19 @@ class BattleScene:
         self,
         actor: BattleMonster,
     ) -> tuple[str, ...]:
-        """Return learned spells that currently have a living target side."""
+        """Evaluate learned spells and retain their planned targets."""
 
-        self._monster_spell_candidate_targets = {}
+        self._monster_spell_candidates: dict[str, MonsterSpellCandidate] = {}
+        is_solo = actor.intelligence == 2 and sum(
+            monster.is_alive for monster in self.monsters
+        ) == 1
         for key in actor.spell_keys:
-            targets = self._eligible_monster_spell_targets(actor, self.spells[key])
-            if targets:
-                self._monster_spell_candidate_targets[key] = targets
-        return tuple(self._monster_spell_candidate_targets)
+            candidate = self._evaluate_monster_spell(actor, self.spells[key], is_solo=is_solo)
+            if candidate.targets:
+                self._monster_spell_candidates[key] = candidate
+                if candidate.priority:
+                    break
+        return tuple(self._monster_spell_candidates)
 
     def _member_can_cast_spells(self, member: Member) -> bool:
         return any(
@@ -9600,14 +9613,16 @@ class BattleScene:
             for spell in self.spells.values()
         )
 
-    def _eligible_monster_spell_targets(
-        self, actor: BattleMonster, spell: Spell
-    ) -> tuple[int, ...]:
+    def _evaluate_monster_spell(
+        self, actor: BattleMonster, spell: Spell, *, is_solo: bool,
+    ) -> MonsterSpellCandidate:
         indexes = self._monster_spell_target_indexes(spell)
         if actor.intelligence <= 0:
-            return indexes
+            return MonsterSpellCandidate(indexes)
+        if actor.state.silenced or actor.state.mp < spell.mp:
+            return MonsterSpellCandidate(())
         if not spell.to_enemy:
-            return () if actor.state.silenced or actor.state.mp < spell.mp else indexes
+            return MonsterSpellCandidate(indexes)
         targets = tuple(
             MonsterSpellTarget(
                 index=index,
@@ -9617,20 +9632,34 @@ class BattleScene:
                     or self.party[index].paralyzed
                     or self.party[index].confused
                 ),
-                can_cast=self._member_can_cast_spells(self.party[index]),
+                can_cast=(
+                    spell.action is SpellAction.SILENCE
+                    and self._member_can_cast_spells(self.party[index])
+                ),
                 silenced=self.party[index].silenced,
                 speed=self.party[index].speed_modifier,
                 protection=self.party[index].protection_level,
+                resistances=self.party[index].resistances,
             )
             for index in indexes
         )
-        return monster_spell_candidate_targets(
+        return evaluate_monster_spell(
             spell,
             targets,
             intelligence=actor.intelligence,
-            silenced=bool(actor.state.silenced),
-            mp=actor.state.mp,
+            is_solo=is_solo,
             choose=random.choice,
+        )
+
+    def _preferred_monster_party_targets(
+        self, actor: BattleMonster, indexes: tuple[int, ...],
+    ) -> tuple[int, ...]:
+        def is_incapacitated(index: int) -> bool:
+            member = self.party[index]
+            return not member.confused and bool(member.sleeping or member.paralyzed)
+
+        return prefer_monster_targets(
+            indexes, intelligence=actor.intelligence, is_incapacitated=is_incapacitated,
         )
 
     def _monster_spell_target_indexes(self, spell: Spell) -> tuple[int, ...]:
@@ -9824,11 +9853,13 @@ class BattleScene:
         if observations is not None:
             observations.spend_mp(self._monster_index(actor), spell.mp)
 
-        planned = getattr(self, "_monster_spell_candidate_targets", {}).pop(
+        planned = getattr(self, "_monster_spell_candidates", {}).pop(
             spell.key, None
         )
         if actor.intelligence > 0 and planned is not None:
-            candidates = planned
+            candidates = planned.targets
+        if spell.to_enemy and not spell.to_all:
+            candidates = self._preferred_monster_party_targets(actor, candidates)
         indexes = (
             candidates
             if spell.to_all or len(candidates) == 1
@@ -10243,7 +10274,9 @@ class BattleScene:
     ) -> tuple[int, PhysicalAttackResult]:
         """Resolve one monster physical attack without starting presentation."""
 
-        protected_index = random.choice(target_indexes)
+        protected_index = random.choice(
+            self._preferred_monster_party_targets(actor, target_indexes)
+        )
         target_index = self._covering_member_index(protected_index)
         self.protected_party_index = (
             protected_index if target_index != protected_index else None

@@ -80,7 +80,7 @@ class PoisonBreathSelectionTest(unittest.TestCase):
                 can_breathe=True, party_actual_attacks=(), monster_attack=70,
                 intelligence=7,
             ), MonsterAction.POISON_BREATH)
-        self.assertEqual(choice.call_args.args[0], [MonsterAction.POISON_BREATH, MonsterAction.IDLE])
+        choice.assert_not_called()
 
 
 class PoisonBreathSceneTest(unittest.TestCase):

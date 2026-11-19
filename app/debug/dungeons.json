@@ -637,6 +637,18 @@
           "battle_id": "battle_16"
         }
       ]
+    },
+    {
+      "id": "dungeon_ba76862718eb4b5aa42f1e2243a56f58",
+      "name": "海域解放",
+      "bgm_id": "da3-city",
+      "steps": [
+        {
+          "id": "event_battle_11e95956a064494484fc76535a8b0945",
+          "type": "event_battle",
+          "battle_id": "battle_17"
+        }
+      ]
     }
   ]
 }

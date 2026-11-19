@@ -9,9 +9,11 @@ from enum import StrEnum
 
 if __package__ == "":
     from monster import MonsterDefinition, MonsterSpecialAction
+    from resistance import ResistanceType
     from spell import Spell, SpellAction
 else:
     from .monster import MonsterDefinition, MonsterSpecialAction
+    from .resistance import ResistanceType
     from .spell import Spell, SpellAction
 
 
@@ -51,44 +53,74 @@ class MonsterSpellTarget:
     silenced: int
     speed: int
     protection: int
+    resistances: frozenset[ResistanceType]
 
 
-def monster_spell_candidate_targets(
+@dataclass(frozen=True)
+class MonsterSpellCandidate:
+    targets: tuple[int, ...]
+    priority: bool = False
+
+
+def evaluate_monster_spell(
     spell: Spell, targets: Sequence[MonsterSpellTarget], *,
-    intelligence: int, silenced: bool, mp: int,
+    intelligence: int, is_solo: bool,
     choose: Callable[[tuple[int, ...]], int] = random.choice,
-) -> tuple[int, ...]:
-    """DA2 Int=1 eligibility, retaining its random-before-check BREAK target."""
+) -> MonsterSpellCandidate:
+    """Evaluate a hostile spell using DA2's generic intelligence rules."""
 
     indexes = tuple(target.index for target in targets)
     if not indexes or intelligence <= 0:
-        return indexes
-    if silenced or mp < spell.mp:
-        return ()
-    if not spell.to_enemy:
-        return indexes
-    if spell.action is SpellAction.BREAK:
+        return MonsterSpellCandidate(indexes)
+    if (
+        spell.action is SpellAction.BREAK
+        or (spell.action is SpellAction.SLOW and not spell.to_all)
+        or (spell.action is SpellAction.CONFUSE and not spell.to_all and intelligence > 1)
+    ):
         selected = choose(indexes)
         target = next(target for target in targets if target.index == selected)
-        return (selected,) if target.front and target.protection >= 0 else ()
-    if spell.action is SpellAction.SLOW and not spell.to_all:
-        selected = choose(indexes)
-        target = next(target for target in targets if target.index == selected)
-        return (selected,) if target.speed >= 0 else ()
-    if spell.to_all:
-        if spell.action is SpellAction.SLEEP:
-            effective = any(target.actionable for target in targets)
-        elif spell.action is SpellAction.SILENCE:
-            effective = any(target.can_cast and not target.silenced for target in targets)
+        if spell.action is SpellAction.BREAK:
+            effective = target.front and target.protection >= 0
         elif spell.action is SpellAction.SLOW:
-            effective = any(target.speed >= 0 for target in targets)
-        elif spell.action is SpellAction.PURGE:
-            effective = any(target.protection > 0 or target.speed > 0 for target in targets)
+            effective = target.speed >= 0
         else:
-            effective = True
-        if not effective:
-            return ()
-    return indexes
+            effective = spell.attribute not in target.resistances
+        return MonsterSpellCandidate((selected,) if effective else ())
+    if spell.to_all and spell.action in (SpellAction.SLEEP, SpellAction.SILENCE, SpellAction.SLOW):
+        applicable = tuple(
+            target for target in targets
+            if intelligence <= 1 or spell.attribute not in target.resistances
+        )
+        if spell.action is SpellAction.SLEEP:
+            effective_count = sum(target.actionable for target in applicable)
+        elif spell.action is SpellAction.SILENCE:
+            applicable = tuple(target for target in applicable if target.can_cast)
+            effective_count = sum(not target.silenced for target in applicable)
+        else:
+            effective_count = sum(target.speed >= 0 for target in applicable)
+        if not effective_count:
+            return MonsterSpellCandidate(())
+        if intelligence == 2:
+            if effective_count == len(applicable):
+                return MonsterSpellCandidate(indexes, priority=True)
+            if is_solo:
+                return MonsterSpellCandidate(())
+    if spell.to_all and spell.action is SpellAction.PURGE and not any(
+        target.protection > 0 or target.speed > 0 for target in targets
+    ):
+        return MonsterSpellCandidate(())
+    return MonsterSpellCandidate(indexes)
+
+
+def prefer_monster_targets(
+    indexes: tuple[int, ...], *, intelligence: int,
+    is_incapacitated: Callable[[int], bool],
+) -> tuple[int, ...]:
+    """Prefer sleeping or paralyzed targets within the attack's legal range."""
+
+    if intelligence <= 1 or len(indexes) < 2:
+        return indexes
+    return tuple(index for index in indexes if is_incapacitated(index)) or indexes
 
 
 def reinforcement_target(
@@ -127,9 +159,12 @@ def monster_action_candidates(
     can_breathe: bool = False,
     intelligence: int = 0, fire_breath_effective: bool = True,
     can_earthquake: bool = False,
+    priority_spell_key: str | None = None,
 ) -> tuple[MonsterActionChoice, ...]:
     """Share candidate construction between live AI and deterministic forecasts."""
 
+    if priority_spell_key is not None:
+        return (MonsterSpellAction(priority_spell_key),)
     candidates: list[MonsterActionChoice] = []
     if MonsterSpecialAction.ESCAPE in special_actions and escape_eligible:
         candidates.append(MonsterAction.ESCAPE)
@@ -149,7 +184,7 @@ def monster_action_candidates(
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     if is_front_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
-    elif not is_front_row:
+    elif not is_front_row and (intelligence <= 1 or not candidates):
         candidates.append(MonsterAction.IDLE)
     return tuple(candidates)
 
@@ -168,18 +203,18 @@ def select_monster_action(
     can_breathe: bool = False,
     fire_breath_effective: bool = True,
     can_earthquake: bool = False,
+    priority_spell_key: str | None = None,
 ) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including call and ZERO's charge.
 
     Escape retains DA2's two-stage eligibility check: a 50% gate, followed
     by comparing one random living member's actual attack against the
     monster's attack multiplied by a random value from 1.0 through 2.0.
-    Eligible specials and each learned spell are then chosen with the same
+    Without a priority action, eligible specials and spells have the same
     weight as a normal attack. A rear-row monster receives one idle candidate
-    instead of a normal attack. This basic routine deliberately does not
-    inspect MP or silence state. Call uses a 3/4 candidate gate below
-    intelligence 2; at intelligence 2 or higher it is forced only when the
-    first available slot is 0 or 1, following DA2's priority rule.
+    at intelligence 0 or 1, or when no other action is available. Call uses a
+    3/4 candidate gate below intelligence 2. At intelligence 2 or higher it
+    takes priority when the first available slot is 0 or 1.
     """
 
     if not isinstance(is_front_row, bool):
@@ -231,6 +266,7 @@ def select_monster_action(
         can_breathe=can_breathe,
         intelligence=intelligence, fire_breath_effective=fire_breath_effective,
         can_earthquake=can_earthquake,
+        priority_spell_key=priority_spell_key,
     )
 
     if not candidates:
@@ -245,7 +281,9 @@ __all__ = [
     "MonsterActionChoice",
     "MonsterSpellAction",
     "MonsterSpellTarget",
-    "monster_spell_candidate_targets",
+    "MonsterSpellCandidate",
+    "evaluate_monster_spell",
+    "prefer_monster_targets",
     "reinforcement_arrives",
     "reinforcement_target",
     "monster_action_candidates",

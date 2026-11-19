@@ -19,7 +19,7 @@ from tools.screen_mocks.battle import (
     BattleScreenMock,
 )
 from monster import MonsterBattleState, MonsterCombatStats
-from monster_ai import MonsterSpellAction
+from monster_ai import MonsterAction, MonsterSpellAction
 from battle_magic import resolve_healing, resolve_spell_damage, SpellAffinity
 from member import Member, FormationRow
 from battle_timeline import TimelineEntry, TimelineOrder
@@ -88,7 +88,7 @@ class MonsterSpellTest(unittest.TestCase):
         spell = scene.spells["PROTECTION"]
         for old_stage, expected_defense in ((-1, 8), (0, 16), (1, 27)):
             self.assertIn(spell.key, actor.spell_keys)
-            self.assertEqual(scene._eligible_monster_spell_targets(actor, spell), (0,))
+            self.assertEqual(scene._evaluate_monster_spell(actor, spell, is_solo=True).targets, (0,))
             self.assertTrue(scene._begin_monster_spell(actor, spell))
             self.assertEqual(actor.state.defense_modifier, old_stage)
             scene._update_action_presentation()
@@ -713,7 +713,57 @@ class IntelligentMonsterSpellTest(unittest.TestCase):
                 scene.party[1].silenced = 0
                 self.assertEqual(scene._targetable_monster_spell_keys(actor), (key,))
                 # DA2 still applies the full spell to everyone, not just the effective member.
-                self.assertEqual(scene._monster_spell_candidate_targets[key], (0, 1))
+                self.assertEqual(scene._monster_spell_candidates[key].targets, (0, 1))
+
+    def test_rear_frau_uses_an_available_spell_and_waits_if_silenced(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Frau")
+        actor = BattleMonster.from_record(record, is_front_row=False)
+        scene = spell_scene(actor)
+        with patch.object(
+            Member, "resistances", new_callable=PropertyMock,
+            return_value=frozenset({ResistanceType.CONFUSE}),
+        ):
+            self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("FREEZE2"))
+        actor.state.apply_silence(1)
+        self.assertIs(scene._select_monster_action(actor), MonsterAction.IDLE)
+        actor.state.elapse_silence_turn()
+        actor.state.mp = 0
+        self.assertIs(scene._select_monster_action(actor), MonsterAction.IDLE)
+
+    def test_int_two_prioritizes_area_debuff_if_all_applicable_targets_are_effective(self):
+        actor, scene = self.scene("SLEEP", intelligence=2)
+        actor.spell_keys = ("FIRE1", "SLEEP")
+        scene.party[0].sleeping = 2
+        self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("FIRE1"))
+        actor.is_front_row = True
+        with (
+            patch.object(
+                Member, "resistances", property(
+                    lambda member: frozenset({ResistanceType.SLEEP})
+                    if member is scene.party[0] else frozenset()
+                ),
+            ),
+            patch("monster_ai.random.choice") as choose,
+        ):
+            self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("SLEEP"))
+        choose.assert_not_called()
+        self.assertEqual(scene._monster_spell_candidates["SLEEP"].targets, (0, 1))
+
+    def test_int_two_prefers_visible_sleeping_or_paralyzed_targets(self):
+        actor, scene = self.scene("FIRE1", intelligence=2)
+        spell = scene.spells["FIRE1"]
+        for sleeping, paralyzed in ((2, False), (0, True)):
+            with self.subTest(sleeping=sleeping, paralyzed=paralyzed):
+                scene.party[1].sleeping = sleeping
+                scene.party[1].paralyzed = paralyzed
+                self.assertEqual(scene._preferred_monster_party_targets(actor, (0, 1)), (1,))
+                self.assertTrue(scene._begin_monster_spell(actor, spell))
+                self.assertEqual(scene.action_presentation.party_damage_results[0].target_index, 1)
+        scene.party[1].confused = 2
+        self.assertEqual(scene._preferred_monster_party_targets(actor, (0, 1)), (0, 1))
+        scene.hidden_party_indexes = {1}
+        self.assertTrue(scene._begin_monster_spell(actor, spell))
+        self.assertEqual(scene.action_presentation.party_damage_results[0].target_index, 0)
 
     def test_silence_excludes_party_without_any_caster(self):
         actor, scene = self.scene("SILENCE")

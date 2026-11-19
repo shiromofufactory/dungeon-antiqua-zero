@@ -1458,6 +1458,41 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                     self.assertEqual(forecast.actors[0].hp, hp)
                     self.assertEqual(actor.mp, enemy.mp)
 
+    def test_rear_int_two_uses_spell_even_when_wait_would_have_been_selected(self):
+        spell = self.spells["FREEZE2"]
+        for intelligence, silenced, mp, uses_spell in (
+            (1, 0, 12, False),
+            (2, 0, 12, True),
+            (2, 1, 12, False),
+            (2, 0, 0, False),
+        ):
+            with self.subTest(intelligence=intelligence, silenced=silenced, mp=mp):
+                enemy = self.enemy(
+                    front=False, spells=(spell,), intelligence=intelligence,
+                    silenced=silenced, max_mp=12, mp=mp, magic=10,
+                )
+                forecast = BattleForecast(self.snapshot(self.specs[0], enemy), 0)
+                with patch.object(forecast, "roll", return_value=0.99):
+                    forecast.enemy_turn(forecast.actors[5])
+                self.assertEqual(
+                    forecast.actors[5].mp, mp - (spell.mp if uses_spell else 0),
+                )
+
+    def test_int_two_enemy_attack_prefers_sleeping_front_row_member(self):
+        for intelligence, expected in ((1, 0), (2, 1)):
+            with self.subTest(intelligence=intelligence):
+                forecast = BattleForecast(self.snapshot(
+                    replace(self.specs[0], front=True),
+                    replace(self.specs[1], front=True, sleeping=2),
+                    self.enemy(intelligence=intelligence),
+                ), 0)
+                with (
+                    patch.object(forecast, "roll", return_value=0.0),
+                    patch.object(forecast, "enemy_physical") as strike,
+                ):
+                    forecast.enemy_turn(forecast.actors[5])
+                self.assertEqual(strike.call_args.args[1].spec.number, expected)
+
     def test_enemy_silence_and_ally_spell_blocking_are_forecast(self):
         spell = self.spells["SILENCE"]
         enemy = self.enemy(front=False, spells=(spell,), intelligence=1,

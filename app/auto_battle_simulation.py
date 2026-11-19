@@ -59,7 +59,10 @@ if __package__:
     from .item import AdditionalEffect, ItemEquipType, ItemSpecial
     from .member import EquipmentSlot
     from .monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
-    from .monster_ai import MonsterAction, MonsterSpellAction, MonsterSpellTarget, monster_spell_candidate_targets, monster_action_candidates
+    from .monster_ai import (
+        MonsterAction, MonsterSpellAction, MonsterSpellTarget,
+        evaluate_monster_spell, monster_action_candidates, prefer_monster_targets,
+    )
     from .resistance import ResistanceType
     from .spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 else:
@@ -116,7 +119,10 @@ else:
     from item import AdditionalEffect, ItemEquipType, ItemSpecial
     from member import EquipmentSlot
     from monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
-    from monster_ai import MonsterAction, MonsterSpellAction, MonsterSpellTarget, monster_spell_candidate_targets, monster_action_candidates
+    from monster_ai import (
+        MonsterAction, MonsterSpellAction, MonsterSpellTarget,
+        evaluate_monster_spell, monster_action_candidates, prefer_monster_targets,
+    )
     from resistance import ResistanceType
     from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 
@@ -1266,9 +1272,14 @@ class BattleForecast:
             )
             escape = physical > actor.spec.attack * (1 + self.roll(actor, 0, 14))
         spell_targets = {}
+        priority_spell_key = None
+        intelligence = actor.spec.intelligence
+        is_solo = intelligence == 2 and len(self.enemies()) == 1
         for spell in actor.spec.spells:
+            if intelligence > 0 and (actor.silenced or actor.mp < spell.mp):
+                continue
             indexes = self.spell_targets(actor, spell)
-            if spell.to_enemy:
+            if intelligence > 0 and spell.to_enemy:
                 states = tuple(
                     MonsterSpellTarget(
                         n, self.actors[n].front,
@@ -1276,18 +1287,21 @@ class BattleForecast:
                              or self.actors[n].confused),
                         bool(self.actors[n].spec.spells), self.actors[n].silenced,
                         self.actors[n].speed, self.actors[n].protection,
+                        self.actors[n].spec.resistances,
                     )
                     for n in indexes
                 )
-                indexes = monster_spell_candidate_targets(
-                    spell, states, intelligence=actor.spec.intelligence,
-                    silenced=bool(actor.silenced), mp=actor.mp,
+                candidate = evaluate_monster_spell(
+                    spell, states, intelligence=intelligence, is_solo=is_solo,
                     choose=lambda values: values[int(self.roll(actor, 0, 15) * len(values))],
                 )
-            elif actor.spec.intelligence > 0 and (actor.silenced or actor.mp < spell.mp):
-                indexes = ()
+                indexes = candidate.targets
+                if candidate.priority:
+                    priority_spell_key = spell.key
             if indexes:
                 spell_targets[spell.key] = indexes
+            if priority_spell_key is not None:
+                break
         spell_keys = tuple(spell_targets)
         candidates = monster_action_candidates(
             special_actions=actor.spec.special_actions,
@@ -1296,13 +1310,14 @@ class BattleForecast:
             can_charge=bool(available),
             can_breathe=bool(available),
             can_earthquake=bool(self.allies()),
-            intelligence=actor.spec.intelligence,
+            intelligence=intelligence,
             fire_breath_effective=any(
                 ResistanceType.FIRE not in target.spec.resistances
                 for target in available
             ),
             spell_keys=spell_keys,
             escape_eligible=escape,
+            priority_spell_key=priority_spell_key,
         )
         silenced = actor.silenced > 0
         actor.silenced = max(0, actor.silenced - 1)
@@ -1367,6 +1382,8 @@ class BattleForecast:
             if not silenced and actor.mp >= spell.mp:
                 actor.mp -= spell.mp
                 targets = spell_targets[spell.key]
+                if spell.to_enemy and not spell.to_all:
+                    targets = self.preferred_monster_party_targets(actor, targets)
                 if not spell.to_all and len(targets) > 1:
                     targets = (targets[int(self.roll(actor, 0, 1) * len(targets))],)
                 if not spell.to_enemy:
@@ -1441,10 +1458,25 @@ class BattleForecast:
         self.normalize()
         self.advance(actor, delay)
 
+    def preferred_monster_party_targets(
+        self, actor: ForecastActor, indexes: tuple[int, ...],
+    ) -> tuple[int, ...]:
+        def is_incapacitated(index: int) -> bool:
+            target = self.actors[index]
+            return not target.confused and bool(target.sleeping or target.paralyzed)
+
+        return prefer_monster_targets(
+            indexes, intelligence=actor.spec.intelligence,
+            is_incapacitated=is_incapacitated,
+        )
+
     def enemy_attack(self, actor, targets, *, charged=False, roll_offset=0):
-        protected = targets[int(self.roll(actor, 0, 1 + roll_offset) * len(targets))]
-        target = self.covering(protected.spec.number)
-        if target is not protected:
+        indexes = self.preferred_monster_party_targets(
+            actor, tuple(target.spec.number for target in targets),
+        )
+        protected = indexes[int(self.roll(actor, 0, 1 + roll_offset) * len(indexes))]
+        target = self.covering(protected)
+        if target.spec.number != protected:
             target.hidden = False
         self.enemy_physical(actor, target, charged=charged, roll_offset=roll_offset)
 
@@ -1520,8 +1552,11 @@ class BattleForecast:
                     for number in self.attack_targets(actor, BattleCommand.ATTACK)
                 )
         if targets:
-            target = targets[int(self.roll(actor, 0, 15) * len(targets))]
-            self.confused_physical(actor, target)
+            indexes = tuple(target.spec.number for target in targets)
+            if actor.spec.enemy and not friendly:
+                indexes = self.preferred_monster_party_targets(actor, indexes)
+            target = indexes[int(self.roll(actor, 0, 15) * len(indexes))]
+            self.confused_physical(actor, self.actors[target])
         actor.hidden = False
         self.normalize()
         self.advance(actor, 0)
