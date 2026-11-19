@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from copy import copy
 from types import MappingProxyType
 
 if __package__ == "systems":
+    from battle_commands import member_attack_reach
     from item import Item, ItemEquipType
     from member import EquipmentSet, EquipmentSlot, Member
 else:
+    from ..battle_commands import member_attack_reach
     from ..item import Item, ItemEquipType
     from ..member import EquipmentSet, EquipmentSlot, Member
 
@@ -323,7 +326,7 @@ class InventorySystem:
         )
 
     def auto_equip(self, member: Member) -> bool:
-        """Apply DA2-style equipment scoring to one member.
+        """Select armor and compare legal hand combinations for one member.
 
         NPC initial equipment is never removed or replaced. Equipment added
         later follows the same replacement rules as player-character gear.
@@ -339,42 +342,7 @@ class InventorySystem:
             ):
                 changed = self.equip(member, slot, None) or changed
 
-        if member.equipment.item_at(EquipmentSlot.RIGHT) is None:
-            weapon = self._best_item(
-                member,
-                EquipmentSlot.RIGHT,
-                score=lambda item: self._weapon_score(member, item),
-            )
-            if weapon is not None:
-                changed = self.equip(member, EquipmentSlot.RIGHT, weapon) or changed
-
-        if member.equipment.item_at(EquipmentSlot.LEFT) is None:
-            if member.has_skill("Dual-Wield"):
-                second_weapon = self._best_item(
-                    member,
-                    EquipmentSlot.LEFT,
-                    score=lambda item: (
-                        self._weapon_score(member, item)
-                        if item.equip_type is ItemEquipType.RIGHT
-                        else -1
-                    ),
-                    accepted_type=ItemEquipType.RIGHT,
-                )
-                if second_weapon is not None:
-                    changed = (
-                        self.equip(member, EquipmentSlot.LEFT, second_weapon)
-                        or changed
-                    )
-            if member.equipment.item_at(EquipmentSlot.LEFT) is None:
-                shield = self._best_item(
-                    member,
-                    EquipmentSlot.LEFT,
-                    score=self._armor_score,
-                    accepted_type=ItemEquipType.LEFT,
-                )
-                if shield is not None:
-                    changed = self.equip(member, EquipmentSlot.LEFT, shield) or changed
-
+        # Armor can grant the skills used to evaluate the hands.
         for slot in (
             EquipmentSlot.BODY,
             EquipmentSlot.HEAD,
@@ -389,7 +357,74 @@ class InventorySystem:
             )
             if armor is not None:
                 changed = self.equip(member, slot, armor) or changed
+
+        right, left = self._best_hand_equipment(member)
+        for slot, item in ((EquipmentSlot.RIGHT, right), (EquipmentSlot.LEFT, left)):
+            if item is not None and item is not member.equipment.item_at(slot):
+                changed = self.equip(member, slot, item) or changed
         return changed
+
+    def _best_hand_equipment(self, member: Member) -> tuple[Item | None, Item | None]:
+        base = member.equipment
+        current_right = base.item_at(EquipmentSlot.RIGHT)
+        current_left = base.item_at(EquipmentSlot.LEFT)
+        weapons = tuple(item for item in self.items if item.is_weapon)
+        right_candidates = (current_right,)
+        if current_right is None:
+            right_candidates = tuple(
+                weapon for weapon in weapons
+                if self.can_equip(member, EquipmentSlot.RIGHT, weapon)
+            ) or (None,)
+
+        shield = None
+        if current_left is None:
+            shield = self._best_item(
+                member,
+                EquipmentSlot.LEFT,
+                score=self._armor_score,
+                accepted_type=ItemEquipType.LEFT,
+            )
+        preview = copy(member)
+        best_hands = current_right, current_left
+        best_score = None
+        for right in right_candidates:
+            right_equipment = base.replaced({EquipmentSlot.RIGHT: right})
+            preview.equipment = right_equipment
+            left_candidates = [current_left]
+            if current_left is None and not right_equipment.uses_both_hands:
+                if shield is not None:
+                    left_candidates.append(shield)
+                if right is not None and preview.has_skill("Dual-Wield"):
+                    left_candidates.extend(
+                        weapon for weapon in weapons
+                        if preview.can_equip_at(weapon, EquipmentSlot.LEFT)
+                        and (
+                            current_right is not None or weapon is not right
+                            or self.quantity(weapon) >= 2
+                        )
+                    )
+
+            for left in left_candidates:
+                preview.equipment = right_equipment.replaced({EquipmentSlot.LEFT: left})
+                stats = preview.battle_stats
+                right_score = stats.attack_right * stats.hit_right.total
+                left_score = (
+                    stats.attack_left * stats.hit_left.total
+                    if stats.attack_left is not None and stats.hit_left is not None
+                    else 0
+                )
+                can_reach = member.is_front_row or (
+                    right is not None and member_attack_reach(preview) >= 2
+                )
+                shield_score = (
+                    self._armor_score(left)
+                    if left is not None and left.is_armor else float("-inf")
+                )
+                score = can_reach, right_score + left_score, shield_score, right_score
+                if best_score is None or score > best_score:
+                    best_hands = right, left
+                    best_score = score
+        return best_hands
 
     def _best_item(
         self,
@@ -406,16 +441,6 @@ class InventorySystem:
             and self.can_equip(member, slot, item)
         )
         return max(candidates, key=score, default=None)
-
-    @staticmethod
-    def _weapon_score(member: Member, item: Item) -> float:
-        base = item.attack * item.hit
-        ranged = item.reach >= 2
-        if member.is_front_row:
-            return base
-        if ranged:
-            return base + 2000
-        return base * (1 + len(item.resistances)) / 60
 
     @staticmethod
     def _armor_score(item: Item) -> float:

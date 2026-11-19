@@ -1265,7 +1265,7 @@ class BattleScreenMockTest(unittest.TestCase):
     def test_party_uses_near_death_and_wide_dead_poses(self) -> None:
         self.assertEqual(NEAR_DEATH_SPRITE_SOURCE_X, 16 * 6)
         self.assertEqual(DEAD_SPRITE_SOURCE_X, 16 * 9)
-        self.assertEqual(DEAD_SPRITE_WIDTH, 24)
+        self.assertEqual(DEAD_SPRITE_WIDTH, 32)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.character_sprites = object()
         mock.party_visuals = (

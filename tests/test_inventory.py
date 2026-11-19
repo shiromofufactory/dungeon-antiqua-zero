@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from app.item import Item
-from app.member import EquipmentSlot, Member, ProficiencyKind
+from app.member import EquipmentSlot, FormationRow, Member, ProficiencyKind
 from app.skill import Skill
 from app.systems import InventorySystem
 
@@ -276,6 +276,135 @@ class InventorySystemTest(unittest.TestCase):
         self.assertTrue(inventory.auto_equip(actor))
         self.assertIs(actor.equipment.item_at(EquipmentSlot.HEAD), hachimaki)
         self.assertEqual(inventory.quantity(necklace), 1)
+
+    def test_auto_equip_preserves_two_handed_weapon_over_left_hand_candidates(self) -> None:
+        axe = equipment(
+            "GREAT AXE", "TWO_HANDS", "AXE", attack=50, hit=90, reach=1
+        )
+        knife = equipment(
+            "MAGE MASHER", "RIGHT", "KNIFE", attack=28, hit=105, reach=1
+        )
+        sword = equipment(
+            "GOBLIN SLAYER", "RIGHT", "SWORD", attack=19, hit=100, reach=1
+        )
+        shield = equipment("SHIELD", "LEFT", "SHIELD", defense=5)
+        items = {gear.key: gear for gear in (axe, knife, sword, shield)}
+        for dual_wield in (False, True):
+            for row in FormationRow:
+                for fixed in (False, True):
+                    with self.subTest(dual_wield=dual_wield, row=row, fixed=fixed):
+                        actor = member(
+                            dual_wield=dual_wield,
+                            character_type="NPC" if fixed else "SUB",
+                            initial={EquipmentSlot.RIGHT: axe} if fixed else None,
+                        )
+                        actor.formation_row = row
+                        inventory = InventorySystem(
+                            items,
+                            {gear.key: 1 for gear in (knife, sword, shield)}
+                            | ({} if fixed else {axe.key: 1}),
+                        )
+                        # Reproduce the reported right-empty/left-knife state.
+                        if dual_wield and not fixed:
+                            self.assertTrue(inventory.equip(actor, EquipmentSlot.LEFT, knife))
+
+                        for _ in range(2):
+                            inventory.auto_equip(actor)
+
+                            self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), axe)
+                            self.assertIsNone(actor.equipment.item_at(EquipmentSlot.LEFT))
+                            self.assertEqual(dict(inventory.quantities), {
+                                knife.key: 1, sword.key: 1, shield.key: 1,
+                            })
+                            for gear in items.values():
+                                self.assertEqual(inventory.total_quantity(gear, (actor,)), 1)
+
+    def test_auto_equip_chooses_dual_wield_over_stronger_individual_weapon(self) -> None:
+        axe = equipment("DWARVEN AXE", "TWO_HANDS", "AXE", attack=36, hit=90, reach=1)
+        knife = equipment("MAGE MASHER", "RIGHT", "KNIFE", attack=28, hit=105, reach=1)
+        katana = equipment("KATANA", "RIGHT", "KATANA", attack=23, hit=100, reach=1)
+        actor = member(dual_wield=True, initial={EquipmentSlot.LEFT: knife})
+        inventory = InventorySystem(
+            {gear.key: gear for gear in (axe, knife, katana)},
+            {axe.key: 1, katana.key: 1},
+        )
+
+        inventory.auto_equip(actor)
+
+        self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), knife)
+        self.assertIs(actor.equipment.item_at(EquipmentSlot.LEFT), katana)
+        stats = actor.battle_stats
+        self.assertEqual((stats.attack_right, stats.attack_left), (28, 18))
+        self.assertEqual(dict(inventory.quantities), {axe.key: 1})
+
+    def test_auto_equip_keeps_back_row_attack_in_range(self) -> None:
+        throwing = equipment("DART", "RIGHT", "THROWING", attack=10, hit=100, reach=2)
+        knife = equipment("KNIFE", "RIGHT", "KNIFE", attack=25, hit=100, reach=1)
+        actor = member(dual_wield=True)
+        actor.formation_row = FormationRow.BACK
+        inventory = InventorySystem(
+            {gear.key: gear for gear in (throwing, knife)},
+            {throwing.key: 1, knife.key: 1},
+        )
+
+        inventory.auto_equip(actor)
+
+        self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), throwing)
+        self.assertIsNone(actor.equipment.item_at(EquipmentSlot.LEFT))
+
+    def test_auto_equip_uses_armor_skill_and_counts_both_copies_of_weapon(self) -> None:
+        sword = equipment("SWORD", "RIGHT", "SWORD", attack=20, hit=100)
+        gloves = equipment("GLOVES", "ARM", "HEAVY", special="DUAL_WIELD")
+        items = {gear.key: gear for gear in (sword, gloves)}
+        for copies in (1, 2):
+            with self.subTest(copies=copies):
+                actor = member()
+                inventory = InventorySystem(items, {sword.key: copies, gloves.key: 1})
+
+                inventory.auto_equip(actor)
+
+                self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), sword)
+                self.assertIs(
+                    actor.equipment.item_at(EquipmentSlot.LEFT),
+                    sword if copies == 2 else None,
+                )
+                self.assertIs(actor.equipment.item_at(EquipmentSlot.ARM), gloves)
+                self.assertEqual(inventory.total_quantity(sword, (actor,)), copies)
+
+    def test_auto_equip_compares_two_handed_skill_bonus_against_shield(self) -> None:
+        sword = equipment("SWORD", "RIGHT", "SWORD", attack=20, hit=100)
+        shield = equipment("SHIELD", "LEFT", "SHIELD", defense=5)
+        gloves = equipment("GLOVES", "ARM", "HEAVY", special="TWO_HANDED")
+        items = {gear.key: gear for gear in (sword, shield, gloves)}
+        actor = member()
+        inventory = InventorySystem(items, {key: 1 for key in items})
+
+        inventory.auto_equip(actor)
+
+        self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), sword)
+        self.assertIsNone(actor.equipment.item_at(EquipmentSlot.LEFT))
+        self.assertEqual(actor.battle_stats.attack_right, 30)
+        self.assertEqual(inventory.quantity(shield), 1)
+
+    def test_auto_equip_keeps_left_hand_selection_for_one_handed_weapon(self) -> None:
+        sword = equipment("SWORD", "RIGHT", "SWORD", attack=30, hit=100)
+        knife = equipment("KNIFE", "RIGHT", "KNIFE", attack=20, hit=100)
+        shield = equipment("SHIELD", "LEFT", "SHIELD", defense=5)
+        items = {gear.key: gear for gear in (sword, knife, shield)}
+        for dual_wield in (False, True):
+            with self.subTest(dual_wield=dual_wield):
+                actor = member(dual_wield=dual_wield)
+                inventory = InventorySystem(items, {key: 1 for key in items})
+
+                inventory.auto_equip(actor)
+
+                self.assertIs(actor.equipment.item_at(EquipmentSlot.RIGHT), sword)
+                self.assertIs(
+                    actor.equipment.item_at(EquipmentSlot.LEFT),
+                    knife if dual_wield else shield,
+                )
+                for gear in items.values():
+                    self.assertEqual(inventory.total_quantity(gear, (actor,)), 1)
 
     def test_auto_equip_adds_each_signed_ability_modifier(self) -> None:
         for modifier in ("strength_modifier", "agility_modifier", "magic_modifier"):

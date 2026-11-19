@@ -111,6 +111,9 @@
     },
     "spell_panacea": {
       "sound": 22
+    },
+    "spell_freeze2": {
+      "sound": 15
     }
   }
 }
