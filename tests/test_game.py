@@ -515,7 +515,7 @@ class GameTest(unittest.TestCase):
         self.assertEqual(party_texts[(PARTY_NAME_TEXT_X, 2)].text, "フィオラ")
         self.assertEqual(
             party_texts[(PARTY_POINT_TEXT_X, 5)].text,
-            "ＨＰ　　４４／　４４",
+            "ＨＰ　　４７／　４７",
         )
         self.assertEqual(
             party_texts[(PARTY_POINT_TEXT_X, 8)].text,

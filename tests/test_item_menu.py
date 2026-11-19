@@ -427,10 +427,10 @@ class ItemMenuTest(unittest.TestCase):
         mock = ItemMenuHarness()
         placements = {(text.x, text.y): text.text for text in mock.party_window.texts}
 
-        self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
+        self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４７")
         self.assertEqual(
             placements[(PARTY_TEXT_X + 2, PARTY_MAX_HP_Y)],
-            "／　４４",
+            "／　４７",
         )
         mock.windows = tuple(Mock() for _ in mock.windows)
         mock.category_cursor = Mock()
@@ -893,6 +893,7 @@ class ItemMenuTest(unittest.TestCase):
         inventory = InventorySystem(items, {potion.key: 2})
         mock = ItemMenuHarness(items=items, inventory_system=inventory)
         target = mock.party_panel.party[1]
+        target.max_hp = 100
         target.hp = 1
         mock.party_panel.party[0].hp = 0
 

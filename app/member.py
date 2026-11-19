@@ -847,10 +847,6 @@ class Member:
                     f"{kind.value}"
                 )
 
-        calculated_max_hp = min(
-            self.definition.base_hp * (4 + self.internal_level) // 5,
-            MAX_HP,
-        )
         maximum_spell_level = max(
             self.proficiency(kind).level for kind in SPELL_PROFICIENCY_KINDS
         )
@@ -862,7 +858,7 @@ class Member:
             MAX_MP,
         )
         if self.max_hp is None:
-            self.max_hp = calculated_max_hp
+            self.max_hp = self.calculated_max_hp()
         if self.hp is None:
             self.hp = self.max_hp
         if self.max_mp is None:
@@ -1111,7 +1107,7 @@ class Member:
         return amount
 
     def _uncapped_max_hp(self, internal_level: int) -> int:
-        return self.definition.base_hp * (4 + internal_level) // 5
+        return int(self.definition.base_hp * (5 + internal_level**1.2 * 0.4) * 0.2)
 
     def _uncapped_max_mp(
         self,

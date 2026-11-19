@@ -114,12 +114,12 @@ class SpellMenuTest(unittest.TestCase):
             [target.key for target in mock.member_cursor.targets],
             list(range(5)),
         )
-        self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
-        self.assertEqual(placements[(PARTY_TEXT_X + 12, PARTY_HP_Y)], "ＨＰ　６４")
-        self.assertEqual(placements[(PARTY_TEXT_X + 24, PARTY_HP_Y)], "ＨＰ２２０")
-        self.assertEqual(placements[(PARTY_TEXT_X + 36, PARTY_HP_Y)], "ＨＰ　９６")
-        self.assertEqual(placements[(PARTY_TEXT_X + 48, PARTY_HP_Y)], "ＨＰ１７１")
-        self.assertEqual(placements[(PARTY_TEXT_X + 2, PARTY_MAX_HP_Y)], "／　４４")
+        self.assertEqual(placements[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４７")
+        self.assertEqual(placements[(PARTY_TEXT_X + 12, PARTY_HP_Y)], "ＨＰ　５９")
+        self.assertEqual(placements[(PARTY_TEXT_X + 24, PARTY_HP_Y)], "ＨＰ１７８")
+        self.assertEqual(placements[(PARTY_TEXT_X + 36, PARTY_HP_Y)], "ＨＰ　８０")
+        self.assertEqual(placements[(PARTY_TEXT_X + 48, PARTY_HP_Y)], "ＨＰ１３８")
+        self.assertEqual(placements[(PARTY_TEXT_X + 2, PARTY_MAX_HP_Y)], "／　４７")
 
         mock.windows = tuple(Mock() for _ in mock.windows)
         mock.caster_cursor = Mock()
@@ -287,7 +287,7 @@ class SpellMenuTest(unittest.TestCase):
             "　１３／　１６",
         )
         party_texts = {(text.x, text.y): text.text for text in mock.party_window.texts}
-        self.assertEqual(party_texts[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４４")
+        self.assertEqual(party_texts[(PARTY_TEXT_X, PARTY_HP_Y)], "ＨＰ　４７")
         random_value.assert_called_once_with()
         play_se.assert_called_once_with("spell_healing1")
 

@@ -725,15 +725,15 @@ class MemberTest(unittest.TestCase):
 
     def test_fiora_initial_growth_state_uses_level_one_formulas(self) -> None:
         self.assertEqual(self.member.internal_level, 1)
-        self.assertEqual(self.member.hp, 44)
-        self.assertEqual(self.member.max_hp, 44)
+        self.assertEqual(self.member.hp, 47)
+        self.assertEqual(self.member.max_hp, 47)
         self.assertEqual(self.member.mp, 12)
         self.assertEqual(self.member.max_mp, 12)
 
     def test_maximum_points_remain_stored_when_internal_level_changes(self) -> None:
         self.member.internal_level = 2
 
-        self.assertEqual((self.member.hp, self.member.max_hp), (44, 44))
+        self.assertEqual((self.member.hp, self.member.max_hp), (47, 47))
         self.assertEqual((self.member.mp, self.member.max_mp), (12, 12))
 
     def test_max_hp_growth_is_limited_to_one_internal_level_step(self) -> None:
@@ -741,10 +741,10 @@ class MemberTest(unittest.TestCase):
 
         amount = self.member.apply_max_hp_growth()
 
-        self.assertEqual(amount, 9)
+        self.assertEqual(amount, 6)
         self.assertEqual(self.member.max_hp, 53)
-        self.assertEqual(self.member.hp, 44)
-        self.assertEqual(self.member.calculated_max_hp(), 79)
+        self.assertEqual(self.member.hp, 47)
+        self.assertEqual(self.member.calculated_max_hp(), 68)
 
     def test_max_mp_growth_uses_one_internal_level_step_without_spell_level_up(
         self,
@@ -794,6 +794,7 @@ class MemberTest(unittest.TestCase):
             },
             99,
         )
+        self.assertEqual((member.hp, member.max_hp), (999, 999))
         member.hp = member.max_hp = 980
         member.mp = member.max_mp = 240
 
@@ -802,7 +803,7 @@ class MemberTest(unittest.TestCase):
             maximum_spell_level_increased=True
         )
 
-        self.assertEqual((hp_amount, member.max_hp), (12, 992))
+        self.assertEqual((hp_amount, member.max_hp), (15, 995))
         self.assertEqual((mp_amount, member.max_mp), (15, 255))
 
     def test_initial_skills_and_equipment_are_copied_to_member_state(self) -> None:
@@ -922,7 +923,7 @@ class MemberTest(unittest.TestCase):
         member = Member.from_record(record, fiora_internal_level=1)
 
         self.assertEqual(member.internal_level, 3)
-        self.assertEqual((member.hp, member.max_hp), (64, 64))
+        self.assertEqual((member.hp, member.max_hp), (59, 59))
         self.assertEqual((member.mp, member.max_mp), (16, 16))
         self.assertEqual(
             (
@@ -957,7 +958,7 @@ class MemberTest(unittest.TestCase):
         member = Member.from_record_at_internal_level(record, 50)
 
         self.assertEqual(member.internal_level, 50)
-        self.assertEqual((member.hp, member.max_hp), (475, 475))
+        self.assertEqual((member.hp, member.max_hp), (428, 428))
         self.assertEqual(
             (
                 member.proficiency(ProficiencyKind.SWORD).level,

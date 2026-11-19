@@ -513,7 +513,12 @@ class SaveSystemTest(unittest.TestCase):
         )
         self.assertEqual(round_tripped["progress"]["play_time_frames"], 890)
         self.assertEqual(round_tripped["progress"]["monster_level"], 7)
-        for state in round_tripped["party"]["character_states"].values():
+        for key, state in round_tripped["party"]["character_states"].items():
+            saved_state = document["party"]["character_states"][key]
+            self.assertEqual(
+                (state["hp"], state["max_hp"]),
+                (saved_state["hp"], saved_state["max_hp"]),
+            )
             self.assertEqual(
                 state["internal_level"],
                 internal_level_for_experience(

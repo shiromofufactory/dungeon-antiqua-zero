@@ -144,12 +144,12 @@ class StatusMenuTest(unittest.TestCase):
                 for member in mock.party
             ],
             [
-                (1, 44, 12),
-                (3, 64, 16),
-                (18, 220, 30),
-                (6, 96, 13),
-                (11, 171, 0),
-                (8, 139, 16),
+                (1, 47, 12),
+                (3, 59, 16),
+                (18, 178, 30),
+                (6, 80, 13),
+                (11, 138, 0),
+                (8, 114, 16),
             ],
         )
         self.assertEqual(
@@ -175,7 +175,7 @@ class StatusMenuTest(unittest.TestCase):
         )
         placed = {(item.x, item.y): item.text for item in texts}
         placements = {(item.x, item.y): item for item in texts}
-        self.assertEqual(placed[(6, 14)], "ＨＰ　　４４／　４４")
+        self.assertEqual(placed[(6, 14)], "ＨＰ　　４７／　４７")
         self.assertEqual(placed[(6, 17)], "ＭＰ　　１２／　１２")
         self.assertEqual(placements[(6, 17)].color, DEFAULT_TEXT_COLOR)
         self.assertEqual(placed[(22, 20)], "ＯＫ")

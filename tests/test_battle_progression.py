@@ -605,8 +605,8 @@ class BattleProgressionTest(unittest.TestCase):
         progression.settle(SaveData(), (member,))
 
         self.assertEqual(member.internal_level, 5)
-        self.assertEqual(member.max_hp, 48)
-        self.assertEqual(member.calculated_max_hp(), 72)
+        self.assertEqual(member.max_hp, 49)
+        self.assertEqual(member.calculated_max_hp(), 62)
 
     def test_victory_uses_spell_step_when_maximum_spell_level_increases(
         self,
