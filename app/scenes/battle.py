@@ -2360,6 +2360,7 @@ class BattleScene:
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
         self.party_status_shows_mp = False
+        self.pending_action_effect_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
         self.fade_escape_transition: MosaicFadeOut | None = None
         self.fade_escape_snapshot = None
@@ -2942,6 +2943,7 @@ class BattleScene:
         self.pending_item_candidate = None
         self.pending_spell = None
         self.party_status_shows_mp = False
+        self.pending_action_effect_spell = None
         self.action_presentation = None
         self.healing_popups.clear()
         self.spell_damage_popups.clear()
@@ -5068,6 +5070,18 @@ class BattleScene:
             return self._begin_identify_presentation()
         if effect_spell is not None:
             self._record_action_target_information(effect_spell)
+            if (
+                not effect_spell.to_enemy
+                and getattr(self, "action_party_index", None) is not None
+                and self.action_offset_x < ACTION_MOVE_DISTANCE
+            ):
+                # A self-targeted effect anchors to the caster's final position.
+                self.pending_action_effect_spell = effect_spell
+                self.phase = BattlePhase.ACTION_PRESENTATION
+                return True
+        return self._start_confirmed_action_presentation(effect_spell)
+
+    def _start_confirmed_action_presentation(self, effect_spell: Spell | None) -> bool:
         if effect_spell is not None and self._begin_action_presentation(effect_spell):
             return True
         if getattr(self, "action_party_index", None) is not None:
@@ -6421,6 +6435,12 @@ class BattleScene:
     def _update_action_presentation(self) -> None:
         """Advance every simultaneous layer, then complete the current turn."""
 
+        pending_spell = getattr(self, "pending_action_effect_spell", None)
+        if pending_spell is not None:
+            if self.action_offset_x == ACTION_MOVE_DISTANCE:
+                self.pending_action_effect_spell = None
+                self._start_confirmed_action_presentation(pending_spell)
+            return
         presentation = getattr(self, "action_presentation", None)
         if presentation is None:
             self._complete_current_turn()
@@ -8039,6 +8059,7 @@ class BattleScene:
             self._refresh_all_party_hp_texts()
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
+        self.pending_action_effect_spell = None
         self.action_presentation = None
         self.monster_action = None
         self.attack_presentation = None

@@ -7489,6 +7489,90 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(popup.frames_remaining, 0)
         self.assertFalse(popup.visible)
 
+    def test_quick_ally_spell_confirmation_keeps_caster_in_place_during_effect(self) -> None:
+        spells = load_mock_spells()
+        items = load_mock_items()
+        for spell_key, se_id in (
+            ("HEALING1", "spell_healing1"),
+            ("PROTECTION", "spell_protection"),
+        ):
+            with self.subTest(spell=spell_key):
+                spell = spells[spell_key]
+                definition = SpellEffectDefinition.from_record(
+                    spell_key,
+                    {
+                        "kind": "target_sprite",
+                        "image_id": "effects/spells32",
+                        "row": 0,
+                        "frame_count": 5,
+                        "frames_per_pattern": 4,
+                        "offset": {"ally": [0, -4], "enemy": [0, -4]},
+                        "flash_color": None,
+                        "se_id": se_id,
+                    },
+                )
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = load_mock_party(
+                    items, load_mock_skills(), character_keys=("Fiora",)
+                )
+                member = mock.party[0]
+                member.hp = 1
+                before_mp = member.mp
+                mock.party_visuals = (SimpleNamespace(member=member),)
+                mock.phase = BattleMockPhase.ACTION_TARGET
+                mock.pending_spell = spell
+                mock.pending_item_candidate = None
+                mock.action_targets_enemy = False
+                mock.action_targets_all = False
+                mock.active_party_index = 0
+                mock.selectable_party_target_indexes = (0,)
+                mock.selected_party_target_index = 0
+                mock.target_cursor = Mock()
+                mock.party_target_cursor = Mock()
+                mock.spell_effects = {spell_key: definition}
+                mock.spell_effect_renderer = Mock()
+                mock.palette_shifter = Mock()
+                mock._refresh_monster_name_colors = Mock()
+                mock._refresh_party_hp_text = Mock()
+                mock._refresh_input_guide = Mock()
+                mock.action_presentation = None
+                mock.action_offset_x = ACTION_MOVE_DISTANCE - ACTION_MOVE_SPEED * 3
+                mock.action_motion_frame = 0
+                mock._begin_action_motion(use_cast_pose=True)
+                mock.input_reader = Mock()
+                mock.input_reader.poll.return_value = InputState(
+                    confirm=InputButton(triggered=True)
+                )
+
+                with patch("scenes.battle.play_se") as play_se:
+                    mock.update()
+                    mock.input_reader.poll.return_value = InputState()
+                    self.assertEqual(member.mp, before_mp - spell.mp)
+                    mock.update()
+                    self.assertIsNone(mock.action_presentation)
+                    play_se.assert_not_called()
+                    mock.update()
+
+                cast_x = mock._party_sprite_x(0) - ACTION_MOVE_DISTANCE
+                effect = mock.action_presentation.spell_effects[0].player
+                self.assertEqual(effect.anchor_x, cast_x + 8)
+                self.assertEqual(effect.elapsed_frame, 0)
+                play_se.assert_called_once_with(se_id)
+
+                for _frame in range(
+                    definition.total_frames + SPELL_POST_EFFECT_WAIT_FRAME_COUNT
+                ):
+                    self.assertEqual(mock._party_draw_position(0)[0], cast_x)
+                    self.assertFalse(mock.action_returning)
+                    mock.update()
+
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
+                self.assertTrue(effect.completed)
+                mock.update()
+                self.assertEqual(
+                    mock._party_draw_position(0)[0], cast_x + ACTION_MOVE_SPEED
+                )
+
     def test_spell_turn_waits_for_caster_to_return_after_presentation(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.phase = BattleMockPhase.ACTION_PRESENTATION
