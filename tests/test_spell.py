@@ -55,7 +55,8 @@ class SpellTest(unittest.TestCase):
         self.assertTrue(self.spells["POISON1"].is_learned_by(fiora))
         self.assertFalse(self.spells["HEALING1"].is_learned_by(fiora))
         self.assertTrue(self.spells["HEALING1"].is_learned_by(cerion))
-        self.assertTrue(self.spells["SLOW"].is_learned_by(alvan))
+        self.assertTrue(self.spells["FIRE1"].is_learned_by(alvan))
+        self.assertFalse(self.spells["SLOW"].is_learned_by(alvan))
         self.assertFalse(self.spells["FIRE1"].is_learned_by(ragna))
 
     def test_level_zero_requires_explicit_event_acquisition(self) -> None:

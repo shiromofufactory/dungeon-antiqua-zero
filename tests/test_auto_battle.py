@@ -721,7 +721,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
     def test_enemy_or_healer_acting_next_changes_recovery_evaluation(self):
         wounded = replace(self.specs[0], hp=10)
         healer = self.specs[1]
-        enemy = self.enemy(attack=80, hp=1000, max_hp=1000)
+        enemy = self.enemy(attack=75, hp=1000, max_hp=1000)
         early = self.snapshot(
             wounded, healer, enemy, gauges=((0, 64), (1, 63), (5, 62))
         )

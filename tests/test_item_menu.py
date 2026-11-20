@@ -949,6 +949,7 @@ class ItemMenuTest(unittest.TestCase):
         inventory = InventorySystem(items, {item.key: 2, "POTION": 1})
         mock = ItemMenuHarness(items=items, inventory_system=inventory)
         party = mock.party_panel.party
+        party[2].max_mp = 30
         party[2].mp = 2
         party[3].hp = 0
         party[3].mp = 0

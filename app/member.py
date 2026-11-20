@@ -285,6 +285,20 @@ def _proficiency_aptitudes(
     return MappingProxyType(aptitudes)
 
 
+def _proficiency_level_adjustments(
+    record: Mapping[str, object],
+) -> Mapping[ProficiencyKind, int]:
+    adjustments: dict[ProficiencyKind, int] = {}
+    for kind in ProficiencyKind:
+        field_name = f"ad_{kind.value.split('_', 1)[1]}"
+        value = record.get(field_name)
+        adjustments[kind] = (
+            0 if value is None or value == ""
+            else _validate_integer_value(field_name, value)
+        )
+    return MappingProxyType(adjustments)
+
+
 @dataclass
 class Proficiency:
     """A member's current level and progress for one weapon or spell kind."""
@@ -328,6 +342,7 @@ class Proficiency:
         internal_level: int,
         *,
         is_fiora: bool = False,
+        level_adjustment: int = 0,
     ) -> Proficiency:
         """Create the proficiency held when a character first joins."""
 
@@ -345,16 +360,19 @@ class Proficiency:
             )
         if not isinstance(is_fiora, bool):
             raise TypeError("is_fiora must be a boolean")
+        if isinstance(level_adjustment, bool) or not isinstance(level_adjustment, int):
+            raise TypeError("level_adjustment must be an integer")
         if aptitude is ProficiencyAptitude.DISABLED:
             return cls(aptitude, level=0, progress=0)
         if is_fiora:
             return cls(aptitude, level=1, progress=0)
 
         if aptitude is ProficiencyAptitude.FAVORED:
-            total = 160 + internal_level * 8
+            total = 160 + internal_level * 6
         else:
-            total = 93 + internal_level * 7
-        total = min(total, aptitude.max_level * 100 + 99)
+            total = 95 + internal_level * 5
+        total += level_adjustment * 100
+        total = min(max(total, 0), aptitude.max_level * 100 + 99)
         level, progress = divmod(total, 100)
         return cls(aptitude, level=level, progress=progress)
 
@@ -636,6 +654,7 @@ class CharacterDefinition:
         ProficiencyKind,
         ProficiencyAptitude,
     ]
+    proficiency_level_adjustments: Mapping[ProficiencyKind, int]
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> CharacterDefinition:
@@ -705,6 +724,7 @@ class CharacterDefinition:
             initial_skill_keys,
             MappingProxyType(initial_equipment_keys),
             _proficiency_aptitudes(record),
+            _proficiency_level_adjustments(record),
         )
 
     def joining_internal_level(self, fiora_internal_level: int) -> int:
@@ -830,6 +850,7 @@ class Member:
                     aptitude,
                     self.internal_level,
                     is_fiora=is_fiora,
+                    level_adjustment=self.definition.proficiency_level_adjustments[kind],
                 )
                 for kind, aptitude in self.definition.proficiency_aptitudes.items()
             }
@@ -998,6 +1019,7 @@ class Member:
                 aptitude,
                 internal_level,
                 is_fiora=is_fiora_start,
+                level_adjustment=member.definition.proficiency_level_adjustments[kind],
             )
             for kind, aptitude in member.definition.proficiency_aptitudes.items()
         }

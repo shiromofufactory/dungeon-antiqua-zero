@@ -67,8 +67,10 @@ class DebugPartyEditorTest(unittest.TestCase):
                 members["Cerion"].proficiency(ProficiencyKind.SPEAR).level,
                 members["Cerion"].proficiency(ProficiencyKind.SPEAR).progress,
             ),
-            (8, 96),
+            (7, 12),
         )
+        alvan_sword = members["Alvan"].proficiency(ProficiencyKind.SWORD)
+        self.assertEqual((alvan_sword.level, alvan_sword.progress), (8, 54))
         self.assertIs(members["Cerion"].formation_row, FormationRow.BACK)
 
     def test_adds_member_at_level_derived_from_current_baseline(self) -> None:

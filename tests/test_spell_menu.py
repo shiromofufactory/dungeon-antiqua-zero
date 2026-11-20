@@ -507,7 +507,7 @@ class SpellMenuTest(unittest.TestCase):
         self.assertEqual(target.confused, 0)
         self.assertTrue(target.stunned)
         self.assertEqual(mock.member.mp, initial_mp - mock.spells["CURE"].mp)
-        self.assertEqual(proficiency.progress, 85)
+        self.assertEqual(proficiency.progress, 79)
         random_value.assert_not_called()
         play_se.assert_called_once_with("spell_healing1")
 

@@ -342,7 +342,10 @@ class BattleProgressionTest(unittest.TestCase):
             for escape in (False, True):
                 with self.subTest(limit=limit, escape=escape):
                     member = Member.from_record(member_record("Fighter"))
-                    npc = Member.from_record_at_internal_level(member_record("NPC"), 60)
+                    npc = Member.from_record_at_internal_level(
+                        {**member_record("NPC"), "ad_sword": 2, "ad_mystic": 2},
+                        60,
+                    )
                     kinds = (ProficiencyKind.SWORD, ProficiencyKind.MYSTIC)
                     npc_before = tuple(
                         (npc.proficiency(kind).level, npc.proficiency(kind).progress)

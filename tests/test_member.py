@@ -791,6 +791,7 @@ class MemberTest(unittest.TestCase):
                 **FACE_FIELDS,
                 **PROFICIENCY_FIELDS,
                 "sp_mystic": 2,
+                "ad_mystic": 2,
             },
             99,
         )
@@ -930,15 +931,49 @@ class MemberTest(unittest.TestCase):
                 member.proficiency(ProficiencyKind.SPEAR).level,
                 member.proficiency(ProficiencyKind.SPEAR).progress,
             ),
-            (1, 84),
+            (1, 78),
         )
         self.assertEqual(
             (
                 member.proficiency(ProficiencyKind.KNIFE).level,
                 member.proficiency(ProficiencyKind.KNIFE).progress,
             ),
-            (1, 14),
+            (1, 10),
         )
+
+    def test_initial_level_adjustments_are_applied_per_kind_within_aptitude_bounds(self) -> None:
+        member = self.build_member(
+            "Recruit",
+            lv_diff=24,
+            eq_knife=1,
+            eq_hammer=1,
+            eq_rod=2,
+            eq_wand=2,
+            sp_mystic=2,
+            sp_sacred=1,
+            sp_nether=1,
+            ad_sword=3,
+            ad_hammer=-3,
+            ad_wand=10,
+            ad_mystic=2,
+            ad_sacred=1,
+            ad_nether=-2,
+        )
+
+        self.assertEqual(member.internal_level, 25)
+        for kind, expected in (
+            (ProficiencyKind.SWORD, (0, 0)),
+            (ProficiencyKind.KNIFE, (2, 20)),
+            (ProficiencyKind.HAMMER, (0, 0)),
+            (ProficiencyKind.ROD, (3, 10)),
+            (ProficiencyKind.WAND, (9, 99)),
+            (ProficiencyKind.MYSTIC, (5, 10)),
+            (ProficiencyKind.SACRED, (3, 20)),
+            (ProficiencyKind.NETHER, (0, 20)),
+        ):
+            with self.subTest(kind=kind):
+                proficiency = member.proficiency(kind)
+                self.assertEqual((proficiency.level, proficiency.progress), expected)
 
     def test_recreates_fiora_at_explicit_internal_level(self) -> None:
         record = {
@@ -964,14 +999,14 @@ class MemberTest(unittest.TestCase):
                 member.proficiency(ProficiencyKind.SWORD).level,
                 member.proficiency(ProficiencyKind.SWORD).progress,
             ),
-            (5, 60),
+            (4, 60),
         )
         self.assertEqual(
             (
                 member.proficiency(ProficiencyKind.KNIFE).level,
                 member.proficiency(ProficiencyKind.KNIFE).progress,
             ),
-            (4, 43),
+            (3, 45),
         )
 
     def test_explicit_level_one_keeps_fiora_starting_proficiencies(self) -> None:
@@ -1024,14 +1059,14 @@ class MemberTest(unittest.TestCase):
                 member.proficiency(ProficiencyKind.SPEAR).level,
                 member.proficiency(ProficiencyKind.SPEAR).progress,
             ),
-            (9, 52),
+            (7, 54),
         )
         self.assertEqual(
             (
                 member.proficiency(ProficiencyKind.KNIFE).level,
                 member.proficiency(ProficiencyKind.KNIFE).progress,
             ),
-            (7, 86),
+            (5, 90),
         )
 
     def test_proficiency_progress_carries_at_100_and_respects_cap(self) -> None:
@@ -1067,7 +1102,7 @@ class MemberTest(unittest.TestCase):
                 self.assertEqual((proficiency.level, proficiency.progress), (limit, 99))
 
     def test_joining_proficiency_above_runtime_limit_is_preserved(self) -> None:
-        for limit, internal_level in ((2, 18), (4, 50)):
+        for limit, internal_level in ((2, 24), (4, 57)):
             with self.subTest(limit=limit):
                 proficiency = Proficiency.for_joining_member(
                     ProficiencyAptitude.FAVORED, internal_level
