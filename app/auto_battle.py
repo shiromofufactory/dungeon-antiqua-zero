@@ -201,23 +201,32 @@ class AutoBattlePlanner:
         if not eligible:
             raise RuntimeError("auto battle must have a legal defensive fallback")
 
+        defensive_commands = (BattleCommand.DEFEND, BattleCommand.HIDE)
         alternatives = [
-            e for e in eligible if e.action.command is not BattleCommand.DEFEND
+            e for e in eligible if e.action.command not in defensive_commands
         ]
-        if alternatives:
-            alternative = min(alternatives, key=lambda e: e.selection_key(snapshot))
-            safety = alternative.selection_key(snapshot)[:2]
-            evaluations = [
-                replace(e, exclusion="defend_no_safety_improvement")
-                if not e.exclusion
-                and e.action.command is BattleCommand.DEFEND
-                and e.selection_key(snapshot)[:2] >= safety
-                else e
-                for e in evaluations
-            ]
-            eligible = [e for e in evaluations if not e.exclusion]
+        # With only defensive commands available, use Defend as the fallback.
+        baseline = min(
+            alternatives or [
+                e for e in eligible if e.action.command is BattleCommand.DEFEND
+            ],
+            key=lambda e: e.selection_key(snapshot),
+        )
+        safety = baseline.selection_key(snapshot)[:2]
+        evaluations = [
+            replace(e, exclusion=f"{e.action.command.value}_no_safety_improvement")
+            if not e.exclusion
+            and e is not baseline
+            and e.action.command in defensive_commands
+            and e.selection_key(snapshot)[:2] >= safety
+            else e
+            for e in evaluations
+        ]
 
-        best = min(eligible, key=lambda e: e.selection_key(snapshot))
+        best = min(
+            (e for e in evaluations if not e.exclusion),
+            key=lambda e: e.selection_key(snapshot),
+        )
         return AutoBattleDecision(best.action, tuple(evaluations), tuple(excluded))
 
 

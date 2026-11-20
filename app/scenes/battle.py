@@ -7741,6 +7741,7 @@ class BattleScene:
             settings=self.settings,
             fonts=self.fonts,
             character_sprites=self.character_sprites,
+            palette_shifter=self.palette_shifter,
             spells=tuple(self.spells.values()),
             texts=self.texts,
         )
@@ -7851,6 +7852,7 @@ class BattleScene:
             settings=self.settings,
             fonts=self.fonts,
             character_sprites=self.character_sprites,
+            palette_shifter=self.palette_shifter,
             spells=tuple(self.spells.values()),
             texts=self.texts,
         )
@@ -9932,6 +9934,7 @@ class BattleScene:
             healing_results=self._resolve_healing_results(spell, indexes, monster_caster=actor),
             protection_results=self._resolve_protection_results(spell, indexes, target_is_monster=True),
             party_damage_results=party_damage_results,
+            party_poison_results=self._resolve_monster_poison_results(actor, spell, indexes),
             drain_monster_index=(
                 self._monster_index(actor) if spell.action is SpellAction.BLOOD_SUCK else None
             ),
@@ -10006,6 +10009,31 @@ class BattleScene:
                     affinity_y=y - 8,
                 )
             )
+        return tuple(results)
+
+    def _resolve_monster_poison_results(
+        self,
+        actor: BattleMonster,
+        spell: Spell,
+        indexes: tuple[int, ...],
+    ) -> tuple[BattlePoisonResult, ...]:
+        if not spell.to_enemy or spell.attribute is not ResistanceType.POISON:
+            return ()
+
+        results: list[BattlePoisonResult] = []
+        for index in indexes:
+            member = self.party[index]
+            resistances = member.resistances
+            resolution = resolve_status_spell(
+                spell_modifier=actor.magic,
+                rate=spell.rate,
+                target_spell_defense=member.battle_stats.spell_resistance,
+                attribute=spell.attribute,
+                target_weaknesses=frozenset(),
+                target_resistances=resistances,
+                success_roll=0 if spell.attribute in resistances else random.randint(0, 19),
+            )
+            results.append(BattlePoisonResult(index, resolution.success))
         return tuple(results)
 
     def _resolve_monster_silence_results(self, actor, spell, indexes):

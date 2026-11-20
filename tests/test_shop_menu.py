@@ -532,7 +532,7 @@ class ShopMenuTest(unittest.TestCase):
         )
         self.assertIsNone(ShopPartyPanel.marker_for(npc, self.items["POTION"]))
 
-    def test_fixed_marker_draws_japanese_dash_without_arrow(self) -> None:
+    def test_fixed_marker_draws_fullwidth_hyphen_without_arrow(self) -> None:
         with (
             patch("ui.shop_party.pyxel.blt") as draw_image,
             patch("ui.shop_party.pyxel.text") as draw_text,
@@ -541,7 +541,7 @@ class ShopMenuTest(unittest.TestCase):
 
         draw_image.assert_not_called()
         draw_text.assert_called_once()
-        self.assertEqual(draw_text.call_args.args[2], "ー")
+        self.assertEqual(draw_text.call_args.args[2], "－")
         self.assertIs(
             draw_text.call_args.args[4], self.screen.party_panel.japanese_font
         )

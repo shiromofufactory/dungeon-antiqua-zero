@@ -368,6 +368,48 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                                     attack.selection_key(snapshot)[safety_index])
                     self.assertEqual(defend.exclusion, "")
 
+    def test_hide_and_defend_use_the_same_attack_baseline(self):
+        for hp, enemy_hp, enemy_attack, attack_risk, defend_risk, hide_risk, expected in (
+            (250, 400, 80, (0, 0), (0, 0), (0, 0), BattleCommand.ATTACK),
+            (100, 400, 55, (0, 1), (0, 1), (0, 0), BattleCommand.HIDE),
+            (100, 1800, 80, (16, 8), (14, 7), (14, 7), BattleCommand.DEFEND),
+            (20, 400, 150, (6, 4), (4, 3), (4, 3), BattleCommand.HIDE),
+        ):
+            with self.subTest(hp=hp, enemy_hp=enemy_hp, enemy_attack=enemy_attack):
+                actor = replace(
+                    self.specs[0], hp=hp, max_hp=250, spells=(),
+                    skills=frozenset(("Hide",)), weapons=(AutoWeapon(80, 80),),
+                )
+                ally = replace(
+                    self.specs[2], hp=250, max_hp=250, spells=(), skills=frozenset(),
+                )
+                enemy = self.enemy(
+                    hp=enemy_hp, max_hp=enemy_hp, attack=enemy_attack,
+                    special_actions=(MonsterSpecialAction.COUNTER, MonsterSpecialAction.POWER_HIT),
+                )
+                snapshot = self.snapshot(
+                    actor, ally, enemy, gauges=((0, 64), (5, 63), (2, 62)),
+                    policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+                )
+
+                result = decide_auto_battle(snapshot)
+
+                evaluations = {e.action.command: e for e in result.evaluations}
+                attack = evaluations[BattleCommand.ATTACK]
+                self.assertEqual(attack.selection_key(snapshot)[:2], attack_risk)
+                for command, risk in (
+                    (BattleCommand.DEFEND, defend_risk), (BattleCommand.HIDE, hide_risk),
+                ):
+                    evaluation = evaluations[command]
+                    self.assertEqual(evaluation.selection_key(snapshot)[:2], risk)
+                    self.assertEqual(
+                        evaluation.exclusion,
+                        f"{command.value}_no_safety_improvement" if risk >= attack_risk else "",
+                    )
+                if expected is BattleCommand.ATTACK:
+                    self.assertGreater(evaluations[BattleCommand.HIDE].score, attack.score)
+                self.assertEqual(result.action.command, expected)
+
     def test_defend_remains_fallback_when_no_other_action_is_available(self):
         actor = replace(
             self.specs[0], front=False, spells=(), skills=frozenset(),
@@ -383,6 +425,38 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(result.action.command, BattleCommand.DEFEND)
         self.assertEqual(len(result.evaluations), 1)
         self.assertEqual(result.evaluations[0].exclusion, "")
+
+    def test_hide_must_improve_on_defend_when_only_those_two_are_available(self):
+        actor = replace(
+            self.specs[0], front=False, hp=250, max_hp=250, spells=(),
+            skills=frozenset(("Hide",)), weapons=(AutoWeapon(80, 80),),
+            equipment=self.specs[0].equipment.replaced({
+                EquipmentSlot.RIGHT: self.items["IRON SWORD"],
+                EquipmentSlot.LEFT: None,
+            }),
+        )
+        ally = replace(self.specs[2], hp=250, max_hp=250, spells=(), skills=frozenset())
+        for enemy_attack, expected in ((30, BattleCommand.DEFEND), (150, BattleCommand.HIDE)):
+            with self.subTest(enemy_attack=enemy_attack):
+                snapshot = self.snapshot(
+                    actor, ally, self.enemy(
+                        hp=400, max_hp=400, attack=enemy_attack,
+                        special_actions=(MonsterSpecialAction.COUNTER, MonsterSpecialAction.POWER_HIT),
+                    ),
+                    gauges=((0, 64), (5, 63), (2, 62)),
+                    policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+                )
+
+                result = decide_auto_battle(snapshot)
+
+                evaluations = {e.action.command: e for e in result.evaluations}
+                self.assertEqual(set(evaluations), {BattleCommand.DEFEND, BattleCommand.HIDE})
+                self.assertEqual(evaluations[BattleCommand.DEFEND].exclusion, "")
+                self.assertEqual(
+                    evaluations[BattleCommand.HIDE].exclusion,
+                    "hide_no_safety_improvement" if expected is BattleCommand.DEFEND else "",
+                )
+                self.assertEqual(result.action.command, expected)
 
     def test_urgent_heal_is_chosen_before_immediately_dangerous_enemy(self):
         healer = replace(self.specs[1], hp=25)
@@ -1440,6 +1514,23 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(forecast.actors[5].mp, 10 - spell.mp)
                 self.assertEqual(target.hp, max(0, hp - expected.damage))
                 self.assertLess(target.hp, hp)
+
+    def test_enemy_poison_spell_forecast_applies_poison_only_to_unresisted_survivors(self):
+        spell = self.spells["POISON2"]
+        unresisted = replace(self.specs[0], resistances=frozenset())
+        resistant = replace(self.specs[1], resistances=frozenset({ResistanceType.POISON}))
+        dying = replace(self.specs[2], hp=1, resistances=frozenset())
+        enemy = self.enemy(front=False, spells=(spell,), magic=10, max_mp=10, mp=10)
+        forecast = BattleForecast(self.snapshot(unresisted, resistant, dying, enemy), 0)
+        forecast.roll = Mock(return_value=0.0)
+
+        forecast.enemy_turn(forecast.actors[5])
+
+        for spec, poisoned in ((unresisted, True), (resistant, False), (dying, False)):
+            target = forecast.actors[spec.number]
+            self.assertLess(target.hp, spec.hp)
+            self.assertEqual(target.poisoned, poisoned)
+        self.assertEqual(forecast.actors[dying.number].hp, 0)
 
     def test_int_one_silenced_or_mp_empty_monster_does_not_choose_spell(self):
         spell = self.spells["FIRE1"]

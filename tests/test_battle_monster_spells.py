@@ -21,7 +21,7 @@ from tools.screen_mocks.battle import (
 from monster import MonsterBattleState, MonsterCombatStats
 from monster_ai import MonsterAction, MonsterSpellAction
 from battle_magic import resolve_healing, resolve_spell_damage, SpellAffinity
-from member import Member, FormationRow
+from member import EquipmentSlot, Member, FormationRow
 from battle_timeline import TimelineEntry, TimelineOrder
 from resources import load_record_array
 from resistance import ResistanceType
@@ -640,6 +640,42 @@ class MonsterDamageSpellTest(unittest.TestCase):
             target_resistances=frozenset(), random_factor=0.5,
         )
         self.assertLess(result.damage, normal.damage)
+
+    def test_poison_spell_damage_and_poison_are_resolved_separately(self):
+        for case, roll, expected_hp, poisoned in (
+            ("success", 0, 43, True),
+            ("failed roll", 19, 43, False),
+            ("resisted", 0, 54, False),
+            ("lethal", 0, 0, False),
+        ):
+            with self.subTest(case=case):
+                actor = spellcaster(magic=8, spell_key="POISON1")
+                scene = spell_scene(actor)
+                target = scene.party[1]
+                if case == "resisted":
+                    target.equipment = target.equipment.replaced(
+                        {EquipmentSlot.HEAD: load_mock_items()["SNAKE CAP"]}
+                    )
+                if case == "lethal":
+                    target.hp = 1
+                hp = target.hp
+                with (
+                    patch("scenes.battle.random.choice", return_value=1),
+                    patch("scenes.battle.random.random", return_value=0.5),
+                    patch("scenes.battle.random.randint", return_value=roll) as status_roll,
+                ):
+                    self.assertTrue(scene._begin_monster_spell(actor, scene.spells["POISON1"]))
+
+                self.assertEqual(target.hp, hp)
+                self.assertFalse(target.poisoned)
+                scene._update_action_presentation()
+                self.assertEqual(target.hp, expected_hp)
+                self.assertEqual(target.poisoned, poisoned)
+                if case == "resisted":
+                    status_roll.assert_not_called()
+                    self.assertIs(scene.affinity_popups[0].affinity, SpellAffinity.RESIST)
+                else:
+                    status_roll.assert_called_once_with(0, 19)
 
     def test_lethal_damage_clears_conditions_and_interrupts_focus(self):
         actor = spellcaster(magic=99, spell_key="FREEZE1")

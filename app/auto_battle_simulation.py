@@ -1446,6 +1446,13 @@ class BattleForecast:
                                     self.debuff_turns(actor, target)
                                     if target.protection < 0 else 0
                                 )
+                if spell.to_enemy and spell.attribute is ResistanceType.POISON:
+                    for n in targets:
+                        target = self.actors[n]
+                        if target.is_alive and self.status_success(
+                            actor, target, spell, actor.spec.magic,
+                        ):
+                            target.poisoned = True
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
             charged = action is MonsterAction.CHARGE
             self.enemy_attack(actor, available if charged else melee, charged=charged)

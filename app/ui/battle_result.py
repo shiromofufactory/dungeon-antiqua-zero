@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import MappingProxyType
 
 import pyxel
@@ -10,6 +11,7 @@ from input import InputState
 from localization import Localizer
 from member import EquipmentSlot, Member, ProficiencyKind
 from resources import FontResources, TRANSPARENT_INDEX, play_se
+from rendering.palette import MONOCHROME_PALETTE, PaletteShifter
 from rendering.victory_pose import VICTORY_MOTION_LIMIT, victory_sprite_source_x
 from spell import Spell
 from state import Language, Settings
@@ -36,8 +38,6 @@ RESULT_CHARACTER_GRID_Y = 2
 RESULT_CHARACTER_SPRITE_WIDTH = 16
 RESULT_CHARACTER_SPRITE_HEIGHT = 32
 RESULT_AILMENT_SPRITE_SOURCE_X = 16 * 6
-RESULT_DEAD_SPRITE_SOURCE_X = 16 * 9
-RESULT_DEAD_SPRITE_WIDTH = 32
 RESULT_TEXT_GRID_X = 8
 RESULT_NAME_GRID_Y = 2
 RESULT_HP_GRID_Y = 5
@@ -69,24 +69,19 @@ def member_battle_sprite_region(
     member: Member, *, victory_frame: int | None = None,
 ) -> tuple[int, int, int, int]:
     if member.is_dead:
-        source_x = RESULT_DEAD_SPRITE_SOURCE_X
-        width = RESULT_DEAD_SPRITE_WIDTH
+        source_x = 0
     elif member.paralyzed:
         source_x = RESULT_AILMENT_SPRITE_SOURCE_X
-        width = RESULT_CHARACTER_SPRITE_WIDTH
     elif victory_frame is not None:
         source_x = victory_sprite_source_x(victory_frame)
-        width = RESULT_CHARACTER_SPRITE_WIDTH
     elif member.poisoned:
         source_x = RESULT_AILMENT_SPRITE_SOURCE_X
-        width = RESULT_CHARACTER_SPRITE_WIDTH
     else:
         source_x = 0
-        width = RESULT_CHARACTER_SPRITE_WIDTH
     return (
         source_x,
         member.definition.battle_sprite * RESULT_CHARACTER_SPRITE_HEIGHT,
-        width,
+        RESULT_CHARACTER_SPRITE_WIDTH,
         RESULT_CHARACTER_SPRITE_HEIGHT,
     )
 
@@ -121,6 +116,7 @@ class BattleResultOverlay:
         settings: Settings,
         fonts: FontResources,
         character_sprites: object,
+        palette_shifter: PaletteShifter,
         spells: tuple[Spell, ...] = (),
         texts: TextCatalog | None = None,
     ) -> None:
@@ -131,6 +127,7 @@ class BattleResultOverlay:
         self.party = party
         self.growth = growth
         self.character_sprites = character_sprites
+        self.palette_shifter = palette_shifter
         self.frame = 0
         self.wait_frame = 0
         self.victory_motion_frame = 0
@@ -347,13 +344,18 @@ class BattleResultOverlay:
                 ),
             )
             window_x, window_y, _width, _height = result_window_grid(index)
-            pyxel.blt(
-                (window_x + RESULT_CHARACTER_GRID_X) * 4,
-                (window_y + RESULT_CHARACTER_GRID_Y) * 4,
-                self.character_sprites,
-                *source,
-                TRANSPARENT_INDEX,
+            palette = (
+                self.palette_shifter.shifted(MONOCHROME_PALETTE)
+                if member.is_dead else nullcontext()
             )
+            with palette:
+                pyxel.blt(
+                    (window_x + RESULT_CHARACTER_GRID_X) * 4,
+                    (window_y + RESULT_CHARACTER_GRID_Y) * 4,
+                    self.character_sprites,
+                    *source,
+                    TRANSPARENT_INDEX,
+                )
         if self.animation_complete and self.spell_learned_popup is not None:
             self.spell_learned_popup.draw()
 
@@ -376,8 +378,6 @@ __all__ = [
     "RESULT_CHARACTER_GRID_Y",
     "RESULT_CHARACTER_SPRITE_HEIGHT",
     "RESULT_CHARACTER_SPRITE_WIDTH",
-    "RESULT_DEAD_SPRITE_SOURCE_X",
-    "RESULT_DEAD_SPRITE_WIDTH",
     "RESULT_HP_GRID_Y",
     "RESULT_MP_GRID_Y",
     "RESULT_NAME_GRID_Y",

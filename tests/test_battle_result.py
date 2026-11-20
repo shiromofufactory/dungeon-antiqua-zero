@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
 from game_data import create_party, load_items, load_skills, load_spells
 
 from input import InputButton, InputState
 from member import EquipmentSlot, ProficiencyKind
+from rendering.palette import MONOCHROME_PALETTE, PaletteShifter
 from resources import FontResources, TRANSPARENT_INDEX
 from rendering.victory_pose import VICTORY_MOTION_LIMIT, VICTORY_SPRITE_SOURCE_X
 from state import SaveData, Settings
@@ -17,8 +18,6 @@ from text_catalog import TextCatalog
 from ui.battle_result import (
     RESULT_AILMENT_SPRITE_SOURCE_X,
     RESULT_ANIMATION_FRAME_COUNT,
-    RESULT_DEAD_SPRITE_SOURCE_X,
-    RESULT_DEAD_SPRITE_WIDTH,
     RESULT_INCREMENT_SE_ID,
     RESULT_WAIT_FRAME_COUNT,
     BattleResultOverlay,
@@ -32,6 +31,9 @@ class BattleResultOverlayTest(unittest.TestCase):
         play_se_patcher = patch("ui.battle_result.play_se")
         self.play_se = play_se_patcher.start()
         self.addCleanup(play_se_patcher.stop)
+        self.remap = Mock()
+        self.palette_shifter = PaletteShifter([0, 0xFF0000], self.remap)
+        self.palette_shifter.define_variant(MONOCHROME_PALETTE, (0, 0x4C4C4C))
         self.party = create_party(
             load_items(),
             load_skills(),
@@ -53,6 +55,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             character_sprites=object(),
+            palette_shifter=self.palette_shifter,
         )
 
     def test_places_six_windows_in_two_columns_and_three_rows(self) -> None:
@@ -93,6 +96,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             character_sprites=sprites,
+            palette_shifter=self.palette_shifter,
         )
         with (
             patch("ui.battle_result.pyxel.cls"),
@@ -103,6 +107,50 @@ class BattleResultOverlayTest(unittest.TestCase):
         self.assertEqual(blt.call_count, 6)
         blt.assert_any_call(
             136, 168, sprites, 0, 192, 16, 32, TRANSPARENT_INDEX
+        )
+
+    def test_applies_monochrome_only_to_the_dead_members_normal_sprite(self) -> None:
+        party = create_party(
+            load_items(), load_skills(), character_keys=("Fiora", "Cerion")
+        )
+        dead, alive = party
+        dead.hp = 0
+        growth = BattleProgression((EnemyProgressionData(1, 0, 1, 0),)).settle(
+            SaveData(), party
+        )
+        sprites = object()
+        overlay = BattleResultOverlay(
+            party=party,
+            growth=growth,
+            settings=Settings(),
+            fonts=FontResources(),
+            character_sprites=sprites,
+            palette_shifter=self.palette_shifter,
+        )
+        drawing = Mock()
+        drawing.attach_mock(self.remap, "remap")
+        with (
+            patch("ui.battle_result.pyxel.cls"),
+            patch("ui.battle_result.pyxel.blt", drawing.blt),
+            patch.object(type(overlay.windows[0]), "draw"),
+        ):
+            overlay.draw()
+
+        self.assertEqual(
+            drawing.mock_calls,
+            [
+                call.remap(0, 2),
+                call.remap(1, 3),
+                call.blt(
+                    8, 8, sprites, 0, dead.definition.battle_sprite * 32,
+                    16, 32, TRANSPARENT_INDEX,
+                ),
+                call.remap(),
+                call.blt(
+                    136, 8, sprites, 0, alive.definition.battle_sprite * 32,
+                    16, 32, TRANSPARENT_INDEX,
+                ),
+            ],
         )
 
     def test_interpolates_for_exactly_thirty_frames(self) -> None:
@@ -150,6 +198,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             character_sprites=object(),
+            palette_shifter=self.palette_shifter,
             spells=tuple(load_spells().values()),
             texts=TextCatalog.from_json(APP_ROOT / "data" / "texts.json"),
         )
@@ -213,6 +262,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             character_sprites=object(),
+            palette_shifter=self.palette_shifter,
         )
         for _frame in range(
             RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT
@@ -238,6 +288,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             settings=Settings(),
             fonts=FontResources(),
             character_sprites=object(),
+            palette_shifter=self.palette_shifter,
         )
 
         def mp_text() -> str:
@@ -261,7 +312,7 @@ class BattleResultOverlayTest(unittest.TestCase):
         self.assertEqual(overlay._snapshot(0).max_mp, 17)
         self.assertIn("／%COL_POSITIVE%", mp_text())
 
-    def test_uses_death_and_ailment_poses_in_the_result(self) -> None:
+    def test_uses_normal_pose_for_death_and_ailment_pose_for_poison_or_paralysis(self) -> None:
         member = self.party[0]
         sprite_y = member.definition.battle_sprite * 32
 
@@ -282,7 +333,7 @@ class BattleResultOverlayTest(unittest.TestCase):
         member.poisoned = True
         self.assertEqual(
             member_battle_sprite_region(member),
-            (RESULT_DEAD_SPRITE_SOURCE_X, sprite_y, RESULT_DEAD_SPRITE_WIDTH, 32),
+            (0, sprite_y, 16, 32),
         )
 
     def test_celebrates_only_members_with_stat_or_level_growth(self) -> None:
@@ -303,6 +354,7 @@ class BattleResultOverlayTest(unittest.TestCase):
                     party=self.party,
                     growth=replace(self.overlay.growth, before=(before,), after=(after,)),
                     settings=Settings(), fonts=FontResources(), character_sprites=object(),
+                    palette_shifter=self.palette_shifter,
                 )
                 self.assertEqual(
                     overlay.celebrating_members,
@@ -327,7 +379,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             self.assertEqual(self.overlay.victory_motion_frame, 70)
             self.assertEqual(blt.call_args.args[3], 0)
 
-    def test_growth_pose_overrides_poison_but_keeps_paralysis_and_death_poses(self) -> None:
+    def test_growth_pose_overrides_poison_but_respects_paralysis_and_death(self) -> None:
         member = self.party[0]
         member.poisoned = True
         self.assertEqual(member_battle_sprite_region(member, victory_frame=10)[0], VICTORY_SPRITE_SOURCE_X)
@@ -343,7 +395,7 @@ class BattleResultOverlayTest(unittest.TestCase):
             with self.subTest(condition="death", frame=frame):
                 self.assertEqual(
                     member_battle_sprite_region(member, victory_frame=frame)[0],
-                    RESULT_DEAD_SPRITE_SOURCE_X,
+                    0,
                 )
 
 

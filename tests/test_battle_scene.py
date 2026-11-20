@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 from inspect import signature
-from itertools import permutations
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -272,7 +271,7 @@ class BattleEncounterTest(unittest.TestCase):
         self.assertEqual(layout.monster_indexes, (0, 1, 2, 3))
         self.assertEqual(layout.slot_indexes, (0, 2, 3, 4))
 
-    def test_tall_second_monster_stays_in_front_of_the_first(self) -> None:
+    def test_tall_front_monster_is_lowered_to_separate_the_names(self) -> None:
         monsters = (
             SimpleNamespace(width=64, height=64),
             SimpleNamespace(width=64, height=96),
@@ -281,17 +280,21 @@ class BattleEncounterTest(unittest.TestCase):
         layout = monster_layout(monsters)
 
         self.assertEqual(layout.monster_indexes, (0, 1))
-        self.assertEqual(layout.positions, ((4, 48), (68, 16)))
+        self.assertEqual(layout.positions, ((4, 48), (68, 32)))
         self.assertEqual(_battle_start_front_monster_indexes(layout.slot_indexes), {1})
 
     def test_two_tall_monsters_and_one_small_monster_fit_without_overlap(self) -> None:
-        for heights in set(permutations((96, 96, 64))):
+        for heights, positions in (
+            ((96, 96, 64), ((4, 48), (68, 16), (68, 112))),
+            ((96, 64, 96), ((4, 48), (68, 16), (68, 80))),
+            ((64, 96, 96), ((4, 48), (68, 32), (4, 112))),
+        ):
             with self.subTest(heights=heights):
                 monsters = tuple(SimpleNamespace(width=64, height=h) for h in heights)
                 layout = monster_layout(monsters)
                 self.assertEqual(monster_slot_indexes(monsters), layout.slot_indexes)
                 self.assertEqual(layout.monster_indexes, (0, 1, 2))
-                self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 16 + heights[1])))
+                self.assertEqual(layout.positions, positions)
                 for index, ((x, y), monster) in enumerate(zip(layout.positions, monsters)):
                     self.assertLessEqual(y + monster.height, MONSTER_AREA_BOTTOM)
                     for (other_x, other_y), other in zip(
@@ -308,12 +311,19 @@ class BattleEncounterTest(unittest.TestCase):
                 )
 
     def test_rear_second_slot_can_fit_an_enemy_after_front_slots_fill(self) -> None:
-        monsters = tuple(SimpleNamespace(width=64, height=h) for h in (64, 96, 96, 64))
+        monsters = tuple(SimpleNamespace(width=64, height=h) for h in (64, 96, 64, 64, 64))
 
         layout = monster_layout(monsters)
 
         self.assertEqual(layout.monster_indexes, (0, 1, 2, 3))
-        self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 112), (4, 112)))
+        self.assertEqual(layout.positions, ((4, 48), (68, 32), (68, 128), (4, 112)))
+
+    def test_tall_front_monster_leaves_room_for_the_second_rear_name(self) -> None:
+        monsters = tuple(SimpleNamespace(width=64, height=h) for h in (64, 64, 96, 64))
+
+        layout = monster_layout(monsters)
+
+        self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 96), (4, 112)))
 
     def test_skips_a_wide_monster_and_still_places_the_next_monster(self) -> None:
         wide = SimpleNamespace(width=96, height=64)
@@ -1111,6 +1121,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.settings = Settings()
         scene.fonts = object()
         scene.character_sprites = object()
+        scene.palette_shifter = Mock()
         scene.spells = {}
         scene.texts = object()
         scene.bgm = Mock()
@@ -1129,6 +1140,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         scene.bgm.stop.assert_called_once_with()
         scene.bgm.set_fade_rate.assert_called_once_with(1.0)
         scene.bgm.transition_to.assert_called_once_with("da3-field", start_sec=12.5)
+        self.assertIs(overlay.call_args.kwargs["palette_shifter"], scene.palette_shifter)
         self.assertIs(scene.result_overlay, overlay.return_value)
         self.assertIs(scene.result_outcome, BattleResult.ESCAPED)
         self.assertIs(scene.phase, BattlePhase.RESULT_TRANSITION)

@@ -8,6 +8,7 @@ MONSTER_POSITIONS = ((4, 48), (4, 112), (68, 16), (68, 80), (68, 144))
 MONSTER_SLOT_INDEXES = tuple(range(len(MONSTER_POSITIONS)))
 MONSTER_AREA_RIGHT = 256
 MONSTER_AREA_BOTTOM = 208
+TALL_MONSTER_NAME_OFFSET = 16
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,19 @@ def find_monster_placement(
                     other.slot < 2 and y < other.bottom and other.y < y + height
                 ):
                     y = max(y, other.bottom)
+            # Leave room for a standard rear enemy's name, even if it joins later.
+            if width == 64 and height == 96 and any(
+                y + height == rear_y + 64
+                and all(
+                    other.slot >= 2
+                    or other.bottom <= rear_y
+                    or rear_y + 64 <= other.y
+                    or (other.y == rear_y and other.width == other.height == 64)
+                    for other in occupied
+                )
+                for _, rear_y in MONSTER_POSITIONS[:2]
+            ):
+                y += TALL_MONSTER_NAME_OFFSET
         if y + height <= MONSTER_AREA_BOTTOM and all(
             y >= other.bottom or y + height <= other.y for other in neighbors
         ):
