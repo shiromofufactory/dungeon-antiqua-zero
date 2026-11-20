@@ -150,7 +150,7 @@ class EncounterSystemTest(unittest.TestCase):
         self.assertEqual(formation.monster_keys, ("Gigas", "Gigas", "Small"))
         self.assertEqual(random_source.randint_calls, [(1, 2), (1, 5), (1, 3), (1, 5)])
 
-    def test_second_group_can_use_the_rear_slot_when_both_tall_enemies_fit(self) -> None:
+    def test_second_group_drops_tall_enemy_that_would_exceed_the_bottom(self) -> None:
         random_source = ScriptedRandom(
             randrange_values=(0, 1, 0), randint_values=(2, 1, 2, 5),
         )
@@ -164,7 +164,7 @@ class EncounterSystemTest(unittest.TestCase):
             encounter_settings(), monster_level=3, living_member_count=3,
         )
 
-        self.assertEqual(formation.monster_keys, ("Small", "Small", "Gigas", "Gigas"))
+        self.assertEqual(formation.monster_keys, ("Small", "Small", "Gigas"))
         self.assertEqual(random_source.randint_calls[2], (1, 2))
 
     def test_party_size_reroll_counts_only_monsters_that_can_fit(self) -> None:

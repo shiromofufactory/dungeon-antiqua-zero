@@ -227,15 +227,16 @@ class BattleEncounterTest(unittest.TestCase):
                     SimpleNamespace(width=64, height=64),
                 )
 
-                slots = monster_slot_indexes(monsters)
+                layout = monster_layout(monsters)
 
-                self.assertEqual(slots, (0, 2, 3))
+                self.assertEqual(layout.slot_indexes, (0, 2, 3))
                 self.assertEqual(
-                    tuple(MONSTER_POSITIONS[index] for index in slots),
-                    ((4, 48), (68, 16), (68, 80)),
+                    layout.positions,
+                    ((4, 64 if first_height == 96 else 48), (68, 16), (68, 80)),
                 )
                 self.assertEqual(
-                    _battle_start_front_monster_indexes(slots), frozenset((1, 2))
+                    _battle_start_front_monster_indexes(layout.slot_indexes),
+                    frozenset((1, 2)),
                 )
 
     def test_other_standard_lineups_keep_their_initial_slots(self) -> None:
@@ -253,12 +254,12 @@ class BattleEncounterTest(unittest.TestCase):
             SimpleNamespace(width=64, height=64),
             SimpleNamespace(width=64, height=64),
         )
-        slots = monster_slot_indexes(monsters)
+        layout = monster_layout(monsters)
 
-        self.assertEqual(slots, (0, 2, 3, 4))
+        self.assertEqual(layout.slot_indexes, (0, 2, 3, 4))
         self.assertEqual(
-            tuple(MONSTER_POSITIONS[index] for index in slots),
-            ((4, 48), (68, 16), (68, 80), (68, 144)),
+            layout.positions,
+            ((4, 64), (68, 16), (68, 80), (68, 144)),
         )
 
     def test_64_by_96_first_monster_leaves_out_a_fifth_monster(self) -> None:
@@ -285,9 +286,8 @@ class BattleEncounterTest(unittest.TestCase):
 
     def test_two_tall_monsters_and_one_small_monster_fit_without_overlap(self) -> None:
         for heights, positions in (
-            ((96, 96, 64), ((4, 48), (68, 16), (68, 112))),
-            ((96, 64, 96), ((4, 48), (68, 16), (68, 80))),
-            ((64, 96, 96), ((4, 48), (68, 32), (4, 112))),
+            ((96, 96, 64), ((4, 64), (68, 32), (68, 128))),
+            ((96, 64, 96), ((4, 64), (68, 16), (68, 96))),
         ):
             with self.subTest(heights=heights):
                 monsters = tuple(SimpleNamespace(width=64, height=h) for h in heights)
@@ -326,13 +326,13 @@ class BattleEncounterTest(unittest.TestCase):
         self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 96), (4, 112)))
 
     def test_skips_a_wide_monster_and_still_places_the_next_monster(self) -> None:
-        wide = SimpleNamespace(width=96, height=64)
+        wide = SimpleNamespace(width=96, height=96)
         small = SimpleNamespace(width=64, height=64)
 
-        layout = monster_layout((wide, small, wide, small))
+        layout = monster_layout((small, wide, wide, small))
 
         self.assertEqual(layout.monster_indexes, (0, 1, 3))
-        self.assertEqual(layout.positions, ((4, 48), (68, 112), (4, 112)))
+        self.assertEqual(layout.positions, ((4, 48), (68, 32), (68, 128)))
 
 
 class BattleSurpriseIntegrationTest(unittest.TestCase):

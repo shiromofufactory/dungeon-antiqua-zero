@@ -93,7 +93,7 @@ class MonsterReinforcementTest(unittest.TestCase):
 
         self.assertIsNone(scene._monster_ally_placement(small))
         small.is_alive = False
-        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 112)))
+        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 128)))
 
     def test_reinforcement_below_a_tall_front_enemy_uses_its_actual_bottom(self):
         scene = BattleScene.__new__(BattleScene)
@@ -104,7 +104,7 @@ class MonsterReinforcementTest(unittest.TestCase):
         scene.monster_positions = layout.positions
         small = SimpleNamespace(width=64, height=64)
 
-        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 112)))
+        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 128)))
 
     def test_fourth_monster_joins_rear_without_moving_initial_three(self) -> None:
         record = next(
@@ -264,8 +264,9 @@ class MonsterReinforcementTest(unittest.TestCase):
         self.assertTrue(treant.is_front_row)
         scene = BattleScene.__new__(BattleScene)
         scene.monsters = (treant, fallen)
-        scene.monster_slot_indexes = (0, 2)
-        scene.monster_positions = (MONSTER_POSITIONS[0], MONSTER_POSITIONS[2])
+        layout = monster_layout(scene.monsters)
+        scene.monster_slot_indexes = layout.slot_indexes
+        scene.monster_positions = layout.positions
         scene.reinforcement_entrance_frames = {}
         scene.monster_definitions_by_key = {
             key: MonsterDefinition.from_record(record)
@@ -302,6 +303,7 @@ class MonsterReinforcementTest(unittest.TestCase):
             with patch("scenes.battle.reinforcement_arrives", return_value=True):
                 self.assertTrue(scene._attempt_monster_reinforcement(treant))
         expected_key = "Treant" if same_monster else "Spirit"
+        expected_position = (68, 32) if same_monster else (68, 16)
 
         self.assertEqual(len(scene.monsters), 3)
         self.assertEqual(scene.monsters[2].key, expected_key)
@@ -309,7 +311,7 @@ class MonsterReinforcementTest(unittest.TestCase):
         self.assertFalse(treant.is_front_row)
         self.assertTrue(scene.monsters[2].is_front_row)
         self.assertEqual(scene.monster_slot_indexes, (0, 2, 2))
-        self.assertEqual(scene.monster_positions[2], MONSTER_POSITIONS[2])
+        self.assertEqual(scene.monster_positions[2], expected_position)
         self.assertEqual(scene.reinforcement_entrance_frames, {2: 0})
         self.assertEqual(scene.progression.enemies[2].monster_key, expected_key)
         self.assertIs(scene.timeline[0], treant)
@@ -341,7 +343,7 @@ class MonsterReinforcementTest(unittest.TestCase):
 
         for _ in range(duration - duration // 2):
             scene._update_reinforcement_entrances()
-        self.assertEqual(scene._monster_draw_position(2), MONSTER_POSITIONS[2])
+        self.assertEqual(scene._monster_draw_position(2), expected_position)
         self.assertNotIn(2, scene.reinforcement_entrance_frames)
 
     def test_reinforcement_recalculates_rows_when_front_slot_becomes_occupied(

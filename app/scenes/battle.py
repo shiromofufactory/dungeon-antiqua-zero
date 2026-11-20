@@ -572,6 +572,7 @@ FOCUS_WAIT_EFFECT_FLOATING_OFFSET_Y = 4
 FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
 SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
+MISSED_ACTION_RETURN_WAIT_FRAME_COUNT = 6
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
 ATTACK_POSE_SWING_FRAME_COUNT = 8
 ATTACK_MOTION_FRAME_COUNT = (
@@ -1154,6 +1155,7 @@ class BattleActionPresentation:
     elapsed_frame: int = 0
     post_effect_elapsed_frame: int = 0
     screen_flash: SpellScreenFlash | None = None
+    minimum_frame_count: int = 0
 
     @property
     def effects_complete(self) -> bool:
@@ -1175,6 +1177,7 @@ class BattleActionPresentation:
     def is_complete(self) -> bool:
         return (
             self.effects_complete
+            and self.elapsed_frame >= self.minimum_frame_count
             and self.post_effect_elapsed_frame >= self.post_effect_wait_frame_count
             and (self.screen_flash is None or self.elapsed_frame >= self.screen_flash.end_frame)
         )
@@ -5324,6 +5327,9 @@ class BattleScene:
             if status_results
             else indexes
         )
+        post_effect_wait = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
+        if status_results and not effect_indexes:
+            post_effect_wait += MISSED_ACTION_RETURN_WAIT_FRAME_COUNT
         effects = self._build_target_spell_effects(spell.key, target_side, effect_indexes)
         effect_frame_count = max(
             (effect.player.definition.total_frames for effect in effects),
@@ -5333,6 +5339,7 @@ class BattleScene:
             effect_frame_count - SPELL_RESULT_OVERLAP_FRAME_COUNT,
             0,
         )
+        battle_popup = getattr(self, "battle_popup", None)
         self.action_presentation = BattleActionPresentation(
             effects,
             healing_results=healing_results,
@@ -5353,7 +5360,16 @@ class BattleScene:
             ),
             fade_escape=spell.action in (SpellAction.FADE, SpellAction.TELEPORT),
             result_start_frame=result_start_frame,
+            post_effect_wait_frame_count=post_effect_wait,
             screen_flash=effects[0].player.screen_flash if effects else None,
+            # Keep the caster in place while auto battle shows the cast name.
+            minimum_frame_count=(
+                battle_popup.frames_remaining
+                if target_side == "ally"
+                and getattr(self, "auto_battle_active", False)
+                and battle_popup is not None
+                else 0
+            ),
         )
         affinity_popups = getattr(self, "affinity_popups", None)
         if affinity_popups is None:
@@ -7550,6 +7566,9 @@ class BattleScene:
                 )
             )
         )
+        all_strikes_missed = not any(strike.is_hit for strike in presentation.strikes)
+        if all_strikes_missed:
+            return_wait_frames += MISSED_ACTION_RETURN_WAIT_FRAME_COUNT
         if (
             not presentation.return_started
             and presentation.elapsed_frame
@@ -7560,7 +7579,14 @@ class BattleScene:
                 jump=presentation.is_iai
                 or not getattr(self, "action_forward_jump", False),
             )
-        if not presentation.return_started or not presentation.result_complete:
+        if (
+            not presentation.return_started
+            or not presentation.result_complete
+            or (
+                all_strikes_missed
+                and getattr(self, "action_party_index", None) is not None
+            )
+        ):
             return
         if presentation.is_iai:
             defeated = tuple(
@@ -11542,10 +11568,16 @@ class BattleScene:
             return None
         if (
             getattr(presentation, "is_iai", False)
-            and self.action_returning
-            and self.action_offset_x > 0
+            and (
+                (self.action_returning and self.action_offset_x > 0)
+                or (
+                    not presentation.return_started
+                    and presentation.elapsed_frame >= presentation.motion_frame_count
+                )
+            )
         ):
-            return presentation.strikes[-1].poses[-1]
+            poses = presentation.strikes[-1].poses
+            return poses[-1] if poses else None
         return presentation.pose
 
     def _draw_party(self) -> None:
