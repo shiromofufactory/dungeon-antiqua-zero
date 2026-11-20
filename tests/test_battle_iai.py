@@ -125,8 +125,8 @@ class IaiBattleTest(unittest.TestCase):
         )
         member.skills.append(skills["Iai"])
 
-        def monster(*, front: bool) -> SimpleNamespace:
-            state = SimpleNamespace(hp=999, sleeping=0)
+        def monster(*, front: bool, confused: int = 0) -> SimpleNamespace:
+            state = SimpleNamespace(hp=999, sleeping=0, confused=confused)
             state.take_damage = lambda amount: setattr(state, "hp", state.hp - amount)
             return SimpleNamespace(
                 is_alive=True,
@@ -144,7 +144,7 @@ class IaiBattleTest(unittest.TestCase):
         scene.active_party_index = 0
         scene.action_party_index = 0
         scene.party = (member,)
-        scene.monsters = (monster(front=False), monster(front=True))
+        scene.monsters = (monster(front=False), monster(front=True, confused=2))
         scene.selectable_target_indexes = (0, 1)
         scene.selected_command = BattleCommand.IAI
         scene.hidden_party_indexes = set()
@@ -157,7 +157,10 @@ class IaiBattleTest(unittest.TestCase):
         scene._resolve_member_attack_additional_effects = Mock(return_value=())
 
         result = PhysicalAttackResult(True, 12, 100.0, 100.0)
-        with patch("scenes.battle.resolve_physical_attack", return_value=result) as resolver:
+        with (
+            patch("scenes.battle.random.randint", return_value=99),
+            patch("scenes.battle.resolve_physical_attack", return_value=result) as resolver,
+        ):
             self.assertTrue(scene._begin_attack_presentation())
 
         expected_attack = member_physical_attack(
@@ -168,6 +171,10 @@ class IaiBattleTest(unittest.TestCase):
         )
         self.assertEqual([call.kwargs["attack"] for call in resolver.call_args_list],
                          [expected_attack, expected_attack])
+        first, second = (call.kwargs for call in resolver.call_args_list)
+        self.assertFalse(first["target_incapacitated"])
+        self.assertTrue(second["target_incapacitated"])
+        self.assertEqual(second["critical_roll"], 99)
         self.assertEqual(scene.action_gauge_adjustment, IAI_GAUGE_ADJUSTMENT)
         self.assertIs(scene.phase, BattlePhase.ATTACK_PRESENTATION)
         self.assertEqual(

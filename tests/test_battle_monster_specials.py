@@ -416,18 +416,21 @@ class MonsterPowerHitTest(unittest.TestCase):
         actor = BattleMonster.from_record(record, is_front_row=True)
         self.assertIn(MonsterSpecialAction.POWER_HIT, actor.special_actions)
 
-    def test_physical_attacks_use_power_hit_rate_damage_and_sleep_bonus(self) -> None:
+    def test_physical_attacks_use_power_hit_and_incapacitation_bonuses(self) -> None:
         for mode in ("attack", "charge", "confused"):
-            for power_hit, sleeping, roll, expected_damage in (
-                (False, 0, 0, 11),
-                (True, 0, 9, 44),
-                (True, 0, 10, 11),
-                (False, 2, 20, 15),
-                (True, 2, 39, 58),
-                (True, 2, 40, 15),
+            for power_hit, status, roll, expected_damage in (
+                (False, None, 0, 11),
+                (True, None, 9, 44),
+                (True, None, 10, 11),
+                (False, "sleeping", 20, 15),
+                (True, "sleeping", 39, 58),
+                (True, "sleeping", 40, 15),
+                (False, "confused", 19, 58),
+                (False, "confused", 20, 15),
+                (True, "confused", 39, 58),
             ):
                 with self.subTest(
-                    mode=mode, power_hit=power_hit, sleeping=sleeping, roll=roll,
+                    mode=mode, power_hit=power_hit, status=status, roll=roll,
                 ):
                     actor = charge_monster()
                     actor.combat_stats = MonsterCombatStats(20, 100, 0, 0)
@@ -435,9 +438,11 @@ class MonsterPowerHitTest(unittest.TestCase):
                         actor.special_actions += (MonsterSpecialAction.POWER_HIT,)
                     scene = BattleScene.__new__(BattleScene)
                     scene.monsters = (actor,)
+                    evasion = 100 if status else 0
                     scene.party = (SimpleNamespace(
-                        sleeping=sleeping,
-                        battle_stats=SimpleNamespace(defense=10, evasion=0),
+                        sleeping=2 if status == "sleeping" else 0,
+                        confused=2 if status == "confused" else 0,
+                        battle_stats=SimpleNamespace(defense=10, evasion=evasion),
                     ),)
                     scene.defending_party_indexes = set()
                     scene._covering_member_index = Mock(return_value=0)
@@ -447,8 +452,9 @@ class MonsterPowerHitTest(unittest.TestCase):
                     scene._show_monster_action_message = Mock()
                     scene.action_gauge_adjustment = 0.0
                     target = charge_monster()
-                    target.combat_stats = MonsterCombatStats(0, 0, 10, 0)
-                    target.state.sleeping = sleeping
+                    target.combat_stats = MonsterCombatStats(0, 0, 10, evasion)
+                    target.state.sleeping = scene.party[0].sleeping
+                    target.state.confused = scene.party[0].confused
                     if mode == "confused":
                         scene.monsters = (actor, target)
                     with (

@@ -346,7 +346,7 @@
         {
           "id": "random_encounter_d4240ba9f2ee4c3f93baf4b63d9f6b9d",
           "type": "random_encounter",
-          "count": 5,
+          "count": 4,
           "encounter": {
             "monster_level": "dynamic",
             "danger": "low",
@@ -376,7 +376,7 @@
         {
           "id": "random_encounter_6886a92b9609438ab7a28b38e1adb220",
           "type": "random_encounter",
-          "count": 10,
+          "count": 4,
           "encounter": {
             "monster_level": "dynamic",
             "danger": "high",
@@ -405,8 +405,8 @@
           "type": "random_encounter",
           "count": 5,
           "encounter": {
-            "monster_level": 4,
-            "danger": "high",
+            "monster_level": 5,
+            "danger": "low",
             "polarity": "yang",
             "allow_demons": false,
             "allow_humans": false,
@@ -435,13 +435,21 @@
           "type": "random_encounter",
           "count": 5,
           "encounter": {
-            "monster_level": 4,
+            "monster_level": 5,
             "danger": "high",
             "polarity": "yang",
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
             "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_e478a15b890f4323b790115afb24cf59",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "RED ORE"
           }
         },
         {
@@ -465,7 +473,7 @@
           "type": "random_encounter",
           "count": 5,
           "encounter": {
-            "monster_level": 4,
+            "monster_level": 5,
             "danger": "high",
             "polarity": "yang",
             "allow_demons": false,
@@ -480,14 +488,6 @@
           "contents": {
             "type": "item",
             "item_key": "DIVINE TEAR"
-          }
-        },
-        {
-          "id": "treasure_e478a15b890f4323b790115afb24cf59",
-          "type": "treasure",
-          "contents": {
-            "type": "item",
-            "item_key": "RED ORE"
           }
         },
         {
@@ -516,7 +516,7 @@
           "type": "random_encounter",
           "count": 5,
           "encounter": {
-            "monster_level": 5,
+            "monster_level": 6,
             "danger": "low",
             "polarity": "yin",
             "allow_demons": false,
@@ -546,8 +546,8 @@
           "type": "random_encounter",
           "count": 5,
           "encounter": {
-            "monster_level": 5,
-            "danger": "low",
+            "monster_level": 6,
+            "danger": "high",
             "polarity": "yin",
             "allow_demons": false,
             "allow_humans": false,
@@ -572,12 +572,20 @@
           }
         },
         {
+          "id": "treasure_01fea150af98471fafd51c4ab0d130ef",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "WHITE ORE"
+          }
+        },
+        {
           "id": "random_encounter_2abbaee4352646c086c63b2167cc1bb2",
           "type": "random_encounter",
           "count": 5,
           "encounter": {
-            "monster_level": 5,
-            "danger": "low",
+            "monster_level": 6,
+            "danger": "high",
             "polarity": "yin",
             "allow_demons": false,
             "allow_humans": false,
@@ -591,14 +599,6 @@
           "contents": {
             "type": "item",
             "item_key": "DIVINE TEAR"
-          }
-        },
-        {
-          "id": "treasure_01fea150af98471fafd51c4ab0d130ef",
-          "type": "treasure",
-          "contents": {
-            "type": "item",
-            "item_key": "WHITE ORE"
           }
         },
         {

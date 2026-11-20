@@ -276,6 +276,10 @@ class ForecastActor:
             self.sleeping or self.paralyzed or self.stunned or self.confused
         )
 
+    @property
+    def incapacitated_for_physical_hit(self) -> bool:
+        return bool(self.sleeping or self.confused)
+
     def damage(self, amount: int, *, poison: bool = False) -> int:
         old = self.hp
         self.hp = max(0, self.hp - amount)
@@ -330,6 +334,8 @@ class BattleForecast:
         self.spells = {s.key: s for s in snapshot.spells}
         self.turns = {n: 0 for n in self.actors}
         self.start_hp = {n: a.hp for n, a in self.actors.items()}
+        self.fixed_breath_hp = False
+        self.breath_hp: dict[tuple[int, int, MonsterAction], int] = {}
         self.original_alive = frozenset(
             n for n, a in self.actors.items() if not a.spec.enemy and a.is_alive
         )
@@ -831,7 +837,7 @@ class BattleForecast:
             actor.agility,
             target.defense,
             target.evasion,
-            bool(target.sleeping),
+            target.incapacitated_for_physical_hit,
             actor.hidden,
             action.command,
             self.turns[actor.spec.number],
@@ -880,7 +886,7 @@ class BattleForecast:
                     hit_roll=int(
                         self.roll(actor, target.spec.number, 2 + hand * 3, case) * 100
                     ),
-                    target_incapacitated=bool(target.sleeping),
+                    target_incapacitated=target.incapacitated_for_physical_hit,
                     attacker_hidden=actor.hidden,
                     hit_value_bonus=100 if action.command is BattleCommand.AIM else 0,
                     attacker_has_power_hit=actor.has_skill("Power Hit"),
@@ -1353,10 +1359,16 @@ class BattleForecast:
                     target.stunned = True
                 target.interrupt_focus()
         elif action in (MonsterAction.POISON_BREATH, MonsterAction.FIRE_BREATH):
+            number = actor.spec.number
+            hp = actor.hp
+            if self.fixed_breath_hp:
+                hp = self.start_hp[number]
+            else:
+                self.breath_hp[number, self.turns[number], action] = hp
             for target in available:
                 arguments = dict(
                     attack=actor.spec.attack,
-                    hp=actor.hp,
+                    hp=hp,
                     max_hp=actor.max_hp,
                     target_spell_defense=target.spec.spell_defense,
                     random_factor=self.roll(actor, target.spec.number, 5),
@@ -1496,11 +1508,11 @@ class BattleForecast:
             target_evasion=target.evasion,
             target_defending=target.defending,
             target_unable_to_evade=target.focus is not None,
-            target_incapacitated=bool(target.sleeping),
+            target_incapacitated=target.incapacitated_for_physical_hit,
             attacker_has_power_hit=power_hit,
             hit_roll=int(self.roll(actor, target.spec.number, 2 + roll_offset) * 100),
             critical_roll=int(self.roll(actor, target.spec.number, 3 + roll_offset) * 100)
-            if power_hit or target.sleeping
+            if power_hit or target.incapacitated_for_physical_hit
             else None,
         )
         effect = actor.spec.effect
@@ -1585,11 +1597,11 @@ class BattleForecast:
                     target_evasion=target.evasion,
                     hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
                     target_defending=target.defending,
-                    target_incapacitated=bool(target.sleeping),
+                    target_incapacitated=target.incapacitated_for_physical_hit,
                     attacker_has_power_hit=power_hit,
                     critical_roll=(
                         int(self.roll(actor, target.spec.number, 3) * 100)
-                        if power_hit or target.sleeping
+                        if power_hit or target.incapacitated_for_physical_hit
                         else None
                     ),
                 ),

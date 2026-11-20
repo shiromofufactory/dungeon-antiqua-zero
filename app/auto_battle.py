@@ -142,15 +142,46 @@ class AutoBattlePlanner:
                 harm += damage + 0.25 * disabled
                 yield
             weights[spec.number] = 1 + max(0, min(2, harm / CASE_COUNT))
+
+        evaluations, breath_hp = yield from self._evaluate(actions, weights, cache)
+        best, evaluations = self._rank(evaluations)
+        chosen_breath_hp = breath_hp[best.action]
+        # Compare the same enemy breath on the same turn and in the same case.
+        # Stopping a breath entirely should still count as a safety improvement.
+        if chosen_breath_hp and any(
+            hp < chosen_breath_hp.get(key, hp)
+            for evaluation in evaluations
+            if not evaluation.exclusion and evaluation is not best
+            for key, hp in breath_hp[evaluation.action].items()
+        ):
+            adjusted, _ = yield from self._evaluate(
+                actions, weights, cache, fixed_breath_hp=True
+            )
+            best, adjusted = self._rank(adjusted)
+            return AutoBattleDecision(
+                best.action,
+                adjusted,
+                tuple(excluded),
+                reason="breath_comparison",
+                unadjusted_evaluations=evaluations,
+            )
+        return AutoBattleDecision(best.action, evaluations, tuple(excluded))
+
+    def _evaluate(self, actions, weights, cache, *, fixed_breath_hp=False):
+        snapshot = self.snapshot
         evaluations = []
+        breath_hp = {}
         discounts = tuple(DISCOUNT**t for t in range(FORECAST_TURNS + 1))
         denominator = CASE_COUNT * sum(discounts)
         for action in actions:
+            action_breath_hp = {}
+            breath_hp[action] = action_breath_hp
             totals = [0.0] * len(VALUE_NAMES)
             cost = defeat = deaths = current_cost = gauge = 0.0
             focus_valid = True
             for case in range(CASE_COUNT):
                 forecast = self._forecast(case, cache)
+                forecast.fixed_breath_hp = fixed_breath_hp
                 start = forecast.values(weights)
                 c, g = forecast.execute(snapshot.active_number, action)
                 current_cost += c
@@ -165,6 +196,9 @@ class AutoBattlePlanner:
                     yield
                 defeat += forecast.defeated
                 deaths += len(forecast.died)
+                action_breath_hp.update(
+                    ((case, breath), hp) for breath, hp in forecast.breath_hp.items()
+                )
                 if (
                     action.command is BattleCommand.FOCUS
                     and not forecast.focus_completed
@@ -197,6 +231,10 @@ class AutoBattlePlanner:
                     "focus_beyond_horizon" if not focus_valid else "",
                 )
             )
+        return evaluations, breath_hp
+
+    def _rank(self, evaluations):
+        snapshot = self.snapshot
         eligible = [e for e in evaluations if not e.exclusion]
         if not eligible:
             raise RuntimeError("auto battle must have a legal defensive fallback")
@@ -227,7 +265,7 @@ class AutoBattlePlanner:
             (e for e in evaluations if not e.exclusion),
             key=lambda e: e.selection_key(snapshot),
         )
-        return AutoBattleDecision(best.action, tuple(evaluations), tuple(excluded))
+        return best, tuple(evaluations)
 
 
 def decide_auto_battle(snapshot: AutoBattleSnapshot) -> AutoBattleDecision:

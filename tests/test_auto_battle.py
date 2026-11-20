@@ -280,6 +280,21 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         forecast.confused_physical(forecast.actors[0], forecast.actors[5])
         self.assertTrue(forecast.actors[5].poisoned)
 
+    def test_expected_damage_accounts_for_confusion_in_cached_estimates(self):
+        member = replace(self.specs[0], weapons=(AutoWeapon(50, 0),))
+        enemy = self.enemy(defense=0, evasion=100)
+        forecast = BattleForecast(self.snapshot(member, enemy), 0)
+        forecast.roll = Mock(return_value=0.99)
+        attacker, target = forecast.actors[0], forecast.actors[5]
+        action = AutoAction(BattleCommand.ATTACK, (5,))
+
+        self.assertEqual(forecast.expected_damage(attacker, target, action), 0)
+        target.confused = 2
+        self.assertGreater(forecast.expected_damage(attacker, target, action), 0)
+        forecast.physical(attacker, action)
+        self.assertEqual(target.confused, 0)
+        self.assertEqual(forecast.expected_damage(attacker, target, action), 0)
+
     def test_score_rounding_and_safety_bucket_boundaries(self):
         self.assertEqual(round_score(1.23445), 1.2345)
         self.assertEqual(round_score(-1.23445), -1.2345)
@@ -367,6 +382,86 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                     self.assertLess(defend.selection_key(snapshot)[safety_index],
                                     attack.selection_key(snapshot)[safety_index])
                     self.assertEqual(defend.exclusion, "")
+
+    def test_resisted_spell_loses_advantage_from_leaving_breath_weaker(self):
+        ally = replace(
+            self.specs[1], hp=140, max_hp=200, agility=23, front=False,
+            spells=(), skills=frozenset(), weapons=(AutoWeapon(40, 100),),
+        )
+        for spell_key, resistance, breath in (
+            ("FIRE1", ResistanceType.FIRE, MonsterSpecialAction.FIRE_BREATH),
+            ("POISON1", ResistanceType.POISON, MonsterSpecialAction.POISON_BREATH),
+        ):
+            with self.subTest(spell=spell_key):
+                actor = replace(
+                    self.specs[0], hp=145, max_hp=180,
+                    spells=(self.spells[spell_key],), skills=frozenset(),
+                    weapons=(AutoWeapon(145, 100),),
+                )
+                enemy = self.enemy(
+                    hp=625, max_hp=700, attack=80, defense=20,
+                    special_actions=(breath,), resistances=frozenset((resistance,)),
+                    known_fields=frozenset(("profile", resistance.value)),
+                )
+                snapshot = self.snapshot(
+                    actor, ally, enemy, gauges=((0, 64), (5, 63), (1, 31)),
+                )
+
+                result = decide_auto_battle(snapshot)
+
+                self.assertEqual(result.reason, "breath_comparison")
+                unadjusted = min(
+                    (e for e in result.unadjusted_evaluations if not e.exclusion),
+                    key=lambda e: e.selection_key(snapshot),
+                )
+                self.assertEqual(unadjusted.action.spell_key, spell_key)
+                self.assertEqual(result.action, AutoAction(BattleCommand.ATTACK, (5,)))
+
+    def test_defend_still_buys_time_for_healing_at_equal_breath_power(self):
+        actor = replace(
+            self.specs[0], hp=40, max_hp=180, spells=(), skills=frozenset(),
+            weapons=(AutoWeapon(100, 100),),
+        )
+        ally = replace(
+            self.specs[1], hp=150, max_hp=200, agility=31, front=False,
+            spells=(), skills=frozenset(), weapons=(AutoWeapon(40, 100),),
+        )
+        enemy = self.enemy(
+            attack=50, hp=500, max_hp=500, defense=5,
+            special_actions=(MonsterSpecialAction.FIRE_BREATH,),
+        )
+        for spells, expected in (
+            ((), BattleCommand.ATTACK),
+            ((self.spells["HEALING1"],), BattleCommand.DEFEND),
+        ):
+            with self.subTest(healing_available=bool(spells)):
+                snapshot = self.snapshot(
+                    actor, replace(ally, spells=spells), enemy,
+                    gauges=((0, 64), (5, 63), (1, 31)),
+                )
+                result = decide_auto_battle(snapshot)
+
+                self.assertEqual(result.reason, "breath_comparison")
+                unadjusted = min(
+                    (e for e in result.unadjusted_evaluations if not e.exclusion),
+                    key=lambda e: e.selection_key(snapshot),
+                )
+                self.assertIs(unadjusted.action.command, BattleCommand.DEFEND)
+                self.assertIs(result.action.command, expected)
+
+    def test_killing_enemy_before_breath_keeps_its_full_safety_benefit(self):
+        actor = replace(
+            self.specs[0], spells=(), skills=frozenset(),
+            weapons=(AutoWeapon(100, 100),),
+        )
+        enemy = self.enemy(
+            hp=20, attack=300, special_actions=(MonsterSpecialAction.FIRE_BREATH,),
+        )
+
+        result = decide_auto_battle(self.snapshot(actor, enemy))
+
+        self.assertEqual(result.reason, "simulation")
+        self.assertEqual(result.action, AutoAction(BattleCommand.ATTACK, (5,)))
 
     def test_hide_and_defend_use_the_same_attack_baseline(self):
         for hp, enemy_hp, enemy_attack, attack_risk, defend_risk, hide_risk, expected in (
@@ -1423,23 +1518,29 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
 
     def test_monster_power_hit_forecasts_match_physical_attack_rules(self):
         for mode in ("attack", "charge", "confused"):
-            for power_hit, sleeping, roll in (
-                (False, 0, 0), (True, 0, 9), (True, 0, 10),
-                (False, 2, 20), (True, 2, 39), (True, 2, 40),
+            for power_hit, status, roll in (
+                (False, None, 0), (True, None, 9), (True, None, 10),
+                (False, "sleeping", 20), (True, "sleeping", 39), (True, "sleeping", 40),
+                (False, "confused", 19), (False, "confused", 20),
             ):
                 with self.subTest(
-                    mode=mode, power_hit=power_hit, sleeping=sleeping, roll=roll,
+                    mode=mode, power_hit=power_hit, status=status, roll=roll,
                 ):
                     specials = (MonsterSpecialAction.POWER_HIT,) if power_hit else ()
                     if mode == "charge":
                         specials += (MonsterSpecialAction.CHARGE,)
                     enemy = self.enemy(front=mode != "charge", special_actions=specials)
+                    statuses = dict(
+                        sleeping=2 if status == "sleeping" else 0,
+                        confused=2 if status == "confused" else 0,
+                    )
+                    evasion = 100 if status else 0
                     member = replace(
                         self.specs[0], hp=1000, max_hp=1000, defense=10,
-                        evasion=0, agility=20, sleeping=sleeping,
+                        evasion=evasion, agility=20, **statuses,
                     )
                     other = self.enemy(
-                        6, hp=1000, max_hp=1000, defense=10, sleeping=sleeping,
+                        6, hp=1000, max_hp=1000, defense=10, evasion=evasion, **statuses,
                     )
                     forecast = BattleForecast(self.snapshot(member, enemy, other), 0)
                     forecast.roll = Mock(
@@ -1452,9 +1553,9 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                         attack=30 if mode == "charge" else 20,
                         hit=100,
                         target_defense=10,
-                        target_evasion=0,
+                        target_evasion=evasion,
                         hit_roll=0,
-                        target_incapacitated=bool(sleeping),
+                        target_incapacitated=status is not None,
                         attacker_has_power_hit=power_hit,
                         critical_roll=roll,
                     )
@@ -1840,6 +1941,7 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             )
         )
         scene.monsters[0].state.hp = 1
+        scene.monsters[0].state.apply_confusion(2)
         first = scene._auto_battle_snapshot()
         scene.monsters[0].state.hp = scene.monsters[0].state.max_hp
         self.assertEqual(scene._auto_battle_snapshot(), first)
@@ -1849,6 +1951,7 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         self.assertIsNone(enemy.tribe)
         self.assertFalse(enemy.resistances)
         self.assertFalse(enemy.weaknesses)
+        self.assertEqual(enemy.confused, 2)
         self.assertEqual(enemy.net_damage, 33)
         self.assertEqual(enemy.healing, 2)
         self.assertEqual(enemy.mp, max(0, scene.monsters[0].max_mp - 3))

@@ -342,6 +342,7 @@ class AutoBattleDecision:
     forecast_turns: int = FORECAST_TURNS
     discount: float = DISCOUNT
     reason: str = "simulation"
+    unadjusted_evaluations: tuple[AutoActionEvaluation, ...] = ()
 
 
 @dataclass(frozen=True)

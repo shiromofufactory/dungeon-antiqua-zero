@@ -3349,6 +3349,7 @@ class BattleScene:
                     poisoned=monster.state.poisoned,
                     healing=monster.combat_stats.healing,
                     sleeping=monster.state.sleeping,
+                    confused=monster.state.confused,
                     silenced=monster.state.silenced,
                     stunned=monster.state.stunned,
                     protection=monster.state.defense_modifier,
@@ -6958,7 +6959,7 @@ class BattleScene:
         )
         member_stats = member.battle_stats
         monster_stats = monster.combat_stats
-        target_incapacitated = monster.state.sleeping > 0
+        target_incapacitated = bool(monster.state.sleeping or monster.state.confused)
         attacker_has_power_hit = member.has_skill("Power Hit")
         left_weapon = member.equipment.weapon_at(EquipmentSlot.LEFT)
         equipped_attacks: list[tuple[Item, int, int, tuple[str, str]]] = [
@@ -7163,6 +7164,7 @@ class BattleScene:
         )
         for target_order, index in enumerate(targets):
             monster = self.monsters[index]
+            target_incapacitated = bool(monster.state.sleeping or monster.state.confused)
             effective = physical_weapon_is_effective(
                 effective_tribe=weapon.effective_tribe,
                 target_tribe=getattr(monster, "tribe", None),
@@ -7176,7 +7178,7 @@ class BattleScene:
                 target_defense=monster.effective_defense,
                 target_evasion=monster.combat_stats.evasion,
                 hit_roll=random.randint(0, 99),
-                target_incapacitated=monster.state.sleeping > 0,
+                target_incapacitated=target_incapacitated,
                 attacker_hidden=hidden,
                 attacker_has_power_hit=power_hit,
                 weapon_has_power_hit=weapon_power_hit,
@@ -7187,7 +7189,7 @@ class BattleScene:
                 critical_roll=(
                     random.randint(0, 99)
                     if (
-                        monster.state.sleeping > 0
+                        target_incapacitated
                         or hidden
                         or power_hit
                         or weapon_power_hit
@@ -8583,7 +8585,9 @@ class BattleScene:
         strikes: list[BattleAttackStrike] = []
         motion_start_frame = 0
         target_defending = target_index in self.defending_party_indexes
-        target_incapacitated = bool(getattr(target, "sleeping", 0))
+        target_incapacitated = bool(
+            getattr(target, "sleeping", 0) or getattr(target, "confused", 0)
+        )
         for weapon, weapon_attack, weapon_hit, pose_branches in equipped_attacks:
             attack = member_physical_attack(
                 weapon_attack=weapon_attack,
@@ -8733,6 +8737,7 @@ class BattleScene:
 
         target_index = random.choice(ally_indexes)
         target = self.monsters[target_index]
+        target_incapacitated = bool(target.state.sleeping or target.state.confused)
         power_hit = MonsterSpecialAction.POWER_HIT in actor.special_actions
         result = resolve_physical_attack(
             attack=actor.combat_stats.attack,
@@ -8740,11 +8745,11 @@ class BattleScene:
             target_defense=target.effective_defense,
             target_evasion=target.combat_stats.evasion,
             hit_roll=random.randint(0, 99),
-            target_incapacitated=target.state.sleeping > 0,
+            target_incapacitated=target_incapacitated,
             attacker_has_power_hit=power_hit,
             critical_roll=(
                 random.randint(0, 99)
-                if power_hit or target.state.sleeping > 0
+                if power_hit or target_incapacitated
                 else None
             ),
         )
@@ -10316,7 +10321,9 @@ class BattleScene:
             getattr(self, "hidden_party_indexes", set()).discard(target_index)
         target = self.party[target_index]
         target_stats = target.battle_stats
-        target_incapacitated = bool(getattr(target, "sleeping", 0))
+        target_incapacitated = bool(
+            getattr(target, "sleeping", 0) or getattr(target, "confused", 0)
+        )
         power_hit = MonsterSpecialAction.POWER_HIT in actor.special_actions
         result = resolve_physical_attack(
             attack=attack,

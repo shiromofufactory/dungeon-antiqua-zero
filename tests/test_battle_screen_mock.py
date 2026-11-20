@@ -3428,6 +3428,39 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock.attack_presentation.strikes[0].is_critical)
         self.assertEqual(randint.call_args_list, [call(0, 99), call(0, 99)])
 
+    def test_normal_attack_ignores_confused_monster_evasion(self) -> None:
+        items = load_mock_items()
+        member = load_mock_party(
+            items, load_mock_skills(), character_keys=("Fiora",)
+        )[0]
+        member.equipment = member.equipment.replaced(
+            {EquipmentSlot.RIGHT: items["KATANA"]}
+        )
+        monster = _damage_test_monster()
+        monster.combat_stats = MonsterCombatStats(0, 0, 0, 100)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.active_party_index = 0
+        mock.monsters = (monster,)
+        mock.selected_command = BattleCommand.ATTACK
+        mock.selectable_target_indexes = (0,)
+        mock.selected_target_index = 0
+        mock.target_cursor = Mock(active=True)
+        mock.command_window = Mock()
+        mock._refresh_monster_name_colors = Mock()
+        mock._resolve_member_attack_additional_effects = Mock(return_value=())
+
+        with patch("scenes.battle.random.randint", return_value=99):
+            self.assertTrue(mock._begin_attack_presentation())
+        self.assertFalse(mock.attack_presentation.strikes[0].is_hit)
+
+        monster.state.apply_confusion(2)
+        with patch("scenes.battle.random.randint", side_effect=(99, 0)):
+            self.assertTrue(mock._begin_attack_presentation())
+        strike = mock.attack_presentation.strikes[0]
+        self.assertTrue(strike.is_hit)
+        self.assertTrue(strike.is_critical)
+
     def test_elemental_weapon_weakness_uses_effective_attack_and_is_recorded(
         self,
     ) -> None:
