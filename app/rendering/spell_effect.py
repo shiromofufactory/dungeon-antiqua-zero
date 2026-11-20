@@ -1,4 +1,4 @@
-"""Render ordinary target-centered spell effects with scoped palette flashes."""
+"""Render spell sprites, target flashes, and whole-screen color effects."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import pyxel
 
 if __package__ == "rendering":
     from resources.images import TRANSPARENT_INDEX, ImageResources
-    from spell_effect import SpellEffectPlayer
+    from spell_effect import FLASH_SCOPE_TARGET, SpellEffectPlayer, SpellScreenFlash
     from rendering.palette import PaletteShifter
 else:
     from ..resources.images import TRANSPARENT_INDEX, ImageResources
-    from ..spell_effect import SpellEffectPlayer
+    from ..spell_effect import FLASH_SCOPE_TARGET, SpellEffectPlayer, SpellScreenFlash
     from .palette import PaletteShifter
 
 
@@ -38,23 +38,55 @@ class SpellEffectRenderer:
         self._palette_shifter = palette_shifter
         self._pyxel = pyxel_api
         self._flash_prepared = False
+        self._preview_flash_prepared = False
 
-    def prepare(self, player: SpellEffectPlayer) -> None:
+    def prepare(self, player: SpellEffectPlayer, *, preview: bool = False) -> None:
         """Update the reusable flash palette during the owner's update phase."""
 
         if not isinstance(player, SpellEffectPlayer):
             raise TypeError("player must be SpellEffectPlayer")
         color_index = player.definition.flash_color
-        self._flash_prepared = color_index is not None and not player.completed
-        if not self._flash_prepared:
-            return
-        if color_index < 0 or color_index >= len(self._palette_shifter.base_colors):
-            raise ValueError(f"flash color is outside the base palette: {color_index}")
-        self._palette_shifter.define_mix(
-            SPELL_EFFECT_FLASH_PALETTE,
-            base_rate=player.flash_base_rate,
-            target_color=self._palette_shifter.base_colors[color_index],
+        self._flash_prepared = (
+            player.definition.flash_scope == FLASH_SCOPE_TARGET
+            and color_index is not None and not player.completed
         )
+        screen_flash = player.screen_flash if preview else None
+        base_rate = (
+            screen_flash.base_rate_at(player.elapsed_frame)
+            if screen_flash is not None else player.flash_base_rate
+        )
+        self._preview_flash_prepared = screen_flash is not None and base_rate < 1.0
+        if not (self._flash_prepared or self._preview_flash_prepared):
+            return
+        self._palette_shifter.define_mix(
+            SPELL_EFFECT_FLASH_PALETTE, base_rate=base_rate,
+            target_color=self._flash_rgb(color_index),
+        )
+
+    def _flash_rgb(self, color_index: int) -> int:
+        if not 0 <= color_index < len(self._palette_shifter.base_colors):
+            raise ValueError(f"flash color is outside the base palette: {color_index}")
+        return self._palette_shifter.base_colors[color_index]
+
+    def prepare_screen_flash(self, flash: SpellScreenFlash | None, elapsed_frame: int) -> None:
+        """Update the battle palette, including HUD and all local color variants."""
+
+        if flash is None:
+            self._palette_shifter.set_screen_flash()
+            return
+        self._palette_shifter.set_screen_flash(
+            base_rate=flash.base_rate_at(elapsed_frame),
+            target_color=self._flash_rgb(flash.color_index),
+        )
+
+    def draw_preview(self, draw_preview: Callable[[], None]) -> None:
+        """Confine screen tint to the simulated battle in the editor."""
+
+        if self._preview_flash_prepared:
+            with self._palette_shifter.shifted(SPELL_EFFECT_FLASH_PALETTE):
+                draw_preview()
+        else:
+            draw_preview()
 
     def draw_target(
         self,

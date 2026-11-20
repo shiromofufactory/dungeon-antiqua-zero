@@ -27,6 +27,7 @@ class MonsterAction(StrEnum):
     POISON_BREATH = "poison_breath"
     FIRE_BREATH = "fire_breath"
     EARTHQUAKE = "earthquake"
+    TEMPTATION = "temptation"
     IDLE = "idle"
 
 
@@ -159,6 +160,7 @@ def monster_action_candidates(
     can_breathe: bool = False,
     intelligence: int = 0, fire_breath_effective: bool = True,
     can_earthquake: bool = False,
+    can_tempt: bool = False,
     priority_spell_key: str | None = None,
 ) -> tuple[MonsterActionChoice, ...]:
     """Share candidate construction between live AI and deterministic forecasts."""
@@ -181,6 +183,8 @@ def monster_action_candidates(
         candidates.append(MonsterAction.FIRE_BREATH)
     if MonsterSpecialAction.EARTHQUAKE in special_actions and can_earthquake:
         candidates.append(MonsterAction.EARTHQUAKE)
+    if MonsterSpecialAction.TEMPTATION in special_actions and can_tempt:
+        candidates.append(MonsterAction.TEMPTATION)
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     if is_front_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
@@ -203,6 +207,7 @@ def select_monster_action(
     can_breathe: bool = False,
     fire_breath_effective: bool = True,
     can_earthquake: bool = False,
+    can_tempt: bool = False,
     priority_spell_key: str | None = None,
 ) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including call and ZERO's charge.
@@ -266,6 +271,7 @@ def select_monster_action(
         can_breathe=can_breathe,
         intelligence=intelligence, fire_breath_effective=fire_breath_effective,
         can_earthquake=can_earthquake,
+        can_tempt=can_tempt,
         priority_spell_key=priority_spell_key,
     )
 

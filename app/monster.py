@@ -87,6 +87,7 @@ class MonsterSpecialAction(StrEnum):
     FIRE_BREATH = "炎"
     COUNTER = "反"
     EARTHQUAKE = "地"
+    TEMPTATION = "誘"
     DOUBLE_ATTACK = "連"
 
 
@@ -493,12 +494,12 @@ class MonsterBattleState:
         return self.confused != previous
 
     def elapse_confusion_turn(self) -> bool:
-        """Consume one confused action and report whether confusion was active."""
+        """Advance confusion and report whether it still affects this turn."""
 
         if self.confused <= 0:
             return False
         self.confused -= 1
-        return True
+        return self.confused > 0
 
     def apply_poison(self) -> bool:
         """Apply persistent poison and report whether the state changed."""

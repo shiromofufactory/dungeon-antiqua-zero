@@ -26,15 +26,19 @@ def _validate_color(color: object, label: str) -> int:
     return color
 
 
+def _validate_base_rate(base_rate: float) -> None:
+    if isinstance(base_rate, bool) or not isinstance(base_rate, (int, float)):
+        raise TypeError("base_rate must be a number")
+    if not 0.0 <= base_rate <= 1.0:
+        raise ValueError("base_rate must be from 0.0 to 1.0")
+
+
 def mix_color(base_color: int, base_rate: float, target_color: int) -> int:
     """Mix one packed RGB color toward another using the DA2 formula."""
 
     base_color = _validate_color(base_color, "base_color")
     target_color = _validate_color(target_color, "target_color")
-    if isinstance(base_rate, bool) or not isinstance(base_rate, (int, float)):
-        raise TypeError("base_rate must be a number")
-    if not 0.0 <= base_rate <= 1.0:
-        raise ValueError("base_rate must be from 0.0 to 1.0")
+    _validate_base_rate(base_rate)
 
     base_red = (base_color >> 16) & 0xFF
     base_green = (base_color >> 8) & 0xFF
@@ -93,6 +97,7 @@ class PaletteShifter:
         self._global_base_rate = 1.0
         self._global_target_color = MIN_COLOR
         self._brightness_rate = 1.0
+        self._screen_flash_mix: tuple[float, int] | None = None
 
     @property
     def base_colors(self) -> tuple[int, ...]:
@@ -103,6 +108,9 @@ class PaletteShifter:
         return self._global_base_rate
 
     def _globally_mixed(self, colors: Sequence[int]) -> tuple[int, ...]:
+        if self._screen_flash_mix is not None:
+            base_rate, target_color = self._screen_flash_mix
+            colors = tuple(mix_color(color, base_rate, target_color) for color in colors)
         if self._global_base_rate != 1.0:
             colors = tuple(
                 mix_color(color, self._global_base_rate, self._global_target_color)
@@ -213,18 +221,22 @@ class PaletteShifter:
         accumulate rounding errors.
         """
 
-        if isinstance(base_rate, bool) or not isinstance(
-            base_rate,
-            (int, float),
-        ):
-            raise TypeError("base_rate must be a number")
-        if not 0.0 <= base_rate <= 1.0:
-            raise ValueError("base_rate must be from 0.0 to 1.0")
+        _validate_base_rate(base_rate)
         target_color = _validate_color(target_color, "target_color")
         self._global_base_rate = float(base_rate)
         self._global_target_color = target_color
 
         self._refresh_colors()
+
+    def set_screen_flash(self, *, base_rate: float = 1.0, target_color: int = MIN_COLOR) -> None:
+        """Apply a battle tint before the global fade and persistent brightness."""
+
+        _validate_base_rate(base_rate)
+        target_color = _validate_color(target_color, "target_color")
+        flash = None if base_rate == 1.0 else (base_rate, target_color)
+        if flash != self._screen_flash_mix:
+            self._screen_flash_mix = flash
+            self._refresh_colors()
 
     def _refresh_colors(self) -> None:
         base_count = len(self._base_colors)

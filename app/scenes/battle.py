@@ -49,6 +49,7 @@ from battle_commands import (
 )
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
+    TEMPTATION_RATE,
     SpellAffinity,
     battle_healing_amount,
     debuff_turn_range,
@@ -121,6 +122,7 @@ from localization import LocalizedText, Localizer, ascii_to_fullwidth, format_nu
 from member import (
     EquipmentSlot,
     FormationRow,
+    Gender,
     MAX_PROTECTION_LEVEL,
     Member,
     Race,
@@ -172,7 +174,9 @@ from spell import (
     SpellType,
 )
 from spell_effect import (
+    SPELL_RESULT_OVERLAP_FRAME_COUNT,
     SpellEffectPlayer,
+    SpellScreenFlash,
     load_spell_effects,
 )
 from systems import (
@@ -234,6 +238,7 @@ BATTLE_FIRE_BREATH_SE_ID = "battle_fire_breath"
 BATTLE_EARTHQUAKE_SE_ID = "battle_earthquake"
 EARTHQUAKE_SHAKE_AMPLITUDE = 2
 EARTHQUAKE_SHAKE_FRAME_COUNT = 35
+TEMPTATION_FLASH_COLOR = 57
 BREATH_TINT_FRAME_COUNT = 16
 # DA2 palette color 2; ZERO's reordered palette uses gray at that index.
 POISON_BREATH_TINT_COLOR = 0x7E2072
@@ -566,7 +571,6 @@ FOCUS_WAIT_EFFECT_PATTERN_FRAME_COUNT = 12
 FOCUS_WAIT_EFFECT_FLOATING_OFFSET_Y = 4
 FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
-SPELL_RESULT_OVERLAP_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
 SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
 ATTACK_POSE_SWING_FRAME_COUNT = 8
@@ -1149,6 +1153,7 @@ class BattleActionPresentation:
     results_applied: bool = False
     elapsed_frame: int = 0
     post_effect_elapsed_frame: int = 0
+    screen_flash: SpellScreenFlash | None = None
 
     @property
     def effects_complete(self) -> bool:
@@ -1171,6 +1176,7 @@ class BattleActionPresentation:
         return (
             self.effects_complete
             and self.post_effect_elapsed_frame >= self.post_effect_wait_frame_count
+            and (self.screen_flash is None or self.elapsed_frame >= self.screen_flash.end_frame)
         )
 
     def update(self) -> None:
@@ -3832,7 +3838,9 @@ class BattleScene:
                 party_indexes is not None
                 or index not in getattr(self, "surprise_deferred_party_indexes", set())
             )
-            and not self._member_focus_is_interrupted(self.party[index])
+            and not self._member_focus_is_interrupted(
+                self.party[index], after_confusion_tick=party_indexes is not None,
+            )
         )
         start_x_by_index = {
             index: self._party_sprite_x(index) for index in active_indexes
@@ -4123,14 +4131,16 @@ class BattleScene:
             self.focus_wait_animation_frame = 0
 
     @staticmethod
-    def _member_focus_is_interrupted(member: object) -> bool:
+    def _member_focus_is_interrupted(
+        member: object, *, after_confusion_tick: bool = False,
+    ) -> bool:
         """Return whether death or an incapacitating ailment cancels focus."""
 
         return (
             BattleScene._member_is_dead(member)
             or bool(getattr(member, "paralyzed", False))
             or bool(getattr(member, "sleeping", 0))
-            or bool(getattr(member, "confused", 0))
+            or getattr(member, "confused", 0) > int(after_confusion_tick)
             or bool(getattr(member, "stunned", False))
         )
 
@@ -5265,7 +5275,6 @@ class BattleScene:
     ) -> bool:
         """Create target effect timelines while retaining room for result layers."""
 
-        definition = getattr(self, "spell_effects", {}).get(spell.key)
         target_side = "enemy" if self.action_targets_enemy else "ally"
         if self.action_targets_enemy:
             indexes = (
@@ -5315,22 +5324,7 @@ class BattleScene:
             if status_results
             else indexes
         )
-        effects: list[BattleTargetSpellEffect] = []
-        if definition is not None:
-            for index in effect_indexes:
-                anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
-                effects.append(
-                    BattleTargetSpellEffect(
-                        target_side,
-                        index,
-                        SpellEffectPlayer(
-                            definition,
-                            anchor_x=anchor_x,
-                            anchor_y=anchor_y,
-                            target_side=target_side,
-                        ),
-                    )
-                )
+        effects = self._build_target_spell_effects(spell.key, target_side, effect_indexes)
         effect_frame_count = max(
             (effect.player.definition.total_frames for effect in effects),
             default=0,
@@ -5340,7 +5334,7 @@ class BattleScene:
             0,
         )
         self.action_presentation = BattleActionPresentation(
-            tuple(effects),
+            effects,
             healing_results=healing_results,
             mana_results=mana_results,
             damage_results=damage_results,
@@ -5359,6 +5353,7 @@ class BattleScene:
             ),
             fade_escape=spell.action in (SpellAction.FADE, SpellAction.TELEPORT),
             result_start_frame=result_start_frame,
+            screen_flash=effects[0].player.screen_flash if effects else None,
         )
         affinity_popups = getattr(self, "affinity_popups", None)
         if affinity_popups is None:
@@ -5407,15 +5402,7 @@ class BattleScene:
         self.all_target_cursors = ()
         self._refresh_monster_name_colors()
 
-        if effects:
-            first_player = effects[0].player
-            se_id = first_player.take_start_sound()
-            for effect in effects[1:]:
-                effect.player.take_start_sound()
-            if se_id is not None:
-                play_se(se_id)
-            self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
-            self.spell_effect_renderer.prepare(first_player)
+        self._start_target_spell_effects(effects)
         return True
 
     def _resolve_healing_results(
@@ -6414,14 +6401,16 @@ class BattleScene:
         window.x = 0 if align_left else SCREEN_WIDTH // TEXT_GRID_X - window.width
         battle_popup.show(frame_count)
 
+    def _party_effect_position(self, index: int) -> tuple[int, int]:
+        return self._party_draw_position(index) or (
+            self._party_sprite_x(index), PARTY_SPRITE_Y[index]
+        )
+
     def _spell_effect_anchor(self, target_side: str, index: int) -> tuple[int, int]:
-        """Return the center of the target's actual battle sprite rectangle."""
+        """Return the sprite center, using the normal position for a hidden ally."""
 
         if target_side == "ally":
-            position = self._party_draw_position(index)
-            if position is None:
-                raise ValueError("spell effect target must be visible")
-            x, y = position
+            x, y = self._party_effect_position(index)
             return x + 8, y + 16
         if target_side == "enemy":
             monster = self.monsters[index]
@@ -6431,6 +6420,50 @@ class BattleScene:
                 target_y + monster.height // 2,
             )
         raise ValueError("target_side must be 'ally' or 'enemy'")
+
+    def _build_target_spell_effects(
+        self, effect_key: str, target_side: str, indexes: tuple[int, ...],
+    ) -> tuple[BattleTargetSpellEffect, ...]:
+        definition = getattr(self, "spell_effects", {}).get(effect_key)
+        if definition is None:
+            return ()
+        settings = getattr(self, "settings", None)
+        screen_flash_enabled = settings is None or settings.screen_flash_enabled
+        effects = []
+        for index in indexes:
+            anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
+            effects.append(BattleTargetSpellEffect(
+                target_side,
+                index,
+                SpellEffectPlayer(
+                    definition, anchor_x=anchor_x, anchor_y=anchor_y, target_side=target_side,
+                    screen_flash_enabled=screen_flash_enabled,
+                ),
+            ))
+        return tuple(effects)
+
+    def _start_target_spell_effects(
+        self, effects: tuple[BattleTargetSpellEffect, ...],
+    ) -> None:
+        if not effects:
+            return
+        first_player = effects[0].player
+        se_id = first_player.take_start_sound()
+        for effect in effects[1:]:
+            effect.player.take_start_sound()
+        if se_id is not None:
+            play_se(se_id)
+        self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
+        self.spell_effect_renderer.prepare(first_player)
+
+    def sync_action_screen_flash(self, *, suspended: bool = False) -> None:
+        """Apply the current tint only while the battle owns the screen."""
+
+        presentation = getattr(self, "action_presentation", None)
+        if presentation is not None and presentation.screen_flash is not None:
+            self.spell_effect_renderer.prepare_screen_flash(
+                None if suspended else presentation.screen_flash, presentation.elapsed_frame,
+            )
 
     def _update_action_presentation(self) -> None:
         """Advance every simultaneous layer, then complete the current turn."""
@@ -6456,6 +6489,7 @@ class BattleScene:
             )
         if presentation.breath_tint_color is not None:
             self._sync_breath_background(presentation)
+        self.sync_action_screen_flash()
         if (
             not presentation.results_applied
             and presentation.elapsed_frame >= presentation.result_start_frame
@@ -7938,6 +7972,7 @@ class BattleScene:
     def _release_transient_action_palettes(self) -> None:
         """Release mutually exclusive effect blocks before restarting the scene."""
 
+        self.sync_action_screen_flash(suspended=True)
         self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
         self._sync_unselectable_target_palette()
@@ -7951,6 +7986,7 @@ class BattleScene:
     def release_palette_variants(self) -> None:
         """Release this battle's palette blocks before the shared shifter is reused."""
 
+        self.sync_action_screen_flash(suspended=True)
         for name in (
             SPELL_EFFECT_FLASH_PALETTE,
             MONSTER_DEATH_PALETTE,
@@ -8060,6 +8096,7 @@ class BattleScene:
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
         self.pending_action_effect_spell = None
+        self.sync_action_screen_flash(suspended=True)
         self.action_presentation = None
         self.monster_action = None
         self.attack_presentation = None
@@ -8385,7 +8422,9 @@ class BattleScene:
                 not getattr(self, "surprise_active", False)
                 and self.active_party_index
                 in getattr(self, "surprise_original_front_rows", {})
-                and not self._member_focus_is_interrupted(actor.member)
+                and not self._member_focus_is_interrupted(
+                    actor.member, after_confusion_tick=True,
+                )
             ):
                 # Restore before turn-start effects so resuming the same head
                 # cannot apply poison, recovery, or status timers twice.
@@ -8439,16 +8478,18 @@ class BattleScene:
                 return
             if getattr(actor.member, "confused", 0):
                 if isinstance(actor.member, Member):
-                    actor.member.elapse_confusion_turn()
+                    remains_confused = actor.member.elapse_confusion_turn()
                 else:
                     actor.member.confused = max(actor.member.confused - 1, 0)
+                    remains_confused = actor.member.confused > 0
                 getattr(self, "focused_target_by_party_index", {}).pop(
                     self.active_party_index,
                     None,
                 )
-                if not self._begin_confused_party_action(self.active_party_index):
-                    self._start_timeline_animation()
-                return
+                if remains_confused:
+                    if not self._begin_confused_party_action(self.active_party_index):
+                        self._start_timeline_animation()
+                    return
             if getattr(self, "escape_requested", False):
                 self._begin_party_member_escape(self.active_party_index)
                 return
@@ -8510,8 +8551,8 @@ class BattleScene:
                 isinstance(confusion_turns, int)
                 and not isinstance(confusion_turns, bool)
                 and confusion_turns > 0
+                and actor.state.elapse_confusion_turn()
             ):
-                actor.state.elapse_confusion_turn()
                 actor.state.elapse_silence_turn()
                 self.phase = BattlePhase.MONSTER_ACTION
                 self.blinking_monster_index = self._monster_index(actor)
@@ -8974,12 +9015,20 @@ class BattleScene:
             index for index in self._active_party_indexes() if index not in hidden
         )
 
+    def _temptation_target_indexes(self) -> tuple[int, ...]:
+        return tuple(
+            index for index in self._active_party_indexes()
+            if self.party[index].definition.gender is Gender.MALE
+        )
+
     def _monster_can_attempt_action(self, actor: BattleMonster) -> bool:
         """Return whether a monster has any action worth evaluating."""
 
         if not actor.is_front_row:
             return True
         if MonsterSpecialAction.EARTHQUAKE in actor.special_actions and self._active_party_indexes():
+            return True
+        if MonsterSpecialAction.TEMPTATION in actor.special_actions and self._temptation_target_indexes():
             return True
         if self._monster_attack_target_indexes(actor):
             return True
@@ -9412,6 +9461,10 @@ class BattleScene:
             if not self._begin_monster_earthquake(actor):
                 self._start_timeline_animation()
             return
+        if action is MonsterAction.TEMPTATION:
+            if not self._begin_monster_temptation(actor):
+                self._start_timeline_animation()
+            return
         if isinstance(action, MonsterSpellAction):
             spell = self.spells[action.spell_key]
             if not self._begin_monster_spell(
@@ -9599,6 +9652,10 @@ class BattleScene:
             can_charge=bool(self._monster_charge_target_indexes()),
             can_breathe=bool(self._monster_charge_target_indexes()),
             can_earthquake=bool(self._active_party_indexes()),
+            can_tempt=(
+                MonsterSpecialAction.TEMPTATION in actor.special_actions
+                and bool(self._temptation_target_indexes())
+            ),
             fire_breath_effective=any(
                 ResistanceType.FIRE not in self.party[index].resistances
                 for index in self._monster_charge_target_indexes()
@@ -9754,6 +9811,37 @@ class BattleScene:
         play_se(BATTLE_EARTHQUAKE_SE_ID)
         return True
 
+    def _begin_monster_temptation(self, actor: BattleMonster) -> bool:
+        indexes = self._temptation_target_indexes()
+        if not indexes:
+            return False
+        results = self._resolve_monster_confuse_results(
+            actor, indexes, rate=TEMPTATION_RATE, attribute=ResistanceType.CONFUSE,
+        )
+        effects = self._build_target_spell_effects(
+            "CONFUSION", "ally", tuple(result.target_index for result in results if result.success),
+        )
+        effect_frame_count = max(
+            (effect.player.definition.total_frames for effect in effects),
+            default=0,
+        )
+        settings = getattr(self, "settings", None)
+        result_frame = max(effect_frame_count - SPELL_RESULT_OVERLAP_FRAME_COUNT, 0)
+        screen_flash = (
+            SpellScreenFlash(TEMPTATION_FLASH_COLOR, result_frame)
+            if settings is None or settings.screen_flash_enabled else None
+        )
+        self.action_presentation = BattleActionPresentation(
+            effects,
+            party_confuse_results=results,
+            screen_flash=screen_flash,
+            result_start_frame=screen_flash.release_frame if screen_flash else result_frame,
+        )
+        self.phase = BattlePhase.ACTION_PRESENTATION
+        self._show_monster_action_message("battle.monster.temptation")
+        self._start_target_spell_effects(effects)
+        return True
+
     def _begin_monster_poison_breath(self, actor: BattleMonster) -> bool:
         return self._begin_monster_breath(actor, poisonous=True)
 
@@ -9907,10 +9995,11 @@ class BattleScene:
             spell,
             indexes,
         )
-        party_confuse_results = self._resolve_monster_confuse_results(
-            actor,
-            spell,
-            indexes,
+        party_confuse_results = (
+            self._resolve_monster_confuse_results(
+                actor, indexes, rate=spell.rate, attribute=spell.attribute,
+            )
+            if spell.action is SpellAction.CONFUSE and spell.to_enemy else ()
         )
         party_slow_results = self._resolve_monster_slow_results(
             actor,
@@ -9934,29 +10023,13 @@ class BattleScene:
             if status_results
             else indexes
         )
-        effects: list[BattleTargetSpellEffect] = []
-        definition = getattr(self, "spell_effects", {}).get(spell.key)
-        if definition is not None:
-            for index in effect_indexes:
-                anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
-                effects.append(
-                    BattleTargetSpellEffect(
-                        target_side,
-                        index,
-                        SpellEffectPlayer(
-                            definition,
-                            anchor_x=anchor_x,
-                            anchor_y=anchor_y,
-                            target_side=target_side,
-                        ),
-                    )
-                )
+        effects = self._build_target_spell_effects(spell.key, target_side, effect_indexes)
         effect_frame_count = max(
             (effect.player.definition.total_frames for effect in effects),
             default=0,
         )
         self.action_presentation = BattleActionPresentation(
-            tuple(effects),
+            effects,
             healing_results=self._resolve_healing_results(spell, indexes, monster_caster=actor),
             protection_results=self._resolve_protection_results(spell, indexes, target_is_monster=True),
             party_damage_results=party_damage_results,
@@ -9974,6 +10047,7 @@ class BattleScene:
                 effect_frame_count - SPELL_RESULT_OVERLAP_FRAME_COUNT,
                 0,
             ),
+            screen_flash=effects[0].player.screen_flash if effects else None,
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
         affinity_popups = getattr(self, "affinity_popups", None)
@@ -9987,15 +10061,7 @@ class BattleScene:
         )
         self._show_spell_cast_message(spell, actor_is_enemy=True)
 
-        if effects:
-            first_player = effects[0].player
-            se_id = first_player.take_start_sound()
-            for effect in effects[1:]:
-                effect.player.take_start_sound()
-            if se_id is not None:
-                play_se(se_id)
-            self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
-            self.spell_effect_renderer.prepare(first_player)
+        self._start_target_spell_effects(effects)
         return True
 
     def _resolve_monster_spell_damage_results(
@@ -10141,29 +10207,26 @@ class BattleScene:
     def _resolve_monster_confuse_results(
         self,
         actor: BattleMonster,
-        spell: Spell,
         indexes: tuple[int, ...],
+        *,
+        rate: int,
+        attribute: ResistanceType | None,
     ) -> tuple[BattlePartyConfuseResult, ...]:
-        """Resolve a monster's CONFUSE spell against party battle stats."""
+        """Roll enemy-inflicted confusion against party battle stats."""
 
-        if spell.action is not SpellAction.CONFUSE or not spell.to_enemy:
-            return ()
         results: list[BattlePartyConfuseResult] = []
         for index in indexes:
             member = self.party[index]
             resolution = resolve_status_spell(
                 spell_modifier=actor.magic,
-                rate=spell.rate,
+                rate=rate,
                 target_spell_defense=member.battle_stats.spell_resistance,
-                attribute=spell.attribute,
+                attribute=attribute,
                 target_weaknesses=frozenset(),
                 target_resistances=member.resistances,
                 success_roll=random.randint(0, 19),
             )
-            position = self._party_draw_position(index)
-            if position is None:
-                continue
-            x, y = position
+            x, y = self._party_effect_position(index)
             results.append(
                 BattlePartyConfuseResult(
                     target_index=index,

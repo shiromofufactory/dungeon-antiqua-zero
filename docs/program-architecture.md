@@ -552,8 +552,11 @@ BattleMonsterは検証済みの `MonsterTribe` を保持し、BattleSceneは武�
 `app/audio/catalog.json`へ追加する。SE用WAVの登録と試聴も共通Playerを使用する。
 Sound自体の編集責務はPyxel Editorに残す。
 形式検証とゲーム用索引の生成はPyxel非依存にし、ツール保存と非対話ビルドから同じ処理を使う。
-経過フレームと画像パターンの計算は`app/spell_effect.py`、Pyxel画像と対象パレットの描画は
-`app/rendering/spell_effect.py`相当が所有し、将来のBattleSceneと設定ツールで共有する。
+経過フレーム、画像パターン、全画面フラッシュの混色率は`app/spell_effect.py`が計算し、
+Pyxel画像とパレットは`app/rendering/spell_effect.py`が扱う。BattleSceneと設定ツールで共有する。
+BattleSceneは全画面フラッシュを `PaletteShifter.set_screen_flash()` で進める。
+画面全体のフェードと明るさはその上から合成し、強制割り込み中はフラッシュの適用と進行を止める。
+設定ツールは戦闘プレビューにだけ名前付きの派生パレットを適用する。
 `SpellEffectPlayer`は対象が味方か敵かを明示的に受け取り、定義に保存された対象側のOFFSETを選ぶ。
 画面構成、保存形式、通常エフェクトと特殊エフェクトの境界は
 [`features/spell-effect-editor.md`](./features/spell-effect-editor.md)を参照する。
@@ -1435,9 +1438,9 @@ DA2同様に増減表示より状態名を優先する。`Game` はダンジョ�
 町・ダンジョンの歩行画像もDA2と同様にパーティ順で最初の生存かつ
 麻痺していないMemberを参照し、該当者がいない場合だけ先頭Memberへフォールバックする。
 
-毒と麻痺は戦闘後も続く真偽値、眠りと混乱は戦闘中の残り行動数として `Member` が保持する。
-敵側は `MonsterBattleState` が同じ残り行動数を保持し、`BattleScene` がタイムライン先頭で
-混乱を1減らして、同陣営を優先する強制通常攻撃へ置き換える。睡眠と混乱の相互解除、および
+毒と麻痺は戦闘後も続く真偽値、眠りと混乱は戦闘中の残り手番数として `Member` が保持する。
+敵側は `MonsterBattleState` が同じ値を保持する。`BattleScene` とオートバトル予測はタイムライン先頭で
+混乱を1減らし、残っていれば同陣営を優先する強制通常攻撃へ置き換える。睡眠と混乱の相互解除、および
 正の通常ダメージによる解除は各状態モデルが所有する。
 町・ダンジョンなどからワールドマップへ切り替える際は `Game` が全Memberへワールドマップ復帰を
 通知し、死亡状態を維持したまま、生存者のHPと全員のMPを最大まで回復し、それ以外の

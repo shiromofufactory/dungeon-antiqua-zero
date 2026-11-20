@@ -14,6 +14,7 @@ if __package__:
     from .member import (
         EquipmentSet,
         EquipmentSlot,
+        Gender,
         Member,
         ProficiencyAptitude,
         ProficiencyKind,
@@ -30,6 +31,7 @@ else:
     from member import (
         EquipmentSet,
         EquipmentSlot,
+        Gender,
         Member,
         ProficiencyAptitude,
         ProficiencyKind,
@@ -136,6 +138,7 @@ class AutoCombatant:
     floating: bool = False
     slow_turns: int = 0
     defense_down_turns: int = 0
+    gender: Gender = Gender.NONE
 
     @classmethod
     def from_member(
@@ -221,6 +224,7 @@ class AutoCombatant:
             mp=member.mp,
             front=front,
             floating=member.definition.race is Race.FAIRY,
+            gender=member.definition.gender,
             alive=member.is_alive,
             agility=member.adjusted_abilities.agility,
             magic=member.adjusted_abilities.magic,

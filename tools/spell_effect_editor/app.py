@@ -21,6 +21,8 @@ from app.resources import (
     reload_se_catalog,
 )
 from app.spell_effect import (
+    FLASH_SCOPE_SCREEN,
+    FLASH_SCOPE_TARGET,
     MAX_EFFECT_OFFSET,
     MIN_EFFECT_OFFSET,
     SpellEffectDefinition,
@@ -178,7 +180,7 @@ class SpellEffectEditor:
         self.status_frames = 0
         self._hold_start_frame = False
         self._player = self._new_player()
-        self.renderer.prepare(self._player)
+        self.renderer.prepare(self._player, preview=True)
 
     @property
     def filtered_spells(self) -> tuple[EditorSpell, ...]:
@@ -308,7 +310,7 @@ class SpellEffectEditor:
             anchor_y=y + height // 2,
             target_side=self.target_side,
         )
-        for _ in range(min(elapsed_frame, player.definition.total_frames)):
+        for _ in range(min(elapsed_frame, player.playback_frames)):
             player.update()
         return player
 
@@ -316,7 +318,7 @@ class SpellEffectEditor:
         elapsed = 0 if self.playing and restart_if_playing else self._player.elapsed_frame
         self._player = self._new_player(elapsed_frame=elapsed)
         self._hold_start_frame = bool(self.playing and restart_if_playing)
-        self.renderer.prepare(self._player)
+        self.renderer.prepare(self._player, preview=True)
 
     def _set_status(self, message: str, color: int = BUTTON_TEXT_COLOR) -> None:
         self.status_message = message
@@ -425,7 +427,7 @@ class SpellEffectEditor:
         self.paused = False
         self._player = self._new_player()
         self._hold_start_frame = True
-        self.renderer.prepare(self._player)
+        self.renderer.prepare(self._player, preview=True)
         self._play_start_sound()
 
     def _step_playback(self) -> None:
@@ -435,14 +437,14 @@ class SpellEffectEditor:
             self._player.restart()
         else:
             self._player.update()
-        self.renderer.prepare(self._player)
+        self.renderer.prepare(self._player, preview=True)
 
     def _reset_preview(self) -> None:
         self.playing = False
         self.paused = False
         self._player = self._new_player()
         self._hold_start_frame = False
-        self.renderer.prepare(self._player)
+        self.renderer.prepare(self._player, preview=True)
 
     def _update_playback(self) -> None:
         if not self.playing or self.paused:
@@ -457,7 +459,7 @@ class SpellEffectEditor:
             self._play_start_sound()
         elif self._player.completed:
             self.playing = False
-        self.renderer.prepare(self._player)
+        self.renderer.prepare(self._player, preview=True)
 
     def _select_spell(self, index: int) -> None:
         spells = self.filtered_spells
@@ -590,6 +592,13 @@ class SpellEffectEditor:
         self._change_definition(flash_color=color)
         self.flash_picker_open = False
 
+    def _toggle_flash_scope(self) -> None:
+        scope = (
+            FLASH_SCOPE_TARGET
+            if self.definition.flash_scope == FLASH_SCOPE_SCREEN else FLASH_SCOPE_SCREEN
+        )
+        self._change_definition(flash_scope=scope)
+
     def _cycle_target(self, direction: int) -> None:
         options = self.targets[self.target_side]
         self.target_indexes[self.target_side] = (
@@ -660,6 +669,7 @@ class SpellEffectEditor:
             Button("x_next", 498, 76, 12, 11, "+"),
             Button("y_prev", 440, 90, 12, 11, "-"),
             Button("y_next", 498, 90, 12, 11, "+"),
+            Button("flash_scope", 362, 102, 52, 11, f"FLASH {definition.flash_scope.upper()}"),
             Button("flash_prev", 440, 104, 12, 11, "<"),
             Button("flash_picker", 454, 104, 42, 11, "PICK"),
             Button("flash_next", 498, 104, 12, 11, ">"),
@@ -736,6 +746,7 @@ class SpellEffectEditor:
             "y_prev": lambda: self._change_offset("y", -1),
             "y_next": lambda: self._change_offset("y", 1),
             "flash_prev": lambda: self._cycle_flash(-1),
+            "flash_scope": self._toggle_flash_scope,
             "flash_picker": lambda: setattr(self, "flash_picker_open", True),
             "flash_next": lambda: self._cycle_flash(1),
             "se_select": self._open_sound_registration,
@@ -958,7 +969,7 @@ class SpellEffectEditor:
                 pyxel.rectb(dx, dy, dw, dh, BUTTON_ACTIVE_COLOR)
             pattern = self._player.pattern_index
             info = (
-                f"F {self._player.elapsed_frame:03d}/{self.definition.total_frames:03d} "
+                f"F {self._player.elapsed_frame:03d}/{self._player.playback_frames:03d} "
                 f"PAT {pattern if pattern is not None else '-'}"
             )
             pyxel.rect(0, 208, PREVIEW_WIDTH, 12, PANEL_COLOR)
@@ -1015,8 +1026,7 @@ class SpellEffectEditor:
         self._draw_value_line(f"{side_label} X", str(offset_x), 74)
         self._draw_value_line(f"{side_label} Y", str(offset_y), 88)
         flash_text = "NONE" if definition.flash_color is None else str(definition.flash_color)
-        pyxel.text(363, 104, "FLASH", 4)
-        pyxel.text(410, 104, flash_text[:4], BUTTON_TEXT_COLOR)
+        pyxel.text(416, 104, flash_text, BUTTON_TEXT_COLOR)
         if definition.flash_color is not None:
             pyxel.rect(426, 104, 10, 9, definition.flash_color)
             pyxel.rectb(426, 104, 10, 9, 5)
@@ -1029,8 +1039,8 @@ class SpellEffectEditor:
             )
         pyxel.text(363, 118, "SE", 4)
         pyxel.text(363, 128, se_detail[:36], 4)
-        duration = definition.total_frames / FPS
-        pyxel.text(363, 135, f"{definition.total_frames}F  {duration:.3f}s", 4)
+        duration = self._player.playback_frames / FPS
+        pyxel.text(363, 135, f"{self._player.playback_frames}F  {duration:.3f}s", 4)
 
         diagnostics = self.store.diagnostics_for(spell.key)
         errors = sum(item.severity == "error" for item in diagnostics)
@@ -1202,7 +1212,7 @@ class SpellEffectEditor:
         pyxel.text(112, 224, "Each row: dark > bright", 3)
 
     def draw(self) -> None:
-        self._draw_preview()
+        self.renderer.draw_preview(self._draw_preview)
         self._draw_spell_list()
         self._draw_settings()
         self._draw_status()

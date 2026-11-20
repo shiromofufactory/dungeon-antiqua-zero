@@ -13,6 +13,10 @@ from typing import Mapping
 SPELL_EFFECT_FORMAT_VERSION = 2
 SUPPORTED_SPELL_EFFECT_FORMAT_VERSIONS = frozenset((1, SPELL_EFFECT_FORMAT_VERSION))
 SPELL_EFFECT_KIND = "target_sprite"
+SPELL_RESULT_OVERLAP_FRAME_COUNT = 4
+SCREEN_FLASH_TRANSITION_FRAMES = 16
+FLASH_SCOPE_TARGET = "target"
+FLASH_SCOPE_SCREEN = "screen"
 SPELL_EFFECT_IMAGE_CELL_SIZES = MappingProxyType(
     {
         "effects/spells32": 32,
@@ -27,6 +31,28 @@ MAX_EFFECT_OFFSET = 128
 
 class SpellEffectDataError(ValueError):
     """Raised when compiled spell-effect data cannot be interpreted safely."""
+
+
+@dataclass(frozen=True)
+class SpellScreenFlash:
+    """Tint toward a palette color, hold through the result, then restore."""
+
+    color_index: int
+    result_frame: int
+
+    @property
+    def release_frame(self) -> int:
+        return max(SCREEN_FLASH_TRANSITION_FRAMES, self.result_frame)
+
+    @property
+    def end_frame(self) -> int:
+        return self.release_frame + SCREEN_FLASH_TRANSITION_FRAMES
+
+    def base_rate_at(self, elapsed_frame: int) -> float:
+        blend_frames = max(0, min(
+            elapsed_frame, SCREEN_FLASH_TRANSITION_FRAMES, self.end_frame - elapsed_frame,
+        ))
+        return 0.7 + math.cos(math.pi * blend_frames / SCREEN_FLASH_TRANSITION_FRAMES) * 0.3
 
 
 def _integer(
@@ -77,6 +103,7 @@ class SpellEffectDefinition:
     enemy_offset_y: int
     flash_color: int | None
     se_id: str | None
+    flash_scope: str = FLASH_SCOPE_TARGET
 
     @classmethod
     def from_record(
@@ -128,6 +155,11 @@ class SpellEffectDefinition:
                 f"spell effect.flash_color must be null or a non-negative integer: "
                 f"{spell_key}"
             )
+        flash_scope = record.get("flash_scope", FLASH_SCOPE_TARGET)
+        if flash_scope not in (FLASH_SCOPE_TARGET, FLASH_SCOPE_SCREEN):
+            raise SpellEffectDataError(
+                f"spell effect.flash_scope must be target or screen: {spell_key}"
+            )
         se_id = record.get("se_id")
         if se_id is not None and (not isinstance(se_id, str) or not se_id):
             raise SpellEffectDataError(
@@ -152,6 +184,7 @@ class SpellEffectDefinition:
             enemy_offset_y=enemy_offset[1],
             flash_color=flash_color,
             se_id=se_id,
+            flash_scope=flash_scope,
         )
 
     @property
@@ -161,6 +194,14 @@ class SpellEffectDefinition:
     @property
     def total_frames(self) -> int:
         return self.frame_count * self.frames_per_pattern
+
+    @property
+    def screen_flash(self) -> SpellScreenFlash | None:
+        if self.flash_scope != FLASH_SCOPE_SCREEN or self.flash_color is None:
+            return None
+        return SpellScreenFlash(
+            self.flash_color, max(0, self.total_frames - SPELL_RESULT_OVERLAP_FRAME_COUNT),
+        )
 
     def pattern_index_at(self, elapsed_frame: int) -> int | None:
         if isinstance(elapsed_frame, bool) or not isinstance(elapsed_frame, int):
@@ -185,7 +226,7 @@ class SpellEffectDefinition:
         raise ValueError("target_side must be 'ally' or 'enemy'")
 
     def to_runtime_record(self) -> dict[str, object]:
-        return {
+        record = {
             "kind": self.kind,
             "image_id": self.image_id,
             "row": self.row,
@@ -198,6 +239,9 @@ class SpellEffectDefinition:
             "flash_color": self.flash_color,
             "se_id": self.se_id,
         }
+        if self.flash_scope != FLASH_SCOPE_TARGET:
+            record["flash_scope"] = self.flash_scope
+        return record
 
     def to_source_record(self) -> dict[str, object]:
         return {"spell_key": self.spell_key, **self.to_runtime_record()}
@@ -213,6 +257,7 @@ class SpellEffectPlayer:
         anchor_x: int,
         anchor_y: int,
         target_side: str = "enemy",
+        screen_flash_enabled: bool = True,
     ) -> None:
         if not isinstance(definition, SpellEffectDefinition):
             raise TypeError("definition must be a SpellEffectDefinition")
@@ -227,9 +272,16 @@ class SpellEffectPlayer:
         self.anchor_x = anchor_x
         self.anchor_y = anchor_y
         self.target_side = target_side
+        self.screen_flash = definition.screen_flash if screen_flash_enabled else None
         self.elapsed_frame = 0
         self.completed = False
         self._start_sound_pending = True
+
+    @property
+    def playback_frames(self) -> int:
+        if self.screen_flash is None:
+            return self.definition.total_frames
+        return max(self.definition.total_frames, self.screen_flash.end_frame)
 
     @property
     def pattern_index(self) -> int | None:
@@ -266,7 +318,7 @@ class SpellEffectPlayer:
         if self.completed:
             return
         self.elapsed_frame += 1
-        if self.elapsed_frame >= self.definition.total_frames:
+        if self.elapsed_frame >= self.playback_frames:
             self.completed = True
 
     def restart(self) -> None:
@@ -308,6 +360,8 @@ def load_spell_effects(path: Path) -> Mapping[str, SpellEffectDefinition]:
 
 
 __all__ = [
+    "FLASH_SCOPE_SCREEN",
+    "FLASH_SCOPE_TARGET",
     "MAX_EFFECT_OFFSET",
     "MAX_FRAMES_PER_PATTERN",
     "MIN_EFFECT_OFFSET",
@@ -316,8 +370,10 @@ __all__ = [
     "SUPPORTED_SPELL_EFFECT_FORMAT_VERSIONS",
     "SPELL_EFFECT_IMAGE_CELL_SIZES",
     "SPELL_EFFECT_KIND",
+    "SPELL_RESULT_OVERLAP_FRAME_COUNT",
     "SpellEffectDataError",
     "SpellEffectDefinition",
     "SpellEffectPlayer",
+    "SpellScreenFlash",
     "load_spell_effects",
 ]

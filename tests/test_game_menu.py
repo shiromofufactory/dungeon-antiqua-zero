@@ -247,6 +247,16 @@ class GameMenuTest(unittest.TestCase):
                     fade.update()
                 self.assertFalse(scene.is_transitioning)
 
+    def test_menu_suspends_and_restores_battle_screen_flash(self) -> None:
+        game = self.game()
+        game.battle_scene = Mock(spec=BattleScene)
+        game.battle_scene.is_transitioning = False
+        self.open(game)
+        game.battle_scene.sync_action_screen_flash.assert_called_once_with(suspended=True)
+        game.battle_scene.sync_action_screen_flash.reset_mock()
+        self.update(game, InputState(cancel=PRESS))
+        game.battle_scene.sync_action_screen_flash.assert_called_once_with()
+
     def test_blocked_press_is_not_reserved_after_transition(self) -> None:
         game = self.game()
         game.start_screen = Mock()

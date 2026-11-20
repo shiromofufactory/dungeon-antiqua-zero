@@ -62,7 +62,7 @@ class SpellEffectPipelineTest(unittest.TestCase):
             "format_version": 2,
             "effects": [
                 source_record(spell_key="CAMP", flash_color=None, se_id=None),
-                source_record(),
+                source_record(flash_scope="screen"),
             ],
         }
 
@@ -71,6 +71,8 @@ class SpellEffectPipelineTest(unittest.TestCase):
         self.assertEqual(tuple(compiled["effects"]), ("FIRE1", "CAMP"))
         self.assertNotIn("spell_key", compiled["effects"]["FIRE1"])
         self.assertEqual(compiled["effects"]["FIRE1"]["frames_per_pattern"], 4)
+        self.assertEqual(compiled["effects"]["FIRE1"]["flash_scope"], "screen")
+        self.assertNotIn("flash_scope", compiled["effects"]["CAMP"])
         self.assertEqual(compiled["format_version"], 2)
 
     def test_warns_for_missing_battle_effect_and_nonbattle_setting(self) -> None:
@@ -122,7 +124,7 @@ class SpellEffectPipelineTest(unittest.TestCase):
             "format_version": 2,
             "effects": [
                 source_record(spell_key="CAMP", flash_color=None, se_id=None),
-                source_record(),
+                source_record(flash_scope="screen"),
             ],
         }
         definitions = definitions_from_document(document, catalogs())
@@ -136,6 +138,7 @@ class SpellEffectPipelineTest(unittest.TestCase):
             ["FIRE1", "CAMP"],
         )
         self.assertEqual(serialized["format_version"], 2)
+        self.assertEqual(serialized["effects"][0]["flash_scope"], "screen")
 
     def test_compiles_legacy_single_offset_into_both_target_sides(self) -> None:
         document = {

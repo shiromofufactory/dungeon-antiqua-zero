@@ -578,7 +578,7 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
     def test_incapacitated_member_restores_on_first_actionable_turn(self) -> None:
         for status, value in (
             ("sleeping", 2), ("sleeping", 1), ("paralyzed", True),
-            ("confused", 2), ("stunned", True),
+            ("confused", 2), ("confused", 1), ("stunned", True),
         ):
             with self.subTest(status=status, value=value):
                 front = self._member(10, FormationRow.FRONT)
@@ -620,8 +620,8 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
                 self.assertEqual(scene.surprise_original_front_rows, {1: False})
                 scene.command_window.open.assert_not_called()
 
-                # Recovery itself leaves the effective row unchanged.
-                setattr(rear, status, 0)
+                # An expiring confusion still has one tick left when the handoff starts.
+                setattr(rear, status, int(status == "confused" and value == 1))
                 self.assertTrue(scene._party_member_is_front_row(1))
                 scene.timeline = (scene.party_visuals[1], scene.party_visuals[0])
                 scene._activate_timeline_head()
@@ -632,6 +632,7 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
 
                 self.assertFalse(scene._party_member_is_front_row(1))
                 self.assertEqual(scene.surprise_original_front_rows, {})
+                self.assertEqual(getattr(rear, status), 0)
                 self.assertEqual(scene._apply_turn_start_hp_change.call_count, 3)
                 scene.command_window.open.assert_called_once_with()
                 self.assertEqual(scene._start_timeline_animation.call_count, 2)

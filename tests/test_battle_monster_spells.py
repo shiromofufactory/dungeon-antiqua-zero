@@ -26,6 +26,7 @@ from battle_timeline import TimelineEntry, TimelineOrder
 from resources import load_record_array
 from resistance import ResistanceType
 from scenes.battle import BattleMonster
+from spell_effect import load_spell_effects
 
 
 def spellcaster(
@@ -80,6 +81,24 @@ def spell_scene(actor: BattleMockMonster) -> BattleScreenMock:
 
 
 class MonsterSpellTest(unittest.TestCase):
+    def test_screen_flash_from_spell_catalog_runs_once_for_all_targets(self):
+        actor = spellcaster(magic=40, spell_key="SLEEP")
+        scene = spell_scene(actor)
+        definition = load_spell_effects(APP_ROOT / "effects" / "spells.json")["SLEEP"]
+        scene.spell_effects = {
+            "SLEEP": replace(definition, flash_scope="screen", flash_color=57, se_id=None)
+        }
+        scene.spell_effect_renderer = Mock()
+        with patch("scenes.battle.random.randint", return_value=2):
+            self.assertTrue(scene._begin_monster_spell(actor, scene.spells["SLEEP"]))
+        presentation = scene.action_presentation
+        self.assertEqual([effect.target_index for effect in presentation.spell_effects], [0, 1])
+        self.assertEqual(presentation.screen_flash.color_index, 57)
+        scene._update_action_presentation()
+        scene.spell_effect_renderer.prepare_screen_flash.assert_called_once_with(
+            presentation.screen_flash, 1
+        )
+
     def test_priest_protection_cancels_defense_down_and_gives_effective_defense(self):
         record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Priest")
         actor = BattleMonster.from_record(record, is_front_row=True)

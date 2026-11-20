@@ -55,6 +55,39 @@ class SpellEffectDefinitionTest(unittest.TestCase):
 
         self.assertEqual(definition.offset_for("ally"), (7, -8))
         self.assertEqual(definition.offset_for("enemy"), (7, -8))
+        self.assertEqual(definition.flash_scope, "target")
+        self.assertIsNone(definition.screen_flash)
+
+    def test_screen_flash_holds_until_result_and_returns_after_the_sprite(self) -> None:
+        definition = SpellEffectDefinition.from_record(
+            "FIRE1", effect_record(flash_scope="screen", frames_per_pattern=12)
+        )
+        player = SpellEffectPlayer(definition, anchor_x=100, anchor_y=80)
+        flash = player.screen_flash
+        self.assertEqual(flash.color_index, 10)
+        self.assertEqual(flash.release_frame, 32)
+        self.assertEqual(player.playback_frames, 48)
+        self.assertAlmostEqual(flash.base_rate_at(0), 1.0)
+        self.assertAlmostEqual(flash.base_rate_at(8), 0.7)
+        self.assertAlmostEqual(flash.base_rate_at(16), 0.4)
+        self.assertAlmostEqual(flash.base_rate_at(32), 0.4)
+        self.assertAlmostEqual(flash.base_rate_at(40), 0.7)
+        self.assertAlmostEqual(flash.base_rate_at(48), 1.0)
+        for _ in range(definition.total_frames):
+            player.update()
+        self.assertIsNone(player.source_position)
+        self.assertFalse(player.completed)
+        for _ in range(12):
+            player.update()
+        self.assertTrue(player.completed)
+        reduced = SpellEffectPlayer(
+            definition, anchor_x=100, anchor_y=80, screen_flash_enabled=False
+        )
+        self.assertEqual(reduced.playback_frames, definition.total_frames)
+
+    def test_rejects_invalid_flash_scope(self) -> None:
+        with self.assertRaisesRegex(SpellEffectDataError, "flash_scope"):
+            SpellEffectDefinition.from_record("FIRE1", effect_record(flash_scope="background"))
 
     def test_rejects_invalid_speed_and_offsets(self) -> None:
         for speed in (0, 61, True):

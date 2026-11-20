@@ -3948,7 +3948,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._start_timeline_animation.assert_called_once_with()
         mock.command_window.open.assert_not_called()
 
-    def test_confused_member_is_forced_to_attack_without_opening_commands(self) -> None:
+    def test_confused_member_opens_commands_on_the_turn_confusion_expires(self) -> None:
         member = load_mock_party(
             load_mock_items(),
             load_mock_skills(),
@@ -3970,6 +3970,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.blinking_monster_index = None
         mock.monster_blink_frames_remaining = 0
         mock._begin_confused_party_action = Mock(return_value=True)
+        mock._refresh_party_text_colors = Mock()
+        mock._refresh_command_options = Mock()
+        mock._select_initial_member_command = Mock()
 
         mock._activate_timeline_head()
 
@@ -3977,6 +3980,13 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.focused_target_by_party_index, {})
         mock._begin_confused_party_action.assert_called_once_with(0)
         mock.command_window.open.assert_not_called()
+
+        mock._activate_timeline_head()
+
+        self.assertEqual(member.confused, 0)
+        self.assertIs(mock.phase, BattleMockPhase.COMMAND)
+        mock._begin_confused_party_action.assert_called_once_with(0)
+        mock.command_window.open.assert_called_once_with()
 
     def test_confused_member_prefers_an_actionable_ally_target(self) -> None:
         party = load_mock_party(
@@ -9116,7 +9126,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.monster_blink_frames_remaining, 0)
         mock._start_timeline_animation.assert_called_once_with()
 
-    def test_confused_monster_is_forced_to_attack_without_ai_selection(self) -> None:
+    def test_confused_monster_returns_to_ai_on_the_turn_confusion_expires(self) -> None:
         actor = _damage_test_monster()
         actor.state.apply_confusion(2)
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -9133,7 +9143,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.command_cursor = Mock()
         mock.command_window = Mock()
         mock._begin_confused_monster_action = Mock(return_value=True)
-        mock._select_monster_action = Mock()
+        mock._select_monster_action = Mock(return_value=MonsterAction.ATTACK)
+        mock._begin_standard_monster_attack = Mock()
+        mock._refresh_party_text_colors = Mock()
 
         mock._activate_timeline_head()
 
@@ -9157,6 +9169,16 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.progression.record_enemy_action.assert_called_once_with(0)
         mock._begin_confused_monster_action.assert_called_once_with(actor)
         mock._select_monster_action.assert_not_called()
+
+        mock._activate_timeline_head()
+        self.assertEqual(actor.state.confused, 0)
+        self.assertFalse(mock.monster_confused_action_pending)
+        mock.monster_blink_frames_remaining = 1
+        mock._update_monster_action()
+
+        mock._begin_confused_monster_action.assert_called_once_with(actor)
+        mock._select_monster_action.assert_called_once_with(actor)
+        mock._begin_standard_monster_attack.assert_called_once_with(actor)
 
     def test_confused_monster_targets_another_living_monster(self) -> None:
         actor = _damage_test_monster()

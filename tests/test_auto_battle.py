@@ -1493,28 +1493,49 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                     self.assertEqual(enemy.sleeping, 1)
 
     def test_confused_forecast_actors_attack_their_own_side(self):
-        forecast = BattleForecast(
-            self.snapshot(self.specs[0], self.specs[1], self.enemy(), self.enemy(6)),
-            0,
-        )
-        forecast.roll = Mock(return_value=0.0)
-        member = forecast.actors[0]
-        member.confused = 2
-        ally_hp = forecast.actors[1].hp
+        for actor_number, target_number in ((0, 1), (5, 6)):
+            with self.subTest(actor_number=actor_number):
+                specs = (self.specs[0], self.specs[1], self.enemy(), self.enemy(6))
+                gauges = ((actor_number, 64),) + tuple(
+                    (spec.number, 40) for spec in specs if spec.number != actor_number
+                )
+                forecast = BattleForecast(
+                    self.snapshot(*specs, active=actor_number, gauges=gauges), 0,
+                )
+                forecast.roll = Mock(return_value=0.0)
+                actor = forecast.actors[actor_number]
+                actor.confused = 2
+                target = forecast.actors[target_number]
+                health = target.hp
 
-        forecast.confused_turn(member)
+                forecast.step({5: 1, 6: 1})
 
-        self.assertEqual(member.confused, 1)
-        self.assertLess(forecast.actors[1].hp, ally_hp)
+                self.assertEqual(actor.confused, 1)
+                self.assertLess(target.hp, health)
 
-        monster = forecast.actors[5]
-        monster.confused = 2
-        other_hp = forecast.actors[6].hp
-
-        forecast.confused_turn(monster)
-
-        self.assertEqual(monster.confused, 1)
-        self.assertLess(forecast.actors[6].hp, other_hp)
+    def test_forecast_uses_normal_actions_on_the_confusion_recovery_turn(self):
+        for actor_number in (0, 5):
+            with self.subTest(actor_number=actor_number):
+                specs = (self.specs[0], self.specs[1], self.enemy(), self.enemy(6))
+                gauges = ((actor_number, 64),) + tuple(
+                    (spec.number, 40) for spec in specs if spec.number != actor_number
+                )
+                forecast = BattleForecast(
+                    self.snapshot(*specs, active=actor_number, gauges=gauges), 0,
+                )
+                actor = forecast.actors[actor_number]
+                actor.confused = 1
+                forecast.roll = Mock(return_value=0.0)
+                forecast.continuation = Mock(return_value=AutoAction(BattleCommand.DEFEND))
+                with patch.object(forecast, "enemy_turn", wraps=forecast.enemy_turn) as enemy_turn:
+                    forecast.step({5: 1, 6: 1})
+                self.assertEqual(actor.confused, 0)
+                if actor.spec.enemy:
+                    enemy_turn.assert_called_once_with(actor)
+                    self.assertEqual(forecast.actors[6].hp, specs[3].hp)
+                else:
+                    self.assertTrue(actor.defending)
+                    self.assertEqual(forecast.actors[1].hp, specs[1].hp)
 
     def test_monster_power_hit_forecasts_match_physical_attack_rules(self):
         for mode in ("attack", "charge", "confused"):

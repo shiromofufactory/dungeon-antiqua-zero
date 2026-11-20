@@ -3997,6 +3997,7 @@ class Game:
     def _update_game_menu(self, input_state: InputState) -> bool:
         """Handle global interruption before any underlying screen advances."""
 
+        battle_scene = getattr(self, "battle_scene", None)
         if getattr(self, "_game_menu_resume_waiting", False):
             if not self._has_held_action_input(input_state):
                 self._game_menu_resume_waiting = False
@@ -4012,6 +4013,8 @@ class Game:
             if action is GameMenuAction.RESUME:
                 self.game_menu = None
                 self._game_menu_resume_waiting = True
+                if isinstance(battle_scene, BattleScene):
+                    battle_scene.sync_action_screen_flash()
             elif action is GameMenuAction.RETURN_TITLE:
                 self._game_menu_return_waiting = True
             elif action is GameMenuAction.QUIT:
@@ -4019,7 +4022,6 @@ class Game:
             return True
         if not input_state.interruption.triggered:
             return False
-        battle_scene = getattr(self, "battle_scene", None)
         if (
             getattr(self, "encounter_transition", None) is not None
             or getattr(self, "battle_return_fade", None) is not None
@@ -4036,6 +4038,8 @@ class Game:
             texts=self.texts,
             fonts=self.fonts,
         )
+        if isinstance(battle_scene, BattleScene):
+            battle_scene.sync_action_screen_flash(suspended=True)
         self.bgm.pause()
         return True
 

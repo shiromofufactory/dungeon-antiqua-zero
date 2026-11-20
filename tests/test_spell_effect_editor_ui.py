@@ -179,6 +179,23 @@ class SpellEffectEditorUiTest(unittest.TestCase):
         self.assertEqual(swatches[34].x - swatches[2].x, 158)
         self.assertEqual(swatches[34].y, swatches[2].y)
 
+    def test_clicking_flash_scope_switches_preview_without_changing_color(self) -> None:
+        editor = self.sound_editor()
+        editor._change_definition(flash_color=57)
+        button = next(button for button in editor._buttons() if button.id == "flash_scope")
+        self.assertEqual(button.label, "FLASH TARGET")
+        with patch("tools.spell_effect_editor.app.pyxel", SimpleNamespace(
+            mouse_wheel=0, mouse_x=button.x + 2, mouse_y=button.y + 2,
+            MOUSE_BUTTON_LEFT=1, btnp=lambda key: True, quit=Mock(),
+        )):
+            editor._handle_mouse()
+        self.assertEqual(editor.definition.flash_scope, "screen")
+        self.assertEqual(editor.definition.flash_color, 57)
+        self.assertEqual(
+            next(button.label for button in editor._buttons() if button.id == "flash_scope"),
+            "FLASH SCREEN",
+        )
+
     def test_offset_buttons_change_only_the_selected_target_side(self) -> None:
         editor = SpellEffectEditor.__new__(SpellEffectEditor)
         current = SpellEffectDefinition.from_record(

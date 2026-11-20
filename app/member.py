@@ -1420,12 +1420,12 @@ class Member:
         return self.confused != previous
 
     def elapse_confusion_turn(self) -> bool:
-        """Consume one confused action and report whether confusion was active."""
+        """Advance confusion and report whether it still affects this turn."""
 
         if self.confused <= 0:
             return False
         self.confused -= 1
-        return True
+        return self.confused > 0
 
     def apply_silence(self, turns: int) -> bool:
         """Keep the longer DA2 silence duration; damage does not remove it."""

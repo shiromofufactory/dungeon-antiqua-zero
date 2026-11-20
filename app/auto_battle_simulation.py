@@ -27,6 +27,7 @@ if __package__:
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
         battle_healing_amount,
+        TEMPTATION_RATE,
         debuff_turn_range,
         member_spell_ability,
         member_spell_modifier,
@@ -57,7 +58,7 @@ if __package__:
         ready_timeline_head,
     )
     from .item import AdditionalEffect, ItemEquipType, ItemSpecial
-    from .member import EquipmentSlot
+    from .member import EquipmentSlot, Gender
     from .monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from .monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
@@ -87,6 +88,7 @@ else:
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
         battle_healing_amount,
+        TEMPTATION_RATE,
         debuff_turn_range,
         member_spell_ability,
         member_spell_modifier,
@@ -117,7 +119,7 @@ else:
         ready_timeline_head,
     )
     from item import AdditionalEffect, ItemEquipType, ItemSpecial
-    from member import EquipmentSlot
+    from member import EquipmentSlot, Gender
     from monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
@@ -1260,15 +1262,16 @@ class BattleForecast:
         return target
 
     def enemy_turn(self, actor):
-        available = tuple(a for a in self.allies() if not a.hidden)
+        allies = self.allies()
+        available = tuple(a for a in allies if not a.hidden)
+        temptation_targets = tuple(a for a in allies if a.spec.gender is Gender.MALE)
         melee = tuple(a for a in available if a.front) if actor.front else ()
         escape = False
         if (
             MonsterSpecialAction.ESCAPE in actor.spec.special_actions
-            and self.allies()
+            and allies
             and self.roll(actor, 0, 12) >= 0.5
         ):
-            allies = self.allies()
             member = allies[int(self.roll(actor, 0, 13) * len(allies))]
             physical = (
                 member.spec.weapons[0].attack
@@ -1315,7 +1318,8 @@ class BattleForecast:
             can_attack=bool(melee),
             can_charge=bool(available),
             can_breathe=bool(available),
-            can_earthquake=bool(self.allies()),
+            can_earthquake=bool(allies),
+            can_tempt=bool(temptation_targets),
             intelligence=intelligence,
             fire_breath_effective=any(
                 ResistanceType.FIRE not in target.spec.resistances
@@ -1337,7 +1341,7 @@ class BattleForecast:
         if action is MonsterAction.ESCAPE:
             actor.removed = True
         elif action is MonsterAction.EARTHQUAKE:
-            for target in self.allies():
+            for target in allies:
                 result = resolve_earthquake_attack(
                     attack=actor.spec.attack, hit=actor.spec.hit,
                     target_defense=target.defense, target_defending=target.defending,
@@ -1358,6 +1362,18 @@ class BattleForecast:
                 if stun and target.is_alive:
                     target.stunned = True
                 target.interrupt_focus()
+        elif action is MonsterAction.TEMPTATION:
+            for target in temptation_targets:
+                if resolve_status_spell(
+                    spell_modifier=actor.spec.magic,
+                    rate=TEMPTATION_RATE,
+                    target_spell_defense=target.spec.spell_defense,
+                    attribute=ResistanceType.CONFUSE,
+                    target_weaknesses=frozenset(),
+                    target_resistances=target.spec.resistances,
+                    success_roll=int(self.roll(actor, target.spec.number, 10) * 20),
+                ).success:
+                    self.apply_extra(actor, target, AdditionalEffect.CONFUSE)
         elif action in (MonsterAction.POISON_BREATH, MonsterAction.FIRE_BREATH):
             number = actor.spec.number
             hp = actor.hp
@@ -1546,7 +1562,6 @@ class BattleForecast:
     def confused_turn(self, actor: ForecastActor) -> None:
         """Forecast DA2's forced same-side basic attack for one confused actor."""
 
-        actor.confused = max(0, actor.confused - 1)
         if actor.spec.enemy:
             actor.silenced = max(0, actor.silenced - 1)
             friendly = tuple(a for a in self.enemies() if a is not actor)
@@ -1686,7 +1701,7 @@ class BattleForecast:
             actor.defending = False
             actor.cover = None
             if not self.surprise:
-                self.restore_surprise_rows((actor,))
+                self.restore_surprise_rows((actor,), after_confusion_tick=True)
         poison = (
             poison_tick_damage(
                 max_hp=actor.max_hp,
@@ -1733,13 +1748,14 @@ class BattleForecast:
             self.normalize()
         return skipped or not actor.is_alive
 
-    def restore_surprise_rows(self, actors):
+    def restore_surprise_rows(self, actors, *, after_confusion_tick=False):
         restored = []
         for actor in actors:
             if (
                 actor.spec.number in self.original_rows
                 and actor.is_alive
-                and not (actor.sleeping or actor.paralyzed or actor.confused or actor.stunned)
+                and not (actor.sleeping or actor.paralyzed or actor.stunned)
+                and actor.confused <= int(after_confusion_tick)
             ):
                 actor.front = self.original_rows.pop(actor.spec.number)
                 self.surprise_deferred.discard(actor.spec.number)
@@ -1822,8 +1838,10 @@ class BattleForecast:
             self.advance(actor, 0)
             return 0.0
         if actor.confused:
-            self.confused_turn(actor)
-            return 0.0
+            actor.confused -= 1
+            if actor.confused:
+                self.confused_turn(actor)
+                return 0.0
         if actor.spec.enemy:
             self.enemy_turn(actor)
             return 0.0
