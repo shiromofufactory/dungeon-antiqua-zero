@@ -501,6 +501,57 @@
       ]
     },
     {
+      "id": "dungeon_43384055f61b4218aa32ac2480184f92",
+      "name": "賢者の祠2回目ボス",
+      "bgm_id": "da3-dungeon2",
+      "steps": [
+        {
+          "id": "event_battle_80d9b41205934eea8541cbcb5f12d55f",
+          "type": "event_battle",
+          "battle_id": "battle_18"
+        }
+      ]
+    },
+    {
+      "id": "dungeon_953ae9ae235042deb321e606cc03c308",
+      "name": "ストーンバラ門番",
+      "bgm_id": "da3-city",
+      "steps": [
+        {
+          "id": "event_battle_eab3985a03754c839bfaa4923a45c524",
+          "type": "event_battle",
+          "battle_id": "battle_12"
+        }
+      ]
+    },
+    {
+      "id": "dungeon_b40b88c112da45b093dea86e82ffb113",
+      "name": "リンデン攻防戦",
+      "bgm_id": "da3-battle2",
+      "steps": [
+        {
+          "id": "event_battle_f6eb930b0eff4f52adffefe75fea9ec5",
+          "type": "event_battle",
+          "battle_id": "battle_13"
+        },
+        {
+          "id": "event_battle_49ce73a7dd6b4e0cacaf0509107a3d7c",
+          "type": "event_battle",
+          "battle_id": "battle_14"
+        },
+        {
+          "id": "event_battle_a69a43002bbc41289770dd51a3b875ad",
+          "type": "event_battle",
+          "battle_id": "battle_15"
+        },
+        {
+          "id": "event_battle_c7e22cf627344a69bf0c9d7f25c15dc6",
+          "type": "event_battle",
+          "battle_id": "battle_16"
+        }
+      ]
+    },
+    {
       "id": "dungeon_367fd9f2203249e4add0029b051b536a",
       "name": "アイゼンタール鉱山（白）",
       "bgm_id": "da3-dungeon1",
@@ -612,33 +663,6 @@
       ]
     },
     {
-      "id": "dungeon_b40b88c112da45b093dea86e82ffb113",
-      "name": "リンデン攻防戦",
-      "bgm_id": "da3-battle2",
-      "steps": [
-        {
-          "id": "event_battle_f6eb930b0eff4f52adffefe75fea9ec5",
-          "type": "event_battle",
-          "battle_id": "battle_13"
-        },
-        {
-          "id": "event_battle_49ce73a7dd6b4e0cacaf0509107a3d7c",
-          "type": "event_battle",
-          "battle_id": "battle_14"
-        },
-        {
-          "id": "event_battle_a69a43002bbc41289770dd51a3b875ad",
-          "type": "event_battle",
-          "battle_id": "battle_15"
-        },
-        {
-          "id": "event_battle_c7e22cf627344a69bf0c9d7f25c15dc6",
-          "type": "event_battle",
-          "battle_id": "battle_16"
-        }
-      ]
-    },
-    {
       "id": "dungeon_ba76862718eb4b5aa42f1e2243a56f58",
       "name": "海域解放",
       "bgm_id": "da3-city",
@@ -647,18 +671,6 @@
           "id": "event_battle_11e95956a064494484fc76535a8b0945",
           "type": "event_battle",
           "battle_id": "battle_17"
-        }
-      ]
-    },
-    {
-      "id": "dungeon_43384055f61b4218aa32ac2480184f92",
-      "name": "賢者の祠2回目ボス",
-      "bgm_id": "da3-dungeon2",
-      "steps": [
-        {
-          "id": "event_battle_80d9b41205934eea8541cbcb5f12d55f",
-          "type": "event_battle",
-          "battle_id": "battle_18"
         }
       ]
     }
