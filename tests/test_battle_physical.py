@@ -400,6 +400,27 @@ class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
                     self.assertEqual(result.success_rate, rate)
                     self.assertEqual(result.success, roll < rate)
 
+    def test_stun_uses_accuracy_based_rate_on_critical_and_weak_hits(self) -> None:
+        for critical, weakness, effective, boss_resistance, rate, points in (
+            (True, False, False, False, 24, 3),
+            (False, True, False, False, 24, 2),
+            (True, False, True, True, 12, 3),
+        ):
+            with self.subTest(critical=critical, weakness=weakness, effective=effective):
+                result = resolve_physical_additional_effect(
+                    effect=AdditionalEffect.STUN,
+                    adjusted_hit=120,
+                    effect_roll=rate,
+                    target_is_member=False,
+                    target_has_boss_resistance=boss_resistance,
+                    target_is_weak=weakness,
+                    critical=critical,
+                    weapon_effective=effective,
+                )
+                self.assertEqual(result.activation_points, points)
+                self.assertEqual(result.success_rate, rate)
+                self.assertFalse(result.success)
+
     def test_silence_uses_the_ordinary_status_rate(self) -> None:
         result = resolve_physical_additional_effect(
             effect=AdditionalEffect.SILENCE,
@@ -449,7 +470,7 @@ class ResolvePhysicalAdditionalEffectTest(unittest.TestCase):
         defending = resolve_physical_additional_effect(
             effect=AdditionalEffect.STUN,
             adjusted_hit=100,
-            effect_roll=99,
+            effect_roll=19,
             target_is_member=True,
             target_defending=True,
             critical=True,

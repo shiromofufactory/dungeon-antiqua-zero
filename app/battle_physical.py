@@ -326,10 +326,10 @@ def resolve_physical_additional_effect(
         and effect is not AdditionalEffect.DEFENSE_DOWN
     ):
         base_rate /= 2
-    success_rate = (
-        100.0 if critical or target_is_weak
-        else max(base_rate * adjusted_hit / 100, base_rate)
-    )
+    if effect is not AdditionalEffect.STUN and (critical or target_is_weak):
+        success_rate = 100.0
+    else:
+        success_rate = max(base_rate * adjusted_hit / 100, base_rate)
 
     return PhysicalAdditionalEffectResult(
         effect,
