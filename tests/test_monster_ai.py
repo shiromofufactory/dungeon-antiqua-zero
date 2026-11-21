@@ -6,6 +6,7 @@ from unittest.mock import call, patch
 from tools._bootstrap import APP_ROOT  # noqa: F401 - add app to sys.path
 
 from monster import (
+    MonsterBattleState,
     MonsterDataError,
     MonsterDefinition,
     MonsterSpecialAction,
@@ -99,12 +100,31 @@ class MonsterReinforcementRuleTest(unittest.TestCase):
 
 
 class MonsterActionSelectionTest(unittest.TestCase):
-    def test_intelligence_two_rear_waits_only_without_an_eligible_action(self):
+    def test_rotation_includes_eligible_specials_on_their_turn(self):
+        state = MonsterBattleState(max_hp=20)
+        arguments = dict(
+            intelligence=3, rotation_state=state,
+            special_actions=(
+                MonsterSpecialAction.CHARGE, MonsterSpecialAction.CALL,
+                MonsterSpecialAction.REINFORCE, MonsterSpecialAction.DOUBLE_ATTACK,
+            ),
+            is_front_row=True, can_attack=True, can_charge=True,
+            party_actual_attacks=(), monster_attack=0,
+        )
+        with patch("monster_ai.random.randrange", return_value=0) as choose_start:
+            self.assertIs(select_monster_action(**arguments, call_slot=1), MonsterAction.CHARGE)
+            self.assertIs(select_monster_action(**arguments, call_slot=1), MonsterAction.CALL)
+            self.assertIs(select_monster_action(**arguments, call_slot=1), MonsterAction.ATTACK)
+            self.assertIs(select_monster_action(**arguments, call_slot=2), MonsterAction.CHARGE)
+            self.assertIs(select_monster_action(**arguments, call_slot=2), MonsterAction.ATTACK)
+        choose_start.assert_called_once_with(3)
+
+    def test_rear_idle_eligibility_for_random_action_selection(self):
         for intelligence, spell_keys, can_charge, expected in (
             (1, ("SLOW",), False, (MonsterSpellAction("SLOW"), MonsterAction.IDLE)),
             (2, (), False, (MonsterAction.IDLE,)),
             (2, ("SLOW",), False, (MonsterSpellAction("SLOW"),)),
-            (3, (), True, (MonsterAction.CHARGE,)),
+            (4, (), True, (MonsterAction.CHARGE,)),
             (2, ("SLOW",), True, (MonsterAction.CHARGE, MonsterSpellAction("SLOW"))),
         ):
             with (

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import floor
 
 if __package__:
@@ -23,6 +23,7 @@ if __package__:
         resolve_battle_commands,
         selectable_attack_target_indexes,
     )
+    from .battle_layout import MonsterPlacement, find_monster_placement
     from .battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
@@ -63,6 +64,7 @@ if __package__:
     from .monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
         evaluate_monster_spell, monster_action_candidates, prefer_monster_targets,
+        rotate_monster_action,
     )
     from .resistance import ResistanceType
     from .spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
@@ -84,6 +86,7 @@ else:
         resolve_battle_commands,
         selectable_attack_target_indexes,
     )
+    from battle_layout import MonsterPlacement, find_monster_placement
     from battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
@@ -124,6 +127,7 @@ else:
     from monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
         evaluate_monster_spell, monster_action_candidates, prefer_monster_targets,
+        rotate_monster_action,
     )
     from resistance import ResistanceType
     from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
@@ -202,6 +206,7 @@ class ForecastActor:
     removed: bool = False
     slow_turns: int = 0
     defense_down_turns: int = 0
+    action_rotation_index: int | None = None
 
     @classmethod
     def create(cls, spec: AutoCombatant, prior: float, case: int) -> ForecastActor:
@@ -232,6 +237,7 @@ class ForecastActor:
             spec.focus,
             slow_turns=spec.slow_turns,
             defense_down_turns=spec.defense_down_turns,
+            action_rotation_index=spec.action_rotation_index,
         )
 
     @property
@@ -583,7 +589,10 @@ class BattleForecast:
                         )
             else:
                 reject(command.value, "unsupported_command")
-        return tuple(sorted(set(actions), key=lambda a: a.stable_key(self.snapshot)))
+        target_keys = {number: combatant.spec.key for number, combatant in self.actors.items()}
+        return tuple(sorted(
+            set(actions), key=lambda action: action.stable_key(self.snapshot, target_keys=target_keys),
+        ))
 
     def effect_candidates(self, actor, command, spell, slot="", reject=lambda *_: None):
         if not spell.on_battle or spell.action not in ALLY_SPELL_ACTIONS:
@@ -820,11 +829,11 @@ class BattleForecast:
             }
             kill = [a for a in attacks if values[a] >= self.actors[a.targets[0]].hp]
             if kill:
-                return min(kill, key=lambda a: (-weights[a.targets[0]], a.targets))
+                return min(kill, key=lambda a: (-weights.get(a.targets[0], 1), a.targets))
             return min(
                 attacks,
                 key=lambda a: (
-                    -weights[a.targets[0]]
+                    -weights.get(a.targets[0], 1)
                     * min(values[a], self.actors[a.targets[0]].hp)
                     / self.actors[a.targets[0]].max_hp,
                     a.targets,
@@ -836,6 +845,7 @@ class BattleForecast:
         key = (
             actor.spec.number,
             target.spec.number,
+            target.spec.key,
             actor.agility,
             target.defense,
             target.evasion,
@@ -1312,6 +1322,18 @@ class BattleForecast:
             if priority_spell_key is not None:
                 break
         spell_keys = tuple(spell_targets)
+        call_placement = None
+        if (
+            intelligence == 3 and MonsterSpecialAction.CALL in actor.spec.special_actions
+            and actor.spec.monster_placement is not None
+        ):
+            occupied = tuple(
+                enemy.spec.monster_placement for enemy in self.enemies()
+                if enemy.spec.monster_placement is not None
+            )
+            call_placement = find_monster_placement(actor.spec.monster_placement, occupied)
+            if call_placement is not None and call_placement.slot > 1:
+                call_placement = None
         candidates = monster_action_candidates(
             special_actions=actor.spec.special_actions,
             is_front_row=actor.front,
@@ -1327,19 +1349,35 @@ class BattleForecast:
             ),
             spell_keys=spell_keys,
             escape_eligible=escape,
+            call_eligible=call_placement is not None,
             priority_spell_key=priority_spell_key,
         )
         silenced = actor.silenced > 0
         actor.silenced = max(0, actor.silenced - 1)
-        if not candidates:
+        if intelligence == 3:
+            action, actor.action_rotation_index = rotate_monster_action(
+                special_actions=actor.spec.special_actions,
+                spell_keys=tuple(spell.key for spell in actor.spec.spells),
+                candidates=candidates, is_front_row=actor.front,
+                next_index=actor.action_rotation_index,
+                choose_start=lambda count: int(
+                    quantile(self.case, actor.spec.number, 0, 0, 0) * count
+                ),
+            )
+        elif candidates:
+            key = lambda a: a.spell_key if isinstance(a, MonsterSpellAction) else a.value
+            candidates = tuple(sorted(candidates, key=key))
+            action = candidates[int(self.roll(actor, 0, 0) * len(candidates))]
+        else:
+            action = None
+        if action is None:
             self.advance(actor, 0)
             return
-        key = lambda a: a.spell_key if isinstance(a, MonsterSpellAction) else a.value
-        candidates = tuple(sorted(candidates, key=key))
-        action = candidates[int(self.roll(actor, 0, 0) * len(candidates))]
         delay = 0
         if action is MonsterAction.ESCAPE:
             actor.removed = True
+        elif action is MonsterAction.CALL and call_placement is not None:
+            self.enemy_call(actor, call_placement)
         elif action is MonsterAction.EARTHQUAKE:
             for target in allies:
                 result = resolve_earthquake_attack(
@@ -1492,6 +1530,35 @@ class BattleForecast:
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
+
+    def enemy_call(self, caller: ForecastActor, placement: MonsterPlacement) -> None:
+        number = max(self.actors) + 1
+        species_key = caller.spec.species_key or caller.spec.key
+        spec = replace(
+            caller.spec, number=number, key=f"enemy:{species_key}:{number - 5}",
+            species_key=species_key, hp=None, mp=caller.spec.max_mp, net_damage=0,
+            front=placement.slot >= 2, hp_displayed=False,
+            poisoned=False, sleeping=0, silenced=0, paralyzed=False,
+            confused=0, stunned=False, protection=0, speed=0,
+            slow_turns=0, defense_down_turns=0, action_rotation_index=None,
+            monster_placement=placement,
+        )
+        newcomer = ForecastActor.create(spec, self.snapshot.hp_prior, self.case)
+        self.actors[number] = newcomer
+        self.enemy_actors += (newcomer,)
+        self.turns[number] = 0
+        self.start_hp[number] = newcomer.hp
+        placed_enemies = tuple(
+            (enemy, enemy.spec.monster_placement.slot) for enemy in self.enemies()
+            if enemy.spec.monster_placement is not None
+        )
+        front_slot_occupied = any(slot >= 2 for _, slot in placed_enemies)
+        for enemy, slot in placed_enemies:
+            enemy.front = slot >= 2 or not front_slot_occupied
+        self.order = insert_timeline_actor(
+            self.order, number, agility=newcomer.agility,
+            gauge=min(float(newcomer.agility), GAUGE_READY_VALUE),
+        )
 
     def preferred_monster_party_targets(
         self, actor: ForecastActor, indexes: tuple[int, ...],

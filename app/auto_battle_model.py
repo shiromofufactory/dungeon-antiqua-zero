@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from math import floor
@@ -9,6 +10,7 @@ from statistics import median
 
 if __package__:
     from .battle_commands import BattleCommand
+    from .battle_layout import MonsterPlacement
     from .battle_physical import member_physical_attack
     from .item import AdditionalEffect, ItemSpecial
     from .member import (
@@ -26,6 +28,7 @@ if __package__:
     from .state import SpellMode
 else:
     from battle_commands import BattleCommand
+    from battle_layout import MonsterPlacement
     from battle_physical import member_physical_attack
     from item import AdditionalEffect, ItemSpecial
     from member import (
@@ -139,6 +142,8 @@ class AutoCombatant:
     slow_turns: int = 0
     defense_down_turns: int = 0
     gender: Gender = Gender.NONE
+    action_rotation_index: int | None = None
+    monster_placement: MonsterPlacement | None = None
 
     @classmethod
     def from_member(
@@ -296,13 +301,16 @@ class AutoAction:
     spell_key: str = ""
     equipment_slot: str = ""
 
-    def stable_key(self, snapshot: AutoBattleSnapshot) -> tuple:
-        keys = {c.number: c.key for c in snapshot.combatants}
+    def stable_key(
+        self, snapshot: AutoBattleSnapshot, *, target_keys: Mapping[int, str] | None = None,
+    ) -> tuple:
+        if target_keys is None:
+            target_keys = {c.number: c.key for c in snapshot.combatants}
         return (
             self.command.value,
             self.spell_key,
             self.equipment_slot,
-            tuple(keys[n] for n in self.targets),
+            tuple(target_keys[n] for n in self.targets),
         )
 
 

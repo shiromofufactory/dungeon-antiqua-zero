@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 if __package__ == "":
-    from monster import MonsterDefinition, MonsterSpecialAction
+    from monster import MonsterBattleState, MonsterDefinition, MonsterSpecialAction
     from resistance import ResistanceType
     from spell import Spell, SpellAction
 else:
-    from .monster import MonsterDefinition, MonsterSpecialAction
+    from .monster import MonsterBattleState, MonsterDefinition, MonsterSpecialAction
     from .resistance import ResistanceType
     from .spell import Spell, SpellAction
 
@@ -165,7 +165,7 @@ def monster_action_candidates(
 ) -> tuple[MonsterActionChoice, ...]:
     """Share candidate construction between live AI and deterministic forecasts."""
 
-    if priority_spell_key is not None:
+    if priority_spell_key is not None and intelligence != 3:
         return (MonsterSpellAction(priority_spell_key),)
     candidates: list[MonsterActionChoice] = []
     if MonsterSpecialAction.ESCAPE in special_actions and escape_eligible:
@@ -188,9 +188,35 @@ def monster_action_candidates(
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     if is_front_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
-    elif not is_front_row and (intelligence <= 1 or not candidates):
+    elif not is_front_row and intelligence != 3 and (intelligence <= 1 or not candidates):
         candidates.append(MonsterAction.IDLE)
     return tuple(candidates)
+
+
+def rotate_monster_action(
+    *, special_actions: Sequence[MonsterSpecialAction], spell_keys: Sequence[str],
+    candidates: Sequence[MonsterActionChoice], is_front_row: bool,
+    next_index: int | None, choose_start: Callable[[int], int],
+) -> tuple[MonsterActionChoice | None, int]:
+    """Scan the fixed rotation for this turn's first available action."""
+
+    rotation = monster_action_candidates(
+        special_actions=special_actions, spell_keys=spell_keys,
+        is_front_row=True, can_attack=True, can_charge=True,
+        escape_eligible=True, call_eligible=True, can_breathe=True,
+        can_earthquake=True, can_tempt=True,
+    )
+    count = len(rotation)
+    start = choose_start(count) if next_index is None else next_index
+    for offset in range(count):
+        index = (start + offset) % count
+        action = rotation[index]
+        following = (index + 1) % count
+        if action is MonsterAction.ATTACK and not is_front_row:
+            return MonsterAction.IDLE, following
+        if action in candidates:
+            return action, following
+    return None, start
 
 
 def select_monster_action(
@@ -209,6 +235,8 @@ def select_monster_action(
     can_earthquake: bool = False,
     can_tempt: bool = False,
     priority_spell_key: str | None = None,
+    rotation_state: MonsterBattleState | None = None,
+    learned_spell_keys: Sequence[str] = (),
 ) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including call and ZERO's charge.
 
@@ -219,7 +247,8 @@ def select_monster_action(
     weight as a normal attack. A rear-row monster receives one idle candidate
     at intelligence 0 or 1, or when no other action is available. Call uses a
     3/4 candidate gate below intelligence 2. At intelligence 2 or higher it
-    takes priority when the first available slot is 0 or 1.
+    takes priority when the first available slot is 0 or 1. At intelligence 3,
+    available actions instead follow a fixed rotation with a random start.
     """
 
     if not isinstance(is_front_row, bool):
@@ -261,7 +290,9 @@ def select_monster_action(
     if MonsterSpecialAction.CALL in specials and call_slot is not None:
         if intelligence >= 2:
             if call_slot <= 1:
-                return MonsterAction.CALL
+                if intelligence != 3:
+                    return MonsterAction.CALL
+                call_eligible = True
         else:
             call_eligible = random.randint(0, 3) > 0
     candidates = monster_action_candidates(
@@ -275,6 +306,15 @@ def select_monster_action(
         priority_spell_key=priority_spell_key,
     )
 
+    if intelligence == 3:
+        if rotation_state is None:
+            raise ValueError("intelligence 3 requires per-monster rotation state")
+        action, rotation_state.action_rotation_index = rotate_monster_action(
+            special_actions=specials, spell_keys=learned_spell_keys,
+            candidates=candidates, is_front_row=is_front_row,
+            next_index=rotation_state.action_rotation_index, choose_start=random.randrange,
+        )
+        return action
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -293,5 +333,6 @@ __all__ = [
     "reinforcement_arrives",
     "reinforcement_target",
     "monster_action_candidates",
+    "rotate_monster_action",
     "select_monster_action",
 ]

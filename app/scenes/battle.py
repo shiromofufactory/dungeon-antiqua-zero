@@ -3367,6 +3367,11 @@ class BattleScene:
                     speed=monster.state.speed_modifier,
                     slow_turns=monster.state.slow_turns,
                     defense_down_turns=monster.state.defense_down_turns,
+                    action_rotation_index=monster.state.action_rotation_index,
+                    monster_placement=MonsterPlacement(
+                        self._monster_slot_index(index), *self._monster_base_position(index),
+                        monster.width, monster.height,
+                    ),
                     known_fields=fields,
                     hp_displayed=hp_shown,
                     net_damage=observations.enemy_net_damage.get(index, 0),
@@ -9058,6 +9063,10 @@ class BattleScene:
             return True
         if self._monster_attack_target_indexes(actor):
             return True
+        if actor.intelligence == 3 and MonsterSpecialAction.CALL in actor.special_actions:
+            slot = self._monster_ally_slot(actor)
+            if slot is not None and slot <= 1:
+                return True
         if any(
             self._monster_spell_target_indexes(self.spells[key])
             for key in actor.spell_keys
@@ -9512,10 +9521,10 @@ class BattleScene:
             return False
         return self._add_monster_ally(actor, same_monster=False)
 
-    def _monster_ally_slot(self) -> int | None:
+    def _monster_ally_slot(self, target: BattleMonster | None = None) -> int | None:
         """Find the first unoccupied display slot, including defeated slots."""
 
-        placement = self._monster_ally_placement(self.monsters[0])
+        placement = self._monster_ally_placement(self.monsters[0] if target is None else target)
         return None if placement is None else placement[0]
 
     def _monster_ally_placement(
@@ -9691,11 +9700,13 @@ class BattleScene:
             spell_keys=spell_keys,
             priority_spell_key=priority_spell_key,
             call_slot=(
-                self._monster_ally_slot()
+                self._monster_ally_slot(actor if actor.intelligence == 3 else None)
                 if MonsterSpecialAction.CALL in actor.special_actions
                 else None
             ),
             intelligence=actor.intelligence,
+            rotation_state=actor.state,
+            learned_spell_keys=actor.spell_keys,
         )
 
     def _targetable_monster_spell_keys(

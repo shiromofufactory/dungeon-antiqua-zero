@@ -30,6 +30,7 @@ from auto_battle_model import (
 )
 from auto_battle_simulation import BattleForecast, ForecastActor, mp_cost
 from battle_commands import BattleCommand
+from battle_layout import MonsterPlacement
 from battle_magic import member_spell_ability, resolve_healing
 from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import TimelineEntry, TimelineOrder
@@ -110,6 +111,56 @@ class AutoBattleFixtures:
 
 
 class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
+    def test_forecast_resumes_rotation_and_waits_in_rear_attack_slot(self):
+        freeze, confusion = (self.spells[key] for key in ("FREEZE2", "CONFUSION"))
+        caster = self.enemy(
+            intelligence=3, action_rotation_index=2, front=False,
+            mp=20, max_mp=20, spells=(freeze, confusion),
+        )
+        front = self.enemy(number=6)
+        forecast = BattleForecast(self.snapshot(caster, self.specs[0], front, active=5), 0)
+        actor = forecast.actors[5]
+        with (
+            patch.object(forecast, "advance"),
+            patch.object(forecast, "enemy_attack") as attack,
+            patch("auto_battle_simulation.quantile", side_effect=AssertionError("already seeded")),
+            patch.object(forecast, "roll", return_value=0.5),
+        ):
+            forecast.enemy_turn(actor)
+            self.assertEqual((actor.mp, actor.action_rotation_index), (20, 0))
+            self.assertFalse(actor.defending)
+            attack.assert_not_called()
+            forecast.enemy_turn(actor)
+            self.assertEqual((actor.mp, actor.action_rotation_index), (20 - freeze.mp, 1))
+            actor.silenced = 1
+            forecast.enemy_turn(actor)
+            self.assertEqual((actor.mp, actor.action_rotation_index), (20 - freeze.mp, 0))
+            self.assertEqual(actor.silenced, 0)
+            actor.front = True
+            actor.mp = 0
+            forecast.enemy_turn(actor)
+            attack.assert_called_once()
+            self.assertEqual(actor.action_rotation_index, 0)
+
+    def test_forecast_rotating_call_adds_a_new_enemy_with_independent_rotation(self):
+        caller = self.enemy(
+            intelligence=3, action_rotation_index=0,
+            mp=0, max_mp=12, special_actions=(MonsterSpecialAction.CALL,),
+            monster_placement=MonsterPlacement(2, 68, 16, 64, 64),
+        )
+        forecast = BattleForecast(self.snapshot(caller, self.specs[0], active=5), 0)
+        forecast.enemy_turn(forecast.actors[5])
+
+        newcomer = forecast.actors[6]
+        self.assertIn(6, forecast.order.actors)
+        self.assertEqual(newcomer.spec.monster_placement.slot, 0)
+        self.assertEqual((newcomer.hp, newcomer.mp, newcomer.front), (120, 12, False))
+        self.assertIsNone(newcomer.action_rotation_index)
+        self.assertEqual(forecast.actors[5].action_rotation_index, 1)
+
+        decision = decide_auto_battle(self.snapshot(self.specs[0], caller))
+        self.assertTrue(decision.evaluations)
+
     def test_enemy_forecast_protection_and_healing_affect_living_monster_targets(self):
         protection, heal = (self.spells[key] for key in ("PROTECTION", "HEALING1"))
         caster = self.enemy(

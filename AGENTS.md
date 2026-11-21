@@ -127,6 +127,7 @@
 - モンスターの吸収攻撃は `python3 -B -m unittest tests.test_battle_drain tests.test_battle_physical tests.test_battle_monster_specials tests.test_battle_monster_spells tests.test_battle_scene tests.test_auto_battle tests.test_audio_resources` で回復上限・致死攻撃・ミス・かばう・とっしん・混乱・演出パターンと遅延・SE・予測を回帰検証する。
 - モンスターの毒・炎のブレスは `python3 -B -m unittest tests.test_battle_poison_breath tests.test_battle_fire_breath tests.test_monster_ai tests.test_battle_monster_specials tests.test_battle_monster_spells tests.test_auto_battle tests.test_battle_scene` で全体対象・威力・毒付与・耐性・演出時間・背景色の復帰・知恵7の炎耐性評価・行動候補と予測を回帰検証する。
 - モンスターの毒属性呪文は `python3 -B -m unittest tests.test_battle_monster_spells tests.test_battle_screen_mock tests.test_auto_battle` でダメージと毒付与の成否・装備の毒耐性・致死時の付与抑止・予測を回帰検証する。
+- 知恵3の行動ローテーションは `python3 -B -m unittest tests.test_monster_ai tests.test_battle_monster_spells tests.test_auto_battle` で開始位置・順番・使えない枠の飛ばし・後衛の待機・予測への引き継ぎを回帰検証する。
 - ラミアの「誘」は `python3 -B -m unittest tests.test_battle_temptation tests.test_monster_ai tests.test_battle_monster_spells tests.test_auto_battle` で対象・術防御と混乱耐性・全画面フラッシュ・成功時の演出・予測を回帰検証する。
 - 混乱が解除された手番の通常行動と不意打ち隊列の復帰は `python3 -B -m unittest tests.test_member tests.test_monster tests.test_battle_screen_mock tests.test_battle_scene tests.test_auto_battle` で回帰検証する。
 - 呪文と「誘」の全画面フラッシュは `python3 -B -m unittest tests.test_spell_effect tests.test_spell_effect_renderer tests.test_spell_effect_pipeline tests.test_spell_effect_editor_ui tests.test_battle_temptation tests.test_battle_monster_spells tests.test_game_menu` で範囲の保存・生成・再生・パレットの復帰・割り込みを回帰検証する。

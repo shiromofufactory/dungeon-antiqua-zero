@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Protocol
@@ -344,6 +344,7 @@ class MonsterBattleState:
     speed_modifier: int = 0
     slow_turns: int = 0
     defense_down_turns: int = 0
+    action_rotation_index: int | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.max_hp, bool) or not isinstance(self.max_hp, int):
@@ -685,6 +686,7 @@ class MonsterBattleState:
         self.speed_modifier = 0
         self.slow_turns = 0
         self.defense_down_turns = 0
+        self.action_rotation_index = None
 
 
 def promote_rear_monsters_if_front_empty(

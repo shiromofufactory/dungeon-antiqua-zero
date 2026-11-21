@@ -770,20 +770,68 @@ class IntelligentMonsterSpellTest(unittest.TestCase):
                 # DA2 still applies the full spell to everyone, not just the effective member.
                 self.assertEqual(scene._monster_spell_candidates[key].targets, (0, 1))
 
-    def test_rear_frau_uses_an_available_spell_and_waits_if_silenced(self):
+    def test_frau_rotates_from_each_starting_action_and_wraps(self):
         record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Frau")
-        actor = BattleMonster.from_record(record, is_front_row=False)
+        rotation = (
+            MonsterSpellAction("FREEZE2"), MonsterSpellAction("CONFUSION"), MonsterAction.ATTACK,
+        )
+        for start in range(len(rotation)):
+            with self.subTest(start=start):
+                actor = BattleMonster.from_record(record, is_front_row=True)
+                scene = spell_scene(actor)
+                with (
+                    patch("monster_ai.random.randrange", return_value=start) as choose_start,
+                    patch.object(Member, "resistances", return_value=frozenset(), new_callable=PropertyMock),
+                ):
+                    self.assertEqual(
+                        tuple(scene._select_monster_action(actor) for _ in range(4)),
+                        tuple(rotation[(start + offset) % 3] for offset in range(4)),
+                    )
+                choose_start.assert_called_once_with(3)
+                actor.restore()
+                self.assertIsNone(actor.state.action_rotation_index)
+
+    def test_frau_skips_silenced_unaffordable_and_ineffective_spells(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Frau")
+        actor = BattleMonster.from_record(record, is_front_row=True)
         scene = spell_scene(actor)
+        actor.state.action_rotation_index = 0
+        actor.state.apply_silence(1)
+        self.assertIs(scene._select_monster_action(actor), MonsterAction.ATTACK)
+        actor.state.elapse_silence_turn()
+        actor.state.mp = scene.spells["CONFUSION"].mp
+        self.assertLess(actor.state.mp, scene.spells["FREEZE2"].mp)
+        with patch.object(Member, "resistances", return_value=frozenset(), new_callable=PropertyMock):
+            self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("CONFUSION"))
+
+        actor.state.action_rotation_index = 1
+        actor.state.mp = actor.max_mp
         with patch.object(
             Member, "resistances", new_callable=PropertyMock,
             return_value=frozenset({ResistanceType.CONFUSE}),
         ):
-            self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("FREEZE2"))
-        actor.state.apply_silence(1)
-        self.assertIs(scene._select_monster_action(actor), MonsterAction.IDLE)
-        actor.state.elapse_silence_turn()
-        actor.state.mp = 0
-        self.assertIs(scene._select_monster_action(actor), MonsterAction.IDLE)
+            self.assertIs(scene._select_monster_action(actor), MonsterAction.ATTACK)
+        scene.hidden_party_indexes = set(range(len(scene.party)))
+        self.assertIsNone(scene._select_monster_action(actor))
+
+    def test_rear_frau_waits_on_attack_turn_even_with_usable_spells(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Frau")
+        actor = BattleMonster.from_record(record, is_front_row=False)
+        actor.state.action_rotation_index = 2
+        scene = spell_scene(actor)
+        scene.command_window = Mock()
+        scene.timeline = (actor,)
+        scene.monster_attack_target_index = None
+        scene.monster_blink_frames_remaining = 0
+        scene._start_timeline_animation = Mock()
+
+        scene._update_monster_action()
+
+        scene._start_timeline_animation.assert_called_once_with()
+        self.assertIsNone(scene.monster_action)
+        self.assertEqual(actor.state.defense_modifier, 0)
+        self.assertEqual(actor.state.mp, actor.max_mp)
+        self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("FREEZE2"))
 
     def test_int_two_prioritizes_area_debuff_if_all_applicable_targets_are_effective(self):
         actor, scene = self.scene("SLEEP", intelligence=2)
