@@ -572,7 +572,6 @@ FOCUS_WAIT_EFFECT_FLOATING_OFFSET_Y = 4
 FOCUS_ATTACK_MULTIPLIER = 2
 SPELL_CAST_SPRITE_SOURCE_X = DEFEND_SPRITE_SOURCE_X
 SPELL_POST_EFFECT_WAIT_FRAME_COUNT = 12
-ALLY_SPELL_RETURN_START_FRAME = 18
 MISSED_ACTION_RETURN_WAIT_FRAME_COUNT = 18
 SPELL_TARGET_INTERVAL_FRAME_COUNT = 2 * FPS // DA2_REFERENCE_FPS
 ATTACK_POSE_RAISE_FRAME_COUNT = 3
@@ -1170,7 +1169,6 @@ class BattleActionPresentation:
         default_factory=dict,
     )
     post_effect_wait_frame_count: int = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
-    return_start_frame: int | None = None
     results_applied: bool = False
     elapsed_frame: int = 0
     post_effect_elapsed_frame: int = 0
@@ -1210,10 +1208,6 @@ class BattleActionPresentation:
     def is_complete(self) -> bool:
         return (
             self.effects_complete
-            and (
-                self.return_start_frame is None
-                or self.elapsed_frame >= self.return_start_frame
-            )
             and self.post_effect_elapsed_frame >= self.post_effect_wait_frame_count
             and (not self.target_result_frames or self.results_applied)
             and (self.screen_flash is None or self.elapsed_frame >= self.screen_flash.end_frame)
@@ -5387,8 +5381,9 @@ class BattleScene:
             else indexes
         )
         fade_escape = spell.action in (SpellAction.FADE, SpellAction.TELEPORT)
-        return_during_effect = target_side == "ally" and not fade_escape
-        post_effect_wait = 0 if return_during_effect else SPELL_POST_EFFECT_WAIT_FRAME_COUNT
+        post_effect_wait = (
+            SPELL_POST_EFFECT_WAIT_FRAME_COUNT if target_side == "enemy" or fade_escape else 0
+        )
         if status_results and not effect_indexes:
             post_effect_wait += MISSED_ACTION_RETURN_WAIT_FRAME_COUNT
         target_start_frames = self._spell_target_start_frames(spell, indexes, effect_indexes)
@@ -5415,9 +5410,6 @@ class BattleScene:
             ),
             fade_escape=fade_escape,
             post_effect_wait_frame_count=post_effect_wait,
-            return_start_frame=(
-                ALLY_SPELL_RETURN_START_FRAME if return_during_effect else None
-            ),
             screen_flash=effects[0].player.screen_flash if effects else None,
         )
         self.action_presentation.schedule_spell_results(target_start_frames)
@@ -5998,10 +5990,6 @@ class BattleScene:
         if popups is None:
             popups = []
             self.healing_popups = popups
-        caster_return_x = (
-            ACTION_MOVE_DISTANCE - getattr(self, "action_offset_x", ACTION_MOVE_DISTANCE)
-            if presentation.return_start_frame is not None else 0
-        )
         for result in ready(presentation.healing_results):
             index = result.target_index
             target = self.monsters[index].state if result.target_is_monster else self.party[index]
@@ -6015,16 +6003,9 @@ class BattleScene:
             else:
                 self._refresh_party_hp_text(index)
             if result.amount > 0:
-                popup_x = result.popup_x
-                if (
-                    caster_return_x
-                    and not result.target_is_monster
-                    and index == self.active_party_index
-                ):
-                    popup_x += caster_return_x
                 popups.append(
                     BattleHealingPopup(
-                        popup_x,
+                        result.popup_x,
                         result.popup_y,
                         result.amount,
                     )
@@ -6035,12 +6016,9 @@ class BattleScene:
             member.mp += restored
             self._refresh_party_hp_text(result.target_index)
             if restored > 0:
-                popup_x = result.popup_x
-                if caster_return_x and result.target_index == self.active_party_index:
-                    popup_x += caster_return_x
                 popups.append(
                     BattleHealingPopup(
-                        popup_x,
+                        result.popup_x,
                         result.popup_y,
                         restored,
                     )
@@ -6602,16 +6580,6 @@ class BattleScene:
         affinity_popups = presentation.pending_affinity_popups.pop(presentation.elapsed_frame, ())
         if affinity_popups:
             self.affinity_popups.extend(affinity_popups)
-        if presentation.return_start_frame is not None:
-            for effect in presentation.spell_effects:
-                if effect.target_index == self.active_party_index:
-                    anchor_x, anchor_y = self._spell_effect_anchor(
-                        effect.target_side, effect.target_index,
-                    )
-                    effect.player.anchor_x = anchor_x
-                    effect.player.anchor_y = anchor_y
-            if presentation.elapsed_frame == presentation.return_start_frame:
-                self._begin_action_return()
         if presentation.earthquake:
             presentation.shake_offset = (
                 (
@@ -6668,10 +6636,7 @@ class BattleScene:
                 self._begin_monster_deaths(defeated_indexes)
                 return
             if getattr(self, "action_party_index", None) is not None:
-                if presentation.return_start_frame is None:
-                    self._begin_action_return(complete_turn=True)
-                else:
-                    self.phase = BattlePhase.ACTION_RETURN
+                self._begin_action_return(complete_turn=True)
                 return
             self._complete_current_turn()
             return

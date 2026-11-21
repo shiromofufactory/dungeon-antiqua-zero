@@ -5936,11 +5936,12 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.healing_popups[0].amount, expected_amount)
         mock._refresh_party_hp_text.assert_called_once_with(0)
 
-        for _frame in range(SPELL_RESULT_OVERLAP_FRAME_COUNT):
+        for _frame in range(SPELL_RESULT_OVERLAP_FRAME_COUNT - 1):
             mock._update_action_presentation()
+        mock._begin_action_return.assert_not_called()
+        mock._update_action_presentation()
 
-        mock._begin_action_return.assert_called_once_with()
-        self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
+        mock._begin_action_return.assert_called_once_with(complete_turn=True)
         self.assertEqual(len(mock.healing_popups), 1)
 
     def test_item_heal_uses_da2_fixed_ability_of_twenty(self) -> None:
@@ -6046,11 +6047,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._update_action_presentation()
 
         self.assertGreater(target.hp, 1)
-        mock._begin_action_return.assert_not_called()
-        for _frame in range(17):
-            mock._update_action_presentation()
-        mock._begin_action_return.assert_called_once_with()
-        self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
+        mock._begin_action_return.assert_called_once_with(complete_turn=True)
         self.assertEqual(len(mock.healing_popups), 1)
 
     def test_zero_intensity_heal_restores_hp_and_cures_all_ailments(self) -> None:
@@ -7692,26 +7689,25 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertEqual(effect.elapsed_frame, 0)
                 play_se.assert_called_once_with(se_id)
 
-                for _frame in range(18):
+                for _frame in range(definition.total_frames):
                     self.assertEqual(mock._party_draw_position(0)[0], cast_x)
                     self.assertFalse(mock.action_returning)
                     mock.update()
 
-                self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
                 self.assertTrue(mock.action_returning)
-                self.assertFalse(effect.completed)
+                self.assertTrue(effect.completed)
                 mock.update()
                 self.assertEqual(
                     mock._party_draw_position(0)[0], cast_x + ACTION_MOVE_SPEED
                 )
-                self.assertEqual(effect.anchor_x, cast_x + ACTION_MOVE_SPEED + 8)
 
-    def test_auto_ally_spell_returns_eighteen_frames_into_effect(self) -> None:
+    def test_auto_ally_spell_returns_when_effect_finishes(self) -> None:
         from auto_battle_model import AutoAction
 
         items = load_mock_items()
         spells = load_mock_spells()
-        for spell_key, frames_per_pattern in (("HEALING1", 4), ("PROTECTION", 14)):
+        for spell_key, frames_per_pattern in (("HEALING1", 2), ("PROTECTION", 14)):
             with self.subTest(spell=spell_key):
                 mock = BattleScreenMock.__new__(BattleScreenMock)
                 mock.party = load_mock_party(
@@ -7762,28 +7758,28 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
                 self.assertTrue(mock.battle_popup.visible)
                 effect = mock.action_presentation.spell_effects[0].player
-                for _frame in range(18):
+                for _frame in range(definition.total_frames):
                     self.assertFalse(mock.action_returning)
                     self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
                     mock.update()
 
                 self.assertTrue(mock.action_returning)
-                self.assertFalse(effect.completed)
-                self.assertTrue(mock.battle_popup.visible)
-                self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+                self.assertTrue(effect.completed)
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
+                if spell_key == "HEALING1":
+                    self.assertTrue(mock.battle_popup.visible)
+                    self.assertEqual(len(mock.healing_popups), 1)
                 mock.update()
                 self.assertEqual(
                     mock.action_offset_x, ACTION_MOVE_DISTANCE - ACTION_MOVE_SPEED
                 )
-                end_frame = max(
-                    definition.total_frames, 18 + ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED,
-                )
-                for _frame in range(end_frame - 19):
+                for _frame in range(ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED - 1):
                     mock._complete_current_turn.assert_not_called()
                     mock.update()
-                self.assertTrue(effect.completed)
                 self.assertEqual(mock.action_offset_x, 0)
                 mock._complete_current_turn.assert_called_once_with()
+                if spell_key == "HEALING1":
+                    self.assertEqual(len(mock.healing_popups), 1)
 
     def test_spell_turn_waits_for_caster_to_return_after_presentation(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
