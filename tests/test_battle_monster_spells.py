@@ -211,10 +211,10 @@ class MonsterSpellTest(unittest.TestCase):
             self.assertEqual(target.state.slow_turns, 0)
             self.assertEqual(target.effective_agility, target.agility + expected * 8)
             self.assertIs(scene._timeline_order, order)
-            self.assertEqual(actor.state.mp, 0)
+            self.assertEqual(actor.state.mp, actor.state.max_mp - spell.mp)
             actor.state.mp = actor.state.max_mp
         self.assertFalse(scene._begin_monster_spell(actor, spell))
-        self.assertEqual(actor.state.mp, 4)
+        self.assertEqual(actor.state.mp, actor.state.max_mp)
 
     def test_single_target_slow_uses_random_living_member_and_monster_magic(
         self,

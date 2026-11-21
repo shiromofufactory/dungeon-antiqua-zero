@@ -9,6 +9,11 @@ MONSTER_SLOT_INDEXES = tuple(range(len(MONSTER_POSITIONS)))
 MONSTER_AREA_RIGHT = 256
 MONSTER_AREA_BOTTOM = 208
 LARGE_MONSTER_Y_OFFSET = 16
+LARGE_SQUARE_SIZE = (96, 96)
+LARGE_SQUARE_SLOT = 0
+LARGE_SQUARE_POSITION = (4, 32)
+LARGE_SQUARE_COMPANION_SLOT = 3
+LARGE_SQUARE_COMPANION_POSITION = (68, 128)
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,10 @@ class MonsterLayout:
     positions: tuple[tuple[int, int], ...]
 
 
+def _is_large_square(monster: object) -> bool:
+    return (getattr(monster, "width", 64), getattr(monster, "height", 64)) == LARGE_SQUARE_SIZE
+
+
 def find_monster_placement(
     monster: object,
     occupied: Sequence[MonsterPlacement],
@@ -41,19 +50,38 @@ def find_monster_placement(
     width = getattr(monster, "width", 64)
     height = getattr(monster, "height", 64)
     y_offset = LARGE_MONSTER_Y_OFFSET if width > 64 or height > 64 else 0
+    fixed_position = None
+    if (width, height) == LARGE_SQUARE_SIZE:
+        if LARGE_SQUARE_SLOT not in slots or any(
+            other.slot != LARGE_SQUARE_COMPANION_SLOT
+            or (other.x, other.y) != LARGE_SQUARE_COMPANION_POSITION
+            for other in occupied
+        ):
+            return None
+        slots = (LARGE_SQUARE_SLOT,)
+        fixed_position = LARGE_SQUARE_POSITION
+    elif any(_is_large_square(other) for other in occupied):
+        if LARGE_SQUARE_COMPANION_SLOT not in slots:
+            return None
+        slots = (LARGE_SQUARE_COMPANION_SLOT,)
+        fixed_position = LARGE_SQUARE_COMPANION_POSITION
+
     occupied_slots = {placement.slot for placement in occupied}
     for slot in slots:
         if slot in occupied_slots:
             continue
-        x, y = MONSTER_POSITIONS[slot]
-        y += y_offset
+        if fixed_position is None:
+            x, y = MONSTER_POSITIONS[slot]
+            y += y_offset
+        else:
+            x, y = fixed_position
         if x + width > MONSTER_AREA_RIGHT:
             continue
         neighbors = sorted(
             (other for other in occupied if x < other.x + other.width and other.x < x + width),
             key=lambda other: other.y,
         )
-        if slot >= 2:
+        if slot >= 2 and fixed_position is None:
             for other in neighbors:
                 if 2 <= other.slot < slot or (
                     other.slot < 2 and y < other.bottom and other.y < y + height
@@ -67,7 +95,7 @@ def find_monster_placement(
 
 
 def monster_layout(monsters: Sequence[object]) -> MonsterLayout:
-    """Place each enemy in input order, skipping images that cannot fit."""
+    """Reserve space for a 96px square enemy, then fit enemies in input order."""
 
     if any(
         getattr(monster, "width", 64) > 64 or getattr(monster, "height", 64) > 64
@@ -79,15 +107,18 @@ def monster_layout(monsters: Sequence[object]) -> MonsterLayout:
     else:
         slots = MONSTER_SLOT_INDEXES
 
-    monster_indexes = []
-    placements: list[MonsterPlacement] = []
-    for index, monster in enumerate(monsters):
-        placement = find_monster_placement(monster, placements, slots)
+    # Reserve the square monster's space before fitting its companion.
+    placement_order = sorted(
+        range(len(monsters)), key=lambda index: not _is_large_square(monsters[index])
+    )
+    placements: dict[int, MonsterPlacement] = {}
+    for index in placement_order:
+        placement = find_monster_placement(monsters[index], tuple(placements.values()), slots)
         if placement is not None:
-            monster_indexes.append(index)
-            placements.append(placement)
+            placements[index] = placement
+    monster_indexes = tuple(sorted(placements))
     return MonsterLayout(
-        tuple(monster_indexes),
-        tuple(placement.slot for placement in placements),
-        tuple((placement.x, placement.y) for placement in placements),
+        monster_indexes,
+        tuple(placements[index].slot for index in monster_indexes),
+        tuple((placements[index].x, placements[index].y) for index in monster_indexes),
     )

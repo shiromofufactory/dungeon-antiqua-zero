@@ -84,6 +84,26 @@ def charge_monster(*, is_front_row: bool = True) -> BattleMockMonster:
 
 
 class MonsterReinforcementTest(unittest.TestCase):
+    def test_large_square_enemy_limits_reinforcement_to_one_lower_front_slot(self):
+        large = SimpleNamespace(width=96, height=96, is_alive=True)
+        small = SimpleNamespace(width=64, height=64, is_alive=True)
+        tall = SimpleNamespace(width=64, height=96, is_alive=True)
+        scene = BattleScene.__new__(BattleScene)
+        scene.monsters = (large,)
+        layout = monster_layout(scene.monsters)
+        scene.monster_slot_indexes = layout.slot_indexes
+        scene.monster_positions = layout.positions
+
+        self.assertIsNone(scene._monster_ally_placement(tall))
+        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 128)))
+
+        scene.monsters = (large, small)
+        scene.monster_slot_indexes += (3,)
+        scene.monster_positions += ((68, 128),)
+        self.assertIsNone(scene._monster_ally_placement(small))
+        small.is_alive = False
+        self.assertEqual(scene._monster_ally_placement(small), (3, (68, 128)))
+
     def test_reinforcements_respect_tall_image_height_and_reuse_fallen_space(self):
         tall = SimpleNamespace(width=64, height=96, is_alive=True)
         small = SimpleNamespace(width=64, height=64, is_alive=True)

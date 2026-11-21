@@ -7399,8 +7399,8 @@ class BattleScreenMockTest(unittest.TestCase):
                             mock._draw_speed_modifier_icons()
 
                         # Six simultaneous markers fit both widths at the image's top.
-                        x = 20 if width == 64 else 28
-                        y = 64 if max(width, height) > 64 else 48
+                        base_x, y = mock._monster_base_position(0)
+                        x = base_x + (16 if width == 64 else 24)
                         sleep_or_confuse_source = (
                             (40, 136) if condition == "sleeping" else (136, 128)
                         )
@@ -7415,7 +7415,7 @@ class BattleScreenMockTest(unittest.TestCase):
                                 for slot, (sx, sy) in enumerate(sources)
                             ],
                         )
-                        self.assertLessEqual(x + 6 * 8, 4 + width)
+                        self.assertLessEqual(x + 6 * 8, base_x + width)
 
     def test_vertically_adjacent_monster_markers_do_not_overlap(self) -> None:
         for height in (64, 96):

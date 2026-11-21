@@ -63,6 +63,15 @@ class MonsterSpecialActionDataTest(unittest.TestCase):
 
 
 class MonsterReinforcementRuleTest(unittest.TestCase):
+    def test_frau_calls_poltergeist_from_the_master_data(self) -> None:
+        records = load_record_array("monsters.json")
+        frau_record = next(record for record in records if record["name_en"] == "Frau")
+        definitions = tuple(MonsterDefinition.from_record(record) for record in records)
+        frau = MonsterDefinition.from_record(frau_record)
+
+        self.assertIn(MonsterSpecialAction.REINFORCE, monster_special_actions_from_record(frau_record))
+        self.assertEqual(reinforcement_target(frau, definitions).key, "Poltergeist")
+
     def test_treant_calls_highest_lower_level_animated_monster(self) -> None:
         definitions = tuple(
             MonsterDefinition.from_record(record)

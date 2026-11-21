@@ -325,14 +325,28 @@ class BattleEncounterTest(unittest.TestCase):
 
         self.assertEqual(layout.positions, ((4, 48), (68, 16), (68, 96), (4, 112)))
 
-    def test_skips_a_wide_monster_and_still_places_the_next_monster(self) -> None:
-        wide = SimpleNamespace(width=96, height=96)
+    def test_large_square_monster_reserves_the_rear_and_allows_one_lower_front(self) -> None:
+        large = SimpleNamespace(width=96, height=96)
+        small = SimpleNamespace(width=64, height=64)
+        tall = SimpleNamespace(width=64, height=96)
+
+        layout = monster_layout((large, tall, small, small))
+
+        self.assertEqual(layout.monster_indexes, (0, 2))
+        self.assertEqual(layout.slot_indexes, (0, 3))
+        self.assertEqual(layout.positions, ((4, 32), (68, 128)))
+        self.assertEqual(_battle_start_front_monster_indexes(layout.slot_indexes), {1})
+
+    def test_large_square_monster_may_appear_after_its_companion_in_encounter_order(self) -> None:
+        large = SimpleNamespace(width=96, height=96)
         small = SimpleNamespace(width=64, height=64)
 
-        layout = monster_layout((small, wide, wide, small))
+        layout = monster_layout((small, large, large, small))
 
-        self.assertEqual(layout.monster_indexes, (0, 1, 3))
-        self.assertEqual(layout.positions, ((4, 48), (68, 32), (68, 128)))
+        self.assertEqual(layout.monster_indexes, (0, 1))
+        self.assertEqual(layout.slot_indexes, (3, 0))
+        self.assertEqual(layout.positions, ((68, 128), (4, 32)))
+        self.assertEqual(_battle_start_front_monster_indexes(layout.slot_indexes), {0})
 
 
 class BattleSurpriseIntegrationTest(unittest.TestCase):
