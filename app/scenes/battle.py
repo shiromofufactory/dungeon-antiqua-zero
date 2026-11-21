@@ -2477,6 +2477,7 @@ class BattleScene:
         self.surprise_roll: SurpriseRoll | None = None
         self.surprise_prevented_by_index: int | None = None
         self.surprise_pending_party_indexes: set[int] = set()
+        self.surprise_turned_party_indexes: set[int] = set()
         self.surprise_deferred_party_indexes: set[int] = set()
         self.surprise_original_front_rows: dict[int, bool] = {}
         self.surprise_front_party_indexes: set[int] | None = None
@@ -3070,6 +3071,7 @@ class BattleScene:
         self.surprise_roll = None
         self.surprise_prevented_by_index = None
         self.surprise_pending_party_indexes = set()
+        self.surprise_turned_party_indexes = set()
         self.surprise_deferred_party_indexes = set()
         self.surprise_original_front_rows = {}
         self.surprise_front_party_indexes = None
@@ -8539,10 +8541,10 @@ class BattleScene:
                 for index, visual in enumerate(self.party_visuals)
                 if visual is actor
             )
-            if (
-                not getattr(self, "surprise_active", False)
-                and self.active_party_index
-                in getattr(self, "surprise_original_front_rows", {})
+            if getattr(self, "surprise_active", False):
+                self.surprise_turned_party_indexes.add(self.active_party_index)
+            elif (
+                self.active_party_index in getattr(self, "surprise_original_front_rows", {})
                 and not self._member_focus_is_interrupted(
                     actor.member, after_confusion_tick=True,
                 )
@@ -12159,7 +12161,10 @@ class BattleScene:
             if self._party_member_is_dead(index)
             else PARTY_SPRITE_WIDTH
         )
-        faces_backward = is_escaping or getattr(self, "surprise_active", False)
+        faces_backward = is_escaping or (
+            getattr(self, "surprise_active", False)
+            and index not in getattr(self, "surprise_turned_party_indexes", ())
+        )
         return -width if faces_backward else width
 
     def _party_sprite_source_x(self, index: int) -> int:

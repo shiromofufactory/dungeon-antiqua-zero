@@ -489,6 +489,13 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         front = self._member(10, FormationRow.FRONT)
         rear = self._member(10, FormationRow.BACK)
         scene = self._scene(front, rear)
+        first, second = (
+            BattleCharacter(member, 0, 0, index)
+            for index, member in enumerate(scene.party)
+        )
+        scene.party_visuals = (first, second)
+        scene.timeline = (first, second)
+        scene.defending_party_indexes = set()
         scene.command_cursor = Mock()
         scene.command_window = Mock()
         scene._refresh_party_text_colors = Mock()
@@ -496,21 +503,25 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         with patch("scenes.battle.pyxel.rndi", return_value=0):
             scene._prepare_surprise()
 
-        self.assertEqual(
-            scene._party_sprite_width(0, is_escaping=False),
-            -16,
-        )
-        self.assertTrue(scene._skip_surprised_party_turn(0))
+        self.assertEqual(scene._party_sprite_width(0, is_escaping=False), -16)
+        self.assertEqual(scene._party_sprite_width(1, is_escaping=False), -16)
+        reversed_positions = tuple(scene._party_sprite_x(index) for index in (0, 1))
+
+        scene._activate_timeline_head()
         self.assertEqual(scene.surprise_pending_party_indexes, {1})
-        self.assertTrue(scene._skip_surprised_party_turn(0))
+        self.assertEqual(scene._party_sprite_width(0, is_escaping=False), 16)
+        self.assertEqual(scene._party_sprite_width(1, is_escaping=False), -16)
+        self.assertEqual(tuple(scene._party_sprite_x(index) for index in (0, 1)), reversed_positions)
+
+        scene._activate_timeline_head()
         self.assertEqual(scene.surprise_pending_party_indexes, {1})
-        self.assertTrue(scene._skip_surprised_party_turn(1))
+        self.assertEqual(scene._party_sprite_width(0, is_escaping=False), 16)
+        scene.timeline = (second, first)
+        scene._activate_timeline_head()
 
         self.assertFalse(scene.surprise_active)
-        self.assertEqual(
-            scene._party_sprite_width(0, is_escaping=False),
-            16,
-        )
+        self.assertEqual(scene._party_sprite_width(0, is_escaping=False), 16)
+        self.assertEqual(scene._party_sprite_width(1, is_escaping=False), 16)
         self.assertIs(scene.phase, BattlePhase.FORMATION)
         self.assertIs(front.formation_row, FormationRow.FRONT)
         self.assertIs(rear.formation_row, FormationRow.BACK)
@@ -531,11 +542,8 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
         scene = self._scene(member)
         scene.party_visuals = (actor,)
         scene.timeline = (actor,)
-        scene.surprise_active = True
-        scene.surprise_pending_party_indexes = {0}
-        scene.surprise_original_front_rows = {0: True}
-        scene.surprise_front_party_indexes = {0}
-        scene.surprise_temporary_front_party_indexes = set()
+        with patch("scenes.battle.pyxel.rndi", return_value=0):
+            scene._prepare_surprise()
         scene.escape_requested = False
         scene.defending_party_indexes = set()
         scene.focused_target_by_party_index = {}
@@ -609,6 +617,8 @@ class BattleSurpriseIntegrationTest(unittest.TestCase):
                 # The disabled member receives their initial handoff first.
                 scene.timeline = (scene.party_visuals[1], scene.party_visuals[0])
                 scene._activate_timeline_head()
+                self.assertEqual(scene._party_sprite_width(0, is_escaping=False), -16)
+                self.assertEqual(scene._party_sprite_width(1, is_escaping=False), 16)
                 scene.timeline = tuple(scene.party_visuals)
                 scene._activate_timeline_head()
                 for _frame in range(8):

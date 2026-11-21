@@ -649,6 +649,18 @@
           "battle_id": "battle_17"
         }
       ]
+    },
+    {
+      "id": "dungeon_43384055f61b4218aa32ac2480184f92",
+      "name": "賢者の祠2回目ボス",
+      "bgm_id": "da3-dungeon2",
+      "steps": [
+        {
+          "id": "event_battle_80d9b41205934eea8541cbcb5f12d55f",
+          "type": "event_battle",
+          "battle_id": "battle_18"
+        }
+      ]
     }
   ]
 }
