@@ -26,7 +26,7 @@ from battle_timeline import TimelineEntry, TimelineOrder
 from resources import load_record_array
 from resistance import ResistanceType
 from scenes.battle import BattleMonster
-from spell_effect import load_spell_effects
+from spell_effect import SPELL_RESULT_OVERLAP_FRAME_COUNT, load_spell_effects
 
 
 def spellcaster(
@@ -93,11 +93,51 @@ class MonsterSpellTest(unittest.TestCase):
             self.assertTrue(scene._begin_monster_spell(actor, scene.spells["SLEEP"]))
         presentation = scene.action_presentation
         self.assertEqual([effect.target_index for effect in presentation.spell_effects], [0, 1])
+        self.assertEqual([effect.start_frame for effect in presentation.spell_effects], [0, 4])
         self.assertEqual(presentation.screen_flash.color_index, 57)
+        self.assertIsNone(presentation.spell_effects[1].player.screen_flash)
         scene._update_action_presentation()
         scene.spell_effect_renderer.prepare_screen_flash.assert_called_once_with(
             presentation.screen_flash, 1
         )
+
+    def test_freeze_two_staggers_damage_on_living_party_targets(self):
+        actor = spellcaster(magic=3, spell_key="FREEZE2")
+        scene = spell_scene(actor)
+        scene.spell_effects = load_spell_effects(APP_ROOT / "effects" / "spells.json")
+        scene.spell_effect_renderer = Mock()
+        second_target = scene.party[1]
+        second_target.equipment = second_target.equipment.replaced({
+            EquipmentSlot.RIGHT: None,
+            EquipmentSlot.LEFT: load_mock_items()["BLESSED SHIELD"],
+        })
+        hp = tuple(member.hp for member in scene.party)
+
+        with patch("scenes.battle.play_se") as play_se:
+            self.assertTrue(scene._begin_monster_spell(actor, scene.spells["FREEZE2"]))
+            presentation = scene.action_presentation
+            self.assertEqual([effect.start_frame for effect in presentation.spell_effects], [0, 4])
+            for _frame in range(3):
+                scene._update_action_presentation()
+            self.assertEqual(scene.affinity_popups, [])
+            scene._update_action_presentation()
+            self.assertEqual([popup.affinity for popup in scene.affinity_popups], [SpellAffinity.RESIST])
+            impact_frame = (
+                scene.spell_effects["FREEZE2"].total_frames - SPELL_RESULT_OVERLAP_FRAME_COUNT
+            )
+            for _frame in range(impact_frame - 4):
+                scene._update_action_presentation()
+            self.assertLess(scene.party[0].hp, hp[0])
+            self.assertEqual(scene.party[1].hp, hp[1])
+            self.assertTrue(presentation.party_damage_motion_visible(0))
+            self.assertFalse(presentation.party_damage_motion_visible(1))
+            for _frame in range(4):
+                scene._update_action_presentation()
+
+        self.assertLess(scene.party[1].hp, hp[1])
+        self.assertTrue(presentation.party_damage_motion_visible(1))
+        self.assertEqual(len(scene.spell_damage_popups), 2)
+        self.assertEqual(play_se.call_count, 2)
 
     def test_priest_protection_cancels_defense_down_and_gives_effective_defense(self):
         record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Priest")

@@ -251,7 +251,7 @@ from systems import (
     MONSTER_IDENTIFY_FIELD_KEYS,
     MonsterRecordSystem,
 )
-from spell_effect import SpellEffectDefinition, SpellEffectPlayer
+from spell_effect import SpellEffectDefinition, SpellEffectPlayer, load_spell_effects
 from text_catalog import TextCatalog
 from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import (
@@ -1636,7 +1636,7 @@ class BattleScreenMockTest(unittest.TestCase):
             projectile_frame_count=projectile_frame_count,
         )
 
-        self.assertEqual(THROWING_PROJECTILE_SPEED, 12)
+        self.assertEqual(THROWING_PROJECTILE_SPEED, 16)
         self.assertEqual(THROWING_PROJECTILE_PATTERN_FRAME_COUNT, 2)
         self.assertIs(strike.pose_at(pose_change_frame - 1), first_pose)
         self.assertIs(strike.pose_at(pose_change_frame), second_pose)
@@ -1652,10 +1652,9 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_throwing_projectile_uses_fixed_speed_and_shorter_near_travel(self) -> None:
         self.assertEqual(throwing_projectile_frame_count((0, 0), (24, 0)), 3)
-        self.assertEqual(throwing_projectile_frame_count((0, 0), (120, 0)), 11)
-        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 1), (12, 0))
-        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 2), (24, 0))
-        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 3), (30, 0))
+        self.assertEqual(throwing_projectile_frame_count((0, 0), (120, 0)), 9)
+        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 1), (16, 0))
+        self.assertEqual(throwing_projectile_position((0, 0), (30, 0), 2), (30, 0))
 
     def test_draws_throwing_projectile_from_authored_pose_to_target_center(self) -> None:
         first = AttackWeaponSprite(8, -9, 1, "back", False, False)
@@ -2044,7 +2043,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 presentation.progression_recorded = True
                 mock.attack_presentation = presentation
 
-                for _frame in range(12 if auto else 6):
+                for _frame in range(24 if auto else 18):
                     mock.update()
                     self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
                     self.assertFalse(mock.action_returning)
@@ -2053,18 +2052,15 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertTrue(mock.action_returning)
                 self.assertEqual(mock.action_return_jump, not auto)
 
-                for _frame in range(MONSTER_MISS_FRAME_COUNT):
-                    if presentation.result_complete:
-                        break
+                return_duration = (
+                    ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED if auto
+                    else ATTACK_RETURN_JUMP_FRAME_COUNT - 1 + ATTACK_LANDING_GUARD_FRAME_COUNT
+                )
+                for _frame in range(return_duration):
                     mock._complete_current_turn.assert_not_called()
                     mock.update()
                 self.assertTrue(presentation.result_complete)
-                self.assertIsNotNone(mock.action_party_index)
-                mock._complete_current_turn.assert_not_called()
-                for _frame in range(ATTACK_LANDING_GUARD_FRAME_COUNT):
-                    if mock.action_party_index is None:
-                        break
-                    mock.update()
+                self.assertIsNone(mock.action_party_index)
                 mock._complete_current_turn.assert_called_once_with()
 
     def test_attack_damage_popup_starts_ten_frames_after_hit_effect(self) -> None:
@@ -3253,6 +3249,8 @@ class BattleScreenMockTest(unittest.TestCase):
                         mock.party = party
                         mock.phase = BattleMockPhase.TARGET
                         mock.active_party_index = 0
+                        mock.action_offset_x = 0
+                        mock.action_motion_frame = 0
                         mock.monsters = (_damage_test_monster(),)
                         mock.attack_poses = {
                             f"{weapon.weapon_img}_{branch}": AttackPoseDefinition(
@@ -3304,10 +3302,21 @@ class BattleScreenMockTest(unittest.TestCase):
                         starting_hp = target.state.hp if target_side == "enemy" else target.hp
                         with patch("scenes.battle.play_se"):
                             for _ in range(followup.hit_start_frame - 1):
+                                if target_side == "ally":
+                                    mock._update_action_motion()
+                                    self.assertEqual(mock.action_offset_x, 0)
                                 mock._update_attack_presentation()
                             hp_before = target.state.hp if target_side == "enemy" else target.hp
                             self.assertEqual(hp_before, starting_hp - 10)
                             mock._update_attack_presentation()
+                            if target_side == "ally":
+                                position = mock._party_draw_position(1)
+                                with patch("scenes.battle.pyxel.blt") as blt:
+                                    mock._draw_party_attack_projectile()
+                                self.assertEqual(blt.call_args.args[:2], (position[0], position[1] + 8))
+                                mock._update_attack_presentation()
+                                self.assertIsNone(mock.action_party_index)
+                                self.assertEqual(mock.action_offset_x, 0)
                         hp_after = target.state.hp if target_side == "enemy" else target.hp
                         self.assertEqual(hp_after, starting_hp - 20)
 
@@ -5930,11 +5939,8 @@ class BattleScreenMockTest(unittest.TestCase):
         for _frame in range(SPELL_RESULT_OVERLAP_FRAME_COUNT):
             mock._update_action_presentation()
 
-        mock._begin_action_return.assert_not_called()
-        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT):
-            mock._update_action_presentation()
-
-        mock._begin_action_return.assert_called_once_with(complete_turn=True)
+        mock._begin_action_return.assert_called_once_with()
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
         self.assertEqual(len(mock.healing_popups), 1)
 
     def test_item_heal_uses_da2_fixed_ability_of_twenty(self) -> None:
@@ -6041,9 +6047,10 @@ class BattleScreenMockTest(unittest.TestCase):
 
         self.assertGreater(target.hp, 1)
         mock._begin_action_return.assert_not_called()
-        for _frame in range(SPELL_POST_EFFECT_WAIT_FRAME_COUNT - 1):
+        for _frame in range(17):
             mock._update_action_presentation()
-        mock._begin_action_return.assert_called_once_with(complete_turn=True)
+        mock._begin_action_return.assert_called_once_with()
+        self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
         self.assertEqual(len(mock.healing_popups), 1)
 
     def test_zero_intensity_heal_restores_hp_and_cures_all_ailments(self) -> None:
@@ -6756,7 +6763,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         randint.assert_not_called()
 
-    def test_all_missed_spell_targets_add_six_frames_before_return(self) -> None:
+    def test_all_missed_spell_targets_add_eighteen_frames_before_return(self) -> None:
         spell = load_mock_spells()["SLEEP"]
         items = load_mock_items()
         skills = load_mock_skills()
@@ -6804,15 +6811,18 @@ class BattleScreenMockTest(unittest.TestCase):
 
                     wait_frames = SPELL_POST_EFFECT_WAIT_FRAME_COUNT
                     if all_missed:
-                        wait_frames += 6
-                    for _frame in range(wait_frames - 1):
-                        mock.update()
-                        self.assertFalse(mock.action_returning)
-                        self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
+                        wait_frames += 18
+                    mock.update()
                     self.assertEqual(
                         [popup.is_miss for popup in mock.spell_damage_popups],
                         [True, True] if all_missed else [True],
                     )
+                    for _frame in range(wait_frames - 2):
+                        self.assertFalse(mock.action_returning)
+                        self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
+                        mock.update()
+                    self.assertFalse(mock.action_returning)
+                    self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
                     mock.update()
                     self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
                     self.assertTrue(mock.action_returning)
@@ -7612,7 +7622,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(popup.frames_remaining, 0)
         self.assertFalse(popup.visible)
 
-    def test_quick_ally_spell_confirmation_keeps_caster_in_place_during_effect(self) -> None:
+    def test_quick_ally_spell_confirmation_starts_effect_after_forward_walk(self) -> None:
         spells = load_mock_spells()
         items = load_mock_items()
         for spell_key, se_id in (
@@ -7682,21 +7692,21 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertEqual(effect.elapsed_frame, 0)
                 play_se.assert_called_once_with(se_id)
 
-                for _frame in range(
-                    definition.total_frames + SPELL_POST_EFFECT_WAIT_FRAME_COUNT
-                ):
+                for _frame in range(18):
                     self.assertEqual(mock._party_draw_position(0)[0], cast_x)
                     self.assertFalse(mock.action_returning)
                     mock.update()
 
-                self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
-                self.assertTrue(effect.completed)
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
+                self.assertTrue(mock.action_returning)
+                self.assertFalse(effect.completed)
                 mock.update()
                 self.assertEqual(
                     mock._party_draw_position(0)[0], cast_x + ACTION_MOVE_SPEED
                 )
+                self.assertEqual(effect.anchor_x, cast_x + ACTION_MOVE_SPEED + 8)
 
-    def test_auto_ally_spell_waits_for_effect_and_cast_popup_before_return(self) -> None:
+    def test_auto_ally_spell_returns_eighteen_frames_into_effect(self) -> None:
         from auto_battle_model import AutoAction
 
         items = load_mock_items()
@@ -7752,23 +7762,28 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
                 self.assertTrue(mock.battle_popup.visible)
                 effect = mock.action_presentation.spell_effects[0].player
-                expected_frames = max(
-                    BATTLE_POPUP_FRAME_COUNT,
-                    definition.total_frames + SPELL_POST_EFFECT_WAIT_FRAME_COUNT,
-                )
-                for _frame in range(expected_frames):
+                for _frame in range(18):
                     self.assertFalse(mock.action_returning)
                     self.assertEqual(mock.action_offset_x, ACTION_MOVE_DISTANCE)
                     mock.update()
 
-                self.assertTrue(effect.completed)
-                self.assertFalse(mock.battle_popup.visible)
-                self.assertIs(mock.phase, BattleMockPhase.ACTION_RETURN)
+                self.assertTrue(mock.action_returning)
+                self.assertFalse(effect.completed)
+                self.assertTrue(mock.battle_popup.visible)
+                self.assertIs(mock.phase, BattleMockPhase.ACTION_PRESENTATION)
                 mock.update()
                 self.assertEqual(
                     mock.action_offset_x, ACTION_MOVE_DISTANCE - ACTION_MOVE_SPEED
                 )
-                mock._complete_current_turn.assert_not_called()
+                end_frame = max(
+                    definition.total_frames, 18 + ACTION_MOVE_DISTANCE // ACTION_MOVE_SPEED,
+                )
+                for _frame in range(end_frame - 19):
+                    mock._complete_current_turn.assert_not_called()
+                    mock.update()
+                self.assertTrue(effect.completed)
+                self.assertEqual(mock.action_offset_x, 0)
+                mock._complete_current_turn.assert_called_once_with()
 
     def test_spell_turn_waits_for_caster_to_return_after_presentation(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -7861,21 +7876,9 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._begin_action_return.assert_not_called()
         mock._complete_current_turn.assert_not_called()
 
-    def test_all_target_spell_creates_one_effect_per_target_and_one_sound(self) -> None:
-        spell = load_mock_spells()["FIRE1"]
-        definition = SpellEffectDefinition.from_record(
-            spell.key,
-            {
-                "kind": "target_sprite",
-                "image_id": "effects/spells32",
-                "row": 0,
-                "frame_count": 1,
-                "frames_per_pattern": 4,
-                "offset": {"ally": [0, 0], "enemy": [0, 0]},
-                "flash_color": None,
-                "se_id": "spell_fire1",
-            },
-        )
+    def test_spark_staggers_target_sprites_sounds_and_damage(self) -> None:
+        spell = load_mock_spells()["SPARK"]
+        definition = load_spell_effects(APP_ROOT / "effects" / "spells.json")[spell.key]
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
             load_mock_items(),
@@ -7898,16 +7901,45 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.spell_damage_popups = []
         mock.affinity_popups = []
         mock._refresh_monster_name_colors = Mock()
+        mock._sync_unselectable_target_palette = Mock()
+        mock._complete_current_turn = Mock()
+        mock._begin_monster_deaths = Mock()
+        original_hp = mock.monsters[1].state.hp
 
         with patch("scenes.battle.play_se") as play_se:
             self.assertTrue(mock._begin_action_presentation(spell))
+            presentation = mock.action_presentation
+            first, second = presentation.spell_effects
+            mock._draw_spell_effects()
+            mock.spell_effect_renderer.draw_effect.assert_called_once_with(first.player)
+            play_se.assert_called_once_with("spell_spark")
 
-        assert mock.action_presentation is not None
-        self.assertEqual(
-            [effect.target_index for effect in mock.action_presentation.spell_effects],
-            [0, 1],
-        )
-        play_se.assert_called_once_with("spell_fire1")
+            for _frame in range(3):
+                mock._update_action_presentation()
+            draw_target = Mock()
+            mock._draw_spell_effect_target("enemy", 1, draw_target)
+            draw_target.assert_called_once_with()
+            self.assertEqual(play_se.call_count, 1)
+
+            mock._update_action_presentation()
+            self.assertEqual([first.player.elapsed_frame, second.player.elapsed_frame], [4, 0])
+            self.assertEqual(play_se.call_args_list, [call("spell_spark"), call("spell_spark")])
+
+            impact_frame = definition.total_frames - SPELL_RESULT_OVERLAP_FRAME_COUNT
+            for _frame in range(impact_frame - 4):
+                mock._update_action_presentation()
+            self.assertEqual(len(mock.spell_damage_popups), 1)
+            self.assertEqual(mock.monsters[1].state.hp, original_hp)
+            for _frame in range(4):
+                mock._update_action_presentation()
+            self.assertEqual(len(mock.spell_damage_popups), 2)
+            self.assertLess(mock.monsters[1].state.hp, original_hp)
+            for _frame in range(4 + SPELL_POST_EFFECT_WAIT_FRAME_COUNT - 1):
+                mock._update_action_presentation()
+            mock._begin_monster_deaths.assert_not_called()
+            mock._complete_current_turn.assert_not_called()
+            mock._update_action_presentation()
+            self.assertIsNone(mock.action_presentation)
 
     def test_action_presentation_composes_target_flash_and_effect_sprite(self) -> None:
         definition = SpellEffectDefinition.from_record(
