@@ -14,7 +14,8 @@ const COMMAND_OPTIONS = [
   ["leave_party", "leave_party"],
   ["give_item", "give_item"],
   ["take_item", "take_item"],
-  ["recover_party", "パーティ全快"],
+  ["recover_party", "パーティ全快（復活含む）"],
+  ["recover_party_without_revive", "パーティ全快（復活除く）"],
   ["open_shop", "ショップを開く"],
   ["start_battle", "イベントバトル開始"],
   ["play_se", "play_se"],
@@ -762,7 +763,9 @@ function renderCommand(command, path, listPath, index) {
     const label = type === "wait" ? "待機時間" : "振動時間";
     fields = field(`${label}（フレーム・6フレーム単位）`, `<input type="number" min="6" step="6" value="${Number(command.frames) || 6}" ${attr("frames")}>`, true);
   } else if (type === "recover_party") {
-    fields = '<p class="command-description full">パーティ全員のHP・MP・状態異常を全て回復します。</p>';
+    fields = '<p class="command-description full">死亡者も含めて、パーティ全員のHP・MPを最大まで回復し、状態異常を解除します。</p>';
+  } else if (type === "recover_party_without_revive") {
+    fields = '<p class="command-description full">生存中のパーティメンバーのHP・MPを最大まで回復し、状態異常を解除します。</p>';
   } else if (type === "open_shop") {
     fields = field("ショップID", `<select ${attr("shop_key")}>${options(state.catalogs.shop_keys || [], command.shop_key)}</select>`, true);
   } else if (type === "start_battle") {
@@ -969,7 +972,7 @@ function defaultCommand(type) {
   if (type === "flash_screen") return {command: type, color: "white"};
   if (type === "change_brightness") return {command: type, percent: 100};
   if (type === "wait" || type === "shake_screen") return {command: type, frames: 6};
-  if (type === "recover_party") return {command: type};
+  if (type === "recover_party" || type === "recover_party_without_revive") return {command: type};
   if (type === "open_shop") return one("shop_key", state.catalogs.shop_keys);
   if (type === "start_battle") return {command: type, battle_id: battleIds()[0] || ""};
   if (type === "move_party") return {command: type, direction: "down", steps: 1};

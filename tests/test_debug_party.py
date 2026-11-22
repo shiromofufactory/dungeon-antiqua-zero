@@ -157,6 +157,32 @@ class DebugPartyEditorTest(unittest.TestCase):
         self.assertEqual(member.refresh_internal_level(next_threshold - 1), 14)
         self.assertEqual(member.refresh_internal_level(next_threshold), 15)
 
+    def test_removing_a_dead_member_revives_them_in_the_stored_state(self) -> None:
+        cerion = self.editor.member("Cerion")
+        cerion.take_damage(cerion.hp)
+        cerion.mp = 0
+
+        self.editor.toggle_member("Cerion")
+
+        self.assertNotIn("Cerion", self.editor.selected_keys)
+        self.assertIs(self.editor.character_states["Cerion"], cerion)
+        self.assertEqual((cerion.hp, cerion.mp), (cerion.max_hp, 0))
+
+    def test_immediate_rejoin_keeps_existing_proficiency(self) -> None:
+        self.editor.set_baseline_level(50)
+        cerion = self.editor.member("Cerion")
+        spear = cerion.proficiency(ProficiencyKind.SPEAR)
+        spear.level, spear.progress = 2, 10
+
+        self.editor.toggle_member("Cerion")
+        self.assertEqual(cerion.departure_level, 52)
+        self.editor.toggle_member("Cerion")
+
+        self.assertIs(self.editor.member("Cerion"), cerion)
+        spear = cerion.proficiency(ProficiencyKind.SPEAR)
+        self.assertEqual((spear.level, spear.progress), (2, 10))
+        self.assertIsNone(cerion.departure_level)
+
     def test_rejects_invalid_shared_experience(self) -> None:
         for experience, error in ((True, TypeError), (1.5, TypeError), (-1, ValueError)):
             with self.subTest(experience=experience), self.assertRaises(error):

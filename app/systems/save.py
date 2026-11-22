@@ -19,8 +19,10 @@ if __package__ == "systems":
         AbilityBonuses,
         BATTLE_PARTY_MEMBER_COUNT,
         FIORA_CHARACTER_KEY,
+        MAX_INTERNAL_LEVEL,
         MAX_PARTY_MEMBER_COUNT,
         MAX_ABILITY,
+        MIN_INTERNAL_LEVEL,
         EquipmentSet,
         EquipmentSlot,
         FormationRow,
@@ -49,8 +51,10 @@ else:
         AbilityBonuses,
         BATTLE_PARTY_MEMBER_COUNT,
         FIORA_CHARACTER_KEY,
+        MAX_INTERNAL_LEVEL,
         MAX_PARTY_MEMBER_COUNT,
         MAX_ABILITY,
+        MIN_INTERNAL_LEVEL,
         EquipmentSet,
         EquipmentSlot,
         FormationRow,
@@ -70,8 +74,8 @@ else:
     from .inventory import InventorySystem
 
 
-SAVE_FORMAT_VERSION = 4
-SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, 2, 3, SAVE_FORMAT_VERSION))
+SAVE_FORMAT_VERSION = 5
+SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, 2, 3, 4, SAVE_FORMAT_VERSION))
 AUTO_SAVE_SLOT = 0
 SAVE_SLOT_COUNT = 8
 SAVE_DIRECTORY = Path.home() / ".config" / ".pyxel" / "dungeon-antiqua-zero"
@@ -277,6 +281,9 @@ def restore_save_document(
         raise SaveSystemError(
             f"active character has no saved state: {error.args[0]}"
         ) from error
+    for key, member in character_states.items():
+        if key not in active_keys and member.has_joined and member.departure_level is None:
+            member.departure_level = member.internal_level
     if save_data.auto_recovery.healer_key not in (
         None,
         *(
@@ -508,6 +515,14 @@ def _restore_member(
         )
     if key == FIORA_CHARACTER_KEY and experience_offset != 0:
         raise SaveSystemError("Fiora's experience offset must be zero")
+    departure_level = None
+    if format_version >= 5:
+        if "departure_level" not in state:
+            raise SaveSystemError(f"member {key}.departure_level is required")
+        if state["departure_level"] is not None:
+            departure_level = _integer(state, "departure_level", f"member {key}")
+            if not MIN_INTERNAL_LEVEL <= departure_level <= MAX_INTERNAL_LEVEL:
+                raise SaveSystemError(f"member {key}.departure_level is out of range")
     member = Member(
         initial.definition,
         internal_level=internal_level,
@@ -516,6 +531,7 @@ def _restore_member(
             True if format_version < 4
             else _required_bool(state, "has_joined", f"member {key}")
         ),
+        departure_level=departure_level,
         hp=_non_negative_int(state, "hp", f"member {key}"),
         max_hp=_non_negative_int(state, "max_hp", f"member {key}"),
         mp=_non_negative_int(state, "mp", f"member {key}"),
@@ -786,6 +802,11 @@ def create_save_document(
         )
     if any(not character_states[key].has_joined for key in active_keys):
         raise SaveSystemError("active party members must have joined")
+    if any(
+        member.departure_level is not None and (key in active_keys or not member.has_joined)
+        for key, member in character_states.items()
+    ):
+        raise SaveSystemError("departure_level requires a departed party member")
     if character_states[FIORA_CHARACTER_KEY].experience_offset != 0:
         raise SaveSystemError("Fiora's experience offset must be zero")
     inventory.validate_total_quantities(character_states.values())
@@ -951,6 +972,7 @@ def _serialize_member(member: Member) -> dict[str, object]:
         "internal_level": member.internal_level,
         "experience_offset": member.experience_offset,
         "has_joined": member.has_joined,
+        "departure_level": member.departure_level,
         "hp": member.hp,
         "max_hp": member.max_hp,
         "mp": member.mp,

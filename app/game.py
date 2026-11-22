@@ -1335,7 +1335,7 @@ class Game:
             simulation.party = self.party
             simulation.complete_battle(victory=result is BattleResult.VICTORY)
             if result is BattleResult.DEFEAT:
-                self._finish_debug_dungeon()
+                self._finish_debug_dungeon(revive=True)
                 self.bgm.set_fade_rate(0.0)
             elif battle_scene is not None:
                 self.bgm.transition_to(simulation.dungeon.bgm_id, start_sec=battle_scene.return_bgm_start_sec)
@@ -2372,9 +2372,8 @@ class Game:
         self._begin_random_encounter()
         return True
 
-    def _finish_debug_dungeon(self) -> None:
-        for member in self.party:
-            member.fully_recover()
+    def _finish_debug_dungeon(self, *, revive: bool) -> None:
+        self.party_system.recover_all(revive=revive)
         self.debug_dungeon_scene = None
         self._promote_first_recoverable_member()
         self._build_main_windows(animate=False)
@@ -2789,7 +2788,7 @@ class Game:
         elif change is GameScreenChange.START_DEBUG_DUNGEON:
             self._apply_debug_dungeon()
         elif change is GameScreenChange.EXIT_DEBUG_DUNGEON:
-            self._finish_debug_dungeon()
+            self._finish_debug_dungeon(revive=False)
         elif change is GameScreenChange.SHOW_START_MENU:
             self._show_start_menu()
         elif change is GameScreenChange.SHOW_CONTROL_GUIDE:

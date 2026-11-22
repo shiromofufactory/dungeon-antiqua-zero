@@ -239,6 +239,7 @@ class EventRunner:
                 if self.party.join(
                     character_key,
                     shared_experience=self.save_data.experience,
+                    proficiency_level_limit=self.launch_mode.proficiency_level_limit,
                 ):
                     self.inventory.record_equipment(
                         (self.party.character_states[character_key],)
@@ -293,8 +294,8 @@ class EventRunner:
                 return ChangeBrightnessEffect(int(command["percent"]))
             if command_type == "shake_screen":
                 return ShakeScreenEffect(int(command["frames"]))
-            if command_type == "recover_party":
-                self.party.recover_all()
+            if command_type in ("recover_party", "recover_party_without_revive"):
+                self.party.recover_all(revive=command_type == "recover_party")
                 return None
             if command_type == "open_shop":
                 self._require_field(command_type)

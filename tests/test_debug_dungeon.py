@@ -428,14 +428,8 @@ class DebugDungeonSceneTest(unittest.TestCase):
 class DebugDungeonGameTest(unittest.TestCase):
     @patch("game.EventMessageOverlay")
     @patch("game.play_se")
-    def test_common_spring_runs_through_game_loop_and_recovers_after_message(self, play, message):
-        game = self.game()
-        game.items = load_mock_items()
-        game.skills = load_mock_skills()
-        game.party = load_mock_party(game.items, game.skills)
-        game.character_states = {m.definition.key: m for m in game.party}
-        game.party_system = PartySystem(character_records=load_mock_character_records(),
-            items=game.items, skills=game.skills, active_party=game.party)
+    def test_common_spring_recovers_living_members_after_message(self, play, message):
+        game = self.game_with_party()
         game.inventory_system = InventorySystem(game.items)
         game.event_catalog = EventCatalog.from_json()
         game.event_runner = None
@@ -452,9 +446,13 @@ class DebugDungeonGameTest(unittest.TestCase):
         game._update_fade = Mock(return_value=False)
         game._update_field_menu_guide = Mock()
         game.debug_dungeon_scene.waiting_for_event = True
-        for member in game.party:
+        dead_member, *living_members = game.party
+        dead_member.hp = 0
+        dead_member.mp = 0
+        for member in living_members:
             member.hp = 1
             member.mp = 0
+            member.poisoned = True
         self.assertTrue(game._start_field_event("common.event_1"))
         play.assert_called_once_with("spell_healing1")
         self.assertIsNotNone(game.event_screen_flash)
@@ -465,11 +463,15 @@ class DebugDungeonGameTest(unittest.TestCase):
                 break
         self.assertIsNotNone(game.event_message)
         self.assertEqual(message.call_args.kwargs["message_id"], "common.message_1")
-        self.assertTrue(all(member.hp == 1 and member.mp == 0 for member in game.party))
+        for member in living_members:
+            self.assertEqual((member.hp, member.mp, member.poisoned), (1, 0, True))
         game.debug_dungeon_scene.complete_event.assert_not_called()
         message.return_value.update.return_value = True
         game.update()
-        self.assertTrue(all(member.hp == member.max_hp and member.mp == member.max_mp for member in game.party))
+        self.assertEqual((dead_member.hp, dead_member.mp), (0, 0))
+        for member in living_members:
+            self.assertEqual((member.hp, member.mp), (member.max_hp, member.max_mp))
+            self.assertFalse(member.poisoned)
         self.assertIsNone(game.event_runner)
         self.assertIsNone(game.event_screen_flash)
         game.debug_dungeon_scene.complete_event.assert_called_once_with(succeeded=True)
@@ -494,6 +496,20 @@ class DebugDungeonGameTest(unittest.TestCase):
         game._restore_dimmed_palette = Mock()
         game._promote_first_recoverable_member = Mock()
         game._build_main_windows = Mock()
+        return game
+
+    def game_with_party(self):
+        game = self.game()
+        game.items = load_mock_items()
+        game.skills = load_mock_skills()
+        game.party = load_mock_party(game.items, game.skills)
+        game.party_system = PartySystem(
+            character_records=load_mock_character_records(),
+            items=game.items,
+            skills=game.skills,
+            active_party=game.party,
+        )
+        game.character_states = game.party_system.character_states
         return game
 
     def test_active_simulation_allows_manual_save_but_not_autosave_or_teleport(self):
@@ -585,14 +601,35 @@ class DebugDungeonGameTest(unittest.TestCase):
                 game.bgm.transition_to.assert_called_once_with(simulation.dungeon.bgm_id, start_sec=12.5)
                 self.assertIsNone(game.battle_scene)
 
-    def test_defeat_exits_and_recovers_without_resolving_a_real_dungeon_exit(self):
-        game = self.game()
+    def test_leaving_the_trial_recovers_only_living_members(self):
+        game = self.game_with_party()
+        dead, living, *_ = game.party
+        dead.hp = dead.mp = 0
+        living.hp = 1
+        living.mp = 0
+        living.poisoned = True
+        game.pending_screen_change = GameScreenChange.EXIT_DEBUG_DUNGEON
+
+        game._apply_pending_screen_change()
+
+        self.assertEqual((dead.hp, dead.mp), (0, 0))
+        self.assertEqual((living.hp, living.mp), (living.max_hp, living.max_mp))
+        self.assertFalse(living.poisoned)
+        self.assertIsNone(game.debug_dungeon_scene)
+        self.assertTrue(game.showing_field)
+        game.bgm.play.assert_called_once_with("original")
+
+    def test_defeat_exits_and_revives_without_resolving_a_real_dungeon_exit(self):
+        game = self.game_with_party()
+        for member in game.party:
+            member.hp = member.mp = 0
         simulation = game.debug_dungeon_scene
         game.battle_return_result = BattleResult.DEFEAT
         game._apply_battle_return()
         simulation.complete_battle.assert_called_once_with(victory=False)
         self.assertIsNone(game.debug_dungeon_scene)
-        game.party[0].fully_recover.assert_called_once()
+        for member in game.party:
+            self.assertEqual((member.hp, member.mp), (member.max_hp, member.max_mp))
         game.encounter_system.defeat_return.assert_not_called()
         self.assertEqual(game.current_map.map_id, "real_map")
         game.bgm.play.assert_called_once_with("original")

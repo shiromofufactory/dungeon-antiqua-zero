@@ -374,6 +374,7 @@ class EventEditorServerTest(unittest.TestCase):
                     "commands": [
                         {"command": "message", "message_id": "sample.hello"},
                         {"command": "recover_party"},
+                        {"command": "recover_party_without_revive"},
                         {
                             "command": "open_shop",
                             "shop_key": "FAIRY_HAMLET_ITEMS",
@@ -396,9 +397,10 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertEqual(runtime["flags"], ["story.done"])
         self.assertIn("sample.hello", runtime["events"])
         self.assertEqual(
-            runtime["events"]["sample.hello"]["commands"][1:3],
+            runtime["events"]["sample.hello"]["commands"][1:4],
             [
                 {"command": "recover_party"},
+                {"command": "recover_party_without_revive"},
                 {
                     "command": "open_shop",
                     "shop_key": "FAIRY_HAMLET_ITEMS",

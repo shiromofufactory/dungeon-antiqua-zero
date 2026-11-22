@@ -265,6 +265,7 @@ class DebugPartyEditor:
             raise DebugPartyError("Fiora cannot be removed from the debug party")
         if character_key in self._party_by_key:
             self._validate_other_member_count(self.other_member_count - 1)
+            self._party_by_key[character_key].record_departure()
             del self._party_by_key[character_key]
             self._party_order.remove(character_key)
             return

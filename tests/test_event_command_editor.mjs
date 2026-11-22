@@ -144,6 +144,21 @@ test('flash command starts with the supported color', () => {
   assert.match(context.renderCommand(state.data.events[0].commands[0], '0', '', 0), /data-command-field="color"/);
 });
 
+test('party recovery offers two commands and saves each without attributes', () => {
+  const { state, context } = editor();
+  context.addDefaultCommand('');
+  for (const [command, label] of [
+    ['recover_party', 'パーティ全快（復活含む）'],
+    ['recover_party_without_revive', 'パーティ全快（復活除く）'],
+  ]) {
+    context.changeCommandType('0', command);
+    assert.deepEqual(JSON.parse(context.requestBody()).data.events[0].commands[0], { command });
+    const html = context.renderCommand(state.data.events[0].commands[0], '0', '', 0);
+    assert.match(html, new RegExp(`value="${command}" selected>${label}</option>`));
+    assert.doesNotMatch(html, /data-command-field=/);
+  }
+});
+
 test('BGM stop replaces track selection, saves without attributes and permits undo', () => {
   const {state, context} = editor();
   state.catalogs.bgm_ids = ['da3-field'];

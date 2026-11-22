@@ -14,7 +14,7 @@ from battle_commands import BattleCommand
 from field import FieldPosition
 from input import Direction
 from state import AutoBattleConfig, Difficulty, SaveData
-from member import Ability, AbilityBonuses, EquipmentSlot, internal_level_for_experience, required_experience_for_level
+from member import Ability, AbilityBonuses, EquipmentSlot, ProficiencyKind, internal_level_for_experience, required_experience_for_level
 from systems import (
     AUTO_SAVE_SLOT,
     SAVE_FORMAT_VERSION,
@@ -36,7 +36,7 @@ from tools.screen_mocks._fixtures import (
 
 class SaveSystemTest(unittest.TestCase):
     def test_debug_trial_checkpoints_are_optional_and_preserve_old_saves(self):
-        for version in (1, 2, 3, SAVE_FORMAT_VERSION):
+        for version in (1, 2, 3, 4, SAVE_FORMAT_VERSION):
             with self.subTest(version=version):
                 document = self.save_document()
                 document["format_version"] = version
@@ -628,6 +628,54 @@ class SaveSystemTest(unittest.TestCase):
             restore_save_document(
                 document, character_records=records, items=self.items, skills=self.skills,
             )
+
+    def test_departure_level_survives_save_and_legacy_saves_start_at_loaded_level(self) -> None:
+        kwargs = dict(
+            character_records=load_mock_character_records(), items=self.items, skills=self.skills,
+        )
+        initial = restore_save_document(self.save_document(), **kwargs)
+        party = PartySystem(
+            **kwargs, active_party=initial.active_party, character_states=initial.character_states,
+        )
+        party.join("Alvan", shared_experience=initial.save_data.experience)
+        alvan = party.active_party[-1]
+        departure_level = alvan.internal_level
+        sword = alvan.proficiency(ProficiencyKind.SWORD)
+        sword.level, sword.progress = 2, 95
+        party.leave("Alvan")
+        new_level = departure_level + 3
+        shared_experience = required_experience_for_level(new_level) - alvan.experience_offset
+        initial.save_data.experience = shared_experience
+        alvan.refresh_internal_level(shared_experience)
+
+        document = create_save_document(
+            save_data=initial.save_data, active_party=party.active_party,
+            character_states=party.character_states, inventory=initial.inventory,
+            map_id=initial.map_id, position=initial.position, facing=initial.facing,
+        )
+        states = document["party"]["character_states"]
+        self.assertEqual(states["Alvan"]["departure_level"], departure_level)
+        self.assertEqual(states["Alvan"]["internal_level"], new_level)
+        loaded = restore_save_document(document, **kwargs)
+        restored_party = PartySystem(
+            **kwargs, active_party=loaded.active_party, character_states=loaded.character_states,
+        )
+        restored_party.join("Alvan", shared_experience=loaded.save_data.experience)
+        restored_sword = restored_party.active_party[-1].proficiency(ProficiencyKind.SWORD)
+        self.assertEqual((restored_sword.level, restored_sword.progress), (3, 13))
+
+        document["format_version"] = 4
+        for state in states.values():
+            del state["departure_level"]
+        legacy = restore_save_document(document, **kwargs)
+        legacy_alvan = legacy.character_states["Alvan"]
+        self.assertEqual(legacy_alvan.departure_level, new_level)
+        legacy_party = PartySystem(
+            **kwargs, active_party=legacy.active_party, character_states=legacy.character_states,
+        )
+        legacy_party.join("Alvan", shared_experience=legacy.save_data.experience)
+        legacy_sword = legacy_alvan.proficiency(ProficiencyKind.SWORD)
+        self.assertEqual((legacy_sword.level, legacy_sword.progress), (2, 95))
 
     def test_monster_level_round_trips_through_manual_and_auto_slots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

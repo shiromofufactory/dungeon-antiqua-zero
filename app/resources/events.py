@@ -130,7 +130,9 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or not _commands_are_valid(command.get("else"), depth=depth + 1)
             ):
                 return False
-        elif command_type in ("end_event", "stop_bgm", "reset_game"):
+        elif command_type in (
+            "end_event", "stop_bgm", "reset_game", "recover_party", "recover_party_without_revive"
+        ):
             if set(command) != {"command"}:
                 return False
         elif command_type == "message":
@@ -170,9 +172,6 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
                 or not _positive_integer(frames)
                 or frames % 6 != 0
             ):
-                return False
-        elif command_type == "recover_party":
-            if set(command) != {"command"}:
                 return False
         elif command_type == "open_shop":
             if set(command) != {"command", "shop_key"} or not isinstance(

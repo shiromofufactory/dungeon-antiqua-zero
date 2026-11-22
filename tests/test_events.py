@@ -13,7 +13,9 @@ from app.member import (
 from app.resources.events import EventCatalog, EventResourceError
 from app.state import LaunchMode, SaveData
 from app.systems import (
+    BattleProgression,
     ChangeBrightnessEffect,
+    EnemyProgressionData,
     StopBgmEffect,
     ResetGameEffect,
     ShakeScreenEffect,
@@ -376,7 +378,9 @@ class EventRunnerTest(unittest.TestCase):
         self.inventory = InventorySystem(self.items)
         self.save_data = SaveData()
 
-    def runner(self, commands: list[dict[str, object]]) -> EventRunner:
+    def runner(
+        self, commands: list[dict[str, object]], *, launch_mode: LaunchMode = LaunchMode.NORMAL,
+    ) -> EventRunner:
         catalog = EventCatalog.from_document(runtime_document(commands))
         return EventRunner.from_catalog(
             catalog,
@@ -385,6 +389,7 @@ class EventRunnerTest(unittest.TestCase):
             save_data=self.save_data,
             party=self.party,
             inventory=self.inventory,
+            launch_mode=launch_mode,
         )
 
     def test_mutates_state_and_waits_for_external_effects_in_order(self) -> None:
@@ -521,37 +526,86 @@ class EventRunnerTest(unittest.TestCase):
         self.party.join("Alvan")
         alvan = self.party.active_party[-1]
         alvan.hp = 1
+        experience = required_experience_for_level(10)
+        alvan.refresh_internal_level(experience)
 
         self.party.leave("Alvan")
-        self.party.join("Alvan")
+        self.party.join("Alvan", shared_experience=experience)
 
         self.assertIs(self.party.active_party[-1], alvan)
         self.assertEqual(self.party.active_party[-1].hp, 1)
+        sword = alvan.proficiency(ProficiencyKind.SWORD)
+        self.assertEqual((sword.level, sword.progress), (1, 0))
+        self.assertIsNone(alvan.departure_level)
 
-    def test_rejoining_uses_the_higher_proficiency_for_each_kind(self) -> None:
+    def test_leaving_while_dead_revives_member_and_enables_off_party_growth(self) -> None:
+        self.party.join("Alvan")
+        alvan = self.party.active_party[-1]
+        alvan.take_damage(alvan.hp)
+        alvan.mp = 0
+
+        self.runner([{"command": "leave_party", "character_key": "Alvan"}]).advance()
+
+        self.assertFalse(self.party.contains("Alvan"))
+        self.assertIs(self.party.character_states["Alvan"], alvan)
+        self.assertEqual((alvan.hp, alvan.mp), (alvan.max_hp, 0))
+        progression = BattleProgression((EnemyProgressionData(5, 4, 1, 0),))
+        progression.settle(
+            self.save_data, self.party.active_party, character_states=self.party.character_states,
+        )
+        self.assertEqual((alvan.experience_offset, alvan.internal_level), (0, 2))
+
+    def test_rejoining_adds_progress_for_levels_gained_while_away(self) -> None:
+        self.records[1][ProficiencyKind.SACRED.value] = 2
+        self.records[1][ProficiencyKind.MYSTIC.value] = 0
         self.party.join("Alvan")
         alvan = self.party.active_party[-1]
         alvan.proficiency(ProficiencyKind.SWORD).level = 3
-        alvan.proficiency(ProficiencyKind.SWORD).progress = 15
-        alvan.proficiency(ProficiencyKind.SACRED).progress = 50
+        alvan.proficiency(ProficiencyKind.SWORD).progress = 95
+        alvan.proficiency(ProficiencyKind.SACRED).progress = 95
         alvan.hp = 1
         original_max_mp = alvan.max_mp
 
         self.party.leave("Alvan")
         self.assertTrue(alvan.has_joined)
-        self.party.join("Alvan", shared_experience=required_experience_for_level(10))
+        progression = BattleProgression((EnemyProgressionData(12, 7, 1, 0),))
+        progression.settle(
+            self.save_data, self.party.active_party, character_states=self.party.character_states,
+        )
+        self.assertEqual((alvan.departure_level, alvan.internal_level), (1, 10))
+        self.runner([
+            {"command": "join_party", "character_key": "Alvan"},
+            {"command": "join_party", "character_key": "Alvan"},
+        ]).advance()
 
         self.assertIs(self.party.active_party[-1], alvan)
-        self.assertEqual(alvan.internal_level, 10)
         self.assertEqual(alvan.experience_offset, 0)
         for kind, expected in (
-            (ProficiencyKind.SWORD, (3, 15)),
-            (ProficiencyKind.SACRED, (1, 50)),
-            (ProficiencyKind.MYSTIC, (1, 45)),
+            (ProficiencyKind.SWORD, (4, 40)),
+            (ProficiencyKind.SACRED, (2, 49)),
+            (ProficiencyKind.MYSTIC, (0, 0)),
         ):
             current = alvan.proficiency(kind)
             self.assertEqual((current.level, current.progress), expected)
         self.assertEqual((alvan.hp, alvan.max_mp), (1, original_max_mp))
+
+    def test_rejoining_preserves_proficiency_at_or_above_the_mode_cap(self) -> None:
+        self.party.join("Alvan")
+        alvan = self.party.active_party[-1]
+        sword = alvan.proficiency(ProficiencyKind.SWORD)
+        sword.level, sword.progress = 2, 95
+        sacred = alvan.proficiency(ProficiencyKind.SACRED)
+        sacred.level, sacred.progress = 3, 15
+        self.party.leave("Alvan")
+        self.save_data.experience = required_experience_for_level(5)
+
+        self.runner(
+            [{"command": "join_party", "character_key": "Alvan"}],
+            launch_mode=LaunchMode.EXHIBITION,
+        ).advance()
+
+        self.assertEqual((sword.level, sword.progress), (2, 99))
+        self.assertEqual((sacred.level, sacred.progress), (3, 15))
 
     def test_join_records_all_npc_equipment_and_keeps_records_after_leaving(self) -> None:
         self.records[1]["type"] = "NPC"

@@ -248,7 +248,9 @@ def _validate_command_list(
                 ):
                     continue
                 _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context, battle_ids=battle_ids)
-        elif command_type in ("end_event", "stop_bgm", "reset_game"):
+        elif command_type in (
+            "end_event", "stop_bgm", "reset_game", "recover_party", "recover_party_without_revive"
+        ):
             _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "message":
             _known_fields(command, {"command", "message_id"}, diagnostics, command_path)
@@ -280,8 +282,6 @@ def _validate_command_list(
             frames = command.get("frames")
             if not _is_positive_int(frames) or frames % 6 != 0:
                 _diagnostic(diagnostics, "error", f"invalid_{command_type}_frames", f"{command_path}.frames", "framesは6以上の6の倍数の整数で指定してください。")
-        elif command_type == "recover_party":
-            _known_fields(command, {"command"}, diagnostics, command_path)
         elif command_type == "open_shop":
             _known_fields(command, {"command", "shop_key"}, diagnostics, command_path)
             shop_key = command.get("shop_key")

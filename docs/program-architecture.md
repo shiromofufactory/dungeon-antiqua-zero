@@ -1385,8 +1385,10 @@ NPCの空き枠へ追加した装備は固定せず、取り外しや
 各 `ProficiencyKind` に対応付ける。列の意味は [コンテンツ運用](content-workflow.md) を参照する。
 `Proficiency.for_joining_member()` は適性、加入時の内部LV、調整値から
 [企画仕様](../content/docs/da0.md#レベルアップ) の初期値を計算する。
-`Member` は種別ごとの現在レベルと熟練度を保持する。`PartySystem` は再加入時に
+`Member` は種別ごとの現在レベルと熟練度を保持する。`PartySystem` と `DebugPartyEditor` は
+離脱時の内部LV保存と復活を `Member.record_departure()` に委ねる。再加入時は
 `Member.refresh_rejoining_growth()` で [再加入時の規則](./features/events.md#パーティとアイテム) を適用する。
+`ProficiencyAptitude` は初加入と再加入で共通の内部LVあたりの熟練度係数を提供する。
 ステータスメニューOverlayでは適性0（使用不可）の武器・呪文のレベルと熟練度を `DISABLED_COLOR` で表示する。
 ステータスメニューOverlayでは適性2（得意）の武器・呪文に限り、種別アイコンの開始位置から8px左の同じ高さへ
 得意マーカー（共通画像バンクの `(152, 24)` から8×8px）を表示する。
@@ -1606,6 +1608,7 @@ Gameは起動中の状態を保持してOverlayへ注入し、開始要求を受
 デバッグ用ダンジョンは `debug_dungeon.py` が定義の検証と1回の入場中の進行を、
 `scenes/debug_dungeon.py` が3択・警告・取得メッセージと描画を所有する。
 Gameは開始・退出Transition、既存BattleSceneと通常メニューへの接続、手動保存・復元とオートセーブ抑止を調停する。
+退出時の回復は、退出理由に応じた復活の有無を `PartySystem.recover_all()` に渡す。
 専用SceneへGameの参照は渡さず、必要なSystemと開始・メニュー・退出コールバックを注入する。
 回復の泉はイベント開始コールバックを通して既存のEventRunnerへ接続し、Gameがイベントの
 更新・メッセージ描画と終了通知を調停する。試行イベント中は退避中のフィールドを更新しない。

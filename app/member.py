@@ -124,6 +124,14 @@ class ProficiencyAptitude(IntEnum):
             ProficiencyAptitude.FAVORED: 9,
         }[self]
 
+    @property
+    def progress_per_internal_level(self) -> int:
+        return {
+            ProficiencyAptitude.DISABLED: 0,
+            ProficiencyAptitude.NORMAL: 5,
+            ProficiencyAptitude.FAVORED: 6,
+        }[self]
+
 
 EnumValue = TypeVar("EnumValue", bound=StrEnum)
 
@@ -367,10 +375,8 @@ class Proficiency:
         if is_fiora:
             return cls(aptitude, level=1, progress=0)
 
-        if aptitude is ProficiencyAptitude.FAVORED:
-            total = 160 + internal_level * 6
-        else:
-            total = 95 + internal_level * 5
+        base = 160 if aptitude is ProficiencyAptitude.FAVORED else 95
+        total = base + internal_level * aptitude.progress_per_internal_level
         total += level_adjustment * 100
         total = min(max(total, 0), aptitude.max_level * 100 + 99)
         level, progress = divmod(total, 100)
@@ -815,6 +821,7 @@ class Member:
     slow_turns: int = 0
     defense_down_turns: int = 0
     has_joined: bool = True
+    departure_level: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
@@ -846,6 +853,16 @@ class Member:
             raise ValueError("Fiora's experience offset must be zero")
         if not isinstance(self.has_joined, bool):
             raise TypeError("has_joined must be a boolean")
+        if self.departure_level is not None:
+            if isinstance(self.departure_level, bool) or not isinstance(
+                self.departure_level, int
+            ):
+                raise TypeError("departure_level must be an integer or None")
+            if not MIN_INTERNAL_LEVEL <= self.departure_level <= MAX_INTERNAL_LEVEL:
+                raise ValueError(
+                    f"departure_level must be from {MIN_INTERNAL_LEVEL} "
+                    f"to {MAX_INTERNAL_LEVEL}"
+                )
         if not isinstance(self.proficiencies, dict):
             raise TypeError("proficiencies must be a dictionary")
         if not self.proficiencies:
@@ -1068,18 +1085,27 @@ class Member:
         )
         return self.internal_level
 
-    def refresh_rejoining_growth(self, shared_experience: int) -> None:
-        """Bring each proficiency up to its starting value at the current level."""
+    def record_departure(self) -> None:
+        """Record the starting level for off-party growth and revive if needed."""
+
+        self.departure_level = self.internal_level
+        self.revive(100)
+
+    def refresh_rejoining_growth(
+        self, shared_experience: int, *, level_limit: int | None = None,
+    ) -> None:
+        """Add proficiency progress for internal levels gained since departure."""
 
         self.refresh_internal_level(shared_experience)
-        for kind, current in self.proficiencies.items():
-            starting = Proficiency.for_joining_member(
-                current.aptitude,
-                self.internal_level,
-                level_adjustment=self.definition.proficiency_level_adjustments[kind],
+        if self.departure_level is None:
+            return
+        levels_gained = max(0, self.internal_level - self.departure_level)
+        for proficiency in self.proficiencies.values():
+            proficiency.add_progress(
+                levels_gained * proficiency.aptitude.progress_per_internal_level,
+                level_limit=level_limit,
             )
-            if (starting.level, starting.progress) > (current.level, current.progress):
-                self.proficiencies[kind] = starting
+        self.departure_level = None
 
     def calculated_max_hp(self) -> int:
         """Return the current internal-level HP ceiling without mutating state."""

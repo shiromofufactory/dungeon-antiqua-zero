@@ -72,7 +72,13 @@ class PartySystem:
         self._active_party = party
         self._character_states = states
 
-    def join(self, character_key: str, *, shared_experience: int = 0) -> bool:
+    def join(
+        self,
+        character_key: str,
+        *,
+        shared_experience: int = 0,
+        proficiency_level_limit: int | None = None,
+    ) -> bool:
         if isinstance(shared_experience, bool) or not isinstance(
             shared_experience, int
         ):
@@ -100,7 +106,9 @@ class PartySystem:
             member.set_joining_experience_offset(shared_experience)
             self._character_states[character_key] = member
         else:
-            member.refresh_rejoining_growth(shared_experience)
+            member.refresh_rejoining_growth(
+                shared_experience, level_limit=proficiency_level_limit,
+            )
         member.has_joined = True
         self._active_party = (*self._active_party, member)
         return True
@@ -118,14 +126,16 @@ class PartySystem:
         )
         if not remaining:
             raise PartySystemError("party must not be empty")
+        self._character_states[character_key].record_departure()
         self._active_party = remaining
         return True
 
-    def recover_all(self) -> None:
-        """Fully recover every member of the active party."""
+    def recover_all(self, *, revive: bool = True) -> None:
+        """Fully recover active members, optionally including those who have died."""
 
         for member in self._active_party:
-            member.fully_recover()
+            if revive or member.is_alive:
+                member.fully_recover()
 
     def _require_character(self, character_key: str) -> None:
         if not isinstance(character_key, str):
