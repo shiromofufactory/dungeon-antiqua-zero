@@ -339,6 +339,18 @@
       ]
     },
     {
+      "id": "dungeon_894a42e426d346f8bd38d738e43cfa26",
+      "name": "漆黒の森カスミイベント",
+      "bgm_id": "da3-forest",
+      "steps": [
+        {
+          "id": "event_battle_f0fe3003d14b42c0a582a630bb44f6ae",
+          "type": "event_battle",
+          "battle_id": "battle_19"
+        }
+      ]
+    },
+    {
       "id": "dungeon_611363b45e5940d09f9a94b76c04adb9",
       "name": "大雪原",
       "bgm_id": "da3-snowfield",

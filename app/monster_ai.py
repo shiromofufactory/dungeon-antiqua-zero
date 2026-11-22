@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TypeVar
 
 if __package__ == "":
     from monster import MonsterBattleState, MonsterDefinition, MonsterSpecialAction
@@ -124,6 +125,23 @@ def prefer_monster_targets(
     return tuple(index for index in indexes if is_incapacitated(index)) or indexes
 
 
+AttackTarget = TypeVar("AttackTarget")
+
+
+def monster_attack_targets(
+    visible_targets: Iterable[AttackTarget], *,
+    special_actions: Sequence[MonsterSpecialAction], is_front_row: bool,
+    target_is_front_row: Callable[[AttackTarget], bool],
+) -> tuple[AttackTarget, ...]:
+    """Apply normal attack reach to the living, visible targets."""
+
+    if MonsterSpecialAction.RANGED_ATTACK in special_actions:
+        return tuple(visible_targets)
+    if is_front_row:
+        return tuple(target for target in visible_targets if target_is_front_row(target))
+    return ()
+
+
 def reinforcement_target(
     caller: MonsterDefinition,
     definitions: Sequence[MonsterDefinition],
@@ -186,9 +204,10 @@ def monster_action_candidates(
     if MonsterSpecialAction.TEMPTATION in special_actions and can_tempt:
         candidates.append(MonsterAction.TEMPTATION)
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
-    if is_front_row and can_attack:
+    can_attack_from_row = is_front_row or MonsterSpecialAction.RANGED_ATTACK in special_actions
+    if can_attack_from_row and can_attack:
         candidates.append(MonsterAction.ATTACK)
-    elif not is_front_row and intelligence != 3 and (intelligence <= 1 or not candidates):
+    elif not can_attack_from_row and intelligence != 3 and (intelligence <= 1 or not candidates):
         candidates.append(MonsterAction.IDLE)
     return tuple(candidates)
 
@@ -208,11 +227,12 @@ def rotate_monster_action(
     )
     count = len(rotation)
     start = choose_start(count) if next_index is None else next_index
+    can_attack_from_row = is_front_row or MonsterSpecialAction.RANGED_ATTACK in special_actions
     for offset in range(count):
         index = (start + offset) % count
         action = rotation[index]
         following = (index + 1) % count
-        if action is MonsterAction.ATTACK and not is_front_row:
+        if action is MonsterAction.ATTACK and not can_attack_from_row:
             return MonsterAction.IDLE, following
         if action in candidates:
             return action, following
@@ -244,11 +264,11 @@ def select_monster_action(
     by comparing one random living member's actual attack against the
     monster's attack multiplied by a random value from 1.0 through 2.0.
     Without a priority action, eligible specials and spells have the same
-    weight as a normal attack. A rear-row monster receives one idle candidate
-    at intelligence 0 or 1, or when no other action is available. Call uses a
-    3/4 candidate gate below intelligence 2. At intelligence 2 or higher it
-    takes priority when the first available slot is 0 or 1. At intelligence 3,
-    available actions instead follow a fixed rotation with a random start.
+    weight as a normal attack. A rear-row monster without ranged reach receives
+    one idle candidate at intelligence 0 or 1, or when no other action is available.
+    Call uses a 3/4 candidate gate below intelligence 2. At intelligence 2 or
+    higher it takes priority when the first available slot is 0 or 1. At intelligence 3,
+    available actions follow a fixed rotation with a random start.
     """
 
     if not isinstance(is_front_row, bool):
@@ -329,6 +349,7 @@ __all__ = [
     "MonsterSpellTarget",
     "MonsterSpellCandidate",
     "evaluate_monster_spell",
+    "monster_attack_targets",
     "prefer_monster_targets",
     "reinforcement_arrives",
     "reinforcement_target",

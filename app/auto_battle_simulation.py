@@ -65,8 +65,8 @@ if __package__:
     from .monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from .monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
-        evaluate_monster_spell, monster_action_candidates, prefer_monster_targets,
-        rotate_monster_action,
+        evaluate_monster_spell, monster_action_candidates, monster_attack_targets,
+        prefer_monster_targets, rotate_monster_action,
     )
     from .resistance import ResistanceType
     from .spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
@@ -130,8 +130,8 @@ else:
     from monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
-        evaluate_monster_spell, monster_action_candidates, prefer_monster_targets,
-        rotate_monster_action,
+        evaluate_monster_spell, monster_action_candidates, monster_attack_targets,
+        prefer_monster_targets, rotate_monster_action,
     )
     from resistance import ResistanceType
     from spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
@@ -1295,7 +1295,7 @@ class BattleForecast:
         allies = self.allies()
         available = tuple(a for a in allies if not a.hidden)
         temptation_targets = tuple(a for a in allies if a.spec.gender is Gender.MALE)
-        melee = tuple(a for a in available if a.front) if actor.front else ()
+        attack_targets = self._enemy_attack_targets(actor, allies)
         escape = False
         if (
             MonsterSpecialAction.ESCAPE in actor.spec.special_actions
@@ -1357,7 +1357,7 @@ class BattleForecast:
         candidates = monster_action_candidates(
             special_actions=actor.spec.special_actions,
             is_front_row=actor.front,
-            can_attack=bool(melee),
+            can_attack=bool(attack_targets),
             can_charge=bool(available),
             can_breathe=bool(available),
             can_earthquake=bool(allies),
@@ -1541,10 +1541,10 @@ class BattleForecast:
                             target.poisoned = True
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
             charged = action is MonsterAction.CHARGE
-            self.enemy_attack(actor, available if charged else melee, charged=charged)
+            self.enemy_attack(actor, available if charged else attack_targets, charged=charged)
             if not charged and MonsterSpecialAction.DOUBLE_ATTACK in actor.spec.special_actions:
                 self.normalize()
-                targets = tuple(a for a in self.allies() if a.front and not a.hidden)
+                targets = self._enemy_attack_targets(actor, self.allies())
                 if targets and not self.party_defeated:
                     self.enemy_attack(actor, targets, roll_offset=5)
             delay = -16 if charged else 0
@@ -1590,6 +1590,16 @@ class BattleForecast:
         return prefer_monster_targets(
             indexes, intelligence=actor.spec.intelligence,
             is_incapacitated=is_incapacitated,
+        )
+
+    def _enemy_attack_targets(
+        self, actor: ForecastActor, allies: tuple[ForecastActor, ...],
+    ) -> tuple[ForecastActor, ...]:
+        return monster_attack_targets(
+            (ally for ally in allies if not ally.hidden),
+            special_actions=actor.spec.special_actions,
+            is_front_row=actor.front,
+            target_is_front_row=lambda ally: ally.front,
         )
 
     def enemy_attack(self, actor, targets, *, charged=False, roll_offset=0):
@@ -1646,8 +1656,7 @@ class BattleForecast:
             if friendly:
                 targets = friendly
             else:
-                visible = tuple(a for a in self.allies() if not a.hidden)
-                targets = tuple(a for a in visible if a.front) if actor.front else ()
+                targets = self._enemy_attack_targets(actor, self.allies())
         else:
             friendly = tuple(
                 a

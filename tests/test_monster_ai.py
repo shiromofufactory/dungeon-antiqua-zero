@@ -26,7 +26,7 @@ from resources import load_record_array
 class MonsterSpecialActionDataTest(unittest.TestCase):
     def test_parses_each_one_character_action_at_the_data_boundary(self) -> None:
         self.assertEqual(
-            monster_special_actions_from_record({"special": "逃突援呼会毒炎"}),
+            monster_special_actions_from_record({"special": "逃突援呼会毒炎遠"}),
             (
                 MonsterSpecialAction.ESCAPE,
                 MonsterSpecialAction.CHARGE,
@@ -35,6 +35,7 @@ class MonsterSpecialActionDataTest(unittest.TestCase):
                 MonsterSpecialAction.POWER_HIT,
                 MonsterSpecialAction.POISON_BREATH,
                 MonsterSpecialAction.FIRE_BREATH,
+                MonsterSpecialAction.RANGED_ATTACK,
             ),
         )
 
@@ -109,6 +110,21 @@ class MonsterReinforcementRuleTest(unittest.TestCase):
 
 
 class MonsterActionSelectionTest(unittest.TestCase):
+    def test_rear_ranged_attack_uses_the_normal_rotation_slot(self) -> None:
+        state = MonsterBattleState(max_hp=20)
+        state.action_rotation_index = 1
+        arguments = dict(
+            special_actions=(MonsterSpecialAction.RANGED_ATTACK,),
+            is_front_row=False, can_charge=False, party_actual_attacks=(),
+            monster_attack=20, spell_keys=("SLOW",), intelligence=3,
+            rotation_state=state, learned_spell_keys=("SLOW",),
+        )
+
+        self.assertIs(select_monster_action(**arguments, can_attack=True), MonsterAction.ATTACK)
+        self.assertEqual(state.action_rotation_index, 0)
+        self.assertEqual(select_monster_action(**arguments, can_attack=True), MonsterSpellAction("SLOW"))
+        self.assertEqual(select_monster_action(**arguments, can_attack=False), MonsterSpellAction("SLOW"))
+
     def test_rotation_includes_eligible_specials_on_their_turn(self):
         state = MonsterBattleState(max_hp=20)
         arguments = dict(

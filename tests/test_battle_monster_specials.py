@@ -513,6 +513,36 @@ class MonsterPowerHitTest(unittest.TestCase):
                     self.assertEqual(damage, expected_damage)
 
 
+class MonsterRangedAttackTest(unittest.TestCase):
+    def test_kasumi_uses_normal_attack_against_either_row(self):
+        record = next(
+            record for record in load_record_array("monsters.json")
+            if record["name_en"] == "Kasumi"
+        )
+        scene = BattleScene.__new__(BattleScene)
+        scene.party = tuple(
+            SimpleNamespace(hp=hp, is_front_row=front, resistances=())
+            for hp, front in ((30, True), (30, False), (30, False), (0, True), (30, True))
+        )
+        scene.hidden_party_indexes = {2}
+        scene.escaped_party_indexes = {4}
+        scene._resolve_monster_attack = Mock(
+            return_value=(1, SimpleNamespace(hit=True, damage=10)),
+        )
+        scene._resolve_monster_attack_additional_effects = Mock(return_value=())
+
+        for front in (True, False):
+            with self.subTest(front=front), patch("scenes.battle.play_se"):
+                actor = BattleMonster.from_record(record, is_front_row=front)
+                scene.monsters = (actor,)
+                self.assertIs(scene._select_monster_action(actor), MonsterAction.ATTACK)
+                scene._begin_standard_monster_attack(actor)
+                scene._resolve_monster_attack.assert_called_with(
+                    actor, (0, 1), attack=actor.combat_stats.attack,
+                )
+                self.assertEqual(scene.monster_attack_target_index, 1)
+
+
 class MonsterDoubleAttackTest(unittest.TestCase):
     def _make_scene(self, party):
         record = next(

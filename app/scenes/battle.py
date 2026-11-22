@@ -69,6 +69,7 @@ from monster_ai import (
     MonsterSpellCandidate,
     MonsterSpellTarget,
     evaluate_monster_spell,
+    monster_attack_targets,
     prefer_monster_targets,
     reinforcement_arrives,
     reinforcement_target,
@@ -9113,13 +9114,12 @@ class BattleScene:
         self,
         actor: BattleMonster,
     ) -> tuple[int, ...]:
-        if not actor.is_front_row:
-            return ()
-        return tuple(
-            index
-            for index in self._active_party_indexes()
-            if self._party_member_is_front_row(index)
-            and index not in getattr(self, "hidden_party_indexes", set())
+        hidden = getattr(self, "hidden_party_indexes", set())
+        return monster_attack_targets(
+            (index for index in self._active_party_indexes() if index not in hidden),
+            special_actions=actor.special_actions,
+            is_front_row=actor.is_front_row,
+            target_is_front_row=self._party_member_is_front_row,
         )
 
     def _monster_charge_target_indexes(self) -> tuple[int, ...]:

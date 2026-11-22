@@ -219,6 +219,27 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             forecast.enemy_turn(actor)
         self.assertEqual((actor.hp, actor.mp, ally.hp), (53, 2, 0))
 
+    def test_rear_ranged_enemy_forecast_can_hit_a_visible_rear_member_twice(self):
+        front = self.specs[0]
+        rear = replace(self.specs[1], front=False)
+        hidden = replace(self.specs[2], front=False, hidden=True)
+        enemy = self.enemy(
+            front=False, attack=100, hit=200,
+            special_actions=(MonsterSpecialAction.RANGED_ATTACK, MonsterSpecialAction.DOUBLE_ATTACK),
+        )
+        forecast = BattleForecast(self.snapshot(enemy, front, rear, hidden, active=5), 0)
+        actor = forecast.actors[5]
+        with (
+            patch.object(forecast, "roll", side_effect=lambda _, __, purpose: 0.99 if purpose in (1, 6) else 0.0),
+            patch.object(forecast, "enemy_physical", wraps=forecast.enemy_physical) as physical,
+        ):
+            forecast.enemy_turn(actor)
+
+        self.assertEqual([call.args[1].spec.number for call in physical.call_args_list], [1, 1])
+        self.assertLess(forecast.actors[1].hp, rear.hp)
+        self.assertEqual(forecast.actors[0].hp, front.hp)
+        self.assertEqual(forecast.actors[2].hp, hidden.hp)
+
     def test_enemy_double_attack_forecast_retargets_after_front_member_dies(self):
         front = replace(self.specs[0], hp=1)
         rear = replace(self.specs[1], front=False)

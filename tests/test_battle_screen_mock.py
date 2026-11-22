@@ -5088,7 +5088,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.hidden_party_indexes = {1}
         mock._active_party_indexes = Mock(return_value=(0, 1, 2))
         mock._party_member_is_front_row = Mock(return_value=True)
-        actor = SimpleNamespace(is_front_row=True)
+        actor = SimpleNamespace(is_front_row=True, special_actions=())
 
         self.assertEqual(mock._monster_attack_target_indexes(actor), (0, 2))
         self.assertEqual(mock._monster_charge_target_indexes(), (0, 2))
@@ -10937,7 +10937,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock._update_formation_animation()
         self.assertIs(mock.phase, BattleMockPhase.TIMELINE)
         self.assertEqual(mock.timeline_advance.after.actors, (visuals[1],))
-        enemy = SimpleNamespace(is_front_row=True)
+        enemy = SimpleNamespace(is_front_row=True, special_actions=())
         self.assertEqual(mock._monster_attack_target_indexes(enemy), (1,))
 
     def test_final_living_member_departure_starts_escape_message(self) -> None:

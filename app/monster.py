@@ -89,6 +89,7 @@ class MonsterSpecialAction(StrEnum):
     EARTHQUAKE = "地"
     TEMPTATION = "誘"
     DOUBLE_ATTACK = "連"
+    RANGED_ATTACK = "遠"
 
 
 def monster_spell_keys_from_record(
