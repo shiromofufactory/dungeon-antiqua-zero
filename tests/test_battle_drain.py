@@ -15,7 +15,7 @@ from resistance import ResistanceType
 from resources import load_record_array
 from resources.audio import sound_effect_definition
 from scenes.battle import (
-    ATTACK_CRITICAL_SE_ID, BATTLE_DRAIN_SE_ID, BattleMonster, MONSTER_DRAIN_HEAL_DELAY,
+    BATTLE_DRAIN_SE_ID, BATTLE_HIT_SE_ID, BattleMonster, MONSTER_DRAIN_HEAL_DELAY,
 )
 from tests.test_auto_battle import AutoBattleFixtures
 from tests.test_battle_monster_spells import spell_scene
@@ -89,7 +89,7 @@ class MonsterDrainTest(unittest.TestCase):
                 self.assertTrue(presentation.healing_applied)
                 self.assertEqual(scene.auto_battle_observations.enemy_net_damage, {0: -amount})
 
-    def test_critical_sound_replaces_hit_or_drain_for_every_monster_attack_path(self):
+    def test_critical_hits_keep_hit_or_drain_sound_for_every_monster_attack_path(self):
         for mode in ("attack", "charge", "confused"):
             for draining in (False, True):
                 with self.subTest(mode=mode, draining=draining):
@@ -120,7 +120,9 @@ class MonsterDrainTest(unittest.TestCase):
                             self.assertTrue(scene.action_presentation.confused_attack_results[0].is_critical)
                             scene._apply_action_results(scene.action_presentation)
                             scene._apply_action_results(scene.action_presentation)
-                        sound.assert_called_once_with(ATTACK_CRITICAL_SE_ID)
+                        sound.assert_called_once_with(
+                            BATTLE_DRAIN_SE_ID if draining else BATTLE_HIT_SE_ID
+                        )
                     self.assertEqual(actor.state.hp, 8 if draining else 1)
 
     def test_full_hp_keeps_drain_sound_but_omits_flight_and_recovery(self):

@@ -253,7 +253,7 @@ BATTLE_HIDE_SE_ID = "battle_hide"
 BATTLE_IDENTIFY_SE_ID = "battle_identify"
 ATTACK_SLASH_SE_ID = "battle_weapon_slash"
 ATTACK_BLUNT_SE_ID = "battle_weapon_blunt"
-ATTACK_CRITICAL_SE_ID = "battle_critical_hit"
+ATTACK_LIGHT_SE_ID = "battle_weapon_light"
 FADE_ESCAPE_BGM_FADE_FRAME_COUNT = DEFAULT_FADE_FRAME_COUNT
 PARTY_SPRITE_Y = (64, 92, 120, 148, 176)
 # Reuse the battle's otherwise unused dimmed block, as the former actor pulse did.
@@ -641,8 +641,8 @@ ATTACK_SE_ID_BY_SUBTYPE = {
     "KATANA": ATTACK_SLASH_SE_ID,
     "KNIFE": ATTACK_SLASH_SE_ID,
     "HAMMER": ATTACK_BLUNT_SE_ID,
-    "WAND": ATTACK_BLUNT_SE_ID,
-    "ROD": ATTACK_BLUNT_SE_ID,
+    "WAND": ATTACK_LIGHT_SE_ID,
+    "ROD": ATTACK_LIGHT_SE_ID,
     "SPEAR": ATTACK_SLASH_SE_ID,
 }
 ADDITIONAL_EFFECT_RESISTANCE = {
@@ -6278,13 +6278,9 @@ class BattleScene:
                         actor, result.damage, result.popup_x, result.popup_y
                     )
                     self._apply_monster_drain_healing()
-                    self._play_physical_hit_se(
-                        BATTLE_DRAIN_SE_ID, is_critical=result.is_critical
-                    )
+                    play_se(BATTLE_DRAIN_SE_ID)
                 else:
-                    self._play_physical_hit_se(
-                        BATTLE_HIT_SE_ID, is_critical=result.is_critical
-                    )
+                    play_se(BATTLE_HIT_SE_ID)
 
     def _delay_slow_target(self, target: Member | BattleMonster) -> None:
         """Reflect a successful SLOW in its target's waiting turn immediately."""
@@ -7519,12 +7515,6 @@ class BattleScene:
             promote_rear_monsters_if_front_empty(self.monsters)
         return tuple(applied)
 
-    @staticmethod
-    def _play_physical_hit_se(se_id: str, *, is_critical: bool) -> None:
-        """Use the shared critical sound for every successful physical hit."""
-
-        play_se(ATTACK_CRITICAL_SE_ID if is_critical else se_id)
-
     def _update_attack_presentation(self) -> None:
         """Apply each hand's hit, show its result, and start the return."""
 
@@ -7540,13 +7530,7 @@ class BattleScene:
             and not presentation.sound_played
             and presentation.elapsed_frame >= presentation.strikes[-1].hit_start_frame
         ):
-            self._play_physical_hit_se(
-                presentation.strikes[-1].sound_effect_id,
-                is_critical=any(
-                    strike.is_hit and strike.is_critical
-                    for strike in presentation.strikes
-                ),
-            )
+            play_se(presentation.strikes[-1].sound_effect_id)
             presentation.sound_played = True
         targets_enemy = presentation.target_side == "enemy"
         monster = self.monsters[presentation.target_index] if targets_enemy else None
@@ -7588,9 +7572,7 @@ class BattleScene:
                         )
                         self._refresh_party_hp_text(presentation.target_index)
                     if not presentation.is_iai:
-                        self._play_physical_hit_se(
-                            strike.sound_effect_id, is_critical=strike.is_critical
-                        )
+                        play_se(strike.sound_effect_id)
                 elif targets_enemy and (
                     presentation.is_iai or strike is presentation.strikes[0]
                 ):
@@ -10671,13 +10653,9 @@ class BattleScene:
                     self._begin_monster_drain(
                         actor, result.damage, position[0] + 14, position[1] + 16
                     )
-                self._play_physical_hit_se(
-                    BATTLE_DRAIN_SE_ID, is_critical=self.monster_attack_critical
-                )
+                play_se(BATTLE_DRAIN_SE_ID)
             else:
-                self._play_physical_hit_se(
-                    BATTLE_HIT_SE_ID, is_critical=self.monster_attack_critical
-                )
+                play_se(BATTLE_HIT_SE_ID)
 
     def _begin_monster_charge(self, actor: BattleMonster) -> None:
         """Start a ranged 1.5x charge toward one living party member."""
@@ -10794,13 +10772,9 @@ class BattleScene:
                             actor, presentation.damage, position[0] + 14, position[1] + 16
                         )
                         self._apply_monster_drain_healing()
-                    self._play_physical_hit_se(
-                        BATTLE_DRAIN_SE_ID, is_critical=presentation.is_critical
-                    )
+                    play_se(BATTLE_DRAIN_SE_ID)
                 else:
-                    self._play_physical_hit_se(
-                        BATTLE_HIT_SE_ID, is_critical=presentation.is_critical
-                    )
+                    play_se(BATTLE_HIT_SE_ID)
         elif presentation.damage_applied:
             self.monster_attack_animation_frame += 1
         if presentation.completed:

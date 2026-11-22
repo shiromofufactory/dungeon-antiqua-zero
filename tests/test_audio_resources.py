@@ -343,6 +343,7 @@ class BgmPlayerTest(unittest.TestCase):
                 "battle_identify",
                 "battle_monster_death",
                 "battle_weapon_blunt",
+                "battle_weapon_light",
                 "battle_weapon_slash",
                 "spell_healing1",
                 "result_increment",
@@ -356,9 +357,10 @@ class BgmPlayerTest(unittest.TestCase):
         self.assertEqual(sound_effect_definition("battle_focus").sound, 37)
         self.assertEqual(sound_effect_definition("battle_hide").sound, 30)
         self.assertEqual(sound_effect_definition("battle_identify").sound, 20)
+        self.assertNotIn("battle_critical_hit", list_se_ids())
         for se_id in (
             "battle_hit", "battle_monster_death", "battle_weapon_slash",
-            "battle_weapon_blunt", "battle_critical_hit",
+            "battle_weapon_blunt", "battle_weapon_light",
         ):
             with self.subTest(se_id=se_id):
                 self.assertEqual(sound_effect_definition(se_id).wav, f"{se_id}.wav")

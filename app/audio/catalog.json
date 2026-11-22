@@ -46,8 +46,8 @@
     "battle_weapon_blunt": {
       "wav": "battle_weapon_blunt.wav"
     },
-    "battle_critical_hit": {
-      "wav": "battle_critical_hit.wav"
+    "battle_weapon_light": {
+      "wav": "battle_weapon_light.wav"
     },
     "field_poison": {
       "sound": 43

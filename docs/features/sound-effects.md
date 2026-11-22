@@ -23,7 +23,7 @@
 配置済みの `spell_fire1.wav`、`spell_slow.wav`、`spell_poison1.wav`、`spell_healing1.wav` は、それぞれ
 `spell_fire1`、`spell_slow`、`spell_poison1`、`spell_healing1` へ割り当てる。
 `battle_hit`、`battle_monster_death`、`battle_weapon_slash`、`battle_weapon_blunt`、
-`battle_critical_hit` は、それぞれ同名のWAVへ割り当てる。
+`battle_weapon_light` は、それぞれ同名のWAVへ割り当てる。
 WAVはゲーム用素材として直接読み込み、BGMのOGG変換処理へ含めない。
 SE IDは呪文エフェクトとイベントから引き続き参照し、音源の切替時に参照側を書き換えない。
 再生元や再生状態はセーブデータへ保存しない。

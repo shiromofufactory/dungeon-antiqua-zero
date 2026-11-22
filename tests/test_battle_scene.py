@@ -37,8 +37,7 @@ from rendering import (
 )
 from scenes import BattleEncounter, BattleResult, BattleScene
 from scenes.battle import (
-    ATTACK_BLUNT_SE_ID,
-    ATTACK_CRITICAL_SE_ID,
+    ATTACK_LIGHT_SE_ID,
     ATTACK_SLASH_SE_ID,
     BATTLE_BGM_ID,
     BATTLE_BOSS_BGM_ID,
@@ -106,11 +105,11 @@ class BattlePhysicalSoundTest(unittest.TestCase):
             is_hit=hit, is_critical=critical, sound_effect_id=se_id,
         )
 
-    def test_dual_wield_plays_each_hands_normal_or_critical_sound_once(self):
+    def test_dual_wield_plays_each_weapons_sound_once_even_on_critical_hits(self):
         for target_side in ("enemy", "ally"):
             for critical_hand in (None, 0, 1):
                 with self.subTest(target_side=target_side, critical_hand=critical_hand):
-                    sounds = (ATTACK_SLASH_SE_ID, ATTACK_BLUNT_SE_ID)
+                    sounds = (ATTACK_SLASH_SE_ID, ATTACK_LIGHT_SE_ID)
                     scene = self.scene(tuple(
                         self.strike(critical=index == critical_hand, frame=1 + index * 2,
                                     se_id=se_id)
@@ -119,10 +118,7 @@ class BattlePhysicalSoundTest(unittest.TestCase):
                     with patch("scenes.battle.play_se") as sound:
                         for _ in range(4):
                             scene._update_attack_presentation()
-                    self.assertEqual(sound.call_args_list, [
-                        call(ATTACK_CRITICAL_SE_ID if index == critical_hand else se_id)
-                        for index, se_id in enumerate(sounds)
-                    ])
+                    self.assertEqual(sound.call_args_list, [call(se_id) for se_id in sounds])
 
     def test_critical_flag_on_a_miss_does_not_play_sound(self):
         scene = self.scene((self.strike(critical=True, hit=False),))
@@ -132,12 +128,12 @@ class BattlePhysicalSoundTest(unittest.TestCase):
         sound.assert_not_called()
         scene.monsters[0].state.take_damage.assert_not_called()
 
-    def test_iai_plays_one_sound_at_last_impact_using_any_successful_critical(self):
-        for critical_hand, critical_hit in ((None, True), (0, True), (1, True), (0, False)):
-            with self.subTest(critical_hand=critical_hand, critical_hit=critical_hit):
+    def test_iai_plays_one_slash_sound_at_last_impact_even_on_critical_hits(self):
+        for critical_target, critical_hit in ((None, True), (0, True), (1, True), (0, False)):
+            with self.subTest(critical_target=critical_target, critical_hit=critical_hit):
                 strikes = tuple(
-                    self.strike(critical=index == critical_hand,
-                                hit=critical_hit if index == critical_hand else True,
+                    self.strike(critical=index == critical_target,
+                                hit=critical_hit if index == critical_target else True,
                                 frame=1 + index * 2)
                     for index in range(2)
                 )
@@ -150,10 +146,7 @@ class BattlePhysicalSoundTest(unittest.TestCase):
                     sound.assert_not_called()
                     scene._update_attack_presentation()
                     scene._update_attack_presentation()
-                sound.assert_called_once_with(
-                    ATTACK_CRITICAL_SE_ID
-                    if critical_hand is not None and critical_hit else ATTACK_SLASH_SE_ID
-                )
+                sound.assert_called_once_with(ATTACK_SLASH_SE_ID)
 
 
 class BattlePaletteLifecycleTest(unittest.TestCase):

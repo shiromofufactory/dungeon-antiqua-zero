@@ -26,6 +26,7 @@ from tools.screen_mocks.battle import (
     FOCUSED_ATTACK_RETURN_WAIT_FRAME_COUNT,
     FADE_ESCAPE_BGM_FADE_FRAME_COUNT,
     ATTACK_BLUNT_SE_ID,
+    ATTACK_LIGHT_SE_ID,
     ATTACK_SE_ID_BY_SUBTYPE,
     ATTACK_SLASH_SE_ID,
     AIM_ATTACK_HIT_START_FRAME,
@@ -1835,19 +1836,15 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
-    def test_attack_sound_matches_da2_weapon_categories(self) -> None:
-        for subtype in ("SWORD", "KATANA", "KNIFE", "AXE", "SPEAR"):
-            with self.subTest(subtype=subtype):
-                self.assertEqual(
-                    ATTACK_SE_ID_BY_SUBTYPE[subtype],
-                    ATTACK_SLASH_SE_ID,
-                )
-        for subtype in ("HAMMER", "WAND", "ROD"):
-            with self.subTest(subtype=subtype):
-                self.assertEqual(
-                    ATTACK_SE_ID_BY_SUBTYPE[subtype],
-                    ATTACK_BLUNT_SE_ID,
-                )
+    def test_attack_sound_matches_weapon_categories(self) -> None:
+        for subtypes, se_id in (
+            (("SWORD", "KATANA", "KNIFE", "AXE", "SPEAR"), ATTACK_SLASH_SE_ID),
+            (("HAMMER",), ATTACK_BLUNT_SE_ID),
+            (("WAND", "ROD"), ATTACK_LIGHT_SE_ID),
+        ):
+            for subtype in subtypes:
+                with self.subTest(subtype=subtype):
+                    self.assertEqual(ATTACK_SE_ID_BY_SUBTYPE[subtype], se_id)
 
     def test_attack_composite_draws_back_weapon_character_and_front_weapon(self) -> None:
         pose = AttackPoseDefinition(

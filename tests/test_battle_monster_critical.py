@@ -68,7 +68,7 @@ class MonsterCriticalPresentationTest(unittest.TestCase):
                 self.assertGreater(scene.monster_attack_damage, 0)
                 self.assertTrue(scene.monster_attack_critical)
                 self.assertTrue(scene._critical_flash_visible())
-                sound.assert_called_once_with("battle_critical_hit")
+                sound.assert_called_once_with("battle_hit")
                 scene.settings = Settings(screen_flash_enabled=False)
                 with patch("scenes.battle.pyxel.blt") as blt:
                     scene._draw_critical_markers()
