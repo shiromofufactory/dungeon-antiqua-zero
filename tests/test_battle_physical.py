@@ -1,16 +1,49 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 
 from app.battle_physical import (
+    PhysicalAttackResult,
     member_physical_attack,
     physical_weapon_is_effective,
+    resolve_monster_attack_effects,
     resolve_physical_additional_effect,
     resolve_physical_attack,
 )
 from app.item import AdditionalEffect
 from app.monster import MonsterTribe
 from app.resistance import ResistanceType
+
+
+class MonsterPhysicalEffectsTest(unittest.TestCase):
+    def test_effects_share_one_roll_and_check_resistance_separately(self) -> None:
+        hit = PhysicalAttackResult(True, 1, 100.0, 100.0)
+        effects = (AdditionalEffect.POISON, AdditionalEffect.CONFUSE, AdditionalEffect.SLEEP)
+        for resistances, expected in (
+            ((), (AdditionalEffect.POISON, AdditionalEffect.CONFUSE)),
+            ((ResistanceType.CONFUSE,), (AdditionalEffect.POISON, AdditionalEffect.SLEEP)),
+        ):
+            with self.subTest(resistances=resistances):
+                roll = Mock(return_value=11)
+                self.assertEqual(resolve_monster_attack_effects(
+                    effects, hit, roll_effect=roll, target_is_member=True,
+                    target_resistances=resistances,
+                ), expected)
+                roll.assert_called_once_with()
+
+    def test_instant_death_takes_priority_and_a_miss_skips_the_roll(self) -> None:
+        effects = (AdditionalEffect.POISON, AdditionalEffect.DEATH, AdditionalEffect.STUN)
+        roll = Mock(return_value=0)
+        self.assertEqual(resolve_monster_attack_effects(
+            effects, PhysicalAttackResult(False, 0, 100.0, -1.0), roll_effect=roll,
+            target_is_member=False, target_resistances=(),
+        ), ())
+        roll.assert_not_called()
+        self.assertEqual(resolve_monster_attack_effects(
+            effects, PhysicalAttackResult(True, 1, 100.0, 100.0), roll_effect=roll,
+            target_is_member=False, target_resistances=(),
+        ), (AdditionalEffect.DEATH,))
 
 
 class PhysicalWeaponEffectivenessTest(unittest.TestCase):

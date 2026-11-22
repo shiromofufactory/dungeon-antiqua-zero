@@ -40,9 +40,11 @@ if __package__:
         spell_cast_delay,
     )
     from .battle_physical import (
+        PHYSICAL_EFFECT_RESISTANCE,
         PHYSICAL_STATUS_EFFECTS,
         drain_healing_amount,
         physical_weapon_is_effective,
+        resolve_monster_attack_effects,
         resolve_physical_additional_effect,
         resolve_physical_attack,
         counter_attack_succeeds,
@@ -103,9 +105,11 @@ else:
         spell_cast_delay,
     )
     from battle_physical import (
+        PHYSICAL_EFFECT_RESISTANCE,
         PHYSICAL_STATUS_EFFECTS,
         drain_healing_amount,
         physical_weapon_is_effective,
+        resolve_monster_attack_effects,
         resolve_physical_additional_effect,
         resolve_physical_attack,
         counter_attack_succeeds,
@@ -170,18 +174,6 @@ DIRECT_COMMANDS = frozenset(
         BattleCommand.DEFEND,
     )
 )
-EFFECT_RESISTANCE = {
-    AdditionalEffect.SLEEP: ResistanceType.SLEEP,
-    AdditionalEffect.CONFUSE: ResistanceType.CONFUSE,
-    AdditionalEffect.POISON: ResistanceType.POISON,
-    AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
-    AdditionalEffect.SILENCE: ResistanceType.SILENCE,
-    AdditionalEffect.DEATH: ResistanceType.DEATH,
-    AdditionalEffect.STUN: ResistanceType.STUN,
-    AdditionalEffect.DEFENSE_DOWN: None,
-}
-
-
 @dataclass(slots=True)
 class ForecastActor:
     spec: AutoCombatant
@@ -987,7 +979,7 @@ class BattleForecast:
             ):
                 effects.append((AdditionalEffect.DEATH, False))
             for effect, stacked in effects:
-                resistance = EFFECT_RESISTANCE[effect]
+                resistance = PHYSICAL_EFFECT_RESISTANCE[effect]
                 successful = resolve_physical_additional_effect(
                     effect=effect,
                     adjusted_hit=result.adjusted_hit,
@@ -1626,33 +1618,24 @@ class BattleForecast:
             if power_hit or target.incapacitated_for_physical_hit
             else None,
         )
-        effect = actor.spec.effect
-        if effect in PHYSICAL_STATUS_EFFECTS and (
-            result.hit or (target.defending and result.hit_value >= 0)
-        ):
-            success = resolve_physical_additional_effect(
-                effect=effect,
-                adjusted_hit=result.adjusted_hit,
-                effect_roll=int(self.roll(actor, target.spec.number, 4 + roll_offset) * 100),
-                target_is_member=True,
-                target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
-                target_is_resistant=EFFECT_RESISTANCE[effect]
-                in target.spec.resistances,
-                target_defending=target.defending,
-                critical=result.critical,
-            ).success
-        else:
-            success = False
-        self.apply_monster_drain(actor, result.damage)
+        effects = resolve_monster_attack_effects(
+            actor.spec.additional_effects,
+            result,
+            roll_effect=lambda: int(
+                self.roll(actor, target.spec.number, 4 + roll_offset) * 100
+            ),
+            target_is_member=not target.spec.enemy,
+            target_resistances=target.spec.resistances,
+            target_weaknesses=target.spec.weaknesses if target.spec.enemy else (),
+            target_defending=target.defending,
+        )
+        if AdditionalEffect.DRAIN in actor.spec.additional_effects:
+            actor.drain(result.damage)
         target.damage(result.damage)
-        if success and target.is_alive:
-            self.apply_extra(actor, target, effect)
+        if target.is_alive:
+            for effect in effects:
+                self.apply_extra(actor, target, effect)
         target.interrupt_focus()
-
-    @staticmethod
-    def apply_monster_drain(actor: ForecastActor, damage: int) -> None:
-        if actor.spec.enemy and actor.spec.effect is AdditionalEffect.DRAIN:
-            actor.drain(damage)
 
     def confused_turn(self, actor: ForecastActor) -> None:
         """Forecast DA2's forced same-side basic attack for one confused actor."""
@@ -1698,64 +1681,38 @@ class BattleForecast:
         """Apply one forced basic attack without assuming the target's side."""
 
         if actor.spec.enemy:
-            power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
-            results = (
-                resolve_physical_attack(
-                    attack=actor.spec.attack,
-                    hit=actor.spec.hit,
-                    target_defense=target.defense,
-                    target_evasion=target.evasion,
-                    hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
-                    target_defending=target.defending,
-                    target_incapacitated=target.incapacitated_for_physical_hit,
-                    attacker_has_power_hit=power_hit,
-                    critical_roll=(
-                        int(self.roll(actor, target.spec.number, 3) * 100)
-                        if power_hit or target.incapacitated_for_physical_hit
-                        else None
-                    ),
-                ),
-            )
-            effect_sources = (
-                ((actor.spec.effect, False),)
-                if actor.spec.effect in PHYSICAL_STATUS_EFFECTS
-                else (),
-            )
-        else:
-            results = tuple(
-                self.physical_results(
-                    actor,
-                    target,
-                    AutoAction(BattleCommand.ATTACK, (target.spec.number,)),
-                )
-            )
-            effect_sources = []
-            for weapon in actor.spec.weapons:
-                candidates = []
-                if weapon.effect in PHYSICAL_STATUS_EFFECTS:
-                    candidates.append(
-                        (
-                            weapon.effect,
-                            weapon.effect is AdditionalEffect.DEATH
-                            and actor.has_skill("Lethal"),
-                        )
+            if target.is_alive:
+                self.enemy_physical(actor, target)
+            return
+
+        results = self.physical_results(
+            actor,
+            target,
+            AutoAction(BattleCommand.ATTACK, (target.spec.number,)),
+        )
+        effect_sources = []
+        for weapon in actor.spec.weapons:
+            candidates = []
+            if weapon.effect in PHYSICAL_STATUS_EFFECTS:
+                candidates.append(
+                    (
+                        weapon.effect,
+                        weapon.effect is AdditionalEffect.DEATH
+                        and actor.has_skill("Lethal"),
                     )
-                if (
-                    actor.has_skill("Lethal")
-                    and weapon.effect is not AdditionalEffect.DEATH
-                ):
-                    candidates.append((AdditionalEffect.DEATH, False))
-                effect_sources.append(tuple(candidates))
+                )
+            if actor.has_skill("Lethal") and weapon.effect is not AdditionalEffect.DEATH:
+                candidates.append((AdditionalEffect.DEATH, False))
+            effect_sources.append(tuple(candidates))
 
         for hand, (result, candidates) in enumerate(zip(results, effect_sources)):
             if not target.is_alive or not result.hit:
                 continue
-            self.apply_monster_drain(actor, result.damage)
             target.damage(result.damage)
             for effect, stacked in candidates:
                 if not target.is_alive:
                     break
-                resistance = EFFECT_RESISTANCE[effect]
+                resistance = PHYSICAL_EFFECT_RESISTANCE[effect]
                 success = resolve_physical_additional_effect(
                     effect=effect,
                     adjusted_hit=result.adjusted_hit,
@@ -1775,8 +1732,7 @@ class BattleForecast:
                     target_defending=target.defending,
                     critical=result.critical,
                     weapon_effective=(
-                        not actor.spec.enemy
-                        and target.spec.enemy
+                        target.spec.enemy
                         and physical_weapon_is_effective(
                             effective_tribe=actor.spec.weapons[hand].effective_tribe,
                             target_tribe=target.spec.tribe,

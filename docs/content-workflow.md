@@ -216,11 +216,11 @@ npm run events:build
 Google Sheetsから共有JSONへ取り込む場合:
 
 ```sh
-npm run content:get-data
+npm run get-data
 git -C content diff -- data
 ```
 
-`content:get-data` は共有JSONの取得と検証に成功した後、`sync` を実行して
+`get-data` は共有コンテンツの作業ツリーがcleanな状態で実行する。共有JSONの取得と検証に成功した後、`sync` を実行して
 `app/data` も同じ内容へ更新する。取得または検証に失敗した場合は `app/data` を更新しない。
 
 キャラクターシートの加入時装備は、順序依存の複数行セルではなく
@@ -268,8 +268,10 @@ Member状態で管理する。
 検証では欠損、文字列、負数をエラーとする。回避率は `agi` から導出せず、`evasion` の値を
 直接使用する。
 モンスターの `special` は改行を含まない文字列とし、日本語1文字を1種類の特殊行動キーとして
-区切りなしで連結する。`extra` はアイテムと同じ許容値を使う。`spells` は空文字、または
-`spells.json` の既存 `name_en` キーを改行で区切った文字列とし、空行を含めない。
+区切りなしで連結する。`extra` は空文字、またはアイテムと共通の追加効果キーを
+区切りなしで連結した文字列とする。たとえば `毒眠乱` は毒・睡眠・混乱を表す。
+`spells` は空文字、または `spells.json` の既存 `name_en` キーを改行で区切った文字列とし、
+空行を含めない。
 モンスターの `treasure_item` は `items.json` に存在する空でない `name_en` キー、
 `treasure_rate` は0から16の整数とする。ドロップ確率は `treasure_rate / 16` で表す。
 

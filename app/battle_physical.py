@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 
 if __package__ == "":
@@ -24,18 +24,17 @@ STUN_BASE_RATE = 20
 DA2_MEMBER_DEATH_BASE_RATE = 6
 DA2_MONSTER_DEATH_BASE_RATE = 10
 
-PHYSICAL_STATUS_EFFECTS = frozenset(
-    (
-        AdditionalEffect.SLEEP,
-        AdditionalEffect.CONFUSE,
-        AdditionalEffect.DEATH,
-        AdditionalEffect.STUN,
-        AdditionalEffect.POISON,
-        AdditionalEffect.PARALIZE,
-        AdditionalEffect.SILENCE,
-        AdditionalEffect.DEFENSE_DOWN,
-    )
-)
+PHYSICAL_EFFECT_RESISTANCE = {
+    AdditionalEffect.SLEEP: ResistanceType.SLEEP,
+    AdditionalEffect.CONFUSE: ResistanceType.CONFUSE,
+    AdditionalEffect.DEATH: ResistanceType.DEATH,
+    AdditionalEffect.STUN: ResistanceType.STUN,
+    AdditionalEffect.POISON: ResistanceType.POISON,
+    AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
+    AdditionalEffect.SILENCE: ResistanceType.SILENCE,
+    AdditionalEffect.DEFENSE_DOWN: None,
+}
+PHYSICAL_STATUS_EFFECTS = frozenset(PHYSICAL_EFFECT_RESISTANCE)
 
 
 @dataclass(frozen=True)
@@ -339,6 +338,49 @@ def resolve_physical_additional_effect(
     )
 
 
+def resolve_monster_attack_effects(
+    effects: tuple[AdditionalEffect, ...],
+    result: PhysicalAttackResult,
+    *,
+    roll_effect: Callable[[], int],
+    target_is_member: bool,
+    target_resistances: Collection[ResistanceType],
+    target_weaknesses: Collection[ResistanceType] = (),
+    target_defending: bool = False,
+) -> tuple[AdditionalEffect, ...]:
+    """Resolve one monster hit using a shared roll and DA2's status priorities."""
+
+    if not result.hit and not (target_defending and result.hit_value >= 0):
+        return ()
+    candidates = tuple(effect for effect in effects if effect in PHYSICAL_STATUS_EFFECTS)
+    if not candidates:
+        return ()
+
+    effect_roll = roll_effect()
+    successful: list[AdditionalEffect] = []
+    for effect in candidates:
+        resistance = PHYSICAL_EFFECT_RESISTANCE[effect]
+        resolution = resolve_physical_additional_effect(
+            effect=effect,
+            adjusted_hit=result.adjusted_hit,
+            effect_roll=effect_roll,
+            target_is_member=target_is_member,
+            target_has_boss_resistance=ResistanceType.DEATH in target_resistances,
+            target_is_weak=resistance is not None and resistance in target_weaknesses,
+            target_is_resistant=resistance is not None and resistance in target_resistances,
+            target_defending=target_defending,
+            critical=result.critical,
+        )
+        if resolution.success:
+            if effect is AdditionalEffect.DEATH:
+                return (effect,)
+            successful.append(effect)
+
+    if AdditionalEffect.CONFUSE in successful and AdditionalEffect.SLEEP in successful:
+        successful.remove(AdditionalEffect.SLEEP)
+    return tuple(successful)
+
+
 def resolve_earthquake_attack(
     *, attack: int, hit: int, target_defense: int, hit_roll: int,
     target_defending: bool = False, target_floating: bool = False,
@@ -385,12 +427,14 @@ __all__ = [
     "DA2_MONSTER_DEATH_BASE_RATE",
     "DA2_MONSTER_STATUS_BASE_RATE",
     "DEFENDING_HIT_VALUE_THRESHOLD",
+    "PHYSICAL_EFFECT_RESISTANCE",
     "PHYSICAL_STATUS_EFFECTS",
     "PhysicalAdditionalEffectResult",
     "PhysicalAttackResult",
     "drain_healing_amount",
     "counter_attack_succeeds",
     "resolve_earthquake_attack",
+    "resolve_monster_attack_effects",
     "member_physical_attack",
     "physical_weapon_is_effective",
     "resolve_physical_additional_effect",

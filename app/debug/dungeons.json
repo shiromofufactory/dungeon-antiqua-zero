@@ -411,7 +411,7 @@
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {
@@ -441,7 +441,7 @@
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {
@@ -479,7 +479,7 @@
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {
@@ -573,7 +573,7 @@
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {
@@ -603,7 +603,7 @@
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {
@@ -641,7 +641,7 @@
             "allow_demons": false,
             "allow_humans": false,
             "allow_giants": true,
-            "allow_large_animals": true
+            "allow_large_animals": false
           }
         },
         {

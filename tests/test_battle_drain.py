@@ -15,7 +15,7 @@ from resistance import ResistanceType
 from resources import load_record_array
 from resources.audio import sound_effect_definition
 from scenes.battle import (
-    BATTLE_DRAIN_SE_ID, BATTLE_HIT_SE_ID, BattleMonster, MONSTER_DRAIN_HEAL_DELAY,
+    BATTLE_DRAIN_SE_ID, BATTLE_HIT_SE_ID, BattleDataError, BattleMonster, MONSTER_DRAIN_HEAL_DELAY,
 )
 from tests.test_auto_battle import AutoBattleFixtures
 from tests.test_battle_monster_spells import spell_scene
@@ -46,7 +46,7 @@ class MonsterDrainTest(unittest.TestCase):
         record = next(r for r in load_record_array("monsters.json")
                       if r["name_en"] == monster_key)
         actor = BattleMonster.from_record(record, is_front_row=True)
-        self.assertIs(actor.additional_effect, AdditionalEffect.DRAIN)
+        self.assertEqual(actor.additional_effects, (AdditionalEffect.DRAIN,))
         actor.state.hp = hp
         actor.combat_stats = replace(actor.combat_stats, attack=40, hit=100)
         scene = spell_scene(actor)
@@ -95,7 +95,7 @@ class MonsterDrainTest(unittest.TestCase):
                 with self.subTest(mode=mode, draining=draining):
                     scene, actor = self.scene()
                     if not draining:
-                        actor = replace(actor, additional_effect=None)
+                        actor = replace(actor, additional_effects=())
                     scene.monsters = (actor,)
                     result = PhysicalAttackResult(True, 7, 100.0, 100.0, critical=True)
                     with patch("scenes.battle.resolve_physical_attack", return_value=result), \
@@ -202,8 +202,12 @@ class MonsterDrainTest(unittest.TestCase):
 
     def test_charge_drains_at_impact_only_once(self):
         scene, actor = self.scene()
+        actor.additional_effects += (AdditionalEffect.POISON,)
         with patch("scenes.battle.random.randint", return_value=0), \
-             patch("scenes.battle.random.choice", return_value=0):
+             patch("scenes.battle.random.choice", return_value=0), \
+             patch("scenes.battle.resolve_physical_attack", return_value=PhysicalAttackResult(
+                 True, 1, 100.0, 100.0,
+             )):
             scene._begin_monster_charge(actor)
         presentation = scene.monster_charge_presentation
         for _ in range(presentation.approach_frame_count - 1):
@@ -212,6 +216,7 @@ class MonsterDrainTest(unittest.TestCase):
         with patch("scenes.battle.play_se") as sound:
             scene._update_monster_charge()
         sound.assert_called_once_with(BATTLE_DRAIN_SE_ID)
+        self.assertTrue(scene.party[0].poisoned)
         recovered_hp = actor.state.hp
         self.assertEqual(recovered_hp, min(actor.state.max_hp, 1 + presentation.damage))
         for _ in range(5):
@@ -235,13 +240,35 @@ class MonsterDrainTest(unittest.TestCase):
         damage = presentation.confused_attack_results[0].damage
         self.assertEqual(actor.state.hp, min(actor.state.max_hp, 1 + damage))
 
+    def test_sheet_effect_codes_apply_poison_and_confusion_after_an_attack(self):
+        scene, _ = self.scene()
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Ean Si")
+        with self.assertRaisesRegex(BattleDataError, "extra"):
+            BattleMonster.from_record({**record, "extra": "毒眠幻"}, is_front_row=True)
+        actor = BattleMonster.from_record({**record, "extra": "毒眠乱"}, is_front_row=True)
+        scene.monsters = (actor,)
+        self.assertEqual(actor.additional_effects, (
+            AdditionalEffect.POISON, AdditionalEffect.SLEEP, AdditionalEffect.CONFUSE,
+        ))
+
+        hit = PhysicalAttackResult(True, 1, 100.0, 100.0)
+        with patch("scenes.battle.resolve_physical_attack", return_value=hit):
+            self.begin(scene, actor)
+        with patch("scenes.battle.random.randint", return_value=2):
+            scene._finish_monster_attack()
+
+        self.assertTrue(scene.party[0].poisoned)
+        self.assertEqual(scene.party[0].sleeping, 0)
+        self.assertEqual(scene.party[0].confused, 2)
+
 
 class DrainForecastTest(AutoBattleFixtures, unittest.TestCase):
     def test_forecast_recovers_for_attack_charge_and_confusion(self):
         for mode in ("attack", "charge", "confused"):
             for hp, defense in ((1, 0), (119, 0), (120, 0), (1, 100)):
                 with self.subTest(mode=mode, hp=hp, defense=defense):
-                    enemy = self.enemy(hp=hp, effect=AdditionalEffect.DRAIN,
+                    enemy = self.enemy(hp=hp,
+                        additional_effects=(AdditionalEffect.DRAIN, AdditionalEffect.POISON),
                         special_actions=(MonsterSpecialAction.CHARGE,)
                         if mode == "charge" else ())
                     member = replace(self.specs[0], hp=1000, max_hp=1000,
@@ -264,6 +291,7 @@ class DrainForecastTest(AutoBattleFixtures, unittest.TestCase):
                     damage = 1000 - target.hp
                     self.assertEqual(damage, expected)
                     self.assertEqual(actor.hp, min(120, hp + damage))
+                    self.assertTrue(target.poisoned)
                     if defense == 0:
                         self.assertGreater(damage, 0)
                     else:

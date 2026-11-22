@@ -106,7 +106,7 @@ class AttackAttribute(StrEnum):
 
 
 class AdditionalEffect(StrEnum):
-    """Stable status effects that a weapon attack can add."""
+    """Stable additional effects for weapon and monster attacks."""
 
     SLEEP = "SLEEP"
     CONFUSE = "CONFUSE"
@@ -156,17 +156,18 @@ _ADDITIONAL_EFFECT_BY_CHARACTER = MappingProxyType(
 )
 
 
-def additional_effect_from_character(value: str) -> AdditionalEffect | None:
-    """Parse the shared one-character item/monster additional-effect code."""
+def monster_additional_effects_from_codes(value: object) -> tuple[AdditionalEffect, ...]:
+    """Parse a monster's concatenated effect codes, retaining each effect once."""
 
     if not isinstance(value, str):
         raise ItemDataError("additional effect must be a string")
-    if not value:
-        return None
     try:
-        return _ADDITIONAL_EFFECT_BY_CHARACTER[value]
+        return tuple(dict.fromkeys(
+            _ADDITIONAL_EFFECT_BY_CHARACTER[code] for code in value
+        ))
     except KeyError as error:
-        raise ItemDataError(f"unsupported additional effect: {value}") from error
+        raise ItemDataError(f"unsupported additional effect: {error.args[0]}") from error
+
 
 Code = TypeVar("Code")
 

@@ -81,6 +81,7 @@ from battle_speed import (
     modified_agility,
 )
 from battle_physical import (
+    PHYSICAL_EFFECT_RESISTANCE,
     PHYSICAL_STATUS_EFFECTS,
     counter_attack_succeeds,
     resolve_earthquake_attack,
@@ -88,6 +89,7 @@ from battle_physical import (
     drain_healing_amount,
     member_physical_attack,
     physical_weapon_is_effective,
+    resolve_monster_attack_effects,
     resolve_physical_additional_effect,
     resolve_physical_attack,
 )
@@ -116,7 +118,7 @@ from item import (
     ItemDataError,
     ItemEquipType,
     ItemSpecial,
-    additional_effect_from_character,
+    monster_additional_effects_from_codes,
 )
 from localization import LocalizedText, Localizer, ascii_to_fullwidth, format_number
 from member import (
@@ -645,16 +647,6 @@ ATTACK_SE_ID_BY_SUBTYPE = {
     "WAND": ATTACK_LIGHT_SE_ID,
     "ROD": ATTACK_LIGHT_SE_ID,
     "SPEAR": ATTACK_SLASH_SE_ID,
-}
-ADDITIONAL_EFFECT_RESISTANCE = {
-    AdditionalEffect.SLEEP: ResistanceType.SLEEP,
-    AdditionalEffect.CONFUSE: ResistanceType.CONFUSE,
-    AdditionalEffect.DEATH: ResistanceType.DEATH,
-    AdditionalEffect.STUN: ResistanceType.STUN,
-    AdditionalEffect.POISON: ResistanceType.POISON,
-    AdditionalEffect.PARALIZE: ResistanceType.PARALIZE,
-    AdditionalEffect.SILENCE: ResistanceType.SILENCE,
-    AdditionalEffect.DEFENSE_DOWN: None,
 }
 WEAPON_ATTRIBUTE_RESISTANCE = {
     AttackAttribute.FIRE: ResistanceType.FIRE,
@@ -1655,7 +1647,7 @@ class BattleMonster:
     state: MonsterBattleState
     agility: int
     is_boss: bool = False
-    additional_effect: AdditionalEffect | None = None
+    additional_effects: tuple[AdditionalEffect, ...] = ()
     special_actions: tuple[MonsterSpecialAction, ...] = ()
     level: int = 1
     early_appear: int = 0
@@ -1719,7 +1711,7 @@ class BattleMonster:
         ):
             raise BattleDataError(f"{key}.is_boss must be 0 or 1")
         try:
-            additional_effect = additional_effect_from_character(record.get("extra"))
+            additional_effects = monster_additional_effects_from_codes(record.get("extra"))
         except ItemDataError as error:
             raise BattleDataError(f"{key}.extra is invalid") from error
         treasure_item_key = _required_text(record, "treasure_item", key)
@@ -1739,7 +1731,7 @@ class BattleMonster:
             combat_stats=MonsterCombatStats.from_record(record),
             agility=_required_nonnegative_integer(record, "agi", key),
             is_boss=bool(is_boss),
-            additional_effect=additional_effect,
+            additional_effects=additional_effects,
             special_actions=monster_special_actions_from_record(record),
             level=_required_nonnegative_integer(record, "lv", key),
             early_appear=_required_nonnegative_integer(record, "early_appear", key),
@@ -3423,7 +3415,7 @@ class BattleScene:
                     hit=monster.combat_stats.hit,
                     spells=tuple(self.spells[k] for k in monster.spell_keys),
                     special_actions=monster.special_actions,
-                    effect=monster.additional_effect,
+                    additional_effects=monster.additional_effects,
                     resistances=frozenset(
                         r for r in monster.resistances if r.value in fields
                     ),
@@ -7489,7 +7481,7 @@ class BattleScene:
         effect_roll = random.randint(0, 99)
         successful: list[AdditionalEffect] = []
         for effect, stacked_death in candidates:
-            resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
+            resistance = PHYSICAL_EFFECT_RESISTANCE[effect]
             resolution = resolve_physical_additional_effect(
                 effect=effect,
                 adjusted_hit=result.adjusted_hit,
@@ -8909,7 +8901,7 @@ class BattleScene:
         target_resistances = target.resistances
         successful: list[AdditionalEffect] = []
         for effect, stacked_death in candidates:
-            resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
+            resistance = PHYSICAL_EFFECT_RESISTANCE[effect]
             resolution = resolve_physical_additional_effect(
                 effect=effect,
                 adjusted_hit=result.adjusted_hit,
@@ -8961,10 +8953,13 @@ class BattleScene:
                 else None
             ),
         )
-        effects = self._resolve_monster_attack_effects_against_monster(
-            actor,
-            target,
+        effects = resolve_monster_attack_effects(
+            actor.additional_effects,
             result,
+            roll_effect=lambda: random.randint(0, 99),
+            target_is_member=False,
+            target_resistances=target.resistances,
+            target_weaknesses=target.weaknesses,
         )
         _base_x, base_y = self._monster_base_position(target_index)
         center_x = self._monster_draw_x(target_index) + target.width // 2
@@ -8981,7 +8976,7 @@ class BattleScene:
                     effect_row=CONFUSED_MONSTER_ATTACK_EFFECT_ROW,
                     additional_effects=effects,
                     drain_actor_index=(
-                        actor_index if actor.additional_effect is AdditionalEffect.DRAIN
+                        actor_index if AdditionalEffect.DRAIN in actor.additional_effects
                         and result.damage > 0 else None
                     ),
                     is_critical=result.critical,
@@ -8992,32 +8987,6 @@ class BattleScene:
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
         return True
-
-    def _resolve_monster_attack_effects_against_monster(
-        self,
-        actor: BattleMonster,
-        target: BattleMonster,
-        result: PhysicalAttackResult,
-    ) -> tuple[AdditionalEffect, ...]:
-        """Resolve a confused monster's authored effect against its ally."""
-
-        effect = actor.additional_effect
-        if effect not in PHYSICAL_STATUS_EFFECTS or not result.hit:
-            return ()
-        resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
-        resolution = resolve_physical_additional_effect(
-            effect=effect,
-            adjusted_hit=result.adjusted_hit,
-            effect_roll=random.randint(0, 99),
-            target_is_member=False,
-            target_has_boss_resistance=ResistanceType.DEATH in target.resistances,
-            target_is_weak=(resistance is not None and resistance in target.weaknesses),
-            target_is_resistant=(
-                resistance is not None and resistance in target.resistances
-            ),
-            critical=result.critical,
-        )
-        return (effect,) if resolution.success else ()
 
     def _apply_turn_start_hp_change(
         self,
@@ -10577,31 +10546,19 @@ class BattleScene:
         target_index: int,
         result: PhysicalAttackResult,
     ) -> tuple[AdditionalEffect, ...]:
-        """Resolve the monster master-data effect for one physical hit."""
+        """Resolve the monster's effects against the party member taking the hit."""
 
-        effect = actor.additional_effect
-        if effect not in PHYSICAL_STATUS_EFFECTS:
+        if not actor.additional_effects:
             return ()
-        target_defending = target_index in self.defending_party_indexes
-        hit_reached_guard = target_defending and result.hit_value >= 0
-        if not result.hit and not hit_reached_guard:
-            return ()
-        resistance = ADDITIONAL_EFFECT_RESISTANCE[effect]
         target = self.party[target_index]
-        target_resistances = getattr(target, "resistances", frozenset())
-        resolution = resolve_physical_additional_effect(
-            effect=effect,
-            adjusted_hit=result.adjusted_hit,
-            effect_roll=random.randint(0, 99),
+        return resolve_monster_attack_effects(
+            actor.additional_effects,
+            result,
+            roll_effect=lambda: random.randint(0, 99),
             target_is_member=True,
-            target_has_boss_resistance=ResistanceType.DEATH in target_resistances,
-            target_is_resistant=(
-                resistance is not None and resistance in target_resistances
-            ),
-            target_defending=target_defending,
-            critical=result.critical,
+            target_resistances=getattr(target, "resistances", ()),
+            target_defending=target_index in self.defending_party_indexes,
         )
-        return (effect,) if resolution.success else ()
 
     def _queue_monster_counter(self, monster_index: int) -> None:
         actor = self.monsters[monster_index]
@@ -10687,7 +10644,7 @@ class BattleScene:
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         if result.hit and result.damage > 0:
-            if actor.additional_effect is AdditionalEffect.DRAIN and result.damage > 0:
+            if AdditionalEffect.DRAIN in actor.additional_effects:
                 position = self._party_draw_position(target_index)
                 if position is not None:
                     self._begin_monster_drain(
@@ -10738,7 +10695,7 @@ class BattleScene:
                 target_index,
                 result,
             ),
-            draining=actor.additional_effect is AdditionalEffect.DRAIN,
+            draining=AdditionalEffect.DRAIN in actor.additional_effects,
         )
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT
         self._show_monster_action_message("battle.monster.charge")

@@ -114,7 +114,7 @@ class AutoCombatant:
     skills: frozenset[str] = frozenset()
     spells: tuple[Spell, ...] = ()
     special_actions: tuple[MonsterSpecialAction, ...] = ()
-    effect: AdditionalEffect | None = None
+    additional_effects: tuple[AdditionalEffect, ...] = ()
     resistances: frozenset[ResistanceType] = frozenset()
     weaknesses: frozenset[ResistanceType] = frozenset()
     shadow: bool = False
