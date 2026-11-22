@@ -13,7 +13,6 @@ if __package__:
         AutoBattleSnapshot,
         AutoCombatant,
         ItemMode,
-        SpellMode,
         quantile,
     )
     from .battle_commands import (
@@ -35,6 +34,7 @@ if __package__:
         modified_defense,
         poison_tick_damage,
         resolve_healing,
+        resolve_recovery_amount,
         resolve_spell_damage,
         resolve_status_spell,
         spell_cast_delay,
@@ -76,7 +76,6 @@ else:
         AutoBattleSnapshot,
         AutoCombatant,
         ItemMode,
-        SpellMode,
         quantile,
     )
     from battle_commands import (
@@ -98,6 +97,7 @@ else:
         modified_defense,
         poison_tick_damage,
         resolve_healing,
+        resolve_recovery_amount,
         resolve_spell_damage,
         resolve_status_spell,
         spell_cast_delay,
@@ -137,6 +137,7 @@ else:
 ALLY_SPELL_ACTIONS = frozenset(
     (
         SpellAction.HEAL,
+        SpellAction.MANA,
         SpellAction.DAMAGE,
         SpellAction.BLOOD_SUCK,
         SpellAction.SLEEP,
@@ -153,9 +154,6 @@ ALLY_SPELL_ACTIONS = frozenset(
 )
 ENEMY_SPELL_ACTIONS = frozenset(
     (SpellAction.SLEEP, SpellAction.CONFUSE, SpellAction.SLOW, SpellAction.BREAK, SpellAction.SILENCE)
-)
-RECOVERY_ACTIONS = frozenset(
-    (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE, SpellAction.MANA)
 )
 PRIORITY_RECOVERY_ACTIONS = frozenset(
     (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE)
@@ -340,6 +338,14 @@ class BattleForecast:
             )
         )
         self.spells = {s.key: s for s in snapshot.spells}
+        self.consumables = tuple(
+            (item.key, self.spells[item.use_spell_key])
+            for item, count in snapshot.consumables
+            if count > 0
+            and item.key in snapshot.policy.config.allowed_items
+            and item.use_spell_key in self.spells
+        )
+        self.item_quantities = {item.key: count for item, count in snapshot.consumables}
         self.turns = {n: 0 for n in self.actors}
         self.start_hp = {n: a.hp for n, a in self.actors.items()}
         self.fixed_breath_hp = False
@@ -455,6 +461,16 @@ class BattleForecast:
                 targets = tuple(a for a in targets if a.speed < MAX_SPEED_MODIFIER)
             elif spell.action is SpellAction.CURE:
                 targets = tuple(a for a in targets if self.cure_spell_curable(a))
+            elif spell.action is SpellAction.MANA:
+                targets = tuple(
+                    a
+                    for a in targets
+                    if a.mp < a.spec.max_mp
+                    and any(
+                        a.proficiency(kind).level > 0
+                        for kind in SPELL_PROFICIENCY_BY_TYPE.values()
+                    )
+                )
         return tuple(a.spec.number for a in targets)
 
     def command_options(self, actor):
@@ -535,20 +551,10 @@ class BattleForecast:
                 actions.append(AutoAction(command))
             elif command is BattleCommand.SPELL:
                 for spell in actor.spec.spells:
-                    if continuation and spell.action not in (
-                        SpellAction.HEAL,
-                        SpellAction.CURE,
-                        SpellAction.REVIVE,
-                    ):
+                    if continuation and spell.action not in PRIORITY_RECOVERY_ACTIONS:
                         continue
-                    if self.snapshot.policy.spell_mode is SpellMode.NEVER:
+                    if not self.spell_allowed(actor, spell):
                         reject(spell.key, "spell_policy")
-                        continue
-                    if (
-                        self.snapshot.policy.spell_mode is SpellMode.RECOVERY_ONLY
-                        and spell.action not in RECOVERY_ACTIONS
-                    ):
-                        reject(spell.key, "recovery_only")
                         continue
                     if spell.mp > actor.mp:
                         reject(spell.key, "mp_lack")
@@ -573,12 +579,7 @@ class BattleForecast:
                     if (
                         continuation
                         and spell is not None
-                        and spell.action
-                        not in (
-                            SpellAction.HEAL,
-                            SpellAction.CURE,
-                            SpellAction.REVIVE,
-                        )
+                        and spell.action not in PRIORITY_RECOVERY_ACTIONS
                     ):
                         continue
                     if spell is not None:
@@ -587,6 +588,16 @@ class BattleForecast:
                                 actor, command, spell, slot.value, reject
                             )
                         )
+                for item_key, spell in self.consumables:
+                    if self.item_quantities[item_key] <= 0:
+                        continue
+                    if continuation and spell.action not in PRIORITY_RECOVERY_ACTIONS:
+                        continue
+                    actions.extend(
+                        self.effect_candidates(
+                            actor, command, spell, reject=reject, item_key=item_key
+                        )
+                    )
             else:
                 reject(command.value, "unsupported_command")
         target_keys = {number: combatant.spec.key for number, combatant in self.actors.items()}
@@ -594,7 +605,14 @@ class BattleForecast:
             set(actions), key=lambda action: action.stable_key(self.snapshot, target_keys=target_keys),
         ))
 
-    def effect_candidates(self, actor, command, spell, slot="", reject=lambda *_: None):
+    def spell_allowed(self, actor: ForecastActor, spell: Spell) -> bool:
+        return self.snapshot.policy.config.uses_spell(
+            actor.spec.key.removeprefix("pc:"), spell.type.value
+        )
+
+    def effect_candidates(
+        self, actor, command, spell, slot="", reject=lambda *_: None, *, item_key=""
+    ):
         if not spell.on_battle or spell.action not in ALLY_SPELL_ACTIONS:
             reject(spell.key, "unsupported_effect")
             return ()
@@ -630,13 +648,17 @@ class BattleForecast:
                 targets = effective
                 if not targets:
                     return ()
-        # Full health can still be a useful HEAL when its full-recovery effect cures.
+        # Single-target consumables must pass battle's missing-HP check.
         if spell.action is SpellAction.HEAL:
             targets = tuple(
                 n
                 for n in targets
                 if self.actors[n].hp < self.actors[n].max_hp
-                or (spell.intensity == 0 and self.curable(self.actors[n]))
+                or (
+                    (not item_key or spell.to_all)
+                    and spell.intensity == 0
+                    and self.curable(self.actors[n])
+                )
             )
         if not targets:
             reject(spell.key, "no_change")
@@ -644,9 +666,9 @@ class BattleForecast:
         if spell.to_all:
             # Apply a whole-party spell to the same full legal set as manual use.
             return (
-                AutoAction(command, self.spell_targets(actor, spell), spell.key, slot),
+                AutoAction(command, self.spell_targets(actor, spell), spell.key, slot, item_key),
             )
-        return tuple(AutoAction(command, (n,), spell.key, slot) for n in targets)
+        return tuple(AutoAction(command, (n,), spell.key, slot, item_key) for n in targets)
 
     @staticmethod
     def curable(actor) -> bool:
@@ -692,16 +714,12 @@ class BattleForecast:
         m = self.spells[action.spell_key].mp
         if not m:
             return 0.0
-        q = 0
-        if self.snapshot.policy.spell_mode is not SpellMode.NEVER:
-            costs = [
-                s.mp
-                for s in actor.spec.spells
-                if s.action in (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE)
-                and s.action in ALLY_SPELL_ACTIONS
-            ]
-            q = min(costs, default=0)
-        return mp_cost(actor.mp, actor.spec.max_mp, m, q)
+        costs = (
+            s.mp
+            for s in actor.spec.spells
+            if s.action in PRIORITY_RECOVERY_ACTIONS and self.spell_allowed(actor, s)
+        )
+        return mp_cost(actor.mp, actor.spec.max_mp, m, min(costs, default=0))
 
     def recovery_action(
         self, number: int, actions: tuple[AutoAction, ...]
@@ -806,6 +824,7 @@ class BattleForecast:
                         0
                         if adequate or stage == "cure"
                         else -min(recovery(a), target.max_hp - target.hp),
+                        bool(a.item_key),
                         self.cost(actor, a),
                         -self.delay(actor, a),
                         a.stable_key(self.snapshot),
@@ -1065,6 +1084,13 @@ class BattleForecast:
             u = self.roll(actor, n, 8)
             if spell.action is SpellAction.HEAL:
                 self.apply_spell_healing(actor, target, spell, u)
+            elif spell.action is SpellAction.MANA:
+                amount = resolve_recovery_amount(
+                    intensity=spell.intensity,
+                    ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
+                    random_factor=u,
+                )
+                target.mp = min(target.spec.max_mp, target.mp + amount)
             elif spell.action is SpellAction.PROTECTION:
                 target.apply_protection()
             elif spell.action is SpellAction.HASTE:
@@ -1223,6 +1249,8 @@ class BattleForecast:
             return 0.0, actor.agility
         if action.command is BattleCommand.SPELL:
             actor.mp -= self.spells[action.spell_key].mp
+        if action.item_key:
+            self.item_quantities[action.item_key] -= 1
         if action.command in (
             BattleCommand.ATTACK,
             BattleCommand.AMBUSH,

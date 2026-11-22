@@ -783,8 +783,8 @@ class GameTest(unittest.TestCase):
         self.assertEqual(placements[(SETTINGS_VALUE_X, 20)], "オン")
         self.assertEqual(placements[(SETTINGS_LABEL_X, 23)], "コマンドきおく")
         self.assertEqual(placements[(SETTINGS_VALUE_X, 23)], "オン")
-        self.assertEqual(placements[(SETTINGS_LABEL_X, 26)], "オートのじゅもん")
-        self.assertEqual(placements[(SETTINGS_VALUE_X, 26)], "つかう")
+        self.assertEqual(placements[(SETTINGS_LABEL_X, 26)], "オートバトルせってい")
+        self.assertNotIn((SETTINGS_VALUE_X, 26), placements)
         self.assertEqual(
             placements[(SETTINGS_LABEL_X, 32)],
             "タイトルがめんへ　もどる",
@@ -4203,7 +4203,7 @@ class GameTest(unittest.TestCase):
         self.assertIn(("screen_flash", 17), SETTINGS_ROWS)
         self.assertIn(("in_game_hints", 20), SETTINGS_ROWS)
         self.assertIn(("command_memory", 23), SETTINGS_ROWS)
-        self.assertIn(("auto_spells", 26), SETTINGS_ROWS)
+        self.assertIn(("auto_battle", 26), SETTINGS_ROWS)
         self.assertIn(("debug", 29), SETTINGS_ROWS)
 
     def test_confirming_debug_setting_opens_debug_menu(self) -> None:

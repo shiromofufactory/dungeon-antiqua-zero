@@ -23,6 +23,7 @@ from game_data import (
     load_spells,
 )
 from ui.debug_menu import DebugMenuOverlay, DebugShopTarget
+from ui.auto_battle import AutoBattleOverlay
 from ui.auto_recovery import AutoRecoveryOverlay
 from ui.debug_text import DEBUG_TEXT
 from ui.debug_encounter import DebugEncounterState
@@ -140,7 +141,7 @@ from skill import SkillDataError
 from shop import ShopDataError
 from spell import SpellDataError
 from spell_effect import SpellEffectDataError
-from state import DisplayMode, Difficulty, Language, LaunchMode, SaveData, Settings, SpellMode
+from state import DisplayMode, Difficulty, Language, LaunchMode, SaveData, Settings
 from systems import (
     AUTO_SAVE_SLOT,
     ChangeBgmEffect,
@@ -295,10 +296,7 @@ SETTINGS_TEXT_KEYS = (
     "settings.screen_flash.normal",
     "settings.screen_flash.reduced",
     "settings.command_memory.label",
-    "settings.auto_spells.label",
-    "settings.auto_spells.use",
-    "settings.auto_spells.recovery_only",
-    "settings.auto_spells.never",
+    "auto_battle.title",
     "settings.return_title",
     "settings.quit",
     "settings.confirm.return_title",
@@ -317,7 +315,7 @@ SETTINGS_ROWS = (
     ("screen_flash", 17),
     ("in_game_hints", 20),
     ("command_memory", 23),
-    ("auto_spells", 26),
+    ("auto_battle", 26),
     ("debug", 29),
     ("return_title", 32),
     ("quit", 35),
@@ -331,7 +329,6 @@ SETTINGS_GUIDE_KEYS = {
     "display": "settings.guide.display",
     "screen_flash": "settings.guide.screen_flash",
     "command_memory": "settings.guide.command_memory",
-    "auto_spells": "settings.guide.auto_spells",
 }
 LANGUAGE_SEQUENCE = (
     Language.JAPANESE,
@@ -629,6 +626,7 @@ class Game:
         ) = None
         self.last_event_error: str | None = None
         self.settings_window = None
+        self.auto_battle_screen: AutoBattleOverlay | None = None
         self.settings_cursor: WindowCursor | None = None
         self.confirmation_window = None
         self.confirmation_cursor: WindowCursor | None = None
@@ -2148,9 +2146,6 @@ class Game:
         if key == "command_memory":
             value = "on" if self.settings.remember_battle_commands else "off"
             return self.localized[f"settings.{value}"]
-        if key == "auto_spells":
-            mode = self.settings.auto_battle_spell_mode.value
-            return self.localized[f"settings.auto_spells.{mode}"]
         raise ValueError(f"settings key has no value: {key}")
 
     def _settings_rows(self) -> tuple[tuple[str, int], ...]:
@@ -2172,9 +2167,9 @@ class Game:
             "screen_flash": "settings.screen_flash.label",
             "in_game_hints": "settings.in_game_hints.label",
             "command_memory": "settings.command_memory.label",
-            "auto_spells": "settings.auto_spells.label",
         }
         action_keys = {
+            "auto_battle": "auto_battle.title",
             "return_title": "settings.return_title",
             "quit": "settings.quit",
         }
@@ -3136,6 +3131,18 @@ class Game:
         self.shop_screen = None
         self.pending_shop = None
 
+    def _start_auto_battle_settings(self, input_device: InputDevice) -> None:
+        self.auto_battle_screen = AutoBattleOverlay(
+            party=self.party,
+            items=self.items,
+            save_data=self.save_data,
+            localizer=Localizer(self.settings.language),
+            texts=self.texts,
+            fonts=self.fonts,
+            input_device=input_device,
+        )
+        self.settings_cursor.active = False
+
     def _finish_settings(self) -> None:
         self.settings_window = None
         self.settings_cursor = None
@@ -3175,12 +3182,6 @@ class Game:
         elif key == "command_memory":
             updated_settings = self.settings.with_remember_battle_commands(
                 not self.settings.remember_battle_commands
-            )
-        elif key == "auto_spells":
-            sequence = tuple(SpellMode)
-            index = sequence.index(self.settings.auto_battle_spell_mode)
-            updated_settings = self.settings.with_auto_battle_spell_mode(
-                sequence[(index + distance) % len(sequence)]
             )
         else:
             return
@@ -4241,6 +4242,13 @@ class Game:
             self.confirmation_window.update(input_state.navigation)
             return
 
+        auto_battle_screen = getattr(self, "auto_battle_screen", None)
+        if auto_battle_screen is not None:
+            if auto_battle_screen.update(input_state):
+                self.auto_battle_screen = None
+                self.settings_cursor.active = True
+            return
+
         if self.settings_cursor is not None:
             if input_state.cancel.triggered:
                 self._finish_settings()
@@ -4254,6 +4262,8 @@ class Game:
                 key = self.settings_cursor.selected_key
                 if key == "debug":
                     self._start_debug_menu()
+                elif key == "auto_battle":
+                    self._start_auto_battle_settings(input_state.device)
                 elif key in ("return_title", "quit"):
                     self._start_confirmation(key)
                 return
@@ -4461,6 +4471,9 @@ class Game:
                 self.settings_window.draw()
             if self.confirmation_window is not None:
                 self.confirmation_window.draw()
+            auto_battle_screen = getattr(self, "auto_battle_screen", None)
+            if auto_battle_screen is not None:
+                auto_battle_screen.draw()
         finally:
             pyxel.camera()
 

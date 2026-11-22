@@ -12,7 +12,7 @@ if __package__:
     from .battle_commands import BattleCommand
     from .battle_layout import MonsterPlacement
     from .battle_physical import member_physical_attack
-    from .item import AdditionalEffect, ItemSpecial
+    from .item import AdditionalEffect, Item, ItemSpecial
     from .member import (
         EquipmentSet,
         EquipmentSlot,
@@ -25,12 +25,12 @@ if __package__:
     from .monster import MonsterSpecialAction, MonsterTribe
     from .resistance import ResistanceType
     from .spell import Spell
-    from .state import SpellMode
+    from .state import AutoBattleConfig
 else:
     from battle_commands import BattleCommand
     from battle_layout import MonsterPlacement
     from battle_physical import member_physical_attack
-    from item import AdditionalEffect, ItemSpecial
+    from item import AdditionalEffect, Item, ItemSpecial
     from member import (
         EquipmentSet,
         EquipmentSlot,
@@ -43,7 +43,7 @@ else:
     from monster import MonsterSpecialAction, MonsterTribe
     from resistance import ResistanceType
     from spell import Spell
-    from state import SpellMode
+    from state import AutoBattleConfig
 
 
 CASE_COUNT = 8
@@ -59,12 +59,10 @@ class ItemMode(StrEnum):
 
 @dataclass(frozen=True)
 class AutoBattlePolicy:
-    spell_mode: SpellMode = SpellMode.USE
+    config: AutoBattleConfig = field(default_factory=AutoBattleConfig)
     item_mode: ItemMode = ItemMode.REUSABLE_EQUIPMENT
 
     def __post_init__(self) -> None:
-        if not isinstance(self.spell_mode, SpellMode):
-            raise TypeError("spell_mode must be SpellMode")
         if not isinstance(self.item_mode, ItemMode):
             raise TypeError("item_mode must be ItemMode")
 
@@ -275,6 +273,7 @@ class AutoBattleSnapshot:
     surprise_original_rows: tuple[tuple[int, bool], ...] = ()
     used_spell_types: frozenset[str] = frozenset()
     surprise_deferred: frozenset[int] = frozenset()
+    consumables: tuple[tuple[Item, int], ...] = ()
 
     def __post_init__(self) -> None:
         numbers = {c.number for c in self.combatants}
@@ -300,6 +299,7 @@ class AutoAction:
     targets: tuple[int, ...] = ()
     spell_key: str = ""
     equipment_slot: str = ""
+    item_key: str = ""
 
     def stable_key(
         self, snapshot: AutoBattleSnapshot, *, target_keys: Mapping[int, str] | None = None,
@@ -310,6 +310,7 @@ class AutoAction:
             self.command.value,
             self.spell_key,
             self.equipment_slot,
+            self.item_key,
             tuple(target_keys[n] for n in self.targets),
         )
 

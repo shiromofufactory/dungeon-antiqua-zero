@@ -7,7 +7,7 @@ import unittest
 
 from tools._bootstrap import APP_ROOT  # noqa: F401
 
-from state import DisplayMode, Language, Settings, SpellMode
+from state import DisplayMode, Language, Settings
 from systems.settings import SettingsRepository, SettingsSystemError
 
 
@@ -27,7 +27,6 @@ class SettingsRepositoryTest(unittest.TestCase):
             display_mode=DisplayMode.SMOOTH,
             screen_flash_enabled=False,
             in_game_hints_enabled=False,
-            auto_battle_spell_mode=SpellMode.RECOVERY_ONLY,
             remember_battle_commands=False,
             control_guide_device="gamepad",
         )

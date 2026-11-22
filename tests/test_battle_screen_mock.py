@@ -789,7 +789,7 @@ class BattleScreenMockTest(unittest.TestCase):
             global_command_window_call.args[:4],
             GLOBAL_COMMAND_WINDOW_GRID,
         )
-        self.assertEqual(GLOBAL_COMMAND_WINDOW_GRID[2], 15)
+        self.assertEqual(GLOBAL_COMMAND_WINDOW_GRID[2:], (17, 16))
         self.assertFalse(global_command_window_call.kwargs["opened"])
         item_guide_window_call = windows.return_value.create.call_args_list[3]
         self.assertEqual(
@@ -10488,7 +10488,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._open_member_command_menu.assert_called_once_with()
         mock.global_command_window.update.assert_not_called()
 
-    def test_global_command_menu_has_fight_escape_and_auto(self) -> None:
+    def test_global_command_menu_has_fight_escape_auto_and_tactics(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.encounter = BattleEncounter(("Coyote",))
         mock.global_command_window = Mock()
@@ -10506,6 +10506,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 call("battle.command.fight", 4, 2),
                 call("battle.command.escape", 4, 5),
                 call("battle.command.auto", 4, 8),
+                call("battle.command.tactics", 4, 11),
             ],
         )
         targets = mock.global_command_window.set_cursor.call_args.args[0]
@@ -10515,6 +10516,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 BattleGlobalCommand.FIGHT,
                 BattleGlobalCommand.ESCAPE,
                 BattleGlobalCommand.AUTO,
+                BattleGlobalCommand.TACTICS,
             ],
         )
         self.assertIs(mock.global_command_cursor, new_cursor)

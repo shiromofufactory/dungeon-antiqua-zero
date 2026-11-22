@@ -204,6 +204,7 @@ from ui import (
     tagged_text_width,
 )
 from item_detail import ItemDetailContext, item_detail_lines
+from ui.auto_battle import AutoBattleOverlay
 from ui.text_layout import right_aligned_grid_x
 from rendering.victory_pose import (
     VICTORY_MOTION_LIMIT,
@@ -287,7 +288,7 @@ ESCAPE_CHOICE_CURSOR_X = 2
 ESCAPE_YES_Y = 2
 ESCAPE_NO_Y = 5
 COMMAND_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
-GLOBAL_COMMAND_WINDOW_GRID = (49, 0, 15, 13)
+GLOBAL_COMMAND_WINDOW_GRID = (47, 0, 17, 16)
 INPUT_GUIDE_WINDOW_GRID = (48, 56, 16, 4)
 ITEM_GUIDE_WINDOW_GRID = (0, 0, 34, 13)
 ITEM_WINDOW_GRID = (33, 0, 31, 13)
@@ -714,6 +715,7 @@ COMMAND_CURSOR_X = (2, 16)
 COMMAND_ROW_Y = (2, 5, 8)
 GLOBAL_COMMAND_TEXT_X = 4
 GLOBAL_COMMAND_CURSOR_X = 2
+GLOBAL_COMMAND_ROW_Y = (2, 5, 8, 11)
 RecordValue = TypeVar("RecordValue")
 
 
@@ -802,6 +804,7 @@ class BattleGlobalCommand(StrEnum):
     FIGHT = "fight"
     ESCAPE = "escape"
     AUTO = "auto"
+    TACTICS = "tactics"
 
 
 class TimelineAnimationPhase(StrEnum):
@@ -2400,9 +2403,7 @@ class BattleScene:
         self.selected_command: str | None = None
         self.escape_return_phase = BattlePhase.COMMAND
         self.auto_battle_active = False
-        self.auto_battle_policy = AutoBattlePolicy(
-            spell_mode=settings.auto_battle_spell_mode
-        )
+        self.auto_battle_screen: AutoBattleOverlay | None = None
         self.auto_battle_planner: AutoBattlePlanner | None = None
         self.auto_battle_observations = AutoBattleObservations()
         self.auto_battle_log: list[AutoBattleLogEntry] = []
@@ -2609,6 +2610,13 @@ class BattleScene:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        auto_battle_screen = getattr(self, "auto_battle_screen", None)
+        if auto_battle_screen is not None:
+            self.input_device = input_state.device
+            if auto_battle_screen.update(input_state):
+                self.auto_battle_screen = None
+                self.global_command_cursor.active = True
+            return
         if self._update_timeline_removal_animation():
             self.input_device = input_state.device
             return
@@ -2843,6 +2851,19 @@ class BattleScene:
                 and not self.encounter.escape_command_enabled
             ):
                 self._notify_invalid_action()
+                return
+            if command.selected_key is BattleGlobalCommand.TACTICS:
+                self.auto_battle_screen = AutoBattleOverlay(
+                    party=self.result_party,
+                    items=self.item_catalog,
+                    save_data=self.save_data,
+                    localizer=self.localizer,
+                    texts=self.texts,
+                    fonts=self.fonts,
+                    input_device=input_state.device,
+                )
+                self.confirm_hold_frame_count = 0
+                command.active = False
                 return
             if (
                 isinstance(command.selected_key, BattleGlobalCommand)
@@ -3281,6 +3302,7 @@ class BattleScene:
             BattleGlobalCommand.FIGHT,
             BattleGlobalCommand.ESCAPE,
             BattleGlobalCommand.AUTO,
+            BattleGlobalCommand.TACTICS,
         )
         escape_enabled = self.encounter.escape_command_enabled
         for row_index, command in enumerate(commands):
@@ -3292,20 +3314,20 @@ class BattleScene:
                 self.global_command_window.add_text(
                     label,
                     GLOBAL_COMMAND_TEXT_X,
-                    COMMAND_ROW_Y[row_index],
+                    GLOBAL_COMMAND_ROW_Y[row_index],
                     color=DISABLED_COLOR,
                 )
             else:
                 self.global_command_window.add_text(
                     label,
                     GLOBAL_COMMAND_TEXT_X,
-                    COMMAND_ROW_Y[row_index],
+                    GLOBAL_COMMAND_ROW_Y[row_index],
                 )
         self.global_command_cursor = self.global_command_window.set_cursor(
             tuple(
                 CursorTarget(
                     GLOBAL_COMMAND_CURSOR_X,
-                    COMMAND_ROW_Y[row_index],
+                    GLOBAL_COMMAND_ROW_Y[row_index],
                     key=command,
                 )
                 for row_index, command in enumerate(commands)
@@ -3435,6 +3457,14 @@ class BattleScene:
         used = self.progression.used_spell_kinds(
             self.party[self.active_party_index].definition.key
         )
+        config = self.save_data.auto_battle
+        consumables = tuple(
+            (item, quantity)
+            for key in sorted(config.allowed_items)
+            if (item := self.item_catalog.get(key)) is not None
+            and self._item_is_usable_in_battle(item)
+            and (quantity := self.inventory_system.quantity(key)) > 0
+        )
         return AutoBattleSnapshot(
             tuple(combatants),
             tuple(
@@ -3442,13 +3472,14 @@ class BattleScene:
             ),
             self.active_party_index,
             tuple(self.spells.values()),
-            self.auto_battle_policy,
+            AutoBattlePolicy(config=config),
             frozenset(self.surprise_pending_party_indexes),
             tuple(self.surprise_original_front_rows.items()),
             frozenset(
                 t.value for t, k in SPELL_PROFICIENCY_BY_TYPE.items() if k in used
             ),
             surprise_deferred=frozenset(self.surprise_deferred_party_indexes),
+            consumables=consumables,
         )
 
     def _update_auto_thinking(self) -> None:
@@ -3495,10 +3526,13 @@ class BattleScene:
             spell = self.spells[action.spell_key]
             candidate = None
             if command is BattleCommand.ITEM:
-                slot = EquipmentSlot(action.equipment_slot)
-                candidate = BattleItemCandidate(
-                    self.party[self.active_party_index].equipment.item_at(slot), slot
-                )
+                if action.item_key:
+                    candidate = BattleItemCandidate(self.item_catalog[action.item_key])
+                else:
+                    slot = EquipmentSlot(action.equipment_slot)
+                    candidate = BattleItemCandidate(
+                        self.party[self.active_party_index].equipment.item_at(slot), slot
+                    )
                 self._remember_active_item(candidate)
             elif self._command_memory_enabled:
                 self.last_spell_key_by_party_index[self.active_party_index] = spell.key
@@ -11261,6 +11295,9 @@ class BattleScene:
         self._draw_protection_icons()
         self._draw_target_cursor()
         self._draw_identify_result()
+        auto_battle_screen = getattr(self, "auto_battle_screen", None)
+        if auto_battle_screen is not None:
+            auto_battle_screen.draw()
         if (
             getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
             and getattr(self, "fade_escape_snapshot", None) is None

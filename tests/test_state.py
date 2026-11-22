@@ -9,7 +9,6 @@ from app.state import (
     SaveData,
     Settings,
     SettingsDataError,
-    SpellMode,
 )
 
 
@@ -31,7 +30,6 @@ class SettingsTest(unittest.TestCase):
                 "display_mode": "pixel",
                 "screen_flash_enabled": True,
                 "in_game_hints_enabled": True,
-                "auto_battle_spell_mode": "use",
                 "remember_battle_commands": True,
                 "control_guide_device": None,
             },
@@ -54,28 +52,19 @@ class SettingsTest(unittest.TestCase):
         with self.assertRaises(SettingsDataError):
             Settings.from_dict({"in_game_hints_enabled": 1})
 
-    def test_battle_preferences_restore_old_settings_and_validate_new_values(
-        self,
-    ) -> None:
-        old = Settings.from_dict({"language": "ja"})
-        self.assertIs(old.auto_battle_spell_mode, SpellMode.USE)
-        self.assertTrue(old.remember_battle_commands)
-        for mode in SpellMode:
-            changed = old.with_auto_battle_spell_mode(
-                mode
-            ).with_remember_battle_commands(False)
-            self.assertEqual(Settings.from_dict(changed.to_dict()), changed)
-        for document in (
-            {"auto_battle_spell_mode": "invalid"},
-            {"auto_battle_spell_mode": 0},
-            {"remember_battle_commands": 1},
-        ):
-            with self.assertRaises(SettingsDataError):
-                Settings.from_dict(document)
+    def test_legacy_auto_battle_mode_is_ignored(self) -> None:
+        for mode in ("use", "recovery_only", "never"):
+            with self.subTest(mode=mode):
+                old = Settings.from_dict(
+                    {"auto_battle_spell_mode": mode, "remember_battle_commands": False}
+                )
+                self.assertFalse(old.remember_battle_commands)
+                self.assertNotIn("auto_battle_spell_mode", old.to_dict())
+                self.assertEqual(Settings.from_dict(old.to_dict()), old)
+        with self.assertRaises(SettingsDataError):
+            Settings.from_dict({"remember_battle_commands": 1})
         with self.assertRaises(TypeError):
-            old.with_auto_battle_spell_mode("use")
-        with self.assertRaises(TypeError):
-            old.with_remember_battle_commands(1)
+            Settings().with_remember_battle_commands(1)
 
     def test_language_change_returns_a_new_settings_snapshot(self) -> None:
         original = Settings()

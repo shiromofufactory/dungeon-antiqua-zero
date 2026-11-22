@@ -10,8 +10,9 @@ from tools._bootstrap import APP_ROOT
 from battle_command_memory import BattleCommandMemory
 from battle_commands import BattleCommand, BattleCommandOption
 from game import Game
-from input import InputButton, InputState
+from input import Direction, InputButton, InputDevice, InputState
 from localization import Localizer
+from resources import FontResources, FontRole
 from scenes.battle import (
     BattleCharacter,
     BattleEncounter,
@@ -20,13 +21,15 @@ from scenes.battle import (
     BattlePhase,
     BattleScene,
 )
-from state import SaveData, Settings, SpellMode
+from state import AUTO_BATTLE_ITEM_KEYS, Language, SaveData, Settings
 from systems.inventory import InventorySystem
 from systems.settings import SettingsSystemError
 from text_catalog import TextCatalog
+from ui.auto_battle import AutoBattleOverlay
 from ui.window import WindowFactory
 
 from tests.test_auto_battle import AutoBattleFixtures
+from tools.screen_mocks._fixtures import load_mock_party, load_mock_skills
 
 
 class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
@@ -35,6 +38,11 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         scene = BattleScene.__new__(BattleScene)
         scene.settings = settings
         scene.party = self.party if party is None else party
+        scene.result_party = scene.party
+        scene.save_data = SaveData()
+        scene.fonts = Mock()
+        scene.fonts.baseline_offset_for.return_value = 0
+        scene.item_catalog = self.items
         scene.encounter = (
             BattleEncounter(("Coyote",)) if encounter is None else encounter
         )
@@ -49,7 +57,7 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
         scene.localizer = Localizer(settings.language)
         scene.global_command_window = WindowFactory(object()).create(
-            0, 0, 15, 13, opened=True
+            0, 0, 17, 16, opened=True
         )
         scene._open_member_command_menu = Mock()
         scene._begin_escape_confirmation = Mock()
@@ -71,7 +79,7 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         )
         self.assertEqual(memory.global_command, "escape")
         targets = scene.global_command_cursor.targets
-        self.assertEqual([target.selectable for target in targets], [True, True, True])
+        self.assertEqual([target.selectable for target in targets], [True, True, True, True])
         self.assertTrue(scene.global_command_cursor.move_down())
         self.assertEqual(
             scene.global_command_cursor.selected_key,
@@ -102,7 +110,7 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         )
 
     def test_each_global_command_is_remembered_only_after_confirmation(self):
-        for command in BattleGlobalCommand:
+        for command in (BattleGlobalCommand.FIGHT, BattleGlobalCommand.ESCAPE, BattleGlobalCommand.AUTO):
             with self.subTest(command=command):
                 scene = self.scene()
                 scene.global_command_cursor.select_key(command)
@@ -417,16 +425,106 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         game.battle_command_memory = BattleCommandMemory(global_command="auto")
         return game
 
-    def test_spell_setting_cycles_both_directions_and_is_immediately_saved(self):
-        game = self.game("auto_spells")
-        for expected in (SpellMode.RECOVERY_ONLY, SpellMode.NEVER, SpellMode.USE):
-            game._change_setting(1)
-            self.assertIs(game.settings.auto_battle_spell_mode, expected)
-            self.assertEqual(
-                game.settings_repository.save.call_args.args[0], game.settings
-            )
-        game._change_setting(-1)
-        self.assertIs(game.settings.auto_battle_spell_mode, SpellMode.NEVER)
+    def test_field_settings_and_battle_tactics_share_the_same_overlay(self):
+        scene = self.scene(memory=BattleCommandMemory(global_command="auto"))
+        game = self.game("auto_battle")
+        game.party = self.party
+        game.items = self.items
+        game.save_data = scene.save_data
+        game.texts = scene.texts
+        game.fonts = scene.fonts
+        confirm = InputState(confirm=InputButton(triggered=True))
+        cancel = InputState(cancel=InputButton(triggered=True))
+
+        game._start_auto_battle_settings(InputDevice.KEYBOARD)
+        field_overlay = game.auto_battle_screen
+        self.assertIsInstance(field_overlay, AutoBattleOverlay)
+        self.assertFalse(game.settings_cursor.active)
+        disabled = next(t for t in field_overlay.cursor.targets if not t.selectable)
+        with self.assertRaises(ValueError):
+            field_overlay.cursor.select_key(disabled.key)
+        spell_key = field_overlay.cursor.selected_key
+        field_overlay.update(confirm)
+
+        scene.global_command_cursor.select_key(BattleGlobalCommand.TACTICS)
+        scene._update_global_command_selection(confirm)
+        self.assertFalse(scene.global_command_cursor.active)
+        self.assertEqual(scene.command_memory.global_command, "auto")
+        tactics = scene.auto_battle_screen
+        self.assertIsInstance(tactics, AutoBattleOverlay)
+        self.assertFalse(tactics.save_data.auto_battle.uses_spell(*spell_key))
+        tactics.cursor.select_key(AUTO_BATTLE_ITEM_KEYS[0])
+        tactics.update(confirm)
+        self.assertIn(AUTO_BATTLE_ITEM_KEYS[0], game.save_data.auto_battle.allowed_items)
+        scene.update(cancel)
+        self.assertIsNone(scene.auto_battle_screen)
+        self.assertTrue(scene.global_command_cursor.active)
+        self.assertIs(scene.global_command_cursor.selected_key, BattleGlobalCommand.TACTICS)
+
+    def test_tactics_uses_the_japanese_heading_font_and_updates_device_icons(self):
+        scene = self.scene()
+        scene.fonts = FontResources(loader=lambda _path: object())
+        scene.global_command_cursor.select_key(BattleGlobalCommand.TACTICS)
+        scene._update_global_command_selection(InputState(
+            confirm=InputButton(triggered=True),
+            device=InputDevice.GAMEPAD,
+        ))
+
+        overlay = scene.auto_battle_screen
+        texts = {placement.text: placement for placement in overlay.window.texts}
+        self.assertNotIn("オートバトルせってい", texts)
+        heading_font = scene.fonts.font_for(Language.JAPANESE, role=FontRole.LARGE)
+        headings = [texts[name] for name in ("%MYSTIC%理術", "%SACRED%聖術", "%NETHER%冥術")]
+        self.assertLess(headings[0].x, headings[1].x)
+        self.assertLess(headings[1].x, headings[2].x)
+        for heading in headings:
+            self.assertIs(heading.font, heading_font)
+        self.assertEqual(texts["フィオラ"].x - texts["じゅもん"].x, 2)
+        self.assertEqual(texts["きずぐすり"].x - texts["どうぐ"].x, 2)
+        self.assertIn("%GAMEPAD_A%　きりかえ　%GAMEPAD_B%　もどる", texts)
+
+        selected = overlay.cursor.selected_key
+        overlay.update(InputState(device=InputDevice.KEYBOARD))
+        self.assertEqual(overlay.cursor.selected_key, selected)
+        self.assertIn(
+            "%KEY_Z%　きりかえ　%KEY_X%　もどる",
+            [placement.text for placement in overlay.window.texts],
+        )
+
+    def test_tactics_moves_by_selectable_row_across_spell_columns_and_items(self):
+        party = load_mock_party(
+            self.items,
+            load_mock_skills(),
+            character_keys=("Fiora", "Ragna", "Iris", "Elika", "Grim", "Liza"),
+        )
+        scene = self.scene(party=party[:5])
+        scene.result_party = party
+        scene.global_command_cursor.select_key(BattleGlobalCommand.TACTICS)
+        scene._update_global_command_selection(InputState(confirm=InputButton(triggered=True)))
+        overlay = scene.auto_battle_screen
+        up = InputState(navigation=Direction.UP)
+        down = InputState(navigation=Direction.DOWN)
+
+        self.assertEqual(overlay.cursor.selected_key, ("Fiora", "mystic"))
+        overlay.update(InputState(navigation=Direction.RIGHT))
+        self.assertEqual(overlay.cursor.selected_key, ("Fiora", "nether"))
+        for key in (
+            ("Iris", "sacred"),
+            ("Elika", "mystic"),
+            ("Grim", "sacred"),
+            ("Liza", "mystic"),
+            *AUTO_BATTLE_ITEM_KEYS,
+        ):
+            overlay.update(down)
+            self.assertEqual(overlay.cursor.selected_key, key)
+        overlay.update(down)
+        self.assertEqual(overlay.cursor.selected_key, ("Fiora", "mystic"))
+
+        overlay.cursor.select_key(AUTO_BATTLE_ITEM_KEYS[0])
+        overlay.update(up)
+        self.assertEqual(overlay.cursor.selected_key, ("Liza", "mystic"))
+        overlay.update(InputState(confirm=InputButton(triggered=True)))
+        self.assertFalse(scene.save_data.auto_battle.uses_spell("Liza", "mystic"))
 
     def test_memory_setting_clears_only_after_successful_save(self):
         game = self.game("command_memory")

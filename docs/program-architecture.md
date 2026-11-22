@@ -1052,10 +1052,10 @@ Domain ModelにGameや起動モードへの参照を持たせない。`Proficien
 設定変更時は一時ファイルからの置換で即時保存し、起動時に読み込む。設定ファイルがない場合や
 内容を安全に復元できない場合は初期値を使う。現段階の`Settings`は言語、BGM音量0〜4、SE音量0〜4、
 画面倍率1〜5、`DisplayMode.PIXEL` / `DisplayMode.SMOOTH`、画面フラッシュとゲーム内ヒントの有無、
-`SpellMode` で表すオートの呪文使用方針、コマンド記憶の有無、操作説明を確認した入力種別を保持し、
+コマンド記憶の有無、操作説明を確認した入力種別を保持し、
 BGM・SE・画面倍率はDA2と同じ初期値3・3・3、表示方式はピクセル表示、画面フラッシュとゲーム内ヒントは有効を使う。
 
-呪文使用方針とコマンド記憶の設定・互換性は [フィールド](./features/field.md) を参照する。
+コマンド記憶の設定と互換性は [フィールド](./features/field.md) を参照する。
 選択したコマンドの記憶はSettingsへ含めず、Gameが `BattleCommandMemory` を
 所有し、BattleSceneへ明示的に渡す。`systems/save.py` が独立した保存対象として
 JSONへ変換し、検証済みの `LoadedGameState` に含めてゲーム状態と同時に復元する。キャラクターの安定キーで
@@ -1689,6 +1689,10 @@ Scene、Game、Windowへ逆参照せず、候補評価中に本体状態・本�
 実戦と共通のブレス計算を呼ぶ。再評価の条件は [オートバトルの仕様](features/auto-battle.md#ブレス威力をそろえた再評価) に従う。
 BattleSceneは計算の開始・中断と結果の実行を所有し、実際の効果・消費・遷移には
 手動操作と共通の戦闘ルールを使う。判断履歴と計算途中の位置はSceneの一時状態として所有する。
+
+オートの使用方針は `SaveData.auto_battle` が所有する。Gameの設定とBattleSceneの全体コマンドは
+共通の `ui/auto_battle.py` を開く。BattleSceneは判断開始時の不変な設定値と許可済みの所持数を渡し、
+予測器は予測ケース内の在庫だけを変更する。操作は [オートバトル](./features/auto-battle.md#設定画面) を参照する。
 
 Member、Item、Spellなど、データとそのデータに密接なルールはDomain Modelへ置く。複数のModelやSaveDataをまたぐ操作はSystemへ置く。
 

@@ -54,12 +54,43 @@ class DisplayMode(StrEnum):
     SMOOTH = "smooth"
 
 
-class SpellMode(StrEnum):
-    """Spell usage in automatic battles, persisted by stable preference keys."""
+AUTO_BATTLE_SPELL_KINDS = ("sacred", "mystic", "nether")
+AUTO_BATTLE_ITEM_KEYS = ("POTION", "REMEDY", "PANACEA", "MANA DROP")
 
-    USE = "use"
-    RECOVERY_ONLY = "recovery_only"
-    NEVER = "never"
+
+@dataclass(frozen=True)
+class AutoBattleConfig:
+    """Per-save permissions keyed by character, spell school, and item."""
+
+    disabled_spells: frozenset[tuple[str, str]] = frozenset()
+    allowed_items: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.disabled_spells, frozenset) or not all(
+            isinstance(entry, tuple)
+            and len(entry) == 2
+            and isinstance(entry[0], str)
+            and entry[0]
+            and entry[1] in AUTO_BATTLE_SPELL_KINDS
+            for entry in self.disabled_spells
+        ):
+            raise ValueError("invalid auto battle spell permissions")
+        if (
+            not isinstance(self.allowed_items, frozenset)
+            or not self.allowed_items.issubset(AUTO_BATTLE_ITEM_KEYS)
+        ):
+            raise ValueError("invalid auto battle item permissions")
+
+    def uses_spell(self, character_key: str, kind: str) -> bool:
+        return (character_key, kind) not in self.disabled_spells
+
+    def toggle_spell(self, character_key: str, kind: str) -> AutoBattleConfig:
+        return replace(
+            self, disabled_spells=self.disabled_spells ^ {(character_key, kind)}
+        )
+
+    def toggle_item(self, key: str) -> AutoBattleConfig:
+        return replace(self, allowed_items=self.allowed_items ^ {key})
 
 
 class AutoRecoveryMethod(StrEnum):
@@ -106,7 +137,6 @@ class Settings:
     display_mode: DisplayMode = DisplayMode.PIXEL
     screen_flash_enabled: bool = True
     in_game_hints_enabled: bool = True
-    auto_battle_spell_mode: SpellMode = SpellMode.USE
     remember_battle_commands: bool = True
     control_guide_device: str | None = None
 
@@ -141,8 +171,6 @@ class Settings:
 
         if not isinstance(self.in_game_hints_enabled, bool):
             raise TypeError("in_game_hints_enabled must be a boolean")
-        if not isinstance(self.auto_battle_spell_mode, SpellMode):
-            raise TypeError("auto_battle_spell_mode must be a SpellMode")
         if not isinstance(self.remember_battle_commands, bool):
             raise TypeError("remember_battle_commands must be a boolean")
         if self.control_guide_device not in (None, "keyboard", "gamepad"):
@@ -159,7 +187,6 @@ class Settings:
             "display_mode": self.display_mode.value,
             "screen_flash_enabled": self.screen_flash_enabled,
             "in_game_hints_enabled": self.in_game_hints_enabled,
-            "auto_battle_spell_mode": self.auto_battle_spell_mode.value,
             "remember_battle_commands": self.remember_battle_commands,
             "control_guide_device": self.control_guide_device,
         }
@@ -205,11 +232,6 @@ class Settings:
 
         return replace(self, in_game_hints_enabled=enabled)
 
-    def with_auto_battle_spell_mode(self, mode: SpellMode) -> Settings:
-        """Return updated preferences for automatic battle spell usage."""
-
-        return replace(self, auto_battle_spell_mode=mode)
-
     def with_remember_battle_commands(self, enabled: bool) -> Settings:
         """Return updated preferences for battle cursor restoration."""
 
@@ -246,15 +268,6 @@ class Settings:
             raise SettingsDataError(
                 f"unsupported display mode: {display_value}"
             ) from error
-        spell_value = data.get("auto_battle_spell_mode", SpellMode.USE.value)
-        if not isinstance(spell_value, str):
-            raise SettingsDataError("settings.auto_battle_spell_mode must be a string")
-        try:
-            spell_mode = SpellMode(spell_value)
-        except ValueError as error:
-            raise SettingsDataError(
-                f"unsupported auto battle spell mode: {spell_value}"
-            ) from error
         try:
             return cls(
                 language=language,
@@ -264,7 +277,6 @@ class Settings:
                 display_mode=display_mode,
                 screen_flash_enabled=data.get("screen_flash_enabled", True),
                 in_game_hints_enabled=data.get("in_game_hints_enabled", True),
-                auto_battle_spell_mode=spell_mode,
                 remember_battle_commands=data.get("remember_battle_commands", True),
                 control_guide_device=data.get("control_guide_device"),
             )
@@ -289,6 +301,7 @@ class SaveData:
     opened_treasures: set[tuple[str, str]] = field(default_factory=set)
     monster_records: dict[str, set[str]] = field(default_factory=dict)
     logs: list[dict[str, object]] = field(default_factory=list)
+    auto_battle: AutoBattleConfig = field(default_factory=AutoBattleConfig)
 
     def __post_init__(self) -> None:
         for name in (
@@ -309,6 +322,8 @@ class SaveData:
             raise TypeError("monster_level must be an integer")
         if not 2 <= self.monster_level <= 9:
             raise ValueError("monster_level must be from 2 to 9")
+        if not isinstance(self.auto_battle, AutoBattleConfig):
+            raise TypeError("auto_battle must be AutoBattleConfig")
         if not isinstance(self.auto_recovery, AutoRecoveryConfig):
             raise TypeError("auto_recovery must be AutoRecoveryConfig")
         if not isinstance(self.event_flags, set) or not all(

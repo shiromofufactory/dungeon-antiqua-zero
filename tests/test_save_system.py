@@ -13,13 +13,14 @@ from debug_dungeon import DungeonCheckpoint
 from battle_commands import BattleCommand
 from field import FieldPosition
 from input import Direction
-from state import Difficulty, SaveData
+from state import AutoBattleConfig, Difficulty, SaveData
 from member import Ability, AbilityBonuses, EquipmentSlot, internal_level_for_experience, required_experience_for_level
 from systems import (
     AUTO_SAVE_SLOT,
     SAVE_FORMAT_VERSION,
     SAVE_SLOT_COUNT,
     InventorySystem,
+    PartySystem,
     SaveRepository,
     SaveSystemError,
     create_save_document,
@@ -69,7 +70,7 @@ class SaveSystemTest(unittest.TestCase):
         cls.skills = load_mock_skills()
         cls.all_members = load_mock_party(cls.items, cls.skills)
 
-    def save_document(self, memory=None, *, monster_level=7) -> dict[str, object]:
+    def save_document(self, memory=None, *, monster_level=7, auto_battle=AutoBattleConfig()) -> dict[str, object]:
         inventory = InventorySystem(self.items)
         party = self.all_members[:2]
         character_states = {
@@ -82,6 +83,7 @@ class SaveSystemTest(unittest.TestCase):
                 battle_count=7,
                 encounter_count=83,
                 monster_level=monster_level,
+                auto_battle=auto_battle,
                 difficulty=Difficulty.HARD,
                 play_time_frames=890,
                 event_flags={"prologue_complete", "fairy_saved"},
@@ -124,6 +126,37 @@ class SaveSystemTest(unittest.TestCase):
                 tzinfo=timezone(timedelta(hours=9)),
             ),
         )
+
+    def test_tactics_round_trip_for_a_departed_member_and_default_for_old_saves(self):
+        departed_key = self.all_members[2].definition.key
+        tactics = AutoBattleConfig().toggle_spell(departed_key, "sacred").toggle_item("REMEDY")
+        document = self.save_document(auto_battle=tactics)
+        self.assertEqual(document["auto_battle"], {
+            "disabled_spells": {departed_key: ["sacred"]},
+            "allowed_items": ["REMEDY"],
+        })
+        kwargs = dict(
+            character_records=load_mock_character_records(),
+            items=self.items, skills=self.skills,
+        )
+        loaded = restore_save_document(document, **kwargs)
+        self.assertEqual(loaded.save_data.auto_battle, tactics)
+        self.assertNotIn(departed_key, [m.definition.key for m in loaded.active_party])
+        self.assertIn(departed_key, loaded.character_states)
+        party = PartySystem(
+            **kwargs, active_party=loaded.active_party, character_states=loaded.character_states
+        )
+        self.assertTrue(party.join(departed_key, shared_experience=loaded.save_data.experience))
+        self.assertEqual(party.active_party[-1].definition.key, departed_key)
+        self.assertFalse(loaded.save_data.auto_battle.uses_spell(departed_key, "sacred"))
+
+        document.pop("auto_battle")
+        for version in (1, 2, 3, SAVE_FORMAT_VERSION):
+            document["format_version"] = version
+            self.assertEqual(
+                restore_save_document(document, **kwargs).save_data.auto_battle,
+                AutoBattleConfig(),
+            )
 
     def test_battle_memory_round_trip_uses_keys_and_preserves_independent_choices(self):
         for command in ("fight", "escape", "auto"):

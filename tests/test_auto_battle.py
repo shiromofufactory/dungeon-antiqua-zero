@@ -25,7 +25,6 @@ from auto_battle_model import (
     AutoCombatant,
     AutoWeapon,
     ItemMode,
-    SpellMode,
     quantile,
 )
 from auto_battle_simulation import BattleForecast, ForecastActor, mp_cost
@@ -40,6 +39,7 @@ from monster import MonsterSpecialAction, MonsterTribe
 from monster_ai import MonsterAction, MonsterSpellAction
 from resistance import ResistanceType
 from spell import SpellAction, SpellType
+from state import AUTO_BATTLE_ITEM_KEYS, AUTO_BATTLE_SPELL_KINDS, AutoBattleConfig
 
 from tools.screen_mocks._fixtures import (
     load_mock_items,
@@ -415,7 +415,6 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 snapshot = self.snapshot(
                     actor, ally, enemy,
                     gauges=((0, 64), (5, 63), (2, 62)),
-                    policy=AutoBattlePolicy(SpellMode.NEVER),
                 )
                 result = decide_auto_battle(snapshot)
                 attack = next(e for e in result.evaluations
@@ -535,7 +534,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 )
                 snapshot = self.snapshot(
                     actor, ally, enemy, gauges=((0, 64), (5, 63), (2, 62)),
-                    policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+                    policy=AutoBattlePolicy(item_mode=ItemMode.NEVER),
                 )
 
                 result = decide_auto_battle(snapshot)
@@ -566,7 +565,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         )
         result = decide_auto_battle(self.snapshot(
             actor, self.specs[2], self.enemy(),
-            policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+            policy=AutoBattlePolicy(item_mode=ItemMode.NEVER),
         ))
         self.assertEqual(result.action.command, BattleCommand.DEFEND)
         self.assertEqual(len(result.evaluations), 1)
@@ -590,7 +589,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                         special_actions=(MonsterSpecialAction.COUNTER, MonsterSpecialAction.POWER_HIT),
                     ),
                     gauges=((0, 64), (5, 63), (2, 62)),
-                    policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+                    policy=AutoBattlePolicy(item_mode=ItemMode.NEVER),
                 )
 
                 result = decide_auto_battle(snapshot)
@@ -847,7 +846,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 {EquipmentSlot.ARM: self.items["MIRACLE RING"]}
             ),
         )
-        for policy in (AutoBattlePolicy(), AutoBattlePolicy(SpellMode.NEVER)):
+        for policy in (AutoBattlePolicy(), self.policy_without_spells(caster)):
             snapshot = self.snapshot(caster, self.enemy(), active=1, policy=policy)
             with patch.object(BattleForecast, "execute", side_effect=AssertionError):
                 result = decide_auto_battle(snapshot)
@@ -1090,35 +1089,89 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             spec.hp = 2
 
-    def test_recovery_only_and_never_policies_are_independent_of_items(self):
-        healer = replace(
-            self.specs[1],
+    @staticmethod
+    def policy_without_spells(*actors):
+        return AutoBattlePolicy(AutoBattleConfig(disabled_spells=frozenset(
+            (actor.key.removeprefix("pc:"), kind)
+            for actor in actors for kind in AUTO_BATTLE_SPELL_KINDS
+        )))
+
+    def test_spell_school_permissions_apply_per_actor_without_disabling_equipment(self):
+        first = replace(
+            self.specs[0],
             hp=20,
-            equipment=self.specs[1].equipment.replaced(
+            spells=(self.spells["HEALING1"],),
+            equipment=self.specs[0].equipment.replaced(
                 {EquipmentSlot.ARM: self.items["FLAME RING"]}
             ),
         )
-        for mode in SpellMode:
-            forecast = BattleForecast(
-                self.snapshot(
-                    healer, self.enemy(), active=1, policy=AutoBattlePolicy(mode)
-                ),
-                0,
-            )
-            actions = forecast.candidates(1)
-            paid = [
-                self.spells[a.spell_key]
-                for a in actions
-                if a.command is BattleCommand.SPELL
-            ]
-            if mode is SpellMode.NEVER:
-                self.assertFalse(paid)
-            elif mode is SpellMode.RECOVERY_ONLY:
-                self.assertTrue(paid)
-                self.assertTrue(all(s.action is SpellAction.HEAL for s in paid))
-            else:
-                self.assertTrue(any(s.action is SpellAction.DAMAGE for s in paid))
-            self.assertTrue(any(a.command is BattleCommand.ITEM for a in actions))
+        second = replace(self.specs[1], spells=first.spells)
+        school = first.spells[0].type.value
+        config = AutoBattleConfig().toggle_spell(first.key.removeprefix("pc:"), school)
+        forecast = BattleForecast(
+            self.snapshot(first, second, self.enemy(), policy=AutoBattlePolicy(config)),
+            0,
+        )
+        for continuation in (False, True):
+            self.assertFalse(any(
+                a.command is BattleCommand.SPELL
+                for a in forecast.candidates(first.number, continuation=continuation)
+            ))
+            self.assertTrue(any(
+                a.command is BattleCommand.SPELL
+                for a in forecast.candidates(second.number, continuation=continuation)
+            ))
+        self.assertTrue(any(
+            a.command is BattleCommand.ITEM and a.equipment_slot == EquipmentSlot.ARM
+            for a in forecast.candidates(first.number)
+        ))
+
+    def test_consumable_permissions_stock_and_mana_recovery_in_forecast(self):
+        actor = replace(self.specs[1], hp=1, mp=0, poisoned=True, silenced=2)
+        snapshot = replace(
+            self.snapshot(actor, self.enemy(), active=1),
+            consumables=tuple((self.items[key], 1) for key in AUTO_BATTLE_ITEM_KEYS),
+        )
+        self.assertFalse(any(a.item_key for a in BattleForecast(snapshot, 0).candidates(1)))
+        for key in AUTO_BATTLE_ITEM_KEYS:
+            with self.subTest(key=key):
+                permitted = replace(snapshot, policy=AutoBattlePolicy(
+                    AutoBattleConfig().toggle_item(key)
+                ))
+                forecast = BattleForecast(permitted, 0)
+                action, = (a for a in forecast.candidates(1) if a.item_key)
+                self.assertEqual(action.item_key, key)
+                forecast.execute(1, action)
+                self.assertEqual(forecast.item_quantities[key], 0)
+                self.assertFalse(any(a.item_key for a in forecast.candidates(1)))
+                self.assertEqual(
+                    {item.key: count for item, count in permitted.consumables}[key], 1
+                )
+                if key == "MANA DROP":
+                    self.assertGreater(forecast.actors[1].mp, 0)
+                elif key == "REMEDY":
+                    self.assertFalse(forecast.actors[1].poisoned)
+                else:
+                    self.assertGreater(forecast.actors[1].hp, 1)
+        potion = replace(snapshot, policy=AutoBattlePolicy(
+            AutoBattleConfig().toggle_item("POTION")
+        ))
+        decision = decide_auto_battle(potion)
+        self.assertEqual((decision.reason, decision.action.item_key), ("recovery_urgent", "POTION"))
+
+    def test_panacea_is_not_selected_for_a_full_hp_target(self):
+        actor = replace(self.specs[1], hp=self.specs[1].max_hp, poisoned=True)
+        snapshot = replace(
+            self.snapshot(actor, self.enemy(), active=1, policy=AutoBattlePolicy(
+                AutoBattleConfig().toggle_item("PANACEA")
+            )),
+            consumables=((self.items["PANACEA"], 1),),
+        )
+
+        self.assertFalse(any(
+            action.item_key == "PANACEA"
+            for action in BattleForecast(snapshot, 0).candidates(1)
+        ))
 
     def test_consumables_breaking_gear_and_unsupported_effects_are_excluded(self):
         healer = replace(
@@ -1155,7 +1208,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                     actor,
                     self.specs[1],
                     self.enemy(attack=0, hit=0),
-                    policy=AutoBattlePolicy(SpellMode.NEVER, ItemMode.NEVER),
+                    policy=AutoBattlePolicy(item_mode=ItemMode.NEVER),
                 )
                 forecast = BattleForecast(snapshot, 0)
                 manual = next(
@@ -2001,7 +2054,6 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             "surprise_original_front_rows",
         ):
             setattr(scene, name, {})
-        scene.auto_battle_policy = AutoBattlePolicy()
         scene.auto_battle_observations = AutoBattleObservations()
         scene.auto_battle_observations.damage(0, 33)
         scene.auto_battle_observations.spend_mp(0, 3)

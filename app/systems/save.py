@@ -31,6 +31,7 @@ if __package__ == "systems":
     )
     from state import (
         MAX_EXPERIENCE,
+        AutoBattleConfig,
         AutoRecoveryConfig,
         AutoRecoveryMethod,
         Difficulty,
@@ -60,6 +61,7 @@ else:
     )
     from ..state import (
         MAX_EXPERIENCE,
+        AutoBattleConfig,
         AutoRecoveryConfig,
         AutoRecoveryMethod,
         Difficulty,
@@ -201,6 +203,7 @@ def restore_save_document(
             "progress",
         ),
         auto_recovery=_restore_auto_recovery(document.get("auto_recovery")),
+        auto_battle=_restore_auto_battle(document.get("auto_battle", {})),
         event_flags=_string_set(document.get("event_flags"), "event_flags"),
         visited_site_ids=_string_set(
             document.get("visited_site_ids"),
@@ -543,6 +546,34 @@ def _required_mapping(
     return _mapping(value.get(key), f"{label}.{key}")
 
 
+def _restore_auto_battle(value: object) -> AutoBattleConfig:
+    data = _mapping(value, "auto_battle")
+    disabled = _mapping(data.get("disabled_spells", {}), "auto_battle.disabled_spells")
+    try:
+        return AutoBattleConfig(
+            disabled_spells=frozenset(
+                (key, kind)
+                for key, kinds in disabled.items()
+                for kind in _string_list(kinds, f"auto_battle.disabled_spells.{key}")
+            ),
+            allowed_items=frozenset(
+                _string_list(data.get("allowed_items", []), "auto_battle.allowed_items")
+            ),
+        )
+    except ValueError as error:
+        raise SaveSystemError("auto_battle has an unsupported setting") from error
+
+
+def _serialize_auto_battle(config: AutoBattleConfig) -> dict[str, object]:
+    disabled: dict[str, list[str]] = {}
+    for key, kind in sorted(config.disabled_spells):
+        disabled.setdefault(key, []).append(kind)
+    return {
+        "disabled_spells": disabled,
+        "allowed_items": sorted(config.allowed_items),
+    }
+
+
 def _restore_auto_recovery(value: object) -> AutoRecoveryConfig:
     if value is None:
         return AutoRecoveryConfig()
@@ -820,6 +851,7 @@ def create_save_document(
             "method": save_data.auto_recovery.method.value,
             "healer_key": save_data.auto_recovery.healer_key,
         },
+        "auto_battle": _serialize_auto_battle(save_data.auto_battle),
         "battle_command_memory": _serialize_battle_command_memory(
             BattleCommandMemory()
             if battle_command_memory is None
