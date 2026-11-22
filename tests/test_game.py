@@ -1920,7 +1920,10 @@ class GameTest(unittest.TestCase):
         mock.pending_teleport_source = "debug"
         mock.save_data = SaveData()
         mock.world_map = target_map
-        mock.debug_screen = Mock(party=party)
+        mock.debug_screen = Mock(
+            party=party,
+            editor=Mock(character_states={"Fiora": member}, shared_experience=0),
+        )
         mock.party = ()
         mock._force_reserve_front = Mock()
         mock.selected_member_index = 5
@@ -3680,7 +3683,11 @@ class GameTest(unittest.TestCase):
         selected_shop = Mock(key="TEST_SHOP")
         member = Mock()
         member.definition.key = "Fiora"
-        mock.debug_screen = Mock(party=(member,))
+        mock.debug_screen = Mock(
+            party=(member,),
+            editor=Mock(character_states={"Fiora": member}, shared_experience=42),
+        )
+        mock.save_data = SaveData()
         mock.party = ()
         mock.character_states = {}
         mock._force_reserve_front = Mock()
@@ -3697,6 +3704,7 @@ class GameTest(unittest.TestCase):
         self.assertIs(mock.pending_screen_change, GameScreenChange.OPEN_SHOP)
         self.assertEqual(mock.party, (member,))
         self.assertIs(mock.character_states["Fiora"], member)
+        self.assertEqual(mock.save_data.experience, 42)
         self.assertEqual(mock.selected_member_index, 0)
 
     def test_closing_debug_shop_returns_to_debug_shop_list(self) -> None:

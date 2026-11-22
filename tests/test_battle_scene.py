@@ -1375,6 +1375,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game.inventory_system = object()
         game.character_records = object()
         game.party = tuple(object() for _index in range(6))
+        game.character_states = {"Departed": object()}
         game.save_data = SaveData()
         game.current_map = Mock(bgm_id="da3-field")
         game.pending_battle_bgm_start_sec = 12.5
@@ -1386,6 +1387,7 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         self.assertIs(scene, create.return_value)
         self.assertEqual(len(create.call_args.kwargs["party"]), 5)
         self.assertEqual(len(create.call_args.kwargs["result_party"]), 6)
+        self.assertIs(create.call_args.kwargs["character_states"], game.character_states)
         self.assertIs(create.call_args.kwargs["save_data"], game.save_data)
         self.assertEqual(create.call_args.kwargs["return_bgm_id"], "da3-field")
         self.assertEqual(create.call_args.kwargs["return_bgm_start_sec"], 12.5)

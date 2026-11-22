@@ -150,6 +150,7 @@
 - SceneやOverlayを変更した場合は、遷移元・遷移先・キャンセル復帰を確認する。
 - フィールド待機時の操作ナビは `python3 -B -m unittest tests.test_field_menu_guide` で待機時間・入力種別・表示抑止を回帰検証する。
 - デバッグのパーティ編集は `python3 -B -m unittest tests.test_debug_party tests.test_debug_menu tests.test_battle_progression tests.test_save_system tests.test_game` で加入・LV変更時の経験値補正・既存補正の保持・保存復元・少量経験値でのLVとHP据え置き・次LV境界を回帰検証する。
+- 加入済み状態と経験値差分は `python3 -B -m unittest tests.test_battle_progression tests.test_events tests.test_debug_party tests.test_debug_menu tests.test_save_system tests.test_launch_modes tests.test_game` で死亡・一時離脱・上限超過分・再加入熟練度・加入履歴表示・メンバー選択一覧の内部LVと経験値差分・v1〜v4の保存復元を回帰検証する。
 - デバッグのイベントフラグ編集は `python3 -B -m unittest tests.test_debug_flags tests.test_debug_menu tests.test_launch_modes tests.test_game tests.test_actor_visibility tests.test_game_events tests.test_save_system` でON/OFF・100件のページ切替・未登録ID保持・戻る操作・ゲームへの接続を回帰検証する。
 - デバッグの変動モンスターレベル編集は `python3 -B -m unittest tests.test_game tests.test_debug_menu tests.test_encounter tests.test_debug_dungeon tests.test_launch_modes tests.test_save_system tests.test_state` で2〜9の入力・範囲外拒否・キャンセル・メニュー再表示時の保持・固定レベル指定との分離・手動／オートセーブとロード・旧セーブの初期値補完を回帰検証する。
 - フロア別のエンカウント有無・編成・設定保存は `python3 -B -m unittest tests.test_encounter tests.test_game tests.test_map_source tests.test_map_resources tests.test_map_editor_server tests.test_debug_menu`、エディタの設定切替・値保持・Undoは `node --test tests/test_map_editor_encounters.mjs` で回帰検証する。

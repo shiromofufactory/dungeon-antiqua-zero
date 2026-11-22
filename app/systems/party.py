@@ -85,7 +85,7 @@ class PartySystem:
         if len(self._active_party) >= MAX_PARTY_MEMBER_COUNT:
             raise PartySystemError("party is full")
         member = self._character_states.get(character_key)
-        if member is None:
+        if member is None or not member.has_joined:
             fiora = next(
                 member
                 for member in self._active_party
@@ -100,7 +100,8 @@ class PartySystem:
             member.set_joining_experience_offset(shared_experience)
             self._character_states[character_key] = member
         else:
-            member.refresh_internal_level(shared_experience)
+            member.refresh_rejoining_growth(shared_experience)
+        member.has_joined = True
         self._active_party = (*self._active_party, member)
         return True
 

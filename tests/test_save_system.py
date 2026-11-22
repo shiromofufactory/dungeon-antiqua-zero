@@ -35,7 +35,7 @@ from tools.screen_mocks._fixtures import (
 
 class SaveSystemTest(unittest.TestCase):
     def test_debug_trial_checkpoints_are_optional_and_preserve_old_saves(self):
-        for version in (1, 2, SAVE_FORMAT_VERSION):
+        for version in (1, 2, 3, SAVE_FORMAT_VERSION):
             with self.subTest(version=version):
                 document = self.save_document()
                 document["format_version"] = version
@@ -49,7 +49,7 @@ class SaveSystemTest(unittest.TestCase):
         restored = restore_save_document(document, character_records=load_mock_character_records(),
                                          items=self.items, skills=self.skills)
         self.assertEqual(restored.debug_dungeon, checkpoint)
-        self.assertEqual(document["format_version"], 3)
+        self.assertEqual(document["format_version"], SAVE_FORMAT_VERSION)
 
     def test_invalid_debug_trial_checkpoint_is_rejected(self):
         for changes in ({"dungeon_id":"../trial"}, {"step_id":False},
@@ -282,7 +282,7 @@ class SaveSystemTest(unittest.TestCase):
                         map_id=restored.map_id, position=restored.position, facing=restored.facing,
                         battle_command_memory=restored.battle_command_memory,
                     )
-                    self.assertEqual(resaved["format_version"], 3)
+                    self.assertEqual(resaved["format_version"], SAVE_FORMAT_VERSION)
                     self.assertEqual(resaved["location"]["map_id"], "fairy_village")
                     self.assertEqual(resaved["logs"][0]["message_id"], "fairy_village.opening_1")
                     self.assertNotIn("faily_village.event_1", resaved["event_flags"])
@@ -328,6 +328,7 @@ class SaveSystemTest(unittest.TestCase):
         )
         self.assertEqual(set(party["character_states"]), {"Fiora", "Cerion", "Alvan"})
         fiora = party["character_states"]["Fiora"]
+        self.assertIs(fiora["has_joined"], True)
         self.assertEqual(
             set(fiora["equipment"]),
             {"RIGHT", "LEFT", "HEAD", "BODY", "ARM"},
@@ -532,6 +533,7 @@ class SaveSystemTest(unittest.TestCase):
         document["format_version"] = 1
         for state in document["party"]["character_states"].values():
             del state["experience_offset"]
+            del state["has_joined"]
 
         restored = restore_save_document(
             document,
@@ -548,7 +550,50 @@ class SaveSystemTest(unittest.TestCase):
             self.assertEqual(
                 member.experience_offset,
                 required_experience_for_level(saved_level)
-                - document["progress"]["experience"],
+                - restored.save_data.experience,
+            )
+            self.assertTrue(member.has_joined)
+        self.assertEqual(restored.character_states["Fiora"].experience_offset, 0)
+
+    def test_migrates_legacy_fiora_offset_without_changing_member_experience(self) -> None:
+        document = self.save_document()
+        document["format_version"] = 3
+        states = document["party"]["character_states"]
+        for state in states.values():
+            del state["has_joined"]
+        states["Fiora"]["experience_offset"] = 1000
+        states["Alvan"]["experience_offset"] = -200
+
+        restored = restore_save_document(
+            document, character_records=load_mock_character_records(),
+            items=self.items, skills=self.skills,
+        )
+
+        self.assertEqual(restored.save_data.experience, 1456)
+        self.assertEqual(restored.character_states["Fiora"].experience_offset, 0)
+        self.assertEqual(restored.character_states["Alvan"].experience_offset, -1200)
+        self.assertTrue(restored.character_states["Alvan"].has_joined)
+        self.assertNotIn(restored.character_states["Alvan"], restored.active_party)
+        self.assertEqual(states["Fiora"]["experience_offset"], 1000)
+
+    def test_restores_membership_flag_and_negative_experience_offset(self) -> None:
+        document = self.save_document()
+        states = document["party"]["character_states"]
+        states["Cerion"]["experience_offset"] = -200
+        states["Alvan"]["has_joined"] = False
+        records = load_mock_character_records()
+
+        restored = restore_save_document(
+            document, character_records=records, items=self.items, skills=self.skills,
+        )
+
+        self.assertEqual(restored.character_states["Cerion"].experience_offset, -200)
+        self.assertFalse(restored.character_states["Alvan"].has_joined)
+
+        states["Cerion"]["has_joined"] = False
+        with self.assertRaisesRegex(SaveSystemError, "active party members must have joined"):
+            restore_save_document(
+                document, character_records=records, items=self.items, skills=self.skills,
             )
 
     def test_monster_level_round_trips_through_manual_and_auto_slots(self) -> None:

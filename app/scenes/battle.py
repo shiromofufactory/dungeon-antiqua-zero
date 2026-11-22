@@ -1923,6 +1923,7 @@ class BattleScene:
 
     proficiency_level_limit: int | None = None
     experience_limit: int | None = None
+    character_states: Mapping[str, Member] | None = None
 
     @classmethod
     def create(
@@ -1948,6 +1949,7 @@ class BattleScene:
         on_invalid_action: Callable[[], None] | None = None,
         proficiency_level_limit: int | None = None,
         experience_limit: int | None = None,
+        character_states: Mapping[str, Member] | None = None,
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -1990,6 +1992,7 @@ class BattleScene:
             on_invalid_action=on_invalid_action,
             proficiency_level_limit=proficiency_level_limit,
             experience_limit=experience_limit,
+            character_states=character_states,
         )
 
     def __init__(
@@ -2024,6 +2027,7 @@ class BattleScene:
         on_invalid_action: Callable[[], None] | None = None,
         proficiency_level_limit: int | None = None,
         experience_limit: int | None = None,
+        character_states: Mapping[str, Member] | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
@@ -2054,6 +2058,7 @@ class BattleScene:
         self.on_invalid_action = on_invalid_action
         self.proficiency_level_limit = proficiency_level_limit
         self.experience_limit = experience_limit
+        self.character_states = character_states
         self.settings = settings
         self.fonts = FontResources() if fonts is None else fonts
         self.window_factory = windows
@@ -7841,6 +7846,7 @@ class BattleScene:
             monster_record_system=self.monster_record_system,
             proficiency_level_limit=self.proficiency_level_limit,
             experience_limit=self.experience_limit,
+            character_states=self.character_states,
         )
         self.growth_result = growth
         self.result_outcome = BattleResult.VICTORY

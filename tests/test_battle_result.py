@@ -8,7 +8,7 @@ from tools._bootstrap import APP_ROOT
 from game_data import create_party, load_items, load_skills, load_spells
 
 from input import InputButton, InputState
-from member import EquipmentSlot, ProficiencyKind
+from member import EquipmentSlot, ProficiencyKind, required_experience_for_level
 from rendering.palette import MONOCHROME_PALETTE, PaletteShifter
 from resources import FontResources, TRANSPARENT_INDEX
 from rendering.victory_pose import VICTORY_MOTION_LIMIT, VICTORY_SPRITE_SOURCE_X
@@ -48,7 +48,8 @@ class BattleResultOverlayTest(unittest.TestCase):
         progression = BattleProgression((EnemyProgressionData(1, 0, 1, 0),))
         weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
         progression.record_weapon_action(member, (weapon,), (1,))
-        growth = progression.settle(SaveData(), self.party)
+        save_data = SaveData(experience=required_experience_for_level(member.internal_level))
+        growth = progression.settle(save_data, self.party)
         self.overlay = BattleResultOverlay(
             party=self.party,
             growth=growth,

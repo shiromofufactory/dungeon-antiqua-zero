@@ -343,6 +343,9 @@ class LaunchModeGameTest(unittest.TestCase):
                     game.items, game.skills, character_keys=INITIAL_PARTY_KEYS,
                     internal_level=7,
                 )
+                game.save_data.experience = required_experience_for_level(7)
+                for member in saved_party:
+                    member.set_joining_experience_offset(game.save_data.experience)
                 document = create_save_document(
                     save_data=game.save_data, active_party=saved_party,
                     character_states={member.definition.key: member for member in saved_party},

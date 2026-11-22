@@ -53,7 +53,7 @@ from ui.item_menu import (
 )
 from ui.teleport_menu import TeleportTarget
 from ui.text_format import pad
-from tests.ui_test_support import ItemMenuHarness
+from tests.ui_test_support import ItemMenuHarness, load_test_items, load_test_spells
 from state import Language, Settings
 from systems import InventorySystem
 from member import Ability, AbilityBonuses, EquipmentSet, EquipmentSlot
@@ -257,7 +257,12 @@ class ItemMenuTest(unittest.TestCase):
         self.assertNotIn("%NETHER%コンフュージョン", discord_lines)
 
     def test_omits_zero_stats_and_keeps_negative_sign(self) -> None:
-        mock = ItemMenuHarness()
+        items = load_test_items()
+        armor = items["IRON ARMOR"]
+        items[armor.key] = replace(
+            armor, defense=10, evasion=-5, spell_resistance=0,
+        )
+        mock = ItemMenuHarness(items=items)
 
         self.select_item(mock, "IRON ARMOR")
 
@@ -266,7 +271,7 @@ class ItemMenuTest(unittest.TestCase):
             [
                 "てつのよろい",
                 "%BODY%からだ　／　おもいぼうぐ",
-                "ぼうぎょ　　　：１２",
+                "ぼうぎょ　　　：１０",
                 "かいひりつ　　：－５",
             ],
         )
@@ -888,10 +893,12 @@ class ItemMenuTest(unittest.TestCase):
         self.assertTrue(mock.update(InputState(cancel=InputButton(True, True))))
 
     def test_uses_potion_on_an_injured_field_party_member(self) -> None:
-        items = ItemMenuHarness().items
+        items = load_test_items()
         potion = items["POTION"]
+        spells = load_test_spells()
+        spells[potion.use_spell_key] = replace(spells[potion.use_spell_key], intensity=40)
         inventory = InventorySystem(items, {potion.key: 2})
-        mock = ItemMenuHarness(items=items, inventory_system=inventory)
+        mock = ItemMenuHarness(items=items, spells=spells, inventory_system=inventory)
         target = mock.party_panel.party[1]
         target.max_hp = 100
         target.hp = 1
@@ -915,13 +922,13 @@ class ItemMenuTest(unittest.TestCase):
         ):
             mock.update(InputState(confirm=InputButton(True, True)))
 
-        self.assertEqual(target.hp, 62)
+        self.assertEqual(target.hp, 82)
         self.assertEqual(inventory.quantity(potion), 1)
         self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
         self.assertEqual(mock.member_cursor.selected_key, 1)
         self.assertEqual(
             [text.text for text in mock.party_window.texts if text.y == PARTY_HP_Y][1],
-            "ＨＰ　６２",
+            "ＨＰ　８２",
         )
         play_se.assert_called_once_with(HEALING_SE_ID)
 

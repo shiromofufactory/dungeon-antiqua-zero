@@ -819,6 +819,7 @@ class Game:
             on_invalid_action=self.alert.start,
             proficiency_level_limit=self.launch_mode.proficiency_level_limit,
             experience_limit=self.launch_mode.experience_limit,
+            character_states=self.character_states,
         )
 
     def _advance_random_encounter(self) -> bool:
@@ -2307,6 +2308,7 @@ class Game:
             skills=self.skills,
             party=self.party,
             shared_experience=self.save_data.experience,
+            character_states=self.character_states,
         )
         self.debug_screen = DebugMenuOverlay(
             editor=editor,
@@ -2416,16 +2418,14 @@ class Game:
         if self.debug_screen is None:
             return
         self.party = self.debug_screen.party
+        editor = self.debug_screen.editor
+        self.character_states = dict(editor.character_states)
         save_data = getattr(self, "save_data", None)
         if isinstance(save_data, SaveData):
+            save_data.experience = editor.shared_experience
             save_data.auto_recovery = valid_config_for_party(
                 save_data.auto_recovery, self.party
             )
-        character_states = getattr(self, "character_states", {})
-        character_states.update(
-            (member.definition.key, member) for member in self.party
-        )
-        self.character_states = character_states
         party_system = getattr(self, "party_system", None)
         if party_system is not None:
             party_system.replace(

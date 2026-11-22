@@ -590,6 +590,34 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.assertFalse(member.poisoned)
         self.assertFalse(member.paralyzed)
 
+    def test_member_status_list_displays_levels_and_signed_experience_offsets(self) -> None:
+        fiora, cerion, *_, reserve = self.editor.party
+        fiora.internal_level = 49
+        cerion.internal_level = 51
+        cerion.experience_offset = 3200
+        reserve.internal_level = 1
+        reserve.experience_offset = -999999
+
+        self.screen.main_cursor.select_key("member_status")
+        self.screen.update(self.confirm())
+
+        texts = self.screen.member_status_list_window.texts
+        level_header = next(
+            text for text in texts if text.text == DEBUG_TEXT.member_internal_level
+        )
+        offset_header = next(
+            text for text in texts if text.text.strip() == DEBUG_TEXT.member_experience_offset
+        )
+        rows = {(text.x, text.y): text.text.strip() for text in texts}
+        targets = self.screen.member_status_list_cursor.targets
+        for target, level, offset in (
+            (targets[0], "４９", "０"),
+            (targets[1], "５１", "＋３２００"),
+            (targets[-1], "１", "－９９９９９９"),
+        ):
+            self.assertEqual(rows[level_header.x, target.y], level)
+            self.assertEqual(rows[offset_header.x, target.y], offset)
+
     def test_member_status_cancel_returns_through_each_parent_screen(self) -> None:
         self.screen.main_cursor.select_key("member_status")
         self.screen.update(self.confirm())
@@ -723,6 +751,20 @@ class DebugMenuOverlayTest(unittest.TestCase):
         self.screen._toggle_selected_member()
         self.assertEqual(self.editor.other_member_count, 5)
         self.assertEqual(self.alert.start.call_count, 2)
+
+    def test_member_list_distinguishes_membership_history(self) -> None:
+        cerion = self.editor.member("Cerion")
+        self.editor.toggle_member("Cerion")
+        self.screen._open_members()
+        texts = [placement.text for placement in self.screen.member_window.texts]
+
+        self.assertIn(DEBUG_TEXT.member_legend, texts)
+        self.assertIn("●", texts)
+        self.assertIn("○", texts)
+        self.assertEqual(texts.count("△"), 1)
+
+        self.editor.toggle_member("Cerion")
+        self.assertIs(self.editor.member("Cerion"), cerion)
 
     def test_can_remove_every_member_except_fiora(self) -> None:
         self.screen._open_members()

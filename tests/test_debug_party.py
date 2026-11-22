@@ -126,21 +126,28 @@ class DebugPartyEditorTest(unittest.TestCase):
             self.assertEqual(after.internal_level, before.internal_level)
             self.assertEqual(after.max_hp, before.max_hp)
 
-    def test_level_change_anchors_all_members_without_changing_shared_experience(self) -> None:
+    def test_level_change_rebases_experience_with_fiora_at_zero_offset(self) -> None:
         editor = self.progressed_editor()
         editor.toggle_member("Sylpha")
+        editor.toggle_member("Dain")
+        dain = editor.member("Dain")
+        dain_experience = editor.shared_experience + dain.experience_offset
+        editor.toggle_member("Dain")
         for baseline in (50, 3):
             with self.subTest(baseline=baseline):
                 editor.set_baseline_level(baseline)
+                self.assertEqual(editor.shared_experience, required_experience_for_level(baseline))
                 for member in editor.party:
                     level = member.internal_level
                     self.assertEqual(
                         member.experience_offset,
-                        required_experience_for_level(level) - 1693,
+                        required_experience_for_level(level) - editor.shared_experience,
                     )
-                    self.assertEqual(member.refresh_internal_level(1693), level)
+                    self.assertEqual(member.refresh_internal_level(editor.shared_experience), level)
                 self.assertEqual(editor.member("Fiora").internal_level, baseline)
                 self.assertEqual(editor.member("Sylpha").internal_level, baseline + 1)
+                self.assertEqual(editor.shared_experience + dain.experience_offset, dain_experience)
+                self.assertEqual(dain.internal_level, 20)
 
     def test_joining_member_levels_up_at_next_threshold(self) -> None:
         editor = self.progressed_editor()

@@ -14,6 +14,7 @@ if __package__ == "systems":
         CharacterDefinition,
         FormationRow,
         Member,
+        required_experience_for_level,
     )
     from skill import Skill
 else:
@@ -26,6 +27,7 @@ else:
         CharacterDefinition,
         FormationRow,
         Member,
+        required_experience_for_level,
     )
     from ..skill import Skill
 
@@ -49,6 +51,7 @@ class DebugPartyEditor:
         skills: Mapping[str, Skill],
         party: Sequence[Member],
         shared_experience: int,
+        character_states: Mapping[str, Member] | None = None,
     ) -> None:
         if not isinstance(character_records, Sequence):
             raise TypeError("character_records must be a sequence")
@@ -109,12 +112,26 @@ class DebugPartyEditor:
         self._skills = skills
         self._shared_experience = shared_experience
         self._party_by_key = party_by_key
+        self._character_states = dict(character_states or {})
+        self._character_states.update(party_by_key)
         self._party_order = party_order
         self._baseline_level = party_by_key[FIORA_CHARACTER_KEY].internal_level
 
     @property
     def baseline_level(self) -> int:
         return self._baseline_level
+
+    @property
+    def shared_experience(self) -> int:
+        return self._shared_experience
+
+    @property
+    def character_states(self) -> Mapping[str, Member]:
+        return self._character_states
+
+    def has_joined(self, character_key: str) -> bool:
+        member = self._character_states.get(character_key)
+        return member is not None and member.has_joined
 
     @property
     def candidate_definitions(self) -> tuple[CharacterDefinition, ...]:
@@ -226,11 +243,19 @@ class DebugPartyEditor:
         formation_rows = {
             key: member.formation_row for key, member in self._party_by_key.items()
         }
+        shared_experience = required_experience_for_level(level)
+        experience_shift = shared_experience - self._shared_experience
         self._baseline_level = level
+        self._shared_experience = shared_experience
         self._party_by_key = {
             key: self._new_member(key, formation_row=formation_rows[key])
             for key in self._party_order
         }
+        self._character_states.update(self._party_by_key)
+        for key, member in self._character_states.items():
+            if key not in self._party_by_key and member.has_joined:
+                member.experience_offset -= experience_shift
+                member.refresh_internal_level(self._shared_experience)
 
     def toggle_member(self, character_key: str) -> None:
         """Add or remove a member while keeping a 1-to-6-person party."""
@@ -245,7 +270,13 @@ class DebugPartyEditor:
             return
 
         self._validate_other_member_count(self.other_member_count + 1)
-        self._party_by_key[character_key] = self._new_member(character_key)
+        member = self._character_states.get(character_key)
+        if member is None or not member.has_joined:
+            member = self._new_member(character_key)
+            self._character_states[character_key] = member
+        else:
+            member.refresh_rejoining_growth(self._shared_experience)
+        self._party_by_key[character_key] = member
         self._party_order.append(character_key)
 
     def _new_member(

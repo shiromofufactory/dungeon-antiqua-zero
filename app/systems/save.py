@@ -29,7 +29,13 @@ if __package__ == "systems":
         ProficiencyKind,
         required_experience_for_level,
     )
-    from state import AutoRecoveryConfig, AutoRecoveryMethod, Difficulty, SaveData
+    from state import (
+        MAX_EXPERIENCE,
+        AutoRecoveryConfig,
+        AutoRecoveryMethod,
+        Difficulty,
+        SaveData,
+    )
     from systems.inventory import InventorySystem
 else:
     from ..debug_dungeon import DungeonCheckpoint, DebugDungeonDataError
@@ -52,12 +58,18 @@ else:
         ProficiencyKind,
         required_experience_for_level,
     )
-    from ..state import AutoRecoveryConfig, AutoRecoveryMethod, Difficulty, SaveData
+    from ..state import (
+        MAX_EXPERIENCE,
+        AutoRecoveryConfig,
+        AutoRecoveryMethod,
+        Difficulty,
+        SaveData,
+    )
     from .inventory import InventorySystem
 
 
-SAVE_FORMAT_VERSION = 3
-SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, 2, SAVE_FORMAT_VERSION))
+SAVE_FORMAT_VERSION = 4
+SUPPORTED_SAVE_FORMAT_VERSIONS = frozenset((1, 2, 3, SAVE_FORMAT_VERSION))
 AUTO_SAVE_SLOT = 0
 SAVE_SLOT_COUNT = 8
 SAVE_DIRECTORY = Path.home() / ".config" / ".pyxel" / "dungeon-antiqua-zero"
@@ -226,6 +238,19 @@ def restore_save_document(
         "character_states",
         "party",
     )
+    saved_experience = save_data.experience
+    if format_version < 4 and FIORA_CHARACTER_KEY in state_documents:
+        fiora_state = _required_mapping(
+            state_documents, FIORA_CHARACTER_KEY, "party.character_states",
+        )
+        fiora_offset = _saved_experience_offset(
+            FIORA_CHARACTER_KEY, fiora_state, saved_experience, format_version,
+        )
+        if fiora_offset:
+            save_data.experience = min(
+                max(0, saved_experience + fiora_offset),
+                MAX_EXPERIENCE,
+            )
     character_states: dict[str, Member] = {}
     for key, state_document in state_documents.items():
         if not isinstance(key, str) or not key:
@@ -239,6 +264,7 @@ def restore_save_document(
             state_document,
             items=items,
             skills=skills,
+            saved_experience=saved_experience,
             shared_experience=save_data.experience,
             format_version=format_version,
         )
@@ -361,6 +387,18 @@ def _migrate_village_ids(save_data: SaveData, map_id: str) -> str:
     return _canonical_village_map_id(map_id)
 
 
+def _saved_experience_offset(
+    key: str,
+    state: Mapping[str, object],
+    shared_experience: int,
+    format_version: int,
+) -> int:
+    if format_version >= 2:
+        return _integer(state, "experience_offset", f"member {key}")
+    internal_level = _non_negative_int(state, "internal_level", f"member {key}")
+    return required_experience_for_level(internal_level) - shared_experience
+
+
 def _restore_member(
     key: str,
     record: Mapping[str, object],
@@ -368,6 +406,7 @@ def _restore_member(
     *,
     items: Mapping[str, object],
     skills: Mapping[str, object],
+    saved_experience: int,
     shared_experience: int,
     format_version: int,
 ) -> Member:
@@ -456,14 +495,23 @@ def _restore_member(
         formation_row = FormationRow(formation_value)
     except ValueError as error:
         raise SaveSystemError(f"member {key} formation row is unsupported") from error
+    experience_offset = _saved_experience_offset(
+        key, state, saved_experience, format_version,
+    )
+    if format_version < 4:
+        experience_offset = (
+            0 if key == FIORA_CHARACTER_KEY
+            else experience_offset + saved_experience - shared_experience
+        )
+    if key == FIORA_CHARACTER_KEY and experience_offset != 0:
+        raise SaveSystemError("Fiora's experience offset must be zero")
     member = Member(
         initial.definition,
         internal_level=internal_level,
-        experience_offset=(
-            _integer(state, "experience_offset", f"member {key}")
-            if format_version >= 2
-            else required_experience_for_level(internal_level)
-            - shared_experience
+        experience_offset=experience_offset,
+        has_joined=(
+            True if format_version < 4
+            else _required_bool(state, "has_joined", f"member {key}")
         ),
         hp=_non_negative_int(state, "hp", f"member {key}"),
         max_hp=_non_negative_int(state, "max_hp", f"member {key}"),
@@ -705,6 +753,10 @@ def create_save_document(
         raise SaveSystemError(
             f"active party characters are missing from saved states: {missing_keys}"
         )
+    if any(not character_states[key].has_joined for key in active_keys):
+        raise SaveSystemError("active party members must have joined")
+    if character_states[FIORA_CHARACTER_KEY].experience_offset != 0:
+        raise SaveSystemError("Fiora's experience offset must be zero")
     inventory.validate_total_quantities(character_states.values())
 
     timestamp = datetime.now().astimezone() if saved_at is None else saved_at
@@ -866,6 +918,7 @@ def _serialize_member(member: Member) -> dict[str, object]:
     return {
         "internal_level": member.internal_level,
         "experience_offset": member.experience_offset,
+        "has_joined": member.has_joined,
         "hp": member.hp,
         "max_hp": member.max_hp,
         "mp": member.mp,

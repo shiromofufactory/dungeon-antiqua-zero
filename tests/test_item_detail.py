@@ -8,7 +8,7 @@ from app.item_detail import (
     ItemDetailError,
     build_item_detail,
 )
-from app.localization import Localizer
+from app.localization import Localizer, format_number
 from app.resources import load_record_array
 from app.spell import Spell
 from app.state import Language
@@ -46,6 +46,7 @@ class ItemDetailTest(unittest.TestCase):
 
     def test_normal_consumable_shows_effect_description_without_spell_or_break(self) -> None:
         detail = self.detail("POTION")
+        intensity = format_number(self.spells["POTION"].intensity)
 
         self.assertEqual(
             detail.lines,
@@ -54,7 +55,7 @@ class ItemDetailTest(unittest.TestCase):
                 "どうぐ",
                 "",
                 "みかたひとりの　きずを",
-                "かいふく（ばいりつ：３０）",
+                f"かいふく（ばいりつ：{intensity}）",
             ),
         )
         self.assertNotIn("こわれる", "".join(detail.lines))

@@ -814,6 +814,7 @@ class Member:
     ability_bonuses: AbilityBonuses = field(default_factory=AbilityBonuses)
     slow_turns: int = 0
     defense_down_turns: int = 0
+    has_joined: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
@@ -841,6 +842,10 @@ class Member:
             self.experience_offset, int
         ):
             raise TypeError("experience_offset must be an integer")
+        if self.definition.key == FIORA_CHARACTER_KEY and self.experience_offset != 0:
+            raise ValueError("Fiora's experience offset must be zero")
+        if not isinstance(self.has_joined, bool):
+            raise TypeError("has_joined must be a boolean")
         if not isinstance(self.proficiencies, dict):
             raise TypeError("proficiencies must be a dictionary")
         if not self.proficiencies:
@@ -1026,7 +1031,10 @@ class Member:
         return cls(
             member.definition,
             internal_level=internal_level,
-            experience_offset=required_experience_for_level(internal_level),
+            experience_offset=(
+                0 if member.definition.key == FIORA_CHARACTER_KEY
+                else required_experience_for_level(internal_level)
+            ),
             skills=member.skills,
             equipment=member.equipment,
             proficiencies=proficiencies,
@@ -1042,7 +1050,8 @@ class Member:
         if shared_experience < 0:
             raise ValueError("shared_experience must not be negative")
         self.experience_offset = (
-            required_experience_for_level(self.internal_level) - shared_experience
+            0 if self.definition.key == FIORA_CHARACTER_KEY
+            else required_experience_for_level(self.internal_level) - shared_experience
         )
 
     def refresh_internal_level(self, shared_experience: int) -> int:
@@ -1058,6 +1067,19 @@ class Member:
             shared_experience + self.experience_offset
         )
         return self.internal_level
+
+    def refresh_rejoining_growth(self, shared_experience: int) -> None:
+        """Bring each proficiency up to its starting value at the current level."""
+
+        self.refresh_internal_level(shared_experience)
+        for kind, current in self.proficiencies.items():
+            starting = Proficiency.for_joining_member(
+                current.aptitude,
+                self.internal_level,
+                level_adjustment=self.definition.proficiency_level_adjustments[kind],
+            )
+            if (starting.level, starting.progress) > (current.level, current.progress):
+                self.proficiencies[kind] = starting
 
     def calculated_max_hp(self) -> int:
         """Return the current internal-level HP ceiling without mutating state."""

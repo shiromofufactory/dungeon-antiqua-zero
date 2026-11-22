@@ -5943,7 +5943,7 @@ class BattleScreenMockTest(unittest.TestCase):
 
     def test_item_heal_uses_da2_fixed_ability_of_twenty(self) -> None:
         items = load_mock_items()
-        spell = load_mock_spells()["POTION"]
+        spell = replace(load_mock_spells()["POTION"], intensity=40)
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.party = load_mock_party(
             items,
@@ -5964,7 +5964,7 @@ class BattleScreenMockTest(unittest.TestCase):
         with patch("scenes.battle.random.random", return_value=0.5):
             result = mock._resolve_healing_results(spell, (0,))[0]
 
-        self.assertEqual(result.amount, 61)
+        self.assertEqual(result.amount, 81)
 
     def test_mana_drop_restores_mp_with_da2_roll_and_actual_popup(self) -> None:
         items = load_mock_items()

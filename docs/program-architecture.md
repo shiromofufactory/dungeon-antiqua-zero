@@ -1383,16 +1383,16 @@ NPCの空き枠へ追加した装備は固定せず、取り外しや
 各 `ProficiencyKind` に対応付ける。列の意味は [コンテンツ運用](content-workflow.md) を参照する。
 `Proficiency.for_joining_member()` は適性、加入時の内部LV、調整値から
 [企画仕様](../content/docs/da0.md#レベルアップ) の初期値を計算する。
-`Member` は種別ごとの現在レベルと熟練度を保持し、再加入やロードでは保持済みの値を使う。
+`Member` は種別ごとの現在レベルと熟練度を保持する。`PartySystem` は再加入時に
+`Member.refresh_rejoining_growth()` で [再加入時の規則](./features/events.md#パーティとアイテム) を適用する。
 ステータスメニューOverlayでは適性0（使用不可）の武器・呪文のレベルと熟練度を `DISABLED_COLOR` で表示する。
 ステータスメニューOverlayでは適性2（得意）の武器・呪文に限り、種別アイコンの開始位置から8px左の同じ高さへ
 得意マーカー（共通画像バンクの `(152, 24)` から8×8px）を表示する。
 
-共有経験値は `SaveData.experience` が1つだけ所有し、各 `Member.experience_offset` を加えた値から
-Domain Modelの累計必要経験値計算で内部LVを導出する。曲線の仕様は
-[戦闘仕様の内部LVの必要経験値](./features/battle.md#内部lvの必要経験値)を参照する。`Member.internal_level` は現在値のキャッシュであり、
-戦闘報酬確定、加入・再加入、ロード時に再計算する。セーブv2以降は補正値を保存し、v1からは
-保存済み内部LVの必要経験値と共有経験値の差を補正値として移行する。
+フィオラの累計経験値は `SaveData.experience` が所有し、各 `Member.experience_offset` を加えた値から
+Domain Modelの累計必要経験値計算で内部LVを導出する。`Member.internal_level` は現在値のキャッシュであり、
+戦闘報酬確定、再加入、ロード時に再計算する。Gameは戦闘への入力として離脱中も含むキャラクター状態を渡し、
+BattleProgressionが `Member.has_joined` を使って [勝利時の経験値配分](./features/battle.md#勝利報酬と成長記録) を確定する。
 
 キャラクター正本の `base_str`、`base_agi`、`base_mag` は、変更されない
 `CharacterDefinition.base_abilities` として保持する。画面やゲームルールは基礎値を
@@ -1624,9 +1624,10 @@ Gameは現在の制作定義を検証してからSceneの `resume()` へ渡し�
 マスターデータから再生成し、武器・呪文熟練度、最大HP・MP、現在HP・MPを指定LV相当に戻す。
 通常加入時のフィオラLV1固定規則は変更せず、明示LVでの再生成には
 `Member.from_record_at_internal_level()` を使う。
-Gameはデバッグ開始時の共有経験値を数値として `DebugPartyEditor` へ渡す。
-同Editorは新規生成したMemberだけ `set_joining_experience_offset()` で現在の共有経験値へ
-対応付ける。既存Memberの補正値と `SaveData.experience` は変更しない。
+Gameはデバッグ開始時の基準経験値とキャラクター状態を `DebugPartyEditor` へ渡す。
+同Editorは新規生成したMemberを `set_joining_experience_offset()` で基準経験値へ対応付ける。
+再加入時は `Member.refresh_rejoining_growth()` を使う。パーティLV変更の確定時は、
+Gameが編集結果の基準経験値を `SaveData.experience` へ反映する。
 具体的な編集後の振る舞いは [設定とデバッグ](./features/field.md#設定とデバッグ) を参照する。
 現在HP・MPの境界検証と毒・麻痺の付与・解除も `DebugPartyEditor` が担当する。
 毒・麻痺はHPとは独立して自由に切り替えられるデバッグ状態とし、HPを0にする操作では
@@ -1652,7 +1653,7 @@ SaveDataは「保存可能な現在のゲーム世界」を表す。ウィンド
 `WorldProgression` が導出するためSaveDataへ複製しない。オートマッピングの踏破状態と
 重要アイテム専用の所持一覧も保存しない。
 
-所持金 `gold`、パーティ全体で共有する経験値 `experience`、難易度
+所持金 `gold`、フィオラの累計経験値 `experience`、難易度
 `difficulty`、プレイ時間 `play_time_frames` は、個々のMemberではなく
 SaveDataが所有する。難易度の保存値には表示文言から独立した
 `Difficulty.NORMAL` / `Difficulty.HARD` を使う。プレイ時間はフレーム数のまま保存し、

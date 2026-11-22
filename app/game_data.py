@@ -12,7 +12,6 @@ from member import (
     FormationRow,
     Member,
     MemberDataError,
-    required_experience_for_level,
 )
 from monster import MonsterDefinition
 from resources import load_record_array
@@ -149,7 +148,6 @@ def create_party(
                 member = replace(
                     member,
                     internal_level=fiora_internal_level,
-                    experience_offset=required_experience_for_level(fiora_internal_level),
                     hp=None,
                     max_hp=None,
                     mp=None,

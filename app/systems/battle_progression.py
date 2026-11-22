@@ -10,14 +10,14 @@ from typing import Iterable, Mapping, Sequence
 
 if __package__ == "systems":
     from item import Item
-    from member import Member, ProficiencyKind
+    from member import FIORA_CHARACTER_KEY, Member, ProficiencyKind
     from state import MAX_EXPERIENCE, SaveData
     from systems.inventory import InventorySystem
     from systems.monster_records import MonsterRecordSystem
     from systems.shop import MAX_GOLD
 else:
     from ..item import Item
-    from ..member import Member, ProficiencyKind
+    from ..member import FIORA_CHARACTER_KEY, Member, ProficiencyKind
     from ..state import MAX_EXPERIENCE, SaveData
     from .inventory import InventorySystem
     from .monster_records import MonsterRecordSystem
@@ -358,6 +358,7 @@ class BattleProgression:
         monster_record_system: MonsterRecordSystem | None = None,
         proficiency_level_limit: int | None = None,
         experience_limit: int | None = None,
+        character_states: Mapping[str, Member] | None = None,
     ) -> BattleGrowthResult:
         """Apply rewards once, including one HP and one eligible MP increase."""
 
@@ -408,19 +409,29 @@ class BattleProgression:
         before = tuple(_snapshot(member) for member in party)
         before_by_key = dict(zip(keys, before))
         if award_rewards:
-            experience_gained, gold_gained = self.rewards()
+            earned_experience, gold_gained = self.rewards()
             experience_ceiling = (
                 MAX_EXPERIENCE
                 if experience_limit is None
                 else min(MAX_EXPERIENCE, experience_limit)
             )
             experience_gained = min(
-                experience_gained,
+                earned_experience,
                 max(0, experience_ceiling - save_data.experience),
             )
             save_data.experience += experience_gained
             save_data.gold = min(MAX_GOLD, save_data.gold + gold_gained)
-            for member in party:
+            departed_members = (
+                member for key, member in (character_states or {}).items()
+                if key not in before_by_key and member.has_joined
+            )
+            overflow = earned_experience - experience_gained
+            for member in (*party, *departed_members):
+                if member.definition.key != FIORA_CHARACTER_KEY:
+                    if member.is_dead:
+                        member.experience_offset -= experience_gained
+                    elif member.experience_offset < 0:
+                        member.experience_offset += min(overflow, -member.experience_offset)
                 member.refresh_internal_level(save_data.experience)
         else:
             experience_gained = 0

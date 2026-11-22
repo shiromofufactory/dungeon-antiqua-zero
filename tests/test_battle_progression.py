@@ -651,9 +651,10 @@ class BattleProgressionTest(unittest.TestCase):
         self.assertGreater(first.max_mp, 0)
         self.assertEqual(second.max_mp, 0)
 
-    def test_dead_member_gets_shared_internal_level_but_no_visible_growth(self) -> None:
+    def test_dead_member_keeps_experience_and_skips_visible_growth(self) -> None:
         member = Member.from_record(member_record("Dead"))
         member.hp = 0
+        save_data = SaveData(experience=30)
         old_hp = member.max_hp
         old_proficiency = member.proficiency(ProficiencyKind.MYSTIC).progress
         progression = BattleProgression((EnemyProgressionData(10, 0, 1, 0),))
@@ -661,14 +662,75 @@ class BattleProgressionTest(unittest.TestCase):
             member, ProficiencyKind.MYSTIC, (10,), mp_spent=9
         )
 
-        progression.settle(SaveData(), (member,))
+        growth = progression.settle(save_data, (member,))
 
-        self.assertGreater(member.internal_level, 1)
+        self.assertEqual(member.internal_level, 1)
+        self.assertEqual(member.experience_offset, -growth.experience_gained)
+        self.assertEqual(save_data.experience + member.experience_offset, 30)
         self.assertEqual(member.max_hp, old_hp)
         self.assertEqual(
             member.proficiency(ProficiencyKind.MYSTIC).progress,
             old_proficiency,
         )
+
+    def test_victory_updates_joined_members_outside_the_party(self) -> None:
+        fiora = Member.from_record(member_record("Fiora"))
+        fiora.hp = 0
+        survivor = Member.from_record(member_record("Survivor"))
+        survivor.experience_offset = -20
+        departed = Member.from_record(member_record("Departed"))
+        dead_departed = Member.from_record(member_record("Dead Departed"))
+        dead_departed.hp = 0
+        unjoined = Member.from_record(member_record("Unjoined"))
+        unjoined.has_joined = False
+        character_states = {
+            member.definition.key: member
+            for member in (fiora, survivor, departed, dead_departed, unjoined)
+        }
+        departed_hp = departed.max_hp
+        progression = BattleProgression((EnemyProgressionData(5, 4, 1, 0),))
+
+        growth = progression.settle(
+            SaveData(), (fiora, survivor), character_states=character_states,
+        )
+
+        self.assertEqual((fiora.experience_offset, fiora.internal_level), (0, 2))
+        self.assertEqual((survivor.experience_offset, survivor.internal_level), (-20, 1))
+        self.assertEqual((departed.internal_level, departed.max_hp), (2, departed_hp))
+        self.assertEqual((dead_departed.experience_offset, dead_departed.internal_level), (-60, 1))
+        self.assertEqual((unjoined.experience_offset, unjoined.internal_level), (0, 1))
+        self.assertEqual(len(growth.after), 2)
+
+    def test_experience_overflow_only_fills_negative_offsets_of_survivors(self) -> None:
+        for initial_experience, gained, expected_offset in (
+            (999_999, 0, -500),
+            (999_499, 500, -1000),
+        ):
+            with self.subTest(initial_experience=initial_experience):
+                save_data = SaveData(experience=initial_experience)
+                fiora = Member.from_record(member_record("Fiora"))
+                behind = Member.from_record(member_record("Behind"))
+                behind.experience_offset = -2000
+                nearly_caught_up = Member.from_record(member_record("Nearly"))
+                nearly_caught_up.experience_offset = -100
+                ahead = Member.from_record(member_record("Ahead"))
+                ahead.experience_offset = 50
+                dead = Member.from_record(member_record("Dead"))
+                dead.hp = 0
+                dead.experience_offset = -2000
+                progression = BattleProgression((EnemyProgressionData(25, 20, 1, 0),))
+
+                growth = progression.settle(
+                    save_data, (fiora, behind, ahead, dead),
+                    character_states={"Nearly": nearly_caught_up},
+                )
+
+                self.assertEqual(growth.experience_gained, gained)
+                self.assertEqual(save_data.experience, 999_999)
+                self.assertEqual(behind.experience_offset, expected_offset)
+                self.assertEqual(nearly_caught_up.experience_offset, 0)
+                self.assertEqual(ahead.experience_offset, 50)
+                self.assertEqual(dead.experience_offset, -2000 - gained)
 
 
 if __name__ == "__main__":

@@ -528,6 +528,31 @@ class EventRunnerTest(unittest.TestCase):
         self.assertIs(self.party.active_party[-1], alvan)
         self.assertEqual(self.party.active_party[-1].hp, 1)
 
+    def test_rejoining_uses_the_higher_proficiency_for_each_kind(self) -> None:
+        self.party.join("Alvan")
+        alvan = self.party.active_party[-1]
+        alvan.proficiency(ProficiencyKind.SWORD).level = 3
+        alvan.proficiency(ProficiencyKind.SWORD).progress = 15
+        alvan.proficiency(ProficiencyKind.SACRED).progress = 50
+        alvan.hp = 1
+        original_max_mp = alvan.max_mp
+
+        self.party.leave("Alvan")
+        self.assertTrue(alvan.has_joined)
+        self.party.join("Alvan", shared_experience=required_experience_for_level(10))
+
+        self.assertIs(self.party.active_party[-1], alvan)
+        self.assertEqual(alvan.internal_level, 10)
+        self.assertEqual(alvan.experience_offset, 0)
+        for kind, expected in (
+            (ProficiencyKind.SWORD, (3, 15)),
+            (ProficiencyKind.SACRED, (1, 50)),
+            (ProficiencyKind.MYSTIC, (1, 45)),
+        ):
+            current = alvan.proficiency(kind)
+            self.assertEqual((current.level, current.progress), expected)
+        self.assertEqual((alvan.hp, alvan.max_mp), (1, original_max_mp))
+
     def test_join_records_all_npc_equipment_and_keeps_records_after_leaving(self) -> None:
         self.records[1]["type"] = "NPC"
         for slot in EquipmentSlot:

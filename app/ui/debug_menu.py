@@ -8,7 +8,7 @@ from enum import Enum, auto
 
 from input import Direction, InputAction, InputDevice, InputState
 from item import Item
-from localization import Localizer, format_number
+from localization import Localizer, ascii_to_fullwidth, format_number
 from member import (
     FIORA_CHARACTER_KEY,
     MAX_INTERNAL_LEVEL,
@@ -77,6 +77,10 @@ MEMBER_STATUS_FIRST_Y = 9
 MEMBER_STATUS_LABEL_X = 6
 MEMBER_STATUS_VALUE_X = 21
 MEMBER_STATUS_COLON_X = 18
+MEMBER_STATUS_LIST_HEADER_Y = 6
+MEMBER_STATUS_LIST_LEVEL_X = 26
+MEMBER_STATUS_LIST_EXPERIENCE_X = 38
+MEMBER_STATUS_LIST_EXPERIENCE_WIDTH = 8
 MEMBER_STATUS_ROWS = (
     ("hp", MEMBER_STATUS_FIRST_Y),
     ("mp", MEMBER_STATUS_FIRST_Y + DEBUG_ROW_HEIGHT),
@@ -435,11 +439,16 @@ class DebugMenuOverlay:
             ),
         ]
         targets: list[CursorTarget] = []
+        selected_keys = self.editor.selected_keys
         for index, definition in enumerate(definitions):
             column, row = divmod(index, MEMBER_ROW_COUNT)
             y = MEMBER_FIRST_Y + row * MEMBER_ROW_HEIGHT
-            selected = definition.key in self.editor.selected_keys
-            marker = "●" if selected else "○"
+            if definition.key in selected_keys:
+                marker = "●"
+            elif self.editor.has_joined(definition.key):
+                marker = "△"
+            else:
+                marker = "○"
             color = (
                 DISABLED_COLOR
                 if definition.key == FIORA_CHARACTER_KEY
@@ -468,6 +477,7 @@ class DebugMenuOverlay:
                     key=definition.key,
                 )
             )
+        placements.append(self.debug_texts.create(DEBUG_TEXT.member_legend, 4, 45))
         placements.append(self._guide_text())
         self.member_window = self.windows.create(
             *DEBUG_WINDOW_GRID,
@@ -496,18 +506,44 @@ class DebugMenuOverlay:
         placements = [
             self.debug_texts.create(DEBUG_TEXT.member_status_selection, 4, 3),
             self.debug_texts.create(self._party_member_count_text(), 34, 3),
+            self.debug_texts.create(
+                DEBUG_TEXT.member_internal_level,
+                MEMBER_STATUS_LIST_LEVEL_X,
+                MEMBER_STATUS_LIST_HEADER_Y,
+            ),
+            self.debug_texts.create(
+                DEBUG_TEXT.member_experience_offset.rjust(
+                    MEMBER_STATUS_LIST_EXPERIENCE_WIDTH, "　",
+                ),
+                MEMBER_STATUS_LIST_EXPERIENCE_X,
+                MEMBER_STATUS_LIST_HEADER_Y,
+            ),
         ]
         targets: list[CursorTarget] = []
         for index, member in enumerate(party):
             y = MEMBER_STATUS_FIRST_Y + index * DEBUG_ROW_HEIGHT
             key = member.definition.key
-            placements.append(
+            offset = member.experience_offset
+            signed_offset = f"{offset:+d}" if offset else "0"
+            placements.extend((
                 self.member_texts.create(
                     member.definition.localized_name(self.localizer),
                     MEMBER_STATUS_LABEL_X,
                     y,
-                )
-            )
+                ),
+                self.debug_texts.create(
+                    ascii_to_fullwidth(f"{member.internal_level:>4d}"),
+                    MEMBER_STATUS_LIST_LEVEL_X,
+                    y,
+                ),
+                self.debug_texts.create(
+                    ascii_to_fullwidth(
+                        signed_offset.rjust(MEMBER_STATUS_LIST_EXPERIENCE_WIDTH),
+                    ),
+                    MEMBER_STATUS_LIST_EXPERIENCE_X,
+                    y,
+                ),
+            ))
             targets.append(CursorTarget(MAIN_CURSOR_X, y, key=key))
         placements.append(self._guide_text())
         self.member_status_list_window = self.windows.create(
