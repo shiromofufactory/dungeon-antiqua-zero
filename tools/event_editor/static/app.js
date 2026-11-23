@@ -898,8 +898,12 @@ function renderBattleEditor() {
   const battle = currentBattle();
   $("event-editor").className = battle ? "" : "empty";
   if (!battle) { $("event-editor").innerHTML = "イベントバトルを追加・選択してください。"; return; }
+  const fieldEventIds = state.data.events
+    .filter((event) => event.id && event.battle_start_id === undefined)
+    .map((event) => event.id).sort();
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("バトルID", `<input data-battle-field="battle_id" value="${esc(battle.battle_id)}">`)}${field("制作メモ", `<input data-battle-field="note" value="${esc(battle.note || "")}">`)}<button class="danger" data-action="delete-battle">イベントバトルを削除</button></div>
+    <div class="event-meta">${field("全滅時イベント", `<select data-battle-field="defeat_event_id">${options(fieldEventIds, battle.defeat_event_id, "指定なし（通常の全滅復帰）")}</select>`, true)}</div>
     <h2>敵編成（1〜5体・上から配置）</h2>
     <p class="compact">本編イベントとダンジョン試行で共通の編成です。同じモンスターを複数指定できます。画面内に収まらない敵は戦闘開始時に除外します。</p>
     ${(battle.monster_keys || []).map((key, index) => `<div class="add-row"><select aria-label="敵${index+1}" data-registered-monster-index="${index}">${options(state.catalogs.monster_keys || [], key)}</select><button data-action="remove-registered-monster" data-index="${index}" ${battle.monster_keys.length <= 1 ? "disabled" : ""}>削除</button></div>`).join("")}
@@ -1217,7 +1221,11 @@ document.body.addEventListener("click", (event) => {
 $("event-editor").addEventListener("change", (event) => {
   const target = event.target;
   if (target.dataset.battleField) {
-    commit(() => { currentBattle()[target.dataset.battleField] = target.value; });
+    const key = target.dataset.battleField;
+    commit(() => {
+      if (key === "defeat_event_id" && !target.value) delete currentBattle()[key];
+      else currentBattle()[key] = target.value;
+    });
   } else if (target.dataset.registeredMonsterIndex !== undefined) {
     commit(() => { currentBattle().monster_keys[Number(target.dataset.registeredMonsterIndex)] = target.value; });
   } else if (target.dataset.flagField) {

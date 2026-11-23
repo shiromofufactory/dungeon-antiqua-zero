@@ -75,6 +75,20 @@ class EventBattleTest(unittest.TestCase):
         second = compile_event_sources(SOURCE, battles=[{**BATTLES[0],"monster_keys":["SLIME"]}], monster_keys={"SLIME"})
         self.assertNotEqual(first["source_sha256"], second["source_sha256"])
 
+    def test_defeat_event_resolves_a_field_event_and_old_catalogs_still_load(self):
+        source = deepcopy(SOURCE)
+        source["events"]["events"].append({
+            "id": "sample.lost", "commands": [{"command": "end_event"}],
+        })
+        battles = [{**BATTLES[0], "defeat_event_id": "sample.lost"}]
+        compiled = compile_event_sources(source, battles=battles, monster_keys={"SLIME"})
+        self.assertEqual(EventCatalog.from_document(compiled).battle_defeat_event("guard"), "sample.lost")
+        for invalid in ({"missing": "sample.lost"}, {"guard": "sample.missing"}):
+            with self.subTest(invalid=invalid), self.assertRaises(EventResourceError):
+                EventCatalog.from_document({**compiled, "battle_defeat_events": invalid})
+        del compiled["battle_defeat_events"]
+        self.assertIsNone(EventCatalog.from_document(compiled).battle_defeat_event("guard"))
+
     def test_trial_reference_prevents_deleting_a_used_registration(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

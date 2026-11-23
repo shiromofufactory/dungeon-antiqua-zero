@@ -16,7 +16,7 @@ const names = [
   'field', 'options', 'noteSummary', 'flagOptions', 'renderCommand', 'renderDropZone',
   'renderCommandList', 'addCommand', 'defaultCondition', 'defaultCommand',
   'addDefaultCommand', 'renderCondition',
-  'changeCommandType', 'requestBody',
+  'changeCommandType', 'requestBody', 'renderBattleEditor',
 ];
 const declarations = names.map((name) => {
   const start = source.indexOf(`function ${name}(`);
@@ -30,23 +30,46 @@ function editor() {
   const state = {
     data: { format_version: 1, events: [{ id: 'sample.run', commands: [] }] },
     flags: [{ flag_id: 'story.done' }], messages: [], missions: [],
-    selectedEvent: 0, selectedFlag: 0, selectedMessage: 0, selectedMission: 0,
+    selectedEvent: 0, selectedFlag: 0, selectedMessage: 0, selectedMission: 0, selectedBattle: 0,
     mode: 'event', battles: [{battle_id:'guard',monster_keys:['Giant Spider']}], catalogs: { monster_keys: ['Giant Spider'] },
     history: [], future: [], dirty: false,
   };
   let focused = 0;
   const handlers = new Map();
+  const editorNode = { addEventListener: (event, handler) => handlers.set(event, handler) };
   const context = vm.createContext({
     state, LIST_TABS: ['flag', 'event', 'mission', 'message'],
     document: { querySelector: () => ({ focus: () => { focused += 1; } }) },
-    $: () => ({ addEventListener: (event, handler) => handlers.set(event, handler) }),
+    $: () => editorNode,
     CSS: { escape: (value) => value },
     render() {}, schedule() {}, renderMessagePreview: () => '', esc: (value) => String(value ?? ''),
   });
   vm.runInContext(`${source.slice(optionStart, optionEnd)}\n${declarations}`, context);
   vm.runInContext(source.slice(changeHandlerStart, changeHandlerEnd), context);
-  return { state, context, handlers, focused: () => focused };
+  return { state, context, handlers, editorNode, focused: () => focused };
 }
+
+test('event battle defeat event selects field events, clears the reference and supports undo', () => {
+  const { state, context, handlers, editorNode } = editor();
+  state.data.events.push({ id: 'sample.opening', battle_start_id: 'guard', commands: [] });
+  context.renderBattleEditor();
+  assert.match(editorNode.innerHTML, /data-battle-field="defeat_event_id"/);
+  assert.match(editorNode.innerHTML, /value="sample.run"/);
+  assert.doesNotMatch(editorNode.innerHTML, /value="sample.opening"/);
+
+  const select = (value) => handlers.get('change')({ target: { dataset: { battleField: 'defeat_event_id' }, value } });
+  const savedBattle = () => JSON.parse(context.requestBody()).battles[0];
+  select('sample.run');
+  assert.equal(savedBattle().defeat_event_id, 'sample.run');
+  context.renderBattleEditor();
+  assert.match(editorNode.innerHTML, /value="sample.run" selected/);
+  select('');
+  assert.equal('defeat_event_id' in savedBattle(), false);
+  context.undo();
+  assert.equal(savedBattle().defeat_event_id, 'sample.run');
+  context.redo();
+  assert.equal('defeat_event_id' in savedBattle(), false);
+});
 
 test('add button creates a message command with its fields and permits changing its type', () => {
   const { state, context, focused } = editor();

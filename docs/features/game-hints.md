@@ -20,7 +20,7 @@
 | 成長リザルトが初めて表示されたとき | `hint.first_result` | `hint.shown.first_result` | リザルト画面上 |
 | 町・ダンジョンから初めてワールドマップへ出たときのフェードイン完了後 | `hint.first_world_map` | `hint.shown.first_world_map` | フィールド上 |
 | ダンジョンからワールドマップへのフェードイン完了後 | `hint.first_dungeon_exit` | `hint.shown.first_dungeon_exit` | フィールド上 |
-| 全滅復帰のフェードイン完了後 | `hint.first_defeat_restart` | `hint.shown.first_defeat_restart` | フィールド上 |
+| 通常の全滅復帰のフェードイン完了後 | `hint.first_defeat_restart` | `hint.shown.first_defeat_restart` | フィールド上 |
 
 上記5文言は `content/data/texts.json` を正本とする。成長変化がなくリザルト画面を省略した戦闘では
 `hint.first_result` の条件を満たさない。戦闘からの逃走はダンジョン脱出に含めない。

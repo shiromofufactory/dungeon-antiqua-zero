@@ -151,6 +151,34 @@ class EventEditorServerTest(unittest.TestCase):
             "shrine_guard": "sample.opening"
         })
 
+    def test_saves_and_clears_defeat_event_and_rejects_dangling_reference(self) -> None:
+        data = {"format_version": 1, "events": [
+            {"id": "sample.lost", "commands": [{"command": "face_party", "direction": "left"}]},
+            {"id": "sample.opening", "battle_start_id": "guard", "commands": [
+                {"command": "message", "message_id": "sample.hello"},
+            ]},
+        ]}
+        battle = {"battle_id": "guard", "monster_keys": ["SLIME"], "defeat_event_id": "sample.lost"}
+        self.assertTrue(self.post_json("/api/save", data, battles=[battle])["saved"])
+        self.assertEqual(self.get_json("/api/document?token=test-token")["battles"], [battle])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["battle_defeat_events"], {"guard": "sample.lost"})
+
+        for target in ("sample.deleted", "sample.opening", "lost"):
+            with self.subTest(target=target):
+                result = self.post_json("/api/save", data, battles=[{**battle, "defeat_event_id": target}])
+                self.assertFalse(result["saved"])
+                self.assertEqual(result["diagnostics"][0]["path"], "battles[0].defeat_event_id")
+                self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+        self.assertFalse(self.post_json(
+            "/api/save", {**data, "events": data["events"][1:]}, battles=[battle],
+        )["saved"])
+
+        del battle["defeat_event_id"]
+        self.assertTrue(self.post_json("/api/save", data, battles=[battle])["saved"])
+        self.assertEqual(self.get_json("/api/document?token=test-token")["battles"], [battle])
+        self.assertEqual(json.loads(self.application.runtime_path.read_bytes())["battle_defeat_events"], {})
+
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -245,6 +273,7 @@ class EventEditorServerTest(unittest.TestCase):
         messages: object | None = None,
         namespace: str | None = None,
         missions: object | None = None,
+        battles: object | None = None,
     ) -> dict:
         payload = {"data": data}
         if flags is not None:
@@ -253,6 +282,8 @@ class EventEditorServerTest(unittest.TestCase):
             payload["messages"] = messages
         if missions is not None:
             payload["missions"] = missions
+        if battles is not None:
+            payload["battles"] = battles
         if namespace is not None:
             payload["namespace"] = namespace
         request = Request(

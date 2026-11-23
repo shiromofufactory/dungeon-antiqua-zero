@@ -340,9 +340,10 @@ def validate_event_sources(
     messages = set(message_ids)
     bgms = set(bgm_ids)
     sounds = set(se_ids)
-    diagnostics = validate_event_battles(battle_values, monster_keys=monsters)
+    diagnostics: list[EventDiagnostic] = []
     flags = set(flag_ids)
     event_ids: set[str] = set()
+    field_event_ids: set[str] = set()
     battle_start_ids: set[str] = set()
 
     for filename, source in sources.items():
@@ -369,6 +370,12 @@ def validate_event_sources(
                 if full_id in event_ids:
                     _diagnostic(diagnostics, "error", "duplicate_event_id", f"{path}.id", f"イベントIDが重複しています: {full_id}")
                 event_ids.add(full_id)
+                if "battle_start_id" not in event:
+                    field_event_ids.add(full_id)
+
+    diagnostics.extend(validate_event_battles(
+        battle_values, monster_keys=monsters, field_event_ids=field_event_ids,
+    ))
 
     for filename, source in sources.items():
         if not isinstance(source, Mapping):
@@ -447,6 +454,10 @@ def compile_event_sources(
         "events": {key: events[key] for key in sorted(events)},
         "battles": {entry["battle_id"]: entry["monster_keys"] for entry in battles or []},
         "battle_start_events": {key: battle_start_events[key] for key in sorted(battle_start_events)},
+        "battle_defeat_events": {
+            entry["battle_id"]: entry["defeat_event_id"]
+            for entry in battles or [] if "defeat_event_id" in entry
+        },
     }
 
 

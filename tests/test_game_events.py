@@ -624,6 +624,87 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertEqual(game.event_conversation_actor_id, "villager")
         game._continue_event.assert_called_once_with()
 
+    @patch("game.play_se")
+    @patch("game.EventMessageOverlay")
+    def test_named_battle_defeat_runs_field_event_in_place_after_fade(self, overlay, play_se):
+        game = game_for(None)
+        game._start_field_event = Game._start_field_event.__get__(game, Game)
+        game.event_catalog = EventCatalog.from_document({
+            "format_version": 1,
+            "source_sha256": "0" * 64,
+            "flags": ["sample.lost", "sample.won"],
+            "battles": {"guard": ["SLIME"]},
+            "battle_defeat_events": {"guard": "sample.defeat"},
+            "events": {
+                "sample.run": {"commands": [
+                    {"command": "start_battle", "battle_id": "guard"},
+                    {"command": "set_flag", "flag_id": "sample.won"},
+                ]},
+                "sample.defeat": {"commands": [
+                    {"command": "message", "message_id": "sample.rescue"},
+                    {"command": "face_party", "direction": "left"},
+                    {"command": "set_flag", "flag_id": "sample.lost"},
+                ]},
+            },
+        })
+        member = Mock(hp=0, paralyzed=False, is_front_row=True)
+        game.party = (member,)
+        game.character_states = {}
+        game.party_system = Mock(active_party=game.party, character_states={})
+        game.inventory_system = InventorySystem({})
+        game.event_runner = None
+        game._begin_random_encounter = Mock()
+        game._begin_defeat_return_message = Mock()
+        game._show_hint_once = Mock()
+        game.encounter_system = Mock()
+        game.palette_shifter = Mock(base_colors=(0,))
+        game.bgm = Mock()
+        game.settings = Settings()
+        game.event_messages = Mock()
+        game.fonts = object()
+        game.faces = object()
+        game.character_face_positions = {}
+        game.selected_member_index = 0
+        field = game.field
+
+        self.assertTrue(game._start_field_event("sample.run"))
+        game.battle_scene = Mock(
+            result=BattleResult.DEFEAT, return_bgm_id=game.current_map.bgm_id,
+            return_bgm_start_sec=3.0,
+        )
+        game.pending_event_battle_id = None  # The first turn has already passed.
+        game._update_battle_scene(InputState())
+        count = game.battle_return_fade.frame_count
+        for _ in range(2 * count - 1):
+            game._update_battle_return(InputState())
+        overlay.assert_not_called()
+        self.assertIsNone(game.battle_scene)
+        self.assertIs(game.field, field)
+        self.assertEqual(game.field.position, FieldPosition(1, 1))
+        self.assertIs(game.field.facing, Direction.RIGHT)
+        member.fully_recover.assert_called_once_with()
+
+        game._update_battle_return(InputState())
+
+        overlay.assert_called_once()
+        self.assertEqual(overlay.call_args.kwargs["message_id"], "sample.rescue")
+        self.assertIs(game.event_runner.context, EventContext.FIELD)
+        self.assertIsNone(game.battle_return_fade)
+        self.assertIsNone(game.defeat_return_event_id)
+        self.assertIsNone(game.suspended_field_event)
+        game._begin_defeat_return_message.assert_not_called()
+        game.encounter_system.defeat_return.assert_not_called()
+        game._show_hint_once.assert_not_called()
+        play_se.assert_not_called()
+        game.bgm.transition_to.assert_called_once_with(game.current_map.bgm_id, start_sec=3.0)
+        self.assertEqual(game.save_data.battle_count, 0)
+
+        overlay.return_value.update.return_value = True
+        game._update_event(InputState())
+        self.assertIsNone(game.event_runner)
+        self.assertEqual(game.save_data.event_flags, {"sample.lost"})
+        self.assertIs(game.field.facing, Direction.LEFT)
+
     def test_named_battle_event_starts_before_first_command_window_opens(self) -> None:
         game = Game.__new__(Game)
         game.battle_scene = Mock(

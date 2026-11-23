@@ -652,6 +652,7 @@ class Game:
         self.pending_battle_bgm_start_sec = 0.0
         self.battle_return_fade: FadeThroughBlack | None = None
         self.battle_return_result: BattleResult | None = None
+        self.defeat_return_event_id: str | None = None
         self.defeat_return_message: MessageOverlay | None = None
         self.defeat_return_sound_waiting = False
         self.defeat_return_bgm_restart_pending = False
@@ -1192,6 +1193,16 @@ class Game:
         if not isinstance(screen_already_covered, bool):
             raise TypeError("screen_already_covered must be a bool")
         self.battle_return_result = result
+        self.defeat_return_event_id = None
+        suspended = getattr(self, "suspended_field_event", None)
+        if (
+            result is BattleResult.DEFEAT
+            and suspended is not None
+            and getattr(self, "debug_dungeon_scene", None) is None
+        ):
+            self.defeat_return_event_id = self.event_catalog.battle_defeat_event(
+                suspended[1].battle_id
+            )
         self.defeat_return_message = None
         self.defeat_return_sound_waiting = False
         self.defeat_return_bgm_restart_pending = False
@@ -1207,7 +1218,7 @@ class Game:
         self.battle_return_fade.start()
 
     def _update_battle_return(self, input_state: InputState) -> None:
-        """Pause defeat at black for its message, then return to the field."""
+        """Return to the field and dispatch the registered defeat event, if any."""
 
         fade = self.battle_return_fade
         if fade is None:
@@ -1238,8 +1249,9 @@ class Game:
         )
         if self.battle_return_result is BattleResult.DEFEAT:
             self.bgm.set_fade_rate(fade.visible_rate)
+        defeat_event_id = getattr(self, "defeat_return_event_id", None)
         if event is FadeEvent.COVERED:
-            if self.battle_return_result is BattleResult.DEFEAT:
+            if self.battle_return_result is BattleResult.DEFEAT and defeat_event_id is None:
                 self._begin_defeat_return_message()
                 self.palette_shifter.set_global_mix(
                     base_rate=1.0,
@@ -1253,11 +1265,18 @@ class Game:
                 self.bgm.set_fade_rate(1.0)
             self.battle_return_fade = None
             self.battle_return_result = None
+            self.defeat_return_event_id = None
             self.defeat_return_sound_waiting = False
             self.defeat_return_bgm_restart_pending = False
-            if finished_result is BattleResult.DEFEAT:
+            if finished_result is BattleResult.DEFEAT and defeat_event_id is None:
                 self._show_hint_once(FIRST_DEFEAT_RESTART_HINT_ID)
             self._resume_event_after_battle(finished_result)
+            if defeat_event_id is not None:
+                self._start_field_event(
+                    defeat_event_id,
+                    release_direction=input_state.held_direction,
+                    release_confirm=input_state.confirm.held,
+                )
 
     def _begin_defeat_return_message(self) -> None:
         """Show the fixed rescue message over the fully black screen."""
@@ -1325,6 +1344,7 @@ class Game:
             raise RuntimeError("battle return has no result")
         battle_scene = getattr(self, "battle_scene", None)
         field_defeat = result is BattleResult.DEFEAT and battle_scene is None
+        event_defeat = getattr(self, "defeat_return_event_id", None) is not None
         if battle_scene is not None:
             battle_scene.clear_temporary_member_conditions()
             battle_scene.release_palette_variants()
@@ -1345,6 +1365,7 @@ class Game:
         if result is BattleResult.DEFEAT:
             for member in self.party:
                 member.fully_recover()
+        if result is BattleResult.DEFEAT and not event_defeat:
             destination = self.encounter_system.defeat_return(
                 self.current_map,
                 self.field.position,
@@ -1382,7 +1403,7 @@ class Game:
             self.bgm.stop()
             self.defeat_return_bgm_restart_pending = True
         elif (
-            result in (BattleResult.VICTORY, BattleResult.ESCAPED)
+            (result in (BattleResult.VICTORY, BattleResult.ESCAPED) or event_defeat)
             and battle_scene is not None
             and battle_scene.return_bgm_id == self.current_map.bgm_id
         ):
