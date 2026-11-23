@@ -1991,14 +1991,21 @@ class BattleSceneIntegrationTest(unittest.TestCase):
         game = Game.__new__(Game)
         game.alert = Mock(camera_x=0)
         game.encounter_transition = None
-        game.defeat_return_message = Mock()
         game.battle_scene = Mock()
 
-        game.draw()
+        for event_active, show_message in ((False, True), (True, True), (True, False)):
+            with self.subTest(event_active=event_active, show_message=show_message):
+                clear.reset_mock()
+                message = Mock() if show_message else None
+                game.defeat_return_event_active = event_active
+                game.event_message = message if event_active else None
+                game.defeat_return_message = None if event_active else message
+                game.draw()
 
-        clear.assert_called_once_with(0)
-        game.defeat_return_message.draw.assert_called_once_with()
-        game.battle_scene.draw.assert_not_called()
+                clear.assert_called_once_with(0)
+                if message is not None:
+                    message.draw.assert_called_once_with()
+                game.battle_scene.draw.assert_not_called()
 
 
 if __name__ == "__main__":

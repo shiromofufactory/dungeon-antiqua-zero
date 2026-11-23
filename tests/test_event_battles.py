@@ -89,6 +89,19 @@ class EventBattleTest(unittest.TestCase):
         del compiled["battle_defeat_events"]
         self.assertIsNone(EventCatalog.from_document(compiled).battle_defeat_event("guard"))
 
+    def test_defeat_event_cannot_open_a_shop_or_start_another_battle_under_fade(self):
+        source = deepcopy(SOURCE)
+        source["events"]["events"].append({
+            "id": "sample.lost", "commands": [{
+                "command": "branch", "condition": {"type": "any_member_dead"},
+                "then": [{"command": "open_shop", "shop_key": "store"}],
+                "else": [{"command": "start_battle", "battle_id": "guard"}],
+            }],
+        })
+        battles = [{**BATTLES[0], "defeat_event_id": "sample.lost"}]
+        issues = validate_event_sources(source, battles=battles, monster_keys={"SLIME"}, shop_keys={"store"})
+        self.assertEqual([issue.code for issue in issues], ["transition_during_defeat"] * 2)
+
     def test_trial_reference_prevents_deleting_a_used_registration(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

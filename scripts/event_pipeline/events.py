@@ -189,6 +189,7 @@ def _validate_command_list(
     battle_ids: set[str],
     depth: int = 0,
     battle_context: bool = False,
+    defeat_context: bool = False,
 ) -> None:
     if not isinstance(value, list):
         _diagnostic(diagnostics, "error", "invalid_commands", path, "commandsは配列で指定してください。")
@@ -206,6 +207,8 @@ def _validate_command_list(
             "face_party", "face_actor", "start_battle"
         }:
             _diagnostic(diagnostics, "error", "field_only_battle_command", f"{command_path}.command", f"戦闘開始イベントでは使用できないコマンドです: {command_type}")
+        if defeat_context and command_type in ("open_shop", "start_battle"):
+            _diagnostic(diagnostics, "error", "transition_during_defeat", f"{command_path}.command", f"全滅時イベントでは使用できないコマンドです: {command_type}")
         if command_type == "set_flag":
             _known_fields(command, {"command", "flag_id"}, diagnostics, command_path)
             flag_id = command.get("flag_id")
@@ -247,7 +250,7 @@ def _validate_command_list(
                     and command["else"]
                 ):
                     continue
-                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context, battle_ids=battle_ids)
+                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context, defeat_context=defeat_context, battle_ids=battle_ids)
         elif command_type in (
             "end_event", "stop_bgm", "reset_game", "recover_party", "recover_party_without_revive"
         ):
@@ -333,6 +336,10 @@ def validate_event_sources(
 
     battle_values = [] if battles is None else battles
     registered_battles = event_battle_ids(battle_values)
+    defeat_event_ids = {
+        battle["defeat_event_id"] for battle in battle_values
+        if isinstance(battle, dict) and isinstance(battle.get("defeat_event_id"), str)
+    } if isinstance(battle_values, list) else set()
     characters = set(character_keys)
     items = set(item_keys)
     monsters = set(monster_keys)
@@ -406,6 +413,7 @@ def validate_event_sources(
                 shop_keys=shops,
                 message_ids=messages, bgm_ids=bgms, se_ids=sounds,
                 battle_context="battle_start_id" in event, battle_ids=registered_battles,
+                defeat_context=isinstance(event.get("id"), str) and event["id"] in defeat_event_ids,
             )
     return diagnostics
 

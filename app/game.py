@@ -652,7 +652,7 @@ class Game:
         self.pending_battle_bgm_start_sec = 0.0
         self.battle_return_fade: FadeThroughBlack | None = None
         self.battle_return_result: BattleResult | None = None
-        self.defeat_return_event_id: str | None = None
+        self.defeat_return_event_active = False
         self.defeat_return_message: MessageOverlay | None = None
         self.defeat_return_sound_waiting = False
         self.defeat_return_bgm_restart_pending = False
@@ -670,7 +670,7 @@ class Game:
         self.battle_scene: BattleScene | None = None
         self.pending_first_party_turn_hint = False
         self.pending_event_battle_encounter: BattleEncounter | None = None
-        self.pending_event_battle_id: str | None = None
+        self.event_battle_id: str | None = None
         self.suspended_field_event: tuple[EventRunner, StartBattleEffect] | None = None
         self.pending_shop = None
         self.shop_return_to_debug = False
@@ -1045,7 +1045,7 @@ class Game:
             event_encounter or debug_encounter or self._create_random_battle_encounter()
         )
         self.pending_battle_bgm_start_sec = 0.0
-        battle_id = getattr(self, "pending_event_battle_id", None)
+        battle_id = getattr(self, "event_battle_id", None)
         if (
             battle_id is not None
             and self.event_catalog.battle_start_event(battle_id) is not None
@@ -1087,7 +1087,7 @@ class Game:
             raise RuntimeError("an event battle is already active")
         encounter = BattleEncounter(self.event_catalog.battle_monster_keys(effect.battle_id), escape_command_enabled=False)
         self.pending_event_battle_encounter = encounter
-        self.pending_event_battle_id = effect.battle_id
+        self.event_battle_id = effect.battle_id
         self.suspended_field_event = (runner, effect)
         self.event_runner = None
         self.event_effect = None
@@ -1118,9 +1118,9 @@ class Game:
             self._abort_event(error)
 
     def _resume_event_after_battle(self, result: BattleResult | None) -> None:
-        """Continue the initiating event after the battle return transition."""
+        """Clear the battle ID and resolve the suspended field event."""
 
-        self.pending_event_battle_id = None
+        self.event_battle_id = None
         suspended = getattr(self, "suspended_field_event", None)
         self.suspended_field_event = None
         if suspended is None:
@@ -1193,16 +1193,7 @@ class Game:
         if not isinstance(screen_already_covered, bool):
             raise TypeError("screen_already_covered must be a bool")
         self.battle_return_result = result
-        self.defeat_return_event_id = None
-        suspended = getattr(self, "suspended_field_event", None)
-        if (
-            result is BattleResult.DEFEAT
-            and suspended is not None
-            and getattr(self, "debug_dungeon_scene", None) is None
-        ):
-            self.defeat_return_event_id = self.event_catalog.battle_defeat_event(
-                suspended[1].battle_id
-            )
+        self.defeat_return_event_active = False
         self.defeat_return_message = None
         self.defeat_return_sound_waiting = False
         self.defeat_return_bgm_restart_pending = False
@@ -1218,7 +1209,7 @@ class Game:
         self.battle_return_fade.start()
 
     def _update_battle_return(self, input_state: InputState) -> None:
-        """Return to the field and dispatch the registered defeat event, if any."""
+        """Pause at black for the defeat presentation, then return to the field."""
 
         fade = self.battle_return_fade
         if fade is None:
@@ -1227,13 +1218,12 @@ class Game:
         if message is not None:
             if message.update(input_state):
                 self.defeat_return_message = None
-                self.palette_shifter.set_global_mix(
-                    base_rate=0.0,
-                    target_color=self.palette_shifter.base_colors[0],
-                )
-                self._apply_battle_return()
-                play_se(TELEPORT_SE_ID)
-                self.defeat_return_sound_waiting = True
+                self._finish_defeat_presentation()
+            return
+        if getattr(self, "defeat_return_event_active", False):
+            self._update_event(input_state)
+            if self.event_runner is None:
+                self._finish_defeat_presentation()
             return
         if getattr(self, "defeat_return_sound_waiting", False):
             if pyxel.play_pos(SE_CHANNEL) is not None:
@@ -1249,14 +1239,9 @@ class Game:
         )
         if self.battle_return_result is BattleResult.DEFEAT:
             self.bgm.set_fade_rate(fade.visible_rate)
-        defeat_event_id = getattr(self, "defeat_return_event_id", None)
         if event is FadeEvent.COVERED:
-            if self.battle_return_result is BattleResult.DEFEAT and defeat_event_id is None:
-                self._begin_defeat_return_message()
-                self.palette_shifter.set_global_mix(
-                    base_rate=1.0,
-                    target_color=self.palette_shifter.base_colors[0],
-                )
+            if self.battle_return_result is BattleResult.DEFEAT:
+                self._begin_defeat_presentation(input_state)
             else:
                 self._apply_battle_return()
         if event is FadeEvent.FINISHED:
@@ -1265,18 +1250,47 @@ class Game:
                 self.bgm.set_fade_rate(1.0)
             self.battle_return_fade = None
             self.battle_return_result = None
-            self.defeat_return_event_id = None
             self.defeat_return_sound_waiting = False
             self.defeat_return_bgm_restart_pending = False
-            if finished_result is BattleResult.DEFEAT and defeat_event_id is None:
+            if finished_result is BattleResult.DEFEAT:
                 self._show_hint_once(FIRST_DEFEAT_RESTART_HINT_ID)
-            self._resume_event_after_battle(finished_result)
-            if defeat_event_id is not None:
-                self._start_field_event(
-                    defeat_event_id,
-                    release_direction=input_state.held_direction,
-                    release_confirm=input_state.confirm.held,
-                )
+            else:
+                self._resume_event_after_battle(finished_result)
+
+    def _begin_defeat_presentation(self, input_state: InputState) -> None:
+        """Select the defeat event or rescue message once fully covered."""
+
+        battle_id = getattr(self, "event_battle_id", None)
+        event_id = (
+            self.event_catalog.battle_defeat_event(battle_id)
+            if battle_id is not None else None
+        )
+        self._resume_event_after_battle(BattleResult.DEFEAT)
+        self.palette_shifter.set_global_mix(
+            base_rate=1.0, target_color=self.palette_shifter.base_colors[0],
+        )
+        if event_id is None:
+            self._begin_defeat_return_message()
+            return
+        self.defeat_return_event_active = True
+        self._start_field_event(
+            event_id,
+            release_direction=input_state.held_direction,
+            release_confirm=input_state.confirm.held,
+        )
+        if self.event_runner is None:
+            self._finish_defeat_presentation()
+
+    def _finish_defeat_presentation(self) -> None:
+        """Apply the shared defeat return and wait at black for its sound."""
+
+        self.defeat_return_event_active = False
+        self.palette_shifter.set_global_mix(
+            base_rate=0.0, target_color=self.palette_shifter.base_colors[0],
+        )
+        self._apply_battle_return()
+        play_se(TELEPORT_SE_ID)
+        self.defeat_return_sound_waiting = True
 
     def _begin_defeat_return_message(self) -> None:
         """Show the fixed rescue message over the fully black screen."""
@@ -1304,7 +1318,7 @@ class Game:
             battle_scene.open_pending_party_command()
         battle_scene.update(input_state)
         if getattr(self, "pending_first_party_turn_hint", False):
-            battle_id = getattr(self, "pending_event_battle_id", None)
+            battle_id = getattr(self, "event_battle_id", None)
             event_id = (
                 self.event_catalog.battle_start_event(battle_id)
                 if battle_id is not None else None
@@ -1314,11 +1328,9 @@ class Game:
                 and battle_scene.is_party_command_pending is True
             ):
                 self.pending_first_party_turn_hint = False
-                self.pending_event_battle_id = None
                 self._start_battle_event(event_id)
             elif event_id is None and battle_scene.is_party_command_ready:
                 self.pending_first_party_turn_hint = False
-                self.pending_event_battle_id = None
                 self._show_hint_once(FIRST_BATTLE_HINT_ID)
         if battle_scene.phase is BattlePhase.RESULT:
             self._show_hint_once(FIRST_RESULT_HINT_ID)
@@ -1344,7 +1356,6 @@ class Game:
             raise RuntimeError("battle return has no result")
         battle_scene = getattr(self, "battle_scene", None)
         field_defeat = result is BattleResult.DEFEAT and battle_scene is None
-        event_defeat = getattr(self, "defeat_return_event_id", None) is not None
         if battle_scene is not None:
             battle_scene.clear_temporary_member_conditions()
             battle_scene.release_palette_variants()
@@ -1365,7 +1376,6 @@ class Game:
         if result is BattleResult.DEFEAT:
             for member in self.party:
                 member.fully_recover()
-        if result is BattleResult.DEFEAT and not event_defeat:
             destination = self.encounter_system.defeat_return(
                 self.current_map,
                 self.field.position,
@@ -1403,7 +1413,7 @@ class Game:
             self.bgm.stop()
             self.defeat_return_bgm_restart_pending = True
         elif (
-            (result in (BattleResult.VICTORY, BattleResult.ESCAPED) or event_defeat)
+            result in (BattleResult.VICTORY, BattleResult.ESCAPED)
             and battle_scene is not None
             and battle_scene.return_bgm_id == self.current_map.bgm_id
         ):
@@ -2389,7 +2399,7 @@ class Game:
         except EncounterGenerationError:
             return False
         self.pending_debug_battle_encounter = encounter
-        self.pending_event_battle_id = step.battle_id
+        self.event_battle_id = step.battle_id
         self._begin_random_encounter()
         return True
 
@@ -3513,6 +3523,8 @@ class Game:
                 continue
             if isinstance(effect, ChangeBgmEffect):
                 self.bgm.play(effect.bgm_id)
+                if getattr(self, "defeat_return_event_active", False):
+                    self.bgm.set_fade_rate(1.0)
                 runner.complete_effect(effect)
                 self.event_effect = None
                 continue
@@ -3541,6 +3553,12 @@ class Game:
                     target_color=color,
                 )
                 return
+            if isinstance(effect, (StartBattleEffect, OpenShopEffect)) and getattr(
+                self, "defeat_return_event_active", False
+            ):
+                raise EventRuntimeError(
+                    runner.event_id, "effect", "全滅復帰中は戦闘開始・ショップを実行できません。"
+                )
             if isinstance(effect, StartBattleEffect):
                 self._begin_event_battle(effect)
                 return
@@ -4381,13 +4399,13 @@ class Game:
             if getattr(self, "encounter_transition", None) is not None:
                 self._draw_encounter_transition()
                 return
-            defeat_return_message = getattr(
-                self,
-                "defeat_return_message",
-                None,
+            defeat_event_active = getattr(self, "defeat_return_event_active", False)
+            defeat_message = getattr(
+                self, "event_message" if defeat_event_active else "defeat_return_message", None,
             )
-            if defeat_return_message is not None:
-                defeat_return_message.draw()
+            if defeat_event_active or defeat_message is not None:
+                if defeat_message is not None:
+                    defeat_message.draw()
                 return
             battle_scene = getattr(self, "battle_scene", None)
             if battle_scene is not None:

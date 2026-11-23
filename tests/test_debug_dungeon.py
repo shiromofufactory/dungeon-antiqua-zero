@@ -12,7 +12,7 @@ from tools._bootstrap import APP_ROOT
 from debug_dungeon import (
     DEFAULT_ENCOUNTER, DebugDungeonDataError, DungeonCheckpoint, DungeonProgress, parse_dungeons as parse_dungeon_document, reset_treasures,
 )
-from game import Game, GameScreenChange
+from game import FIRST_DEFEAT_RESTART_HINT_ID, TELEPORT_SE_ID, Game, GameScreenChange
 from input import Direction, InputButton, InputState
 from resources import EventCatalog, FontResources
 from scenes import BattleEncounter, BattlePhase, BattleResult
@@ -634,12 +634,81 @@ class DebugDungeonGameTest(unittest.TestCase):
         self.assertEqual(game.current_map.map_id, "real_map")
         game.bgm.play.assert_called_once_with("original")
 
+    @patch("game.pyxel.play_pos", return_value=None)
+    @patch("game.play_se")
+    def test_event_battle_defeat_runs_registered_event_before_leaving_trial(self, play_se, play_pos):
+        game = self.game_with_party()
+        simulation = game.debug_dungeon_scene
+        field = game.field
+        game.palette_shifter = Mock(base_colors=(0,))
+        game._begin_random_encounter = Mock()
+        game._begin_defeat_return_message = Mock()
+        game._show_hint_once = Mock()
+        game.event_runner = None
+        def start_event(*args, **kwargs):
+            game.event_runner = Mock()
+        game._start_field_event = Mock(side_effect=start_event)
+        game.event_catalog.battle_start_event.return_value = None
+        game.event_catalog.battle_defeat_event.return_value = "trial.after_defeat"
+        battle = Mock(
+            is_party_command_pending=False, is_party_command_ready=True,
+            phase=BattlePhase.INITIAL, result=None,
+        )
+        game._build_battle_scene = Mock(return_value=battle)
+        game.encounter_transition = Mock(is_finished=True)
+
+        self.assertTrue(game._start_debug_dungeon_battle(parse_dungeons(source())[0].steps[2]))
+        game._update_encounter_transition()
+        game._update_battle_scene(InputState())
+        game._show_hint_once.reset_mock()
+        for member in game.party:
+            member.hp = member.mp = 0
+        battle.result = BattleResult.DEFEAT
+        game._update_battle_scene(InputState())
+
+        frames = game.battle_return_fade.frame_count
+        for _ in range(frames - 1):
+            game._update_battle_return(InputState())
+        game._start_field_event.assert_not_called()
+        game._update_battle_return(InputState())
+        game.event_catalog.battle_defeat_event.assert_called_once_with("shrine_guard")
+        game._start_field_event.assert_called_once_with(
+            "trial.after_defeat", release_direction=None, release_confirm=False,
+        )
+        self.assertTrue(game.defeat_return_event_active)
+        self.assertIs(game.debug_dungeon_scene, simulation)
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
+        simulation.complete_battle.assert_not_called()
+        play_se.assert_not_called()
+
+        def complete_event(_input_state):
+            game.event_runner = None
+        game._update_event = Mock(side_effect=complete_event)
+        game._update_battle_return(InputState())
+
+        self.assertIsNone(game.debug_dungeon_scene)
+        self.assertIs(game.field, field)
+        self.assertTrue(game.showing_field)
+        for member in game.party:
+            self.assertEqual((member.hp, member.mp), (member.max_hp, member.max_mp))
+
+        simulation.complete_battle.assert_called_once_with(victory=False)
+        game._begin_defeat_return_message.assert_not_called()
+        game._show_hint_once.assert_not_called()
+        game.encounter_system.defeat_return.assert_not_called()
+        play_se.assert_called_once_with(TELEPORT_SE_ID)
+        for _ in range(frames):
+            game._update_battle_return(InputState())
+        self.assertIsNone(game.battle_return_fade)
+        self.assertIsNone(game.event_battle_id)
+        game._show_hint_once.assert_called_once_with(FIRST_DEFEAT_RESTART_HINT_ID)
+
     def test_event_battle_stages_id_and_disables_normal_escape(self):
         game = self.game()
         game._begin_random_encounter = Mock()
         step = parse_dungeons(source())[0].steps[2]
         self.assertTrue(game._start_debug_dungeon_battle(step))
-        self.assertEqual(game.pending_event_battle_id, "shrine_guard")
+        self.assertEqual(game.event_battle_id, "shrine_guard")
         self.assertFalse(game.pending_debug_battle_encounter.escape_command_enabled)
         game._begin_random_encounter.assert_called_once()
 
@@ -649,7 +718,7 @@ class DebugDungeonGameTest(unittest.TestCase):
         game.encounter_transition = Mock(is_finished=True)
         game.palette_shifter = Mock()
         game.pending_debug_battle_encounter = encounter
-        game.pending_event_battle_id = "shrine_guard"
+        game.event_battle_id = "shrine_guard"
         game.event_catalog = Mock()
         game.event_catalog.battle_start_event.return_value = "trial.before_guard"
         battle = Mock(is_party_command_pending=True, result=None, phase=BattlePhase.INITIAL)

@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import ANY, Mock, call, patch
 
 from tools._bootstrap import APP_ROOT as _APP_ROOT
-from game import EVENT_ITEM_RECEIVED_TEXT_KEY, Game, GameScreenChange
+from game import EVENT_ITEM_RECEIVED_TEXT_KEY, FIRST_DEFEAT_RESTART_HINT_ID, TELEPORT_SE_ID, Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
 from resources.maps import MapVisibilityCondition
@@ -29,6 +29,7 @@ from state import SaveData, Settings
 from systems import (
     StopBgmEffect,
     ChangeBrightnessEffect,
+    DungeonExitReturn,
     ShakeScreenEffect,
     InventorySystem,
     EventContext,
@@ -570,7 +571,7 @@ class GameEventTriggerTest(unittest.TestCase):
         game._update_field(InputState(held_direction=Direction.RIGHT))
 
         self.assertEqual(game.field.position, FieldPosition(2, 1))
-        self.assertEqual(game.pending_event_battle_id, "guard")
+        self.assertEqual(game.event_battle_id, "guard")
         self.assertIs(game.event_release_direction, Direction.RIGHT)
         game._begin_random_encounter.assert_called_once_with()
 
@@ -583,7 +584,7 @@ class GameEventTriggerTest(unittest.TestCase):
         )
         game.palette_shifter = Mock(base_colors=(0,))
         game.pending_event_battle_encounter = BattleEncounter(("SLIME",))
-        game.pending_event_battle_id = "shrine_guard"
+        game.event_battle_id = "shrine_guard"
         game.event_catalog = Mock()
         game.event_catalog.battle_start_event.return_value = "sample.guard_opens"
         battle = Mock()
@@ -609,7 +610,7 @@ class GameEventTriggerTest(unittest.TestCase):
 
         game._begin_event_battle(effect)
 
-        self.assertEqual(game.pending_event_battle_id, "shrine_guard")
+        self.assertEqual(game.event_battle_id, "shrine_guard")
         self.assertEqual(game.pending_event_battle_encounter.monster_keys, ("SLIME",))
         self.assertFalse(game.pending_event_battle_encounter.escape_command_enabled)
         self.assertIsNone(game.event_runner)
@@ -624,9 +625,10 @@ class GameEventTriggerTest(unittest.TestCase):
         self.assertEqual(game.event_conversation_actor_id, "villager")
         game._continue_event.assert_called_once_with()
 
+    @patch("game.pyxel.play_pos", return_value=None)
     @patch("game.play_se")
     @patch("game.EventMessageOverlay")
-    def test_named_battle_defeat_runs_field_event_in_place_after_fade(self, overlay, play_se):
+    def test_named_battle_defeat_runs_event_at_black_then_returns_to_entrance(self, overlay, play_se, play_pos):
         game = game_for(None)
         game._start_field_event = Game._start_field_event.__get__(game, Game)
         game.event_catalog = EventCatalog.from_document({
@@ -642,6 +644,7 @@ class GameEventTriggerTest(unittest.TestCase):
                 ]},
                 "sample.defeat": {"commands": [
                     {"command": "message", "message_id": "sample.rescue"},
+                    {"command": "wait", "frames": 6},
                     {"command": "face_party", "direction": "left"},
                     {"command": "set_flag", "flag_id": "sample.lost"},
                 ]},
@@ -657,6 +660,11 @@ class GameEventTriggerTest(unittest.TestCase):
         game._begin_defeat_return_message = Mock()
         game._show_hint_once = Mock()
         game.encounter_system = Mock()
+        game.encounter_system.defeat_return.return_value = DungeonExitReturn(
+            FieldPosition(2, 2), Direction.DOWN, game.current_map.map_id,
+        )
+        game.map_resources = Mock()
+        game._reset_field_actors = Mock()
         game.palette_shifter = Mock(base_colors=(0,))
         game.bgm = Mock()
         game.settings = Settings()
@@ -669,41 +677,68 @@ class GameEventTriggerTest(unittest.TestCase):
 
         self.assertTrue(game._start_field_event("sample.run"))
         game.battle_scene = Mock(
-            result=BattleResult.DEFEAT, return_bgm_id=game.current_map.bgm_id,
+            is_party_command_pending=False, is_party_command_ready=True,
+            phase=BattlePhase.INITIAL, result=None, return_bgm_id=game.current_map.bgm_id,
             return_bgm_start_sec=3.0,
         )
-        game.pending_event_battle_id = None  # The first turn has already passed.
+        game.pending_first_party_turn_hint = True
+        game._update_battle_scene(InputState())
+        game._show_hint_once.reset_mock()
+        game.battle_scene.result = BattleResult.DEFEAT
         game._update_battle_scene(InputState())
         count = game.battle_return_fade.frame_count
-        for _ in range(2 * count - 1):
+        for _ in range(count - 1):
             game._update_battle_return(InputState())
         overlay.assert_not_called()
-        self.assertIsNone(game.battle_scene)
-        self.assertIs(game.field, field)
-        self.assertEqual(game.field.position, FieldPosition(1, 1))
-        self.assertIs(game.field.facing, Direction.RIGHT)
-        member.fully_recover.assert_called_once_with()
-
         game._update_battle_return(InputState())
 
         overlay.assert_called_once()
         self.assertEqual(overlay.call_args.kwargs["message_id"], "sample.rescue")
         self.assertIs(game.event_runner.context, EventContext.FIELD)
-        self.assertIsNone(game.battle_return_fade)
-        self.assertIsNone(game.defeat_return_event_id)
+        self.assertTrue(game.defeat_return_event_active)
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
+        self.assertIs(game.field, field)
+        self.assertEqual(game.field.position, FieldPosition(1, 1))
+        self.assertIs(game.field.facing, Direction.RIGHT)
+        member.fully_recover.assert_not_called()
         self.assertIsNone(game.suspended_field_event)
         game._begin_defeat_return_message.assert_not_called()
         game.encounter_system.defeat_return.assert_not_called()
         game._show_hint_once.assert_not_called()
         play_se.assert_not_called()
-        game.bgm.transition_to.assert_called_once_with(game.current_map.bgm_id, start_sec=3.0)
         self.assertEqual(game.save_data.battle_count, 0)
 
         overlay.return_value.update.return_value = True
-        game._update_event(InputState())
+        game._update_battle_return(InputState())
+        for _ in range(5):
+            game._update_battle_return(InputState())
+        self.assertEqual(game.battle_return_fade.elapsed_frames, 0)
+        self.assertIs(game.field, field)
+        self.assertIsInstance(game.event_effect, WaitEffect)
+        play_se.assert_not_called()
+
+        game._update_battle_return(InputState())
+
         self.assertIsNone(game.event_runner)
+        self.assertIsNone(game.battle_scene)
+        self.assertFalse(game.defeat_return_event_active)
+        self.assertIsNone(game.event_battle_id)
         self.assertEqual(game.save_data.event_flags, {"sample.lost"})
-        self.assertIs(game.field.facing, Direction.LEFT)
+        self.assertIs(field.facing, Direction.LEFT)
+        self.assertEqual(game.field.position, FieldPosition(2, 2))
+        self.assertIs(game.field.facing, Direction.DOWN)
+        member.fully_recover.assert_called_once_with()
+        game.encounter_system.defeat_return.assert_called_once()
+        game.bgm.transition_to.assert_called_once_with(game.current_map.bgm_id)
+        play_se.assert_called_once_with(TELEPORT_SE_ID)
+        self.assertTrue(game.defeat_return_sound_waiting)
+        game._show_hint_once.assert_not_called()
+
+        for _ in range(count):
+            game._update_battle_return(InputState())
+        self.assertIsNone(game.battle_return_fade)
+        play_pos.assert_called_once()
+        game._show_hint_once.assert_called_once_with(FIRST_DEFEAT_RESTART_HINT_ID)
 
     def test_named_battle_event_starts_before_first_command_window_opens(self) -> None:
         game = Game.__new__(Game)
@@ -713,7 +748,7 @@ class GameEventTriggerTest(unittest.TestCase):
             result=None,
         )
         game.pending_first_party_turn_hint = True
-        game.pending_event_battle_id = "shrine_guard"
+        game.event_battle_id = "shrine_guard"
         game.event_catalog = Mock()
         game.event_catalog.battle_start_event.return_value = "sample.guard_opens"
         game._start_battle_event = Mock()
@@ -725,7 +760,7 @@ class GameEventTriggerTest(unittest.TestCase):
         game._start_battle_event.assert_called_once_with("sample.guard_opens")
         game._show_hint_once.assert_not_called()
         game.battle_scene.open_pending_party_command.assert_not_called()
-        self.assertIsNone(game.pending_event_battle_id)
+        self.assertEqual(game.event_battle_id, "shrine_guard")
         self.assertFalse(game.pending_first_party_turn_hint)
 
     def test_command_window_waits_until_battle_event_and_hint_finish(self) -> None:
