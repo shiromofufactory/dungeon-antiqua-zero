@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from collections import Counter
 from dataclasses import replace
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -5281,6 +5282,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 mock.active_party_index = 0
                 mock.spells = load_mock_spells()
                 mock.inventory_system = InventorySystem(items, {item_key: 2})
+                mock._consumed_items = Counter()
                 mock.item_candidates = mock._active_member_item_candidates()
                 mock.selected_item_index = next(
                     index
@@ -5727,6 +5729,10 @@ class BattleScreenMockTest(unittest.TestCase):
                     if item_key == "WAND of FIRE":
                         # Capture the equipment benefit before the used gear breaks.
                         item = replace(item, breaks_on_use=True)
+                        member.equipment = member.equipment.replaced(
+                            {EquipmentSlot.RIGHT: item}
+                        )
+                        mock._broken_equipment = {}
                         mock.pending_item_candidate = BattleItemCandidate(
                             item, EquipmentSlot.RIGHT
                         )
@@ -7976,6 +7982,7 @@ class BattleScreenMockTest(unittest.TestCase):
         from systems import InventorySystem
 
         mock.inventory_system = InventorySystem.with_one_each(items)
+        mock._consumed_items = Counter()
         mock.active_party_index = 0
         mock.pending_item_candidate = BattleItemCandidate(potion)
         mock.pending_spell = None
@@ -7992,6 +7999,7 @@ class BattleScreenMockTest(unittest.TestCase):
         from systems import InventorySystem
 
         mock.inventory_system = InventorySystem.with_one_each(items)
+        mock._consumed_items = Counter()
         mock.active_party_index = 0
         mock.localizer = Localizer(Language.JAPANESE)
         font = Mock()
@@ -8030,6 +8038,7 @@ class BattleScreenMockTest(unittest.TestCase):
         from systems import InventorySystem
 
         mock.inventory_system = InventorySystem.with_one_each(items)
+        mock._consumed_items = Counter()
         mock.active_party_index = 0
         mock.pending_item_candidate = BattleItemCandidate(magnifier)
         mock.pending_spell = None
@@ -8133,6 +8142,7 @@ class BattleScreenMockTest(unittest.TestCase):
         from systems import InventorySystem
 
         mock.inventory_system = InventorySystem(items, {"MANA DROP": 1})
+        mock._consumed_items = Counter()
         mock.party_status_windows = []
         mock.party_status_texts = []
         for index, member in enumerate(mock.party):
@@ -9751,6 +9761,8 @@ class BattleScreenMockTest(unittest.TestCase):
         self,
     ) -> None:
         mock = BattleScene.__new__(BattleScene)
+        mock._consumed_items = Counter()
+        mock._broken_equipment = {}
         mock.phase = BattleMockPhase.MONSTER_ACTION
         mock.result = None
         mock.active_party_index = 0
@@ -9791,6 +9803,41 @@ class BattleScreenMockTest(unittest.TestCase):
         )
 
         self.assertIs(mock.result, BattleResult.DEFEAT)
+
+    def test_defeat_refunds_only_items_used_in_that_battle(self) -> None:
+        from systems import InventorySystem
+
+        items = load_mock_items()
+        potion = BattleItemCandidate(items["POTION"])
+        ring = BattleItemCandidate(items["TELEPORT RING"], EquipmentSlot.ARM)
+        scene = BattleScene.__new__(BattleScene)
+        scene._consumed_items = Counter()
+        scene._broken_equipment = {}
+        scene.inventory_system = InventorySystem(items, {"POTION": 2, "MAGNIFIER": 1})
+        scene.party = load_mock_party(items, load_mock_skills())
+        scene.active_party_index = 1
+        user = scene.party[1]
+        user.equipment = user.equipment.replaced({EquipmentSlot.ARM: ring.item})
+        original_equipment = user.equipment
+
+        # A battle-start event can take inventory before the party acts.
+        self.assertTrue(scene.inventory_system.remove("MAGNIFIER"))
+        self.assertTrue(scene._commit_item_use(potion))
+        self.assertTrue(scene._commit_item_use(potion))
+        self.assertFalse(scene._commit_item_use(potion))
+        self.assertTrue(scene._commit_item_use(ring))
+        self.assertEqual(scene.inventory_system.quantity("POTION"), 0)
+        self.assertIsNone(user.equipment.item_at(EquipmentSlot.ARM))
+
+        scene._update_defeat_message(
+            InputState(confirm=InputButton(triggered=True, held=True))
+        )
+        self.assertIs(scene.result, BattleResult.DEFEAT)
+        self.assertEqual(dict(scene.inventory_system.quantities), {"POTION": 2})
+        self.assertEqual(user.equipment, original_equipment)
+
+        scene._complete_defeat()
+        self.assertEqual(scene.inventory_system.quantity("POTION"), 2)
 
     def test_standalone_defeat_acknowledgement_restarts_fixture(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)

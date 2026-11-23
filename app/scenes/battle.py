@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -2906,6 +2907,8 @@ class BattleScene:
         self._restart_battle_bgm()
         if self.reset_inventory_on_restart:
             self.inventory_system = InventorySystem.with_one_each(self.item_catalog)
+        self._consumed_items: Counter[str] = Counter()
+        self._broken_equipment: dict[tuple[int, EquipmentSlot], Item] = {}
         if self.reset_party_on_restart:
             for member in self.party:
                 member.fully_recover()
@@ -3775,8 +3778,16 @@ class BattleScene:
             self._complete_defeat()
 
     def _complete_defeat(self) -> None:
-        """Report defeat to the future battle-transition owner."""
+        """Restore spent items and report defeat to the transition owner."""
 
+        for key, quantity in self._consumed_items.items():
+            if not self.inventory_system.add(key, quantity):
+                raise RuntimeError(f"cannot restore {quantity} consumed copies of {key!r}")
+        for (index, slot), item in self._broken_equipment.items():
+            member = self.party[index]
+            member.equipment = member.equipment.replaced({slot: item})
+        self._consumed_items.clear()
+        self._broken_equipment.clear()
         self.result = BattleResult.DEFEAT
 
     def _cancel_escape_confirmation(self) -> None:
@@ -6837,17 +6848,25 @@ class BattleScene:
         self.action_landing_guard_frames_remaining = 0
 
     def _commit_item_use(self, candidate: BattleItemCandidate) -> bool:
-        """Remove an item or equipped gear only when its use was confirmed."""
+        """Spend a confirmed item and remember what to restore on defeat."""
 
         item = candidate.item
         if not item.breaks_on_use:
             return True
-        if candidate.equipment_slot is None:
-            return self.inventory_system.remove(item)
-        if self.active_party_index is None:
+        slot = candidate.equipment_slot
+        if slot is None:
+            if not self.inventory_system.remove(item):
+                return False
+            self._consumed_items[item.key] += 1
+            return True
+        index = self.active_party_index
+        if index is None:
             return False
-        member = self.party[self.active_party_index]
-        member.equipment = member.equipment.replaced({candidate.equipment_slot: None})
+        member = self.party[index]
+        if member.equipment.item_at(slot) != item:
+            return False
+        member.equipment = member.equipment.replaced({slot: None})
+        self._broken_equipment[index, slot] = item
         return True
 
     def _cancel_action_target_selection(self) -> None:
