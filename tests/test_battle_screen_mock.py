@@ -11461,20 +11461,66 @@ class BattleScreenMockTest(unittest.TestCase):
                 self.assertTrue(getattr(monster.state, state_field))
                 mock._show_battle_popup.assert_not_called()
 
-    def test_instant_death_effect_defeats_a_living_monster(self) -> None:
-        monster = _damage_test_monster()
+    def test_party_attack_reports_only_an_applied_instant_death(self) -> None:
+        for damage, is_hit, should_show in ((1, True, True), (10, True, False), (0, False, False)):
+            with self.subTest(damage=damage, is_hit=is_hit):
+                monster = _damage_test_monster(hp=10)
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.monsters = (monster,)
+                mock.attack_presentation = _attack_presentation(
+                    0, damage, (), None, is_hit=is_hit,
+                    additional_effects=(AdditionalEffect.DEATH,),
+                    elapsed_frame=ATTACK_HIT_START_FRAME - 1,
+                )
+                mock.localizer = Localizer(Language.JAPANESE)
+                mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+                font = Mock()
+                font.text_width.side_effect = lambda text: len(text) * 8
+                mock.action_popup_window = Window(60, 0, 4, 7, font=font)
+                mock.battle_popup = BattleTimedPopup()
+
+                with patch("scenes.battle.play_se"):
+                    mock._update_attack_presentation()
+
+                self.assertEqual(monster.is_alive, not is_hit)
+                self.assertEqual(mock.battle_popup.visible, should_show)
+                if should_show:
+                    window = mock.action_popup_window
+                    self.assertEqual(window.texts, (WindowText("ひっさつのいちげき", 2, 2),))
+                    self.assertEqual((window.x + window.width, window.y), (64, 0))
+                    self.assertEqual(mock.battle_popup.frames_remaining, BATTLE_POPUP_FRAME_COUNT)
+
+    def test_enemy_instant_death_popup_precedes_party_defeat_message(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
-        mock.monsters = (monster,)
-        mock._show_battle_popup = Mock()
+        mock.party = (SimpleNamespace(hp=10),)
+        mock.monster_attack_target_index = 0
+        mock.monster_attack_damage = 1
+        mock.monster_attack_additional_effects = (AdditionalEffect.DEATH,)
+        mock.defending_party_indexes = set()
+        mock.localizer = Localizer(Language.JAPANESE)
+        mock.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        font = Mock()
+        font.text_width.side_effect = lambda text: len(text) * 8
+        mock.action_popup_window = Window(60, 0, 4, 7, font=font)
+        mock.battle_popup = BattleTimedPopup()
+        mock._refresh_party_hp_text = Mock()
+        mock._remove_defeated_party_from_timeline = Mock()
+        mock._begin_defeat_message = Mock()
 
-        applied = mock._apply_additional_effects_to_monster(
-            0,
-            (AdditionalEffect.DEATH,),
-        )
+        mock._finish_monster_attack()
 
-        self.assertEqual(applied, (AdditionalEffect.DEATH,))
-        self.assertFalse(monster.is_alive)
-        mock._show_battle_popup.assert_not_called()
+        self.assertEqual(mock.party[0].hp, 0)
+        window = mock.action_popup_window
+        self.assertEqual(window.texts, (WindowText("ひっさつのいちげき", 2, 2),))
+        self.assertEqual((window.x, window.y), (0, 0))
+        self.assertEqual(mock.battle_popup.frames_remaining, BATTLE_POPUP_FRAME_COUNT)
+        for _ in range(BATTLE_POPUP_FRAME_COUNT - 1):
+            mock.battle_popup.update()
+            mock._finish_monster_attack()
+        mock._begin_defeat_message.assert_not_called()
+        mock.battle_popup.update()
+        mock._finish_monster_attack()
+        mock._begin_defeat_message.assert_called_once_with()
 
     def test_mage_masher_silences_a_spellcasting_monster(self) -> None:
         monster = _damage_test_monster()

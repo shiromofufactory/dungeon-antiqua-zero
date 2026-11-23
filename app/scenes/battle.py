@@ -6274,7 +6274,7 @@ class BattleScene:
             if result.target_side == "ally":
                 member = self.party[result.target_index]
                 member.take_damage(result.damage)
-                self._apply_additional_effects_to_member(
+                applied_effects = self._apply_additional_effects_to_member(
                     result.target_index,
                     result.additional_effects,
                 )
@@ -6282,13 +6282,15 @@ class BattleScene:
             elif result.target_side == "enemy":
                 monster = self.monsters[result.target_index]
                 monster.state.take_damage(result.damage)
-                self._apply_additional_effects_to_monster(
+                applied_effects = self._apply_additional_effects_to_monster(
                     result.target_index,
                     result.additional_effects,
                 )
                 promote_rear_monsters_if_front_empty(self.monsters)
             else:
                 raise RuntimeError("confused attack target side must be ally or enemy")
+            if AdditionalEffect.DEATH in applied_effects:
+                self._show_instant_death_message(actor_is_enemy=True)
             damage_popups.append(
                 BattleSpellDamagePopup(
                     result.popup_x,
@@ -6401,6 +6403,20 @@ class BattleScene:
             self.texts.text(text_key, self.localizer),
             BATTLE_POPUP_FRAME_COUNT,
             align_left=True,
+        )
+
+    def _show_instant_death_message(self, *, actor_is_enemy: bool) -> None:
+        """Show the applied instant-death effect on the attacker's side."""
+
+        if (
+            getattr(self, "action_popup_window", None) is None
+            or getattr(self, "battle_popup", None) is None
+        ):
+            return
+        self._show_battle_popup(
+            self.texts.text("battle.attack.instant_death", self.localizer),
+            BATTLE_POPUP_FRAME_COUNT,
+            align_left=actor_is_enemy,
         )
 
     def _show_monster_spell_mp_lack_message(self, actor: BattleMonster) -> None:
@@ -7582,27 +7598,27 @@ class BattleScene:
                 and strike.hit_elapsed_frame(presentation.elapsed_frame) >= 0
             ):
                 if strike.is_hit:
+                    applied_effects = ()
                     if targets_enemy and monster is not None and monster.is_alive:
                         monster.state.take_damage(strike.damage)
                         if presentation.is_iai or strike is presentation.strikes[0]:
                             self._queue_monster_counter(strike_target_index)
-                        strike.additional_effects = (
-                            self._apply_additional_effects_to_monster(
-                                strike_target_index,
-                                strike.additional_effects,
-                            )
+                        applied_effects = self._apply_additional_effects_to_monster(
+                            strike_target_index,
+                            strike.additional_effects,
                         )
                         promote_rear_monsters_if_front_empty(self.monsters)
                     elif member is not None and not self._member_is_dead(member):
                         member.take_damage(strike.damage)
-                        strike.additional_effects = (
-                            self._apply_additional_effects_to_member(
-                                presentation.target_index,
-                                strike.additional_effects,
-                            )
+                        applied_effects = self._apply_additional_effects_to_member(
+                            presentation.target_index,
+                            strike.additional_effects,
                         )
                         self._refresh_party_hp_text(presentation.target_index)
+                    strike.additional_effects = applied_effects
                     if not presentation.is_iai:
+                        if AdditionalEffect.DEATH in applied_effects:
+                            self._show_instant_death_message(actor_is_enemy=False)
                         play_se(strike.sound_effect_id)
                 elif targets_enemy and (
                     presentation.is_iai or strike is presentation.strikes[0]
@@ -10826,13 +10842,31 @@ class BattleScene:
         if target_index is None or damage is None:
             raise RuntimeError("monster attack requires a target and result")
         double_attack_pending = self._monster_double_attack_pending()
+        is_normal_attack = (
+            getattr(self, "monster_counter_actor_index", None) is None
+            and getattr(self, "monster_charge_presentation", None) is None
+        )
         if not getattr(self, "monster_attack_damage_applied", False):
             self._apply_monster_attack_damage(target_index, damage)
-            self._apply_additional_effects_to_member(
+            applied_effects = self._apply_additional_effects_to_member(
                 target_index,
                 getattr(self, "monster_attack_additional_effects", ()),
             )
+            self.monster_attack_additional_effects = applied_effects
+            if is_normal_attack and AdditionalEffect.DEATH in applied_effects:
+                self._show_instant_death_message(actor_is_enemy=True)
         self._apply_monster_drain_healing()
+        popup = getattr(self, "battle_popup", None)
+        # The defeat message uses the same screen edge as the attack popup.
+        if (
+            is_normal_attack
+            and popup is not None
+            and popup.visible
+            and AdditionalEffect.DEATH in self.monster_attack_additional_effects
+            and self._party_is_defeated()
+        ):
+            self.monster_attack_damage_applied = True
+            return
         self.monster_previous_attack_popup = None
         if double_attack_pending:
             if self._party_is_defeated():
