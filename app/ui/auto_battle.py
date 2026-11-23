@@ -22,16 +22,17 @@ from ui.spell_menu import SPELL_TYPE_ORDER
 from ui.tagged_text import ICON_SIZE
 
 
-WINDOW_GRID = (1, 6, 62, 48)
+WINDOW_GRID = (1, 4, 62, 52)
 HEADING_X = 2
 LABEL_X = HEADING_X + 2
 SPELL_X = (26, 38, 50)
 ITEM_VALUE_X = 28
-SPELL_HEADING_Y = 2
-MEMBER_FIRST_Y = 6
-ITEM_HEADING_Y = 26
-ITEM_FIRST_Y = 30
-GUIDE_Y = 43
+TITLE_Y = 2
+SPELL_HEADING_Y = 6
+MEMBER_FIRST_Y = 10
+ITEM_HEADING_Y = 30
+ITEM_FIRST_Y = 34
+GUIDE_Y = 47
 ROW_HEIGHT = 3
 CURSOR_OFFSET = 2
 
@@ -97,6 +98,7 @@ class AutoBattleOverlay:
     def _refresh_texts(self) -> None:
         config = self.save_data.auto_battle
         self.window.clear_texts()
+        self.window.add_text(self._text("heading"), HEADING_X, TITLE_Y)
         self.window.add_text(self._text("spells"), HEADING_X, SPELL_HEADING_Y)
         for spell_type, x in self.spell_columns.items():
             self.window.add_text(

@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from math import floor
-from statistics import median
 
 if __package__:
     from .battle_commands import BattleCommand
@@ -88,13 +87,13 @@ class AutoProficiency:
 
 @dataclass(frozen=True)
 class AutoCombatant:
-    """No live member, scene, hidden enemy HP, or hidden affinities."""
+    """Battle state with exact HP/MP and only revealed enemy affinities."""
 
     number: int
     key: str
     enemy: bool
-    max_hp: int | None
-    hp: int | None
+    max_hp: int
+    hp: int
     max_mp: int = 0
     mp: int = 0
     front: bool = True
@@ -133,7 +132,6 @@ class AutoCombatant:
     focus: int | None = None
     known_fields: frozenset[str] = frozenset()
     hp_displayed: bool = False
-    net_damage: int = 0
     species_key: str = ""
     tribe: MonsterTribe | None = None
     floating: bool = False
@@ -288,10 +286,6 @@ class AutoBattleSnapshot:
         if not any(c.enemy and c.alive for c in self.combatants):
             raise ValueError("cannot decide after victory")
 
-    @property
-    def hp_prior(self) -> float:
-        return median(c.max_hp for c in self.combatants if not c.enemy and c.alive)
-
 
 @dataclass(frozen=True)
 class AutoAction:
@@ -328,6 +322,7 @@ class AutoActionEvaluation:
     next_gauge: float
     first_spell_types: int
     exclusion: str = ""
+    stops_next_enemy_turn: bool = False
 
     def selection_key(self, snapshot: AutoBattleSnapshot) -> tuple:
         """Safety buckets first; exact risk and expenditure break score ties."""
@@ -363,20 +358,6 @@ class AutoBattleLogEntry:
     sequence: int
     snapshot: AutoBattleSnapshot
     decision: AutoBattleDecision
-
-
-class AutoBattleObservations:
-    """Battle-only accounting from presented results, never HP differences."""
-
-    def __init__(self) -> None:
-        self.enemy_net_damage: dict[int, int] = {}
-        self.enemy_mp_spent: dict[int, int] = {}
-
-    def damage(self, index: int, amount: int) -> None:
-        self.enemy_net_damage[index] = self.enemy_net_damage.get(index, 0) + amount
-
-    def spend_mp(self, index: int, amount: int) -> None:
-        self.enemy_mp_spent[index] = self.enemy_mp_spent.get(index, 0) + amount
 
 
 def quantile(case: int, number: int, turn: int, target: int, purpose: int) -> float:

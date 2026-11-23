@@ -19,7 +19,6 @@ from auto_battle_model import (
     CASE_COUNT,
     AutoAction,
     AutoActionEvaluation,
-    AutoBattleObservations,
     AutoBattlePolicy,
     AutoBattleSnapshot,
     AutoCombatant,
@@ -27,7 +26,7 @@ from auto_battle_model import (
     ItemMode,
     quantile,
 )
-from auto_battle_simulation import BattleForecast, ForecastActor, mp_cost
+from auto_battle_simulation import BattleForecast, mp_cost
 from battle_commands import BattleCommand
 from battle_layout import MonsterPlacement
 from battle_magic import member_spell_ability, resolve_healing
@@ -145,7 +144,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
     def test_forecast_rotating_call_adds_a_new_enemy_with_independent_rotation(self):
         caller = self.enemy(
             intelligence=3, action_rotation_index=0,
-            mp=0, max_mp=12, special_actions=(MonsterSpecialAction.CALL,),
+            hp=29, mp=0, max_mp=12, special_actions=(MonsterSpecialAction.CALL,),
             monster_placement=MonsterPlacement(2, 68, 16, 64, 64),
         )
         forecast = BattleForecast(self.snapshot(caller, self.specs[0], active=5), 0)
@@ -1079,20 +1078,72 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             self.assertTrue(all(0 <= u < 1 for u in values))
         self.assertEqual(random.getstate(), before)
 
-    def test_unknown_hp_is_an_estimate_with_observation_lower_bound(self):
-        enemy = self.enemy(max_hp=None, hp=None, hp_displayed=False, net_damage=999)
+    def test_all_cases_start_from_exact_hp_and_mp_before_disclosure(self):
+        first = self.enemy(
+            species_key="Imp", max_hp=280, hp=41, max_mp=16, mp=3,
+            hp_displayed=False, known_fields=frozenset(),
+        )
+        second = replace(first, number=6, key="enemy:6", hp=280, mp=16)
+        snapshot = self.snapshot(self.specs[0], first, second)
         for case in range(CASE_COUNT):
-            actor = ForecastActor.create(enemy, 100, case)
-            self.assertGreaterEqual(actor.max_hp, 1000)
-            self.assertEqual(actor.hp, actor.max_hp - 999)
-        actor = ForecastActor.create(
-            self.enemy(max_hp=120, hp=None, net_damage=40), 100, 0
+            with self.subTest(case=case):
+                forecast = BattleForecast(snapshot, case)
+                a, b = forecast.enemy_actors
+                self.assertEqual((a.max_hp, a.hp, a.spec.max_mp, a.mp), (280, 41, 16, 3))
+                self.assertEqual((b.max_hp, b.hp, b.spec.max_mp, b.mp), (280, 280, 16, 16))
+                self.assertEqual((forecast.start_hp[5], forecast.start_hp[6]), (41, 280))
+                self.assertFalse(forecast.hp_shown)
+
+    def test_same_species_focuses_current_hp_on_either_slot(self):
+        party = tuple(
+            replace(
+                actor, spells=(), skills=frozenset(),
+                weapons=tuple(replace(weapon, effect=None) for weapon in actor.weapons),
+            )
+            for actor in self.specs
         )
-        self.assertEqual(actor.hp, 80)
-        actor = ForecastActor.create(
-            self.enemy(max_hp=120, hp=31, net_damage=40), 100, 0
+        for profile_known in (False, True):
+            for wounded in (5, 6):
+                with self.subTest(profile_known=profile_known, wounded=wounded):
+                    first, second = (
+                        self.enemy(
+                            number, species_key="Imp", max_hp=280,
+                            hp=266 if number == wounded else 280, hp_displayed=False,
+                            known_fields=frozenset(("profile",)) if profile_known else frozenset(),
+                            max_mp=16, mp=16, agility=20, intelligence=1, magic=10,
+                            attack=36, defense=8, evasion=10, spell_defense=10,
+                            spells=(self.spells["SPARK"], self.spells["SLOW"]),
+                        )
+                        for number in (5, 6)
+                    )
+                    snapshot = self.snapshot(
+                        *party, first, second, gauges=((0, 64), (5, 60), (6, 56), (1, 52), (2, 48))
+                    )
+                    forecast = BattleForecast(snapshot, 0)
+                    self.assertEqual(
+                        forecast.continuation(0, {wounded: 1.0, 11 - wounded: 1.1}).targets,
+                        (wounded,),
+                    )
+                    self.assertEqual(
+                        decide_auto_battle(snapshot).action,
+                        AutoAction(BattleCommand.ATTACK, (wounded,)),
+                    )
+
+    def test_focusing_wounded_target_keeps_certain_kill_of_next_enemy_available(self):
+        ally = replace(
+            self.specs[0], spells=(), skills=frozenset(), weapons=(AutoWeapon(180, 150),)
         )
-        self.assertEqual(actor.hp, 31)
+        first = self.enemy(hp=100, species_key="Imp")
+        second = replace(first, number=6, key="enemy:6", hp=40)
+        snapshot = self.snapshot(ally, first, second)
+        forecast = BattleForecast(snapshot, 0)
+        self.assertEqual(forecast.continuation(0, {5: 1, 6: 1}).targets, (5,))
+        evaluations = {
+            e.action.targets: e for e in decide_auto_battle(snapshot).evaluations
+            if e.action.command is BattleCommand.ATTACK
+        }
+        self.assertTrue(evaluations[(5,)].stops_next_enemy_turn)
+        self.assertFalse(evaluations[(5,)].exclusion)
 
     def test_snapshot_is_detached_from_member_status_and_proficiencies(self):
         member = load_mock_party(
@@ -1438,6 +1489,43 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             weapon_has_power_hit=weapon.power_hit,
         )
         self.assertEqual(result, expected)
+
+    def test_single_target_physical_attack_pairs_rolls_but_iai_keeps_individual_rolls(self):
+        ally = replace(
+            self.specs[0], weapons=(AutoWeapon(129, 104, iai_attack=80), AutoWeapon(40, 95))
+        )
+        first = self.enemy(defense=8, evasion=10)
+        second = replace(first, number=6, key="enemy:6")
+        forecast = BattleForecast(self.snapshot(ally, first, second), 0)
+        attacker = forecast.actors[0]
+        a, b = forecast.enemy_actors
+        iai = AutoAction(BattleCommand.IAI, (5, 6))
+        iai_results = []
+        for case in range(CASE_COUNT):
+            a_hit = forecast.physical_results(attacker, a, AutoAction(BattleCommand.ATTACK, (5,)), case)
+            b_hit = forecast.physical_results(attacker, b, AutoAction(BattleCommand.ATTACK, (6,)), case)
+            self.assertEqual(a_hit, b_hit)
+            iai_results.append((
+                forecast.physical_results(attacker, a, iai, case),
+                forecast.physical_results(attacker, b, iai, case),
+            ))
+        self.assertTrue(any(a_hit != b_hit for a_hit, b_hit in iai_results))
+
+    def test_single_target_damage_spell_pairs_damage_rolls(self):
+        spell = self.spells["FIRE1"]
+        self.assertTrue(spell.to_enemy and not spell.to_all)
+        caster = self.specs[1]
+        first = self.enemy(hp=200, max_hp=200)
+        second = replace(first, number=6, key="enemy:6")
+        snapshot = self.snapshot(caster, first, second, active=1)
+        for case in range(CASE_COUNT):
+            damage = []
+            for n in (5, 6):
+                forecast = BattleForecast(snapshot, case)
+                forecast.cast(forecast.actors[1], AutoAction(BattleCommand.SPELL, (n,), spell.key))
+                damage.append(200 - forecast.actors[n].hp)
+            self.assertEqual(damage[0], damage[1])
+            self.assertGreater(damage[0], 0)
 
     def test_snapshot_and_forecast_preserve_independent_debuff_durations(self):
         member = replace(self.party[0])
@@ -1867,14 +1955,6 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(forecast.actors[0].protection, ally.protection)
                 self.assertEqual(forecast.actors[0].speed, ally.speed)
 
-    def test_observations_accumulate_presented_amounts_including_overkill(self):
-        observations = AutoBattleObservations()
-        observations.damage(0, 40)
-        observations.damage(0, 100)
-        observations.spend_mp(0, 3)
-        self.assertEqual(observations.enemy_net_damage, {0: 140})
-        self.assertEqual(observations.enemy_mp_spent, {0: 3})
-
     def test_incremental_and_synchronous_planning_are_identical_and_do_not_mutate(self):
         snapshot = self.snapshot(self.specs[0], self.enemy(max_hp=20, hp=20))
         original = repr(snapshot)
@@ -2037,7 +2117,7 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
                         if key != visible:
                             cursor.draw.assert_not_called()
 
-    def test_snapshot_masks_actual_hp_and_unrevealed_affinities(self):
+    def test_snapshot_reads_live_hp_mp_and_masks_unrevealed_affinities(self):
         from resources import load_record_array
         from scenes.battle import BattleMonster, BattleScene
         from state import SaveData
@@ -2051,7 +2131,8 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         )
         scene.monsters = (
             BattleMonster.from_record(
-                {**record, "healing": 2, "tolerance": "死"}, is_front_row=True
+                {**record, "healing": 2, "mmp": 12, "shadow": 1, "tolerance": "死", "weakness": "炎"},
+                is_front_row=True,
             ),
         )
         scene.party = self.party[:1]
@@ -2075,9 +2156,6 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
             "surprise_original_front_rows",
         ):
             setattr(scene, name, {})
-        scene.auto_battle_observations = AutoBattleObservations()
-        scene.auto_battle_observations.damage(0, 33)
-        scene.auto_battle_observations.spend_mp(0, 3)
         scene.progression = BattleProgression((EnemyProgressionData(1, 0, 1, 0),))
         scene._timeline_order = TimelineOrder(
             (
@@ -2085,33 +2163,36 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
                 TimelineEntry(scene.monsters[0], 10, 20),
             )
         )
-        scene.monsters[0].state.hp = 1
-        scene.monsters[0].state.apply_confusion(2)
-        first = scene._auto_battle_snapshot()
-        scene.monsters[0].state.hp = scene.monsters[0].state.max_hp
-        self.assertEqual(scene._auto_battle_snapshot(), first)
-        enemy = first.combatants[-1]
-        self.assertIsNone(enemy.hp)
-        self.assertIsNone(enemy.max_hp)
+        state = scene.monsters[0].state
+        initial = scene._auto_battle_snapshot().combatants[-1]
+        self.assertEqual((initial.hp, initial.max_hp, initial.mp, initial.max_mp),
+                         (state.max_hp, state.max_hp, 12, 12))
+        state.take_damage(state.max_hp - 1)
+        state.spend_mp(9)
+        state.apply_confusion(2)
+        enemy = scene._auto_battle_snapshot().combatants[-1]
+        self.assertEqual((enemy.hp, enemy.max_hp, enemy.mp, enemy.max_mp), (1, state.max_hp, 3, 12))
+        self.assertFalse(enemy.hp_displayed)
         self.assertIsNone(enemy.tribe)
+        self.assertFalse(enemy.shadow)
         self.assertFalse(enemy.resistances)
         self.assertFalse(enemy.weaknesses)
         self.assertEqual(enemy.confused, 2)
-        self.assertEqual(enemy.net_damage, 33)
         self.assertEqual(enemy.healing, 2)
-        self.assertEqual(enemy.mp, max(0, scene.monsters[0].max_mp - 3))
-        scene.save_data.monster_records["Giant Spider"] = {"profile"}
-        self.assertEqual(
-            scene._auto_battle_snapshot().combatants[-1].tribe, MonsterTribe.ANIMAL
-        )
-        self.assertIsNotNone(scene._auto_battle_snapshot().combatants[-1].max_hp)
-        scene.save_data.monster_records["Giant Spider"].add("DEATH")
-        self.assertIn(
-            ResistanceType.DEATH, scene._auto_battle_snapshot().combatants[-1].resistances
-        )
+        self.assertEqual((initial.hp, initial.mp), (state.max_hp, 12))
+
+        state.apply_healing(4)
+        state.spend_mp(3)
+        scene.save_data.monster_records["Giant Spider"] = {"profile", "DEATH", "FIRE"}
+        revealed = scene._auto_battle_snapshot().combatants[-1]
+        self.assertEqual((revealed.hp, revealed.mp), (5, 0))
+        self.assertEqual(revealed.tribe, MonsterTribe.ANIMAL)
+        self.assertTrue(revealed.shadow)
+        self.assertIn(ResistanceType.DEATH, revealed.resistances)
+        self.assertIn(ResistanceType.FIRE, revealed.weaknesses)
         scene.identified_monster_indexes.add(0)
         self.assertEqual(
-            scene._auto_battle_snapshot().combatants[-1].hp, scene.monsters[0].state.hp
+            scene._auto_battle_snapshot().combatants[-1], replace(revealed, hp_displayed=True)
         )
 
     def test_game_menu_suspends_and_resumes_the_same_partial_planner(self):

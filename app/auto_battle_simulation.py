@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from math import floor
 
 if __package__:
     from .battle_breath import resolve_fire_breath, resolve_poison_breath
@@ -199,18 +198,11 @@ class ForecastActor:
     action_rotation_index: int | None = None
 
     @classmethod
-    def create(cls, spec: AutoCombatant, prior: float, case: int) -> ForecastActor:
-        maximum = spec.max_hp
-        if maximum is None:
-            u = quantile(case, spec.number, 0, spec.number, 9)
-            maximum = max(floor(prior * (0.75 + 0.75 * u)), spec.net_damage + 1, 1)
-        hp = spec.hp
-        if hp is None:
-            hp = max(1, min(maximum, maximum - spec.net_damage)) if spec.alive else 0
+    def create(cls, spec: AutoCombatant) -> ForecastActor:
         return cls(
             spec,
-            hp,
-            maximum,
+            spec.hp,
+            spec.max_hp,
             spec.mp,
             spec.front,
             spec.poisoned,
@@ -278,6 +270,19 @@ class ForecastActor:
     def incapacitated_for_physical_hit(self) -> bool:
         return bool(self.sleeping or self.confused)
 
+    def focus_group(self) -> tuple:
+        """Combat state that must agree before HP can decide between targets."""
+
+        return (
+            self.spec.species_key or self.spec.key, self.max_hp, self.front,
+            self.spec.attack, self.spec.hit, self.defense, self.evasion,
+            self.spec.spell_defense, self.spec.resistances, self.spec.weaknesses,
+            self.spec.tribe, self.spec.shadow, self.agility, self.mp, self.defending,
+            self.poisoned, self.sleeping, self.confused, self.paralyzed, self.stunned,
+            self.silenced, self.speed, self.protection, self.slow_turns, self.defense_down_turns,
+            self.action_rotation_index,
+        )
+
     def damage(self, amount: int, *, poison: bool = False) -> int:
         old = self.hp
         self.hp = max(0, self.hp - amount)
@@ -321,8 +326,7 @@ class BattleForecast:
         self.snapshot = snapshot
         self.case = case
         self.actors = {
-            c.number: ForecastActor.create(c, snapshot.hp_prior, case)
-            for c in snapshot.combatants
+            c.number: ForecastActor.create(c) for c in snapshot.combatants
         }
         self.order = TimelineOrder(
             tuple(
@@ -361,11 +365,13 @@ class BattleForecast:
         self.died: set[int] = set()
         self.defeated = False
         self.focus_completed = False
-        self.expected_cache: dict[tuple, float] = {}
+        self.expected_cache: dict[tuple, tuple[int, ...]] = {}
         self.command_cache: dict[tuple, tuple] = {}
         self.timeline_cache: dict[tuple, TimelineOrder] = {}
         self.ally_actors = tuple(a for a in self.actors.values() if not a.spec.enemy)
         self.enemy_actors = tuple(a for a in self.actors.values() if a.spec.enemy)
+        # Use a fixed slot for alternative single-target attacks in every case.
+        self.single_enemy_roll_target = min(a.spec.number for a in self.enemy_actors)
 
     def allies(self) -> tuple[ForecastActor, ...]:
         return tuple(a for a in self.ally_actors if a.is_alive)
@@ -832,27 +838,42 @@ class BattleForecast:
         if recovery is not None:
             return recovery[0]
         command = BattleCommand.AMBUSH if actor.hidden else BattleCommand.ATTACK
-        attacks = [a for a in actions if a.command is command]
-        if attacks:
-            values = {
-                a: self.expected_damage(actor, self.actors[a.targets[0]], a)
-                for a in attacks
-            }
-            kill = [a for a in attacks if values[a] >= self.actors[a.targets[0]].hp]
-            if kill:
-                return min(kill, key=lambda a: (-weights.get(a.targets[0], 1), a.targets))
-            return min(
-                attacks,
-                key=lambda a: (
-                    -weights.get(a.targets[0], 1)
-                    * min(values[a], self.actors[a.targets[0]].hp)
-                    / self.actors[a.targets[0]].max_hp,
-                    a.targets,
-                ),
+        targets = {}
+        for action in actions:
+            if action.command is command:
+                target = self.actors[action.targets[0]]
+                targets.setdefault(target.focus_group(), []).append(action)
+        if not targets:
+            return AutoAction(BattleCommand.DEFEND)
+
+        def priority(action):
+            target = self.actors[action.targets[0]]
+            samples = self.physical_damage_samples(actor, target, action)
+            weight = weights.get(target.spec.number, 1)
+            return (
+                -weight * sum(damage >= target.hp for damage in samples) / CASE_COUNT,
+                -weight * min(self.expected_damage(actor, target, action), target.hp)
+                / target.max_hp,
+                action.targets,
             )
-        return AutoAction(BattleCommand.DEFEND)
+
+        next_actors = self.order.actors[1:2]
+
+        def focus_priority(action):
+            target = self.actors[action.targets[0]]
+            stops_next_turn = action.targets == next_actors and all(
+                damage >= target.hp for damage in self.physical_damage_samples(actor, target, action)
+            )
+            return not stops_next_turn, target.hp, action.targets
+
+        # Focus equivalent targets before comparing their sampled threat weights.
+        attacks = (min(group, key=focus_priority) for group in targets.values())
+        return min(attacks, key=priority)
 
     def expected_damage(self, actor, target, action):
+        return sum(self.physical_damage_samples(actor, target, action)) / CASE_COUNT
+
+    def physical_damage_samples(self, actor, target, action) -> tuple[int, ...]:
         key = (
             actor.spec.number,
             target.spec.number,
@@ -861,25 +882,31 @@ class BattleForecast:
             target.defense,
             target.evasion,
             target.incapacitated_for_physical_hit,
+            target.spec.tribe,
+            target.spec.weaknesses,
+            target.spec.resistances,
             actor.hidden,
             action.command,
             self.turns[actor.spec.number],
         )
         if key not in self.expected_cache:
-            self.expected_cache[key] = (
+            self.expected_cache[key] = tuple(
                 sum(
-                    sum(
-                        r.damage
-                        for r in self.physical_results(actor, target, action, k)
-                    )
-                    for k in range(CASE_COUNT)
+                    r.damage for r in self.physical_results(actor, target, action, k)
                 )
-                / CASE_COUNT
+                for k in range(CASE_COUNT)
             )
         return self.expected_cache[key]
 
-    def physical_results(self, actor, target, action, case=None):
+    def _physical_roll_target(self, action: AutoAction, target: ForecastActor) -> int:
+        if action.command is not BattleCommand.IAI and target.spec.enemy:
+            return self.single_enemy_roll_target
+        return target.spec.number
+
+    def physical_results(self, actor, target, action, case=None, *, roll_target=None):
         results = []
+        if roll_target is None:
+            roll_target = self._physical_roll_target(action, target)
         weapons = (
             actor.spec.weapons[:1]
             if action.command is BattleCommand.IAI
@@ -907,7 +934,7 @@ class BattleForecast:
                     target_defense=target.defense,
                     target_evasion=target.evasion,
                     hit_roll=int(
-                        self.roll(actor, target.spec.number, 2 + hand * 3, case) * 100
+                        self.roll(actor, roll_target, 2 + hand * 3, case) * 100
                     ),
                     target_incapacitated=target.incapacitated_for_physical_hit,
                     attacker_hidden=actor.hidden,
@@ -917,7 +944,7 @@ class BattleForecast:
                     weapon_effective=effective,
                     critical_rate_scale=weapon.critical_scale,
                     critical_roll=int(
-                        self.roll(actor, target.spec.number, 3 + hand * 3, case) * 100
+                        self.roll(actor, roll_target, 3 + hand * 3, case) * 100
                     ),
                 )
             )
@@ -942,7 +969,8 @@ class BattleForecast:
 
     def _physical_target(self, actor, target, action):
         # Live execution resolves both hands before applying either result.
-        results = self.physical_results(actor, target, action)
+        roll_target = self._physical_roll_target(action, target)
+        results = self.physical_results(actor, target, action, roll_target=roll_target)
         hidden = actor.hidden
         counter = False
         for hand, (weapon, result) in enumerate(zip(actor.spec.weapons, results)):
@@ -960,7 +988,7 @@ class BattleForecast:
                     defender_actionable=target.is_alive and not (
                         target.sleeping or target.confused or target.stunned
                     ),
-                    roll=int(self.roll(actor, target.spec.number, 16) * 20),
+                    roll=int(self.roll(actor, roll_target, 16) * 20),
                 )
             if not result.hit:
                 continue
@@ -984,7 +1012,7 @@ class BattleForecast:
                     effect=effect,
                     adjusted_hit=result.adjusted_hit,
                     effect_roll=int(
-                        self.roll(actor, target.spec.number, 4 + hand * 3) * 100
+                        self.roll(actor, roll_target, 4 + hand * 3) * 100
                     ),
                     target_is_member=False,
                     target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
@@ -1002,21 +1030,23 @@ class BattleForecast:
                     stacked_death=stacked,
                 ).success
                 if successful and target.is_alive:
-                    self.apply_extra(actor, target, effect)
+                    self.apply_extra(actor, target, effect, roll_target=roll_target)
         return counter
 
-    def apply_extra(self, actor, target, effect):
+    def apply_extra(self, actor, target, effect, *, roll_target=None):
+        if roll_target is None:
+            roll_target = target.spec.number
         if effect is AdditionalEffect.DEATH:
             target.damage(target.hp)
         elif effect is AdditionalEffect.SLEEP:
             target.sleeping = max(
-                target.sleeping, 2 + int(self.roll(actor, target.spec.number, 11) * 2)
+                target.sleeping, 2 + int(self.roll(actor, roll_target, 11) * 2)
             )
             target.confused = 0
         elif effect is AdditionalEffect.CONFUSE:
             target.confused = max(
                 target.confused,
-                2 + int(self.roll(actor, target.spec.number, 11) * 2),
+                2 + int(self.roll(actor, roll_target, 11) * 2),
             )
             target.sleeping = 0
         elif effect is AdditionalEffect.POISON:
@@ -1030,13 +1060,13 @@ class BattleForecast:
             and target.spec.spells
         ):
             target.silenced = max(
-                target.silenced, self.debuff_turns(actor, target)
+                target.silenced, self.debuff_turns(actor, target, roll_target=roll_target)
             )
         elif effect is AdditionalEffect.DEFENSE_DOWN:
             if target.protection > -1:
                 target.protection -= 1
                 target.defense_down_turns = (
-                    self.debuff_turns(actor, target)
+                    self.debuff_turns(actor, target, roll_target=roll_target)
                     if target.protection < 0 else 0
                 )
         target.interrupt_focus()
@@ -1069,11 +1099,14 @@ class BattleForecast:
         spell = self.spells[action.spell_key]
         for n in action.targets:
             target = self.actors[n]
+            roll_target = (
+                self.single_enemy_roll_target if spell.to_enemy and not spell.to_all else n
+            )
             if target.spec.enemy:
                 self.reveal(target, "profile")
                 if spell.attribute is not None:
                     self.reveal(target, spell.attribute.value)
-            u = self.roll(actor, n, 8)
+            u = self.roll(actor, roll_target, 8)
             if spell.action is SpellAction.HEAL:
                 self.apply_spell_healing(actor, target, spell, u)
             elif spell.action is SpellAction.MANA:
@@ -1144,7 +1177,9 @@ class BattleForecast:
                     )
                     or spell.attribute is ResistanceType.POISON
                 ):
-                    successful = self.status_success(actor, target, spell, modifier)
+                    successful = self.status_success(
+                        actor, target, spell, modifier, roll_target=roll_target
+                    )
                     if (
                         spell.action is SpellAction.SILENCE
                         and not target.spec.spells
@@ -1152,36 +1187,45 @@ class BattleForecast:
                         successful = False
                     if successful:
                         if spell.action is SpellAction.SLEEP:
-                            self.apply_extra(actor, target, AdditionalEffect.SLEEP)
+                            self.apply_extra(
+                                actor, target, AdditionalEffect.SLEEP, roll_target=roll_target
+                            )
                         elif spell.action is SpellAction.CONFUSE:
-                            self.apply_extra(actor, target, AdditionalEffect.CONFUSE)
+                            self.apply_extra(
+                                actor, target, AdditionalEffect.CONFUSE, roll_target=roll_target
+                            )
                         elif spell.action is SpellAction.SLOW:
-                            self.apply_slow(target, actor)
+                            self.apply_slow(target, actor, roll_target=roll_target)
                         elif spell.action is SpellAction.BREAK:
                             target.protection = (
                                 0 if target.protection > 0 else -1
                             )
                             target.defense_down_turns = (
-                                self.debuff_turns(actor, target)
+                                self.debuff_turns(actor, target, roll_target=roll_target)
                                 if target.protection < 0 else 0
                             )
                         elif spell.action is SpellAction.SILENCE:
                             target.silenced = max(
                                 target.silenced,
-                                self.debuff_turns(actor, target),
+                                self.debuff_turns(actor, target, roll_target=roll_target),
                             )
                         if spell.attribute is ResistanceType.POISON:
                             target.poisoned = True
         actor.hidden = False
 
-    def debuff_turns(self, actor: ForecastActor, target: ForecastActor) -> int:
+    def debuff_turns(
+        self, actor: ForecastActor, target: ForecastActor, *, roll_target: int | None = None,
+    ) -> int:
+        if roll_target is None:
+            roll_target = target.spec.number
         minimum, maximum = debuff_turn_range(target.spec.resistances)
         return minimum + int(
-            self.roll(actor, target.spec.number, 11) * (maximum - minimum + 1)
+            self.roll(actor, roll_target, 11) * (maximum - minimum + 1)
         )
 
     def apply_slow(
         self, target: ForecastActor, actor: ForecastActor | None = None,
+        *, roll_target: int | None = None,
     ) -> None:
         """Use the live speed stages and immediate waiting-gauge penalty."""
 
@@ -1189,7 +1233,8 @@ class BattleForecast:
             return
         target.speed = 0 if target.speed > 0 else -1
         target.slow_turns = (
-            self.debuff_turns(actor or target, target) if target.speed < 0 else 0
+            self.debuff_turns(actor or target, target, roll_target=roll_target)
+            if target.speed < 0 else 0
         )
         for index, entry in enumerate(self.order.entries):
             if entry.actor == target.spec.number:
@@ -1200,7 +1245,9 @@ class BattleForecast:
                 )
                 return
 
-    def status_success(self, actor, target, spell, modifier):
+    def status_success(self, actor, target, spell, modifier, *, roll_target=None):
+        if roll_target is None:
+            roll_target = target.spec.number
         return resolve_status_spell(
             spell_modifier=modifier,
             rate=spell.rate,
@@ -1208,7 +1255,7 @@ class BattleForecast:
             attribute=spell.attribute,
             target_weaknesses=target.spec.weaknesses,
             target_resistances=target.spec.resistances,
-            success_roll=int(self.roll(actor, target.spec.number, 10) * 20),
+            success_roll=int(self.roll(actor, roll_target, 10) * 20),
         ).success
 
     def reveal(self, actor, field):
@@ -1556,14 +1603,14 @@ class BattleForecast:
         species_key = caller.spec.species_key or caller.spec.key
         spec = replace(
             caller.spec, number=number, key=f"enemy:{species_key}:{number - 5}",
-            species_key=species_key, hp=None, mp=caller.spec.max_mp, net_damage=0,
+            species_key=species_key, hp=caller.max_hp, mp=caller.spec.max_mp,
             front=placement.slot >= 2, hp_displayed=False,
             poisoned=False, sleeping=0, silenced=0, paralyzed=False,
             confused=0, stunned=False, protection=0, speed=0,
             slow_turns=0, defense_down_turns=0, action_rotation_index=None,
             monster_placement=placement,
         )
-        newcomer = ForecastActor.create(spec, self.snapshot.hp_prior, self.case)
+        newcomer = ForecastActor.create(spec)
         self.actors[number] = newcomer
         self.enemy_actors += (newcomer,)
         self.turns[number] = 0
@@ -1698,6 +1745,7 @@ class BattleForecast:
             actor,
             target,
             AutoAction(BattleCommand.ATTACK, (target.spec.number,)),
+            roll_target=target.spec.number,
         )
         effect_sources = []
         for weapon in actor.spec.weapons:

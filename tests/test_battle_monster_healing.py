@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import Mock
 
 from tools._bootstrap import APP_ROOT  # noqa: F401 - add app to sys.path
-from auto_battle_model import AutoBattleObservations
 from monster import MonsterBattleState, MonsterCombatStats
 from resistance import ResistanceType
 from scenes.battle import BattleMonster, BattleScene
@@ -23,7 +22,6 @@ class MonsterTurnHealingTest(unittest.TestCase):
         scene.monsters = (monster,)
         scene.spell_damage_popups = []
         scene.healing_popups = []
-        scene.auto_battle_observations = AutoBattleObservations()
         scene._monster_base_position = Mock(return_value=(10, 20))
         scene._monster_draw_x = Mock(return_value=10)
         scene._begin_monster_death = Mock()
@@ -37,14 +35,12 @@ class MonsterTurnHealingTest(unittest.TestCase):
         popup = scene.healing_popups[0]
         self.assertEqual((popup.x, popup.y, popup.amount), (42, 76, 8))
         self.assertEqual(scene.spell_damage_popups, [])
-        self.assertEqual(scene.auto_battle_observations.enemy_net_damage[0], -8)
 
-    def test_cap_limits_observed_recovery_but_not_displayed_number(self):
+    def test_recovery_is_capped_at_max_hp_and_shows_full_amount(self):
         scene, monster = self.make_scene(hp=119)
         scene._apply_turn_start_hp_change(monster)
         self.assertEqual(monster.state.hp, 120)
         self.assertEqual(scene.healing_popups[0].amount, 8)
-        self.assertEqual(scene.auto_battle_observations.enemy_net_damage[0], -1)
 
     def test_poison_and_recovery_cancel_without_popups(self):
         scene, monster = self.make_scene(poisoned=True)
@@ -52,7 +48,6 @@ class MonsterTurnHealingTest(unittest.TestCase):
         self.assertEqual(monster.state.hp, 10)
         self.assertEqual(scene.healing_popups, [])
         self.assertEqual(scene.spell_damage_popups, [])
-        self.assertEqual(scene.auto_battle_observations.enemy_net_damage, {})
 
     def test_poison_weakness_still_deals_net_damage_without_waking(self):
         scene, monster = self.make_scene(hp=40, poisoned=True, weak=True)
@@ -60,7 +55,6 @@ class MonsterTurnHealingTest(unittest.TestCase):
         self.assertEqual(monster.state.hp, 33)
         self.assertEqual(monster.state.sleeping, 2)
         self.assertEqual(scene.spell_damage_popups[0].damage, 7)
-        self.assertEqual(scene.auto_battle_observations.enemy_net_damage[0], 7)
 
     def test_negative_healing_and_poison_start_death_and_timeline_removal(self):
         scene, monster = self.make_scene(healing=-1, poisoned=True)

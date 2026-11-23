@@ -16,6 +16,7 @@ if __package__:
     )
     from .auto_battle_simulation import PRIORITY_RECOVERY_ACTIONS, BattleForecast
     from .battle_commands import BattleCommand
+    from .spell import SpellAction
 else:
     from auto_battle_model import (
         CASE_COUNT,
@@ -27,6 +28,7 @@ else:
     )
     from auto_battle_simulation import PRIORITY_RECOVERY_ACTIONS, BattleForecast
     from battle_commands import BattleCommand
+    from spell import SpellAction
 
 
 VALUE_NAMES = (
@@ -40,6 +42,9 @@ VALUE_NAMES = (
     "information",
 )
 VALUE_WEIGHTS = (2000, -2000, -600, 45, 35, 80, 20, 1)
+SINGLE_TARGET_ATTACKS = frozenset((
+    BattleCommand.ATTACK, BattleCommand.AMBUSH, BattleCommand.AIM, BattleCommand.FOCUS,
+))
 
 
 def round_score(score: float) -> float:
@@ -144,20 +149,20 @@ class AutoBattlePlanner:
             weights[spec.number] = 1 + max(0, min(2, harm / CASE_COUNT))
 
         evaluations, breath_hp = yield from self._evaluate(actions, weights, cache)
-        best, evaluations = self._rank(evaluations)
+        best, evaluations = self._rank(evaluations, current)
         chosen_breath_hp = breath_hp[best.action]
         # Compare the same enemy breath on the same turn and in the same case.
         # Stopping a breath entirely should still count as a safety improvement.
         if chosen_breath_hp and any(
             hp < chosen_breath_hp.get(key, hp)
             for evaluation in evaluations
-            if not evaluation.exclusion and evaluation is not best
+            if evaluation.exclusion in ("", "less_wounded_target") and evaluation is not best
             for key, hp in breath_hp[evaluation.action].items()
         ):
             adjusted, _ = yield from self._evaluate(
                 actions, weights, cache, fixed_breath_hp=True
             )
-            best, adjusted = self._rank(adjusted)
+            best, adjusted = self._rank(adjusted, current)
             return AutoBattleDecision(
                 best.action,
                 adjusted,
@@ -173,17 +178,22 @@ class AutoBattlePlanner:
         breath_hp = {}
         discounts = tuple(DISCOUNT**t for t in range(FORECAST_TURNS + 1))
         denominator = CASE_COUNT * sum(discounts)
+        next_number = snapshot.gauges[1][0] if len(snapshot.gauges) > 1 else None
         for action in actions:
             action_breath_hp = {}
             breath_hp[action] = action_breath_hp
             totals = [0.0] * len(VALUE_NAMES)
             cost = defeat = deaths = current_cost = gauge = 0.0
             focus_valid = True
+            stops_next_enemy_turn = action.targets == (next_number,)
             for case in range(CASE_COUNT):
                 forecast = self._forecast(case, cache)
                 forecast.fixed_breath_hp = fixed_breath_hp
                 start = forecast.values(weights)
                 c, g = forecast.execute(snapshot.active_number, action)
+                if stops_next_enemy_turn:
+                    next_actor = forecast.actors[next_number]
+                    stops_next_enemy_turn = next_actor.spec.enemy and not next_actor.is_alive
                 current_cost += c
                 gauge += g
                 cost += c
@@ -229,11 +239,12 @@ class AutoBattlePlanner:
                     gauge / CASE_COUNT,
                     first_types,
                     "focus_beyond_horizon" if not focus_valid else "",
+                    stops_next_enemy_turn=stops_next_enemy_turn,
                 )
             )
         return evaluations, breath_hp
 
-    def _rank(self, evaluations):
+    def _rank(self, evaluations, current):
         snapshot = self.snapshot
         eligible = [e for e in evaluations if not e.exclusion]
         if not eligible:
@@ -260,12 +271,46 @@ class AutoBattlePlanner:
             else e
             for e in evaluations
         ]
+        evaluations = self._prefer_wounded_targets(evaluations, current)
 
         best = min(
             (e for e in evaluations if not e.exclusion),
             key=lambda e: e.selection_key(snapshot),
         )
         return best, tuple(evaluations)
+
+    def _prefer_wounded_targets(self, evaluations, current):
+        groups = {}
+        for evaluation in evaluations:
+            action = evaluation.action
+            if evaluation.exclusion or len(action.targets) != 1:
+                continue
+            target = current.actors[action.targets[0]]
+            if not target.spec.enemy:
+                continue
+            if action.command not in SINGLE_TARGET_ATTACKS:
+                spell = current.spells.get(action.spell_key)
+                if (
+                    spell is None or spell.to_all
+                    or spell.action not in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK)
+                ):
+                    continue
+            safety = evaluation.selection_key(self.snapshot)[:2]
+            group = (replace(action, targets=()), target.focus_group(), safety)
+            groups.setdefault(group, []).append(evaluation)
+
+        suppressed = set()
+        for group in groups.values():
+            lowest_hp = min(current.actors[e.action.targets[0]].hp for e in group)
+            suppressed.update(
+                e.action for e in group
+                if current.actors[e.action.targets[0]].hp > lowest_hp
+                and not e.stops_next_enemy_turn
+            )
+        return [
+            replace(e, exclusion="less_wounded_target") if e.action in suppressed else e
+            for e in evaluations
+        ]
 
 
 def decide_auto_battle(snapshot: AutoBattleSnapshot) -> AutoBattleDecision:

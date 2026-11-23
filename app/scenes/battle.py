@@ -23,7 +23,6 @@ from auto_battle import AutoBattlePlanner
 from auto_battle_model import (
     AutoAction,
     AutoBattleLogEntry,
-    AutoBattleObservations,
     AutoBattlePolicy,
     AutoBattleSnapshot,
     AutoCombatant,
@@ -2398,7 +2397,6 @@ class BattleScene:
         self.auto_battle_active = False
         self.auto_battle_screen: AutoBattleOverlay | None = None
         self.auto_battle_planner: AutoBattlePlanner | None = None
-        self.auto_battle_observations = AutoBattleObservations()
         self.auto_battle_log: list[AutoBattleLogEntry] = []
         self.auto_battle_sequence = 0
         self.input_device = InputDevice.KEYBOARD
@@ -2888,7 +2886,6 @@ class BattleScene:
         self._defer_first_party_command = False
         self._pending_first_party_command = False
         self.auto_battle_planner = None
-        self.auto_battle_observations = AutoBattleObservations()
         self.auto_battle_log = []
         self.auto_battle_sequence = 0
         self.reinforcement_entrance_frames.clear()
@@ -3345,7 +3342,7 @@ class BattleScene:
         self._refresh_input_guide()
 
     def _begin_auto_action(self) -> None:
-        """Capture observations and start a cancellable, private forecast."""
+        """Capture the battle state and start a cancellable, private forecast."""
 
         self.auto_battle_planner = AutoBattlePlanner(self._auto_battle_snapshot())
         self.auto_battle_sequence += 1
@@ -3355,9 +3352,8 @@ class BattleScene:
         self._hide_command_guide()
 
     def _auto_battle_snapshot(self) -> AutoBattleSnapshot:
-        """Explicitly mask hidden HP and affinities at the scene boundary."""
+        """Capture exact HP/MP and apply the encounter's disclosure rules."""
 
-        observations = self.auto_battle_observations
         combatants = []
         for index, member in enumerate(self.party):
             if index in self.escaped_party_indexes:
@@ -3387,24 +3383,19 @@ class BattleScene:
             )
         for index, monster in enumerate(self.monsters):
             fields = frozenset(self.save_data.monster_records.get(monster.key, ()))
-            hp_shown = index in self.identified_monster_indexes
+            state = monster.state
+            assert state.hp is not None and state.mp is not None
             combatants.append(
                 AutoCombatant(
                     number=5 + index,
                     key=f"enemy:{monster.key}:{index}",
                     species_key=monster.key,
                     enemy=True,
-                    max_hp=(
-                        monster.state.max_hp
-                        if "profile" in fields or hp_shown
-                        else None
-                    ),
-                    hp=monster.state.hp if hp_shown else None,
+                    max_hp=state.max_hp,
+                    hp=state.hp,
                     alive=monster.is_alive,
-                    max_mp=monster.max_mp,
-                    mp=max(
-                        0, monster.max_mp - observations.enemy_mp_spent.get(index, 0)
-                    ),
+                    max_mp=state.max_mp,
+                    mp=state.mp,
                     front=monster.is_front_row,
                     agility=monster.agility,
                     magic=monster.magic,
@@ -3441,8 +3432,7 @@ class BattleScene:
                         monster.width, monster.height,
                     ),
                     known_fields=fields,
-                    hp_displayed=hp_shown,
-                    net_damage=observations.enemy_net_damage.get(index, 0),
+                    hp_displayed=index in self.identified_monster_indexes,
                 )
             )
         numbers = {id(visual): i for i, visual in enumerate(self.party_visuals)}
@@ -6027,14 +6017,10 @@ class BattleScene:
         for result in ready(presentation.healing_results):
             index = result.target_index
             target = self.monsters[index].state if result.target_is_monster else self.party[index]
-            recovered = target.apply_healing(
+            target.apply_healing(
                 result.amount, cure_ailments=result.cures_ailments,
             )
-            if result.target_is_monster:
-                observations = getattr(self, "auto_battle_observations", None)
-                if observations is not None and recovered:
-                    observations.damage(index, -recovered)
-            else:
+            if not result.target_is_monster:
                 self._refresh_party_hp_text(index)
             if result.amount > 0:
                 popups.append(
@@ -6067,9 +6053,6 @@ class BattleScene:
             damage = monster.state.take_damage(result.damage)
             if presentation.drain_party_index is not None:
                 drained += damage
-            observations = getattr(self, "auto_battle_observations", None)
-            if observations is not None:
-                observations.damage(result.target_index, result.damage)
             damage_popups.append(
                 BattleSpellDamagePopup(
                     result.popup_x,
@@ -7582,9 +7565,6 @@ class BattleScene:
                 if strike.is_hit:
                     if targets_enemy and monster is not None and monster.is_alive:
                         monster.state.take_damage(strike.damage)
-                        observations = getattr(self, "auto_battle_observations", None)
-                        if observations is not None:
-                            observations.damage(strike_target_index, strike.damage)
                         if presentation.is_iai or strike is presentation.strikes[0]:
                             self._queue_monster_counter(strike_target_index)
                         strike.additional_effects = (
@@ -9081,14 +9061,11 @@ class BattleScene:
         monster_index = next(
             index for index, monster in enumerate(self.monsters) if monster is actor
         )
-        observations = getattr(self, "auto_battle_observations", None)
         _base_x, y = self._monster_base_position(monster_index)
         popup_x = self._monster_draw_x(monster_index) + actor.width // 2
         popup_y = y + actor.height - 8
         if hp_change > 0:
-            recovered = actor.state.apply_healing(hp_change)
-            if observations is not None:
-                observations.damage(monster_index, -recovered)
+            actor.state.apply_healing(hp_change)
             healing_popups = getattr(self, "healing_popups", None)
             if healing_popups is None:
                 healing_popups = []
@@ -9097,8 +9074,6 @@ class BattleScene:
         else:
             damage = -hp_change
             actor.state.take_poison_damage(damage)
-            if observations is not None:
-                observations.damage(monster_index, damage)
             damage_popups.append(BattleSpellDamagePopup(popup_x, popup_y, damage))
         if not actor.is_alive:
             self.blinking_monster_index = None
@@ -10090,10 +10065,6 @@ class BattleScene:
             self._show_monster_spell_mp_lack_message(actor)
             return True
 
-        observations = getattr(self, "auto_battle_observations", None)
-        if observations is not None:
-            observations.spend_mp(self._monster_index(actor), spell.mp)
-
         planned = getattr(self, "_monster_spell_candidates", {}).pop(
             spell.key, None
         )
@@ -10932,12 +10903,9 @@ class BattleScene:
         if presentation is None or presentation.healing_applied:
             return
         presentation.healing_applied = True
-        restored = self.monsters[presentation.actor_index].state.apply_healing(
+        self.monsters[presentation.actor_index].state.apply_healing(
             presentation.amount
         )
-        observations = getattr(self, "auto_battle_observations", None)
-        if observations is not None:
-            observations.damage(presentation.actor_index, -restored)
 
     def _update_monster_drain(self) -> None:
         presentation = getattr(self, "monster_drain_presentation", None)

@@ -159,7 +159,7 @@ class MonsterSpellTest(unittest.TestCase):
         self.assertTrue(actor.state.apply_defense_down(5, armor_break=True))
         self.assertEqual((actor.state.defense_modifier, actor.state.defense_down_turns), (0, 0))
 
-    def test_monster_heal_uses_magic_and_observes_actual_hp_recovered(self):
+    def test_monster_heal_uses_magic_and_caps_hp_at_maximum(self):
         actor = spellcaster(magic=14, spell_key="HEALING1")
         target = spellcaster(magic=0, spell_key="HASTE")
         target.state.take_damage(3)
@@ -168,7 +168,6 @@ class MonsterSpellTest(unittest.TestCase):
         defeated.state.defeat()
         scene = spell_scene(actor)
         scene.monsters = (actor, target, defeated)
-        scene.auto_battle_observations = Mock()
         spell = scene.spells["HEALING1"]
         expected = resolve_healing(
             intensity=spell.intensity, ability=14, current_hp=17, max_hp=20,
@@ -185,7 +184,6 @@ class MonsterSpellTest(unittest.TestCase):
         self.assertEqual(target.state.hp, 20)
         self.assertTrue(target.state.poisoned)
         self.assertEqual(scene.healing_popups[0].amount, expected)
-        scene.auto_battle_observations.damage.assert_called_once_with(1, -3)
         self.assertFalse(scene._begin_monster_spell(actor, spell))
 
     def test_poltergeist_haste_uses_speed_stages_without_moving_waiting_target(self):
@@ -592,7 +590,6 @@ class MonsterDamageSpellTest(unittest.TestCase):
         target = scene.party[0]
         target.hp = 2
         hp = actor.state.hp
-        scene.auto_battle_observations = Mock()
 
         with (
             patch("scenes.battle.random.choice", return_value=0),
@@ -610,7 +607,6 @@ class MonsterDamageSpellTest(unittest.TestCase):
 
         self.assertEqual((target.hp, actor.state.hp), (0, hp + 2))
         self.assertTrue(actor.state.poisoned)
-        scene.auto_battle_observations.damage.assert_called_once_with(0, -2)
         play_se.assert_called_once_with("battle_drain")
 
     def test_fire_and_freeze_use_shared_damage_rule_and_apply_once_at_result_time(self):

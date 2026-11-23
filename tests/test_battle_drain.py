@@ -6,7 +6,6 @@ from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT  # noqa: F401
-from auto_battle_model import AutoBattleObservations
 from auto_battle_simulation import BattleForecast
 from battle_physical import PhysicalAttackResult, drain_healing_amount, resolve_physical_attack
 from item import AdditionalEffect
@@ -51,7 +50,6 @@ class MonsterDrainTest(unittest.TestCase):
         actor.combat_stats = replace(actor.combat_stats, attack=40, hit=100)
         scene = spell_scene(actor)
         scene.healing_popups = []
-        scene.auto_battle_observations = AutoBattleObservations()
         scene.defending_party_indexes = set()
         scene._monster_attack_target_indexes = Mock(return_value=(0,))
         scene._monster_charge_target_indexes = Mock(return_value=(0,))
@@ -71,7 +69,7 @@ class MonsterDrainTest(unittest.TestCase):
             scene._begin_standard_monster_attack(actor)
         return sound
 
-    def test_attack_recovers_once_and_updates_observed_hp(self):
+    def test_attack_recovers_hp_once(self):
         for key in ("ヴァンパイアバット", "Lesser Vampire"):
             with self.subTest(monster=key):
                 scene, actor = self.scene(monster_key=key)
@@ -87,7 +85,6 @@ class MonsterDrainTest(unittest.TestCase):
                 self.assertEqual(scene.party[0].hp, max(0, hp - damage))
                 self.assertEqual(actor.state.hp, 1 + amount)
                 self.assertTrue(presentation.healing_applied)
-                self.assertEqual(scene.auto_battle_observations.enemy_net_damage, {0: -amount})
 
     def test_critical_hits_keep_hit_or_drain_sound_for_every_monster_attack_path(self):
         for mode in ("attack", "charge", "confused"):
