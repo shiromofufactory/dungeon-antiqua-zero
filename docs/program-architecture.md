@@ -718,8 +718,8 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 操作時の条件は `InventorySystem` が担当し、この純粋な可否判定へ混在させない。
 左手へ `RIGHT` 武器を置けるのは「にとうりゅう」を習得しているか、現在装備に
 `special=DUAL_WIELD` があるときだけとし、両手武器と
-左手装備の競合時は、交換可能なMemberでは競合装備を所持品へ戻す。NPCは
-初期装備だけを固定し、空き枠へ追加した装備は取り外しや交換を許可する。
+左手装備の競合時は、交換可能なMemberでは競合装備を所持品へ戻す。NPCの固定装備は
+`Member.is_equipment_fixed()` で判定し、空き枠へプレイヤーが追加した装備は取り外しや交換を許可する。
 両手武器との競合もこの固定判定に従い、オート装備も同じ交換規則を通す。
 
 例えば `scenes/town.py` が店、寺院、宿など複数の独立した変更理由を持つようになったら、次のようにパッケージへ昇格させる。
@@ -1336,26 +1336,26 @@ ZEROには素手攻撃がないため、武器を外した手の装備名は空�
 左右方向または前後ページ入力でMemberを循環切り替え、メニュー側は最後に表示した
 Member位置を保持する。
 右手または左手の両手占有、二刀流、装備適性、所持数交換は `InventorySystem` を経由して
-確定する。`characters.json` の `type=NPC` は初期装備を固定する判定に使い、固定装備名は
+確定する。`characters.json` の `type=NPC` は装備を固定する判定に使い、固定装備名は
 `POSITIVE_COLOR` で表示する。部位見出しと区切りの「：」は通常色のままとする。
 NPCの空き枠へ追加した装備は固定せず、取り外しや
-交換を許可する。NPCの固定された初期装備を決定して交換しようとした場合は候補一覧へ
+交換を許可する。NPCの固定装備を決定して交換しようとした場合は候補一覧へ
 移らず、メニュー共通のエラー音と横振動を発生させる。
 
 加入時スキルは `characters.json` の `skills`、加入時装備は `equip_right`、
 `equip_left`、`equip_head`、`equip_body`、`equip_arm` を正本とする。
 `CharacterDefinition` はこれらを安定キーとして保持し、Member生成時に `Skill` と `Item` へ
-解決して現在状態へコピーする。進行中に変更されるのは `Member.skills` と
-`Member.equipment` であり、加入時の定義を書き換えない。
+解決して現在状態へコピーする。進行中のスキル・装備・固定装備の変更は `Member` に保持し、
+加入時の定義は保持する。
 `characters.json` の `type` は `MAIN`、`SUB`、`NPC` の安定値として
-`CharacterDefinition.character_type` へ読み込み、表示上の分類ではなくNPC初期装備の固定などの
+`CharacterDefinition.character_type` へ読み込み、NPC装備の固定などの
 ゲームルール判定に使用する。
 
 現在装備は数値添字の配列ではなく、`EquipmentSlot` をキーとする `EquipmentSet` が
 管理する。右手、左手、頭、体、腕を明示し、両手武器は右手に保持したうえで左手を
 使用不可とする。二刀流の武器は `Item.type1` が `RIGHT` であっても左手スロットへの
 配置を許可する。物理スロットと
-二刀流の可否を `Member.can_equip_at()`、所持数交換、両手競合、NPC初期装備の固定、オート装備を
+二刀流の可否を `Member.can_equip_at()`、所持数交換、両手競合、NPC装備の固定、オート装備を
 `InventorySystem` が担当する。
 
 装備中の `special=DUAL_WIELD` は「にとうりゅう」、`special=TWO_HANDED` は
@@ -1389,6 +1389,9 @@ NPCの空き枠へ追加した装備は固定せず、取り外しや
 離脱時の内部LV保存と復活を `Member.record_departure()` に委ねる。再加入時は
 `Member.refresh_rejoining_growth()` で [再加入時の規則](./features/events.md#パーティとアイテム) を適用する。
 `ProficiencyAptitude` は初加入と再加入で共通の内部LVあたりの熟練度係数を提供する。
+イベントによるNPCの装備交換は、EventRunnerから `InventorySystem.replace_npc_equipment()` に委ねる。
+固定装備の上書きは `Member` が保持し、`SaveSystem` が現在装備とともに復元する。
+交換の詳細は [イベント仕様](./features/events.md#パーティとアイテム) を参照する。
 ステータスメニューOverlayでは適性0（使用不可）の武器・呪文のレベルと熟練度を `DISABLED_COLOR` で表示する。
 ステータスメニューOverlayでは適性2（得意）の武器・呪文に限り、種別アイコンの開始位置から8px左の同じ高さへ
 得意マーカー（共通画像バンクの `(152, 24)` から8×8px）を表示する。

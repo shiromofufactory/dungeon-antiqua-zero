@@ -127,6 +127,49 @@ class SaveSystemTest(unittest.TestCase):
             ),
         )
 
+    def test_npc_event_equipment_stays_fixed_after_saving_while_departed(self):
+        records = load_mock_character_records()
+        original = restore_save_document(
+            self.save_document(), character_records=records, items=self.items, skills=self.skills,
+        )
+        alvan = original.character_states["Alvan"]
+        slot = EquipmentSlot.RIGHT
+        item_key = "GREAT SWORD+"
+        self.assertEqual(alvan.equipment.item_at(slot).key, "GREAT SWORD")
+        self.assertTrue(alvan.is_equipment_fixed(slot))
+        self.assertTrue(original.inventory.replace_npc_equipment(
+            alvan, slot, item_key, members=original.character_states.values(),
+        ))
+        document = create_save_document(
+            save_data=original.save_data, active_party=original.active_party,
+            character_states=original.character_states, inventory=original.inventory,
+            map_id="worldmap", position=FieldPosition(17, 39), facing=Direction.LEFT,
+        )
+        state = document["party"]["character_states"]["Alvan"]
+        self.assertEqual(state["event_equipment_overrides"], {"RIGHT": item_key})
+        restored = restore_save_document(
+            document, character_records=records, items=self.items, skills=self.skills,
+        )
+        party = PartySystem(
+            character_records=records, items=self.items, skills=self.skills,
+            active_party=restored.active_party, character_states=restored.character_states,
+        )
+        self.assertFalse(party.contains("Alvan"))
+        self.assertTrue(party.join("Alvan", shared_experience=restored.save_data.experience))
+        alvan = party.active_party[-1]
+        self.assertEqual(alvan.equipment.item_at(slot).key, item_key)
+        self.assertTrue(alvan.is_equipment_fixed(slot))
+        self.assertFalse(restored.inventory.equip(alvan, slot, None))
+        self.assertEqual(restored.inventory.quantity(item_key), 0)
+        self.assertIn(item_key, {item.key for item in restored.inventory.recorded_items})
+
+        for invalid in (None, {"NECK": item_key}, {"RIGHT": "missing"}, {"HEAD": item_key}):
+            state["event_equipment_overrides"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(SaveSystemError):
+                restore_save_document(
+                    document, character_records=records, items=self.items, skills=self.skills,
+                )
+
     def test_tactics_round_trip_for_a_departed_member_and_default_for_old_saves(self):
         departed_key = self.all_members[2].definition.key
         tactics = AutoBattleConfig().toggle_spell(departed_key, "sacred").toggle_item("REMEDY")

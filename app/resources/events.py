@@ -10,8 +10,10 @@ from types import MappingProxyType
 from typing import Mapping
 
 if __package__ == "resources":
+    from item import EquipmentSlot
     from state import LaunchMode
 else:
+    from ..item import EquipmentSlot
     from ..state import LaunchMode
 
 
@@ -109,6 +111,17 @@ def _commands_are_valid(value: object, *, depth: int = 0) -> bool:
             if set(command) != {"command", "character_key"} or not isinstance(
                 command.get("character_key"), str
             ) or not command["character_key"]:
+                return False
+        elif command_type == "replace_npc_equipment":
+            if (
+                set(command) != {"command", "character_key", "slot", "item_key"}
+                or not isinstance(command["character_key"], str)
+                or not command["character_key"]
+                or not isinstance(command["item_key"], str)
+                or not command["item_key"]
+                or not isinstance(command["slot"], str)
+                or command["slot"] not in {slot.value for slot in EquipmentSlot}
+            ):
                 return False
         elif command_type in ("give_item", "take_item"):
             fields = {"command", "item_key", "quantity"}

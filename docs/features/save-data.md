@@ -281,6 +281,7 @@ JSONオブジェクトのプロパティ順には意味を持たせない。書�
 | `skill_keys` | string[] | 現在習得しているスキルの安定キー |
 | `event_spell_keys` | string[] | 熟練度から導出できないイベント習得呪文の安定キー |
 | `equipment` | object | 各装備スロットのアイテムキーまたは `null` |
+| `event_equipment_overrides` | object、省略可 | イベントでNPCの固定装備が変わった部位と、変更後のアイテムキーまたは `null` |
 | `proficiencies` | object | 武器・呪文種別ごとのLVと熟練度 |
 
 `ability_bonuses` は `strength`、`agility`、`magic` の0以上の整数を必須とする。各能力について、
@@ -292,6 +293,11 @@ v1・v2からの復元でも同じ検証と復元を行い、従来の全能力0
 `equipment` は `RIGHT`、`LEFT`、`HEAD`、`BODY`、`ARM` の5プロパティを必須とする。
 装備品は `inventory.quantities` に重複して数えない。復元後は未装備品と、離脱中を含む
 全キャラクターの装備品を合算し、アイテムごとの所持上限を検証する。
+
+`event_equipment_overrides` は加入済みNPCに適用する。指定のない部位は正本の初期装備で固定を判定する。
+アイテムキーは対応する品を装備中に固定し、`null` はその部位の初期装備の固定を解除する。
+キーは既存アイテムを参照し、部位に適合する必要がある。省略時は全ての部位で初期装備の規則を使うため、
+旧セーブも形式バージョン5のまま読み込める。
 
 `proficiencies` は `ProficiencyKind` の全13キーを必須とし、各値を次のオブジェクトとする。
 

@@ -81,6 +81,46 @@ class EventEditorServerTest(unittest.TestCase):
         self.assertIn("invalid_show_message", {item["code"] for item in result["diagnostics"]})
         self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
 
+    def test_npc_equipment_filters_catalogs_and_validates_before_saving(self) -> None:
+        data_root = self.content_root / "data"
+        (data_root / "characters.json").write_text(json.dumps([
+            {"name_en": "Fiora", "type": "MAIN", "face_x": 0, "face_y": 0},
+            {"name_en": "Alvan", "type": "NPC", "face_x": 1, "face_y": 0},
+        ]), encoding="utf-8")
+        (data_root / "items.json").write_text(json.dumps([
+            {"name_en": "POTION", "type1": "ITEM"},
+            {"name_en": "SWORD", "type1": "RIGHT"},
+            {"name_en": "AXE", "type1": "TWO_HANDS"},
+            {"name_en": "SHIELD", "type1": "LEFT"},
+        ]), encoding="utf-8")
+        catalogs = self.get_json("/api/document?token=test-token")["catalogs"]
+        self.assertEqual(catalogs["npc_keys"], ["Alvan"])
+        self.assertEqual(catalogs["equipment_item_keys_by_slot"]["RIGHT"], ["AXE", "SWORD"])
+        self.assertEqual(catalogs["equipment_item_keys_by_slot"]["LEFT"], ["SHIELD", "SWORD"])
+
+        command = {
+            "command": "replace_npc_equipment", "character_key": "Alvan",
+            "slot": "RIGHT", "item_key": "AXE",
+        }
+        event = {"id": "sample.equip", "commands": [command]}
+        data = {"format_version": 1, "events": [event]}
+        self.assertTrue(self.post_json("/api/save", data)["saved"])
+        runtime_before = self.application.runtime_path.read_bytes()
+        self.assertEqual(json.loads(runtime_before)["events"]["sample.equip"]["commands"], [command])
+        for changes, code in (
+            ({"character_key": "Fiora"}, "invalid_equipment_npc"),
+            ({"slot": "NECK"}, "invalid_equipment_slot"),
+            ({"slot": "LEFT"}, "invalid_equipment_item"),
+            ({"item_key": "POTION"}, "invalid_equipment_item"),
+            ({"item_key": "missing"}, "unknown_item"),
+        ):
+            with self.subTest(changes=changes):
+                event["commands"] = [{**command, **changes}]
+                result = self.post_json("/api/save", data)
+                self.assertFalse(result["saved"])
+                self.assertEqual({issue["code"] for issue in result["diagnostics"]}, {code})
+                self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+
     def test_wait_saves_integer_frames_and_invalid_duration_keeps_last_generation(self) -> None:
         command = {"command": "wait", "frames": 12}
         data = {"format_version": 1, "events": [{

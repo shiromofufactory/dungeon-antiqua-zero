@@ -97,6 +97,32 @@ class ItemEquipType(StrEnum):
     ARM = "ARM"
 
 
+class EquipmentSlot(StrEnum):
+    """Named physical slots used by a member's current equipment."""
+
+    RIGHT = "RIGHT"
+    LEFT = "LEFT"
+    HEAD = "HEAD"
+    BODY = "BODY"
+    ARM = "ARM"
+
+    def accepts(self, equip_type: ItemEquipType | str) -> bool:
+        """Return whether this slot can hold the given item type."""
+
+        return equip_type in _EQUIPMENT_TYPES_BY_SLOT[self]
+
+
+_EQUIPMENT_TYPES_BY_SLOT = MappingProxyType(
+    {
+        EquipmentSlot.RIGHT: frozenset((ItemEquipType.RIGHT, ItemEquipType.TWO_HANDS)),
+        EquipmentSlot.LEFT: frozenset((ItemEquipType.LEFT, ItemEquipType.RIGHT)),
+        EquipmentSlot.HEAD: frozenset((ItemEquipType.HEAD,)),
+        EquipmentSlot.BODY: frozenset((ItemEquipType.BODY,)),
+        EquipmentSlot.ARM: frozenset((ItemEquipType.ARM,)),
+    }
+)
+
+
 class AttackAttribute(StrEnum):
     """Stable elemental attributes applied by weapon attacks."""
 

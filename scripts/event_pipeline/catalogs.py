@@ -6,15 +6,22 @@ import json
 from pathlib import Path
 
 from app.audio_catalog import load_sound_effects
+from app.item import EquipmentSlot
+from app.member import CharacterType
 
-def _record_keys(path: Path, field: str) -> set[str]:
+
+def _load_records(path: Path) -> list[dict[str, object]]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, list):
         raise ValueError(f"{path}のルートは配列である必要があります。")
+    return [record for record in value if isinstance(record, dict)]
+
+
+def _record_keys(path: Path, field: str) -> set[str]:
     return {
         record[field]
-        for record in value
-        if isinstance(record, dict) and isinstance(record.get(field), str)
+        for record in _load_records(path)
+        if isinstance(record.get(field), str)
     }
 
 
@@ -26,17 +33,33 @@ def reference_catalogs(
     content_root: Path,
     *,
     app_root: Path,
-) -> dict[str, set[str]]:
+) -> dict[str, set[str] | dict[str, set[str]]]:
     """Return every stable ID list shared by validation and authoring tools."""
 
     audio_dir = app_root / "audio"
     flag_path = content_root / "events" / "flags.json"
     message_path = content_root / "events" / "messages.json"
+    characters = {
+        record["name_en"]: record.get("type")
+        for record in _load_records(content_root / "data" / "characters.json")
+        if isinstance(record.get("name_en"), str)
+    }
+    items = {
+        record["name_en"]: record.get("type1")
+        for record in _load_records(content_root / "data" / "items.json")
+        if isinstance(record.get("name_en"), str)
+    }
     return {
-        "character_keys": _record_keys(
-            content_root / "data" / "characters.json", "name_en"
-        ),
-        "item_keys": _record_keys(content_root / "data" / "items.json", "name_en"),
+        "character_keys": set(characters),
+        "npc_keys": {key for key, kind in characters.items() if kind == CharacterType.NPC},
+        "item_keys": set(items),
+        "equipment_item_keys_by_slot": {
+            slot.value: {
+                key for key, kind in items.items()
+                if isinstance(kind, str) and slot.accepts(kind)
+            }
+            for slot in EquipmentSlot
+        },
         "shop_keys": _record_keys(
             content_root / "data" / "shops.json", "shop_key"
         ),

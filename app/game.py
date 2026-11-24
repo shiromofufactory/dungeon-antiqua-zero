@@ -3459,14 +3459,16 @@ class Game:
         if runner is None:
             return
         while True:
-            effect = runner.advance()
-            self.party = self.party_system.active_party
-            self.character_states = self.party_system.character_states
-            save_data = getattr(self, "save_data", None)
-            if isinstance(save_data, SaveData):
-                save_data.auto_recovery = valid_config_for_party(
-                    save_data.auto_recovery, self.party
-                )
+            try:
+                effect = runner.advance()
+            finally:
+                self.party = self.party_system.active_party
+                self.character_states = self.party_system.character_states
+                save_data = getattr(self, "save_data", None)
+                if isinstance(save_data, SaveData):
+                    save_data.auto_recovery = valid_config_for_party(
+                        save_data.auto_recovery, self.party
+                    )
             if effect is None:
                 if runner.is_complete:
                     battle_event_finished = runner.context is EventContext.BATTLE

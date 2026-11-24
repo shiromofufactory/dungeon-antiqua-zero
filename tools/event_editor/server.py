@@ -122,7 +122,7 @@ class EventEditorApplication:
         self,
         flags: object | None = None,
         messages: object | None = None,
-    ) -> dict[str, set[str]]:
+    ) -> dict[str, set[str] | dict[str, set[str]]]:
         catalogs = reference_catalogs(self.content_root, app_root=self.app_root)
         if flags is not None:
             catalogs["flag_ids"] = event_flag_ids(flags)
@@ -214,7 +214,11 @@ class EventEditorApplication:
             "missions": load_missions(self.content_root),
             "battles": load_event_battles(self.content_root),
             "catalogs": {
-                key: sorted(values) for key, values in catalogs.items()
+                key: (
+                    {slot: sorted(items) for slot, items in values.items()}
+                    if isinstance(values, dict) else sorted(values)
+                )
+                for key, values in catalogs.items()
             },
             "face_sheet": {
                 "width": FACE_SHEET_WIDTH,

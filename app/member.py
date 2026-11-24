@@ -19,7 +19,7 @@ if __package__ == "":
         MIN_SPEED_MODIFIER,
         modified_agility,
     )
-    from item import Item, ItemEquipType, ItemSpecial
+    from item import EquipmentSlot, Item, ItemEquipType, ItemSpecial
     from localization import Localizer
     from resistance import ResistanceType
     from skill import Skill
@@ -36,7 +36,7 @@ else:
         MIN_SPEED_MODIFIER,
         modified_agility,
     )
-    from .item import Item, ItemEquipType, ItemSpecial
+    from .item import EquipmentSlot, Item, ItemEquipType, ItemSpecial
     from .localization import Localizer
     from .resistance import ResistanceType
     from .skill import Skill
@@ -72,16 +72,6 @@ class CharacterType(StrEnum):
     MAIN = "MAIN"
     SUB = "SUB"
     NPC = "NPC"
-
-
-class EquipmentSlot(StrEnum):
-    """Named physical slots used by a member's current equipment."""
-
-    RIGHT = "RIGHT"
-    LEFT = "LEFT"
-    HEAD = "HEAD"
-    BODY = "BODY"
-    ARM = "ARM"
 
 
 class FormationRow(StrEnum):
@@ -150,19 +140,6 @@ EQUIPMENT_RECORD_FIELDS = MappingProxyType(
         EquipmentSlot.HEAD: "equip_head",
         EquipmentSlot.BODY: "equip_body",
         EquipmentSlot.ARM: "equip_arm",
-    }
-)
-_EQUIPMENT_TYPES_BY_SLOT = MappingProxyType(
-    {
-        EquipmentSlot.RIGHT: frozenset(
-            (ItemEquipType.RIGHT, ItemEquipType.TWO_HANDS)
-        ),
-        EquipmentSlot.LEFT: frozenset(
-            (ItemEquipType.LEFT, ItemEquipType.RIGHT)
-        ),
-        EquipmentSlot.HEAD: frozenset((ItemEquipType.HEAD,)),
-        EquipmentSlot.BODY: frozenset((ItemEquipType.BODY,)),
-        EquipmentSlot.ARM: frozenset((ItemEquipType.ARM,)),
     }
 )
 WEAPON_PROFICIENCY_KINDS = frozenset(
@@ -428,7 +405,7 @@ class EquipmentSet:
             item = self._items.setdefault(slot, None)
             if item is not None and not isinstance(item, Item):
                 raise TypeError(f"equipment at {slot.value} must be an Item or None")
-            if item is not None and item.equip_type not in _EQUIPMENT_TYPES_BY_SLOT[slot]:
+            if item is not None and not slot.accepts(item.equip_type):
                 raise MemberDataError(
                     f"item cannot be equipped at {slot.value}: {item.key}"
                 )
@@ -822,6 +799,7 @@ class Member:
     defense_down_turns: int = 0
     has_joined: bool = True
     departure_level: int | None = None
+    event_equipment_overrides: dict[EquipmentSlot, str | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.definition, CharacterDefinition):
@@ -1302,7 +1280,7 @@ class Member:
         return self.definition.character_type is CharacterType.NPC
 
     def is_equipment_fixed(self, slot: EquipmentSlot) -> bool:
-        """Return whether the NPC's initial item still occupies ``slot``."""
+        """Return whether the NPC's initial or event item occupies the slot."""
 
         if not isinstance(slot, EquipmentSlot):
             raise TypeError("slot must be an EquipmentSlot")
@@ -1310,7 +1288,9 @@ class Member:
         return (
             self.is_npc
             and current is not None
-            and current.key == self.definition.initial_equipment_keys[slot]
+            and current.key == self.event_equipment_overrides.get(
+                slot, self.definition.initial_equipment_keys[slot]
+            )
         )
 
     @property
@@ -1777,7 +1757,7 @@ class Member:
             raise TypeError("slot must be an EquipmentSlot")
         if not self.can_equip(item):
             return False
-        if item.equip_type not in _EQUIPMENT_TYPES_BY_SLOT[slot]:
+        if not slot.accepts(item.equip_type):
             return False
         if (
             slot is EquipmentSlot.LEFT

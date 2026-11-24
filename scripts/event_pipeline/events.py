@@ -10,6 +10,8 @@ import re
 import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
+from app.item import EquipmentSlot
+
 
 EVENT_SOURCE_FORMAT_VERSION = 1
 EVENT_RUNTIME_FORMAT_VERSION = 1
@@ -182,6 +184,8 @@ def _validate_command_list(
     flag_ids: set[str],
     character_keys: set[str],
     item_keys: set[str],
+    npc_keys: set[str],
+    equipment_item_keys_by_slot: Mapping[str, Iterable[str]],
     shop_keys: set[str],
     message_ids: set[str],
     bgm_ids: set[str],
@@ -202,10 +206,10 @@ def _validate_command_list(
             _diagnostic(diagnostics, "error", "invalid_command", command_path, "commandはobjectで指定してください。")
             continue
         command_type = command.get("command")
-        if battle_context and command_type in {
-            "join_party", "leave_party", "open_shop", "move_party", "move_actor",
+        if battle_context and command_type in (
+            "join_party", "leave_party", "replace_npc_equipment", "open_shop", "move_party", "move_actor",
             "face_party", "face_actor", "start_battle"
-        }:
+        ):
             _diagnostic(diagnostics, "error", "field_only_battle_command", f"{command_path}.command", f"戦闘開始イベントでは使用できないコマンドです: {command_type}")
         if defeat_context and command_type in ("open_shop", "start_battle"):
             _diagnostic(diagnostics, "error", "transition_during_defeat", f"{command_path}.command", f"全滅時イベントでは使用できないコマンドです: {command_type}")
@@ -221,6 +225,20 @@ def _validate_command_list(
                 _diagnostic(diagnostics, "error", "unknown_character", f"{command_path}.character_key", f"存在しないキャラクターです: {key}")
             elif command_type == "leave_party" and key == "Fiora":
                 _diagnostic(diagnostics, "error", "cannot_remove_fiora", f"{command_path}.character_key", "フィオラをパーティから外すことはできません。")
+        elif command_type == "replace_npc_equipment":
+            _known_fields(command, {"command", "character_key", "slot", "item_key"}, diagnostics, command_path)
+            character_key = command.get("character_key")
+            slot = command.get("slot")
+            item_key = command.get("item_key")
+            if not isinstance(character_key, str) or character_key not in npc_keys:
+                _diagnostic(diagnostics, "error", "invalid_equipment_npc", f"{command_path}.character_key", f"NPCを指定してください: {character_key}")
+            valid_slot = isinstance(slot, str) and slot in {part.value for part in EquipmentSlot}
+            if not valid_slot:
+                _diagnostic(diagnostics, "error", "invalid_equipment_slot", f"{command_path}.slot", f"装備部位を指定してください: {slot}")
+            if not isinstance(item_key, str) or item_key not in item_keys:
+                _diagnostic(diagnostics, "error", "unknown_item", f"{command_path}.item_key", f"存在しないアイテムです: {item_key}")
+            elif valid_slot and item_key not in equipment_item_keys_by_slot.get(slot, ()):
+                _diagnostic(diagnostics, "error", "invalid_equipment_item", f"{command_path}.item_key", f"{slot}に装備できないアイテムです: {item_key}")
         elif command_type in ("give_item", "take_item"):
             fields = {"command", "item_key", "quantity"}
             if command_type == "give_item":
@@ -250,7 +268,14 @@ def _validate_command_list(
                     and command["else"]
                 ):
                     continue
-                _validate_command_list(branch, diagnostics, f"{command_path}.{branch_name}", flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys, shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids, depth=depth + 1, battle_context=battle_context, defeat_context=defeat_context, battle_ids=battle_ids)
+                _validate_command_list(
+                    branch, diagnostics, f"{command_path}.{branch_name}",
+                    flag_ids=flag_ids, character_keys=character_keys, item_keys=item_keys,
+                    npc_keys=npc_keys, equipment_item_keys_by_slot=equipment_item_keys_by_slot,
+                    shop_keys=shop_keys, message_ids=message_ids, bgm_ids=bgm_ids, se_ids=se_ids,
+                    depth=depth + 1, battle_context=battle_context,
+                    defeat_context=defeat_context, battle_ids=battle_ids,
+                )
         elif command_type in (
             "end_event", "stop_bgm", "reset_game", "recover_party", "recover_party_without_revive"
         ):
@@ -321,6 +346,8 @@ def validate_event_sources(
     flag_ids: Iterable[str] = (),
     character_keys: Iterable[str] = (),
     item_keys: Iterable[str] = (),
+    npc_keys: Iterable[str] = (),
+    equipment_item_keys_by_slot: Mapping[str, Iterable[str]] | None = None,
     monster_keys: Iterable[str] = (),
     shop_keys: Iterable[str] = (),
     message_ids: Iterable[str] = (),
@@ -342,6 +369,8 @@ def validate_event_sources(
     } if isinstance(battle_values, list) else set()
     characters = set(character_keys)
     items = set(item_keys)
+    npcs = set(npc_keys)
+    equipment_items = equipment_item_keys_by_slot or {}
     monsters = set(monster_keys)
     shops = set(shop_keys)
     messages = set(message_ids)
@@ -410,6 +439,7 @@ def validate_event_sources(
             _validate_command_list(
                 event.get("commands"), diagnostics, f"{path}.commands",
                 flag_ids=flags, character_keys=characters, item_keys=items,
+                npc_keys=npcs, equipment_item_keys_by_slot=equipment_items,
                 shop_keys=shops,
                 message_ids=messages, bgm_ids=bgms, se_ids=sounds,
                 battle_context="battle_start_id" in event, battle_ids=registered_battles,
@@ -423,13 +453,17 @@ def compile_event_sources(
     *,
     missions: object = None,
     battles: object = None,
+    equipment_item_keys_by_slot: Mapping[str, Iterable[str]] | None = None,
     **catalogs: Iterable[str],
 ) -> dict[str, object]:
     from .missions import validate_missions
 
     mission_values = [] if missions is None else missions
     diagnostics = [
-        *validate_event_sources(sources, battles=battles, **catalogs),
+        *validate_event_sources(
+            sources, battles=battles, equipment_item_keys_by_slot=equipment_item_keys_by_slot,
+            **catalogs,
+        ),
         *validate_missions(mission_values, **catalogs),
     ]
     errors = [item for item in diagnostics if item.severity == "error"]

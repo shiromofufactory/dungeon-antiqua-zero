@@ -422,6 +422,7 @@ def _restore_member(
 ) -> Member:
     state = _mapping(value, f"party.character_states.{key}")
     internal_level = _non_negative_int(state, "internal_level", f"member {key}")
+    has_joined = format_version < 4 or _required_bool(state, "has_joined", f"member {key}")
     initial = Member.from_record_at_internal_level(
         record,
         internal_level,
@@ -450,6 +451,25 @@ def _restore_member(
             )
         equipment_keys[slot] = "" if item_key is None else item_key
     equipment = EquipmentSet.from_keys(equipment_keys, items)
+
+    overrides = _mapping(
+        state.get("event_equipment_overrides", {}),
+        f"member {key}.event_equipment_overrides",
+    )
+    if overrides and (not initial.is_npc or not has_joined):
+        raise SaveSystemError(f"member {key} must be a joined NPC to have event equipment")
+    event_equipment_overrides: dict[EquipmentSlot, str | None] = {}
+    for slot_value, item_key in overrides.items():
+        if slot_value not in expected_equipment_keys:
+            raise SaveSystemError(f"member {key} event equipment slot is unsupported")
+        slot = EquipmentSlot(slot_value)
+        if item_key is not None and (
+            not isinstance(item_key, str)
+            or item_key not in items
+            or not slot.accepts(items[item_key].equip_type)
+        ):
+            raise SaveSystemError(f"member {key} event equipment key is invalid: {item_key!r}")
+        event_equipment_overrides[slot] = item_key
 
     proficiency_document = _required_mapping(
         state,
@@ -527,10 +547,7 @@ def _restore_member(
         initial.definition,
         internal_level=internal_level,
         experience_offset=experience_offset,
-        has_joined=(
-            True if format_version < 4
-            else _required_bool(state, "has_joined", f"member {key}")
-        ),
+        has_joined=has_joined,
         departure_level=departure_level,
         hp=_non_negative_int(state, "hp", f"member {key}"),
         max_hp=_non_negative_int(state, "max_hp", f"member {key}"),
@@ -541,6 +558,7 @@ def _restore_member(
         paralyzed=_required_bool(state, "paralyzed", f"member {key}"),
         skills=member_skills,
         equipment=equipment,
+        event_equipment_overrides=event_equipment_overrides,
         proficiencies=proficiencies,
         ability_bonuses=ability_bonuses,
     )
@@ -968,7 +986,7 @@ def _serialize_member(member: Member) -> dict[str, object]:
     for slot in EquipmentSlot:
         item = member.equipment.item_at(slot)
         equipment[slot.value] = None if item is None else item.key
-    return {
+    document = {
         "internal_level": member.internal_level,
         "experience_offset": member.experience_offset,
         "has_joined": member.has_joined,
@@ -995,6 +1013,12 @@ def _serialize_member(member: Member) -> dict[str, object]:
             for kind in ProficiencyKind
         },
     }
+    if member.event_equipment_overrides:
+        document["event_equipment_overrides"] = {
+            slot.value: item_key
+            for slot, item_key in member.event_equipment_overrides.items()
+        }
+    return document
 
 
 def _serialize_opened_treasures(

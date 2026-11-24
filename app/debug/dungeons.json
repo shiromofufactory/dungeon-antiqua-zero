@@ -682,7 +682,8 @@
         {
           "id": "event_battle_11e95956a064494484fc76535a8b0945",
           "type": "event_battle",
-          "battle_id": "battle_17"
+          "battle_id": "battle_17",
+          "flag_id": "lorewick.seasrea_unlocked"
         }
       ]
     }

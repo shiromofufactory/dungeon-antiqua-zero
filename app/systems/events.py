@@ -8,10 +8,12 @@ from typing import Mapping
 
 if __package__ == "systems":
     from input import Direction
+    from item import EquipmentSlot
     from resources.events import EventCatalog, EventDefinition
     from state import LaunchMode, SaveData
 else:
     from ..input import Direction
+    from ..item import EquipmentSlot
     from ..resources.events import EventCatalog, EventDefinition
     from ..state import LaunchMode, SaveData
 
@@ -248,6 +250,20 @@ class EventRunner:
             if command_type == "leave_party":
                 self._require_field(command_type)
                 self.party.leave(str(command["character_key"]))
+                return None
+            if command_type == "replace_npc_equipment":
+                self._require_field(command_type)
+                character_key = str(command["character_key"])
+                member = self.party.character_states.get(character_key)
+                if member is None:
+                    raise ValueError(f"character has not joined: {character_key}")
+                if not self.inventory.replace_npc_equipment(
+                    member,
+                    EquipmentSlot(command["slot"]),
+                    str(command["item_key"]),
+                    members=self.party.character_states.values(),
+                ):
+                    raise EventRuntimeError(self.event_id, path, "item capacity exceeded")
                 return None
             if command_type == "give_item":
                 if not self.inventory.add(

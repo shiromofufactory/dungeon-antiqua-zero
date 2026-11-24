@@ -51,6 +51,27 @@ def sample_source() -> dict[str, object]:
 
 
 class EventPipelineTest(unittest.TestCase):
+    def test_nested_npc_equipment_compiles_and_is_field_only(self) -> None:
+        source = sample_source()
+        command = {
+            "command": "replace_npc_equipment", "character_key": "Alvan",
+            "slot": "RIGHT", "item_key": "AXE",
+        }
+        event = source["events"][0]
+        event["commands"][0]["else"].insert(0, command)
+        catalogs = {
+            **CATALOGS, "npc_keys": {"Alvan"}, "item_keys": {"POTION", "AXE"},
+            "equipment_item_keys_by_slot": {"RIGHT": {"AXE"}},
+        }
+        compiled = compile_event_sources({"events": source}, **catalogs)
+        self.assertEqual(
+            EventCatalog.from_document(compiled).event("sample.greeting").commands[0]["else"][0],
+            command,
+        )
+        event["battle_start_id"] = "guard"
+        diagnostics = validate_event_sources({"events": source}, **catalogs)
+        self.assertEqual({issue.code for issue in diagnostics}, {"field_only_battle_command"})
+
     def test_complete_ids_with_shared_suffix_compile_without_extra_prefix(self) -> None:
         source = {"format_version": 1, "events": [
             {"id": "common.event_0", "commands": [{"command": "end_event"}]},

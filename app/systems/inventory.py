@@ -239,6 +239,50 @@ class InventorySystem:
                     f"total item quantity exceeds stack limit {limit}: {key!r}"
                 )
 
+    def replace_npc_equipment(
+        self,
+        member: Member,
+        slot: EquipmentSlot,
+        item_key: str,
+        *,
+        members: Iterable[Member],
+    ) -> bool:
+        """Grant fixed equipment by event, returning player equipment to inventory."""
+
+        item = self._items[self._item_key(item_key)]
+        if not member.is_npc or not member.has_joined:
+            raise ValueError("equipment replacement requires an NPC who has joined")
+        replacements = self._equipment_replacements(member, slot, item)
+        if replacements[slot] is None:
+            raise ValueError("replacement requires Dual-Wield in the resulting equipment")
+
+        next_equipment = member.equipment.replaced(replacements)
+        overrides = dict(member.event_equipment_overrides)
+        returned: list[Item] = []
+        added_copies = 1
+        for replaced_slot, replacement in replacements.items():
+            previous = member.equipment.item_at(replaced_slot)
+            if previous is None:
+                continue
+            if replacement is not None and previous.key == replacement.key:
+                added_copies -= 1
+                continue
+            if member.is_equipment_fixed(replaced_slot):
+                added_copies -= int(previous.key == item.key)
+                overrides[replaced_slot] = None
+            else:
+                returned.append(previous)
+        if added_copies > 0 and not self.can_add(item, added_copies, members=members):
+            return False
+
+        for previous in returned:
+            self._increase(previous.key)
+        overrides[slot] = item.key
+        member.equipment = next_equipment
+        member.event_equipment_overrides = overrides
+        self._recorded_keys = self._recorded_keys | {item.key}
+        return True
+
     def can_discard(self, item: Item | str) -> bool:
         """Return whether one owned item may be discarded.
 
@@ -328,7 +372,7 @@ class InventorySystem:
     def auto_equip(self, member: Member) -> bool:
         """Select armor and compare legal hand combinations for one member.
 
-        NPC initial equipment is never removed or replaced. Equipment added
+        NPC fixed equipment is never removed or replaced. Equipment added
         later follows the same replacement rules as player-character gear.
         """
 

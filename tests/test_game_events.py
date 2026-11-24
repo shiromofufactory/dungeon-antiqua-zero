@@ -11,6 +11,7 @@ from tools._bootstrap import APP_ROOT as _APP_ROOT
 from game import EVENT_ITEM_RECEIVED_TEXT_KEY, FIRST_DEFEAT_RESTART_HINT_ID, TELEPORT_SE_ID, Game, GameScreenChange
 from field import FieldActors, FieldMovement, FieldPosition
 from input import Direction, InputButton, InputState
+from member import EquipmentSlot
 from resources.maps import MapVisibilityCondition
 from resources import (
     CompiledMap,
@@ -25,7 +26,7 @@ from resources import (
 from rendering import FadeThroughBlack, ScreenBrightness
 from rendering.field import FieldRenderer
 from scenes.battle import BattleEncounter, BattlePhase, BattleResult
-from state import SaveData, Settings
+from state import LaunchMode, SaveData, Settings
 from systems import (
     StopBgmEffect,
     ChangeBrightnessEffect,
@@ -41,9 +42,16 @@ from systems import (
     MoveActorEffect,
     MovePartyEffect,
     OpenShopEffect,
+    PartySystem,
     StartBattleEffect,
     WaitEffect,
     TreasureSystem,
+)
+from tools.screen_mocks._fixtures import (
+    load_mock_character_records,
+    load_mock_items,
+    load_mock_party,
+    load_mock_skills,
 )
 
 
@@ -125,6 +133,53 @@ def game_for(
 
 
 class GameEventTriggerTest(unittest.TestCase):
+    def test_field_event_equips_rejoining_npc_and_preserves_join_on_capacity_failure(self) -> None:
+        items = load_mock_items()
+        skills = load_mock_skills()
+        for existing_copies in (0, 9):
+            with self.subTest(existing_copies=existing_copies):
+                game = game_for(None)
+                game.launch_mode = LaunchMode.NORMAL
+                game.selected_member_index = 0
+                game.alert = Mock()
+                game.party_system = PartySystem(
+                    character_records=load_mock_character_records(), items=items, skills=skills,
+                    active_party=load_mock_party(items, skills, character_keys=("Fiora",)),
+                )
+                game.party_system.join("Elika")
+                game.party_system.leave("Elika")
+                game.party = game.party_system.active_party
+                game.character_states = game.party_system.character_states
+                game.inventory_system = InventorySystem(items, {"MURASAME!": existing_copies})
+                elika = game.character_states["Elika"]
+                slot = EquipmentSlot.RIGHT
+                self.assertFalse(elika.can_equip(items["MURASAME!"]))
+                original = elika.equipment.item_at(slot)
+                game.event_catalog = EventCatalog.from_document({
+                    "format_version": 1, "source_sha256": "0" * 64, "flags": ["sample.done"],
+                    "events": {"sample.rejoin": {"commands": [
+                        {"command": "join_party", "character_key": "Elika"},
+                        {"command": "replace_npc_equipment", "character_key": "Elika",
+                         "slot": "RIGHT", "item_key": "MURASAME!"},
+                        {"command": "set_flag", "flag_id": "sample.done"},
+                    ]}},
+                })
+
+                Game._start_field_event(game, "sample.rejoin")
+
+                self.assertIs(game.party[-1], elika)
+                self.assertTrue(elika.is_equipment_fixed(slot))
+                self.assertIsNone(game.event_runner)
+                self.assertEqual(game.inventory_system.quantity("MURASAME!"), existing_copies)
+                if existing_copies:
+                    self.assertIn("item capacity exceeded", game.last_event_error)
+                    self.assertIs(elika.equipment.item_at(slot), original)
+                    self.assertNotIn("sample.done", game.save_data.event_flags)
+                else:
+                    self.assertIsNone(game.last_event_error)
+                    self.assertIs(elika.equipment.item_at(slot), items["MURASAME!"])
+                    self.assertIn("sample.done", game.save_data.event_flags)
+
     def test_normal_pc_and_npc_movement_cannot_share_a_destination(self) -> None:
         for first_mover in ("party", "actor"):
             with self.subTest(first_mover=first_mover):

@@ -6,30 +6,31 @@ const CLIENT = "event-editor-ui";
 const UI_STORAGE_KEY = "da0.event-editor.ui.v1";
 const LIST_TABS = ["flag", "event", "mission", "message", "battle"];
 const COMMAND_OPTIONS = [
-  ["message", "message"],
-  ["set_flag", "set_flag"],
-  ["branch", "branch"],
+  ["message", "メッセージを表示"],
+  ["set_flag", "フラグを立てる"],
+  ["branch", "条件分岐"],
   ["end_event", "イベント終了"],
-  ["join_party", "join_party"],
-  ["leave_party", "leave_party"],
-  ["give_item", "give_item"],
-  ["take_item", "take_item"],
+  ["join_party", "パーティに加入"],
+  ["leave_party", "パーティから離脱"],
+  ["replace_npc_equipment", "NPCの装備を交換する"],
+  ["give_item", "アイテムを渡す"],
+  ["take_item", "アイテムを減らす"],
   ["recover_party", "パーティ全快（復活含む）"],
   ["recover_party_without_revive", "パーティ全快（復活除く）"],
   ["open_shop", "ショップを開く"],
   ["start_battle", "イベントバトル開始"],
-  ["play_se", "play_se"],
-  ["change_bgm", "change_bgm"],
-  ["stop_bgm", "stop_bgm（BGM停止）"],
+  ["play_se", "効果音を再生"],
+  ["change_bgm", "BGMを変更"],
+  ["stop_bgm", "BGM停止"],
   ["reset_game", "ゲームをリセット"],
   ["flash_screen", "画面をフラッシュ"],
   ["change_brightness", "画面の明るさを変更"],
   ["shake_screen", "画面を横揺れ"],
-  ["wait", "wait（待機）"],
-  ["move_party", "move_party"],
-  ["move_actor", "move_actor"],
-  ["face_party", "face_party（パーティの向き変更）"],
-  ["face_actor", "face_actor（actorの向き変更）"],
+  ["wait", "待機"],
+  ["move_party", "パーティを移動"],
+  ["move_actor", "アクターを移動"],
+  ["face_party", "パーティの向きを変更"],
+  ["face_actor", "アクターの向きを変更"],
 ];
 let token = new URLSearchParams(location.search).get("token") || "";
 const editorRoute = location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[1] || null;
@@ -738,6 +739,12 @@ function renderCommand(command, path, listPath, index) {
     fields = field("フラグ", `<select ${attr("flag_id")}>${flagOptions(command.flag_id)}</select>`, true);
   } else if (type === "join_party" || type === "leave_party") {
     fields = field("キャラクター", `<select ${attr("character_key")}>${options(state.catalogs.character_keys || [], command.character_key)}</select>`, true);
+  } else if (type === "replace_npc_equipment") {
+    const slots = {RIGHT: "右手", LEFT: "左手", HEAD: "頭", BODY: "体", ARM: "腕"};
+    const items = state.catalogs.equipment_item_keys_by_slot?.[command.slot] || [];
+    fields = field("NPC", `<select ${attr("character_key")}>${options(state.catalogs.npc_keys || [], command.character_key)}</select>`)
+      + field("装備部位", `<select ${attr("slot")}>${options(Object.keys(slots), command.slot, undefined, (slot) => slots[slot] || slot)}</select>`)
+      + field("交換後の装備", `<select ${attr("item_key")}>${options(items, command.item_key)}</select>`);
   } else if (type === "give_item" || type === "take_item") {
     fields = field("アイテム", `<select ${attr("item_key")}>${options(state.catalogs.item_keys || [], command.item_key)}</select>`)
       + field("個数", `<input type="number" min="1" value="${Number(command.quantity) || 1}" ${attr("quantity")}>`);
@@ -967,6 +974,7 @@ function defaultCommand(type) {
   const one = (key, values) => ({command: type, [key]: values?.[0] || ""});
   if (type === "set_flag") return one("flag_id", fullFlags());
   if (type === "join_party" || type === "leave_party") return one("character_key", state.catalogs.character_keys);
+  if (type === "replace_npc_equipment") return {...one("character_key", state.catalogs.npc_keys), slot: "RIGHT", item_key: ""};
   if (type === "give_item") return {...one("item_key", state.catalogs.item_keys), quantity: 1, show_message: false};
   if (type === "take_item") return {...one("item_key", state.catalogs.item_keys), quantity: 1};
   if (type === "message") return one("message_id", messageIds());
@@ -1263,6 +1271,10 @@ $("event-editor").addEventListener("change", (event) => {
         : ["quantity", "steps", "frames", "percent"].includes(fieldName)
         ? Number(target.value)
         : target.value;
+      if (command.command === "replace_npc_equipment" && fieldName === "slot") {
+        const items = state.catalogs.equipment_item_keys_by_slot?.[command.slot] || [];
+        if (!items.includes(command.item_key)) command.item_key = "";
+      }
     });
   } else if (target.dataset.condField) {
     commit(() => {

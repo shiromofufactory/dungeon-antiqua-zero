@@ -648,6 +648,93 @@ class EventRunnerTest(unittest.TestCase):
         self.assertEqual(self.inventory.recorded_count, len(expected_keys))
         self.assertEqual(dict(self.inventory.quantities), {})
 
+    def prepare_npc_equipment(self, quantities=None) -> dict[str, str]:
+        self.records[1].update(type="NPC", equip_right="NPC SWORD", eq_sword=0)
+        self.items.update({
+            "NPC SWORD": item_record("NPC SWORD", equip_type="RIGHT", subtype="SWORD"),
+            "NEW SWORD": item_record("NEW SWORD", equip_type="TWO_HANDS", subtype="SWORD"),
+            "SHIELD": item_record("SHIELD", equip_type="LEFT", subtype="GENERAL"),
+        })
+        self.party = PartySystem(
+            character_records=self.records, items=self.items, skills={},
+            active_party=self.party.active_party,
+        )
+        self.inventory = InventorySystem(self.items, quantities)
+        return {
+            "command": "replace_npc_equipment", "character_key": "Alvan",
+            "slot": "RIGHT", "item_key": "NEW SWORD",
+        }
+
+    def test_event_equipment_replaces_fixed_gear_and_returns_player_gear(self) -> None:
+        command = self.prepare_npc_equipment({"SHIELD": 1})
+        self.runner([{"command": "join_party", "character_key": "Alvan"}]).advance()
+        alvan = self.party.active_party[-1]
+        self.assertTrue(self.inventory.equip(alvan, EquipmentSlot.LEFT, self.items["SHIELD"]))
+        self.assertFalse(alvan.can_equip(self.items["NEW SWORD"]))
+
+        self.runner([command, command]).advance()
+
+        self.assertIs(alvan.equipment.item_at(EquipmentSlot.RIGHT), self.items["NEW SWORD"])
+        self.assertTrue(alvan.is_equipment_fixed(EquipmentSlot.RIGHT))
+        self.assertFalse(self.inventory.equip(alvan, EquipmentSlot.RIGHT, None))
+        self.assertIsNone(alvan.equipment.item_at(EquipmentSlot.LEFT))
+        self.assertEqual(dict(self.inventory.quantities), {"SHIELD": 1})
+        self.assertEqual(
+            {item.key for item in self.inventory.recorded_items},
+            {"NPC SWORD", "NEW SWORD", "SHIELD"},
+        )
+
+    def test_event_equipment_updates_departed_npc_and_clears_displaced_lock(self) -> None:
+        command = self.prepare_npc_equipment()
+        self.records[1]["equip_left"] = "SHIELD"
+        self.party.join("Alvan")
+        alvan = self.party.active_party[-1]
+        alvan.hp = 5
+        self.party.leave("Alvan")
+        self.runner([command]).advance()
+        self.assertFalse(self.party.contains("Alvan"))
+        self.assertIsNone(alvan.equipment.item_at(EquipmentSlot.LEFT))
+        self.assertEqual(self.inventory.quantity("SHIELD"), 0)
+
+        self.runner([
+            {"command": "join_party", "character_key": "Alvan"},
+            {**command, "item_key": "NPC SWORD"},
+        ]).advance()
+        self.assertIs(self.party.active_party[-1], alvan)
+        self.assertEqual(alvan.hp, 5)
+        self.assertTrue(alvan.is_equipment_fixed(EquipmentSlot.RIGHT))
+        self.assertTrue(self.inventory.add("SHIELD"))
+        self.assertTrue(self.inventory.equip(alvan, EquipmentSlot.LEFT, self.items["SHIELD"]))
+        self.assertFalse(alvan.is_equipment_fixed(EquipmentSlot.LEFT))
+
+    def test_event_equipment_failure_preserves_gear_and_stops_following_commands(self) -> None:
+        command = self.prepare_npc_equipment({"NEW SWORD": 9})
+        with self.assertRaisesRegex(EventRuntimeError, "has not joined"):
+            self.runner([command]).advance()
+
+        self.party.join("Alvan")
+        alvan = self.party.active_party[-1]
+        original = alvan.equipment
+        with self.assertRaisesRegex(EventRuntimeError, "capacity exceeded"):
+            self.runner([command, {"command": "set_flag", "flag_id": "sample.done"}]).advance()
+        self.assertIs(alvan.equipment, original)
+        self.assertEqual(alvan.event_equipment_overrides, {})
+        self.assertEqual(self.inventory.quantity("NEW SWORD"), 9)
+        self.assertNotIn("sample.done", self.save_data.event_flags)
+
+    def test_event_equipment_requires_field_context_and_valid_runtime_fields(self) -> None:
+        command = self.prepare_npc_equipment()
+        catalog = EventCatalog.from_document(runtime_document([command]))
+        runner = EventRunner.from_catalog(
+            catalog, "sample.run", context=EventContext.BATTLE,
+            save_data=self.save_data, party=self.party, inventory=self.inventory,
+        )
+        with self.assertRaisesRegex(EventRuntimeError, "only available in field"):
+            runner.advance()
+        for field, value in (("slot", "NECK"), ("item_key", ""), ("character_key", 1)):
+            with self.subTest(field=field), self.assertRaises(EventResourceError):
+                EventCatalog.from_document(runtime_document([{**command, field: value}]))
+
     def test_join_event_anchors_level_difference_to_shared_experience(self) -> None:
         self.records[1]["lv_diff"] = 17
         self.save_data.experience = 10

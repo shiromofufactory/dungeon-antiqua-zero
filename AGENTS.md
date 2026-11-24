@@ -147,6 +147,7 @@
 - イベントの単一ファイル保存・完全ID・マップ参照は `python3 -B -m unittest tests.test_event_pipeline tests.test_event_editor_server tests.test_editor_server tests.test_map_editor_server`、4種類のIDフィルタ・選択・並べ替え・Undoとactorへの紐づけは `node --test tests/test_event_editor_lists.mjs tests/test_editor_navigation.mjs` で回帰検証する。
 - イベントエディタのドラッグ中の挿入枠と枠外ドロップ、移動先の切替、分岐への移動、4種類の一覧、Undo／Redoと中断は `node --test tests/test_event_editor_drag.mjs` で回帰検証する。
 - イベントコマンドの検証・実行・待機・ゲームメニュー中の停止とゲームリセットは `python3 -B -m unittest tests.test_game tests.test_game_events tests.test_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu tests.test_launch_modes`、コマンドの編集とUndoは `node --test tests/test_event_command_editor.mjs` で回帰検証する。
+- NPCのイベント装備は `python3 -B -m unittest tests.test_events tests.test_game_events tests.test_event_pipeline tests.test_event_editor_server tests.test_inventory tests.test_save_system` と `node --test tests/test_event_command_editor.mjs` で交換・固定・離脱と再加入・保存復元・エディタ選択を回帰検証する。
 - イベントの明るさ変更・横揺れは `python3 -B -m unittest tests.test_screen_effects tests.test_palette tests.test_game_events tests.test_game_menu` で補間・パレット合成・位置復元・割り込み停止を回帰検証する。
 - イベントのBGM停止は `python3 -B -m unittest tests.test_audio_resources tests.test_events tests.test_game_events tests.test_event_pipeline tests.test_event_editor_server tests.test_game_menu` でフェードアウト・予約解除・停止保持・次曲再生・割り込み停止を回帰検証する。
 - セーブ形式を変更した場合は保存・復元と旧データ移行を検証する。

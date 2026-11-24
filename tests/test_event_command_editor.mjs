@@ -80,7 +80,12 @@ test('add button creates a message command with its fields and permits changing 
   assert.equal(state.data.events[0].commands[0].command, 'message');
   assert.equal(state.dirty, true);
   assert.equal(state.history.length, 1);
-  assert.match(context.renderCommandList(state.data.events[0].commands, '', 'なし'), /data-command-field="message_id"/);
+  const initialHtml = context.renderCommandList(state.data.events[0].commands, '', 'なし');
+  assert.match(initialHtml, /data-command-field="message_id"/);
+  assert.match(initialHtml, /<option value="message" selected>メッセージを表示<\/option>/);
+  assert.match(initialHtml, /<code>1\. メッセージを表示<\/code>/);
+  assert.match(initialHtml, /<option value="stop_bgm"\s*>BGM停止<\/option>/);
+  assert.match(initialHtml, /<option value="face_actor"\s*>アクターの向きを変更<\/option>/);
   assert.doesNotMatch(context.renderCommandList(state.data.events[0].commands, '', 'なし'), /data-command-field="battle_id"/);
 
   context.changeCommandType('0', 'start_battle');
@@ -96,6 +101,39 @@ test('add button creates a message command with its fields and permits changing 
   assert.doesNotMatch(html, /data-battle-monster-index/);
   assert.match(html, /<select[^>]*data-command-field="battle_id"/);
   assert.doesNotMatch(html, /data-draft-command/);
+});
+
+test('NPC equipment picks compatible gear and restores the selection with undo', () => {
+  const { state, context, handlers } = editor();
+  Object.assign(state.catalogs, {
+    character_keys: ['Fiora', 'Alvan'],
+    npc_keys: ['Alvan'],
+    equipment_item_keys_by_slot: { RIGHT: ['SWORD', 'AXE'], LEFT: ['SHIELD', 'SWORD'] },
+  });
+  context.addDefaultCommand('');
+  context.changeCommandType('0', 'replace_npc_equipment');
+  const saved = () => JSON.parse(context.requestBody()).data.events[0].commands[0];
+  const html = () => context.renderCommand(saved(), '0', '', 0);
+  const select = (commandField, value) => handlers.get('change')({
+    target: { dataset: { commandPath: '0', commandField }, value },
+  });
+  assert.deepEqual(saved(), {
+    command: 'replace_npc_equipment', character_key: 'Alvan', slot: 'RIGHT', item_key: '',
+  });
+  assert.match(html(), /NPCの装備を交換する/);
+  assert.match(html(), /value="AXE"/);
+  assert.doesNotMatch(html(), /value="Fiora"|value="SHIELD"/);
+  select('item_key', 'AXE');
+  select('slot', 'LEFT');
+  assert.equal(saved().item_key, '');
+  assert.match(html(), /value="SHIELD"/);
+  assert.doesNotMatch(html(), /value="AXE"/);
+  context.undo();
+  assert.equal(saved().slot, 'RIGHT');
+  assert.equal(saved().item_key, 'AXE');
+  context.redo();
+  assert.equal(saved().slot, 'LEFT');
+  assert.equal(saved().item_key, '');
 });
 
 test('branch death condition saves no attributes and switching types supports undo and redo', () => {
