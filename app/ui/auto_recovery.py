@@ -166,7 +166,12 @@ class AutoRecoveryOverlay:
                 f"auto_recovery.guide.{self.cursor.selected_key}", self.localizer
             )
         elif self.result.actions == 0:
-            lines = (self._label("auto_recovery.result.none"),)
+            key = (
+                "auto_recovery.result.unavailable"
+                if self.result.recovery_needed
+                else "auto_recovery.result.none"
+            )
+            lines = (self._label(key),)
         else:
             lines = tuple(
                 self.texts.formatted_text(

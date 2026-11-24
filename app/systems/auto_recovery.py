@@ -38,6 +38,7 @@ class RecoveryResult:
     hp_recovered: set[int] = field(default_factory=set)
     mp_spent: set[int] = field(default_factory=set)
     proficiency_growths: dict[int, MenuSpellProficiencyGrowth] = field(default_factory=dict)
+    recovery_needed: bool = False
 
 
 def eligible_healer_keys(party: Sequence[Member]) -> tuple[str, ...]:
@@ -104,6 +105,10 @@ def _targets(party: Sequence[Member]) -> tuple[int, ...]:
     return tuple(sorted(range(len(party)), key=rank))
 
 
+def _needs_hp_recovery(member: Member, threshold: int) -> bool:
+    return member.hp * 100 < member.max_hp * threshold
+
+
 def _spell_for_target(
     caster: Member,
     target: Member,
@@ -134,7 +139,7 @@ def _spell_for_target(
         cure = min(cures, key=lambda spell: spell.mp, default=None)
         if cure is not None:
             return cure
-    if target.hp * 100 >= target.max_hp * threshold:
+    if not _needs_hp_recovery(target, threshold):
         return None
     heals = tuple(spell for spell in available if spell.action is SpellAction.HEAL)
     if not heals:
@@ -196,7 +201,7 @@ def next_recovery_step(
                 keys = []
                 if target.has_curable_ailment:
                     keys.append("REMEDY")
-                if target.hp * 100 < target.max_hp * config.threshold:
+                if _needs_hp_recovery(target, config.threshold):
                     keys.append("POTION")
                 for key in keys:
                     if inventory.quantity(key) == 0:
@@ -222,6 +227,12 @@ def execute_auto_recovery(
     for _attempt in range(10_000):
         step = next_recovery_step(party, spells, inventory, config)
         if step is None:
+            result.recovery_needed = any(
+                member.is_dead
+                or member.has_curable_ailment
+                or _needs_hp_recovery(member, config.threshold)
+                for member in party
+            )
             return result
         target = party[step.target_index]
         caster = party[step.caster_index] if step.caster_index is not None else None

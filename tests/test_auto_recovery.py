@@ -327,6 +327,52 @@ class AutoRecoveryTest(unittest.TestCase):
         overlay.update(InputState(navigation=Direction.RIGHT))
         self.assertEqual(save_data.auto_recovery.threshold, 90)
 
+    def test_no_action_message_distinguishes_need_from_available_recovery(self) -> None:
+        cases = (
+            ("no need", AutoRecoveryMethod.SPELLS_ITEMS, {}, None),
+            ("no MP", AutoRecoveryMethod.SPELLS, {"POTION": 1}, "injured"),
+            ("no potion", AutoRecoveryMethod.ITEMS_SPELLS, {}, "injured"),
+            ("no remedy", AutoRecoveryMethod.ITEMS_SPELLS, {}, "poisoned"),
+            ("no revival", AutoRecoveryMethod.SPELLS_ITEMS, {}, "dead"),
+        )
+        fonts = Mock()
+        fonts.baseline_offset_for.return_value = 0
+        for name, method, item_counts, condition in cases:
+            with self.subTest(name=name):
+                party = load_mock_party(self.items, self.skills)
+                for member in party:
+                    member.mp = 0
+                target = party[-1]
+                if condition == "injured":
+                    target.hp = 1
+                elif condition == "poisoned":
+                    target.poisoned = True
+                elif condition == "dead":
+                    target.hp = 0
+                overlay = AutoRecoveryOverlay(
+                    party=party,
+                    spells=self.spells,
+                    items=self.items,
+                    inventory=InventorySystem(self.items, item_counts),
+                    save_data=SaveData(auto_recovery=AutoRecoveryConfig(90, method)),
+                    settings=Settings(language=Language.JAPANESE),
+                    texts=self.texts,
+                    fonts=fonts,
+                    faces=Mock(),
+                )
+
+                overlay.update(InputState(confirm=InputButton(True, True)))
+
+                self.assertEqual(overlay.result.actions, 0)
+                expected = (
+                    "かいふくの　ひつようはありません"
+                    if condition is None
+                    else "じっこうできる　かいふくしゅだんが　ありません"
+                )
+                self.assertEqual(
+                    [line.text for line in overlay.guide_window.texts], [expected]
+                )
+
     def test_result_shows_only_items_actually_used(self) -> None:
         fonts = Mock()
         fonts.baseline_offset_for.return_value = 0
@@ -344,7 +390,9 @@ class AutoRecoveryTest(unittest.TestCase):
         overlay.result = RecoveryResult(actions=1)
         overlay._refresh()
         self.assertEqual(overlay.guide_window.texts, ())
-        overlay.result = RecoveryResult(actions=1, items_used={"POTION": 1})
+        overlay.result = RecoveryResult(
+            actions=1, items_used={"POTION": 1}, recovery_needed=True
+        )
         overlay._refresh()
         self.assertEqual(len(overlay.guide_window.texts), 1)
         self.assertIn("きずぐすり", overlay.guide_window.texts[0].text)
