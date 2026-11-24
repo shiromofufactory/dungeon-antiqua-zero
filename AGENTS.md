@@ -106,6 +106,7 @@
 ## 検証方針
 
 - JSON変更時は少なくとも全対象ファイルをパースする。
+- 音声変換のOGG・MP3生成、キャッシュ、視聴用MP3の旧日付版削除は `python3 -B -m unittest tests.test_audio_build` で回帰検証する。
 - サウンドテストの候補・再生・音量・選択操作は `python3 -B -m unittest tests.test_sound_test tests.test_audio_resources` で回帰検証する。
 - WAV・Pyxel Sound併用、共通SEチャンネル、カタログ検証、エディタ登録・試聴は `python3 -B -m unittest tests.test_audio_catalog tests.test_audio_resources tests.test_spell_effect_editor_model tests.test_spell_effect_editor_ui tests.test_spell_effect_pipeline tests.test_event_pipeline tests.test_event_editor_server tests.test_game tests.test_battle_scene tests.test_game_menu tests.test_main` で回帰検証する。
 - 共有JSON変更時は `npm run content:validate` と `npm run sync` を実行する。

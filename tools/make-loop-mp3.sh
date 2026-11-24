@@ -137,6 +137,16 @@ while IFS= read -r -d '' src; do
   printf '%s\n%s\n' "$fingerprint" "${name}_${DATE}.mp3" > "$tmp_state"
   mv -f "$tmp_state" "$state"
   trap - EXIT
+
+  # 新しい出力と変換状態が揃ってから、同じ曲の旧日付版を削除する。
+  for old_output in "$OUT_DIR/${name}_"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].mp3; do
+    old_date="${old_output#"$OUT_DIR/${name}_"}"
+    old_date="${old_date%.mp3}"
+    if [[ -f "$old_output" && ! -L "$old_output" && "$old_date" < "$DATE" ]]; then
+      rm -f "$old_output"
+      printf '[%s] 旧版を削除 → %s\n' "$name" "${old_output#"$OUT_DIR"/}"
+    fi
+  done
 done < <(find "$SRC_DIR" -type f -iname '*.wav' -print0 | sort -z)
 
 if [ "$found" -eq 0 ]; then

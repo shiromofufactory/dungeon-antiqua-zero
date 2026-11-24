@@ -2624,7 +2624,10 @@ class BattleScene:
             self.input_device = input_state.device
             self._update_result(input_state)
             return
-        if getattr(self, "phase", None) is BattlePhase.BOSS_INTRO:
+        if getattr(self, "phase", None) in (
+            BattlePhase.BOSS_INTRO,
+            BattlePhase.IDENTIFY_RESULT,
+        ):
             self.confirm_hold_frame_count = 0
         else:
             input_state = self._apply_confirm_repeat(input_state)
@@ -7090,23 +7093,13 @@ class BattleScene:
             detail_texts,
         )
         self.identify_detail_window.open_immediately()
-        self.identify_result_elapsed_frame = 0
         self.phase = BattlePhase.IDENTIFY_RESULT
 
     def _update_identify_result(self, input_state: InputState) -> None:
         """Close the inspected detail and finish the acting member's turn."""
 
-        if getattr(self, "auto_battle_active", False):
-            self.identify_result_elapsed_frame += 1
-        timed_out = (
-            getattr(self, "auto_battle_active", False)
-            and self.identify_result_elapsed_frame >= 60
-        )
-        if not (
-            timed_out or input_state.confirm.triggered or input_state.cancel.triggered
-        ):
-            return
-        self._finish_identify_result()
+        if input_state.confirm.triggered or input_state.cancel.triggered:
+            self._finish_identify_result()
 
     def _finish_identify_result(self) -> None:
         if self.identify_detail_window is not None:

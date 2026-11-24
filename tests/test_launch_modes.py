@@ -15,7 +15,7 @@ from game import (
 )
 from game_data import create_party
 from input import Direction, InputButton, InputDevice, InputState
-from member import FIORA_CHARACTER_KEY, required_experience_for_level
+from member import FIORA_CHARACTER_KEY, ProficiencyKind, required_experience_for_level
 from resources.events import EventCatalog
 from state import Language, LaunchMode, Settings
 from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR, POSITIVE_COLOR, WindowCursor
@@ -310,6 +310,8 @@ class LaunchModeGameTest(unittest.TestCase):
                     self.assertEqual(member.hp, member.calculated_max_hp())
                     self.assertEqual(member.mp, member.calculated_max_mp())
                 fiora = game.character_states[FIORA_CHARACTER_KEY]
+                rod = fiora.proficiency(ProficiencyKind.ROD)
+                self.assertEqual((rod.level, rod.progress), (1, 0))
                 for proficiency in fiora.proficiencies.values():
                     self.assertEqual(proficiency.level, 1 if proficiency.aptitude else 0)
                     self.assertEqual(proficiency.progress, 0)

@@ -2277,16 +2277,38 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         self.assertIs(scene.phase, BattlePhase.ACTION_PRESENTATION)
         scene._begin_action_return.assert_not_called()
 
-    def test_auto_identify_closes_after_sixty_frames(self):
-        from input import InputState
-        from scenes.battle import BattleScene
+    def test_identify_waits_for_a_new_confirm_or_cancel_press(self):
+        from input import InputButton, InputState
+        from scenes.battle import (
+            BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT,
+            BattlePhase,
+            BattleScene,
+        )
 
-        scene = BattleScene.__new__(BattleScene)
-        scene.auto_battle_active = True
-        scene.identify_result_elapsed_frame = 0
-        scene._finish_identify_result = Mock()
-        for _ in range(59):
-            scene._update_identify_result(InputState())
-        scene._finish_identify_result.assert_not_called()
-        scene._update_identify_result(InputState())
-        scene._finish_identify_result.assert_called_once()
+        for auto_active in (False, True):
+            for button in ("confirm", "cancel"):
+                with self.subTest(auto_active=auto_active, button=button):
+                    scene = BattleScene.__new__(BattleScene)
+                    scene.phase = BattlePhase.IDENTIFY_RESULT
+                    scene.auto_battle_active = auto_active
+                    scene.identify_detail_window = window = Mock()
+                    scene.identify_target_index = 0
+                    scene.confirm_hold_frame_count = (
+                        BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT - 1
+                    )
+                    held = InputState(confirm=InputButton(held=True))
+                    for input_state in (held, InputState()):
+                        for _ in range(120):
+                            scene.update(input_state)
+                        self.assertIs(scene.phase, BattlePhase.IDENTIFY_RESULT)
+                        self.assertIs(scene.identify_detail_window, window)
+                        window.close_immediately.assert_not_called()
+
+                    scene.update(InputState(**{button: InputButton(triggered=True)}))
+
+                    window.close_immediately.assert_called_once_with()
+                    self.assertIsNone(scene.identify_detail_window)
+                    self.assertIs(scene.phase, BattlePhase.ACTION_RETURN)
+                    self.assertEqual(
+                        scene.auto_battle_active, auto_active and button == "confirm"
+                    )

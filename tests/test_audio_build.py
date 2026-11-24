@@ -137,20 +137,40 @@ class AudioBuildTest(unittest.TestCase):
             # Existing MP3 state files move to the ignored shared cache.
             state = cache_dir / "mp3" / "da3-win.state"
             legacy_state = mp3_dir / ".da3-win.make-loop-mp3.state"
-            state.replace(legacy_state)
+            old_mp3 = mp3.with_name("da3-win_20000102.mp3")
+            mp3.replace(old_mp3)
+            fingerprint = state.read_text(encoding="utf-8").splitlines()[0]
+            legacy_state.write_text(f"{fingerprint}\n{old_mp3.name}\n", encoding="utf-8")
+            state.unlink()
+            older_mp3 = mp3.with_name("da3-win_20000101.mp3")
+            older_mp3.touch()
+            untouched_mp3s = [
+                mp3.with_name("da3-win_99991231.mp3"),
+                mp3.with_name("da3-win-alt_20000101.mp3"),
+                mp3.with_name("da3-win_20000101_backup.mp3"),
+            ]
+            for untouched in untouched_mp3s:
+                untouched.touch()
+
             second = build()
             self.assertIn("OGG 変更なし", second)
             self.assertIn("[da3-win] 変更なし", second)
             self.assertTrue(state.is_file())
             self.assertFalse(legacy_state.exists())
             self.assertEqual(output.stat().st_mtime_ns, original_mtime)
-            self.assertEqual(mp3.stat().st_mtime_ns, mp3_mtime)
+            self.assertEqual(old_mp3.stat().st_mtime_ns, mp3_mtime)
+            self.assertTrue(older_mp3.is_file())
 
             self._write_stereo_wav(source, frequency=880)
             third = build()
             self.assertIn("OGG 生成しました", third)
             self.assertIn("[da3-win] ループなし", third)
             self.assertNotEqual(output.read_bytes(), original_bytes)
+            self.assertTrue(mp3.is_file())
+            self.assertFalse(old_mp3.exists())
+            self.assertFalse(older_mp3.exists())
+            for untouched in untouched_mp3s:
+                self.assertTrue(untouched.is_file())
 
             (cache_dir / "ogg" / "da3-win.wav.json").unlink()
             changed_mtime = output.stat().st_mtime_ns
