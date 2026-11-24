@@ -1669,6 +1669,7 @@ class BattleForecast:
             target_defending=target.defending,
             target_unable_to_evade=target.focus is not None,
             target_incapacitated=target.incapacitated_for_physical_hit,
+            attacker_is_monster=True,
             attacker_has_power_hit=power_hit,
             hit_roll=int(self.roll(actor, target.spec.number, 2 + roll_offset) * 100),
             critical_roll=int(self.roll(actor, target.spec.number, 3 + roll_offset) * 100)

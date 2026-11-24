@@ -444,14 +444,14 @@ class MonsterPowerHitTest(unittest.TestCase):
         for mode in ("attack", "charge", "confused"):
             for power_hit, status, roll, expected_damage in (
                 (False, None, 0, 11),
-                (True, None, 9, 44),
+                (True, None, 9, 33),
                 (True, None, 10, 11),
                 (False, "sleeping", 20, 15),
-                (True, "sleeping", 39, 58),
+                (True, "sleeping", 39, 44),
                 (True, "sleeping", 40, 15),
-                (False, "confused", 19, 58),
+                (False, "confused", 19, 44),
                 (False, "confused", 20, 15),
-                (True, "confused", 39, 58),
+                (True, "confused", 39, 44),
             ):
                 with self.subTest(
                     mode=mode, power_hit=power_hit, status=status, roll=roll,
@@ -494,7 +494,7 @@ class MonsterPowerHitTest(unittest.TestCase):
                             damage = scene.monster_attack_damage
                             self.assertEqual(
                                 scene.monster_attack_critical,
-                                expected_damage in (44, 58),
+                                expected_damage in (33, 44),
                             )
                         elif mode == "charge":
                             scene._begin_monster_charge(actor)
@@ -502,10 +502,10 @@ class MonsterPowerHitTest(unittest.TestCase):
                             damage = presentation.damage
                             self.assertEqual(
                                 presentation.is_critical,
-                                expected_damage in (44, 58),
+                                expected_damage in (33, 44),
                             )
                             # Charge raises attack from 20 to 30 before the same formula.
-                            expected_damage = {11: 22, 44: 65, 15: 29, 58: 87}[expected_damage]
+                            expected_damage = {11: 22, 33: 49, 15: 29, 44: 65}[expected_damage]
                         else:
                             self.assertTrue(scene._begin_confused_monster_action(actor))
                             result = scene.action_presentation.confused_attack_results[0]

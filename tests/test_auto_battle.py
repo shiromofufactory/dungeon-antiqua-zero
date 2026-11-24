@@ -1752,10 +1752,15 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
 
     def test_monster_power_hit_forecasts_match_physical_attack_rules(self):
         for mode in ("attack", "charge", "confused"):
-            for power_hit, status, roll in (
-                (False, None, 0), (True, None, 9), (True, None, 10),
-                (False, "sleeping", 20), (True, "sleeping", 39), (True, "sleeping", 40),
-                (False, "confused", 19), (False, "confused", 20),
+            for power_hit, status, roll, normal_damage, charge_damage in (
+                (False, None, 0, 11, 22),
+                (True, None, 9, 33, 49),
+                (True, None, 10, 11, 22),
+                (False, "sleeping", 20, 15, 29),
+                (True, "sleeping", 39, 44, 65),
+                (True, "sleeping", 40, 15, 29),
+                (False, "confused", 19, 44, 65),
+                (False, "confused", 20, 15, 29),
             ):
                 with self.subTest(
                     mode=mode, power_hit=power_hit, status=status, roll=roll,
@@ -1783,21 +1788,12 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                         ),
                     )
                     target = forecast.actors[6 if mode == "confused" else 0]
-                    expected = resolve_physical_attack(
-                        attack=30 if mode == "charge" else 20,
-                        hit=100,
-                        target_defense=10,
-                        target_evasion=evasion,
-                        hit_roll=0,
-                        target_incapacitated=status is not None,
-                        attacker_has_power_hit=power_hit,
-                        critical_roll=roll,
-                    )
                     if mode == "confused":
                         forecast.confused_physical(forecast.actors[5], target)
                     else:
                         forecast.enemy_turn(forecast.actors[5])
-                    self.assertEqual(target.hp, 1000 - expected.damage)
+                    expected_damage = charge_damage if mode == "charge" else normal_damage
+                    self.assertEqual(target.hp, 1000 - expected_damage)
 
     def test_guard_cover_and_hide_change_the_actual_damage_recipient(self):
         coverer = replace(self.specs[1], defending=True, cover=0)

@@ -126,6 +126,7 @@ def resolve_physical_attack(
     target_incapacitated: bool = False,
     attacker_hidden: bool = False,
     hit_value_bonus: int = 0,
+    attacker_is_monster: bool = False,
     attacker_has_power_hit: bool = False,
     weapon_has_power_hit: bool = False,
     weapon_effective: bool = False,
@@ -154,6 +155,8 @@ def resolve_physical_attack(
         raise TypeError("target_incapacitated must be a boolean")
     if not isinstance(attacker_hidden, bool):
         raise TypeError("attacker_hidden must be a boolean")
+    if not isinstance(attacker_is_monster, bool):
+        raise TypeError("attacker_is_monster must be a boolean")
     if not isinstance(attacker_has_power_hit, bool):
         raise TypeError("attacker_has_power_hit must be a boolean")
     if not isinstance(weapon_has_power_hit, bool):
@@ -224,8 +227,9 @@ def resolve_physical_attack(
         )
 
     damage_factor = 0.8 + hit_value / 250
+    critical_multiplier = 1.5 if attacker_is_monster else 2
     reduced_attack = (
-        attack * 2 if critical else max(attack - target_defense, 1)
+        attack * critical_multiplier if critical else max(attack - target_defense, 1)
     )
     defense_cut_rate = target_defense / 100
     damage = int(

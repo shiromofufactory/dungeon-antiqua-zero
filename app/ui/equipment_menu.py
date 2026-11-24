@@ -812,11 +812,19 @@ class EquipmentMenuOverlay:
     def _draw_equipment_levels(self) -> None:
         icon_origin_x = self.main_window.pixel_x + HEADER_TEXT_X * TEXT_GRID_X
         y = self.main_window.pixel_y + HEADER_EQUIPMENT_LEVEL_PIXEL_Y
+        equipped_subtypes = {
+            item.subtype
+            for slot in (EquipmentSlot.RIGHT, EquipmentSlot.LEFT)
+            if (item := self.member.equipment.item_at(slot)) is not None
+        }
         for index, kind in enumerate(self._equippable_proficiency_kinds()):
             level_text = (
                 "-"
                 if kind is ProficiencyKind.SHIELD
                 else str(self.member.proficiency(kind).level)
+            )
+            color = (
+                DEFAULT_TEXT_COLOR if kind.name in equipped_subtypes else DISABLED_COLOR
             )
             pyxel.text(
                 icon_origin_x
@@ -824,7 +832,7 @@ class EquipmentMenuOverlay:
                 + HEADER_EQUIPMENT_LEVEL_RIGHT_OFFSET,
                 y,
                 level_text,
-                DEFAULT_TEXT_COLOR,
+                color,
             )
 
 

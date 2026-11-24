@@ -8970,6 +8970,7 @@ class BattleScene:
             target_evasion=target.combat_stats.evasion,
             hit_roll=random.randint(0, 99),
             target_incapacitated=target_incapacitated,
+            attacker_is_monster=True,
             attacker_has_power_hit=power_hit,
             critical_roll=(
                 random.randint(0, 99)
@@ -10550,6 +10551,7 @@ class BattleScene:
                 target_index in getattr(self, "focused_target_by_party_index", {})
             ),
             target_incapacitated=target_incapacitated,
+            attacker_is_monster=True,
             attacker_has_power_hit=power_hit,
             critical_roll=(
                 random.randint(0, 99) if power_hit or target_incapacitated else None

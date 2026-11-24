@@ -204,7 +204,9 @@ class EquipmentMenuTest(unittest.TestCase):
                     "-"
                     if kind is ProficiencyKind.SHIELD
                     else str(mock.member.proficiency(kind).level),
-                    DEFAULT_TEXT_COLOR,
+                    DEFAULT_TEXT_COLOR
+                    if kind is ProficiencyKind.SWORD
+                    else DISABLED_COLOR,
                 )
                 for index, kind in enumerate(kinds)
             ],
@@ -222,6 +224,42 @@ class EquipmentMenuTest(unittest.TestCase):
             )
             self.assertEqual(args.args[0] + 3, icon_right)
             self.assertEqual(len(args.args), 4)
+
+    @patch("ui.equipment_menu.play_se")
+    @patch("ui.equipment_menu.pyxel.text")
+    def test_weapon_level_color_follows_confirmed_equipment(self, text, _play_se) -> None:
+        mock = self.build_mock()
+        confirm = InputState(confirm=InputButton(triggered=True, held=True))
+        mock.update(confirm)
+        mock.selected_item_index = mock.candidates.index(mock.items["WAND of POISON"])
+        mock._rebuild()
+
+        def assert_equipped_kind(expected: ProficiencyKind | None) -> None:
+            text.reset_mock()
+            mock._draw_equipment_levels()
+            self.assertEqual(
+                [
+                    kind
+                    for kind, draw_call in zip(
+                        mock._equippable_proficiency_kinds(),
+                        text.call_args_list,
+                        strict=True,
+                    )
+                    if draw_call.args[3] == DEFAULT_TEXT_COLOR
+                ],
+                [] if expected is None else [expected],
+            )
+
+        assert_equipped_kind(ProficiencyKind.KNIFE)
+        mock.update(confirm)
+        assert_equipped_kind(ProficiencyKind.WAND)
+
+        mock.update(confirm)
+        mock.selected_item_index = mock.candidates.index(None)
+        mock._rebuild()
+        assert_equipped_kind(ProficiencyKind.WAND)
+        mock.update(confirm)
+        assert_equipped_kind(None)
 
     def test_equipment_stats_use_three_digit_values_and_sum_dual_attack(
         self,
