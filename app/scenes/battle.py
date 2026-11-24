@@ -49,6 +49,7 @@ from battle_commands import (
 )
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
+    PRAY_SUCCESS_ROLL_COUNT,
     TEMPTATION_RATE,
     SpellAffinity,
     battle_healing_amount,
@@ -57,6 +58,7 @@ from battle_magic import (
     member_spell_modifier,
     poison_tick_damage,
     resolve_healing,
+    resolve_pray_recovery,
     resolve_recovery_amount,
     resolve_spell_damage,
     resolve_status_spell,
@@ -860,12 +862,13 @@ class BattleHealingResult:
 
 @dataclass(frozen=True)
 class BattleManaResult:
-    """A resolved MANA value waiting for its DA2-timed application."""
+    """An MP recovery roll waiting for its timed application."""
 
     target_index: int
-    amount: int
+    amount: int | None
     popup_x: int
     popup_y: int
+    show_rolled_amount: bool = False
 
 
 @dataclass
@@ -2411,7 +2414,6 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
-        self.party_status_shows_mp = False
         self.pending_action_effect_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
         self.fade_escape_transition: MosaicFadeOut | None = None
@@ -2795,6 +2797,8 @@ class BattleScene:
                     self._begin_hide()
                 elif command == BattleCommand.IDENTIFY:
                     self._begin_identify_target_selection()
+                elif command == BattleCommand.PRAY:
+                    self._begin_pray()
                 elif command == BattleCommand.COVER:
                     self._begin_cover_target_selection()
                 elif command == BattleCommand.ITEM:
@@ -3021,7 +3025,6 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
-        self.party_status_shows_mp = False
         self.pending_action_effect_spell = None
         self.action_presentation = None
         self.healing_popups.clear()
@@ -3512,6 +3515,8 @@ class BattleScene:
             self._begin_identify_target_selection()
             self.selected_target_index = action.targets[0] - 5
             self.target_cursor.select_key(self.selected_target_index)
+        elif command is BattleCommand.PRAY:
+            self._begin_pray()
         elif command in (BattleCommand.SPELL, BattleCommand.ITEM):
             spell = self.spells[action.spell_key]
             candidate = None
@@ -4166,6 +4171,49 @@ class BattleScene:
             )
         self._reveal_hidden_party_if_all_unavailable()
         self._complete_current_turn()
+
+    def _begin_pray(self) -> None:
+        """Move the caster into position for a self-targeted prayer."""
+
+        self.selected_command = BattleCommand.PRAY
+        self.phase = BattlePhase.ACTION_PRESENTATION
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self.hidden_party_indexes.discard(self.active_party_index)
+        self._begin_action_motion(use_cast_pose=True)
+
+    def _start_pray_presentation(self, index: int) -> None:
+        """Play the shared MP effect on success, or show a miss on failure."""
+
+        member = self.party[index]
+        amount = resolve_pray_recovery(
+            magic=member.adjusted_abilities.magic,
+            internal_level=member.internal_level,
+            success_roll=random.randrange(PRAY_SUCCESS_ROLL_COUNT),
+            random_factor=random.random(),
+        )
+        x, y = self._party_effect_position(index)
+        effects = (
+            () if amount is None else self._build_target_spell_effects(
+                "MANA DROP", "ally", (index,), caster=("ally", index),
+            )
+        )
+        self.action_presentation = BattleActionPresentation(
+            effects,
+            mana_results=(
+                BattleManaResult(index, amount, x + 6, y + 16, show_rolled_amount=True),
+            ),
+            post_effect_wait_frame_count=(
+                MISSED_ACTION_RETURN_WAIT_FRAME_COUNT if amount is None else 0
+            ),
+            screen_flash=effects[0].player.screen_flash if effects else None,
+        )
+        self.action_presentation.schedule_spell_results({})
+        self._show_battle_popup(
+            self.texts.text("battle.command.pray", self.localizer),
+            BATTLE_POPUP_FRAME_COUNT,
+        )
+        self._start_target_spell_effects(effects)
 
     def _begin_focus_presentation(self) -> bool:
         """Store a charged attack and hold the guard pose for 36 frames."""
@@ -4935,11 +4983,6 @@ class BattleScene:
 
         self.pending_item_candidate = item_candidate
         self.pending_spell = spell if item_candidate is None else None
-        self.party_status_shows_mp = (
-            item_candidate is not None and spell.action is SpellAction.MANA
-        )
-        if self.party_status_shows_mp:
-            self._refresh_all_party_hp_texts()
         self.action_targets_enemy = spell.to_enemy
         self.action_targets_all = spell.to_all
         self.selected_command = (
@@ -6046,23 +6089,28 @@ class BattleScene:
                         result.amount,
                     )
                 )
-        for result in ready(presentation.mana_results):
-            member = self.party[result.target_index]
-            restored = min(result.amount, member.max_mp - member.mp)
-            member.mp += restored
-            self._refresh_party_hp_text(result.target_index)
-            if restored > 0:
-                popups.append(
-                    BattleHealingPopup(
-                        result.popup_x,
-                        result.popup_y,
-                        restored,
-                    )
-                )
         damage_popups = getattr(self, "spell_damage_popups", None)
         if damage_popups is None:
             damage_popups = []
             self.spell_damage_popups = damage_popups
+        for result in ready(presentation.mana_results):
+            if result.amount is None:
+                damage_popups.append(
+                    BattleSpellDamagePopup(result.popup_x, result.popup_y, 0, is_miss=True)
+                )
+                continue
+            member = self.party[result.target_index]
+            restored = min(result.amount, member.max_mp - member.mp)
+            member.mp += restored
+            popup_amount = result.amount if result.show_rolled_amount else restored
+            if popup_amount > 0:
+                popups.append(
+                    BattleHealingPopup(
+                        result.popup_x,
+                        result.popup_y,
+                        popup_amount,
+                    )
+                )
         drained = 0
         for result in ready(presentation.damage_results):
             monster = self.monsters[result.target_index]
@@ -6632,7 +6680,12 @@ class BattleScene:
             return
         presentation = getattr(self, "action_presentation", None)
         if presentation is None:
-            self._complete_current_turn()
+            if getattr(self, "selected_command", None) is BattleCommand.PRAY:
+                index = self.action_party_index
+                if index is not None and self.action_offset_x == ACTION_MOVE_DISTANCE:
+                    self._start_pray_presentation(index)
+            else:
+                self._complete_current_turn()
             return
         presentation.update()
         affinity_popups = presentation.pending_affinity_popups.pop(presentation.elapsed_frame, ())
@@ -6934,9 +6987,6 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
-        if getattr(self, "party_status_shows_mp", False):
-            self.party_status_shows_mp = False
-            self._refresh_all_party_hp_texts()
         self.target_cursor.active = False
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
@@ -8251,9 +8301,6 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
-        if getattr(self, "party_status_shows_mp", False):
-            self.party_status_shows_mp = False
-            self._refresh_all_party_hp_texts()
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
         self.pending_action_effect_spell = None
@@ -11159,12 +11206,9 @@ class BattleScene:
         window = self.party_status_windows[index]
         name_text, hp_text = self.party_status_texts[index]
         member = self.party[index]
-        show_mp = getattr(self, "party_status_shows_mp", False)
-        current = member.mp if show_mp else member.hp
-        maximum = member.max_mp if show_mp else member.max_hp
         window.remove_text(hp_text)
         hp_text = window.add_text(
-            ascii_to_fullwidth(f"{current:3d}/{maximum:3d}"),
+            ascii_to_fullwidth(f"{member.hp:3d}/{member.max_hp:3d}"),
             hp_text.x,
             hp_text.y,
             color=hp_text.color,

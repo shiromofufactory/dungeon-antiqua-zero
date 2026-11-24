@@ -10,6 +10,7 @@ from app.battle_magic import (
     member_spell_modifier,
     poison_tick_damage,
     resolve_healing,
+    resolve_pray_recovery,
     resolve_spell_damage,
     resolve_status_spell,
     spell_cast_delay,
@@ -35,6 +36,29 @@ class MemberSpellModifierTest(unittest.TestCase):
             ),
             34,
         )
+
+
+class PrayRecoveryTest(unittest.TestCase):
+    def test_pray_success_rate_uses_magic_and_level_without_rounding(self) -> None:
+        for magic, level, roll, factor, expected in (
+            (0, 1, 0, 0.5, None),
+            (23, 1, 3587, 0.0, 20),
+            (23, 1, 3588, 0.5, None),
+            (32, 1, 4991, 1.0, 29),
+            (32, 1, 4992, 0.5, None),
+            (32, 53, 9984, 0.5, None),
+            (32, 54, 9999, 0.5, 25),
+            (23, 93, 9936, 0.5, None),
+            (23, 94, 9999, 0.5, 25),
+        ):
+            with self.subTest(magic=magic, level=level, roll=roll):
+                self.assertEqual(
+                    resolve_pray_recovery(
+                        magic=magic, internal_level=level,
+                        success_roll=roll, random_factor=factor,
+                    ),
+                    expected,
+                )
 
 
 class SpellCastDelayTest(unittest.TestCase):

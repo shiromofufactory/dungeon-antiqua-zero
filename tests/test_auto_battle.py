@@ -1231,6 +1231,24 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         decision = decide_auto_battle(potion)
         self.assertEqual((decision.reason, decision.action.item_key), ("recovery_urgent", "POTION"))
 
+    def test_pray_forecasts_self_recovery_even_while_silenced(self):
+        spec = replace(
+            self.specs[1], skills=frozenset(("Pray",)), max_mp=30, mp=29,
+            magic=23, internal_level=1, silenced=2, hidden=True,
+        )
+        action = AutoAction(BattleCommand.PRAY, (spec.number,))
+        for success_roll, expected_mp in ((0.35875, 30), (0.35885, 29)):
+            with self.subTest(success_roll=success_roll):
+                forecast = BattleForecast(self.snapshot(spec, self.enemy(), active=1), 0)
+                self.assertIn(action, forecast.candidates(1))
+                with patch.object(forecast, "roll", side_effect=(success_roll, 0.5)):
+                    cost, gauge = forecast.execute(1, action)
+                actor = forecast.actors[1]
+                self.assertEqual((cost, gauge), (0, actor.agility))
+                self.assertEqual(actor.mp, expected_mp)
+                self.assertFalse(actor.hidden)
+                self.assertEqual(action in forecast.candidates(1), expected_mp < 30)
+
     def test_panacea_is_not_selected_for_a_full_hp_target(self):
         actor = replace(self.specs[1], hp=self.specs[1].max_hp, poisoned=True)
         snapshot = replace(

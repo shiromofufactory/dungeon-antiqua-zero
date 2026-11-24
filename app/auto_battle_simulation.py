@@ -25,6 +25,7 @@ if __package__:
     from .battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
+        PRAY_SUCCESS_ROLL_COUNT,
         battle_healing_amount,
         TEMPTATION_RATE,
         debuff_turn_range,
@@ -33,6 +34,7 @@ if __package__:
         modified_defense,
         poison_tick_damage,
         resolve_healing,
+        resolve_pray_recovery,
         resolve_recovery_amount,
         resolve_spell_damage,
         resolve_status_spell,
@@ -90,6 +92,7 @@ else:
     from battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
+        PRAY_SUCCESS_ROLL_COUNT,
         battle_healing_amount,
         TEMPTATION_RATE,
         debuff_turn_range,
@@ -98,6 +101,7 @@ else:
         modified_defense,
         poison_tick_damage,
         resolve_healing,
+        resolve_pray_recovery,
         resolve_recovery_amount,
         resolve_spell_damage,
         resolve_status_spell,
@@ -539,6 +543,9 @@ class BattleForecast:
                 actions.extend(
                     AutoAction(command, (a.spec.number,)) for a in self.enemies()
                 )
+            elif command is BattleCommand.PRAY:
+                if actor.mp < actor.spec.max_mp:
+                    actions.append(AutoAction(command, (number,)))
             elif command is BattleCommand.COVER:
                 actions.extend(
                     AutoAction(command, (a.spec.number,))
@@ -1311,6 +1318,16 @@ class BattleForecast:
         elif action.command is BattleCommand.IDENTIFY:
             self.identify(self.actors[action.targets[0]])
             actor.hidden = False
+        elif action.command is BattleCommand.PRAY:
+            actor.hidden = False
+            amount = resolve_pray_recovery(
+                magic=actor.spec.magic,
+                internal_level=actor.spec.internal_level,
+                success_roll=int(self.roll(actor, number, 10) * PRAY_SUCCESS_ROLL_COUNT),
+                random_factor=self.roll(actor, number, 8),
+            )
+            if amount is not None:
+                actor.mp = min(actor.spec.max_mp, actor.mp + amount)
         elif action.command is BattleCommand.FORMATION:
             actor.front = not actor.front
         self.normalize()

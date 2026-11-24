@@ -950,7 +950,7 @@ class ItemMenuTest(unittest.TestCase):
             all(text.color == DEFAULT_TEXT_COLOR for text in mock.party_window.texts)
         )
 
-    def test_mana_drop_shows_mp_and_restores_only_a_valid_target(self) -> None:
+    def test_mana_drop_keeps_hp_visible_and_restores_only_a_valid_target(self) -> None:
         items = ItemMenuHarness().items
         item = items["MANA DROP"]
         inventory = InventorySystem(items, {item.key: 2, "POTION": 1})
@@ -960,14 +960,15 @@ class ItemMenuTest(unittest.TestCase):
         party[2].mp = 2
         party[3].hp = 0
         party[3].mp = 0
+        expected_hp = ("ＨＰ" + pad(party[2].hp, 3), "／" + pad(party[2].max_hp, 3))
         self.select_item(mock, item.key)
 
-        self.assertEqual(mock.party_window.texts[4].text, "ＭＰ　　２")
-        self.assertEqual(mock.party_window.texts[5].text, "／　３０")
+        self.assertEqual(tuple(text.text for text in mock.party_window.texts[4:6]), expected_hp)
         mock.update(InputState(confirm=InputButton(True, True)))
 
         self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
         self.assertEqual(mock.member_cursor.selected_key, 2)
+        self.assertEqual(tuple(text.text for text in mock.party_window.texts[4:6]), expected_hp)
         self.assertEqual(mock.dimmed_member_indexes, frozenset((0, 1, 3, 4)))
         self.assertEqual(inventory.quantity(item), 2)
         mock.member_cursor.select_key(3)
@@ -987,13 +988,13 @@ class ItemMenuTest(unittest.TestCase):
         self.assertIs(mock.phase, ItemSelectionPhase.TARGET)
         self.assertEqual(mock.selected_item.key, item.key)
         self.assertEqual(mock.item_cursor.selected_key, item.key)
-        self.assertEqual(mock.party_window.texts[4].text, "ＭＰ　２７")
+        self.assertEqual(tuple(text.text for text in mock.party_window.texts[4:6]), expected_hp)
         play_se.assert_called_once_with(HEALING_SE_ID)
 
         mock.update(InputState(cancel=InputButton(True, True)))
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
         self.assertEqual(mock.item_cursor.selected_key, item.key)
-        self.assertEqual(mock.party_window.texts[4].text, "ＭＰ　２７")
+        self.assertEqual(tuple(text.text for text in mock.party_window.texts[4:6]), expected_hp)
         mock.update(InputState(cancel=InputButton(True, True)))
         self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
         self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))

@@ -14,6 +14,7 @@ else:
 
 DEFAULT_DEBUFF_MIN_TURNS = 4
 TEMPTATION_RATE = 6
+PRAY_SUCCESS_ROLL_COUNT = 10_000
 MIN_PROTECTION_LEVEL = -1
 MAX_PROTECTION_LEVEL = 2
 
@@ -112,6 +113,24 @@ def spell_cast_delay(*, spell_level: int, reduced_wait: bool = False) -> int:
 
     spell_level = _nonnegative_integer(spell_level, "spell_level")
     return 17 - spell_level - (8 if reduced_wait else 0)
+
+
+def resolve_pray_recovery(
+    *, magic: int, internal_level: int, success_roll: int, random_factor: float,
+) -> int | None:
+    """Return the rolled MP restoration, or None when the prayer misses."""
+
+    magic = _nonnegative_integer(magic, "magic")
+    internal_level = _nonnegative_integer(internal_level, "internal_level")
+    # magic * 1.5 * (51 + level) / 50 percent, in hundredths of a percent.
+    success_threshold = min(PRAY_SUCCESS_ROLL_COUNT, magic * 3 * (51 + internal_level))
+    if success_roll >= success_threshold:
+        return None
+    return resolve_recovery_amount(
+        intensity=12,
+        ability=DA2_DEFAULT_ITEM_SPELL_ABILITY,
+        random_factor=random_factor,
+    )
 
 
 def resolve_spell_damage(
@@ -343,6 +362,7 @@ __all__ = [
     "DA2_MINIMUM_HEAL_RATE",
     "DA2_POISON_DAMAGE_DENOMINATOR",
     "HealingResult",
+    "PRAY_SUCCESS_ROLL_COUNT",
     "SPELL_DAMAGE_MINIMUM_RATE",
     "SPELL_DAMAGE_RATE_RANGE",
     "SpellAffinity",
@@ -353,6 +373,7 @@ __all__ = [
     "member_spell_modifier",
     "poison_tick_damage",
     "resolve_healing",
+    "resolve_pray_recovery",
     "resolve_recovery_amount",
     "resolve_spell_damage",
     "resolve_status_spell",

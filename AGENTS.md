@@ -122,6 +122,7 @@
 - 仮タイトル・モード別の開始経路・押しっぱなし入力・タイトル復帰は `python3 -B -m unittest tests.test_title tests.test_start_menu tests.test_launch_modes tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - 開始時の操作説明・入力種別変更・初回判定・試遊版での毎回表示・端末設定の互換性は `python3 -B -m unittest tests.test_control_guide tests.test_launch_modes tests.test_state tests.test_settings_system tests.test_title tests.test_start_menu tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
+- スキル「いのり」の成功条件・MP上限・演出と、手動／オートの接続は `python3 -B -m unittest tests.test_battle_magic tests.test_battle_screen_mock tests.test_auto_battle` で回帰検証する。
 - 戦闘中のアイテム消費と全滅時の返却は `python3 -B -m unittest tests.test_battle_screen_mock tests.test_battle_scene tests.test_debug_dungeon tests.test_game_events` で回帰検証する。
 - 呪文の全対象ミスは `python3 -B -m unittest tests.test_battle_screen_mock.BattleScreenMockTest.test_all_missed_spell_targets_add_eighteen_frames_before_return` で手動・オートの待機、部分成功、帰還後の手番進行を回帰検証する。
 - オートの味方対象呪文と手動・オートの全段ミスの帰還は `python3 -B -m unittest tests.test_battle_screen_mock.BattleScreenMockTest.test_auto_ally_spell_returns_when_effect_finishes tests.test_battle_screen_mock.BattleScreenMockTest.test_missed_attack_waits_at_target_and_returns_before_next_turn tests.test_battle_screen_mock.BattleScreenMockTest.test_jump_attack_wait_and_walk_return_survive_cancelling_auto tests.test_battle_iai` で演出完了・待機時間・帰還と次の手番への接続を回帰検証する。

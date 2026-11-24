@@ -6008,9 +6008,97 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(target.mp, target.max_mp)
         self.assertEqual(target.hp, before_hp)
         self.assertEqual(mock.healing_popups[0].amount, 1)
-        mock._refresh_party_hp_text.assert_called_once_with(1)
+        mock._refresh_party_hp_text.assert_not_called()
         mock._apply_action_results(presentation)
         self.assertEqual(len(mock.healing_popups), 1)
+
+    def test_pray_uses_self_effect_or_miss_then_returns_in_manual_and_auto(self) -> None:
+        from auto_battle_model import AutoAction
+
+        definitions = load_spell_effects(APP_ROOT / "effects" / "spells.json")
+        for auto in (False, True):
+            for succeeded in (False, True):
+                with self.subTest(auto=auto, succeeded=succeeded):
+                    actor, ally = load_mock_party(
+                        load_mock_items(), load_mock_skills(),
+                        character_keys=("Milia", "Cerion"),
+                    )
+                    actor.mp = actor.max_mp - 1
+                    actor.apply_silence(2)
+                    ally.mp = 0
+                    scene = BattleScreenMock.__new__(BattleScreenMock)
+                    scene.party = (actor, ally)
+                    scene.active_party_index = 0
+                    scene.hidden_party_indexes = {0}
+                    scene.phase = BattleMockPhase.COMMAND
+                    scene.command_cursor = Mock(selected_key=BattleCommand.PRAY)
+                    scene.command_window = Mock(is_closed=False, is_open=True)
+                    scene.input_reader = Mock()
+                    scene.input_reader.poll.return_value = InputState(
+                        confirm=InputButton(triggered=True)
+                    )
+                    scene.auto_battle_active = auto
+                    scene.action_offset_x = 0
+                    scene.action_presentation = None
+                    scene.spell_effects = definitions
+                    scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+                    scene.localizer = Localizer(Language.JAPANESE)
+                    scene.spell_effect_renderer = Mock()
+                    scene.progression = Mock()
+                    scene._party_draw_position = Mock(return_value=(100, 80))
+                    scene._refresh_party_hp_text = Mock()
+                    scene._release_palette_variant = Mock()
+                    scene._sync_unselectable_target_palette = Mock()
+
+                    if auto:
+                        scene._execute_auto_action(AutoAction(BattleCommand.PRAY, (0,)))
+                    else:
+                        scene.update()
+                    self.assertIs(scene.phase, BattleMockPhase.ACTION_PRESENTATION)
+                    self.assertTrue(scene.action_uses_cast_pose)
+                    self.assertEqual(scene.hidden_party_indexes, set())
+                    scene._update_action_presentation()
+                    self.assertIsNone(scene.action_presentation)
+                    scene.action_offset_x = ACTION_MOVE_DISTANCE
+
+                    with (
+                        patch("scenes.battle.random.randrange", return_value=0 if succeeded else 9999) as roll,
+                        patch("scenes.battle.random.random", return_value=0.5),
+                        patch("scenes.battle.play_se") as play_se,
+                    ):
+                        scene._update_action_presentation()
+                        presentation = scene.action_presentation
+                        if succeeded:
+                            effect, = presentation.spell_effects
+                            self.assertEqual(effect.target_index, 0)
+                            definition = effect.player.definition
+                            self.assertEqual(
+                                (definition.image_id, definition.row, definition.frame_count),
+                                ("effects/spells32", 4, 5),
+                            )
+                            self.assertEqual(actor.mp, actor.max_mp - 1)
+                            frames = definition.total_frames
+                        else:
+                            self.assertEqual(presentation.spell_effects, ())
+                            frames = MISSED_ACTION_RETURN_WAIT_FRAME_COUNT
+                        for _ in range(frames - 1):
+                            scene._update_action_presentation()
+                        self.assertIs(scene.phase, BattleMockPhase.ACTION_PRESENTATION)
+                        scene._update_action_presentation()
+
+                    self.assertIs(scene.phase, BattleMockPhase.ACTION_RETURN)
+                    roll.assert_called_once_with(10_000)
+                    self.assertEqual(ally.mp, 0)
+                    scene._refresh_party_hp_text.assert_not_called()
+                    scene.progression.record_spell_use.assert_not_called()
+                    if succeeded:
+                        play_se.assert_called_once_with("spell_healing1")
+                        self.assertEqual(actor.mp, actor.max_mp)
+                        self.assertEqual(scene.healing_popups[0].amount, 25)
+                    else:
+                        play_se.assert_not_called()
+                        self.assertEqual(actor.mp, actor.max_mp - 1)
+                        self.assertTrue(scene.spell_damage_popups[0].is_miss)
 
     def test_unregistered_heal_effect_still_recovers_then_returns(self) -> None:
         items = load_mock_items()
@@ -8110,7 +8198,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_target_index, 1)
         self.assertTrue(mock.target_cursor.active)
 
-    def test_mana_drop_targeting_shows_mp_and_cancel_restores_hp(self) -> None:
+    def test_mana_drop_keeps_hp_visible_during_targeting_and_use(self) -> None:
         items = load_mock_items()
         spell = load_mock_spells()["MANA DROP"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -8155,6 +8243,7 @@ class BattleScreenMockTest(unittest.TestCase):
             )
             mock.party_status_windows.append(window)
             mock.party_status_texts.append((name, points))
+        hp_text = mock.party_status_texts[2][1].text
 
         self.assertEqual(mock._selectable_party_indexes_for_spell(spell), (0, 2, 3))
         self.assertTrue(
@@ -8166,20 +8255,12 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_party_target_index, 0)
         self.assertTrue(mock._move_party_target(Direction.DOWN))
         self.assertEqual(mock.selected_party_target_index, 2)
-        self.assertTrue(mock.party_status_shows_mp)
-        self.assertEqual(
-            mock.party_status_texts[2][1].text,
-            ascii_to_fullwidth(f"{2:3d}/{mock.party[2].max_mp:3d}"),
-        )
+        self.assertEqual(mock.party_status_texts[2][1].text, hp_text)
 
         mock._cancel_action_target_selection()
 
-        self.assertFalse(mock.party_status_shows_mp)
         self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 1)
-        self.assertEqual(
-            mock.party_status_texts[2][1].text,
-            ascii_to_fullwidth(f"{mock.party[2].hp:3d}/{mock.party[2].max_hp:3d}"),
-        )
+        self.assertEqual(mock.party_status_texts[2][1].text, hp_text)
 
         mock._show_item_use_message = Mock()
         mock._record_action_target_information = Mock()
@@ -8194,17 +8275,14 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._confirm_action_target_selection())
         self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 0)
         mock._begin_action_presentation.assert_called_once_with(spell)
+        self.assertEqual(mock.party_status_texts[2][1].text, hp_text)
 
         mock._clear_action_motion_state = Mock()
         mock._start_timeline_animation = Mock()
         mock.command_guide_window = Mock()
         mock._complete_current_turn()
 
-        self.assertFalse(mock.party_status_shows_mp)
-        self.assertEqual(
-            mock.party_status_texts[2][1].text,
-            ascii_to_fullwidth(f"{mock.party[2].hp:3d}/{mock.party[2].max_hp:3d}"),
-        )
+        self.assertEqual(mock.party_status_texts[2][1].text, hp_text)
 
     def test_mana_drop_cursor_visits_full_mp_and_no_spell_members(self) -> None:
         items = load_mock_items()
