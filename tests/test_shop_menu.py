@@ -33,7 +33,6 @@ from ui.shop import (
     QUANTITY_TEXT_HEIGHT,
     QUANTITY_TOTAL_VALUE_X,
     QUANTITY_TOTAL_Y,
-    RARE_CHOICE_WINDOW_GRID,
     SHOP_BUY_LIST_VISIBLE_COUNT,
     SHOP_BUY_OWNED_X,
     SHOP_BUY_OWNED_Y,
@@ -612,64 +611,34 @@ class ShopMenuTest(unittest.TestCase):
             self.screen.sell_price_window.texts[0].text.endswith("２０Ｇ")
         )
 
-    def test_sell_warns_for_item_not_sold_by_any_shop(self) -> None:
+    def test_sell_fire_and_sleep_books_with_one_quantity_confirmation(self) -> None:
+        self.save_data.gold = 0
         self.screen.update(InputState(navigation=Direction.RIGHT))
-        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+        confirm = InputState(confirm=InputButton(triggered=True))
+        self.screen.update(confirm)
         self.assertIs(self.screen.mode, ShopMode.SELL)
 
-        rare_index = next(
-            index
-            for index, item in enumerate(self.screen.available_items)
-            if self.system.is_rare_sale(item)
-        )
-        self.screen.selected_item_index = rare_index
-        self.screen.scroll_offset = rare_index
-        self.screen._refresh_trade_windows()
-        rare_item = self.screen.selected_item
-        before_count = self.inventory.quantity(rare_item)
+        for item_key in ("BOOK of FIRE", "BOOK of SLEEP"):
+            with self.subTest(item_key=item_key):
+                item = self.items[item_key]
+                item_index = self.screen.available_items.index(item)
+                steps = (item_index - self.screen.selected_item_index) % len(
+                    self.screen.available_items
+                )
+                for _ in range(steps):
+                    self.screen.update(InputState(navigation=Direction.DOWN))
+                self.assertEqual(self.screen.selected_item, item)
+                before_count = self.inventory.quantity(item)
+                before_gold = self.save_data.gold
 
-        self.screen.update(InputState(confirm=InputButton(triggered=True)))
-        self.screen.update(InputState(confirm=InputButton(triggered=True)))
+                self.screen.update(confirm)
+                self.assertIs(self.screen.phase, ShopPhase.QUANTITY)
+                self.screen.update(confirm)
 
-        self.assertIs(self.screen.phase, ShopPhase.RARE_CONFIRMATION)
-        self.assertEqual(
-            (
-                self.screen.rare_window.x,
-                self.screen.rare_window.y,
-                self.screen.rare_window.width,
-                self.screen.rare_window.height,
-            ),
-            SHOP_MESSAGE_WINDOW_GRID,
-        )
-        self.assertIn(
-            "「ウチでは　うれない　しなものだけど",
-            [text.text for text in self.screen.rare_window.texts],
-        )
-        self.assertEqual(
-            [text.y for text in self.screen.rare_window.texts],
-            [SHOP_GREETING_Y, SHOP_GREETING_Y + SHOP_GREETING_ROW_HEIGHT],
-        )
-        self.assertEqual(
-            (
-                self.screen.rare_choice_window.x,
-                self.screen.rare_choice_window.y,
-                self.screen.rare_choice_window.width,
-                self.screen.rare_choice_window.height,
-            ),
-            RARE_CHOICE_WINDOW_GRID,
-        )
-        self.assertEqual(self.screen.item_cursor.selected_key, rare_item.key)
-        self.assertFalse(self.screen.item_cursor.active)
-        self.screen.item_cursor.draw = Mock()
-        self.screen.command_cursor.draw = Mock()
-        self.screen.rare_cursor.draw = Mock()
-        with patch("ui.shop.Window.draw"):
-            self.screen.draw()
-        self.screen.item_cursor.draw.assert_called_once_with()
-        self.screen.update(InputState(confirm=InputButton(triggered=True)))
-        self.assertIs(self.screen.phase, ShopPhase.ITEM)
-        self.assertEqual(self.inventory.quantity(rare_item), before_count - 1)
-        self.assertNotIn(rare_item, self.screen.shop.items)
+                self.assertIs(self.screen.phase, ShopPhase.ITEM)
+                self.assertEqual(self.inventory.quantity(item), before_count - 1)
+                self.assertEqual(self.save_data.gold, before_gold + item.price // 2)
+                self.assertIsNotNone(self.screen.completion_message_window)
 
     def test_sell_list_counts_only_unequipped_inventory(self) -> None:
         self.assertEqual(self.inventory.quantity("DAGGER"), 1)

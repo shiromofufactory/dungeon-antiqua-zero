@@ -566,20 +566,28 @@ class MonsterDamageSpellTest(unittest.TestCase):
         scene.party_target_cursor = None
         scene._refresh_monster_name_colors = Mock()
         spell = scene.spells["BLOOD SUCK"]
+        scene.spell_effects = load_spell_effects(APP_ROOT / "effects" / "spells.json")
+        scene.spell_effect_renderer = Mock()
 
         with (
             patch("scenes.battle.random.random", return_value=0.5),
-            patch("scenes.battle.play_se"),
+            patch("scenes.battle.play_se") as play_se,
         ):
             self.assertTrue(scene._begin_action_presentation(spell))
-            result, = scene.action_presentation.damage_results
+            presentation = scene.action_presentation
+            result, = presentation.damage_results
             self.assertIs(result.affinity, SpellAffinity.RESIST)
             self.assertGreater(result.damage, 1)
-            scene._update_action_presentation()
+            effect, = presentation.spell_effects
+            self.assertEqual(effect.player.caster_anchor, scene._spell_effect_anchor("ally", 0))
+            play_se.assert_called_once_with("spell_blood_suck")
+            for _ in range(presentation.result_start_frame):
+                scene._update_action_presentation()
 
         self.assertEqual(target.state.hp, max(0, target.state.max_hp - result.damage))
         self.assertEqual(caster.hp, caster.max_hp)
         self.assertEqual(scene.healing_popups[0].amount, 1)
+        play_se.assert_called_once_with("spell_blood_suck")
 
     def test_mage_dwarf_blood_suck_heals_only_actual_hp_lost_once(self):
         record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "メイジドワーフ")
@@ -587,6 +595,8 @@ class MonsterDamageSpellTest(unittest.TestCase):
         actor.state.take_damage(30)
         actor.state.apply_poison()
         scene = spell_scene(actor)
+        scene.spell_effects = load_spell_effects(APP_ROOT / "effects" / "spells.json")
+        scene.spell_effect_renderer = Mock()
         target = scene.party[0]
         target.hp = 2
         hp = actor.state.hp
@@ -600,14 +610,22 @@ class MonsterDamageSpellTest(unittest.TestCase):
             self.assertTrue(scene._begin_monster_spell(actor, scene.spells["BLOOD SUCK"]))
             self.assertEqual(actor.state.mp, 6)
             presentation = scene.action_presentation
+            effect, = presentation.spell_effects
+            self.assertEqual(effect.player.elapsed_frame, 0)
+            self.assertEqual(effect.player.caster_anchor, scene._spell_effect_anchor("enemy", 0))
+            scene.spell_effect_renderer.prepare.assert_called_once_with(effect.player)
+            play_se.assert_called_once_with("spell_blood_suck")
             self.assertGreater(presentation.party_damage_results[0].damage, 2)
             self.assertEqual((target.hp, actor.state.hp), (2, hp))
-            scene._update_action_presentation()
+            for _ in range(presentation.result_start_frame):
+                scene._update_action_presentation()
             scene._apply_action_results(presentation)
 
         self.assertEqual((target.hp, actor.state.hp), (0, hp + 2))
         self.assertTrue(actor.state.poisoned)
-        play_se.assert_called_once_with("battle_drain")
+        self.assertEqual(tuple(popup.amount for popup in scene.healing_popups), (2,))
+        self.assertIsNone(getattr(scene, "monster_drain_presentation", None))
+        play_se.assert_called_once_with("spell_blood_suck")
 
     def test_fire_and_freeze_use_shared_damage_rule_and_apply_once_at_result_time(self):
         for key in ("FIRE1", "FREEZE1"):

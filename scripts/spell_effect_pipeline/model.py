@@ -314,30 +314,6 @@ def validate_document(
             )
             continue
 
-        entry = catalogs.images.get(definition.image_id)
-        if entry is None:
-            diagnostics.append(
-                SpellEffectDiagnostic(
-                    "error", "missing_image", "生成済み画像にimage_idがありません。", spell_key
-                )
-            )
-            continue
-        cell_size = SPELL_EFFECT_IMAGE_CELL_SIZES[definition.image_id]
-        if (definition.row + 1) * cell_size > entry.height:
-            diagnostics.append(
-                SpellEffectDiagnostic(
-                    "error", "row_out_of_bounds", "選択行が画像の高さを超えています。", spell_key
-                )
-            )
-        if definition.frame_count * cell_size > entry.width:
-            diagnostics.append(
-                SpellEffectDiagnostic(
-                    "error",
-                    "frames_out_of_bounds",
-                    "使用パターンが画像の完全セル範囲を超えています。",
-                    spell_key,
-                )
-            )
         if (
             definition.flash_color is not None
             and (
@@ -361,6 +337,32 @@ def validate_document(
             diagnostics.append(
                 SpellEffectDiagnostic(
                     "warning", "not_battle_spell", "戦闘外の呪文に設定されています。", spell_key
+                )
+            )
+        if definition.image_id is None:
+            continue
+        entry = catalogs.images.get(definition.image_id)
+        if entry is None:
+            diagnostics.append(
+                SpellEffectDiagnostic(
+                    "error", "missing_image", "生成済み画像にimage_idがありません。", spell_key
+                )
+            )
+            continue
+        cell_size = SPELL_EFFECT_IMAGE_CELL_SIZES[definition.image_id]
+        if (definition.row + 1) * cell_size > entry.height:
+            diagnostics.append(
+                SpellEffectDiagnostic(
+                    "error", "row_out_of_bounds", "選択行が画像の高さを超えています。", spell_key
+                )
+            )
+        if definition.frame_count * cell_size > entry.width:
+            diagnostics.append(
+                SpellEffectDiagnostic(
+                    "error",
+                    "frames_out_of_bounds",
+                    "使用パターンが画像の完全セル範囲を超えています。",
+                    spell_key,
                 )
             )
         if (

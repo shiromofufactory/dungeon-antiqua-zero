@@ -1,4 +1,4 @@
-"""Interactive Pyxel UI for editing ordinary spell effects."""
+"""Interactive Pyxel UI for editing spell effects."""
 
 from __future__ import annotations
 
@@ -21,10 +21,13 @@ from app.resources import (
     reload_se_catalog,
 )
 from app.spell_effect import (
+    BLOOD_SUCK_EFFECT_KIND,
     FLASH_SCOPE_SCREEN,
     FLASH_SCOPE_TARGET,
     MAX_EFFECT_OFFSET,
     MIN_EFFECT_OFFSET,
+    SPELL_EFFECT_IMAGE_CELL_SIZES,
+    SPELL_EFFECT_KIND,
     SpellEffectDefinition,
     SpellEffectPlayer,
 )
@@ -76,6 +79,11 @@ FILTER_LABELS = {
     "sacred": "SAC",
     "nether": "NET",
     "item": "ITEM",
+}
+EFFECT_TYPE_LABELS = {
+    (SPELL_EFFECT_KIND, "effects/spells32"): "SPRITE32",
+    (SPELL_EFFECT_KIND, "effects/spells64"): "SPRITE64",
+    (BLOOD_SUCK_EFFECT_KIND, None): "BLOOD SUCK",
 }
 
 
@@ -170,7 +178,6 @@ class SpellEffectEditor:
         self.strip_scroll = 0
         self.playing = False
         self.paused = False
-        self.looping = True
         self.debug_visible = True
         self.exit_confirmation = False
         self.flash_picker_open = False
@@ -205,9 +212,16 @@ class SpellEffectEditor:
 
     @property
     def target(self) -> PreviewTarget:
-        options = self.targets[self.target_side]
-        index = self.target_indexes[self.target_side] % len(options)
+        return self._preview_target(self.target_side)
+
+    def _preview_target(self, side: str) -> PreviewTarget:
+        options = self.targets[side]
+        index = self.target_indexes[side] % len(options)
         return options[index]
+
+    @property
+    def preview_caster(self) -> PreviewTarget:
+        return self._preview_target("enemy" if self.target_side == "ally" else "ally")
 
     def _load_json_array(self, filename: str) -> list[dict[str, object]]:
         path = self.content_root / "data" / filename
@@ -291,24 +305,23 @@ class SpellEffectEditor:
             )
         return {"ally": tuple(allies), "enemy": tuple(enemies)}
 
-    def _target_rect(self) -> tuple[int, int, int, int]:
-        target = self.target
+    @staticmethod
+    def _preview_center(target: PreviewTarget) -> tuple[int, int]:
         center_x = 184 if target.side == "ally" else 92
-        center_y = 118
-        return (
-            center_x - target.width // 2,
-            center_y - target.height // 2,
-            target.width,
-            target.height,
-        )
+        return center_x, 118
 
     def _new_player(self, *, elapsed_frame: int = 0) -> SpellEffectPlayer:
-        x, y, width, height = self._target_rect()
+        definition = self.definition
+        anchor_x, anchor_y = self._preview_center(self.target)
         player = SpellEffectPlayer(
-            self.definition,
-            anchor_x=x + width // 2,
-            anchor_y=y + height // 2,
+            definition,
+            anchor_x=anchor_x,
+            anchor_y=anchor_y,
             target_side=self.target_side,
+            caster_anchor=(
+                self._preview_center(self.preview_caster)
+                if definition.kind == BLOOD_SUCK_EFFECT_KIND else None
+            ),
         )
         for _ in range(min(elapsed_frame, player.playback_frames)):
             player.update()
@@ -453,11 +466,7 @@ class SpellEffectEditor:
             self._hold_start_frame = False
             return
         self._player.update()
-        if self._player.completed and self.looping:
-            self._player.restart()
-            self._hold_start_frame = False
-            self._play_start_sound()
-        elif self._player.completed:
+        if self._player.completed:
             self.playing = False
         self.renderer.prepare(self._player, preview=True)
 
@@ -503,23 +512,25 @@ class SpellEffectEditor:
         self.store.set_definition(updated)
         self._refresh_player()
 
-    def _cycle_image(self, direction: int) -> None:
-        image_ids = tuple(self.store.catalogs.images)
-        image_ids = tuple(
-            image
-            for image in ("effects/spells32", "effects/spells64")
-            if image in image_ids
+    def _cycle_effect_type(self, direction: int) -> None:
+        choices = tuple(
+            (kind, image_id) for kind, image_id in EFFECT_TYPE_LABELS
+            if image_id is None or image_id in self.store.catalogs.images
         )
-        current = self.definition.image_id
-        index = (image_ids.index(current) + direction) % len(image_ids)
-        image_id = image_ids[index]
-        entry = self.store.catalogs.images[image_id]
-        size = 32 if image_id.endswith("32") else 64
+        definition = self.definition
+        current = choices.index((definition.kind, definition.image_id))
+        kind, image_id = choices[(current + direction) % len(choices)]
         self.strip_scroll = 0
+        if image_id is None:
+            self._change_definition(kind=kind, image_id=None)
+            return
+        entry = self.store.catalogs.images[image_id]
+        size = SPELL_EFFECT_IMAGE_CELL_SIZES[image_id]
         self._change_definition(
+            kind=kind,
             image_id=image_id,
-            row=min(self.definition.row, entry.height // size - 1),
-            frame_count=min(self.definition.frame_count, entry.width // size),
+            row=min(definition.row, entry.height // size - 1),
+            frame_count=min(definition.frame_count, entry.width // size),
         )
 
     def _change_row(self, direction: int) -> None:
@@ -654,21 +665,10 @@ class SpellEffectEditor:
             Button("debug", 68, 2, 30, 11, "GUIDE", self.debug_visible),
             Button("play", 2, 224, 30, 12, "PLAY", self.playing and not self.paused),
             Button("pause", 34, 224, 34, 12, "PAUSE", self.paused),
-            Button("loop", 70, 224, 30, 12, "LOOP", self.looping),
-            Button("step", 102, 224, 30, 12, "STEP"),
-            Button("reset", 134, 224, 34, 12, "RESET"),
-            Button("sheet_prev", 440, 20, 12, 11, "<"),
-            Button("sheet_next", 498, 20, 12, 11, ">"),
-            Button("row_prev", 440, 34, 12, 11, "-"),
-            Button("row_next", 498, 34, 12, 11, "+"),
-            Button("count_prev", 440, 48, 12, 11, "-"),
-            Button("count_next", 498, 48, 12, 11, "+"),
-            Button("speed_prev", 440, 62, 12, 11, "-"),
-            Button("speed_next", 498, 62, 12, 11, "+"),
-            Button("x_prev", 440, 76, 12, 11, "-"),
-            Button("x_next", 498, 76, 12, 11, "+"),
-            Button("y_prev", 440, 90, 12, 11, "-"),
-            Button("y_next", 498, 90, 12, 11, "+"),
+            Button("step", 70, 224, 30, 12, "STEP"),
+            Button("reset", 102, 224, 34, 12, "RESET"),
+            Button("type_prev", 440, 20, 12, 11, "<"),
+            Button("type_next", 498, 20, 12, 11, ">"),
             Button("flash_scope", 362, 102, 52, 11, f"FLASH {definition.flash_scope.upper()}"),
             Button("flash_prev", 440, 104, 12, 11, "<"),
             Button("flash_picker", 454, 104, 42, 11, "PICK"),
@@ -679,9 +679,22 @@ class SpellEffectEditor:
             ),
             Button("set", 362, 142, 40, 12, "UNSET" if configured else "SET"),
             Button("save", 440, 142, 38, 12, "SAVE", self.store.dirty),
-            Button("strip_prev", 480, 242, 14, 12, "<"),
-            Button("strip_next", 496, 242, 14, 12, ">"),
         ]
+        if definition.image_id is not None:
+            buttons.extend((
+                Button("row_prev", 440, 34, 12, 11, "-"),
+                Button("row_next", 498, 34, 12, 11, "+"),
+                Button("count_prev", 440, 48, 12, 11, "-"),
+                Button("count_next", 498, 48, 12, 11, "+"),
+                Button("speed_prev", 440, 62, 12, 11, "-"),
+                Button("speed_next", 498, 62, 12, 11, "+"),
+                Button("x_prev", 440, 76, 12, 11, "-"),
+                Button("x_next", 498, 76, 12, 11, "+"),
+                Button("y_prev", 440, 90, 12, 11, "-"),
+                Button("y_next", 498, 90, 12, 11, "+"),
+                Button("strip_prev", 480, 242, 14, 12, "<"),
+                Button("strip_next", 496, 242, 14, 12, ">"),
+            ))
         if self.sound_registration is not None:
             buttons.extend(
                 (
@@ -730,11 +743,10 @@ class SpellEffectEditor:
             "debug": lambda: setattr(self, "debug_visible", not self.debug_visible),
             "play": self._start_playback,
             "pause": lambda: setattr(self, "paused", not self.paused),
-            "loop": lambda: setattr(self, "looping", not self.looping),
             "step": self._step_playback,
             "reset": self._reset_preview,
-            "sheet_prev": lambda: self._cycle_image(-1),
-            "sheet_next": lambda: self._cycle_image(1),
+            "type_prev": lambda: self._cycle_effect_type(-1),
+            "type_next": lambda: self._cycle_effect_type(1),
             "row_prev": lambda: self._change_row(-1),
             "row_next": lambda: self._change_row(1),
             "count_prev": lambda: self._change_frame_count(-1),
@@ -837,6 +849,8 @@ class SpellEffectEditor:
 
     def _handle_strip_click(self) -> None:
         definition = self.definition
+        if definition.image_id is None:
+            return
         size = definition.cell_size
         if not (
             0 <= pyxel.mouse_x < STRIP_WIDTH
@@ -900,8 +914,6 @@ class SpellEffectEditor:
             self._start_playback()
         if pyxel.btnp(pyxel.KEY_SPACE):
             self.paused = not self.paused
-        if pyxel.btnp(pyxel.KEY_L):
-            self.looping = not self.looping
         if pyxel.btnp(pyxel.KEY_T):
             self._toggle_target_side()
         if pyxel.btnp(pyxel.KEY_COMMA):
@@ -936,31 +948,30 @@ class SpellEffectEditor:
             BUTTON_TEXT_COLOR,
         )
 
-    def _draw_target(self) -> None:
-        x, y, width, height = self._target_rect()
-        target = self.target
+    def _draw_combatant(self, target: PreviewTarget) -> None:
+        x, y = self._preview_center(target)
         pyxel.blt(
-            x,
-            y,
+            x - target.width // 2,
+            y - target.height // 2,
             self.images.image(target.image_id),
             target.source_x,
             target.source_y,
-            width,
-            height,
+            target.width,
+            target.height,
             TRANSPARENT_INDEX,
         )
 
     def _draw_preview(self) -> None:
         pyxel.blt(0, 0, self.background, 0, 0, PREVIEW_WIDTH, TOP_PANEL_HEIGHT)
-        self.renderer.draw_target(self._player, self._draw_target)
+        if self._player.caster_anchor is not None:
+            self._draw_combatant(self.preview_caster)
+        self.renderer.draw_target(self._player, lambda: self._draw_combatant(self.target))
         self.renderer.draw_effect(self._player)
         pyxel.rect(0, 16, PREVIEW_WIDTH, 12, PANEL_COLOR)
         label = f"{self.target_side.upper()} {self.target.key[:22]}"
         pyxel.text(4, 19, label, BUTTON_TEXT_COLOR)
         if self.debug_visible:
-            x, y, width, height = self._target_rect()
-            anchor_x = x + width // 2
-            anchor_y = y + height // 2
+            anchor_x, anchor_y = self._preview_center(self.target)
             pyxel.line(anchor_x - 3, anchor_y, anchor_x + 3, anchor_y, WARNING_COLOR)
             pyxel.line(anchor_x, anchor_y - 3, anchor_x, anchor_y + 3, WARNING_COLOR)
             destination = self.renderer.destination_rect(self._player)
@@ -1015,16 +1026,21 @@ class SpellEffectEditor:
         pyxel.rect(SETTINGS_X, 0, SETTINGS_WIDTH, TOP_PANEL_HEIGHT, PANEL_COLOR)
         spell = self.selected_spell
         pyxel.text(363, 2, spell.key[:23], BUTTON_TEXT_COLOR)
-        pyxel.text(363, 10, spell.name[:9], 5, self.japanese_font)
+        pyxel.text(363, 8, spell.name[:9], 5, self.japanese_font)
         definition = self.definition
-        self._draw_value_line("SHEET", "32" if definition.cell_size == 32 else "64", 18)
-        self._draw_value_line("ROW", str(definition.row), 32)
-        self._draw_value_line("COUNT", str(definition.frame_count), 46)
-        self._draw_value_line("SPEED", str(definition.frames_per_pattern), 60)
-        offset_x, offset_y = definition.offset_for(self.target_side)
-        side_label = self.target_side.upper()
-        self._draw_value_line(f"{side_label} X", str(offset_x), 74)
-        self._draw_value_line(f"{side_label} Y", str(offset_y), 88)
+        self._draw_value_line("TYPE", EFFECT_TYPE_LABELS[(definition.kind, definition.image_id)], 18)
+        if definition.image_id is not None:
+            self._draw_value_line("ROW", str(definition.row), 32)
+            self._draw_value_line("COUNT", str(definition.frame_count), 46)
+            self._draw_value_line("SPEED", str(definition.frames_per_pattern), 60)
+            offset_x, offset_y = definition.offset_for(self.target_side)
+            side_label = self.target_side.upper()
+            self._draw_value_line(f"{side_label} X", str(offset_x), 74)
+            self._draw_value_line(f"{side_label} Y", str(offset_y), 88)
+            ally_x, ally_y = definition.offset_for("ally")
+            enemy_x, enemy_y = definition.offset_for("enemy")
+            pyxel.text(363, 177, f"ALLY  {ally_x:+4d},{ally_y:+4d}", 4)
+            pyxel.text(363, 185, f"ENEMY {enemy_x:+4d},{enemy_y:+4d}", 4)
         flash_text = "NONE" if definition.flash_color is None else str(definition.flash_color)
         pyxel.text(416, 104, flash_text, BUTTON_TEXT_COLOR)
         if definition.flash_color is not None:
@@ -1047,21 +1063,19 @@ class SpellEffectEditor:
         warnings = sum(item.severity == "warning" for item in diagnostics)
         pyxel.text(480, 145, f"E{errors} W{warnings}", ERROR_COLOR if errors else 4)
         pyxel.text(363, 161, f"{len(self.store.sound_effects)} IDS", 4)
-        ally_x, ally_y = definition.offset_for("ally")
-        enemy_x, enemy_y = definition.offset_for("enemy")
-        pyxel.text(363, 177, f"ALLY  {ally_x:+4d},{ally_y:+4d}", 4)
-        pyxel.text(363, 185, f"ENEMY {enemy_x:+4d},{enemy_y:+4d}", 4)
 
     def _draw_strip(self) -> None:
         definition = self.definition
+        pyxel.rect(0, STRIP_HEADER_Y, SCREEN_WIDTH, SCREEN_HEIGHT - STRIP_HEADER_Y, PANEL_COLOR)
+        pyxel.line(0, STRIP_HEADER_Y, SCREEN_WIDTH, STRIP_HEADER_Y, PANEL_BORDER_COLOR)
+        if definition.image_id is None:
+            return
         entry = self.store.catalogs.images[definition.image_id]
         size = definition.cell_size
         maximum = entry.width // size
         visible_count = max(1, STRIP_WIDTH // size)
         maximum_scroll = max(0, maximum - visible_count)
         scroll = max(0, min(self.strip_scroll, maximum_scroll))
-        pyxel.rect(0, STRIP_HEADER_Y, SCREEN_WIDTH, 16, PANEL_COLOR)
-        pyxel.line(0, STRIP_HEADER_Y, SCREEN_WIDTH, STRIP_HEADER_Y, PANEL_BORDER_COLOR)
         last_visible = min(maximum - 1, scroll + visible_count - 1)
         pyxel.text(
             3,

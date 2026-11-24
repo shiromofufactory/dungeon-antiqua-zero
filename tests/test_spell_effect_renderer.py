@@ -84,6 +84,33 @@ class SpellEffectRendererTest(unittest.TestCase):
         self.remap.assert_not_called()
         self.pyxel.blt.assert_not_called()
 
+    def test_blood_suck_draws_flight_during_target_flash_without_sheet(self) -> None:
+        player = SpellEffectPlayer(
+            SpellEffectDefinition.from_record("BLOOD SUCK", {
+                "kind": "blood_suck", "flash_color": 2, "se_id": "spell_blood_suck",
+            }),
+            anchor_x=100, anchor_y=80, caster_anchor=(150, 100),
+        )
+        self.renderer.draw_effect(player)
+        self.pyxel.blt.assert_called_once_with(88, 72, 0, 0, 48, 24, 16, 1)
+        for _ in range(6):
+            player.update()
+        self.renderer.prepare(player)
+        draw_target = Mock()
+        self.renderer.draw_target(player, draw_target)
+        self.renderer.draw_effect(player)
+
+        self.assertLess(player.flash_base_rate, 1.0)
+        draw_target.assert_called_once_with()
+        self.assertEqual(self.remap.call_args_list, [call(0, 3), call(1, 4), call(2, 5), call()])
+        self.pyxel.blt.assert_called_with(118, 84, 0, 48, 48, 24, 16, 1)
+        self.images.image.assert_not_called()
+
+        for _ in range(6):
+            player.update()
+        self.renderer.draw_effect(player)
+        self.assertEqual(self.pyxel.blt.call_count, 2)
+
     def test_screen_flash_composes_with_fade_and_local_variants_then_restores(self) -> None:
         player = SpellEffectPlayer(
             replace(self.player.definition, flash_scope="screen"), anchor_x=100, anchor_y=80

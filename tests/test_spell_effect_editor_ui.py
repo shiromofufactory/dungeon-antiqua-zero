@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app.audio_catalog import SoundEffectDefinition
-from app.spell_effect import SpellEffectDefinition
+from app.spell_effect import SpellEffectDefinition, SpellEffectPlayer
 from app.resources import AudioResourceError
 from tools.spell_effect_editor.app import SoundRegistrationDraft, SpellEffectEditor
 from tools.spell_effect_editor.model import EditorSpell
@@ -55,7 +55,6 @@ class SpellEffectEditorUiTest(unittest.TestCase):
         editor.debug_visible = False
         editor.playing = False
         editor.paused = False
-        editor.looping = False
         editor.exit_confirmation = False
         editor.flash_picker_open = False
         editor.sound_registration = None
@@ -63,6 +62,48 @@ class SpellEffectEditorUiTest(unittest.TestCase):
         editor._refresh_player = Mock()
         editor._set_status = Mock()
         return editor
+
+    def test_play_stops_after_one_pass_and_replays_only_when_requested(self) -> None:
+        editor = self.sound_editor()
+        editor.renderer = Mock()
+        editor._new_player = Mock(side_effect=lambda: SpellEffectPlayer(
+            editor.definition, anchor_x=0, anchor_y=0,
+        ))
+        self.assertNotIn("loop", {button.id for button in editor._buttons()})
+
+        editor._activate("play")
+        for _ in range(editor._player.playback_frames + 2):
+            editor._update_playback()
+
+        self.assertTrue(editor._player.completed)
+        self.assertFalse(editor.playing)
+        sound = editor.store.sound_effect("spell_fire1")
+        editor.se_player.play.assert_called_once_with(sound)
+
+        editor._activate("play")
+        self.assertTrue(editor.playing)
+        self.assertEqual(editor._player.elapsed_frame, 0)
+        self.assertEqual(editor.se_player.play.call_count, 2)
+
+    def test_type_buttons_select_blood_suck_and_keep_flash_and_se_editable(self) -> None:
+        editor = self.sound_editor()
+        editor.store.catalogs = SimpleNamespace(images={
+            "effects/spells32": SimpleNamespace(width=128, height=128),
+            "effects/spells64": SimpleNamespace(width=128, height=128),
+        })
+        editor._change_definition(flash_color=10)
+        editor._activate("type_prev")
+
+        self.assertEqual(editor.definition.to_runtime_record(), {
+            "kind": "blood_suck", "flash_color": 10, "se_id": "spell_fire1",
+        })
+        button_ids = {button.id for button in editor._buttons()}
+        self.assertTrue({"row_next", "count_next", "speed_next", "x_next", "strip_next"}.isdisjoint(button_ids))
+        self.assertTrue({"type_next", "flash_picker", "se_select", "save"} <= button_ids)
+
+        editor._activate("type_prev")
+        self.assertEqual(editor.definition.image_id, "effects/spells64")
+        self.assertIn("count_next", {button.id for button in editor._buttons()})
 
     def test_clicking_sound_name_opens_current_source_without_obsolete_buttons(self) -> None:
         editor = self.sound_editor()

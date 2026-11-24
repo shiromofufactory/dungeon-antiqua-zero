@@ -117,6 +117,9 @@
     },
     "spell_fire2": {
       "sound": 13
+    },
+    "spell_blood_suck": {
+      "sound": 51
     }
   }
 }

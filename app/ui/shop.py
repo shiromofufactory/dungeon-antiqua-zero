@@ -89,11 +89,6 @@ QUANTITY_ARROW_LEFT_X = 22
 QUANTITY_ARROW_RIGHT_X = 32
 QUANTITY_TEXT_HEIGHT = 12
 QUANTITY_ARROW_Y_ADJUSTMENT = 2
-RARE_CHOICE_WINDOW_GRID = (50, 47, 14, 10)
-RARE_CHOICE_X = 4
-RARE_CURSOR_X = 2
-RARE_YES_Y = 2
-RARE_NO_Y = 5
 FACES_IMAGE_ID = "faces/faces"
 
 
@@ -112,7 +107,6 @@ class ShopPhase(Enum):
     COMMAND = "command"
     ITEM = "item"
     QUANTITY = "quantity"
-    RARE_CONFIRMATION = "rare_confirmation"
 
 
 class ShopUiDataError(RuntimeError):
@@ -186,9 +180,6 @@ class ShopOverlay:
         self.quantity_value_text: WindowText | None = None
         self.completion_message_window = None
         self.sell_price_window = None
-        self.rare_window = None
-        self.rare_choice_window = None
-        self.rare_cursor: WindowCursor | None = None
         self._build_windows()
 
     def _required_text(self, key: str) -> str:
@@ -516,9 +507,6 @@ class ShopOverlay:
         self.quantity_window = None
         self.quantity_value_text = None
         self.completion_message_window = None
-        self.rare_window = None
-        self.rare_choice_window = None
-        self.rare_cursor = None
         self._refresh_trade_windows()
 
     def _move_item(self, distance: int) -> None:
@@ -644,38 +632,6 @@ class ShopOverlay:
         )
         self._build_quantity_window()
 
-    def _confirm_quantity(self) -> None:
-        item = self.selected_item
-        if item is None:
-            return
-        if self.mode is ShopMode.SELL and self.shop_system.is_rare_sale(item):
-            self._start_rare_confirmation()
-            return
-        self._finish_transaction()
-
-    def _start_rare_confirmation(self) -> None:
-        yes = self._required_text("settings.yes")
-        no = self._required_text("settings.no")
-        self.phase = ShopPhase.RARE_CONFIRMATION
-        self.quantity_window = None
-        self.rare_window = self._build_shopkeeper_message_window(
-            "shop.rare.confirm"
-        )
-        self.rare_choice_window = self._window_factory.create(
-            *RARE_CHOICE_WINDOW_GRID,
-            (
-                self.localized_texts.create(yes, RARE_CHOICE_X, RARE_YES_Y),
-                self.localized_texts.create(no, RARE_CHOICE_X, RARE_NO_Y),
-            ),
-        )
-        self.rare_cursor = WindowCursor(
-            self.rare_choice_window,
-            (
-                CursorTarget(RARE_CURSOR_X, RARE_YES_Y, key="yes"),
-                CursorTarget(RARE_CURSOR_X, RARE_NO_Y, key="no"),
-            ),
-        )
-
     def _finish_transaction(self) -> None:
         item = self.selected_item
         if item is None:
@@ -700,9 +656,6 @@ class ShopOverlay:
             )
         self.quantity_window = None
         self.quantity_value_text = None
-        self.rare_window = None
-        self.rare_choice_window = None
-        self.rare_cursor = None
         items = self.available_items
         if items:
             self.selected_item_index = min(self.selected_item_index, len(items) - 1)
@@ -715,13 +668,6 @@ class ShopOverlay:
             return
         self._refresh_trade_windows()
 
-    def _cancel_rare_confirmation(self) -> None:
-        self.phase = ShopPhase.ITEM
-        self.rare_window = None
-        self.rare_choice_window = None
-        self.rare_cursor = None
-        self._refresh_trade_windows()
-
     def _invalid_action(self) -> None:
         if self.on_invalid_action is not None:
             self.on_invalid_action()
@@ -730,21 +676,6 @@ class ShopOverlay:
         """Update shop state and return whether the shop should close."""
 
         self.item_list_window.set_vertical_navigation_pressed()
-        if self.phase is ShopPhase.RARE_CONFIRMATION:
-            if self.rare_cursor is None:
-                raise ShopUiDataError("レア売却確認カーソルがありません")
-            if input_state.cancel.triggered:
-                self._cancel_rare_confirmation()
-                return False
-            if input_state.confirm.triggered:
-                if self.rare_cursor.selected_key == "yes":
-                    self._finish_transaction()
-                else:
-                    self._cancel_rare_confirmation()
-                return False
-            self.rare_cursor.update(input_state.navigation)
-            return False
-
         if self.phase is ShopPhase.QUANTITY:
             if input_state.cancel.triggered:
                 self.phase = ShopPhase.ITEM
@@ -753,7 +684,7 @@ class ShopOverlay:
                 self._refresh_trade_windows()
                 return False
             if input_state.confirm.triggered:
-                self._confirm_quantity()
+                self._finish_transaction()
                 return False
             if input_state.navigation is not None and input_state.navigation.dx:
                 self._change_quantity(-1 if input_state.navigation.dx < 0 else 1)
@@ -811,12 +742,6 @@ class ShopOverlay:
         if self.quantity_window is not None:
             self.quantity_window.draw()
             self._draw_quantity_arrows()
-        if self.rare_window is not None:
-            self.rare_window.draw()
-        if self.rare_choice_window is not None:
-            self.rare_choice_window.draw()
-        if self.rare_cursor is not None:
-            self.rare_cursor.draw()
 
     def _draw_quantity_arrows(self) -> None:
         if (

@@ -159,6 +159,7 @@ from rendering import (
     floating_offset,
     floating_phase_offset,
 )
+from rendering.spell_effect import draw_drain_flight
 from resources import (
     TRANSPARENT_INDEX,
     BgmPlayer,
@@ -177,6 +178,8 @@ from spell import (
     SpellType,
 )
 from spell_effect import (
+    BLOOD_SUCK_EFFECT_KIND,
+    DRAIN_FLIGHT_FRAME_COUNT,
     SPELL_RESULT_OVERLAP_FRAME_COUNT,
     SpellEffectPlayer,
     SpellScreenFlash,
@@ -234,8 +237,6 @@ BATTLE_WIN_BGM_ID = "da3-win"
 BATTLE_LEVEL_UP_BGM_ID = "da3-lvup"
 BATTLE_HIT_SE_ID = "battle_hit"
 BATTLE_DRAIN_SE_ID = "battle_drain"
-MONSTER_DRAIN_PATTERNS = (0, 1, 2, 2, 1, 0)
-MONSTER_DRAIN_PATTERN_FRAME_COUNT = 2
 MONSTER_DRAIN_HEAL_DELAY = 10  # DA2's five frames at 60 fps.
 BATTLE_POISON_BREATH_SE_ID = "battle_poison_breath"
 BATTLE_FIRE_BREATH_SE_ID = "battle_fire_breath"
@@ -5426,7 +5427,8 @@ class BattleScene:
             post_effect_wait += MISSED_ACTION_RETURN_WAIT_FRAME_COUNT
         target_start_frames = self._spell_target_start_frames(spell, indexes, effect_indexes)
         effects = self._build_target_spell_effects(
-            spell.key, target_side, effect_indexes, target_start_frames=target_start_frames,
+            spell.key, target_side, effect_indexes, caster=("ally", self.active_party_index),
+            target_start_frames=target_start_frames,
         )
         self.action_presentation = BattleActionPresentation(
             effects,
@@ -6086,7 +6088,6 @@ class BattleScene:
                 if position is not None:
                     x, y = position
                     popups.append(BattleHealingPopup(x + 6, y + 16, restored))
-            play_se(BATTLE_DRAIN_SE_ID)
         for result in ready(presentation.sleep_results):
             monster = self.monsters[result.target_index]
             if result.success:
@@ -6193,11 +6194,17 @@ class BattleScene:
                     BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage, is_miss=result.is_miss)
                 )
         if presentation.drain_monster_index is not None and drained:
-            actor = self.monsters[presentation.drain_monster_index]
-            source = presentation.party_damage_results[0]
-            self._begin_monster_drain(actor, drained, source.popup_x, source.popup_y)
-            self._apply_monster_drain_healing()
-            play_se(BATTLE_DRAIN_SE_ID)
+            index = presentation.drain_monster_index
+            actor = self.monsters[index]
+            restored = drain_healing_amount(
+                damage=drained, hp=actor.state.hp, max_hp=actor.state.max_hp,
+            )
+            if restored:
+                actor.state.apply_healing(restored)
+                x, y = self._monster_base_position(index)
+                popups.append(BattleHealingPopup(
+                    x + actor.width // 2, y + actor.height - 8, restored,
+                ))
 
         for result in ready(presentation.party_poison_results):
             if result.success:
@@ -6507,10 +6514,12 @@ class BattleScene:
     def _spell_target_start_frames(
         self, spell: Spell, indexes: tuple[int, ...], effect_indexes: tuple[int, ...],
     ) -> dict[int, int]:
+        definition = getattr(self, "spell_effects", {}).get(spell.key)
         if (
             len(indexes) < 2
             or not effect_indexes
-            or spell.key not in getattr(self, "spell_effects", {})
+            or definition is None
+            or definition.kind == BLOOD_SUCK_EFFECT_KIND
             or spell.action in (SpellAction.HEAVENGATE, SpellAction.BLOOD_SUCK)
         ):
             return {}
@@ -6549,13 +6558,18 @@ class BattleScene:
 
     def _build_target_spell_effects(
         self, effect_key: str, target_side: str, indexes: tuple[int, ...],
-        *, target_start_frames: Mapping[int, int] | None = None,
+        *, caster: tuple[str, int | None], target_start_frames: Mapping[int, int] | None = None,
     ) -> tuple[BattleTargetSpellEffect, ...]:
         definition = getattr(self, "spell_effects", {}).get(effect_key)
         if definition is None:
             return ()
         settings = getattr(self, "settings", None)
         screen_flash_enabled = settings is None or settings.screen_flash_enabled
+        caster_side, caster_index = caster
+        caster_anchor = (
+            self._spell_effect_anchor(caster_side, caster_index)
+            if definition.kind == BLOOD_SUCK_EFFECT_KIND and caster_index is not None else None
+        )
         effects = []
         for order, index in enumerate(indexes):
             anchor_x, anchor_y = self._spell_effect_anchor(target_side, index)
@@ -6565,6 +6579,7 @@ class BattleScene:
                 SpellEffectPlayer(
                     definition, anchor_x=anchor_x, anchor_y=anchor_y, target_side=target_side,
                     screen_flash_enabled=screen_flash_enabled and order == 0,
+                    caster_anchor=caster_anchor,
                 ),
                 start_frame=target_start_frames.get(index, 0) if target_start_frames else 0,
             ))
@@ -9948,6 +9963,7 @@ class BattleScene:
         )
         effects = self._build_target_spell_effects(
             "CONFUSION", "ally", tuple(result.target_index for result in results if result.success),
+            caster=("enemy", self._monster_index(actor)),
         )
         effect_frame_count = max(
             (effect.player.definition.total_frames for effect in effects),
@@ -10148,8 +10164,10 @@ class BattleScene:
             else indexes
         )
         target_start_frames = self._spell_target_start_frames(spell, indexes, effect_indexes)
+        actor_index = self._monster_index(actor)
         effects = self._build_target_spell_effects(
-            spell.key, target_side, effect_indexes, target_start_frames=target_start_frames,
+            spell.key, target_side, effect_indexes, caster=("enemy", actor_index),
+            target_start_frames=target_start_frames,
         )
         self.action_presentation = BattleActionPresentation(
             effects,
@@ -10158,7 +10176,7 @@ class BattleScene:
             party_damage_results=party_damage_results,
             party_poison_results=self._resolve_monster_poison_results(actor, spell, indexes),
             drain_monster_index=(
-                self._monster_index(actor) if spell.action is SpellAction.BLOOD_SUCK else None
+                actor_index if spell.action is SpellAction.BLOOD_SUCK else None
             ),
             haste_results=self._resolve_haste_results(spell, indexes, target_is_monster=True),
             party_silence_results=party_silence_results,
@@ -10966,26 +10984,16 @@ class BattleScene:
             self.healing_popups.append(BattleHealingPopup(
                 presentation.end_x, presentation.end_y + 16, presentation.amount
             ))
-        if (
-            presentation.elapsed_frame
-            >= len(MONSTER_DRAIN_PATTERNS) * MONSTER_DRAIN_PATTERN_FRAME_COUNT
-            and presentation.healing_applied
-        ):
+        if presentation.elapsed_frame >= DRAIN_FLIGHT_FRAME_COUNT and presentation.healing_applied:
             self.monster_drain_presentation = None
 
     def _draw_monster_drain(self) -> None:
         presentation = getattr(self, "monster_drain_presentation", None)
         if presentation is None:
             return
-        step = presentation.elapsed_frame // MONSTER_DRAIN_PATTERN_FRAME_COUNT
-        if step >= len(MONSTER_DRAIN_PATTERNS):
-            return
-        rate = step / 5
-        x = presentation.start_x + (presentation.end_x - presentation.start_x) * rate
-        y = presentation.start_y + (presentation.end_y - presentation.start_y) * rate
-        pyxel.blt(
-            x - 12, y - 8, 0, MONSTER_DRAIN_PATTERNS[step] * 24, 48,
-            24, 16, TRANSPARENT_INDEX,
+        draw_drain_flight(
+            (presentation.start_x, presentation.start_y),
+            (presentation.end_x, presentation.end_y), presentation.elapsed_frame,
         )
 
     def _apply_monster_attack_damage(self, target_index: int, damage: int) -> int:

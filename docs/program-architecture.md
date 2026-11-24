@@ -687,8 +687,8 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 [`features/shop.md`](./features/shop.md) を正本とする。
 
 ショップマスターの解釈は `app/shop.py` の `Shop` が所有し、`shops.json` のデータ順と
-各店の商品順を維持する。価格、最大取引数、Goldと所持数の同時更新、全店舗の固定商品集合に
-基づくレア売却判定はPyxel非依存の `systems/shop.py` が担当する。
+各店の商品順を維持する。価格、最大取引数、Goldと所持数の同時更新はPyxel非依存の
+`systems/shop.py` が担当する。
 
 ショップOverlayは `app/ui/shop.py` が画面内のPhase、モード、カーソル、一時的な取引個数を
 所有する。購入時の顔と装備比較は `app/ui/shop_party.py` に分けるが、Domain ModelへPyxel描画を

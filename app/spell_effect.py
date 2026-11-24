@@ -13,7 +13,12 @@ from typing import Mapping
 SPELL_EFFECT_FORMAT_VERSION = 2
 SUPPORTED_SPELL_EFFECT_FORMAT_VERSIONS = frozenset((1, SPELL_EFFECT_FORMAT_VERSION))
 SPELL_EFFECT_KIND = "target_sprite"
+BLOOD_SUCK_EFFECT_KIND = "blood_suck"
+DRAIN_FLIGHT_PATTERNS = (0, 1, 2, 2, 1, 0)
+DRAIN_FLIGHT_FRAMES_PER_PATTERN = 2
+DRAIN_FLIGHT_FRAME_COUNT = len(DRAIN_FLIGHT_PATTERNS) * DRAIN_FLIGHT_FRAMES_PER_PATTERN
 SPELL_RESULT_OVERLAP_FRAME_COUNT = 4
+BLOOD_SUCK_EFFECT_FRAME_COUNT = DRAIN_FLIGHT_FRAME_COUNT + SPELL_RESULT_OVERLAP_FRAME_COUNT
 SCREEN_FLASH_TRANSITION_FRAMES = 16
 FLASH_SCOPE_TARGET = "target"
 FLASH_SCOPE_SCREEN = "screen"
@@ -89,11 +94,11 @@ def _offset_pair(value: object, *, field: str, spell_key: str) -> tuple[int, int
 
 @dataclass(frozen=True)
 class SpellEffectDefinition:
-    """Immutable visual and audio settings for one ordinary target effect."""
+    """Immutable visual and audio settings for one spell effect."""
 
     spell_key: str
     kind: str
-    image_id: str
+    image_id: str | None
     row: int
     frame_count: int
     frames_per_pattern: int
@@ -117,34 +122,10 @@ class SpellEffectDefinition:
             raise SpellEffectDataError(f"spell effect must be an object: {spell_key}")
 
         kind = record.get("kind")
-        if kind != SPELL_EFFECT_KIND:
+        if kind not in (SPELL_EFFECT_KIND, BLOOD_SUCK_EFFECT_KIND):
             raise SpellEffectDataError(
                 f"unsupported spell effect kind for {spell_key}: {kind}"
             )
-        image_id = record.get("image_id")
-        if image_id not in SPELL_EFFECT_IMAGE_CELL_SIZES:
-            raise SpellEffectDataError(
-                f"unsupported spell effect image for {spell_key}: {image_id}"
-            )
-
-        offset = record.get("offset")
-        if isinstance(offset, list):
-            # format_version 1 compatibility: the single pair applied to both sides.
-            ally_offset = enemy_offset = _offset_pair(
-                offset, field="offset", spell_key=spell_key
-            )
-        elif isinstance(offset, Mapping):
-            ally_offset = _offset_pair(
-                offset.get("ally"), field="offset.ally", spell_key=spell_key
-            )
-            enemy_offset = _offset_pair(
-                offset.get("enemy"), field="offset.enemy", spell_key=spell_key
-            )
-        else:
-            raise SpellEffectDataError(
-                f"spell effect.offset must be an ally/enemy object: {spell_key}"
-            )
-
         flash_color = record.get("flash_color")
         if flash_color is not None and (
             isinstance(flash_color, bool)
@@ -164,6 +145,37 @@ class SpellEffectDefinition:
         if se_id is not None and (not isinstance(se_id, str) or not se_id):
             raise SpellEffectDataError(
                 f"spell effect.se_id must be null or a non-empty string: {spell_key}"
+            )
+
+        if kind == BLOOD_SUCK_EFFECT_KIND:
+            return cls(
+                spell_key=spell_key, kind=kind, image_id=None,
+                row=0, frame_count=1, frames_per_pattern=4,
+                ally_offset_x=0, ally_offset_y=0, enemy_offset_x=0, enemy_offset_y=0,
+                flash_color=flash_color, se_id=se_id, flash_scope=flash_scope,
+            )
+
+        image_id = record.get("image_id")
+        if not isinstance(image_id, str) or image_id not in SPELL_EFFECT_IMAGE_CELL_SIZES:
+            raise SpellEffectDataError(
+                f"unsupported spell effect image for {spell_key}: {image_id}"
+            )
+        offset = record.get("offset")
+        if isinstance(offset, list):
+            # format_version 1 compatibility: the single pair applied to both sides.
+            ally_offset = enemy_offset = _offset_pair(
+                offset, field="offset", spell_key=spell_key
+            )
+        elif isinstance(offset, Mapping):
+            ally_offset = _offset_pair(
+                offset.get("ally"), field="offset.ally", spell_key=spell_key
+            )
+            enemy_offset = _offset_pair(
+                offset.get("enemy"), field="offset.enemy", spell_key=spell_key
+            )
+        else:
+            raise SpellEffectDataError(
+                f"spell effect.offset must be an ally/enemy object: {spell_key}"
             )
 
         return cls(
@@ -193,6 +205,8 @@ class SpellEffectDefinition:
 
     @property
     def total_frames(self) -> int:
+        if self.kind == BLOOD_SUCK_EFFECT_KIND:
+            return BLOOD_SUCK_EFFECT_FRAME_COUNT
         return self.frame_count * self.frames_per_pattern
 
     @property
@@ -208,7 +222,7 @@ class SpellEffectDefinition:
             raise TypeError("elapsed_frame must be an integer")
         if elapsed_frame < 0:
             raise ValueError("elapsed_frame must not be negative")
-        if elapsed_frame >= self.total_frames:
+        if self.image_id is None or elapsed_frame >= self.total_frames:
             return None
         return min(elapsed_frame // self.frames_per_pattern, self.frame_count - 1)
 
@@ -226,19 +240,19 @@ class SpellEffectDefinition:
         raise ValueError("target_side must be 'ally' or 'enemy'")
 
     def to_runtime_record(self) -> dict[str, object]:
-        record = {
-            "kind": self.kind,
-            "image_id": self.image_id,
-            "row": self.row,
-            "frame_count": self.frame_count,
-            "frames_per_pattern": self.frames_per_pattern,
-            "offset": {
-                "ally": [self.ally_offset_x, self.ally_offset_y],
-                "enemy": [self.enemy_offset_x, self.enemy_offset_y],
-            },
-            "flash_color": self.flash_color,
-            "se_id": self.se_id,
-        }
+        record: dict[str, object] = {"kind": self.kind}
+        if self.image_id is not None:
+            record.update(
+                image_id=self.image_id,
+                row=self.row,
+                frame_count=self.frame_count,
+                frames_per_pattern=self.frames_per_pattern,
+                offset={
+                    "ally": [self.ally_offset_x, self.ally_offset_y],
+                    "enemy": [self.enemy_offset_x, self.enemy_offset_y],
+                },
+            )
+        record.update(flash_color=self.flash_color, se_id=self.se_id)
         if self.flash_scope != FLASH_SCOPE_TARGET:
             record["flash_scope"] = self.flash_scope
         return record
@@ -258,6 +272,7 @@ class SpellEffectPlayer:
         anchor_y: int,
         target_side: str = "enemy",
         screen_flash_enabled: bool = True,
+        caster_anchor: tuple[int, int] | None = None,
     ) -> None:
         if not isinstance(definition, SpellEffectDefinition):
             raise TypeError("definition must be a SpellEffectDefinition")
@@ -272,6 +287,7 @@ class SpellEffectPlayer:
         self.anchor_x = anchor_x
         self.anchor_y = anchor_y
         self.target_side = target_side
+        self.caster_anchor = caster_anchor
         self.screen_flash = definition.screen_flash if screen_flash_enabled else None
         self.elapsed_frame = 0
         self.completed = False
@@ -360,6 +376,10 @@ def load_spell_effects(path: Path) -> Mapping[str, SpellEffectDefinition]:
 
 
 __all__ = [
+    "BLOOD_SUCK_EFFECT_KIND",
+    "DRAIN_FLIGHT_FRAME_COUNT",
+    "DRAIN_FLIGHT_FRAMES_PER_PATTERN",
+    "DRAIN_FLIGHT_PATTERNS",
     "FLASH_SCOPE_SCREEN",
     "FLASH_SCOPE_TARGET",
     "MAX_EFFECT_OFFSET",

@@ -9,15 +9,35 @@ import pyxel
 
 if __package__ == "rendering":
     from resources.images import TRANSPARENT_INDEX, ImageResources
-    from spell_effect import FLASH_SCOPE_TARGET, SpellEffectPlayer, SpellScreenFlash
+    from spell_effect import (
+        BLOOD_SUCK_EFFECT_KIND, DRAIN_FLIGHT_FRAMES_PER_PATTERN, DRAIN_FLIGHT_PATTERNS,
+        FLASH_SCOPE_TARGET, SpellEffectPlayer, SpellScreenFlash,
+    )
     from rendering.palette import PaletteShifter
 else:
     from ..resources.images import TRANSPARENT_INDEX, ImageResources
-    from ..spell_effect import FLASH_SCOPE_TARGET, SpellEffectPlayer, SpellScreenFlash
+    from ..spell_effect import (
+        BLOOD_SUCK_EFFECT_KIND, DRAIN_FLIGHT_FRAMES_PER_PATTERN, DRAIN_FLIGHT_PATTERNS,
+        FLASH_SCOPE_TARGET, SpellEffectPlayer, SpellScreenFlash,
+    )
     from .palette import PaletteShifter
 
 
 SPELL_EFFECT_FLASH_PALETTE = "spell_effect_flash"
+
+
+def draw_drain_flight(
+    start: tuple[int, int], end: tuple[int, int], elapsed_frame: int, *, pyxel_api: Any = pyxel,
+) -> None:
+    """Draw the travelling orb shared by physical and spell drains."""
+
+    step = elapsed_frame // DRAIN_FLIGHT_FRAMES_PER_PATTERN
+    if step >= len(DRAIN_FLIGHT_PATTERNS):
+        return
+    rate = step / (len(DRAIN_FLIGHT_PATTERNS) - 1)
+    x = start[0] + (end[0] - start[0]) * rate
+    y = start[1] + (end[1] - start[1]) * rate
+    pyxel_api.blt(x - 12, y - 8, 0, DRAIN_FLIGHT_PATTERNS[step] * 24, 48, 24, 16, TRANSPARENT_INDEX)
 
 
 class SpellEffectRenderer:
@@ -118,6 +138,13 @@ class SpellEffectRenderer:
     def draw_effect(self, player: SpellEffectPlayer) -> None:
         """Draw the current pattern over the target without advancing time."""
 
+        if player.definition.kind == BLOOD_SUCK_EFFECT_KIND:
+            if not player.completed and player.caster_anchor is not None:
+                draw_drain_flight(
+                    (player.anchor_x, player.anchor_y), player.caster_anchor,
+                    player.elapsed_frame, pyxel_api=self._pyxel,
+                )
+            return
         source = player.source_position
         destination = self.destination_rect(player)
         if source is None or destination is None:
@@ -136,4 +163,4 @@ class SpellEffectRenderer:
         )
 
 
-__all__ = ["SPELL_EFFECT_FLASH_PALETTE", "SpellEffectRenderer"]
+__all__ = ["SPELL_EFFECT_FLASH_PALETTE", "SpellEffectRenderer", "draw_drain_flight"]

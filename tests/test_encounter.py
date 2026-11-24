@@ -369,15 +369,15 @@ class EncounterSystemTest(unittest.TestCase):
                 with self.assertRaises(error):
                     system.advance(0, threshold=threshold)  # type: ignore[arg-type]
 
-    def test_high_danger_can_add_an_early_next_level_monster(self) -> None:
+    def test_high_danger_halves_early_monster_max_occurrence_rounding_up(self) -> None:
         random_source = ScriptedRandom(
             randrange_values=(2,),
-            randint_values=(1, 5),
+            randint_values=(3, 5),
         )
         system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
         monsters = (
             monster("Level 3"),
-            monster("Early Level 4", lv=4, early_appear=1),
+            monster("Early Level 4", lv=4, early_appear=1, max_occ=5),
             monster("Late Level 4", lv=4, early_appear=0),
         )
 
@@ -388,9 +388,36 @@ class EncounterSystemTest(unittest.TestCase):
             living_member_count=3,
         )
 
-        self.assertEqual(formation.monster_keys, ("Early Level 4",))
+        self.assertEqual(formation.monster_keys, ("Early Level 4",) * 3)
         self.assertEqual(random_source.randrange_calls, [4])
-        self.assertEqual(random_source.randint_calls, [(1, 1), (1, 5)])
+        self.assertEqual(random_source.randint_calls, [(1, 3), (1, 5)])
+
+    def test_early_occurrence_cap_uses_the_level_of_each_group_draw(self) -> None:
+        monsters = (
+            monster("First Group"),
+            monster("Second Group", early_appear=1, max_occ=3),
+        )
+        for level_roll, maximum in ((0, 2), (1, 3)):
+            with self.subTest(level_roll=level_roll):
+                random_source = ScriptedRandom(
+                    randrange_values=(0, level_roll, 0),
+                    randint_values=(1, 1, maximum, 5),
+                )
+                system = EncounterSystem(random_source=random_source)  # type: ignore[arg-type]
+
+                formation = system.generate_formation(
+                    monsters,
+                    encounter_settings(),
+                    monster_level=3,
+                    living_member_count=3,
+                )
+
+                self.assertEqual(
+                    formation.monster_keys, ("First Group",) + ("Second Group",) * maximum,
+                )
+                self.assertEqual(
+                    random_source.randint_calls, [(1, 1), (1, 5), (1, maximum), (1, 5)],
+                )
 
     def test_low_danger_halves_max_occurrence_rounding_up(self) -> None:
         random_source = ScriptedRandom(

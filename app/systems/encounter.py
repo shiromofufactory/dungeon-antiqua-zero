@@ -193,7 +193,7 @@ class EncounterSystem:
 
             selected = self._weighted_choice(weighted_pool)
             maximum = selected.max_occurrence
-            if settings.danger == "low":
+            if settings.danger == "low" or selected.level > current_level:
                 maximum = (maximum + 1) // 2
             occurrence = self._random.randint(1, maximum)
             if len(selected_monsters) + occurrence > maximum_monsters:

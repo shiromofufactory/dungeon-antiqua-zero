@@ -57,6 +57,22 @@ def source_record(**changes: object) -> dict[str, object]:
 
 
 class SpellEffectPipelineTest(unittest.TestCase):
+    def test_blood_suck_round_trips_without_sprite_fields_and_validates_flash_and_sound(self) -> None:
+        record = {"kind": "blood_suck", "flash_color": 10, "se_id": "spell_fire1"}
+        source = {"spell_key": "FIRE1", **record}
+        document = {"format_version": 2, "effects": [source]}
+        data_catalogs = catalogs()
+
+        self.assertEqual(compile_document(document, data_catalogs)["effects"]["FIRE1"], record)
+        self.assertEqual(definitions_from_document(document, data_catalogs)["FIRE1"].to_source_record(), source)
+
+        source.update(flash_color=1, se_id="missing")
+        diagnostics = validate_document(document, data_catalogs)
+        self.assertEqual(
+            {item.code for item in diagnostics if item.severity == "error"},
+            {"invalid_flash_color", "unknown_se_id"},
+        )
+
     def test_compiles_source_array_to_runtime_index_in_master_order(self) -> None:
         document = {
             "format_version": 2,

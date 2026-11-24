@@ -99,11 +99,9 @@ class ShopSystemTest(unittest.TestCase):
         self.assertEqual(capped.save_data.gold, MAX_GOLD)
         self.assertEqual(capped.inventory.quantity(self.rare), 1)
 
-    def test_price_zero_is_unsellable_and_global_non_stock_is_rare(self) -> None:
+    def test_price_zero_is_unsellable(self) -> None:
         self.assertFalse(self.system.can_sell(self.protected))
         self.assertEqual(self.system.max_sell_quantity(self.protected), 0)
-        self.assertFalse(self.system.is_rare_sale(self.potion))
-        self.assertTrue(self.system.is_rare_sale(self.rare))
 
     def test_sale_never_changes_fixed_shop_products(self) -> None:
         self.assertTrue(self.system.sell(self.rare, 1))

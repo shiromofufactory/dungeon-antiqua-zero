@@ -57,15 +57,6 @@ class ShopSystem:
         self.inventory = inventory
         self.party = normalized_party
         self.save_data = save_data
-        self._sold_item_keys = frozenset(
-            item.key for shop in normalized_shops for item in shop.items
-        )
-
-    def is_rare_sale(self, item: Item) -> bool:
-        """Return whether no shop in the master data sells this item."""
-
-        self._validate_item(item)
-        return item.key not in self._sold_item_keys
 
     @staticmethod
     def sale_unit_price(item: Item) -> int:
