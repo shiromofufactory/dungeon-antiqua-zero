@@ -521,6 +521,14 @@
           "id": "event_battle_80d9b41205934eea8541cbcb5f12d55f",
           "type": "event_battle",
           "battle_id": "battle_18"
+        },
+        {
+          "id": "treasure_a74916591d834451b7d4400480bce59d",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "SLEEP BLADE"
+          }
         }
       ]
     },
@@ -601,7 +609,7 @@
           "type": "treasure",
           "contents": {
             "type": "item",
-            "item_key": "DWARVEN AXE"
+            "item_key": "WINTER MITTENS"
           }
         },
         {
@@ -755,6 +763,87 @@
           "id": "event_battle_473135cbc98d4558b3d504ce254c76f1",
           "type": "event_battle",
           "battle_id": "battle_20"
+        }
+      ]
+    },
+    {
+      "id": "dungeon_bee5f3b36af64e0eba5721dd2edeb123",
+      "name": "地下水路",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "random_encounter_e597d1cc75684e88b7422a09b913bbf8",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 5,
+            "danger": "low",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": false,
+            "allow_large_animals": false
+          }
+        },
+        {
+          "id": "treasure_1f6c59c384714a9a927056ef4ae71a22",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "ELVEN'S ARCANUM"
+          }
+        },
+        {
+          "id": "treasure_a969b09d3e2e469b8474d5efa943452e",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "MACE of SNAKE"
+          }
+        },
+        {
+          "id": "random_encounter_423536185f1d43d48037bd19c6594322",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 5,
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": false,
+            "allow_large_animals": false
+          }
+        },
+        {
+          "id": "treasure_69dd422a14594954a56159e25890c3b9",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "ROD of DISCORD"
+          }
+        },
+        {
+          "id": "treasure_8de59132b5b74f198cfa91f88dec7a15",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "SHISHIGOROSHI"
+          }
+        },
+        {
+          "id": "random_encounter_de145c1ef84f47ce8f94c63584627396",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 5,
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": false,
+            "allow_large_animals": false
+          }
         }
       ]
     }
