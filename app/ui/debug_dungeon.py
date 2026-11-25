@@ -1,8 +1,30 @@
-"""Dungeon selection and explicit treasure reset confirmation."""
+"""Debug dungeon selection and confirmation overlays."""
 
-from input import Direction
-from ui import CursorTarget
+from input import Direction, InputState
+from ui import CursorTarget, LocalizedWindowTextFactory, WindowFactory
 from ui.debug_text import DEBUG_TEXT
+
+
+class DebugDungeonExitOverlay:
+    def __init__(self, *, texts: LocalizedWindowTextFactory, windows: WindowFactory) -> None:
+        self.window = windows.create(13, 21, 38, 17, (
+            texts.create(DEBUG_TEXT.dungeon_exit_recovery, 4, 3),
+            texts.create(DEBUG_TEXT.dungeon_exit_recovery_yes, 7, 8),
+            texts.create(DEBUG_TEXT.dungeon_exit_recovery_no, 7, 12),
+        ))
+        self.cursor = self.window.set_cursor((
+            CursorTarget(4, 8, key="yes"),
+            CursorTarget(4, 12, key="no"),
+        ))
+
+    def update(self, input_state: InputState) -> bool | None:
+        if input_state.confirm.triggered:
+            return self.cursor.selected_key == "yes"
+        self.window.update(input_state.navigation)
+        return None
+
+    def draw(self) -> None:
+        self.window.draw()
 
 
 class DebugDungeonOverlay:

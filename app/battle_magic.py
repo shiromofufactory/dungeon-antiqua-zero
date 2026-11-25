@@ -25,6 +25,7 @@ SPELL_DAMAGE_MINIMUM_RATE = 0.20
 SPELL_DAMAGE_RATE_RANGE = 0.05
 DA2_POISON_DAMAGE_DENOMINATOR = 16
 DA2_BATTLE_HEALING_DENOMINATOR = 16
+_BOSS_BATTLE_HEALING_DENOMINATOR = 32
 
 
 def debuff_turn_range(resistances: Collection[ResistanceType]) -> tuple[int, int]:
@@ -63,6 +64,7 @@ class SpellDamageResult:
 
     damage: int
     affinity: SpellAffinity = SpellAffinity.NORMAL
+    is_miss: bool = False
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,7 @@ def resolve_spell_damage(
     target_resistances: frozenset[ResistanceType],
     target_is_shadow: bool = False,
     flying_effective: bool = False,
+    dark_resistance_causes_miss: bool = False,
     random_factor: float,
 ) -> SpellDamageResult:
     """Resolve DAMAGE magic with ZERO's formula and DA2's affinities."""
@@ -182,6 +185,9 @@ def resolve_spell_damage(
         raise TypeError("random_factor must be a number")
     if not 0 <= random_factor <= 1:
         raise ValueError("random_factor must be from 0.0 to 1.0")
+
+    if dark_resistance_causes_miss and ResistanceType.DARK in target_resistances:
+        return SpellDamageResult(0, SpellAffinity.RESIST, is_miss=True)
 
     affinity = SpellAffinity.NORMAL
     multiplier = 1.0
@@ -280,8 +286,8 @@ def poison_tick_damage(*, max_hp: int, weak_to_poison: bool = False) -> int:
     ) // DA2_POISON_DAMAGE_DENOMINATOR
 
 
-def battle_healing_amount(*, max_hp: int, healing: int) -> int:
-    """Return the signed HP change for battle recovery equipment and skills."""
+def battle_healing_amount(*, max_hp: int, healing: int, is_boss: bool = False) -> int:
+    """Return the signed HP change from turn-start healing."""
 
     max_hp = _nonnegative_integer(max_hp, "max_hp")
     if max_hp <= 0:
@@ -290,9 +296,10 @@ def battle_healing_amount(*, max_hp: int, healing: int) -> int:
         raise TypeError("healing must be an integer")
     if healing == 0:
         return 0
-    magnitude = (
-        max_hp * abs(healing) + DA2_BATTLE_HEALING_DENOMINATOR - 1
-    ) // DA2_BATTLE_HEALING_DENOMINATOR
+    denominator = (
+        _BOSS_BATTLE_HEALING_DENOMINATOR if is_boss else DA2_BATTLE_HEALING_DENOMINATOR
+    )
+    magnitude = (max_hp * abs(healing) + denominator - 1) // denominator
     return magnitude if healing > 0 else -magnitude
 
 

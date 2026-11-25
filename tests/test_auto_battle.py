@@ -1704,16 +1704,19 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         self.assertFalse(forecast.actors[1].front)
 
     def test_enemy_turn_healing_matches_poison_net_change_and_caps_hp(self):
-        for healing, poisoned, weak, hp, expected in (
-            (1, False, False, 10, 18),
-            (1, False, False, 119, 120),
-            (1, True, False, 10, 10),
-            (1, True, True, 40, 33),
-            (-1, True, False, 10, 0),
+        for healing, poisoned, weak, is_boss, hp, expected in (
+            (1, False, False, False, 10, 18),
+            (1, False, False, False, 119, 120),
+            (1, True, False, False, 10, 10),
+            (1, True, True, False, 40, 33),
+            (-1, True, False, False, 10, 0),
+            (1, False, False, True, 10, 14),
+            (1, True, False, True, 10, 6),
+            (-1, False, False, True, 10, 6),
         ):
-            with self.subTest(healing=healing, poisoned=poisoned, weak=weak, hp=hp):
+            with self.subTest(healing=healing, poisoned=poisoned, weak=weak, is_boss=is_boss, hp=hp):
                 spec = self.enemy(
-                    hp=hp, healing=healing, poisoned=poisoned, sleeping=2,
+                    hp=hp, healing=healing, poisoned=poisoned, sleeping=2, is_boss=is_boss,
                     weaknesses=frozenset((ResistanceType.POISON,)) if weak else frozenset(),
                 )
                 forecast = BattleForecast(self.snapshot(self.specs[0], spec), 0)
@@ -2145,7 +2148,15 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         )
         scene.monsters = (
             BattleMonster.from_record(
-                {**record, "healing": 2, "mmp": 12, "shadow": 1, "tolerance": "死", "weakness": "炎"},
+                {
+                    **record,
+                    "healing": 2,
+                    "is_boss": 1,
+                    "mmp": 12,
+                    "shadow": 1,
+                    "tolerance": "死",
+                    "weakness": "炎",
+                },
                 is_front_row=True,
             ),
         )
@@ -2193,6 +2204,7 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         self.assertFalse(enemy.weaknesses)
         self.assertEqual(enemy.confused, 2)
         self.assertEqual(enemy.healing, 2)
+        self.assertTrue(enemy.is_boss)
         self.assertEqual((initial.hp, initial.mp), (state.max_hp, 12))
 
         state.apply_healing(4)

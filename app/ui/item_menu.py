@@ -300,6 +300,7 @@ class ItemMenuOverlay:
             faces=self.faces,
             palette_shifter=self.palette_shifter,
             cursor_active=self.phase is ItemSelectionPhase.TARGET,
+            show_mp=self._show_mp_for_selected_item(),
         )
         self.party_window = self.party_panel.window
         self.member_cursor = self.party_panel.cursor
@@ -391,6 +392,17 @@ class ItemMenuOverlay:
             info_texts,
         )
         self._refresh_windows()
+        if self.party_panel.show_mp != self._show_mp_for_selected_item():
+            self._build_party_panel()
+
+    def _show_mp_for_selected_item(self) -> bool:
+        return (
+            self.category is ItemCategory.USE
+            and self.phase in (ItemSelectionPhase.ITEM, ItemSelectionPhase.TARGET)
+            and self.selected_item is not None
+            and self.selected_item.use_spell_key in self.spells
+            and self.spells[self.selected_item.use_spell_key].action is SpellAction.MANA
+        )
 
     def _item_summary_texts(self) -> tuple[WindowText, ...]:
         recorded_label = self.texts.text("item.recorded.count", self.localizer)

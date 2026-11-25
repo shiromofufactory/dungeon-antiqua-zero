@@ -116,6 +116,36 @@ class BattleTribeTest(unittest.TestCase):
         self.assertFalse(strike.is_critical)
         self.assertEqual(strike.damage, 0)
 
+    def test_chizakura_only_drains_targets_without_dark_resistance(self):
+        for command in (BattleCommand.ATTACK, BattleCommand.IAI):
+            damages = []
+            for resistant in (False, True):
+                with self.subTest(command=command, resistant=resistant):
+                    scene = self.scene(self.items["CHIZAKURA!"], command=command)
+                    caster = scene.party[0]
+                    caster.hp = caster.max_hp - 1
+                    if command is BattleCommand.IAI:
+                        caster.skills.append(self.skills["Iai"])
+                    target = scene.monsters[0]
+                    target.resistances = frozenset({ResistanceType.DARK}) if resistant else frozenset()
+                    scene.healing_popups = []
+                    scene._party_draw_position = Mock(return_value=(188, 64))
+                    scene._refresh_party_hp_text = Mock()
+                    scene._begin_action_motion(use_cast_pose=False)
+                    with patch("scenes.battle.random.randint", return_value=0), patch("scenes.battle.play_se"):
+                        self.assertTrue(scene._begin_attack_presentation())
+                        presentation = scene.attack_presentation
+                        strike, = presentation.strikes
+                        damages.append(strike.damage)
+                        self.assertGreater(strike.damage, 0)
+                        presentation.elapsed_frame = strike.hit_start_frame - 1
+                        scene._update_attack_presentation()
+                    self.assertLess(target.state.hp, target.state.max_hp)
+                    self.assertEqual(caster.hp, caster.max_hp - int(resistant))
+                    self.assertEqual([popup.amount for popup in scene.healing_popups], [] if resistant else [1])
+            if len(damages) == 2:
+                self.assertEqual(damages[0], damages[1])
+
     def test_species_bonus_increases_status_effect_points(self):
         weapon = replace(self.items["GOBLIN SLAYER"], additional_effect=AdditionalEffect.POISON)
         scene = self.scene(weapon)

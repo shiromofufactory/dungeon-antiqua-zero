@@ -421,6 +421,7 @@ class GameScreenChange(Enum):
     START_GAME = auto()
     START_DEBUG_DUNGEON = auto()
     EXIT_DEBUG_DUNGEON = auto()
+    EXIT_DEBUG_DUNGEON_WITH_RECOVERY = auto()
 
 
 class MenuAlertEffect:
@@ -1366,7 +1367,8 @@ class Game:
             simulation.party = self.party
             simulation.complete_battle(victory=result is BattleResult.VICTORY)
             if result is BattleResult.DEFEAT:
-                self._finish_debug_dungeon(revive=True)
+                self.party_system.recover_all(revive=True)
+                self._finish_debug_dungeon()
                 self.bgm.set_fade_rate(0.0)
             elif battle_scene is not None:
                 self.bgm.transition_to(simulation.dungeon.bgm_id, start_sec=battle_scene.return_bgm_start_sec)
@@ -2382,7 +2384,11 @@ class Game:
             on_battle=self._start_debug_dungeon_battle,
             on_event=self._start_field_event,
             on_menu=lambda: self._begin_screen_change(GameScreenChange.SHOW_MENU),
-            on_exit=lambda: self._begin_screen_change(GameScreenChange.EXIT_DEBUG_DUNGEON),
+            on_exit=lambda recover: self._begin_screen_change(
+                GameScreenChange.EXIT_DEBUG_DUNGEON_WITH_RECOVERY
+                if recover
+                else GameScreenChange.EXIT_DEBUG_DUNGEON
+            ),
             alert=self.alert,
         )
         self.pending_debug_dungeon = None
@@ -2403,8 +2409,7 @@ class Game:
         self._begin_random_encounter()
         return True
 
-    def _finish_debug_dungeon(self, *, revive: bool) -> None:
-        self.party_system.recover_all(revive=revive)
+    def _finish_debug_dungeon(self) -> None:
         self.debug_dungeon_scene = None
         self._promote_first_recoverable_member()
         self._build_main_windows(animate=False)
@@ -2818,8 +2823,13 @@ class Game:
             self._apply_start_game()
         elif change is GameScreenChange.START_DEBUG_DUNGEON:
             self._apply_debug_dungeon()
-        elif change is GameScreenChange.EXIT_DEBUG_DUNGEON:
-            self._finish_debug_dungeon(revive=False)
+        elif change in (
+            GameScreenChange.EXIT_DEBUG_DUNGEON,
+            GameScreenChange.EXIT_DEBUG_DUNGEON_WITH_RECOVERY,
+        ):
+            if change is GameScreenChange.EXIT_DEBUG_DUNGEON_WITH_RECOVERY:
+                self.party_system.recover_all(revive=False)
+            self._finish_debug_dungeon()
         elif change is GameScreenChange.SHOW_START_MENU:
             self._show_start_menu()
         elif change is GameScreenChange.SHOW_CONTROL_GUIDE:

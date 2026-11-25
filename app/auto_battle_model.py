@@ -140,6 +140,7 @@ class AutoCombatant:
     gender: Gender = Gender.NONE
     action_rotation_index: int | None = None
     monster_placement: MonsterPlacement | None = None
+    is_boss: bool = False
 
     @classmethod
     def from_member(

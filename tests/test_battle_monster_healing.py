@@ -10,13 +10,14 @@ from scenes.battle import BattleMonster, BattleScene
 
 
 class MonsterTurnHealingTest(unittest.TestCase):
-    def make_scene(self, *, healing=1, hp=10, poisoned=False, weak=False):
+    def make_scene(self, *, healing=1, hp=10, poisoned=False, weak=False, is_boss=False):
         monster = BattleMonster(
             key="healer", names={}, image_id="0", width=64, height=64,
             icon_x=0, icon_y=0, is_front_row=True, agility=10,
             state=MonsterBattleState(max_hp=120, hp=hp, poisoned=poisoned, sleeping=2),
             combat_stats=MonsterCombatStats(0, 0, 0, 0, healing=healing),
             weaknesses=frozenset((ResistanceType.POISON,)) if weak else frozenset(),
+            is_boss=is_boss,
         )
         scene = BattleScene.__new__(BattleScene)
         scene.monsters = (monster,)
@@ -35,6 +36,12 @@ class MonsterTurnHealingTest(unittest.TestCase):
         popup = scene.healing_popups[0]
         self.assertEqual((popup.x, popup.y, popup.amount), (42, 76, 8))
         self.assertEqual(scene.spell_damage_popups, [])
+
+    def test_boss_recovers_one_thirty_second_per_healing_level(self):
+        scene, monster = self.make_scene(healing=2, is_boss=True)
+        self.assertFalse(scene._apply_turn_start_hp_change(monster))
+        self.assertEqual(monster.state.hp, 18)
+        self.assertEqual(scene.healing_popups[0].amount, 8)
 
     def test_recovery_is_capped_at_max_hp_and_shows_full_amount(self):
         scene, monster = self.make_scene(hp=119)

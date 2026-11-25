@@ -51,6 +51,7 @@ if __package__:
         resolve_physical_attack,
         counter_attack_succeeds,
         resolve_earthquake_attack,
+        weapon_can_drain,
     )
     from .battle_speed import MAX_SPEED_MODIFIER, SLOW_GAUGE_ADJUSTMENT, modified_agility
     from .battle_timeline import (
@@ -119,6 +120,7 @@ else:
         resolve_physical_attack,
         counter_attack_succeeds,
         resolve_earthquake_attack,
+        weapon_can_drain,
     )
     from battle_speed import MAX_SPEED_MODIFIER, SLOW_GAUGE_ADJUSTMENT, modified_agility
     from battle_timeline import (
@@ -992,6 +994,8 @@ class BattleForecast:
                 continue
             if result.hit:
                 target.damage(result.damage)
+                if weapon_can_drain(weapon.effect, target.spec.resistances):
+                    actor.drain(result.damage)
             if (
                 hand == 0 and not is_counter and target.spec.enemy
                 and MonsterSpecialAction.COUNTER in target.spec.special_actions
@@ -1175,8 +1179,11 @@ class BattleForecast:
                         target_resistances=target.spec.resistances,
                         target_is_shadow=target.spec.shadow,
                         flying_effective=spell.effective_race == "FLYING",
+                        dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
                         random_factor=u,
                     )
+                    if result.is_miss:
+                        continue
                     drained = target.damage(result.damage)
                     if spell.action is SpellAction.BLOOD_SUCK:
                         actor.drain(drained)
@@ -1562,8 +1569,11 @@ class BattleForecast:
                             attribute=spell.attribute,
                             target_weaknesses=target.spec.weaknesses,
                             target_resistances=target.spec.resistances,
+                            dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
                             random_factor=self.roll(actor, target.spec.number, 5),
                         )
+                        if result.is_miss:
+                            continue
                         drained = target.damage(result.damage)
                         if spell.action is SpellAction.BLOOD_SUCK:
                             actor.drain(drained)
@@ -1814,7 +1824,10 @@ class BattleForecast:
         for hand, (result, candidates) in enumerate(zip(results, effect_sources)):
             if not target.is_alive or not result.hit:
                 continue
+            weapon = actor.spec.weapons[hand]
             target.damage(result.damage)
+            if weapon_can_drain(weapon.effect, target.spec.resistances):
+                actor.drain(result.damage)
             for effect, stacked in candidates:
                 if not target.is_alive:
                     break
@@ -1840,9 +1853,9 @@ class BattleForecast:
                     weapon_effective=(
                         target.spec.enemy
                         and physical_weapon_is_effective(
-                            effective_tribe=actor.spec.weapons[hand].effective_tribe,
+                            effective_tribe=weapon.effective_tribe,
                             target_tribe=target.spec.tribe,
-                            attribute=actor.spec.weapons[hand].attribute,
+                            attribute=weapon.attribute,
                             target_weaknesses=target.spec.weaknesses,
                             target_resistances=target.spec.resistances,
                         )
@@ -1869,7 +1882,9 @@ class BattleForecast:
             else 0
         )
         recovery = battle_healing_amount(
-            max_hp=actor.max_hp, healing=actor.spec.healing
+            max_hp=actor.max_hp,
+            healing=actor.spec.healing,
+            is_boss=actor.spec.is_boss,
         )
         delta = recovery - poison
         if delta < 0:

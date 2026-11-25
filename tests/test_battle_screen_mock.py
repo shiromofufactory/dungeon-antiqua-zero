@@ -5988,6 +5988,7 @@ class BattleScreenMockTest(unittest.TestCase):
         mock.action_targets_enemy = False
         mock.action_targets_all = False
         mock.selected_party_target_index = 1
+        mock.party_status_shows_mp = True
         mock.spell_effects = {}
         mock._party_draw_position = Mock(return_value=(100, 80))
         mock.target_cursor = Mock(active=False)
@@ -6008,7 +6009,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(target.mp, target.max_mp)
         self.assertEqual(target.hp, before_hp)
         self.assertEqual(mock.healing_popups[0].amount, 1)
-        mock._refresh_party_hp_text.assert_not_called()
+        mock._refresh_party_hp_text.assert_called_once_with(1)
         mock._apply_action_results(presentation)
         self.assertEqual(len(mock.healing_popups), 1)
 
@@ -6040,6 +6041,7 @@ class BattleScreenMockTest(unittest.TestCase):
                     scene.auto_battle_active = auto
                     scene.action_offset_x = 0
                     scene.action_presentation = None
+                    scene.party_status_shows_mp = False
                     scene.spell_effects = definitions
                     scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
                     scene.localizer = Localizer(Language.JAPANESE)
@@ -6055,6 +6057,7 @@ class BattleScreenMockTest(unittest.TestCase):
                     else:
                         scene.update()
                     self.assertIs(scene.phase, BattleMockPhase.ACTION_PRESENTATION)
+                    self.assertFalse(scene.party_status_shows_mp)
                     self.assertTrue(scene.action_uses_cast_pose)
                     self.assertEqual(scene.hidden_party_indexes, set())
                     scene._update_action_presentation()
@@ -6087,6 +6090,7 @@ class BattleScreenMockTest(unittest.TestCase):
                         scene._update_action_presentation()
 
                     self.assertIs(scene.phase, BattleMockPhase.ACTION_RETURN)
+                    self.assertFalse(scene.party_status_shows_mp)
                     roll.assert_called_once_with(10_000)
                     self.assertEqual(ally.mp, 0)
                     scene._refresh_party_hp_text.assert_not_called()
@@ -8198,7 +8202,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_target_index, 1)
         self.assertTrue(mock.target_cursor.active)
 
-    def test_mana_drop_keeps_hp_visible_during_targeting_and_use(self) -> None:
+    def test_mana_drop_shows_mp_until_target_cancel_or_turn_end(self) -> None:
         items = load_mock_items()
         spell = load_mock_spells()["MANA DROP"]
         mock = BattleScreenMock.__new__(BattleScreenMock)
@@ -8244,6 +8248,7 @@ class BattleScreenMockTest(unittest.TestCase):
             mock.party_status_windows.append(window)
             mock.party_status_texts.append((name, points))
         hp_text = mock.party_status_texts[2][1].text
+        mp_text = ascii_to_fullwidth(f"{mock.party[2].mp:3d}/{mock.party[2].max_mp:3d}")
 
         self.assertEqual(mock._selectable_party_indexes_for_spell(spell), (0, 2, 3))
         self.assertTrue(
@@ -8255,7 +8260,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.selected_party_target_index, 0)
         self.assertTrue(mock._move_party_target(Direction.DOWN))
         self.assertEqual(mock.selected_party_target_index, 2)
-        self.assertEqual(mock.party_status_texts[2][1].text, hp_text)
+        self.assertEqual(mock.party_status_texts[2][1].text, mp_text)
 
         mock._cancel_action_target_selection()
 
@@ -8275,7 +8280,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertTrue(mock._confirm_action_target_selection())
         self.assertEqual(mock.inventory_system.quantity("MANA DROP"), 0)
         mock._begin_action_presentation.assert_called_once_with(spell)
-        self.assertEqual(mock.party_status_texts[2][1].text, hp_text)
+        self.assertEqual(mock.party_status_texts[2][1].text, mp_text)
 
         mock._clear_action_motion_state = Mock()
         mock._start_timeline_animation = Mock()

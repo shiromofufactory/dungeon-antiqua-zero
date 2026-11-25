@@ -11,6 +11,7 @@ from resources import play_se
 from state import Language
 from systems.treasure import TreasureOpenStatus
 from ui import CursorTarget, DEFAULT_TEXT_COLOR, DISABLED_COLOR, NEGATIVE_COLOR, LocalizedWindowTextFactory, MessageOverlay, WindowFactory
+from ui.debug_dungeon import DebugDungeonExitOverlay
 from ui.debug_text import DEBUG_TEXT
 
 
@@ -18,7 +19,7 @@ class DebugDungeonScene:
     def __init__(self, *, dungeon: DebugDungeon, party, event_flags: set[str], settings, fonts, texts, items,
                  treasure_system, on_battle: Callable[[DungeonStep], bool],
                  on_event: Callable[[str], bool],
-                 on_menu: Callable[[], None], on_exit: Callable[[], None], alert) -> None:
+                 on_menu: Callable[[], None], on_exit: Callable[[bool], None], alert) -> None:
         self.progress = DungeonProgress(dungeon)
         self.party = party
         self.event_flags = event_flags
@@ -33,6 +34,7 @@ class DebugDungeonScene:
         self.on_exit = on_exit
         self.alert = alert
         self.message: MessageOverlay | None = None
+        self.exit_confirmation: DebugDungeonExitOverlay | None = None
         self.notice = ""
         self.waiting_for_battle = False
         self.waiting_for_event = False
@@ -189,6 +191,15 @@ class DebugDungeonScene:
             return
         if self.waiting_for_battle or self.waiting_for_event:
             return
+        if self.exit_confirmation is not None:
+            if input_state.cancel.triggered:
+                self.exit_confirmation = None
+                self.cursor.active = True
+            else:
+                recover = self.exit_confirmation.update(input_state)
+                if recover is not None:
+                    self.on_exit(recover)
+            return
         if input_state.menu.triggered:
             self.on_menu()
         elif input_state.confirm.triggered:
@@ -196,7 +207,8 @@ class DebugDungeonScene:
             if key == "next":
                 self.advance()
             elif key == "exit":
-                self.on_exit()
+                self.exit_confirmation = DebugDungeonExitOverlay(texts=self.placements, windows=self.windows)
+                self.cursor.active = False
             elif key == "menu":
                 self.on_menu()
         else:
@@ -206,3 +218,5 @@ class DebugDungeonScene:
         self.window.draw()
         if self.message is not None:
             self.message.draw()
+        if self.exit_confirmation is not None:
+            self.exit_confirmation.draw()

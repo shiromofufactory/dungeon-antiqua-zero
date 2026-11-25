@@ -737,6 +737,26 @@
           }
         }
       ]
+    },
+    {
+      "id": "dungeon_bad60ded44a74355b22dff362740bfd3",
+      "name": "ヒュドラの洞窟再",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "treasure_0524c2441dd343ba896fe910b25612b9",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "GREAT SWORD+"
+          }
+        },
+        {
+          "id": "event_battle_473135cbc98d4558b3d504ce254c76f1",
+          "type": "event_battle",
+          "battle_id": "battle_20"
+        }
+      ]
     }
   ]
 }

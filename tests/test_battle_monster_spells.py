@@ -25,7 +25,11 @@ from member import EquipmentSlot, Member, FormationRow
 from battle_timeline import TimelineEntry, TimelineOrder
 from resources import load_record_array
 from resistance import ResistanceType
-from scenes.battle import BattleMonster
+from scenes.battle import (
+    MISSED_ACTION_RETURN_WAIT_FRAME_COUNT,
+    SPELL_POST_EFFECT_WAIT_FRAME_COUNT,
+    BattleMonster,
+)
 from spell_effect import SPELL_RESULT_OVERLAP_FRAME_COUNT, load_spell_effects
 
 
@@ -552,9 +556,11 @@ class BattleDebuffRecoveryTest(unittest.TestCase):
 
 
 class MonsterDamageSpellTest(unittest.TestCase):
-    def test_party_blood_suck_respects_dark_affinity_and_caps_healing(self):
+    def test_party_blood_suck_misses_against_dark_resistance(self):
         target = spellcaster(magic=0, spell_key="HASTE")
         target.resistances = frozenset({ResistanceType.DARK})
+        target.weaknesses = frozenset({ResistanceType.DARK})
+        target.state.apply_sleep(2)
         scene = spell_scene(target)
         caster = scene.party[0]
         caster.hp = caster.max_hp - 1
@@ -577,17 +583,60 @@ class MonsterDamageSpellTest(unittest.TestCase):
             presentation = scene.action_presentation
             result, = presentation.damage_results
             self.assertIs(result.affinity, SpellAffinity.RESIST)
-            self.assertGreater(result.damage, 1)
-            effect, = presentation.spell_effects
-            self.assertEqual(effect.player.caster_anchor, scene._spell_effect_anchor("ally", 0))
-            play_se.assert_called_once_with("spell_blood_suck")
-            for _ in range(presentation.result_start_frame):
-                scene._update_action_presentation()
+            self.assertTrue(result.is_miss)
+            self.assertEqual(result.damage, 0)
+            self.assertIs(scene.affinity_popups[0].affinity, SpellAffinity.RESIST)
+            self.assertEqual(presentation.spell_effects, ())
+            self.assertEqual(
+                presentation.post_effect_wait_frame_count,
+                SPELL_POST_EFFECT_WAIT_FRAME_COUNT + MISSED_ACTION_RETURN_WAIT_FRAME_COUNT,
+            )
+            scene._update_action_presentation()
 
-        self.assertEqual(target.state.hp, max(0, target.state.max_hp - result.damage))
-        self.assertEqual(caster.hp, caster.max_hp)
-        self.assertEqual(scene.healing_popups[0].amount, 1)
-        play_se.assert_called_once_with("spell_blood_suck")
+        self.assertEqual(target.state.hp, target.state.max_hp)
+        self.assertEqual(target.state.sleeping, 2)
+        self.assertEqual(caster.hp, caster.max_hp - 1)
+        self.assertEqual(scene.healing_popups, [])
+        self.assertEqual([popup.is_miss for popup in scene.spell_damage_popups], [True])
+        scene.spell_effect_renderer.prepare.assert_not_called()
+        play_se.assert_not_called()
+
+    def test_monster_blood_suck_misses_against_dark_resistance(self):
+        spell_key = "BLOOD SUCK"
+        actor = spellcaster(magic=20, spell_key=spell_key)
+        actor.state.take_damage(10)
+        scene = spell_scene(actor)
+        scene.spell_effects = load_spell_effects(APP_ROOT / "effects" / "spells.json")
+        scene.spell_effect_renderer = Mock()
+        target = scene.party[0]
+        target.equipment = target.equipment.replaced({
+            EquipmentSlot.RIGHT: load_mock_items()["CHIZAKURA!"],
+        })
+        target.apply_sleep(2)
+        hp = target.hp
+
+        with (
+            patch("scenes.battle.random.choice", return_value=0),
+            patch("scenes.battle.random.random", return_value=0.5),
+            patch("scenes.battle.play_se") as play_se,
+        ):
+            self.assertTrue(scene._begin_monster_spell(actor, scene.spells[spell_key]))
+            presentation = scene.action_presentation
+            result, = presentation.party_damage_results
+            self.assertIs(result.affinity, SpellAffinity.RESIST)
+            self.assertTrue(result.is_miss)
+            self.assertEqual(result.damage, 0)
+            self.assertEqual(presentation.spell_effects, ())
+            scene._update_action_presentation()
+
+        self.assertEqual(target.hp, hp)
+        self.assertEqual(target.sleeping, 2)
+        self.assertFalse(presentation.party_damage_motion_visible(0))
+        self.assertEqual(actor.state.hp, 10)
+        self.assertEqual(actor.state.mp, actor.state.max_mp - scene.spells[spell_key].mp)
+        self.assertEqual(scene.healing_popups, [])
+        self.assertEqual([popup.is_miss for popup in scene.spell_damage_popups], [True])
+        play_se.assert_not_called()
 
     def test_mage_dwarf_blood_suck_heals_only_actual_hp_lost_once(self):
         record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "メイジドワーフ")

@@ -207,6 +207,31 @@ class DebugDungeonSceneTest(unittest.TestCase):
         self.assertIn("ステップ　２／４", texts)
         self.assertFalse(any("ランダム戦闘" in text or "残り戦闘" in text for text in texts))
 
+    def test_exit_confirmation_is_japanese_and_cancel_returns_to_the_same_step(self):
+        self.settings = Settings(language=Language.ENGLISH)
+        scene = self.scene()
+        checkpoint = DungeonCheckpoint(scene.dungeon.id, "random_1", 1, True)
+        scene.resume(checkpoint)
+        scene.update(InputState(navigation=Direction.DOWN))
+        scene.update(InputState(confirm=InputButton(True, True)))
+
+        confirmation = scene.exit_confirmation
+        self.assertEqual([text.text for text in confirmation.window.texts],
+                         ["脱出時に回復しますか？", "はい", "いいえ"])
+        self.assertEqual(confirmation.cursor.selected_key, "yes")
+        self.assertFalse(scene.cursor.active)
+        scene.update(InputState(menu=InputButton(True, True)))
+        scene.update(InputState(navigation=Direction.DOWN))
+        self.assertEqual(confirmation.cursor.selected_key, "no")
+        scene.update(InputState(cancel=InputButton(True, True)))
+
+        self.exit.assert_not_called()
+        self.menu.assert_not_called()
+        self.assertIsNone(scene.exit_confirmation)
+        self.assertTrue(scene.cursor.active)
+        self.assertEqual(scene.cursor.selected_key, "exit")
+        self.assertEqual(scene.progress.checkpoint(), checkpoint)
+
     def test_healing_spring_calls_common_event_and_waits_before_completing(self):
         data = source()
         data["dungeons"][0]["steps"].insert(0, {"id": "spring", "type": "healing_spring"})
@@ -601,23 +626,47 @@ class DebugDungeonGameTest(unittest.TestCase):
                 game.bgm.transition_to.assert_called_once_with(simulation.dungeon.bgm_id, start_sec=12.5)
                 self.assertIsNone(game.battle_scene)
 
-    def test_leaving_the_trial_recovers_only_living_members(self):
-        game = self.game_with_party()
-        dead, living, *_ = game.party
-        dead.hp = dead.mp = 0
-        living.hp = 1
-        living.mp = 0
-        living.poisoned = True
-        game.pending_screen_change = GameScreenChange.EXIT_DEBUG_DUNGEON
+    def test_leaving_the_trial_recovers_only_living_members_when_requested(self):
+        for recover in (False, True):
+            with self.subTest(recover=recover):
+                game = self.game_with_party()
+                field = game.field
+                game.pending_debug_dungeon = parse_dungeons(source())[0]
+                game.settings = Settings()
+                game.fonts = FontResources()
+                game.texts = Mock()
+                game.treasure_system = Mock()
+                game.alert = Mock()
+                dead, living, *_ = game.party
+                dead.hp = dead.mp = 0
+                living.hp, living.mp = 1, 0
+                living.poisoned = living.paralyzed = True
+                game._apply_debug_dungeon()
+                scene = game.debug_dungeon_scene
+                scene.resume(scene.progress.checkpoint())
 
-        game._apply_pending_screen_change()
+                scene.update(InputState(navigation=Direction.DOWN))
+                scene.update(InputState(confirm=InputButton(True, True)))
+                self.assertIsNone(getattr(game, "pending_screen_change", None))
+                if not recover:
+                    scene.update(InputState(navigation=Direction.DOWN))
+                scene.update(InputState(confirm=InputButton(True, True)))
+                expected_change = (GameScreenChange.EXIT_DEBUG_DUNGEON_WITH_RECOVERY if recover
+                                   else GameScreenChange.EXIT_DEBUG_DUNGEON)
+                self.assertIs(game.pending_screen_change, expected_change)
+                self.assertEqual((living.hp, living.mp, living.poisoned, living.paralyzed), (1, 0, True, True))
+                game.bgm.play.assert_called_once_with(scene.dungeon.bgm_id)
 
-        self.assertEqual((dead.hp, dead.mp), (0, 0))
-        self.assertEqual((living.hp, living.mp), (living.max_hp, living.max_mp))
-        self.assertFalse(living.poisoned)
-        self.assertIsNone(game.debug_dungeon_scene)
-        self.assertTrue(game.showing_field)
-        game.bgm.play.assert_called_once_with("original")
+                game._apply_pending_screen_change()
+
+                self.assertEqual((dead.hp, dead.mp), (0, 0))
+                expected = (living.max_hp, living.max_mp, False, False) if recover else (1, 0, True, True)
+                self.assertEqual((living.hp, living.mp, living.poisoned, living.paralyzed), expected)
+                self.assertIsNone(game.debug_dungeon_scene)
+                self.assertIs(game.field, field)
+                self.assertTrue(game.showing_field)
+                self.assertEqual(game.bgm.play.call_count, 2)
+                game.bgm.play.assert_called_with("original")
 
     def test_defeat_exits_and_revives_without_resolving_a_real_dungeon_exit(self):
         game = self.game_with_party()

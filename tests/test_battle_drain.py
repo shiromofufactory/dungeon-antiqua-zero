@@ -6,10 +6,13 @@ from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT  # noqa: F401
+from auto_battle_model import AutoAction, AutoWeapon
 from auto_battle_simulation import BattleForecast
+from battle_commands import BattleCommand
 from battle_physical import PhysicalAttackResult, drain_healing_amount, resolve_physical_attack
 from item import AdditionalEffect
 from monster import MonsterSpecialAction
+from monster_ai import MonsterSpellAction
 from resistance import ResistanceType
 from resources import load_record_array
 from resources.audio import sound_effect_definition
@@ -266,6 +269,43 @@ class MonsterDrainTest(unittest.TestCase):
 
 
 class DrainForecastTest(AutoBattleFixtures, unittest.TestCase):
+    def test_party_forecast_dark_resistance_blocks_spell_hit_and_weapon_drain(self):
+        spell = self.spells["BLOOD SUCK"]
+        member = replace(self.specs[0], hp=1, magic=20, weapons=(AutoWeapon(
+            attack=30, hit=100, attribute=ResistanceType.DARK, effect=AdditionalEffect.DRAIN,
+        ),))
+        for resistant in (False, True):
+            resistances = frozenset({ResistanceType.DARK}) if resistant else frozenset()
+            for command in (BattleCommand.ATTACK, BattleCommand.SPELL):
+                with self.subTest(command=command, resistant=resistant):
+                    enemy = self.enemy(resistances=resistances)
+                    forecast = BattleForecast(self.snapshot(member, enemy), 0)
+                    forecast.roll = Mock(return_value=0.5)
+                    actor, target = forecast.actors[0], forecast.actors[5]
+                    if command is BattleCommand.SPELL:
+                        forecast.cast(actor, AutoAction(command, (5,), spell_key=spell.key))
+                    else:
+                        forecast.physical(actor, AutoAction(command, (5,)))
+                    damage = enemy.hp - target.hp
+                    if resistant and command is BattleCommand.SPELL:
+                        self.assertEqual(damage, 0)
+                    else:
+                        self.assertGreater(damage, 0)
+                    self.assertEqual(actor.hp, 1 if resistant else min(actor.max_hp, 1 + damage))
+
+    def test_enemy_spell_forecast_misses_resistant_targets(self):
+        spell = self.spells["BLOOD SUCK"]
+        enemy = self.enemy(hp=25, mp=10, max_mp=10, magic=20, spells=(spell,))
+        member = replace(self.specs[0], resistances=frozenset({ResistanceType.DARK}))
+        forecast = BattleForecast(self.snapshot(enemy, member, active=5), 0)
+        forecast.roll = Mock(return_value=0.5)
+
+        with patch("auto_battle_simulation.monster_action_candidates", return_value=(MonsterSpellAction(spell.key),)):
+            forecast.enemy_turn(forecast.actors[5])
+
+        self.assertEqual(forecast.actors[0].hp, member.hp)
+        self.assertEqual(forecast.actors[5].hp, enemy.hp)
+
     def test_forecast_recovers_for_attack_charge_and_confusion(self):
         for mode in ("attack", "charge", "confused"):
             for hp, defense in ((1, 0), (119, 0), (120, 0), (1, 100)):

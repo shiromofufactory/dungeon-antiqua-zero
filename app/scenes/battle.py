@@ -95,6 +95,7 @@ from battle_physical import (
     resolve_monster_attack_effects,
     resolve_physical_additional_effect,
     resolve_physical_attack,
+    weapon_can_drain,
 )
 from battle_timeline import (
     GAUGE_READY_VALUE,
@@ -1273,6 +1274,7 @@ class BattleAttackStrike:
     target_index: int | None = None
     damage_applied: bool = False
     affinity_popup_started: bool = False
+    drains_hp: bool = False
 
     def pose_at(self, elapsed_frame: int) -> AttackPoseDefinition | None:
         if (
@@ -2416,6 +2418,7 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate: BattleItemCandidate | None = None
         self.pending_spell: Spell | None = None
+        self.party_status_shows_mp = False
         self.pending_action_effect_spell: Spell | None = None
         self.action_presentation: BattleActionPresentation | None = None
         self.fade_escape_transition: MosaicFadeOut | None = None
@@ -3028,6 +3031,7 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        self.party_status_shows_mp = False
         self.pending_action_effect_spell = None
         self.action_presentation = None
         self.healing_popups.clear()
@@ -3431,6 +3435,7 @@ class BattleScene:
                     tribe=monster.tribe if "profile" in fields else None,
                     poisoned=monster.state.poisoned,
                     healing=monster.combat_stats.healing,
+                    is_boss=monster.is_boss,
                     sleeping=monster.state.sleeping,
                     confused=monster.state.confused,
                     silenced=monster.state.silenced,
@@ -4987,6 +4992,11 @@ class BattleScene:
 
         self.pending_item_candidate = item_candidate
         self.pending_spell = spell if item_candidate is None else None
+        self.party_status_shows_mp = (
+            item_candidate is not None and spell.action is SpellAction.MANA
+        )
+        if self.party_status_shows_mp:
+            self._refresh_all_party_hp_texts()
         self.action_targets_enemy = spell.to_enemy
         self.action_targets_all = spell.to_all
         self.selected_command = (
@@ -5461,16 +5471,17 @@ class BattleScene:
             or break_results
             or silence_results
         )
-        effect_indexes = (
-            tuple(result.target_index for result in status_results if result.success)
-            if status_results
-            else indexes
-        )
+        if status_results:
+            effect_indexes = tuple(result.target_index for result in status_results if result.success)
+        elif damage_results:
+            effect_indexes = tuple(result.target_index for result in damage_results if not result.is_miss)
+        else:
+            effect_indexes = indexes
         fade_escape = spell.action in (SpellAction.FADE, SpellAction.TELEPORT)
         post_effect_wait = (
             SPELL_POST_EFFECT_WAIT_FRAME_COUNT if target_side == "enemy" or fade_escape else 0
         )
-        if status_results and not effect_indexes:
+        if (status_results or damage_results) and not effect_indexes:
             post_effect_wait += MISSED_ACTION_RETURN_WAIT_FRAME_COUNT
         target_start_frames = self._spell_target_start_frames(spell, indexes, effect_indexes)
         effects = self._build_target_spell_effects(
@@ -5908,6 +5919,7 @@ class BattleScene:
                 target_resistances=monster.resistances,
                 target_is_shadow=monster.is_shadow,
                 flying_effective=spell.effective_race == "FLYING",
+                dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
                 random_factor=random.random(),
             )
             _base_x, base_y = self._monster_base_position(index)
@@ -5921,6 +5933,7 @@ class BattleScene:
                     popup_y=base_y + monster.height - 8,
                     affinity_x=center_x - AFFINITY_ICON_WIDTH // 2,
                     affinity_y=base_y + 20,
+                    is_miss=resolution.is_miss,
                 )
             )
         return tuple(results)
@@ -6106,6 +6119,8 @@ class BattleScene:
             member = self.party[result.target_index]
             restored = min(result.amount, member.max_mp - member.mp)
             member.mp += restored
+            if getattr(self, "party_status_shows_mp", False):
+                self._refresh_party_hp_text(result.target_index)
             popup_amount = result.amount if result.show_rolled_amount else restored
             if popup_amount > 0:
                 popups.append(
@@ -6117,29 +6132,21 @@ class BattleScene:
                 )
         drained = 0
         for result in ready(presentation.damage_results):
-            monster = self.monsters[result.target_index]
-            damage = monster.state.take_damage(result.damage)
-            if presentation.drain_party_index is not None:
-                drained += damage
+            if not result.is_miss:
+                monster = self.monsters[result.target_index]
+                damage = monster.state.take_damage(result.damage)
+                if presentation.drain_party_index is not None:
+                    drained += damage
             damage_popups.append(
                 BattleSpellDamagePopup(
                     result.popup_x,
                     result.popup_y,
                     result.damage,
+                    is_miss=result.is_miss,
                 )
             )
         if presentation.drain_party_index is not None and drained:
-            index = presentation.drain_party_index
-            member = self.party[index]
-            restored = member.apply_healing(
-                drain_healing_amount(damage=drained, hp=member.hp, max_hp=member.max_hp)
-            )
-            if restored:
-                self._refresh_party_hp_text(index)
-                position = self._party_draw_position(index)
-                if position is not None:
-                    x, y = position
-                    popups.append(BattleHealingPopup(x + 6, y + 16, restored))
+            self._apply_party_drain(presentation.drain_party_index, drained)
         for result in ready(presentation.sleep_results):
             monster = self.monsters[result.target_index]
             if result.success:
@@ -6238,9 +6245,10 @@ class BattleScene:
 
         drained = 0
         for result in ready(presentation.party_damage_results):
-            damage = self._apply_monster_attack_damage(result.target_index, result.damage)
-            if presentation.drain_monster_index is not None:
-                drained += damage
+            if not result.is_miss:
+                damage = self._apply_monster_attack_damage(result.target_index, result.damage)
+                if presentation.drain_monster_index is not None:
+                    drained += damage
             if presentation.breath_tint_color is None:
                 damage_popups.append(
                     BattleSpellDamagePopup(result.popup_x, result.popup_y, result.damage, is_miss=result.is_miss)
@@ -6994,6 +7002,9 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        if getattr(self, "party_status_shows_mp", False):
+            self.party_status_shows_mp = False
+            self._refresh_all_party_hp_texts()
         self.target_cursor.active = False
         if self.party_target_cursor is not None:
             self.party_target_cursor.active = False
@@ -7368,6 +7379,7 @@ class BattleScene:
                     is_hit=result.hit,
                     is_critical=getattr(result, "critical", False),
                     is_weak=weapon_effective,
+                    drains_hp=weapon_can_drain(weapon.additional_effect, monster.resistances),
                     additional_effects=(
                         self._resolve_member_attack_additional_effects(
                             member,
@@ -7504,6 +7516,7 @@ class BattleScene:
                     is_hit=result.hit,
                     is_critical=getattr(result, "critical", False),
                     is_weak=effective,
+                    drains_hp=weapon_can_drain(weapon.additional_effect, monster.resistances),
                     additional_effects=self._resolve_member_attack_additional_effects(
                         member,
                         weapon,
@@ -7660,6 +7673,7 @@ class BattleScene:
         targets_enemy = presentation.target_side == "enemy"
         monster = self.monsters[presentation.target_index] if targets_enemy else None
         member = self.party[presentation.target_index] if not targets_enemy else None
+        party_index = getattr(self, "action_party_index", None)
         for strike in presentation.strikes:
             strike_target_index = (
                 presentation.target_index
@@ -7677,8 +7691,10 @@ class BattleScene:
             ):
                 if strike.is_hit:
                     applied_effects = ()
+                    hit_target = False
                     if targets_enemy and monster is not None and monster.is_alive:
                         monster.state.take_damage(strike.damage)
+                        hit_target = True
                         if provokes_counter:
                             self._queue_monster_counter(strike_target_index)
                         applied_effects = self._apply_additional_effects_to_monster(
@@ -7688,11 +7704,14 @@ class BattleScene:
                         promote_rear_monsters_if_front_empty(self.monsters)
                     elif member is not None and not self._member_is_dead(member):
                         member.take_damage(strike.damage)
+                        hit_target = True
                         applied_effects = self._apply_additional_effects_to_member(
                             presentation.target_index,
                             strike.additional_effects,
                         )
                         self._refresh_party_hp_text(presentation.target_index)
+                    if hit_target and strike.drains_hp and party_index is not None:
+                        self._apply_party_drain(party_index, strike.damage)
                     strike.additional_effects = applied_effects
                     if not presentation.is_iai:
                         if AdditionalEffect.DEATH in applied_effects:
@@ -7728,7 +7747,6 @@ class BattleScene:
         if not presentation.progression_recorded and all(
             strike.damage_applied for strike in presentation.strikes
         ):
-            party_index = getattr(self, "action_party_index", None)
             if party_index is not None and monster is not None:
                 target_indexes = tuple(
                     dict.fromkeys(
@@ -8322,6 +8340,9 @@ class BattleScene:
         self.action_targets_all = False
         self.pending_item_candidate = None
         self.pending_spell = None
+        if getattr(self, "party_status_shows_mp", False):
+            self.party_status_shows_mp = False
+            self._refresh_all_party_hp_texts()
         self.action_progression_weapon = None
         self.action_progression_enemy_levels = ()
         self.pending_action_effect_spell = None
@@ -8941,6 +8962,7 @@ class BattleScene:
                     effect_flip_x=bool(strikes),
                     is_hit=result.hit,
                     is_critical=result.critical,
+                    drains_hp=weapon_can_drain(weapon.additional_effect, target.resistances),
                     additional_effects=(
                         self._resolve_member_attack_effects_against_member(
                             actor,
@@ -9165,6 +9187,7 @@ class BattleScene:
             battle_healing_amount(
                 max_hp=actor.state.max_hp,
                 healing=actor.combat_stats.healing,
+                is_boss=actor.is_boss,
             )
             - poison_damage
         )
@@ -10227,11 +10250,12 @@ class BattleScene:
             or party_slow_results
             or party_break_results
         )
-        effect_indexes = (
-            tuple(result.target_index for result in status_results if result.success)
-            if status_results
-            else indexes
-        )
+        if status_results:
+            effect_indexes = tuple(result.target_index for result in status_results if result.success)
+        elif party_damage_results:
+            effect_indexes = tuple(result.target_index for result in party_damage_results if not result.is_miss)
+        else:
+            effect_indexes = indexes
         target_start_frames = self._spell_target_start_frames(spell, indexes, effect_indexes)
         actor_index = self._monster_index(actor)
         effects = self._build_target_spell_effects(
@@ -10283,6 +10307,7 @@ class BattleScene:
                 attribute=spell.attribute,
                 target_weaknesses=frozenset(),
                 target_resistances=member.resistances,
+                dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
                 random_factor=random.random(),
             )
             position = self._party_draw_position(index)
@@ -10298,6 +10323,7 @@ class BattleScene:
                     popup_y=y + 16,
                     affinity_x=x + 8 - AFFINITY_ICON_WIDTH // 2,
                     affinity_y=y - 8,
+                    is_miss=resolution.is_miss,
                 )
             )
         return tuple(results)
@@ -11065,6 +11091,18 @@ class BattleScene:
             return
         self._continue_after_formation(completion)
 
+    def _apply_party_drain(self, index: int, damage: int) -> None:
+        member = self.party[index]
+        amount = drain_healing_amount(damage=damage, hp=member.hp, max_hp=member.max_hp)
+        if not amount:
+            return
+        member.apply_healing(amount)
+        self._refresh_party_hp_text(index)
+        position = self._party_draw_position(index)
+        if position is not None:
+            x, y = position
+            self.healing_popups.append(BattleHealingPopup(x + 6, y + 16, amount))
+
     def _begin_monster_drain(
         self, actor: BattleMonster, damage: int, source_x: int, source_y: int,
     ) -> bool:
@@ -11278,9 +11316,12 @@ class BattleScene:
         window = self.party_status_windows[index]
         name_text, hp_text = self.party_status_texts[index]
         member = self.party[index]
+        show_mp = getattr(self, "party_status_shows_mp", False)
+        current = member.mp if show_mp else member.hp
+        maximum = member.max_mp if show_mp else member.max_hp
         window.remove_text(hp_text)
         hp_text = window.add_text(
-            ascii_to_fullwidth(f"{member.hp:3d}/{member.max_hp:3d}"),
+            ascii_to_fullwidth(f"{current:3d}/{maximum:3d}"),
             hp_text.x,
             hp_text.y,
             color=hp_text.color,

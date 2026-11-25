@@ -67,6 +67,14 @@ def drain_healing_amount(*, damage: int, hp: int, max_hp: int) -> int:
     return min(damage, max_hp - hp) if hp > 0 else 0
 
 
+def weapon_can_drain(
+    effect: AdditionalEffect | None, target_resistances: Collection[ResistanceType],
+) -> bool:
+    """Dark resistance blocks a weapon's HP drain on a successful hit."""
+
+    return effect is AdditionalEffect.DRAIN and ResistanceType.DARK not in target_resistances
+
+
 def _nonnegative_integer(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer")
@@ -443,4 +451,5 @@ __all__ = [
     "physical_weapon_is_effective",
     "resolve_physical_additional_effect",
     "resolve_physical_attack",
+    "weapon_can_drain",
 ]
