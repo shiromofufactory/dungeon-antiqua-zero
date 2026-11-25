@@ -6362,15 +6362,15 @@ class BattleScene:
                 )
             )
             if result.is_hit:
+                hit_se = BATTLE_HIT_SE_ID
                 if result.drain_actor_index is not None:
                     actor = self.monsters[result.drain_actor_index]
-                    self._begin_monster_drain(
+                    if self._begin_monster_drain(
                         actor, result.damage, result.popup_x, result.popup_y
-                    )
-                    self._apply_monster_drain_healing()
-                    play_se(BATTLE_DRAIN_SE_ID)
-                else:
-                    play_se(BATTLE_HIT_SE_ID)
+                    ):
+                        self._apply_monster_drain_healing()
+                        hit_se = BATTLE_DRAIN_SE_ID
+                play_se(hit_se)
 
     def _delay_slow_target(self, target: Member | BattleMonster) -> None:
         """Reflect a successful SLOW in its target's waiting turn immediately."""
@@ -10776,15 +10776,14 @@ class BattleScene:
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
         if result.hit and result.damage > 0:
+            hit_se = BATTLE_HIT_SE_ID
             if AdditionalEffect.DRAIN in actor.additional_effects:
                 position = self._party_draw_position(target_index)
-                if position is not None:
-                    self._begin_monster_drain(
-                        actor, result.damage, position[0] + 14, position[1] + 16
-                    )
-                play_se(BATTLE_DRAIN_SE_ID)
-            else:
-                play_se(BATTLE_HIT_SE_ID)
+                if position is not None and self._begin_monster_drain(
+                    actor, result.damage, position[0] + 14, position[1] + 16
+                ):
+                    hit_se = BATTLE_DRAIN_SE_ID
+            play_se(hit_se)
 
     def _begin_monster_charge(self, actor: BattleMonster) -> None:
         """Start a ranged 1.5x charge toward one living party member."""
@@ -10893,17 +10892,16 @@ class BattleScene:
                 presentation.additional_effects,
             )
             if presentation.damage > 0:
+                hit_se = BATTLE_HIT_SE_ID
                 if presentation.draining:
                     actor = self.monsters[presentation.actor_index]
                     position = self._party_draw_position(presentation.target_index)
-                    if position is not None:
-                        self._begin_monster_drain(
-                            actor, presentation.damage, position[0] + 14, position[1] + 16
-                        )
+                    if position is not None and self._begin_monster_drain(
+                        actor, presentation.damage, position[0] + 14, position[1] + 16
+                    ):
                         self._apply_monster_drain_healing()
-                    play_se(BATTLE_DRAIN_SE_ID)
-                else:
-                    play_se(BATTLE_HIT_SE_ID)
+                        hit_se = BATTLE_DRAIN_SE_ID
+                play_se(hit_se)
         elif presentation.damage_applied:
             self.monster_attack_animation_frame += 1
         if presentation.completed:
@@ -11069,18 +11067,21 @@ class BattleScene:
 
     def _begin_monster_drain(
         self, actor: BattleMonster, damage: int, source_x: int, source_y: int,
-    ) -> None:
+    ) -> bool:
+        """Start the drain presentation when there is HP to restore."""
+
         amount = drain_healing_amount(
             damage=damage, hp=actor.state.hp, max_hp=actor.state.max_hp
         )
         if amount == 0:
-            return
+            return False
         actor_index = self._monster_index(actor)
         x, y = self._monster_base_position(actor_index)
         self.monster_drain_presentation = BattleMonsterDrainPresentation(
             actor_index, amount, source_x, source_y,
             x + actor.width // 2, y + actor.height - 24,
         )
+        return True
 
     def _apply_monster_drain_healing(self) -> None:
         presentation = getattr(self, "monster_drain_presentation", None)

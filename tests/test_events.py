@@ -526,6 +526,8 @@ class EventRunnerTest(unittest.TestCase):
         self.party.join("Alvan")
         alvan = self.party.active_party[-1]
         alvan.hp = 1
+        alvan.mp = 0
+        max_hp, max_mp = alvan.max_hp, alvan.max_mp
         experience = required_experience_for_level(10)
         alvan.refresh_internal_level(experience)
 
@@ -533,7 +535,7 @@ class EventRunnerTest(unittest.TestCase):
         self.party.join("Alvan", shared_experience=experience)
 
         self.assertIs(self.party.active_party[-1], alvan)
-        self.assertEqual(self.party.active_party[-1].hp, 1)
+        self.assertEqual((alvan.hp, alvan.max_hp, alvan.mp, alvan.max_mp), (1, max_hp, 0, max_mp))
         sword = alvan.proficiency(ProficiencyKind.SWORD)
         self.assertEqual((sword.level, sword.progress), (1, 0))
         self.assertIsNone(alvan.departure_level)
@@ -555,7 +557,7 @@ class EventRunnerTest(unittest.TestCase):
         )
         self.assertEqual((alvan.experience_offset, alvan.internal_level), (0, 2))
 
-    def test_rejoining_adds_progress_for_levels_gained_while_away(self) -> None:
+    def test_rejoining_applies_proficiency_and_hp_mp_growth_for_levels_gained_while_away(self) -> None:
         self.records[1][ProficiencyKind.SACRED.value] = 2
         self.records[1][ProficiencyKind.MYSTIC.value] = 0
         self.party.join("Alvan")
@@ -564,7 +566,7 @@ class EventRunnerTest(unittest.TestCase):
         alvan.proficiency(ProficiencyKind.SWORD).progress = 95
         alvan.proficiency(ProficiencyKind.SACRED).progress = 95
         alvan.hp = 1
-        original_max_mp = alvan.max_mp
+        alvan.mp = 0
 
         self.party.leave("Alvan")
         self.assertTrue(alvan.has_joined)
@@ -587,7 +589,8 @@ class EventRunnerTest(unittest.TestCase):
         ):
             current = alvan.proficiency(kind)
             self.assertEqual((current.level, current.progress), expected)
-        self.assertEqual((alvan.hp, alvan.max_mp), (1, original_max_mp))
+        self.assertEqual((alvan.hp, alvan.max_hp), (90, 90))
+        self.assertEqual((alvan.mp, alvan.max_mp), (9, 9))
 
     def test_rejoining_preserves_proficiency_at_or_above_the_mode_cap(self) -> None:
         self.party.join("Alvan")

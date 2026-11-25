@@ -88,11 +88,17 @@ class MonsterDrainTest(unittest.TestCase):
 
     def test_critical_hits_keep_hit_or_drain_sound_for_every_monster_attack_path(self):
         for mode in ("attack", "charge", "confused"):
-            for draining in (False, True):
-                with self.subTest(mode=mode, draining=draining):
+            for extra, full_hp, expected_healing in (
+                ((), False, 0),
+                ((AdditionalEffect.DRAIN,), False, 7),
+                ((AdditionalEffect.DRAIN,), True, 0),
+            ):
+                with self.subTest(mode=mode, extra=extra, full_hp=full_hp):
                     scene, actor = self.scene()
-                    if not draining:
-                        actor = replace(actor, additional_effects=())
+                    actor.additional_effects = extra
+                    if full_hp:
+                        actor.state.hp = actor.state.max_hp
+                    starting_hp = actor.state.hp
                     scene.monsters = (actor,)
                     result = PhysicalAttackResult(True, 7, 100.0, 100.0, critical=True)
                     with patch("scenes.battle.resolve_physical_attack", return_value=result), \
@@ -118,15 +124,15 @@ class MonsterDrainTest(unittest.TestCase):
                             scene._apply_action_results(scene.action_presentation)
                             scene._apply_action_results(scene.action_presentation)
                         sound.assert_called_once_with(
-                            BATTLE_DRAIN_SE_ID if draining else BATTLE_HIT_SE_ID
+                            BATTLE_DRAIN_SE_ID if expected_healing else BATTLE_HIT_SE_ID
                         )
-                    self.assertEqual(actor.state.hp, 8 if draining else 1)
+                    self.assertEqual(actor.state.hp, starting_hp + expected_healing)
 
-    def test_full_hp_keeps_drain_sound_but_omits_flight_and_recovery(self):
+    def test_full_hp_uses_hit_sound_and_omits_flight_and_recovery(self):
         scene, actor = self.scene()
         actor.state.hp = actor.state.max_hp
         sound = self.begin(scene, actor)
-        sound.assert_called_once_with(BATTLE_DRAIN_SE_ID)
+        sound.assert_called_once_with(BATTLE_HIT_SE_ID)
         self.assertIsNone(getattr(scene, "monster_drain_presentation", None))
         scene._finish_monster_attack()
         self.assertEqual(actor.state.hp, actor.state.max_hp)

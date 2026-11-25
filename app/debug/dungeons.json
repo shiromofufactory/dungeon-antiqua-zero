@@ -686,6 +686,57 @@
           "flag_id": "lorewick.seasrea_unlocked"
         }
       ]
+    },
+    {
+      "id": "dungeon_088ea8c61dc044dfb09c56b7fdcf939e",
+      "name": "峠の道",
+      "bgm_id": "da3-mountain",
+      "steps": [
+        {
+          "id": "random_encounter_de49aa49b4bc4032950ab3d748a5a626",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": true,
+            "allow_humans": true,
+            "allow_giants": false,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_a8325c487cc34f1aacf2e04437f867a5",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "LILITH’S CIRCLET"
+          }
+        },
+        {
+          "id": "treasure_f1073a05e7434b51bcf4b04cc8f77d44",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DRAGON HEWER"
+          }
+        },
+        {
+          "id": "random_encounter_56fb973ce1d44a61810780355bd9b67d",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": "dynamic",
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": true,
+            "allow_humans": true,
+            "allow_giants": false,
+            "allow_large_animals": true
+          }
+        }
+      ]
     }
   ]
 }

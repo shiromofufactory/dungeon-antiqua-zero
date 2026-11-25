@@ -1072,7 +1072,7 @@ class Member:
     def refresh_rejoining_growth(
         self, shared_experience: int, *, level_limit: int | None = None,
     ) -> None:
-        """Add proficiency progress for internal levels gained since departure."""
+        """Apply proficiency and HP/MP growth for levels gained since departure."""
 
         self.refresh_internal_level(shared_experience)
         if self.departure_level is None:
@@ -1083,6 +1083,9 @@ class Member:
                 levels_gained * proficiency.aptitude.progress_per_internal_level,
                 level_limit=level_limit,
             )
+        if levels_gained > 0:
+            self.hp = self.max_hp = self.calculated_max_hp()
+            self.mp = self.max_mp = self.calculated_max_mp()
         self.departure_level = None
 
     def calculated_max_hp(self) -> int:
