@@ -4,21 +4,26 @@ import unittest
 from dataclasses import replace
 from unittest.mock import Mock, patch
 
-from tools._bootstrap import APP_ROOT  # noqa: F401
+from tools._bootstrap import APP_ROOT
+from tools.screen_mocks._fixtures import load_mock_items, load_mock_skills
 from battle_physical import counter_attack_succeeds
 from battle_timeline import TimelineEntry, TimelineOrder
+from item import AdditionalEffect
+from localization import Localizer
 from monster import MonsterSpecialAction
 from monster_ai import MonsterAction, monster_action_candidates
 from scenes.battle import (
     BattleAttackPresentation, BattleAttackStrike, BattleCharacter,
-    BattleScene, MONSTER_BLINK_FRAME_COUNT,
+    BattlePhase, BattleScene, MONSTER_BLINK_FRAME_COUNT,
 )
+from state import Language
+from text_catalog import TextCatalog
 from tests import test_battle_poison_breath as poison_tests
 from tests.test_auto_battle import AutoBattleFixtures
 from auto_battle_simulation import BattleForecast
-from auto_battle_model import AutoAction
+from auto_battle_model import AutoAction, AutoCombatant
 from battle_commands import BattleCommand
-from member import FormationRow
+from member import EquipmentSlot, FormationRow
 
 
 class CounterRuleTest(unittest.TestCase):
@@ -177,6 +182,113 @@ class CounterSceneTest(unittest.TestCase):
         actor.state.apply_stun()
         self.assertFalse(scene._begin_pending_monster_counter())
 
+    def party_counter_scene(self):
+        scene, actor = self.scene()
+        scene.party[0].skills.append(load_mock_skills()["Retaliate"])
+        scene._timeline_order = TimelineOrder((
+            TimelineEntry(actor, actor.agility, 64),
+            TimelineEntry(scene.party_visuals[0], 10, 30),
+            TimelineEntry(scene.party_visuals[1], 10, 20),
+        ))
+        scene.timeline = scene._timeline_order.actors
+        scene.active_party_index = None
+        scene.selected_command = None
+        scene.monster_action = MonsterAction.ATTACK
+        scene.monster_attack_target_index = 0
+        scene.monster_attack_damage = 0
+        scene.monster_attack_critical = False
+        scene.monster_attack_additional_effects = ()
+        scene.monster_attack_animation_frame = 0
+        scene.target_cursor = Mock()
+        scene.command_cursor = Mock()
+        scene.command_window = Mock()
+        scene._refresh_monster_name_colors = Mock()
+        scene._queue_monster_counter = Mock(wraps=scene._queue_monster_counter)
+        scene._show_battle_popup = Mock()
+        scene._start_timeline_animation = Mock()
+        scene.texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        scene.localizer = Localizer(Language.JAPANESE)
+        scene._clear_action_motion_state()
+        return scene, actor
+
+    def test_party_counter_uses_actual_hit_recipient_and_keeps_enemy_turn(self):
+        scene, actor = self.party_counter_scene()
+        scene.protected_party_index = 1
+        scene.covering_party_index = 0
+        scene.defending_party_indexes.add(0)
+        member = scene.party[0]
+        member.poisoned = True
+        member.silenced = 3
+        before = scene._timeline_order
+
+        with patch("scenes.battle.random.randint", return_value=0), patch("scenes.battle.play_se"):
+            scene._finish_monster_attack()
+            self.assertIs(scene.phase, BattlePhase.ATTACK_PRESENTATION)
+            self.assertTrue(scene.attack_presentation.is_counter)
+            self.assertEqual(scene.action_party_index, 0)
+            self.assertIsNone(scene.active_party_index)
+            self.assertEqual(scene.attack_presentation.target_index, 0)
+            self.assertIs(scene._timeline_order, before)
+            scene._show_battle_popup.assert_called_once()
+            scene._begin_monster_death = Mock()
+            actor.state.hp = 1
+            for _ in range(100):
+                scene._update_action_motion()
+                scene._update_attack_presentation()
+                if scene.attack_presentation is None:
+                    break
+
+        self.assertEqual(actor.state.hp, 0)
+        scene._begin_monster_death.assert_called_once_with(0, from_timeline_head=True)
+        scene._queue_monster_counter.assert_not_called()
+        self.assertIs(scene._timeline_order, before)
+        self.assertIsNone(scene.action_party_index)
+        self.assertTrue(member.poisoned)
+        self.assertEqual(member.silenced, 3)
+        self.assertIn(0, scene.defending_party_indexes)
+        scene.progression.record_weapon_action.assert_called_once()
+
+    def test_party_counter_uses_da2_reach_and_actionability(self):
+        for condition in ("surprised", "sleeping", "paralyzed", "stunned", "confused", "dead", "rear", "long_reach"):
+            with self.subTest(condition=condition):
+                scene, actor = self.party_counter_scene()
+                member = scene.party[0]
+                if condition == "surprised":
+                    scene.surprise_active = True
+                elif condition == "dead":
+                    member.defeat()
+                elif condition in ("rear", "long_reach"):
+                    actor.is_front_row = False
+                    member.formation_row = FormationRow.BACK
+                    if condition == "long_reach":
+                        weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
+                        member.equipment = member.equipment.replaced({
+                            EquipmentSlot.RIGHT: replace(weapon, reach=2),
+                        })
+                else:
+                    setattr(member, condition, True)
+                with patch("scenes.battle.random.randint", return_value=0):
+                    scene._queue_party_counter(0)
+                self.assertEqual(getattr(scene, "pending_party_counter_index", None),
+                                 0 if condition == "long_reach" else None)
+
+    def test_second_strike_can_cancel_reserved_party_counter(self):
+        scene, actor = self.party_counter_scene()
+        actor.special_actions = (MonsterSpecialAction.DOUBLE_ATTACK,)
+        scene._begin_standard_monster_attack = Mock()
+        with patch("scenes.battle.random.randint", return_value=0):
+            scene._finish_monster_attack()
+            self.assertEqual(scene.pending_party_counter_index, 0)
+            scene._begin_standard_monster_attack.assert_called_once()
+            scene.monster_attack_target_index = 0
+            scene.monster_attack_damage = 1
+            scene.monster_attack_additional_effects = (AdditionalEffect.STUN,)
+            scene._finish_monster_attack()
+        self.assertTrue(scene.party[0].stunned)
+        self.assertIsNone(scene.pending_party_counter_index)
+        scene._start_timeline_animation.assert_called_once_with()
+        scene._show_battle_popup.assert_not_called()
+
 
 class CounterForecastTest(AutoBattleFixtures, unittest.TestCase):
     def test_counter_uses_same_rules_and_does_not_spend_defender_gauge(self):
@@ -202,6 +314,26 @@ class CounterForecastTest(AutoBattleFixtures, unittest.TestCase):
         self.assertFalse(forecast.actors[5].is_alive)
         self.assertTrue(forecast.actors[6].front)
         self.assertLess(forecast.actors[0].hp, 100)
+
+    def test_party_counter_forecast_damages_original_attacker_without_using_own_turn(self):
+        member = self.party[0]
+        with patch.object(member, "skills", [load_mock_skills()["Retaliate"]]):
+            defender = AutoCombatant.from_member(member, 0, front=True, spells=())
+        self.assertIn("Retaliate", defender.skills)
+        defender = replace(defender, hp=500, max_hp=500, silenced=2, defending=True)
+        attacker = self.enemy(
+            hp=1, max_hp=1, hit=0,
+            special_actions=(MonsterSpecialAction.COUNTER,),
+        )
+        forecast = BattleForecast(self.snapshot(attacker, defender, active=5), 0)
+        forecast.roll = lambda *_args: 0.0
+        forecast.enemy_turn(forecast.actors[5])
+        self.assertEqual(forecast.actors[5].hp, 0)
+        self.assertEqual(forecast.actors[0].hp, 500)
+        self.assertTrue(forecast.actors[0].defending)
+        self.assertEqual(forecast.actors[0].silenced, 2)
+        self.assertEqual(forecast.turns[0], 0)
+        self.assertEqual(forecast.order.actors, (0,))
 
 
 if __name__ == "__main__":

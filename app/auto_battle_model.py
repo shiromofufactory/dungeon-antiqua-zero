@@ -207,6 +207,7 @@ class AutoCombatant:
             "Identify",
             "Pray",
             "Cover",
+            "Retaliate",
             "Iai",
             "Focus",
             "Breath",

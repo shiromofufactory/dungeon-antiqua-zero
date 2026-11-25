@@ -18,6 +18,7 @@ if __package__:
         BattleCommand,
         BattleCommandContext,
         member_attack_reach,
+        member_can_attack,
         resolve_battle_commands,
         selectable_attack_target_indexes,
     )
@@ -85,6 +86,7 @@ else:
         BattleCommand,
         BattleCommandContext,
         member_attack_reach,
+        member_can_attack,
         resolve_battle_commands,
         selectable_attack_target_indexes,
     )
@@ -974,9 +976,11 @@ class BattleForecast:
             target.hidden = False
             self.enemy_physical(defender, target)
 
-    def _physical_target(self, actor, target, action):
+    def _physical_target(self, actor, target, action, *, is_counter=False):
         # Live execution resolves both hands before applying either result.
-        roll_target = self._physical_roll_target(action, target)
+        roll_target = (
+            target.spec.number if is_counter else self._physical_roll_target(action, target)
+        )
         results = self.physical_results(actor, target, action, roll_target=roll_target)
         hidden = actor.hidden
         counter = False
@@ -988,7 +992,10 @@ class BattleForecast:
                 continue
             if result.hit:
                 target.damage(result.damage)
-            if hand == 0 and target.spec.enemy and MonsterSpecialAction.COUNTER in target.spec.special_actions:
+            if (
+                hand == 0 and not is_counter and target.spec.enemy
+                and MonsterSpecialAction.COUNTER in target.spec.special_actions
+            ):
                 counter = counter_attack_succeeds(
                     attacker_agility=actor.agility, defender_agility=target.agility,
                     attacker_front=actor.front, defender_front=target.front,
@@ -1605,12 +1612,21 @@ class BattleForecast:
                             target.poisoned = True
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
             charged = action is MonsterAction.CHARGE
-            self.enemy_attack(actor, available if charged else attack_targets, charged=charged)
+            countering_member = self.enemy_attack(
+                actor, available if charged else attack_targets, charged=charged,
+                allow_counter=not charged and not self.surprise,
+            )
             if not charged and MonsterSpecialAction.DOUBLE_ATTACK in actor.spec.special_actions:
                 self.normalize()
                 targets = self._enemy_attack_targets(actor, self.allies())
                 if targets and not self.party_defeated:
                     self.enemy_attack(actor, targets, roll_offset=5)
+            if countering_member is not None and countering_member.actionable:
+                self._physical_target(
+                    countering_member, actor,
+                    AutoAction(BattleCommand.ATTACK, (actor.spec.number,)),
+                    is_counter=True,
+                )
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
@@ -1666,7 +1682,7 @@ class BattleForecast:
             target_is_front_row=lambda ally: ally.front,
         )
 
-    def enemy_attack(self, actor, targets, *, charged=False, roll_offset=0):
+    def enemy_attack(self, actor, targets, *, charged=False, roll_offset=0, allow_counter=False):
         indexes = self.preferred_monster_party_targets(
             actor, tuple(target.spec.number for target in targets),
         )
@@ -1674,9 +1690,13 @@ class BattleForecast:
         target = self.covering(protected)
         if target.spec.number != protected:
             target.hidden = False
-        self.enemy_physical(actor, target, charged=charged, roll_offset=roll_offset)
+        if self.enemy_physical(
+            actor, target, charged=charged, roll_offset=roll_offset, allow_counter=allow_counter,
+        ):
+            return target
+        return None
 
-    def enemy_physical(self, actor, target, *, charged=False, roll_offset=0):
+    def enemy_physical(self, actor, target, *, charged=False, roll_offset=0, allow_counter=False):
         power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
         result = resolve_physical_attack(
             attack=int(actor.spec.attack * (1.5 if charged else 1)),
@@ -1707,10 +1727,21 @@ class BattleForecast:
         if AdditionalEffect.DRAIN in actor.spec.additional_effects:
             actor.drain(result.damage)
         target.damage(result.damage)
+        counter = (
+            allow_counter and target.has_skill("Retaliate") and target.actionable
+            and member_can_attack(target)
+            and counter_attack_succeeds(
+                attacker_agility=actor.agility, defender_agility=target.agility,
+                attacker_front=actor.front, defender_front=target.front,
+                defender_actionable=True, defender_reach=member_attack_reach(target),
+                roll=int(self.roll(actor, target.spec.number, 16) * 20),
+            )
+        )
         if target.is_alive:
             for effect in effects:
                 self.apply_extra(actor, target, effect)
         target.interrupt_focus()
+        return counter
 
     def confused_turn(self, actor: ForecastActor) -> None:
         """Forecast DA2's forced same-side basic attack for one confused actor."""

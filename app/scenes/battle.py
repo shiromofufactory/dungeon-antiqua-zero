@@ -1358,6 +1358,7 @@ class BattleAttackPresentation:
     return_started: bool = False
     progression_recorded: bool = False
     sound_played: bool = False
+    is_counter: bool = False
 
     def __post_init__(self) -> None:
         if not self.strikes:
@@ -2361,6 +2362,7 @@ class BattleScene:
         self.monster_previous_attack_popup: BattleMonsterAttackPopup | None = None
         self.monster_drain_presentation: BattleMonsterDrainPresentation | None = None
         self.pending_monster_counters: list[tuple[int, int]] = []
+        self.pending_party_counter_index: int | None = None
         self.monster_counter_actor_index: int | None = None
         self.monster_counter_target_index: int | None = None
         self.counter_defeated_turn_actor = False
@@ -2963,6 +2965,7 @@ class BattleScene:
         self.monster_previous_attack_popup = None
         self.monster_drain_presentation = None
         self.pending_monster_counters: list[tuple[int, int]] = []
+        self.pending_party_counter_index = None
         self.monster_counter_actor_index: int | None = None
         self.monster_counter_target_index: int | None = None
         self.counter_defeated_turn_actor = False
@@ -4346,7 +4349,8 @@ class BattleScene:
         if completion is FormationAnimationCompletion.COMPLETE_CURRENT_TURN:
             self._complete_current_turn()
         elif completion is FormationAnimationCompletion.START_TIMELINE:
-            self._start_timeline_animation()
+            if not self._begin_pending_party_counter():
+                self._start_timeline_animation()
         elif completion is FormationAnimationCompletion.START_TIMELINE_REMOVAL:
             self._start_timeline_removal_animation()
         elif completion is FormationAnimationCompletion.ACTIVATE_TIMELINE_HEAD:
@@ -4359,7 +4363,7 @@ class BattleScene:
                 self._begin_standard_monster_attack(actor, target_indexes=targets)
             else:
                 self.monster_previous_attack_popup = None
-                self._start_timeline_animation()
+                self._continue_after_formation(FormationAnimationCompletion.START_TIMELINE)
         else:
             raise RuntimeError("unknown formation animation completion")
 
@@ -6826,12 +6830,15 @@ class BattleScene:
 
     def _begin_action_motion(
         self, *, use_cast_pose: bool, jump: bool = False, stationary: bool = False,
+        party_index: int | None = None,
     ) -> None:
         """Set the actor's walk, jump, or in-place action motion."""
 
-        if self.active_party_index is None:
+        if party_index is None:
+            party_index = self.active_party_index
+        if party_index is None:
             return
-        self.action_party_index = self.active_party_index
+        self.action_party_index = party_index
         self.action_stationary = stationary
         self.action_returning = False
         self.action_uses_cast_pose = use_cast_pose
@@ -7207,23 +7214,31 @@ class BattleScene:
         if self.selected_command is BattleCommand.IAI:
             return self._begin_iai_presentation()
 
+        party_index = self.active_party_index
         index = self.selected_target_index
         if (
-            self.active_party_index is None
+            party_index is None
             or index is None
             or index not in self.selectable_target_indexes
         ):
             return False
+        return self._start_member_attack(party_index, index)
+
+    def _start_member_attack(
+        self, party_index: int, index: int, *, is_counter: bool = False,
+    ) -> bool:
+        """Resolve the weapon strikes against a confirmed enemy target."""
+
         monster = self.monsters[index]
         if not monster.is_alive:
             return False
-        member = self.party[self.active_party_index]
+        member = self.party[party_index]
         right_weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
         if right_weapon is None:
             return False
-        is_aimed = self.selected_command == BattleCommand.AIM
-        is_focused = self.selected_command == BattleCommand.FOCUS
-        attacker_hidden = self.active_party_index in getattr(
+        is_aimed = not is_counter and self.selected_command == BattleCommand.AIM
+        is_focused = not is_counter and self.selected_command == BattleCommand.FOCUS
+        attacker_hidden = party_index in getattr(
             self,
             "hidden_party_indexes",
             set(),
@@ -7269,14 +7284,14 @@ class BattleScene:
                 throwing_projectile_sequence(
                     getattr(self, "attack_poses", {}),
                     weapon.weapon_img,
-                    race=self.party[self.active_party_index].definition.race,
+                    race=member.definition.race,
                     branches=("5", "6") if pose_branches == ("4", "5") else ("2", "3"),
                 )
                 if weapon.subtype == "THROWING"
                 else ()
             )
             projectile_frame_count = self._throwing_projectile_frame_count(
-                self.active_party_index,
+                party_index,
                 "enemy",
                 index,
                 projectile_sprites,
@@ -7380,11 +7395,13 @@ class BattleScene:
             strikes=tuple(strikes),
             is_aimed=is_aimed,
             is_focused=is_focused,
+            is_counter=is_counter,
         )
         if records is not None:
             records.reveal_profile(monster.key)
         self.phase = BattlePhase.ATTACK_PRESENTATION
-        self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT if is_aimed else 0.0
+        if not is_counter:
+            self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT if is_aimed else 0.0
         if is_aimed:
             self._show_battle_popup(
                 self._command_label(BattleCommand.AIM),
@@ -7393,7 +7410,7 @@ class BattleScene:
         self.target_cursor.active = False
         self.command_window.close_immediately()
         if attacker_hidden:
-            self.hidden_party_indexes.discard(self.active_party_index)
+            self.hidden_party_indexes.discard(party_index)
         self._refresh_monster_name_colors()
         return True
 
@@ -7651,6 +7668,9 @@ class BattleScene:
             )
             if targets_enemy:
                 monster = self.monsters[strike_target_index]
+            provokes_counter = targets_enemy and not presentation.is_counter and (
+                presentation.is_iai or strike is presentation.strikes[0]
+            )
             if (
                 not strike.damage_applied
                 and strike.hit_elapsed_frame(presentation.elapsed_frame) >= 0
@@ -7659,7 +7679,7 @@ class BattleScene:
                     applied_effects = ()
                     if targets_enemy and monster is not None and monster.is_alive:
                         monster.state.take_damage(strike.damage)
-                        if presentation.is_iai or strike is presentation.strikes[0]:
+                        if provokes_counter:
                             self._queue_monster_counter(strike_target_index)
                         applied_effects = self._apply_additional_effects_to_monster(
                             strike_target_index,
@@ -7678,9 +7698,7 @@ class BattleScene:
                         if AdditionalEffect.DEATH in applied_effects:
                             self._show_instant_death_message(actor_is_enemy=False)
                         play_se(strike.sound_effect_id)
-                elif targets_enemy and (
-                    presentation.is_iai or strike is presentation.strikes[0]
-                ):
+                elif provokes_counter:
                     self._queue_monster_counter(strike_target_index)
                 strike.damage_applied = True
             if (
@@ -7767,7 +7785,7 @@ class BattleScene:
             not presentation.return_started
             or not presentation.result_complete
             or (
-                all_strikes_missed
+                (all_strikes_missed or presentation.is_counter)
                 and getattr(self, "action_party_index", None) is not None
             )
         ):
@@ -7794,7 +7812,10 @@ class BattleScene:
         )
         self.attack_presentation = None
         if not target_is_alive and targets_enemy:
-            self._begin_monster_death(target_index)
+            if presentation.is_counter:
+                self._begin_monster_death(target_index, from_timeline_head=True)
+            else:
+                self._begin_monster_death(target_index)
             return
         if not target_is_alive:
             self._remove_defeated_party_from_timeline()
@@ -10647,6 +10668,51 @@ class BattleScene:
                 pending = self.pending_monster_counters = []
             pending.append((monster_index, party_index))
 
+    def _queue_party_counter(self, party_index: int) -> None:
+        """Test the actual recipient of the enemy's first normal strike."""
+
+        if getattr(self, "surprise_active", False):
+            return
+        member = self.party[party_index]
+        if not isinstance(member, Member) or not member.has_skill("Retaliate"):
+            return
+        if not self._member_can_counter(member):
+            return
+        attacker = self.timeline[0]
+        if counter_attack_succeeds(
+            attacker_agility=attacker.effective_agility,
+            defender_agility=member.effective_agility,
+            attacker_front=attacker.is_front_row,
+            defender_front=self._party_member_is_front_row(party_index),
+            defender_actionable=True,
+            defender_reach=member_attack_reach(member),
+            roll=random.randint(0, 19),
+        ):
+            self.pending_party_counter_index = party_index
+
+    @staticmethod
+    def _member_can_counter(member: Member) -> bool:
+        return member.is_alive and member_can_attack(member) and not (
+            member.sleeping or member.paralyzed or member.confused or member.stunned
+        )
+
+    def _begin_pending_party_counter(self) -> bool:
+        party_index = getattr(self, "pending_party_counter_index", None)
+        if party_index is None:
+            return False
+        self.pending_party_counter_index = None
+        if not self._member_can_counter(self.party[party_index]):
+            return False
+        attacker_index = self._monster_index(self.timeline[0])
+        if not self._start_member_attack(party_index, attacker_index, is_counter=True):
+            return False
+        self._begin_action_motion(use_cast_pose=False, jump=True, party_index=party_index)
+        self._show_battle_popup(
+            self.texts.text("battle.monster.counter", self.localizer),
+            BATTLE_POPUP_FRAME_COUNT,
+        )
+        return True
+
     @staticmethod
     def _monster_can_counter(actor: BattleMonster) -> bool:
         return actor.is_alive and not (
@@ -10908,6 +10974,11 @@ class BattleScene:
         )
         if not getattr(self, "monster_attack_damage_applied", False):
             self._apply_monster_attack_damage(target_index, damage)
+            if (
+                is_normal_attack
+                and getattr(self, "monster_action", None) is MonsterAction.ATTACK
+            ):
+                self._queue_party_counter(target_index)
             applied_effects = self._apply_additional_effects_to_member(
                 target_index,
                 getattr(self, "monster_attack_additional_effects", ()),
