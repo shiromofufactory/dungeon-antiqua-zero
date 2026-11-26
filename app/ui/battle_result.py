@@ -119,6 +119,7 @@ class BattleResultOverlay:
         palette_shifter: PaletteShifter,
         spells: tuple[Spell, ...] = (),
         texts: TextCatalog | None = None,
+        growth_member_keys: set[str] | None = None,
     ) -> None:
         if not party or len(party) > 6:
             raise ValueError("result party must contain from 1 to 6 members")
@@ -132,14 +133,17 @@ class BattleResultOverlay:
         self.wait_frame = 0
         self.victory_motion_frame = 0
         self.celebrating_members = tuple(
-            new.internal_level > old.internal_level
-            or new.max_hp > old.max_hp
-            or new.max_mp > old.max_mp
-            or any(
-                new.proficiencies[kind].level > old.proficiencies[kind].level
-                for kind in ProficiencyKind
+            (growth_member_keys is None or member.definition.key in growth_member_keys)
+            and (
+                new.internal_level > old.internal_level
+                or new.max_hp > old.max_hp
+                or new.max_mp > old.max_mp
+                or any(
+                    new.proficiencies[kind].level > old.proficiencies[kind].level
+                    for kind in ProficiencyKind
+                )
             )
-            for old, new in zip(growth.before, growth.after)
+            for member, old, new in zip(party, growth.before, growth.after)
         )
         self.localizer = Localizer(settings.language)
         self.localized_texts = LocalizedWindowTextFactory.from_language(

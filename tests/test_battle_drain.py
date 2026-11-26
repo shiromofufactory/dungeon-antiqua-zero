@@ -6,12 +6,14 @@ from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT  # noqa: F401
+from tools.screen_mocks._fixtures import load_mock_items
 from auto_battle_model import AutoAction, AutoWeapon
 from auto_battle_simulation import BattleForecast
 from battle_commands import BattleCommand
 from battle_physical import PhysicalAttackResult, drain_healing_amount, resolve_physical_attack
 from item import AdditionalEffect
-from monster import MonsterSpecialAction
+from member import EquipmentSlot
+from monster import MonsterSpecialAction, MonsterTribe
 from monster_ai import MonsterSpellAction
 from resistance import ResistanceType
 from resources import load_record_array
@@ -140,6 +142,32 @@ class MonsterDrainTest(unittest.TestCase):
         scene._finish_monster_attack()
         self.assertEqual(actor.state.hp, actor.state.max_hp)
         self.assertEqual(scene.healing_popups, [])
+
+    def test_matching_tribe_blocks_drain_from_a_damaging_hit(self):
+        for charged in (False, True):
+            with self.subTest(charged=charged):
+                scene, actor = self.scene()
+                actor.tribe = MonsterTribe.GIANT
+                scene.monsters = (actor,)
+                target = scene.party[0]
+                target.equipment = target.equipment.replaced({
+                    EquipmentSlot.RIGHT: load_mock_items()["ONIGOROSHI"],
+                })
+                hp = target.hp
+                scene.affinity_popups = []
+                with patch("scenes.battle.random.randint", return_value=0), \
+                     patch("scenes.battle.play_se") as sound:
+                    if charged:
+                        scene._begin_monster_charge(actor)
+                        for _ in range(scene.monster_charge_presentation.approach_frame_count):
+                            scene._update_monster_charge()
+                    else:
+                        scene._begin_standard_monster_attack(actor)
+                        scene._finish_monster_attack()
+                self.assertLess(target.hp, hp)
+                self.assertIsNone(getattr(scene, "monster_drain_presentation", None))
+                self.assertEqual(actor.state.hp, 1)
+                sound.assert_called_once_with(BATTLE_HIT_SE_ID)
 
     def test_miss_never_drains_or_plays_hit_sound(self):
         scene, actor = self.scene()

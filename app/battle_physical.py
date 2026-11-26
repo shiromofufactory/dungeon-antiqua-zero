@@ -47,6 +47,7 @@ class PhysicalAttackResult:
     hit_value: float
     critical: bool = False
     critical_rate: float = 0.0
+    tribe_resisted: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,7 @@ def resolve_physical_attack(
     attacker_has_power_hit: bool = False,
     weapon_has_power_hit: bool = False,
     weapon_effective: bool = False,
+    target_resists_tribe: bool = False,
     critical_rate_scale: float = 1.0,
     critical_roll: int | None = None,
 ) -> PhysicalAttackResult:
@@ -171,6 +173,8 @@ def resolve_physical_attack(
         raise TypeError("weapon_has_power_hit must be a boolean")
     if not isinstance(weapon_effective, bool):
         raise TypeError("weapon_effective must be a boolean")
+    if not isinstance(target_resists_tribe, bool):
+        raise TypeError("target_resists_tribe must be a boolean")
     if isinstance(critical_rate_scale, bool) or not isinstance(
         critical_rate_scale,
         (int, float),
@@ -220,8 +224,10 @@ def resolve_physical_attack(
         * critical_rate_scale
         * max(adjusted_hit, 100)
     )
-    critical = weapon_effective or (
-        critical_roll is not None and critical_rate > critical_roll
+    if target_resists_tribe:
+        critical_rate = 0.0
+    critical = not target_resists_tribe and (
+        weapon_effective or (critical_roll is not None and critical_rate > critical_roll)
     )
 
     if target_defending and hit_value < DEFENDING_HIT_VALUE_THRESHOLD:
@@ -240,10 +246,14 @@ def resolve_physical_attack(
         attack * critical_multiplier if critical else max(attack - target_defense, 1)
     )
     defense_cut_rate = target_defense / 100
+    if target_resists_tribe:
+        defense_cut_rate /= 2
     damage = int(
         reduced_attack * damage_factor * (1 - defense_cut_rate) + 0.99
     )
     if target_defending:
+        damage //= 2
+    if target_resists_tribe:
         damage //= 2
     return PhysicalAttackResult(
         hit=not target_defending or damage > 0,
@@ -252,6 +262,7 @@ def resolve_physical_attack(
         hit_value=hit_value,
         critical=critical,
         critical_rate=critical_rate,
+        tribe_resisted=target_resists_tribe,
     )
 
 
@@ -379,7 +390,10 @@ def resolve_monster_attack_effects(
             target_is_member=target_is_member,
             target_has_boss_resistance=ResistanceType.DEATH in target_resistances,
             target_is_weak=resistance is not None and resistance in target_weaknesses,
-            target_is_resistant=resistance is not None and resistance in target_resistances,
+            target_is_resistant=(
+                result.tribe_resisted
+                or (resistance is not None and resistance in target_resistances)
+            ),
             target_defending=target_defending,
             critical=result.critical,
         )
@@ -396,6 +410,7 @@ def resolve_monster_attack_effects(
 def resolve_earthquake_attack(
     *, attack: int, hit: int, target_defense: int, hit_roll: int,
     target_defending: bool = False, target_floating: bool = False,
+    target_resists_tribe: bool = False,
 ) -> PhysicalAttackResult:
     """Miss floating targets; otherwise use 60% attack without evasion or criticals.
 
@@ -409,6 +424,7 @@ def resolve_earthquake_attack(
         attack=_nonnegative_integer(attack, "attack") * 3 // 5,
         hit=hit, target_defense=target_defense, target_evasion=0,
         hit_roll=hit_roll, target_unable_to_evade=True,
+        target_resists_tribe=target_resists_tribe,
     )
     return replace(result, damage=result.damage // 2 if target_defending else result.damage)
 

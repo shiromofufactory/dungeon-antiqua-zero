@@ -22,6 +22,7 @@ if __package__ == "":
     )
     from item import EquipmentSlot, Item, ItemEquipType, ItemSpecial
     from localization import Localizer
+    from monster import MonsterTribe
     from resistance import ResistanceType
     from skill import Skill
     from text_catalog import TextCatalog
@@ -40,6 +41,7 @@ else:
     )
     from .item import EquipmentSlot, Item, ItemEquipType, ItemSpecial
     from .localization import Localizer
+    from .monster import MonsterTribe
     from .resistance import ResistanceType
     from .skill import Skill
     from .text_catalog import TextCatalog
@@ -482,6 +484,13 @@ class EquipmentSet:
             item
             for slot in EquipmentSlot
             if (item := self._items[slot]) is not None
+        )
+
+    def resists_tribe(self, tribe: MonsterTribe | None) -> bool:
+        """Check whether any equipped item's tribe matches the attacker."""
+
+        return tribe is not None and any(
+            item.effective_tribe == tribe for item in self.equipped_items()
         )
 
     def weapon_at(self, slot: EquipmentSlot) -> Item | None:

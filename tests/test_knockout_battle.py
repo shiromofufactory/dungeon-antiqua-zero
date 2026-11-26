@@ -15,12 +15,20 @@ from battle_timeline import TimelineEntry, TimelineOrder
 from debug_dungeon import DungeonStep
 from game import Game
 from input import Direction, InputButton, InputState
-from member import EquipmentSlot, FormationRow
+from member import EquipmentSlot, FormationRow, required_experience_for_level
 from monster import MonsterSpecialAction
 from rendering import PaletteShifter
-from resources import FontResources, ImageResources
+from resources import BgmPlayer, FontResources, ImageResources
 from resources.events import EventCatalog, EventResourceError
-from scenes.battle import BattleItemCandidate, BattlePhase, KNOCKOUT_HANDOFF_HALF_FRAMES
+from scenes.battle import (
+    BATTLE_BGM_ID,
+    BATTLE_BOSS_BGM_ID,
+    BATTLE_LEVEL_UP_BGM_ID,
+    BATTLE_WIN_BGM_ID,
+    BattleItemCandidate,
+    BattlePhase,
+    KNOCKOUT_HANDOFF_HALF_FRAMES,
+)
 from scripts.event_pipeline import compile_event_sources, validate_event_battles
 from state import LaunchMode, SaveData, Settings
 from systems import InventorySystem
@@ -109,7 +117,7 @@ class KnockoutBattleTest(unittest.TestCase):
         game._update_encounter_transition()
         return game.battle_scene
 
-    def _win_current_round(self):
+    def _show_current_round_result(self):
         game = self.game
         scene = game.battle_scene
         scene.monsters[0].state.defeat()
@@ -123,12 +131,19 @@ class KnockoutBattleTest(unittest.TestCase):
         for _ in range(80):
             game._update_battle_scene(IDLE)
         self.assertIs(scene.phase, BattlePhase.RESULT)
+
+    def _close_current_round_result(self):
+        game = self.game
         game._update_battle_scene(CONFIRM)
         self.assertIsNotNone(game.battle_return_fade)
         for _ in range(30):
             if game.battle_return_fade is None:
                 break
             game._update_battle_return(IDLE)
+
+    def _win_current_round(self):
+        self._show_current_round_result()
+        self._close_current_round_result()
 
     def test_catalog_round_trip_preserves_order_and_requires_five_enemies(self):
         document = catalog_document()
@@ -216,6 +231,86 @@ class KnockoutBattleTest(unittest.TestCase):
         self.assertEqual(game.knockout_enemy_keys, tuple(ENEMIES[1:]))
         self.assertEqual(game.knockout_party, game.party[:5])
         game._begin_random_encounter.assert_called_once_with()
+
+    def test_result_growth_excludes_waiting_members_and_the_reserve(self):
+        game = self.game
+        game.save_data.experience = required_experience_for_level(2) - 1
+        scene = self._start_challenge()
+        fighter, = scene.party
+        self.assertEqual(fighter.definition.key, "Cerion")
+        for member in game.party:
+            member.hp = member.max_hp = 1
+            self.assertGreater(member.calculated_max_hp(), 1)
+
+        self._show_current_round_result()
+
+        self.assertGreater(fighter.max_hp, 1)
+        self.assertGreaterEqual(game.save_data.experience, required_experience_for_level(2))
+        self.assertGreater(
+            scene.growth_result.after[0].internal_level,
+            scene.growth_result.before[0].internal_level,
+        )
+        for index, (member, before, after) in enumerate(zip(
+            game.party, scene.growth_result.before, scene.growth_result.after,
+        )):
+            self.assertEqual(member.hp, 1)
+            if member is not fighter:
+                self.assertEqual(after.max_hp, before.max_hp)
+                self.assertEqual(after.max_mp, before.max_mp)
+                self.assertEqual(after.proficiencies, before.proficiencies)
+            self.assertEqual(scene.result_overlay.celebrating_members[index], member is fighter)
+
+    def test_growth_uses_the_fighters_for_each_opponent_after_an_ally_handoff(self):
+        game = self.game
+        scene = self._start_challenge()
+        first_fighter, = scene.party
+        for member in game.party:
+            member.max_hp = 999
+        first_fighter.hp = first_fighter.max_hp = 1
+        first_fighter.paralyzed = True
+        scene._activate_timeline_head()
+        self.assertIs(scene.phase, BattlePhase.KNOCKOUT_HANDOFF)
+        for _ in range(2 * KNOCKOUT_HANDOFF_HALF_FRAMES):
+            scene.update(IDLE)
+        self.assertEqual(scene.party, (game.party[0],))
+
+        self._win_current_round()
+        self.assertGreater(first_fighter.max_hp, 1)
+
+        first_fighter.max_hp = 1
+        self._show_current_round_result()
+        self.assertEqual(first_fighter.max_hp, 1)
+
+    def test_result_plays_next_battle_or_field_bgm_and_keeps_playback_on_transition(self):
+        from tests.test_audio_resources import FakePyxel
+
+        game = self.game
+        px = FakePyxel()
+        game.bgm = BgmPlayer(APP_ROOT / "audio", pyxel_api=px)
+        game.pending_battle_bgm_start_sec = 12.5
+        scene = self._start_challenge()
+        self.assertEqual(game.bgm.current_id, BATTLE_BGM_ID)
+        fighter, = scene.party
+        fighter.hp = fighter.max_hp = 1
+        successors = (
+            BATTLE_BOSS_BGM_ID, BATTLE_BGM_ID, BATTLE_BGM_ID, BATTLE_BGM_ID, "da3-field",
+        )
+        for index, successor in enumerate(successors):
+            self._show_current_round_result()
+            jingle = BATTLE_LEVEL_UP_BGM_ID if index == 0 else BATTLE_WIN_BGM_ID
+            self.assertEqual(game.bgm.current_id, jingle)
+            px.play_position = None
+            self.assertTrue(game.bgm.update())
+            self.assertEqual(game.bgm.current_id, successor)
+            expected_start = 12.5 if successor == "da3-field" else 0.0
+            self.assertEqual(px.play_calls[-1][2:], (expected_start, True))
+            play_count = len(px.play_calls)
+            stop_count = len(px.stop_calls)
+            self._close_current_round_result()
+            self.assertEqual(game.bgm.current_id, successor)
+            self.assertEqual(len(px.play_calls), play_count)
+            self.assertEqual(len(px.stop_calls), stop_count)
+            fighter.max_hp = 999
 
     def test_death_and_paralysis_swap_in_place_then_team_defeat_refunds_since_last_win(self):
         game = self.game

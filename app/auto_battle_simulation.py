@@ -1593,6 +1593,7 @@ class BattleForecast:
                     target_defense=target.defense, target_defending=target.defending,
                     hit_roll=int(self.roll(actor, target.spec.number, 2) * 100),
                     target_floating=target.spec.floating,
+                    target_resists_tribe=target.spec.equipment.resists_tribe(actor.spec.tribe),
                 )
                 if not result.hit:
                     continue
@@ -1601,7 +1602,9 @@ class BattleForecast:
                     effect_roll=int(self.roll(actor, target.spec.number, 4) * 100),
                     target_is_member=True,
                     target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
-                    target_is_resistant=ResistanceType.STUN in target.spec.resistances,
+                    target_is_resistant=(
+                        result.tribe_resisted or ResistanceType.STUN in target.spec.resistances
+                    ),
                     target_defending=target.defending,
                 ).success
                 target.damage(result.damage)
@@ -1847,6 +1850,9 @@ class BattleForecast:
             target_incapacitated=target.incapacitated_for_physical_hit,
             attacker_is_monster=True,
             attacker_has_power_hit=power_hit,
+            target_resists_tribe=(
+                not target.spec.enemy and target.spec.equipment.resists_tribe(actor.spec.tribe)
+            ),
             hit_roll=int(self.roll(actor, target.spec.number, 2 + roll_offset) * 100),
             critical_roll=int(self.roll(actor, target.spec.number, 3 + roll_offset) * 100)
             if power_hit or target.incapacitated_for_physical_hit
@@ -1863,7 +1869,7 @@ class BattleForecast:
             target_weaknesses=target.spec.weaknesses if target.spec.enemy else (),
             target_defending=defending,
         )
-        if AdditionalEffect.DRAIN in actor.spec.additional_effects:
+        if not result.tribe_resisted and AdditionalEffect.DRAIN in actor.spec.additional_effects:
             actor.drain(result.damage)
         target.damage(result.damage)
         counter = (

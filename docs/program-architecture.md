@@ -543,6 +543,8 @@ GameはSaveDataのフラグ集合をFieldMovementとFieldActorsへ注入し、�
 BattleMonsterは検証済みの `MonsterTribe` を保持し、BattleSceneは武器・対象の情報を共通判定へ渡して、
 追加効果への特効情報の伝達と `WEAK` 表示を担当する。オートバトルは `AutoWeapon` に武器の特効種族、
 `AutoCombatant` に開示済みの敵種族だけを保持し、物理ダメージと追加効果の予測に同じ判定を使う。
+攻撃元への種族耐性は `EquipmentSet` が装備から判定し、実戦と予測はその結果を
+`battle_physical.py` のダメージ・追加効果判定へ渡す。
 
 呪文エフェクト設定ツールはブラウザエディタへ統合せず、60fps、PyxelのSound、本番パレットを
 そのまま確認できる独立したPyxelプログラムとして`tools/spell_effect_editor/`へ置く。

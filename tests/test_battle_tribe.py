@@ -8,6 +8,7 @@ from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import load_mock_items, load_mock_party, load_mock_skills
 
 from battle_commands import BattleCommand
+from battle_magic import SpellAffinity
 from battle_physical import member_physical_attack, resolve_physical_attack
 from item import AdditionalEffect, AttackAttribute
 from member import EquipmentSlot, FormationRow
@@ -24,6 +25,8 @@ class BattleTribeTest(unittest.TestCase):
         cls.skills = load_mock_skills()
         cls.goblin = next(r for r in load_record_array("monsters.json", APP_ROOT / "data")
                           if r["name_en"] == "Goblin Shaman")
+        cls.fafnir = next(r for r in load_record_array("monsters.json")
+                          if r["name_en"] == "ファーヴニル")
 
     def scene(self, weapon=None, *, command=BattleCommand.ATTACK):
         member = load_mock_party(self.items, self.skills, character_keys=("Fiora",))[0]
@@ -67,6 +70,30 @@ class BattleTribeTest(unittest.TestCase):
         self.assertTrue(strike.is_critical)
         self.assertTrue(strike.is_weak)
         self.assertEqual(strike.damage, expected.damage)
+
+    def test_onigoroshi_resists_fafnirs_physical_hit_and_displays_resist(self):
+        weapon = self.items["ONIGOROSHI"]
+        for warded in (False, True):
+            with self.subTest(warded=warded):
+                scene = self.scene(weapon if warded else replace(weapon, effective_tribe=None))
+                actor = BattleMonster.from_record(self.fafnir, is_front_row=True)
+                scene.monsters = (actor,)
+                scene.defending_party_indexes = set()
+                scene.affinity_popups = []
+                scene._party_draw_position = Mock(return_value=(188, 64))
+                with patch("scenes.battle.random.randint", return_value=0), patch("scenes.battle.play_se"):
+                    scene._begin_standard_monster_attack(actor, target_indexes=(0,))
+                stats = scene.party[0].battle_stats
+                hit_factor = 0.8 + 95 * (100 - stats.evasion) / 25000
+                if warded:
+                    expected = int((136 - stats.defense) * hit_factor
+                                   * (1 - stats.defense / 200) + 0.99) // 2
+                else:
+                    expected = int(136 * 1.5 * hit_factor * (1 - stats.defense / 100) + 0.99)
+                self.assertEqual(scene.monster_attack_damage, expected)
+                self.assertEqual(scene.monster_attack_critical, not warded)
+                self.assertEqual([popup.affinity for popup in scene.affinity_popups],
+                                 [SpellAffinity.RESIST] if warded else [])
 
     def test_each_attack_path_combines_species_and_attribute_once(self):
         for command in (BattleCommand.ATTACK, BattleCommand.AIM, BattleCommand.FOCUS,

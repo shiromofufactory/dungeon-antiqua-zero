@@ -5439,6 +5439,79 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         self.assertTrue(all(spell.type != "item" for spell in candidates))
 
+    def test_fade_remains_navigable_when_casting_is_blocked(self) -> None:
+        items = load_mock_items()
+        skills = load_mock_skills()
+        spells = load_mock_spells()
+        fade = spells["FADE"]
+        localizer = Localizer(Language.JAPANESE)
+        texts = TextCatalog.from_json(APP_ROOT / "data" / "texts.json")
+        for is_boss, knockout, enabled in (
+            (True, False, False),
+            (False, True, False),
+            (False, False, True),
+        ):
+            with self.subTest(is_boss=is_boss, knockout=knockout):
+                mock = BattleScreenMock.__new__(BattleScreenMock)
+                mock.party = load_mock_party(
+                    items, skills, character_keys=("Fiora",),
+                    internal_level=MAX_INTERNAL_LEVEL,
+                )
+                member = mock.party[0]
+                before_mp = member.mp
+                self.assertGreaterEqual(before_mp, fade.mp)
+                mock.active_party_index = 0
+                mock.monsters = (SimpleNamespace(is_boss=is_boss),)
+                mock.knockout_battle = knockout
+                mock.spells = spells
+                mock.localizer = localizer
+                mock.texts = texts
+                mock.last_spell_key_by_party_index = {0: "ARMOR BREAK"}
+                mock.command_cursor = Mock()
+                mock.command_window = Mock()
+                mock._hide_command_guide = Mock()
+                mock.spell_window = Window(*SPELL_WINDOW_GRID)
+                mock.spell_guide_window = Window(*SPELL_GUIDE_WINDOW_GRID)
+                mock.spell_mp_window = Window(*SPELL_MP_WINDOW_GRID)
+                mock._begin_action_target_selection = Mock(return_value=True)
+                mock.on_invalid_action = Mock()
+
+                self.assertTrue(mock._begin_spell_selection())
+                self.assertEqual(mock.selected_spell.key, "ARMOR BREAK")
+                mock._update_spell_selection(InputState(navigation=Direction.DOWN))
+
+                self.assertIs(mock.selected_spell, fade)
+                self.assertTrue(mock.spell_cursor.selected_target.selectable)
+                fade_text = next(
+                    text for text in mock.spell_window.texts
+                    if text.text == fade.localized_display_name(localizer)
+                )
+                self.assertEqual(
+                    fade_text.color, DEFAULT_TEXT_COLOR if enabled else DISABLED_COLOR
+                )
+                self.assertEqual(
+                    [text.text for text in mock.spell_guide_window.texts[:2]],
+                    list(fade.localized_description(localizer)[:2]),
+                )
+
+                mock._update_spell_selection(
+                    InputState(confirm=InputButton(triggered=True, held=True))
+                )
+
+                self.assertEqual(member.mp, before_mp)
+                if enabled:
+                    mock.on_invalid_action.assert_not_called()
+                    mock._begin_action_target_selection.assert_called_once_with(fade)
+                    self.assertEqual(mock.last_spell_key_by_party_index, {0: "FADE"})
+                else:
+                    self.assertIs(mock.phase, BattleMockPhase.SPELL)
+                    self.assertIs(mock.selected_spell, fade)
+                    mock.on_invalid_action.assert_called_once_with()
+                    mock._begin_action_target_selection.assert_not_called()
+                    self.assertEqual(
+                        mock.last_spell_key_by_party_index, {0: "ARMOR BREAK"}
+                    )
+
     def test_spell_list_uses_the_item_window_width_for_one_school(self) -> None:
         items = load_mock_items()
         mock = BattleScreenMock.__new__(BattleScreenMock)

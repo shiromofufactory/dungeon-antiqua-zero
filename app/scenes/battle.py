@@ -1513,6 +1513,7 @@ class BattleMonsterChargePresentation:
     jump_height: int
     additional_effects: tuple[AdditionalEffect, ...] = ()
     draining: bool = False
+    tribe_resisted: bool = False
     elapsed_frame: int = 0
     damage_applied: bool = False
 
@@ -1947,6 +1948,10 @@ def _battle_start_front_monster_indexes(
     return frozenset(range(len(slot_indexes)))
 
 
+def _battle_bgm_id(is_boss: bool) -> str:
+    return BATTLE_BOSS_BGM_ID if is_boss else BATTLE_BGM_ID
+
+
 def monster_slot_indexes(monsters: Sequence[object]) -> tuple[int, ...]:
     """Select presentation slots for the encountered monster image sizes."""
 
@@ -1959,6 +1964,7 @@ class BattleScene:
     proficiency_level_limit: int | None = None
     experience_limit: int | None = None
     character_states: Mapping[str, Member] | None = None
+    next_knockout_bgm_id: str | None = None
 
     @classmethod
     def create(
@@ -1986,6 +1992,7 @@ class BattleScene:
         experience_limit: int | None = None,
         character_states: Mapping[str, Member] | None = None,
         knockout_party: tuple[Member, ...] = (),
+        next_knockout_enemy_key: str | None = None,
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -2030,6 +2037,7 @@ class BattleScene:
             experience_limit=experience_limit,
             character_states=character_states,
             knockout_party=knockout_party,
+            next_knockout_enemy_key=next_knockout_enemy_key,
         )
 
     def __init__(
@@ -2066,6 +2074,7 @@ class BattleScene:
         experience_limit: int | None = None,
         character_states: Mapping[str, Member] | None = None,
         knockout_party: tuple[Member, ...] = (),
+        next_knockout_enemy_key: str | None = None,
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
@@ -2193,6 +2202,12 @@ class BattleScene:
             key: MonsterDefinition.from_record(record)
             for key, record in monsters_by_key.items()
         }
+        if next_knockout_enemy_key is not None:
+            next_enemy = _record_for_key(
+                self.monster_definitions_by_key, next_knockout_enemy_key,
+                label="monster definition",
+            )
+            self.next_knockout_bgm_id = _battle_bgm_id(next_enemy.is_boss)
         encounter_definitions = tuple(
             _record_for_key(
                 self.monster_definitions_by_key,
@@ -3136,6 +3151,7 @@ class BattleScene:
         self.temporary_front_party_indexes.clear()
         if getattr(self, "knockout_battle", False):
             self.temporary_front_party_indexes.add(0)
+            self.knockout_participant_keys = {self.party[0].definition.key}
         self._prepare_surprise()
         self.victory_motion_frame = 0
         self.victory_summary_window = None
@@ -3261,11 +3277,15 @@ class BattleScene:
         """Allow a composition root to apply fixture state before gauge rolls."""
 
     def _restart_battle_bgm(self) -> None:
-        """Restart the battle track from its beginning for this scene."""
+        """Start a battle track or keep the one carried over from the result."""
 
+        bgm_id = _battle_bgm_id(self.monsters[0].is_boss)
+        if getattr(self, "knockout_battle", False):
+            self.bgm.set_fade_rate(1.0)
+            self.bgm.transition_to(bgm_id)
+            return
         self.bgm.stop()
         self.bgm.set_fade_rate(1.0)
-        bgm_id = BATTLE_BOSS_BGM_ID if self.monsters[0].is_boss else BATTLE_BGM_ID
         self.bgm.play(bgm_id)
 
     def _close_spell_windows(self) -> None:
@@ -3918,6 +3938,7 @@ class BattleScene:
         entrant, *waiting = self.knockout_queue
         self.knockout_queue = tuple(waiting)
         self.party = (entrant.member,)
+        self.knockout_participant_keys.add(entrant.member.definition.key)
         self.party_visuals = (entrant,)
         self.defending_party_indexes.clear()
         self.cover_target_by_party_index.clear()
@@ -4784,7 +4805,7 @@ class BattleScene:
         return started
 
     def _active_member_spell_candidates(self) -> tuple[Spell, ...]:
-        """Return the active member's learned spells that work in battle."""
+        """Return learned battle spells to display, including blocked FADE."""
 
         if self.active_party_index is None:
             return ()
@@ -4794,8 +4815,24 @@ class BattleScene:
             for spell in self.spells.values()
             if (
                 spell.type is not SpellType.ITEM
-                and self._party_spell_is_usable(spell)
+                and (
+                    self._party_spell_is_usable(spell)
+                    or (spell.on_battle and spell.action is SpellAction.FADE)
+                )
                 and spell.is_learned_by(member)
+            )
+        )
+
+    def _can_cast_party_spell(self, member: Member, spell: Spell) -> bool:
+        """Check whether a spell in the party command list can be confirmed."""
+
+        return (
+            member.mp >= spell.mp
+            and self._party_spell_is_usable(spell)
+            and not (
+                spell.action is SpellAction.FADE
+                and self.monsters
+                and self.monsters[0].is_boss
             )
         )
 
@@ -4841,7 +4878,9 @@ class BattleScene:
             (spell for spell in candidates if spell.key == remembered_key),
             None,
         )
-        if remembered_spell is not None and member.mp >= remembered_spell.mp:
+        if remembered_spell is not None and self._can_cast_party_spell(
+            member, remembered_spell
+        ):
             self.spell_type = remembered_spell.type
             self._ensure_selected_spell_is_visible(remembered_spell)
         else:
@@ -4899,7 +4938,7 @@ class BattleScene:
             )
             if spell is None:
                 continue
-            available = member.mp >= spell.mp
+            available = self._can_cast_party_spell(member, spell)
             self.spell_window.add_text(
                 spell.localized_display_name(self.localizer),
                 SPELL_TEXT_X,
@@ -5073,7 +5112,7 @@ class BattleScene:
         member = self.party[self.active_party_index]
         if spell is None:
             return False
-        if member.mp < spell.mp:
+        if not self._can_cast_party_spell(member, spell):
             self._notify_invalid_action()
             return False
         started = self._begin_action_target_selection(spell)
@@ -8259,6 +8298,12 @@ class BattleScene:
         growth = self.progression.settle(
             self.save_data,
             self.result_party,
+            ineligible_member_keys=(
+                {member.definition.key for member in self.result_party}
+                - self.knockout_participant_keys
+                if getattr(self, "knockout_battle", False)
+                else ()
+            ),
             hp_growth_ineligible_member_keys=hp_growth_ineligible,
             inventory_system=self.inventory_system,
             monster_record_system=self.monster_record_system,
@@ -8405,14 +8450,16 @@ class BattleScene:
         return str(value)
 
     def _play_victory_jingle(self, bgm_id: str) -> None:
-        if self.return_bgm_id is None:
+        if self.next_knockout_bgm_id is not None:
+            self.bgm.play_once_then(bgm_id, self.next_knockout_bgm_id)
+        elif self.return_bgm_id is None:
             self.bgm.play(bgm_id, loop=False)
-            return
-        self.bgm.play_once_then(
-            bgm_id,
-            self.return_bgm_id,
-            next_start_sec=self.return_bgm_start_sec,
-        )
+        else:
+            self.bgm.play_once_then(
+                bgm_id,
+                self.return_bgm_id,
+                next_start_sec=self.return_bgm_start_sec,
+            )
 
     def _update_victory_summary(self, input_state: InputState) -> None:
         self.victory_motion_frame = min(
@@ -8440,6 +8487,7 @@ class BattleScene:
             palette_shifter=self.palette_shifter,
             spells=tuple(self.spells.values()),
             texts=self.texts,
+            growth_member_keys=getattr(self, "knockout_participant_keys", None),
         )
         self.result_transition_fade = FadeThroughBlack(DEFAULT_FADE_FRAME_COUNT)
         self.result_transition_fade.start()
@@ -10345,17 +10393,19 @@ class BattleScene:
                 target_defense=member.battle_stats.defense,
                 target_defending=defending, hit_roll=random.randint(0, 99),
                 target_floating=self._party_member_is_fairy(index),
+                target_resists_tribe=member.equipment.resists_tribe(actor.tribe),
             )
             stun_success = result.hit and resolve_physical_additional_effect(
                 effect=AdditionalEffect.STUN, adjusted_hit=result.adjusted_hit,
                 effect_roll=random.randint(0, 99), target_is_member=True,
                 target_has_boss_resistance=ResistanceType.DEATH in resistances,
-                target_is_resistant=ResistanceType.STUN in resistances,
+                target_is_resistant=result.tribe_resisted or ResistanceType.STUN in resistances,
                 target_defending=defending,
             ).success
             x, y = self._party_draw_position(index) or (self._party_sprite_x(index), PARTY_SPRITE_Y[index])
             damages.append(BattleSpellDamageResult(
-                index, result.damage, SpellAffinity.NORMAL,
+                index, result.damage,
+                SpellAffinity.RESIST if result.tribe_resisted else SpellAffinity.NORMAL,
                 x + 6, y + 16, x + 8 - AFFINITY_ICON_WIDTH // 2, y - 8,
                 is_miss=not result.hit,
             ))
@@ -10366,6 +10416,9 @@ class BattleScene:
             post_effect_wait_frame_count=EARTHQUAKE_SHAKE_FRAME_COUNT + DAMAGE_POPUP_FRAME_COUNT,
         )
         self.phase = BattlePhase.ACTION_PRESENTATION
+        self._queue_spell_affinity_popups(
+            damages, dict.fromkeys(indexes, EARTHQUAKE_SHAKE_FRAME_COUNT),
+        )
         self._show_monster_action_message("battle.monster.earthquake")
         play_se(BATTLE_EARTHQUAKE_SE_ID)
         return True
@@ -10930,6 +10983,10 @@ class BattleScene:
             target_incapacitated=target_incapacitated,
             attacker_is_monster=True,
             attacker_has_power_hit=power_hit,
+            target_resists_tribe=(
+                isinstance(target, Member)
+                and target.equipment.resists_tribe(getattr(actor, "tribe", None))
+            ),
             critical_roll=(
                 random.randint(0, 99) if power_hit or target_incapacitated else None
             ),
@@ -11084,15 +11141,26 @@ class BattleScene:
         )
         self.monster_attack_animation_frame = 0
         self.monster_attack_damage_applied = False
+        tribe_resisted = getattr(result, "tribe_resisted", False)
+        if tribe_resisted:
+            self._show_monster_tribe_resist(target_index)
         if result.hit and result.damage > 0:
             hit_se = BATTLE_HIT_SE_ID
-            if AdditionalEffect.DRAIN in actor.additional_effects:
+            if not tribe_resisted and AdditionalEffect.DRAIN in actor.additional_effects:
                 position = self._party_draw_position(target_index)
                 if position is not None and self._begin_monster_drain(
                     actor, result.damage, position[0] + 14, position[1] + 16
                 ):
                     hit_se = BATTLE_DRAIN_SE_ID
             play_se(hit_se)
+
+    def _show_monster_tribe_resist(self, target_index: int) -> None:
+        position = self._party_draw_position(target_index)
+        if position is not None:
+            x, y = position
+            self.affinity_popups.append(BattleAffinityPopup(
+                x + 8 - AFFINITY_ICON_WIDTH // 2, y - 8, SpellAffinity.RESIST,
+            ))
 
     def _begin_monster_charge(self, actor: BattleMonster) -> None:
         """Start a ranged 1.5x charge toward one living party member."""
@@ -11117,6 +11185,7 @@ class BattleScene:
             1,
             MONSTER_CHARGE_MAX_JUMP_HEIGHT * approach_frames // reference_frames,
         )
+        tribe_resisted = getattr(result, "tribe_resisted", False)
         self.monster_charge_presentation = BattleMonsterChargePresentation(
             actor_index=actor_index,
             target_index=target_index,
@@ -11135,7 +11204,11 @@ class BattleScene:
                 target_index,
                 result,
             ),
-            draining=AdditionalEffect.DRAIN in actor.additional_effects,
+            draining=(
+                AdditionalEffect.DRAIN in actor.additional_effects
+                and not tribe_resisted
+            ),
+            tribe_resisted=tribe_resisted,
         )
         self.action_gauge_adjustment = AIM_GAUGE_ADJUSTMENT
         self._show_monster_action_message("battle.monster.charge")
@@ -11200,6 +11273,8 @@ class BattleScene:
                 presentation.target_index,
                 presentation.additional_effects,
             )
+            if presentation.tribe_resisted:
+                self._show_monster_tribe_resist(presentation.target_index)
             if presentation.damage > 0:
                 hit_se = BATTLE_HIT_SE_ID
                 if presentation.draining:

@@ -1883,6 +1883,33 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                     expected_damage = charge_damage if mode == "charge" else normal_damage
                     self.assertEqual(target.hp, 1000 - expected_damage)
 
+    def test_known_attacker_tribe_uses_equipment_resistance_in_physical_forecasts(self):
+        weapon = self.items["ONIGOROSHI"]
+        member = replace(
+            self.specs[0], hp=1000, max_hp=1000, defense=10, evasion=0, agility=20,
+            floating=False,
+            equipment=self.specs[0].equipment.replaced({EquipmentSlot.RIGHT: weapon}),
+        )
+        for action, unresisted_damage, resisted_damage in (
+            ("attack", 156, 49), ("charge", 234, 76), ("earthquake", 51, 27),
+        ):
+            for tribe in (None, MonsterTribe.GIANT, MonsterTribe.DRAGON):
+                with self.subTest(action=action, tribe=tribe):
+                    enemy = self.enemy(
+                        tribe=tribe, attack=96, hit=100, front=action != "earthquake",
+                        special_actions=(MonsterSpecialAction.POWER_HIT, MonsterSpecialAction.EARTHQUAKE),
+                    )
+                    forecast = BattleForecast(self.snapshot(member, enemy), 0)
+                    forecast.roll = Mock(return_value=0.0)
+                    attacker, target = forecast.actors[5], forecast.actors[0]
+                    if action == "earthquake":
+                        forecast.enemy_turn(attacker)
+                        self.assertEqual(target.stunned, tribe is not MonsterTribe.GIANT)
+                    else:
+                        forecast.enemy_physical(attacker, target, charged=action == "charge")
+                    expected = resisted_damage if tribe is MonsterTribe.GIANT else unresisted_damage
+                    self.assertEqual(1000 - target.hp, expected)
+
     def test_guard_cover_and_hide_change_the_actual_damage_recipient(self):
         coverer = replace(self.specs[1], defending=True, cover=0)
         forecast = BattleForecast(

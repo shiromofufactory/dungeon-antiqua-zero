@@ -5,11 +5,13 @@ from dataclasses import replace
 from unittest.mock import Mock, PropertyMock, call, patch
 
 from tools._bootstrap import APP_ROOT  # noqa: F401
+from tools.screen_mocks._fixtures import load_mock_items
 from auto_battle_simulation import BattleForecast
+from battle_magic import SpellAffinity
 from battle_physical import resolve_earthquake_attack
 from game import Game
-from member import FormationRow, Race
-from monster import MonsterSpecialAction
+from member import EquipmentSlot, FormationRow, Race
+from monster import MonsterSpecialAction, MonsterTribe
 from monster_ai import MonsterAction, monster_action_candidates
 from resistance import ResistanceType
 from resources import load_record_array
@@ -126,6 +128,28 @@ class EarthquakeSceneTest(unittest.TestCase):
                               return_value=frozenset(resistances)):
                 self.begin(scene, actor, stun_roll=roll)
             self.assertEqual(tuple(r.success for r in scene.action_presentation.party_stun_results), (success, success))
+
+    def test_matching_tribe_reduces_damage_and_blocks_earthquake_stun_on_impact(self):
+        scene, actor = self.scene()
+        actor.tribe = MonsterTribe.GIANT
+        member = scene.party[0]
+        member.equipment = member.equipment.replaced({EquipmentSlot.RIGHT: load_mock_items()["ONIGOROSHI"]})
+        scene.defending_party_indexes = set()
+        self.begin(scene, actor)
+        hit = scene.action_presentation.party_damage_results[0]
+        base_attack = actor.combat_stats.attack * 3 // 5
+        defense = member.battle_stats.defense
+        hit_value = max(actor.combat_stats.hit, 100) - 99
+        expected = int((base_attack - defense) * (0.8 + hit_value / 250)
+                       * (1 - defense / 200) + 0.99) // 2
+        self.assertEqual(hit.damage, expected)
+        self.assertEqual(hit.affinity, SpellAffinity.RESIST)
+        self.assertFalse(scene.action_presentation.party_stun_results[0].success)
+        self.assertEqual(scene.affinity_popups, [])
+        with patch("scenes.battle.random.randint", return_value=0):
+            for _ in range(EARTHQUAKE_SHAKE_FRAME_COUNT):
+                scene._update_action_presentation()
+        self.assertEqual([popup.affinity for popup in scene.affinity_popups], [SpellAffinity.RESIST])
 
     def test_hidden_and_rear_grounded_members_remain_targets(self):
         scene, actor = self.scene()

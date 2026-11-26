@@ -805,9 +805,7 @@ class Game:
         if memory is None:
             memory = self.battle_command_memory = BattleCommandMemory()
         knockout_party = getattr(self, "knockout_party", ())
-        return_bgm_id = (
-            None if getattr(self, "knockout_enemy_keys", ()) else self._exploration_bgm_id()
-        )
+        knockout_enemy_keys = getattr(self, "knockout_enemy_keys", ())
         return BattleScene.create(
             settings=self.settings,
             palette_shifter=self.palette_shifter,
@@ -822,7 +820,7 @@ class Game:
             party=knockout_party[:1] or self.party[:BATTLE_PARTY_MEMBER_COUNT],
             result_party=self.party,
             save_data=self.save_data,
-            return_bgm_id=return_bgm_id,
+            return_bgm_id=self._exploration_bgm_id(),
             return_bgm_start_sec=(
                 getattr(self, "pending_battle_bgm_start_sec", 0.0)
                 if return_bgm_start_sec is None else return_bgm_start_sec
@@ -834,6 +832,7 @@ class Game:
             experience_limit=self.launch_mode.experience_limit,
             character_states=self.character_states,
             knockout_party=knockout_party,
+            next_knockout_enemy_key=knockout_enemy_keys[0] if knockout_enemy_keys else None,
         )
 
     def _advance_random_encounter(self) -> bool:
