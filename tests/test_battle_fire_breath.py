@@ -18,8 +18,8 @@ from monster_ai import MonsterAction, monster_action_candidates, select_monster_
 from resistance import ResistanceType
 from resources import load_record_array
 from scenes.battle import (
-    ACTION_MOVE_DISTANCE, BattleMonster, BattlePhase, BATTLE_BACKGROUND_TINT_FRAME_COUNT,
-    DAMAGE_POPUP_FRAME_COUNT,
+    ACTION_MOVE_DISTANCE, BattleActionPresentation, BattleMonster, BattlePhase,
+    BattleSpellDamageResult, BATTLE_BACKGROUND_TINT_FRAME_COUNT, DAMAGE_POPUP_FRAME_COUNT,
     FIRE_BREATH_TINT_COLOR, SPELL_EFFECT_FLASH_PALETTE,
 )
 from ui import CursorTarget, Window, WindowCursor
@@ -294,6 +294,7 @@ class MemberFireBreathTest(AutoBattleFixtures, unittest.TestCase):
                     self.assertEqual((popup.x, popup.y, popup.damage), (194, 80, 19))
                     presentation = scene.action_presentation
                     self.assertEqual(presentation.background_tint_color, FIRE_BREATH_TINT_COLOR)
+                    self.assertTrue(presentation.wave_enemy_sprites)
                     self.assertEqual(tuple(hit.damage for hit in presentation.damage_results), (300, 75))
                     self.assertEqual(len(scene.affinity_popups), 1)
                     for _ in range(DAMAGE_POPUP_FRAME_COUNT - 1):
@@ -309,6 +310,44 @@ class MemberFireBreathTest(AutoBattleFixtures, unittest.TestCase):
                 scene._begin_monster_deaths.assert_called_once_with([0])
                 scene.progression.record_weapon_action.assert_not_called()
                 scene.progression.record_spell_use.assert_not_called()
+
+    def test_enemy_sprite_wave_follows_tint_and_keeps_untargeted_sprite_fixed(self):
+        scene, target = poison_tests.PoisonBreathSceneTest().scene()
+        untargeted = replace(target, key="untargeted")
+        scene.monsters = (target, untargeted)
+        scene.monster_images = {monster.key: object() for monster in scene.monsters}
+        scene.blinking_monster_index = None
+        scene._monster_draw_position = lambda index: (25 + index * 80, 30)
+        scene._draw_identified_monster_hp = Mock()
+        scene.phase = BattlePhase.ACTION_PRESENTATION
+        presentation = BattleActionPresentation(
+            (), damage_results=(BattleSpellDamageResult(0, 10, SpellAffinity.NORMAL, 0, 0, 0, 0),),
+            background_tint_color=FIRE_BREATH_TINT_COLOR, wave_enemy_sprites=True,
+            result_start_frame=DAMAGE_POPUP_FRAME_COUNT,
+        )
+        scene.action_presentation = presentation
+
+        def draw_at(frame):
+            presentation.elapsed_frame = frame
+            with patch("scenes.battle.pyxel.blt") as blt:
+                scene._draw_monsters()
+            self.assertEqual(presentation.elapsed_frame, frame)
+            calls = [call.args for call in blt.call_args_list]
+            self.assertEqual((calls[-1][0], calls[-1][6]), (105, untargeted.height))
+            return calls[:-1]
+
+        self.assertEqual(len(draw_at(0)), 1)
+        full = draw_at(BATTLE_BACKGROUND_TINT_FRAME_COUNT)
+        self.assertEqual([args[4] for args in full], list(range(0, target.height, 2)))
+        self.assertTrue(all(args[6] == 2 for args in full))
+        self.assertEqual([args[0] for args in full[:3]], [25, 28, 29])
+        self.assertEqual(draw_at(BATTLE_BACKGROUND_TINT_FRAME_COUNT + 1), full)
+        next_step = draw_at(BATTLE_BACKGROUND_TINT_FRAME_COUNT + 2)
+        self.assertEqual([args[0] for args in next_step[:3]], [22, 25, 28])
+        self.assertEqual(draw_at(BATTLE_BACKGROUND_TINT_FRAME_COUNT + 16), full)
+        fading = draw_at(DAMAGE_POPUP_FRAME_COUNT + BATTLE_BACKGROUND_TINT_FRAME_COUNT // 2)
+        self.assertEqual(max(abs(args[0] - 25) for args in fading), 2)
+        self.assertEqual(len(draw_at(DAMAGE_POPUP_FRAME_COUNT + BATTLE_BACKGROUND_TINT_FRAME_COUNT)), 1)
 
     def test_forecast_charges_hp_and_hits_front_and_rear_with_pre_cost_power(self):
         member = self.vald()

@@ -264,6 +264,9 @@ BLACK_WIND_TINT_COLOR = 0x000000
 POISON_BREATH_TINT_COLOR = 0x7E2072
 # DA2 palette color 30, independent of ZERO's palette ordering.
 FIRE_BREATH_TINT_COLOR = 0x990000
+BREATH_WAVE_STRIP_HEIGHT = 2
+BREATH_WAVE_FRAMES_PER_STEP = 2
+BREATH_WAVE_OFFSETS = (0, 3, 4, 3, 0, -3, -4, -3)
 ALL_ENEMY_TARGET_COMMANDS = (BattleCommand.IAI, BattleCommand.BREATH)
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT = 12
@@ -1182,6 +1185,7 @@ class BattleActionPresentation:
     earthquake: bool = False
     shake_offset: tuple[int, int] = (0, 0)
     background_tint_color: int | None = None
+    wave_enemy_sprites: bool = False
     party_silence_results: tuple[BattlePartySilenceResult, ...] = ()
     party_sleep_results: tuple[BattlePartySleepResult, ...] = ()
     party_confuse_results: tuple[BattlePartyConfuseResult, ...] = ()
@@ -1231,6 +1235,13 @@ class BattleActionPresentation:
             and (self.background_tint_color is not None or self.earthquake or result.damage > 0)
             for result in self.party_damage_results
         )
+
+    @property
+    def background_tint_progress(self) -> float:
+        duration = BATTLE_BACKGROUND_TINT_FRAME_COUNT
+        if self.elapsed_frame >= self.result_start_frame:
+            return max(0.0, 1 - (self.elapsed_frame - self.result_start_frame) / duration)
+        return min(self.elapsed_frame / duration, 1.0)
 
     @property
     def is_complete(self) -> bool:
@@ -4447,6 +4458,7 @@ class BattleScene:
 
         presentation = BattleActionPresentation(
             (), damage_results=tuple(damages), background_tint_color=FIRE_BREATH_TINT_COLOR,
+            wave_enemy_sprites=True,
             result_start_frame=DAMAGE_POPUP_FRAME_COUNT, post_effect_wait_frame_count=0,
         )
         self.action_presentation = presentation
@@ -10636,16 +10648,11 @@ class BattleScene:
     ) -> None:
         """Update only the background palette; draw never advances the tint."""
 
-        elapsed = presentation.elapsed_frame
-        duration = BATTLE_BACKGROUND_TINT_FRAME_COUNT
-        progress = min(elapsed / duration, 1.0)
-        if elapsed >= presentation.result_start_frame:
-            progress = max(0.0, 1 - (elapsed - presentation.result_start_frame) / duration)
         # Breaths and Black Wind use the palette block without a target flash.
         self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
         self.palette_shifter.define_mix(
             SPELL_EFFECT_FLASH_PALETTE,
-            base_rate=0.7 + cos(progress * pi) * 0.3,
+            base_rate=0.7 + cos(presentation.background_tint_progress * pi) * 0.3,
             target_color=presentation.background_tint_color,
         )
 
@@ -13201,6 +13208,13 @@ class BattleScene:
                 x += DAMAGE_NUMBER_SPRITE_SIZE
 
     def _draw_monsters(self) -> None:
+        action_presentation = getattr(self, "action_presentation", None)
+        wave_strength = (
+            action_presentation.background_tint_progress
+            if self.phase is BattlePhase.ACTION_PRESENTATION
+            and action_presentation is not None
+            and action_presentation.wave_enemy_sprites else 0.0
+        )
         for index, monster in enumerate(self.monsters):
             is_dying = (
                 self.phase is BattlePhase.MONSTER_DEATH
@@ -13219,7 +13233,6 @@ class BattleScene:
                     )
                 )
             )
-            action_presentation = getattr(self, "action_presentation", None)
             is_spell_damage_target = (
                 self.phase is BattlePhase.ACTION_PRESENTATION
                 and action_presentation is not None
@@ -13250,16 +13263,15 @@ class BattleScene:
             if not is_dying or getattr(self, "monster_death_delay_frames_remaining", 0):
                 self._draw_monster_shadow(monster, x, y)
                 if self.phase is BattlePhase.ACTION_PRESENTATION:
-                    self._draw_spell_effect_target(
-                        "enemy",
-                        index,
-                        lambda: self._draw_monster_image(
-                            monster,
-                            x,
-                            y,
-                            flip_x=is_escaping,
-                        ),
-                    )
+                    if is_spell_damage_target and wave_strength:
+                        self._draw_monster_image(
+                            monster, x, y, wave_strength=wave_strength,
+                            wave_frame=action_presentation.elapsed_frame,
+                        )
+                    else:
+                        self._draw_spell_effect_target(
+                            "enemy", index, lambda: self._draw_monster_image(monster, x, y),
+                        )
                     self._draw_identified_monster_hp(index, monster, x, y)
                     continue
                 is_unselectable_rear_target = (
@@ -13996,19 +14008,31 @@ class BattleScene:
         y: int,
         *,
         flip_x: bool = False,
+        wave_strength: float = 0.0,
+        wave_frame: int = 0,
     ) -> None:
         if monster.shadow == 1:
             pattern = (
                 pyxel.frame_count // MONSTER_FLOATING_PATTERN_FRAME_COUNT
             ) % len(MONSTER_FLOATING_OFFSETS)
             y += MONSTER_FLOATING_OFFSETS[pattern]
+        image = self.monster_images[monster.key]
+        width = -monster.width if flip_x else monster.width
+        if wave_strength:
+            wave_step = wave_frame // BREATH_WAVE_FRAMES_PER_STEP
+            for row in range(0, monster.height, BREATH_WAVE_STRIP_HEIGHT):
+                phase = (row // BREATH_WAVE_STRIP_HEIGHT - wave_step) % len(BREATH_WAVE_OFFSETS)
+                offset = round(BREATH_WAVE_OFFSETS[phase] * wave_strength)
+                height = min(BREATH_WAVE_STRIP_HEIGHT, monster.height - row)
+                pyxel.blt(x + offset, y + row, image, 0, row, width, height, TRANSPARENT_INDEX)
+            return
         pyxel.blt(
             x,
             y,
-            self.monster_images[monster.key],
+            image,
             0,
             0,
-            -monster.width if flip_x else monster.width,
+            width,
             monster.height,
             TRANSPARENT_INDEX,
         )
