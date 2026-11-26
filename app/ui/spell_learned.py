@@ -1,4 +1,4 @@
-"""Centered, confirm-driven notice for spells unlocked by proficiency growth."""
+"""Centered notice for spells unlocked by proficiency growth."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def newly_learned_spells(
 
 
 class SpellLearnedPopup:
-    """Show each new spell in a text-sized window until confirmed."""
+    """Show each new spell in a text-sized window until dismissed."""
 
     def __init__(
         self,
@@ -133,9 +133,9 @@ class SpellLearnedPopup:
         )
 
     def update(self, input_state: InputState) -> bool:
-        """Return true after the last notice receives a fresh confirm."""
+        """Return true after a fresh confirm or cancel dismisses the last notice."""
 
-        if not input_state.confirm.triggered:
+        if not (input_state.confirm.triggered or input_state.cancel.triggered):
             return False
         self.index += 1
         if self.index == len(self.notices):

@@ -211,11 +211,15 @@ class BattleResultOverlayTest(unittest.TestCase):
         )
         for _frame in range(RESULT_WAIT_FRAME_COUNT + RESULT_ANIMATION_FRAME_COUNT):
             self.assertFalse(overlay.update(InputState()))
+        cancel = InputState(cancel=InputButton(triggered=True, held=True))
+        self.assertFalse(overlay.update(cancel))
+        self.assertEqual(overlay.spell_learned_popup.index, 1)
+        self.assertFalse(overlay.update(InputState(cancel=InputButton(held=True))))
+        self.assertEqual(overlay.spell_learned_popup.index, 1)
         confirm = InputState(confirm=InputButton(triggered=True))
         self.assertFalse(overlay.update(confirm))
-        self.assertIsNotNone(overlay.spell_learned_popup)
-        self.assertFalse(overlay.update(confirm))
         self.assertIsNone(overlay.spell_learned_popup)
+        self.assertFalse(overlay.update(cancel))
         self.assertTrue(overlay.update(confirm))
 
     def test_marks_level_and_max_hp_growth_with_positive_color(self) -> None:

@@ -401,8 +401,10 @@ class SpellMenuTest(unittest.TestCase):
         self.assertIn(mock.proficiency_window, mock.windows)
         self.assertIsNotNone(mock.spell_learned_popup)
         self.assertIn("キュアー", mock.spell_learned_popup.window.texts[0].text)
-        mock.update(InputState(confirm=InputButton(True, True)))
+        self.assertFalse(mock.update(InputState(cancel=InputButton(True, True))))
         self.assertIsNone(mock.spell_learned_popup)
+        self.assertIs(mock.phase, SpellSelectionPhase.TARGET)
+        self.assertEqual(mock.member_cursor.selected_key, 0)
         level_up_jingle.assert_called_once_with()
         self.assertEqual(
             mock.proficiency_window.texts[0].text,
