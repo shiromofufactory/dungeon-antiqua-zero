@@ -8,6 +8,7 @@ from enum import StrEnum
 from math import floor
 
 if __package__:
+    from .battle_breath import member_breath_attack
     from .battle_commands import BattleCommand
     from .battle_layout import MonsterPlacement
     from .battle_physical import member_physical_attack
@@ -26,6 +27,7 @@ if __package__:
     from .spell import Spell
     from .state import AutoBattleConfig
 else:
+    from battle_breath import member_breath_attack
     from battle_commands import BattleCommand
     from battle_layout import MonsterPlacement
     from battle_physical import member_physical_attack
@@ -142,6 +144,7 @@ class AutoCombatant:
     action_rotation_index: int | None = None
     monster_placement: MonsterPlacement | None = None
     is_boss: bool = False
+    breath_attack: float = 0.0
 
     @classmethod
     def from_member(
@@ -237,6 +240,7 @@ class AutoCombatant:
             defense=sum(item.defense for item in armor),
             evasion=sum(item.evasion for item in armor),
             spell_defense=stats.spell_resistance,
+            breath_attack=member_breath_attack(member) if member.has_skill("Breath") else 0.0,
             weapons=tuple(weapons),
             equipment=member.equipment,
             proficiencies=tuple(

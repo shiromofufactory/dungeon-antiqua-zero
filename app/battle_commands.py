@@ -252,24 +252,16 @@ def resolve_battle_commands(
             or (command is BattleCommand.COVER and len(party) <= 1)
         ):
             continue
-        left_commands.append(
-            BattleCommandOption(
-                command,
-                enabled=(
-                    (
-                        member_can_iai(
-                            member, attacker_is_front_row=member_is_front_row
-                        )
-                        and any(monster.is_alive for monster in monsters)
-                    )
-                    if command is BattleCommand.IAI
-                    else (
-                        command not in (BattleCommand.AIM, BattleCommand.FOCUS)
-                        or bool(normal_attack_targets)
-                    )
-                ),
-            )
-        )
+        enabled = True
+        if command is BattleCommand.IAI:
+            enabled = member_can_iai(
+                member, attacker_is_front_row=member_is_front_row,
+            ) and any(monster.is_alive for monster in monsters)
+        elif command in (BattleCommand.AIM, BattleCommand.FOCUS):
+            enabled = bool(normal_attack_targets)
+        elif command is BattleCommand.BREATH:
+            enabled = any(monster.is_alive for monster in monsters)
+        left_commands.append(BattleCommandOption(command, enabled=enabled))
     right_commands = [
         BattleCommandOption(BattleCommand.DEFEND),
         BattleCommandOption(

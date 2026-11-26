@@ -36,7 +36,12 @@ from attack_pose import (
     throwing_projectile_sequence,
 )
 from battle_command_memory import BattleCommandMemory
-from battle_breath import resolve_fire_breath, resolve_poison_breath
+from battle_breath import (
+    member_breath_attack,
+    member_breath_hp_cost,
+    resolve_fire_breath,
+    resolve_poison_breath,
+)
 from battle_commands import (
     BattleCommand,
     BattleCommandContext,
@@ -259,6 +264,7 @@ BLACK_WIND_TINT_COLOR = 0x000000
 POISON_BREATH_TINT_COLOR = 0x7E2072
 # DA2 palette color 30, independent of ZERO's palette ordering.
 FIRE_BREATH_TINT_COLOR = 0x990000
+ALL_ENEMY_TARGET_COMMANDS = (BattleCommand.IAI, BattleCommand.BREATH)
 BATTLE_MONSTER_DEATH_SE_ID = "battle_monster_death"
 BOSS_MONSTER_DEATH_DELAY_FRAME_COUNT = 12
 BATTLE_MONSTER_ESCAPE_SE_ID = "battle_monster_escape"
@@ -2871,6 +2877,8 @@ class BattleScene:
                     self._begin_attack_target_selection(command=BattleCommand.AIM)
                 elif command == BattleCommand.IAI:
                     self._begin_attack_target_selection(command=BattleCommand.IAI)
+                elif command == BattleCommand.BREATH:
+                    self._begin_attack_target_selection(command=BattleCommand.BREATH)
                 elif command == BattleCommand.FOCUS:
                     self._begin_attack_target_selection(command=BattleCommand.FOCUS)
                 elif command == BattleCommand.SPELL:
@@ -3604,9 +3612,10 @@ class BattleScene:
             BattleCommand.AIM,
             BattleCommand.IAI,
             BattleCommand.FOCUS,
+            BattleCommand.BREATH,
         ):
             self._begin_attack_target_selection(command=command)
-            if command is not BattleCommand.IAI:
+            if command not in ALL_ENEMY_TARGET_COMMANDS:
                 self.selected_target_index = action.targets[0] - 5
                 self.target_cursor.select_key(self.selected_target_index)
         elif command is BattleCommand.IDENTIFY:
@@ -3675,6 +3684,7 @@ class BattleScene:
             self.selectable_target_indexes = ()
             self.selected_target_index = None
             self.target_cursor.active = False
+            self.all_target_cursors = ()
             self._begin_action_return()
             self._open_member_command_menu()
         self._refresh_input_guide()
@@ -4391,6 +4401,61 @@ class BattleScene:
             BATTLE_POPUP_FRAME_COUNT,
         )
         self._start_target_spell_effects(effects)
+
+    def _begin_member_breath(self) -> None:
+        """Confirm the all-enemy breath and wait for the actor to step forward."""
+
+        self.phase = BattlePhase.ACTION_PRESENTATION
+        self.command_window.close_immediately()
+        self.all_target_cursors = ()
+        self.hidden_party_indexes.discard(self.active_party_index)
+        self._refresh_monster_name_colors()
+
+    def _start_member_breath_presentation(self, party_index: int) -> None:
+        """Pay HP once and resolve every living enemy's fire damage."""
+
+        member = self.party[party_index]
+        hp = member.hp
+        attack = member_breath_attack(member)
+        hp_cost = member_breath_hp_cost(hp)
+        member.hp -= hp_cost
+        self._refresh_party_hp_text(party_index)
+        if hp_cost:
+            x, y = self._party_effect_position(party_index)
+            self.spell_damage_popups.append(BattleSpellDamagePopup(x + 6, y + 16, hp_cost))
+        damages = []
+        for index in self.selectable_target_indexes:
+            monster = self.monsters[index]
+            if not monster.is_alive:
+                continue
+            result = resolve_fire_breath(
+                attack=attack, hp=hp, max_hp=member.max_hp,
+                target_spell_defense=monster.combat_stats.spell_resistance,
+                fire_resistant=ResistanceType.FIRE in monster.spell_resistances,
+                random_factor=random.random(),
+            )
+            _x, y = self._monster_base_position(index)
+            center_x = self._monster_draw_x(index) + monster.width // 2
+            damages.append(BattleSpellDamageResult(
+                index, result.damage,
+                SpellAffinity.RESIST if result.resisted else SpellAffinity.NORMAL,
+                center_x, y + monster.height - 8,
+                center_x - AFFINITY_ICON_WIDTH // 2, y + 20,
+            ))
+            self.monster_record_system.reveal_profile(monster.key)
+            self.monster_record_system.reveal_affinity(monster.key, ResistanceType.FIRE)
+
+        presentation = BattleActionPresentation(
+            (), damage_results=tuple(damages), background_tint_color=FIRE_BREATH_TINT_COLOR,
+            result_start_frame=DAMAGE_POPUP_FRAME_COUNT, post_effect_wait_frame_count=0,
+        )
+        self.action_presentation = presentation
+        self._queue_spell_affinity_popups(damages, {})
+        self._sync_action_background(presentation)
+        self._show_battle_popup(
+            self._command_label(BattleCommand.BREATH), BATTLE_POPUP_FRAME_COUNT,
+        )
+        play_se(BATTLE_FIRE_BREATH_SE_ID)
 
     def _begin_focus_presentation(self) -> bool:
         """Store a charged attack and hold the guard pose for 36 frames."""
@@ -6987,10 +7052,14 @@ class BattleScene:
             return
         presentation = getattr(self, "action_presentation", None)
         if presentation is None:
-            if getattr(self, "selected_command", None) is BattleCommand.PRAY:
+            command = getattr(self, "selected_command", None)
+            if command in (BattleCommand.PRAY, BattleCommand.BREATH):
                 index = self.action_party_index
                 if index is not None and self.action_offset_x == ACTION_MOVE_DISTANCE:
-                    self._start_pray_presentation(index)
+                    if command is BattleCommand.PRAY:
+                        self._start_pray_presentation(index)
+                    else:
+                        self._start_member_breath_presentation(index)
             else:
                 self._complete_current_turn()
             return
@@ -7361,18 +7430,18 @@ class BattleScene:
             BattleCommand.AIM,
             BattleCommand.IAI,
             BattleCommand.FOCUS,
+            BattleCommand.BREATH,
         ):
-            raise ValueError("attack target selection requires a physical command")
+            raise ValueError("attack target selection requires an attack command")
         selectable = self._active_member_attack_targets(command=command)
         if not selectable:
             return False
 
         self.selected_command = command
         self.selectable_target_indexes = selectable
+        all_enemies = command in ALL_ENEMY_TARGET_COMMANDS
         # DA2 starts enemy selection at the last selectable monster.
-        self.selected_target_index = (
-            None if command is BattleCommand.IAI else selectable[-1]
-        )
+        self.selected_target_index = None if all_enemies else selectable[-1]
         self.phase = BattlePhase.TARGET
         if command is not BattleCommand.FOCUS:
             self._begin_action_motion(
@@ -7380,10 +7449,10 @@ class BattleScene:
                 jump=getattr(self, "auto_battle_active", False),
             )
         self.command_cursor.active = False
-        self.target_cursor.active = command is not BattleCommand.IAI
+        self.target_cursor.active = not all_enemies
         if self.selected_target_index is not None:
             self.target_cursor.select_key(self.selected_target_index)
-        if command is BattleCommand.IAI:
+        if all_enemies:
             target_positions = tuple(
                 target
                 for target in self.target_cursor.targets
@@ -7404,6 +7473,8 @@ class BattleScene:
                 return
             if self.selected_command is BattleCommand.IDENTIFY:
                 self._begin_identify_presentation()
+            elif self.selected_command is BattleCommand.BREATH:
+                self._begin_member_breath()
             else:
                 self._begin_attack_presentation()
             return
@@ -7423,11 +7494,13 @@ class BattleScene:
                 self._begin_focus_presentation()
             elif self.selected_command is BattleCommand.IDENTIFY:
                 self._begin_identify_presentation()
+            elif self.selected_command is BattleCommand.BREATH:
+                self._begin_member_breath()
             else:
                 self._begin_attack_presentation()
             return
 
-        if self.selected_command is BattleCommand.IAI:
+        if self.selected_command in ALL_ENEMY_TARGET_COMMANDS:
             for cursor in self.all_target_cursors:
                 cursor.update()
         else:
@@ -9632,6 +9705,8 @@ class BattleScene:
         if self.active_party_index is None:
             return ()
         actor = self.party[self.active_party_index]
+        if command is BattleCommand.BREATH:
+            return tuple(index for index, monster in enumerate(self.monsters) if monster.is_alive)
         if command is BattleCommand.IAI:
             if not member_can_iai(
                 actor,
@@ -14006,7 +14081,7 @@ class BattleScene:
         if getattr(self, "auto_battle_active", False):
             return
         if self.phase is BattlePhase.TARGET:
-            if getattr(self, "selected_command", None) is BattleCommand.IAI:
+            if getattr(self, "selected_command", None) in ALL_ENEMY_TARGET_COMMANDS:
                 if pyxel.frame_count % 2 == 0:
                     for cursor in self.all_target_cursors:
                         cursor.draw()

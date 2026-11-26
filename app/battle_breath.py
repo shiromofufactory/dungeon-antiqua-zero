@@ -1,6 +1,11 @@
-"""DA2 monster breath rules, independent of Pyxel and presentation."""
+"""Breath rules independent of Pyxel and presentation."""
 
 from dataclasses import dataclass
+
+if __package__:
+    from .member import MAX_ABILITY, Member
+else:
+    from member import MAX_ABILITY, Member
 
 
 @dataclass(frozen=True)
@@ -8,6 +13,20 @@ class BreathResult:
     damage: int
     poisoned: bool
     resisted: bool
+
+
+def member_breath_attack(member: Member) -> float:
+    """Use strength and internal level without any weapon bonuses."""
+
+    strength = min(MAX_ABILITY, member.permanent_abilities.strength + sum(
+        item.strength_modifier for item in member.equipment.equipped_items()
+        if not item.is_weapon
+    ))
+    return strength * (1 + member.internal_level) / 2
+
+
+def member_breath_hp_cost(current_hp: int) -> int:
+    return current_hp // 5
 
 
 def resolve_poison_breath(
@@ -35,7 +54,7 @@ def resolve_poison_breath(
 
 
 def resolve_fire_breath(
-    *, attack: int, hp: int, max_hp: int, target_spell_defense: int,
+    *, attack: int | float, hp: int, max_hp: int, target_spell_defense: int,
     fire_resistant: bool, random_factor: float,
 ) -> BreathResult:
     """Use full attack for DA2 fire breath, with no status-effect roll."""
@@ -52,7 +71,7 @@ def resolve_fire_breath(
 
 
 def _breath_damage(
-    *, attack: int, hp: int, max_hp: int, target_spell_defense: int,
+    *, attack: int | float, hp: int, max_hp: int, target_spell_defense: int,
     attack_multiplier: float, resisted: bool, random_factor: float,
 ) -> int:
     if attack < 0 or max_hp <= 0 or not 0 <= hp <= max_hp:

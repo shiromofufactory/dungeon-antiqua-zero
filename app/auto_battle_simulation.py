@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 if __package__:
-    from .battle_breath import resolve_fire_breath, resolve_poison_breath
+    from .battle_breath import member_breath_hp_cost, resolve_fire_breath, resolve_poison_breath
     from .auto_battle_model import (
         CASE_COUNT,
         AutoAction,
@@ -79,7 +79,7 @@ if __package__:
     from .resistance import ResistanceType
     from .spell import SPELL_PROFICIENCY_BY_TYPE, Spell, SpellAction, SpellType
 else:
-    from battle_breath import resolve_fire_breath, resolve_poison_breath
+    from battle_breath import member_breath_hp_cost, resolve_fire_breath, resolve_poison_breath
     from auto_battle_model import (
         CASE_COUNT,
         AutoAction,
@@ -591,6 +591,8 @@ class BattleForecast:
                 targets = self.attack_targets(actor, command)
                 if targets:
                     actions.append(AutoAction(command, targets))
+            elif command is BattleCommand.BREATH:
+                actions.append(AutoAction(command, tuple(a.spec.number for a in self.enemies())))
             elif command is BattleCommand.IDENTIFY:
                 actions.extend(
                     AutoAction(command, (a.spec.number,)) for a in self.enemies()
@@ -1416,6 +1418,8 @@ class BattleForecast:
             self.physical(actor, action)
         elif action.command is BattleCommand.FOCUS:
             actor.focus = action.targets[0]
+        elif action.command is BattleCommand.BREATH:
+            self.member_breath(actor, action.targets)
         elif action.spell_key:
             self.cast(actor, action)
         elif action.command is BattleCommand.HIDE:
@@ -1443,6 +1447,22 @@ class BattleForecast:
         self.normalize()
         self.advance(actor, delay)
         return cost, actor.agility + delay
+
+    def member_breath(self, actor: ForecastActor, targets: tuple[int, ...]) -> None:
+        hp = actor.hp
+        actor.hp -= member_breath_hp_cost(hp)
+        actor.hidden = False
+        for number in targets:
+            target = self.actors[number]
+            result = resolve_fire_breath(
+                attack=actor.spec.breath_attack, hp=hp, max_hp=actor.max_hp,
+                target_spell_defense=target.spec.spell_defense,
+                fire_resistant=ResistanceType.FIRE in target.spell_resistances,
+                random_factor=self.roll(actor, number, 5),
+            )
+            target.damage(result.damage)
+            self.reveal(target, "profile")
+            self.reveal(target, ResistanceType.FIRE.value)
 
     def covering(self, number):
         target = self.actors[number]
