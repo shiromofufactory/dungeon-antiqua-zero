@@ -122,7 +122,7 @@
 - 起動モード別の武器・呪文・経験値上限と経験値到達色、上限超過NPCの保持、戦闘・メニュー呪文・自動回復への適用は `python3 -B -m unittest tests.test_member tests.test_battle_progression tests.test_spell_progression tests.test_auto_recovery tests.test_spell_menu tests.test_battle_scene tests.test_launch_modes tests.test_game tests.test_save_system` で回帰検証する。
 - 仮タイトル・モード別の開始経路・押しっぱなし入力・タイトル復帰は `python3 -B -m unittest tests.test_title tests.test_start_menu tests.test_launch_modes tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
 - 開始時の操作説明・入力種別変更・初回判定・試遊版での毎回表示・端末設定の互換性は `python3 -B -m unittest tests.test_control_guide tests.test_launch_modes tests.test_state tests.test_settings_system tests.test_title tests.test_start_menu tests.test_game tests.test_game_menu tests.test_input` で回帰検証する。
-- オートバトルの判断・予測・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
+- オートバトルの判断・予測・毒と眠りの治療・固定回復の優先・Scene接続は `python3 -B -m unittest tests.test_auto_battle` で回帰検証する。
 - スキル「いのり」の成功条件・MP上限・演出と、手動／オートの接続は `python3 -B -m unittest tests.test_battle_magic tests.test_battle_screen_mock tests.test_auto_battle` で回帰検証する。
 - 戦闘中のアイテム消費と全滅時の返却は `python3 -B -m unittest tests.test_battle_screen_mock tests.test_battle_scene tests.test_debug_dungeon tests.test_game_events` で回帰検証する。
 - 呪文の全対象ミスは `python3 -B -m unittest tests.test_battle_screen_mock.BattleScreenMockTest.test_all_missed_spell_targets_add_eighteen_frames_before_return` で手動・オートの待機、部分成功、帰還後の手番進行を回帰検証する。

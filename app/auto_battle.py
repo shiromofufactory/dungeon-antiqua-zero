@@ -14,7 +14,7 @@ if __package__:
         AutoBattleDecision,
         AutoBattleSnapshot,
     )
-    from .auto_battle_simulation import PRIORITY_RECOVERY_ACTIONS, BattleForecast
+    from .auto_battle_simulation import RECOVERY_ACTIONS, BattleForecast
     from .battle_commands import BattleCommand
     from .spell import SpellAction
 else:
@@ -26,7 +26,7 @@ else:
         AutoBattleDecision,
         AutoBattleSnapshot,
     )
-    from auto_battle_simulation import PRIORITY_RECOVERY_ACTIONS, BattleForecast
+    from auto_battle_simulation import RECOVERY_ACTIONS, BattleForecast
     from battle_commands import BattleCommand
     from spell import SpellAction
 
@@ -97,12 +97,12 @@ class AutoBattlePlanner:
                 forecast_turns=0,
                 reason="recovery_" + stage,
             )
-        # Recovery is decided from current allies, never ranked by sampled risk.
         simulation_actions = []
         for action in actions:
             if (
                 action.spell_key
-                and current.spells[action.spell_key].action in PRIORITY_RECOVERY_ACTIONS
+                and current.spells[action.spell_key].action in RECOVERY_ACTIONS
+                and not current.treats_poison_or_sleep(action)
             ):
                 excluded.append((action.spell_key, "recovery_not_needed"))
             else:

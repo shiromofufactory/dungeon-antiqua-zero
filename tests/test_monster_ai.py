@@ -144,6 +144,25 @@ class MonsterActionSelectionTest(unittest.TestCase):
             self.assertIs(select_monster_action(**arguments, call_slot=2), MonsterAction.ATTACK)
         choose_start.assert_called_once_with(3)
 
+    def test_rotation_selects_escape_on_its_turn_without_eligibility_rolls(self):
+        state = MonsterBattleState(max_hp=20)
+        arguments = dict(
+            special_actions=(MonsterSpecialAction.ESCAPE,),
+            is_front_row=True, can_attack=True, can_charge=False,
+            party_actual_attacks=(0,), monster_attack=60,
+            intelligence=3, rotation_state=state,
+        )
+
+        with (
+            patch("monster_ai.random.randrange", return_value=1) as choose_start,
+            patch("monster_ai.random.randint", return_value=0) as escape_roll,
+        ):
+            self.assertIs(select_monster_action(**arguments), MonsterAction.ATTACK)
+            self.assertIs(select_monster_action(**arguments), MonsterAction.ESCAPE)
+
+        choose_start.assert_called_once_with(2)
+        escape_roll.assert_not_called()
+
     def test_rear_idle_eligibility_for_random_action_selection(self):
         for intelligence, spell_keys, can_charge, expected in (
             (1, ("SLOW",), False, (MonsterSpellAction("SLOW"), MonsterAction.IDLE)),

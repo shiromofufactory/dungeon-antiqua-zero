@@ -160,6 +160,23 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         decision = decide_auto_battle(self.snapshot(self.specs[0], caller))
         self.assertTrue(decision.evaluations)
 
+    def test_forecast_rotating_escape_removes_enemy_without_eligibility_rolls(self):
+        enemy = self.enemy(
+            intelligence=3, action_rotation_index=0, attack=60,
+            special_actions=(MonsterSpecialAction.ESCAPE,),
+        )
+        ally = replace(self.specs[0], weapons=())
+        forecast = BattleForecast(self.snapshot(enemy, ally, active=5), 0)
+        actor = forecast.actors[5]
+
+        with patch.object(forecast, "roll", return_value=0) as roll:
+            forecast.enemy_turn(actor)
+
+        self.assertTrue(actor.removed)
+        self.assertNotIn(5, forecast.order.actors)
+        self.assertEqual(actor.action_rotation_index, 1)
+        roll.assert_not_called()
+
     def test_enemy_forecast_protection_and_healing_affect_living_monster_targets(self):
         protection, heal = (self.spells[key] for key in ("PROTECTION", "HEALING1"))
         caster = self.enemy(
@@ -687,7 +704,7 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             result = decide_auto_battle(self.snapshot(healer, self.enemy(), active=1))
             self.assertEqual(result.action.spell_key, "HEALING2")
 
-    def test_full_recovery_treats_current_ailments_even_at_full_hp(self):
+    def test_full_recovery_prioritizes_paralysis_confusion_and_stun_at_full_hp(self):
         ring = replace(self.items["MIRACLE RING"], use_spell_key="PANACEA")
         caster = replace(
             self.specs[1],
@@ -696,8 +713,6 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
             equipment=self.specs[1].equipment.replaced({EquipmentSlot.ARM: ring}),
         )
         for field, value in (
-            ("poisoned", True),
-            ("sleeping", 2),
             ("paralyzed", True),
             ("confused", 2),
             ("stunned", True),
@@ -713,15 +728,13 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(result.action.targets, (0,))
                 self.assertEqual(result.action.spell_key, "PANACEA")
 
-    def test_dedicated_cure_is_selected_for_its_four_ailments(self):
+    def test_dedicated_cure_still_prioritizes_paralysis_and_confusion(self):
         caster = replace(
             self.specs[1],
             spells=(self.spells["CURE"],),
             mp=self.spells["CURE"].mp,
         )
         for field, value in (
-            ("poisoned", True),
-            ("sleeping", 2),
             ("paralyzed", True),
             ("confused", 2),
         ):
@@ -733,6 +746,60 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                 self.assertEqual(result.reason, "recovery_cure")
                 self.assertEqual(result.action.spell_key, "CURE")
                 self.assertEqual(result.action.targets, (0,))
+
+    def test_poison_and_sleep_treatments_compete_with_attacks_in_the_forecast(self):
+        caster = replace(
+            self.specs[1], spells=(self.spells["CURE"],), skills=frozenset(),
+            weapons=(AutoWeapon(120, 200),),
+        )
+        cases = (
+            ({"poisoned": True}, 1, BattleCommand.ATTACK),
+            ({"poisoned": True, "stunned": True}, 1, BattleCommand.ATTACK),
+            ({"sleeping": 3}, 1, BattleCommand.ATTACK),
+            ({"poisoned": True, "max_hp": 320, "hp": 15}, 350, BattleCommand.SPELL),
+            ({"sleeping": 3}, 350, BattleCommand.SPELL),
+        )
+        for ailments, enemy_hp, expected in cases:
+            with self.subTest(ailments=ailments, enemy_hp=enemy_hp):
+                ally = replace(
+                    self.specs[0], spells=(), skills=frozenset(),
+                    weapons=(AutoWeapon(170, 200),), **ailments,
+                )
+                enemy = self.enemy(hp=enemy_hp, max_hp=enemy_hp, attack=10)
+                snapshot = self.snapshot(caster, ally, enemy, active=1)
+                result = decide_auto_battle(snapshot)
+                self.assertEqual(result.reason, "simulation")
+                self.assertEqual(result.action.command, expected)
+                self.assertEqual((result.case_count, result.forecast_turns), (8, 16))
+                cure = next(e for e in result.evaluations if e.action.spell_key == "CURE")
+                attack = next(e for e in result.evaluations if e.action.command is BattleCommand.ATTACK)
+                self.assertEqual(cure.action.targets, (0,))
+                self.assertGreater(cure.current_cost, 0)
+                if expected is BattleCommand.SPELL:
+                    self.assertEqual(result.action, cure.action)
+                    if ally.poisoned:
+                        self.assertLess(cure.new_deaths, attack.new_deaths)
+                    else:
+                        self.assertGreater(
+                            dict(cure.components)["ability"], dict(attack.components)["ability"]
+                        )
+
+    def test_full_recovery_for_sleep_is_evaluated_even_at_full_hp(self):
+        ring = replace(self.items["MIRACLE RING"], use_spell_key="PANACEA")
+        caster = replace(
+            self.specs[1], mp=0, skills=frozenset(), weapons=(AutoWeapon(120, 200),),
+            equipment=self.specs[1].equipment.replaced({EquipmentSlot.ARM: ring}),
+        )
+        ally = replace(self.specs[0], sleeping=2)
+        snapshot = self.snapshot(caster, ally, self.enemy(hp=1, max_hp=1), active=1)
+        result = decide_auto_battle(snapshot)
+        self.assertEqual(result.action.command, BattleCommand.ATTACK)
+        action = AutoAction(BattleCommand.ITEM, (0,), "PANACEA", EquipmentSlot.ARM.value)
+        self.assertIn(action, tuple(e.action for e in result.evaluations))
+        forecast = BattleForecast(snapshot, 0)
+        self.assertEqual(forecast.continuation(1, {5: 1}).command, BattleCommand.ATTACK)
+        forecast.execute(1, action)
+        self.assertEqual(forecast.actors[0].sleeping, 0)
 
     def test_revive_is_selected_for_the_first_dead_member(self):
         dead = replace(self.specs[0], hp=0, alive=False)

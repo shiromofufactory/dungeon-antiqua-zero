@@ -193,7 +193,7 @@ def monster_action_candidates(
     if priority_spell_key is not None and intelligence != 3:
         return (MonsterSpellAction(priority_spell_key),)
     candidates: list[MonsterActionChoice] = []
-    if MonsterSpecialAction.ESCAPE in special_actions and escape_eligible:
+    if MonsterSpecialAction.ESCAPE in special_actions and (intelligence == 3 or escape_eligible):
         candidates.append(MonsterAction.ESCAPE)
     if MonsterSpecialAction.CHARGE in special_actions and can_charge:
         candidates.append(MonsterAction.CHARGE)
@@ -274,9 +274,10 @@ def select_monster_action(
 ) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including call and ZERO's charge.
 
-    Escape retains DA2's two-stage eligibility check: a 50% gate, followed
-    by comparing one random living member's actual attack against the
-    monster's attack multiplied by a random value from 1.0 through 2.0.
+    At intelligence 3, escape is always available in its rotation slot.
+    Other intelligence levels use DA2's two-stage eligibility check: a 50%
+    gate, followed by comparing one random living member's actual attack
+    against the monster's attack multiplied by a random value from 1.0 through 2.0.
     Without a priority action, eligible specials and spells have the same
     weight as a normal attack. A rear-row monster without ranged reach receives
     one idle candidate at intelligence 0 or 1, or when no other action is available.
@@ -313,7 +314,8 @@ def select_monster_action(
 
     escape_eligible = False
     if (
-        MonsterSpecialAction.ESCAPE in specials
+        intelligence != 3
+        and MonsterSpecialAction.ESCAPE in specials
         and party_actual_attacks
         and random.randint(0, 1) > 0
     ):

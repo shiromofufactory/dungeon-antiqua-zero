@@ -10183,7 +10183,7 @@ class BattleScene:
         """Evaluate spells and specials before choosing one action."""
 
         party_attacks: tuple[int, ...] = ()
-        if MonsterSpecialAction.ESCAPE in actor.special_actions:
+        if actor.intelligence != 3 and MonsterSpecialAction.ESCAPE in actor.special_actions:
             party_attacks = tuple(
                 self._member_actual_physical_attack(self.party[index])
                 for index in self._active_party_indexes()
