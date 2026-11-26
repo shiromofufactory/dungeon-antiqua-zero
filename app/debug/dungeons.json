@@ -846,6 +846,129 @@
           }
         }
       ]
+    },
+    {
+      "id": "dungeon_ca5c26c00e3747f28c6349740a240d36",
+      "name": "試練の塔A",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "random_encounter_34b9eefacf684e1283070163ae14f540",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 6,
+            "danger": "low",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_9dfe6776dd1d40f59e78ae50ef1ab3aa",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "FRUIT of AGI"
+          }
+        },
+        {
+          "id": "treasure_85009b0623ae402486d857692767a504",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "SHIELD RING"
+          }
+        },
+        {
+          "id": "random_encounter_da15e46106d946bd8212b272ddac1093",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 6,
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_87d9dd1eb72f4f40b484786a8749e24d",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "WINTER MITTENS"
+          }
+        },
+        {
+          "id": "treasure_231128864a654b4ea866123582a52df1",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "FALCON DAGGER"
+          }
+        },
+        {
+          "id": "random_encounter_a23676f4a86948dc9f5e5c1128f9c475",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 6,
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_829477a5ae0847fc885bbd748b5eb82c",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "ROBE of ANGELS"
+          }
+        },
+        {
+          "id": "treasure_d383be0cd7a9416fbb3cd03c5d67b22c",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "GOLD HAIRPIN"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dungeon_edaa5d92c5f44e10828989c50716d3db",
+      "name": "試練の塔B",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "random_encounter_cd4f053a1077416fb2dd79ed1338372f",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 6,
+            "danger": "high",
+            "polarity": "yang",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "event_battle_f8803eb9c2fa4737b79f011c9b47e2e4",
+          "type": "event_battle",
+          "battle_id": "battle_21"
+        }
+      ]
     }
   ]
 }

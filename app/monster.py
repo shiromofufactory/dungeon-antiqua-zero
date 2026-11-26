@@ -345,6 +345,7 @@ class MonsterBattleState:
     confused: int = 0
     silenced: int = 0
     stunned: bool = False
+    magic_shield: bool = field(default=False, init=False)
     defense_modifier: int = 0
     speed_modifier: int = 0
     slow_turns: int = 0
@@ -478,6 +479,7 @@ class MonsterBattleState:
             self.confused = 0
             self.silenced = 0
             self.stunned = False
+            self.magic_shield = False
             self.defense_modifier = 0
             self.speed_modifier = 0
             self.slow_turns = 0
@@ -558,6 +560,7 @@ class MonsterBattleState:
             self.confused = 0
             self.silenced = 0
             self.stunned = False
+            self.magic_shield = False
             self.defense_modifier = 0
             self.speed_modifier = 0
             self.slow_turns = 0
@@ -681,6 +684,13 @@ class MonsterBattleState:
         self.slow_turns = 0
         return True
 
+    def purge_buffs(self) -> None:
+        """Remove defensive magic without changing ailments or debuffs."""
+
+        self.defense_modifier = min(self.defense_modifier, 0)
+        self.speed_modifier = min(self.speed_modifier, 0)
+        self.magic_shield = False
+
     def spend_mp(self, amount: int) -> bool:
         """Spend MP when possible and report whether the spell can proceed."""
 
@@ -702,6 +712,7 @@ class MonsterBattleState:
         self.confused = 0
         self.silenced = 0
         self.stunned = False
+        self.magic_shield = False
         self.defense_modifier = 0
         self.speed_modifier = 0
         self.slow_turns = 0
@@ -717,6 +728,7 @@ class MonsterBattleState:
         self.confused = 0
         self.silenced = 0
         self.stunned = False
+        self.magic_shield = False
         self.defense_modifier = 0
         self.speed_modifier = 0
         self.slow_turns = 0

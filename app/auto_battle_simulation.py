@@ -32,6 +32,7 @@ if __package__:
         black_wind_has_effect,
         TEMPTATION_RATE,
         debuff_turn_range,
+        has_dispellable_buffs,
         member_spell_ability,
         member_spell_modifier,
         modified_defense,
@@ -43,6 +44,7 @@ if __package__:
         resolve_status_spell,
         spell_cast_delay,
         spell_reflection_chance,
+        spell_resistances,
     )
     from .battle_physical import (
         PHYSICAL_EFFECT_RESISTANCE,
@@ -104,6 +106,7 @@ else:
         black_wind_has_effect,
         TEMPTATION_RATE,
         debuff_turn_range,
+        has_dispellable_buffs,
         member_spell_ability,
         member_spell_modifier,
         modified_defense,
@@ -115,6 +118,7 @@ else:
         resolve_status_spell,
         spell_cast_delay,
         spell_reflection_chance,
+        spell_resistances,
     )
     from battle_physical import (
         PHYSICAL_EFFECT_RESISTANCE,
@@ -162,6 +166,8 @@ ALLY_SPELL_ACTIONS = frozenset(
         SpellAction.SLOW,
         SpellAction.BREAK,
         SpellAction.PROTECTION,
+        SpellAction.MAGIC_SHIELD,
+        SpellAction.PURGE,
         SpellAction.IDENTIFY,
         SpellAction.HASTE,
         SpellAction.SILENCE,
@@ -207,6 +213,7 @@ class ForecastActor:
     cover: int | None
     focus: int | None
     removed: bool = False
+    magic_shield: bool = False
     slow_turns: int = 0
     defense_down_turns: int = 0
     action_rotation_index: int | None = None
@@ -231,6 +238,7 @@ class ForecastActor:
             spec.defending,
             spec.cover,
             spec.focus,
+            magic_shield=spec.magic_shield,
             slow_turns=spec.slow_turns,
             defense_down_turns=spec.defense_down_turns,
             action_rotation_index=spec.action_rotation_index,
@@ -267,6 +275,10 @@ class ForecastActor:
         return modified_defense(self.spec.defense, self.protection)
 
     @property
+    def spell_resistances(self) -> frozenset[ResistanceType]:
+        return spell_resistances(self.spec.resistances, self.magic_shield)
+
+    @property
     def evasion(self) -> int:
         return (
             self.spec.evasion
@@ -298,6 +310,7 @@ class ForecastActor:
             self.spec.tribe, self.spec.shadow, self.agility, self.mp, self.defending,
             self.poisoned, self.sleeping, self.confused, self.paralyzed, self.stunned,
             self.silenced, self.speed, self.protection, self.slow_turns, self.defense_down_turns,
+            self.magic_shield,
             self.action_rotation_index,
         )
 
@@ -308,6 +321,7 @@ class ForecastActor:
             self.sleeping = self.confused = 0
         if self.hp == 0:
             self.poisoned = self.paralyzed = self.stunned = self.hidden = False
+            self.magic_shield = False
             self.sleeping = self.confused = self.silenced = self.protection = (
                 self.speed
             ) = 0
@@ -326,6 +340,11 @@ class ForecastActor:
     def apply_protection(self) -> None:
         self.protection = min(MAX_PROTECTION_LEVEL, self.protection + 1)
         self.defense_down_turns = 0
+
+    def purge_buffs(self) -> None:
+        self.protection = min(self.protection, 0)
+        self.speed = min(self.speed, 0)
+        self.magic_shield = False
 
     @property
     def can_recover_with_black_wind(self) -> bool:
@@ -504,6 +523,8 @@ class BattleForecast:
                         for kind in SPELL_PROFICIENCY_BY_TYPE.values()
                     )
                 )
+        if spell.action is SpellAction.MAGIC_SHIELD:
+            targets = tuple(a for a in targets if not a.magic_shield)
         return tuple(a.spec.number for a in targets)
 
     def command_options(self, actor):
@@ -656,6 +677,12 @@ class BattleForecast:
         if not targets:
             reject(spell.key, "no_targets")
             return ()
+        if spell.action is SpellAction.PURGE and not any(
+            has_dispellable_buffs(target.protection, target.speed, target.magic_shield)
+            for target in (self.actors[number] for number in targets)
+        ):
+            reject(spell.key, "no_change")
+            return ()
         if spell.action in (
             SpellAction.SLEEP,
             SpellAction.CONFUSE,
@@ -666,7 +693,7 @@ class BattleForecast:
             effective = tuple(
                 n
                 for n in targets
-                if spell.attribute not in self.actors[n].spec.resistances
+                if spell.attribute not in self.actors[n].spell_resistances
             )
             if spell.to_all:
                 # Mixed groups still use the full manual target set; only an
@@ -1190,6 +1217,10 @@ class BattleForecast:
                 target.mp = min(target.spec.max_mp, target.mp + amount)
             elif spell.action is SpellAction.PROTECTION:
                 target.apply_protection()
+            elif spell.action is SpellAction.MAGIC_SHIELD:
+                target.magic_shield = True
+            elif spell.action is SpellAction.PURGE:
+                target.purge_buffs()
             elif spell.action is SpellAction.HASTE:
                 target.apply_haste()
             elif spell.action is SpellAction.CURE:
@@ -1200,6 +1231,7 @@ class BattleForecast:
                 target.poisoned = target.paralyzed = target.stunned = False
                 target.sleeping = target.confused = target.silenced = 0
                 target.protection = target.speed = 0
+                target.magic_shield = False
                 target.slow_turns = target.defense_down_turns = 0
                 target.hidden = False
                 target.focus = target.cover = None
@@ -1230,7 +1262,7 @@ class BattleForecast:
                         target_spell_defense=target.spec.spell_defense,
                         attribute=spell.attribute,
                         target_weaknesses=target.spec.weaknesses,
-                        target_resistances=target.spec.resistances,
+                        target_resistances=target.spell_resistances,
                         target_is_shadow=target.spec.shadow,
                         flying_effective=spell.effective_race == "FLYING",
                         dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
@@ -1337,7 +1369,7 @@ class BattleForecast:
             target_spell_defense=target.spec.spell_defense,
             attribute=spell.attribute,
             target_weaknesses=target.spec.weaknesses,
-            target_resistances=target.spec.resistances,
+            target_resistances=target.spell_resistances,
             success_roll=int(self.roll(actor, roll_target, 10) * 20),
         ).success
 
@@ -1467,7 +1499,8 @@ class BattleForecast:
                              or self.actors[n].confused),
                         bool(self.actors[n].spec.spells), self.actors[n].silenced,
                         self.actors[n].speed, self.actors[n].protection,
-                        self.actors[n].spec.resistances,
+                        self.actors[n].spell_resistances,
+                        magic_shield=self.actors[n].magic_shield,
                     )
                     for n in indexes
                 )
@@ -1509,7 +1542,7 @@ class BattleForecast:
             ),
             intelligence=intelligence,
             fire_breath_effective=any(
-                ResistanceType.FIRE not in target.spec.resistances
+                ResistanceType.FIRE not in target.spell_resistances
                 for target in available
             ),
             spell_keys=spell_keys,
@@ -1608,7 +1641,7 @@ class BattleForecast:
                 else:
                     result = resolve_fire_breath(
                         **arguments,
-                        fire_resistant=ResistanceType.FIRE in target.spec.resistances,
+                        fire_resistant=ResistanceType.FIRE in target.spell_resistances,
                     )
                 target.damage(result.damage)
                 if result.poisoned and target.is_alive:
@@ -1631,12 +1664,17 @@ class BattleForecast:
                             target.apply_haste()
                         elif spell.action is SpellAction.PROTECTION:
                             target.apply_protection()
+                        elif spell.action is SpellAction.MAGIC_SHIELD:
+                            target.magic_shield = True
                         elif spell.action is SpellAction.HEAL:
                             self.apply_spell_healing(actor, target, spell, self.roll(actor, n, 8))
                 if spell.to_enemy:
                     recipients = tuple(
                         (n, self.spell_recipient(actor, self.actors[n])) for n in targets
                     )
+                if spell.to_enemy and spell.action is SpellAction.PURGE:
+                    for _, target in recipients:
+                        target.purge_buffs()
                 if spell.to_enemy and spell.action in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK):
                     reflected_damage = 0
                     for n, target in recipients:
@@ -1646,7 +1684,7 @@ class BattleForecast:
                             target_spell_defense=target.spec.spell_defense,
                             attribute=spell.attribute,
                             target_weaknesses=target.spec.weaknesses,
-                            target_resistances=target.spec.resistances,
+                            target_resistances=target.spell_resistances,
                             dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
                             target_is_shadow=target.spec.shadow,
                             flying_effective=spell.effective_race == "FLYING",
@@ -1734,6 +1772,7 @@ class BattleForecast:
             caller.spec, number=number, key=f"enemy:{species_key}:{number - 5}",
             species_key=species_key, hp=caller.max_hp, mp=caller.spec.max_mp,
             front=placement.slot >= 2, hp_displayed=False,
+            magic_shield=False,
             poisoned=False, sleeping=0, silenced=0, paralyzed=False, defending=False,
             confused=0, stunned=False, protection=0, speed=0,
             slow_turns=0, defense_down_turns=0, action_rotation_index=None,

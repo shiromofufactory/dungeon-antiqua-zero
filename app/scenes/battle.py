@@ -65,6 +65,7 @@ from battle_magic import (
     resolve_status_spell,
     spell_cast_delay,
     spell_reflection_chance,
+    spell_resistances,
 )
 from monster_ai import (
     MonsterAction,
@@ -503,6 +504,10 @@ PARALYZE_ICON_SIZE = 8
 STUN_ICON_SOURCE_X = 224
 STUN_ICON_SOURCE_Y = 16
 STUN_ICON_SIZE = 8
+MAGIC_SHIELD_ICON_SOURCE_X = 128
+MAGIC_SHIELD_ICON_SOURCE_Y = 136
+MAGIC_SHIELD_ICON_PATTERN_COUNT = 3
+MAGIC_SHIELD_ICON_PATTERN_FRAME_COUNT = 3 * FPS // DA2_REFERENCE_FPS
 MONSTER_CONDITION_ICON_OFFSET_X = 24
 MONSTER_CONDITION_ICON_FIELDS = (
     "poisoned",
@@ -512,6 +517,7 @@ MONSTER_CONDITION_ICON_FIELDS = (
     "stunned",
     "defense_modifier",
     "speed_modifier",
+    "magic_shield",
 )
 PARTY_CONDITION_ICON_OFFSET_X = 12
 PARTY_CONDITION_ICON_FIELDS = (
@@ -521,6 +527,7 @@ PARTY_CONDITION_ICON_FIELDS = (
     "confused",
     "paralyzed",
     "stunned",
+    "magic_shield",
 )
 SPEED_ICON_SOURCE_X = 96
 SPEED_ICON_POSITIVE_SOURCE_Y = 128
@@ -1157,6 +1164,8 @@ class BattleActionPresentation:
     break_results: tuple[BattleBreakResult, ...] = ()
     protection_results: tuple[BattleProtectionResult, ...] = ()
     haste_results: tuple[BattleHasteResult, ...] = ()
+    magic_shield_targets: tuple[tuple[str, int], ...] = ()
+    purge_targets: tuple[tuple[str, int], ...] = ()
     cure_results: tuple[BattleCureResult, ...] = ()
     revive_results: tuple[BattleReviveResult, ...] = ()
     silence_results: tuple[BattleSilenceResult, ...] = ()
@@ -1694,6 +1703,10 @@ class BattleMonster:
     shadow: int = 0
     tribe: MonsterTribe | None = None
     initial_is_front_row: bool = field(init=False)
+
+    @property
+    def spell_resistances(self) -> frozenset[ResistanceType]:
+        return spell_resistances(self.resistances, self.state.magic_shield)
 
     def __post_init__(self) -> None:
         if not isinstance(self.is_front_row, bool):
@@ -3497,6 +3510,7 @@ class BattleScene:
                     stunned=monster.state.stunned,
                     protection=monster.state.defense_modifier,
                     speed=monster.state.speed_modifier,
+                    magic_shield=monster.state.magic_shield,
                     slow_turns=monster.state.slow_turns,
                     defense_down_turns=monster.state.defense_down_turns,
                     defending=monster.state.is_defending,
@@ -5210,6 +5224,8 @@ class BattleScene:
                 for index in indexes
                 if self.party[index].speed_modifier < MAX_SPEED_MODIFIER
             )
+        if spell.action is SpellAction.MAGIC_SHIELD:
+            return tuple(index for index in indexes if not self.party[index].magic_shield)
         return indexes
 
     def _selected_party_target_can_receive_spell(self, spell: Spell) -> bool:
@@ -5725,6 +5741,8 @@ class BattleScene:
             presentation.haste_results = self._resolve_haste_results(
                 spell, indexes, target_is_monster=caster_is_monster,
             )
+            if spell.action is SpellAction.MAGIC_SHIELD:
+                presentation.magic_shield_targets = tuple((target_side, index) for index in indexes)
             if not caster_is_monster:
                 presentation.mana_results = self._resolve_mana_results(spell, indexes)
                 presentation.cure_results = self._resolve_cure_results(spell, indexes)
@@ -5753,7 +5771,10 @@ class BattleScene:
         for side, targets in target_groups:
             if not targets:
                 continue
-            if spell.to_enemy:
+            if spell.action is SpellAction.PURGE:
+                presentation.purge_targets += tuple((side, index) for index in dict.fromkeys(targets))
+                hits, affinities = targets, ()
+            elif spell.to_enemy:
                 modifier = (
                     monster_caster.magic
                     if monster_caster is not None
@@ -5924,7 +5945,7 @@ class BattleScene:
                     target_spell_defense=monster.combat_stats.spell_resistance,
                     attribute=spell.attribute,
                     target_weaknesses=monster.weaknesses,
-                    target_resistances=monster.resistances,
+                    target_resistances=monster.spell_resistances,
                     success_roll=random.randint(0, 19),
                 ).success
             _base_x, base_y = self._monster_base_position(index)
@@ -5965,7 +5986,7 @@ class BattleScene:
                     target_spell_defense=monster.combat_stats.spell_resistance,
                     attribute=spell.attribute,
                     target_weaknesses=monster.weaknesses,
-                    target_resistances=monster.resistances,
+                    target_resistances=monster.spell_resistances,
                     success_roll=random.randint(0, 19),
                 ).success
             _base_x, base_y = self._monster_base_position(index)
@@ -6004,10 +6025,10 @@ class BattleScene:
                 target_spell_defense=monster.combat_stats.spell_resistance,
                 attribute=spell.attribute,
                 target_weaknesses=monster.weaknesses,
-                target_resistances=monster.resistances,
+                target_resistances=monster.spell_resistances,
                 success_roll=(
                     0
-                    if spell.attribute in monster.resistances
+                    if spell.attribute in monster.spell_resistances
                     else random.randint(0, 19)
                 ),
             )
@@ -6097,7 +6118,7 @@ class BattleScene:
                     target_spell_defense=monster.combat_stats.spell_resistance,
                     attribute=spell.attribute,
                     target_weaknesses=monster.weaknesses,
-                    target_resistances=monster.resistances,
+                    target_resistances=monster.spell_resistances,
                     success_roll=random.randint(0, 19),
                 )
                 success = resolution.success
@@ -6149,7 +6170,7 @@ class BattleScene:
                 target_spell_defense=monster.combat_stats.spell_resistance,
                 attribute=spell.attribute,
                 target_weaknesses=monster.weaknesses,
-                target_resistances=monster.resistances,
+                target_resistances=monster.spell_resistances,
                 target_is_shadow=monster.is_shadow,
                 flying_effective=spell.effective_race == "FLYING",
                 dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
@@ -6195,11 +6216,11 @@ class BattleScene:
                 target_spell_defense=monster.combat_stats.spell_resistance,
                 attribute=spell.attribute,
                 target_weaknesses=monster.weaknesses,
-                target_resistances=monster.resistances,
+                target_resistances=monster.spell_resistances,
                 success_roll=(
                     0
                     if spell.attribute is not None
-                    and spell.attribute in monster.resistances
+                    and spell.attribute in monster.spell_resistances
                     else random.randint(0, 19)
                 ),
             )
@@ -6247,11 +6268,11 @@ class BattleScene:
                 target_spell_defense=monster.combat_stats.spell_resistance,
                 attribute=spell.attribute,
                 target_weaknesses=monster.weaknesses,
-                target_resistances=monster.resistances,
+                target_resistances=monster.spell_resistances,
                 success_roll=(
                     0
                     if spell.attribute is not None
-                    and spell.attribute in monster.resistances
+                    and spell.attribute in monster.spell_resistances
                     else random.randint(0, 19)
                 ),
             )
@@ -6295,6 +6316,14 @@ class BattleScene:
         )
         for index in presentation.black_wind_targets:
             self.monsters[index].state.recover_with_black_wind()
+        for side, index in presentation.magic_shield_targets:
+            if ready_targets is None or (side, index) in ready_targets:
+                target = self.monsters[index].state if side == "enemy" else self.party[index]
+                target.magic_shield = True
+        for side, index in presentation.purge_targets:
+            if ready_targets is None or (side, index) in ready_targets:
+                target = self.monsters[index].state if side == "enemy" else self.party[index]
+                target.purge_buffs()
 
         def ready(
             results: Iterable[TargetedResult], side: str,
@@ -10179,8 +10208,10 @@ class BattleScene:
                 MonsterSpecialAction.BLACK_WIND in actor.special_actions
                 and bool(self._black_wind_target_indexes())
             ),
-            fire_breath_effective=any(
-                ResistanceType.FIRE not in self.party[index].resistances
+            fire_breath_effective=actor.intelligence != 7 or (
+                MonsterSpecialAction.FIRE_BREATH not in actor.special_actions
+            ) or any(
+                ResistanceType.FIRE not in self.party[index].spell_resistances
                 for index in self._monster_charge_target_indexes()
             ),
             party_actual_attacks=party_attacks,
@@ -10249,7 +10280,8 @@ class BattleScene:
                 silenced=self.party[index].silenced,
                 speed=self.party[index].speed_modifier,
                 protection=self.party[index].protection_level,
-                resistances=self.party[index].resistances,
+                resistances=self.party[index].spell_resistances,
+                magic_shield=self.party[index].magic_shield,
             )
             for index in indexes
         )
@@ -10281,6 +10313,8 @@ class BattleScene:
                 index for index in self._active_party_indexes() if index not in hidden
             )
         living = tuple(index for index, monster in enumerate(self.monsters) if monster.is_alive)
+        if spell.action is SpellAction.MAGIC_SHIELD:
+            return tuple(i for i in living if not self.monsters[i].state.magic_shield)
         if spell.action is SpellAction.HASTE:
             return tuple(i for i in living if self.monsters[i].state.speed_modifier < MAX_SPEED_MODIFIER)
         if spell.action is SpellAction.PROTECTION:
@@ -10429,7 +10463,7 @@ class BattleScene:
             else:
                 result = resolve_fire_breath(
                     **arguments,
-                    fire_resistant=ResistanceType.FIRE in member.resistances,
+                    fire_resistant=ResistanceType.FIRE in member.spell_resistances,
                 )
             position = self._party_draw_position(index)
             if position is None:
@@ -10555,7 +10589,7 @@ class BattleScene:
                 target_spell_defense=member.battle_stats.spell_resistance,
                 attribute=spell.attribute,
                 target_weaknesses=frozenset(),
-                target_resistances=member.resistances,
+                target_resistances=member.spell_resistances,
                 dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
                 random_factor=random.random(),
             )
@@ -10616,7 +10650,7 @@ class BattleScene:
                     target_spell_defense=member.battle_stats.spell_resistance,
                     attribute=spell.attribute,
                     target_weaknesses=frozenset(),
-                    target_resistances=member.resistances,
+                    target_resistances=member.spell_resistances,
                     success_roll=random.randint(0, 19),
                 ).success
             position = self._party_draw_position(index)
@@ -10656,7 +10690,7 @@ class BattleScene:
                 target_spell_defense=member.battle_stats.spell_resistance,
                 attribute=spell.attribute,
                 target_weaknesses=frozenset(),
-                target_resistances=member.resistances,
+                target_resistances=member.spell_resistances,
                 success_roll=random.randint(0, 19),
             )
             position = self._party_draw_position(index)
@@ -10697,7 +10731,7 @@ class BattleScene:
                 target_spell_defense=member.battle_stats.spell_resistance,
                 attribute=attribute,
                 target_weaknesses=frozenset(),
-                target_resistances=member.resistances,
+                target_resistances=member.spell_resistances,
                 success_roll=random.randint(0, 19),
             )
             x, y = self._party_effect_position(index)
@@ -10737,7 +10771,7 @@ class BattleScene:
                     target_spell_defense=member.battle_stats.spell_resistance,
                     attribute=spell.attribute,
                     target_weaknesses=frozenset(),
-                    target_resistances=member.resistances,
+                    target_resistances=member.spell_resistances,
                     success_roll=random.randint(0, 19),
                 ).success
             position = self._party_draw_position(index)
@@ -10775,7 +10809,7 @@ class BattleScene:
                     target_spell_defense=member.battle_stats.spell_resistance,
                     attribute=spell.attribute,
                     target_weaknesses=frozenset(),
-                    target_resistances=member.resistances,
+                    target_resistances=member.spell_resistances,
                     success_roll=random.randint(0, 19),
                 ).success
             position = self._party_draw_position(index)
@@ -11668,6 +11702,7 @@ class BattleScene:
         self._draw_paralyze_icons()
         self._draw_stun_icons()
         self._draw_speed_modifier_icons()
+        self._draw_magic_shield_icons()
         self._draw_target_affinity_indicators()
         self._draw_affinity_popups()
         self._draw_spell_damage_popups()
@@ -13516,6 +13551,29 @@ class BattleScene:
                 STUN_ICON_SIZE,
                 STUN_ICON_SIZE,
                 TRANSPARENT_INDEX,
+            )
+
+    def _draw_magic_shield_icons(self) -> None:
+        """Show the active elemental barrier in the combatant's condition row."""
+
+        pattern = (
+            pyxel.frame_count // MAGIC_SHIELD_ICON_PATTERN_FRAME_COUNT
+        ) % MAGIC_SHIELD_ICON_PATTERN_COUNT
+        positions = []
+        for index, visual in enumerate(getattr(self, "party_visuals", ())):
+            if getattr(visual.member, "magic_shield", False):
+                position = self._party_condition_icon_position(index, "magic_shield")
+                if position is not None:
+                    positions.append(position)
+        for index, monster in enumerate(getattr(self, "monsters", ())):
+            if monster.is_alive and getattr(monster.state, "magic_shield", False):
+                positions.append(self._monster_condition_icon_position(index, "magic_shield"))
+        for x, y in positions:
+            pyxel.blt(
+                x, y, 0,
+                MAGIC_SHIELD_ICON_SOURCE_X + pattern * SLEEP_ICON_SIZE,
+                MAGIC_SHIELD_ICON_SOURCE_Y,
+                SLEEP_ICON_SIZE, SLEEP_ICON_SIZE, TRANSPARENT_INDEX,
             )
 
     def _monster_condition_icon_position(

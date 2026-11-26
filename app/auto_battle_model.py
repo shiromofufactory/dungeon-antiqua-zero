@@ -125,6 +125,7 @@ class AutoCombatant:
     stunned: bool = False
     protection: int = 0
     speed: int = 0
+    magic_shield: bool = False
     healing: int = 0
     hidden: bool = False
     defending: bool = False
@@ -253,6 +254,7 @@ class AutoCombatant:
             stunned=member.stunned,
             protection=member.protection_level,
             speed=member.speed_modifier,
+            magic_shield=member.magic_shield,
             slow_turns=member.slow_turns,
             defense_down_turns=member.defense_down_turns,
             healing=member.battle_healing,

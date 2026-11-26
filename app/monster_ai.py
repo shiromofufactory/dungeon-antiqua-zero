@@ -9,10 +9,12 @@ from enum import StrEnum
 from typing import TypeVar
 
 if __package__ == "":
+    from battle_magic import has_dispellable_buffs
     from monster import MonsterBattleState, MonsterDefinition, MonsterSpecialAction
     from resistance import ResistanceType
     from spell import Spell, SpellAction
 else:
+    from .battle_magic import has_dispellable_buffs
     from .monster import MonsterBattleState, MonsterDefinition, MonsterSpecialAction
     from .resistance import ResistanceType
     from .spell import Spell, SpellAction
@@ -58,6 +60,7 @@ class MonsterSpellTarget:
     speed: int
     protection: int
     resistances: frozenset[ResistanceType]
+    magic_shield: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,7 +113,8 @@ def evaluate_monster_spell(
             if is_solo:
                 return MonsterSpellCandidate(())
     if spell.to_all and spell.action is SpellAction.PURGE and not any(
-        target.protection > 0 or target.speed > 0 for target in targets
+        has_dispellable_buffs(target.protection, target.speed, target.magic_shield)
+        for target in targets
     ):
         return MonsterSpellCandidate(())
     return MonsterSpellCandidate(indexes)

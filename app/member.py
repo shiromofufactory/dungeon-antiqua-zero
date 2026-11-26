@@ -13,6 +13,7 @@ if __package__ == "":
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
         modified_defense,
+        spell_resistances,
     )
     from battle_speed import (
         MAX_SPEED_MODIFIER,
@@ -30,6 +31,7 @@ else:
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
         modified_defense,
+        spell_resistances,
     )
     from .battle_speed import (
         MAX_SPEED_MODIFIER,
@@ -787,6 +789,7 @@ class Member:
     sleeping: int = 0
     confused: int = 0
     stunned: bool = False
+    magic_shield: bool = field(default=False, init=False)
     protection_level: int = 0
     speed_modifier: int = 0
     skills: list[Skill] = field(default_factory=list)
@@ -1341,6 +1344,7 @@ class Member:
         self.confused = 0
         self.silenced = 0
         self.stunned = False
+        self.magic_shield = False
         self.protection_level = 0
         self.speed_modifier = 0
         self.slow_turns = 0
@@ -1574,6 +1578,13 @@ class Member:
         self.slow_turns = 0
         return True
 
+    def purge_buffs(self) -> None:
+        """Remove defensive magic without changing ailments or debuffs."""
+
+        self.protection_level = min(self.protection_level, 0)
+        self.speed_modifier = min(self.speed_modifier, 0)
+        self.magic_shield = False
+
     def defeat(self) -> None:
         """Set HP to zero and clear battle modifiers after instant death."""
 
@@ -1596,6 +1607,7 @@ class Member:
         self.confused = 0
         self.silenced = 0
         self.stunned = False
+        self.magic_shield = False
         self.protection_level = 0
         self.speed_modifier = 0
         self.slow_turns = 0
@@ -1613,6 +1625,7 @@ class Member:
         self.confused = 0
         self.silenced = 0
         self.stunned = False
+        self.magic_shield = False
         self.protection_level = 0
         self.speed_modifier = 0
         self.slow_turns = 0
@@ -1629,6 +1642,7 @@ class Member:
         self.confused = 0
         self.silenced = 0
         self.stunned = False
+        self.magic_shield = False
         self.protection_level = 0
         self.speed_modifier = 0
         self.slow_turns = 0
@@ -1659,6 +1673,10 @@ class Member:
             for item in self.equipment.equipped_items()
             for resistance in item.resistances
         )
+
+    @property
+    def spell_resistances(self) -> frozenset[ResistanceType]:
+        return spell_resistances(self.resistances, self.magic_shield)
 
     def has_skill(
         self,

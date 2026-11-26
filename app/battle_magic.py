@@ -13,6 +13,23 @@ else:
 
 
 SPELL_REFLECTION_ROLL_COUNT = 4
+MAGIC_SHIELD_ATTRIBUTES = frozenset((
+    ResistanceType.FIRE, ResistanceType.FREEZE, ResistanceType.DARK,
+))
+
+
+def spell_resistances(
+    equipment_or_innate: frozenset[ResistanceType], magic_shield: bool,
+) -> frozenset[ResistanceType]:
+    """Apply the temporary shield to spells and breaths only."""
+
+    return equipment_or_innate | MAGIC_SHIELD_ATTRIBUTES if magic_shield else equipment_or_innate
+
+
+def has_dispellable_buffs(protection: int, speed: int, magic_shield: bool) -> bool:
+    """Return whether a target has a bonus Purge can remove."""
+
+    return protection > 0 or speed > 0 or magic_shield
 
 
 def spell_reflection_chance(
