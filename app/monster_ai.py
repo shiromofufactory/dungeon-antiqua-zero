@@ -29,6 +29,8 @@ class MonsterAction(StrEnum):
     FIRE_BREATH = "fire_breath"
     EARTHQUAKE = "earthquake"
     TEMPTATION = "temptation"
+    DEFEND = "defend"
+    BLACK_WIND = "black_wind"
     IDLE = "idle"
 
 
@@ -179,6 +181,7 @@ def monster_action_candidates(
     intelligence: int = 0, fire_breath_effective: bool = True,
     can_earthquake: bool = False,
     can_tempt: bool = False,
+    black_wind_has_targets: bool = False,
     priority_spell_key: str | None = None,
 ) -> tuple[MonsterActionChoice, ...]:
     """Share candidate construction between live AI and deterministic forecasts."""
@@ -203,6 +206,12 @@ def monster_action_candidates(
         candidates.append(MonsterAction.EARTHQUAKE)
     if MonsterSpecialAction.TEMPTATION in special_actions and can_tempt:
         candidates.append(MonsterAction.TEMPTATION)
+    if MonsterSpecialAction.MIRROR in special_actions:
+        candidates.append(MonsterAction.DEFEND)
+    if MonsterSpecialAction.BLACK_WIND in special_actions and (
+        intelligence <= 0 or black_wind_has_targets
+    ):
+        candidates.append(MonsterAction.BLACK_WIND)
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
     can_attack_from_row = is_front_row or MonsterSpecialAction.RANGED_ATTACK in special_actions
     if can_attack_from_row and can_attack:
@@ -223,7 +232,7 @@ def rotate_monster_action(
         special_actions=special_actions, spell_keys=spell_keys,
         is_front_row=True, can_attack=True, can_charge=True,
         escape_eligible=True, call_eligible=True, can_breathe=True,
-        can_earthquake=True, can_tempt=True,
+        can_earthquake=True, can_tempt=True, black_wind_has_targets=True,
     )
     count = len(rotation)
     start = choose_start(count) if next_index is None else next_index
@@ -254,6 +263,7 @@ def select_monster_action(
     fire_breath_effective: bool = True,
     can_earthquake: bool = False,
     can_tempt: bool = False,
+    black_wind_has_targets: bool = False,
     priority_spell_key: str | None = None,
     rotation_state: MonsterBattleState | None = None,
     learned_spell_keys: Sequence[str] = (),
@@ -323,6 +333,7 @@ def select_monster_action(
         intelligence=intelligence, fire_breath_effective=fire_breath_effective,
         can_earthquake=can_earthquake,
         can_tempt=can_tempt,
+        black_wind_has_targets=black_wind_has_targets,
         priority_spell_key=priority_spell_key,
     )
 

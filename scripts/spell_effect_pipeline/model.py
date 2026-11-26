@@ -12,8 +12,10 @@ from typing import Iterable, Mapping
 
 from app.audio_catalog import AudioCatalogError, load_sound_effects
 from app.spell_effect import (
+    BLACK_WIND_EFFECT_KEY,
     SPELL_EFFECT_FORMAT_VERSION,
     SPELL_EFFECT_IMAGE_CELL_SIZES,
+    SPELL_REFLECT_EFFECT_KEY,
     SUPPORTED_SPELL_EFFECT_FORMAT_VERSIONS,
     SpellEffectDataError,
     SpellEffectDefinition,
@@ -198,7 +200,11 @@ def load_project_catalogs(
     if any(entry.offset + entry.length > len(bundle) for entry in images.values()):
         raise SpellEffectSourceError("画像manifestがbundle範囲外を参照しています。")
     return SpellEffectCatalogs(
-        spells=_load_spells(content_root / "data" / "spells.json"),
+        spells=(
+            *_load_spells(content_root / "data" / "spells.json"),
+            SpellCatalogEntry(SPELL_REFLECT_EFFECT_KEY, True),
+            SpellCatalogEntry(BLACK_WIND_EFFECT_KEY, True),
+        ),
         images=images,
         palette_color_count=color_count,
         transparent_index=transparent_index,

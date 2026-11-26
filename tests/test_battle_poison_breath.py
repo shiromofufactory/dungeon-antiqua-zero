@@ -14,7 +14,7 @@ from resistance import ResistanceType
 from resources import load_record_array
 from scenes.battle import (
     BattleMonster, BattlePhase, DAMAGE_POPUP_FRAME_COUNT,
-    MONSTER_DAMAGE_SPRITE_SOURCE_X, BREATH_TINT_FRAME_COUNT,
+    MONSTER_DAMAGE_SPRITE_SOURCE_X, BATTLE_BACKGROUND_TINT_FRAME_COUNT,
     POISON_BREATH_TINT_COLOR,
     SPELL_EFFECT_FLASH_PALETTE,
 )
@@ -129,7 +129,7 @@ class PoisonBreathSceneTest(unittest.TestCase):
         self.assertNotIn(0, scene.focused_target_by_party_index)
         self.assertEqual(len(scene.spell_damage_popups), 2)
         scene._complete_current_turn.assert_not_called()
-        for _ in range(BREATH_TINT_FRAME_COUNT):
+        for _ in range(BATTLE_BACKGROUND_TINT_FRAME_COUNT):
             scene._update_action_presentation()
         scene._complete_current_turn.assert_called_once_with()
         self.assertIsNone(scene.action_presentation)
@@ -177,7 +177,7 @@ class PoisonBreathSceneTest(unittest.TestCase):
         scene.palette_shifter.define_mix = Mock(wraps=scene.palette_shifter.define_mix)
         for frame, expected in ((0, 1.0), (16, 0.4), (35, 0.4), (51, 1.0)):
             presentation.elapsed_frame = frame
-            scene._sync_breath_background(presentation)
+            scene._sync_action_background(presentation)
             self.assertAlmostEqual(scene.palette_shifter.define_mix.call_args.kwargs["base_rate"], expected)
             self.assertEqual(scene.palette_shifter.define_mix.call_args.kwargs["target_color"], POISON_BREATH_TINT_COLOR)
         scene._draw_background_image = Mock()

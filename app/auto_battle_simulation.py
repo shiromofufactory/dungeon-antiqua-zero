@@ -27,7 +27,9 @@ if __package__:
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
         PRAY_SUCCESS_ROLL_COUNT,
+        SPELL_REFLECTION_ROLL_COUNT,
         battle_healing_amount,
+        black_wind_has_effect,
         TEMPTATION_RATE,
         debuff_turn_range,
         member_spell_ability,
@@ -40,6 +42,7 @@ if __package__:
         resolve_spell_damage,
         resolve_status_spell,
         spell_cast_delay,
+        spell_reflection_chance,
     )
     from .battle_physical import (
         PHYSICAL_EFFECT_RESISTANCE,
@@ -96,7 +99,9 @@ else:
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
         PRAY_SUCCESS_ROLL_COUNT,
+        SPELL_REFLECTION_ROLL_COUNT,
         battle_healing_amount,
+        black_wind_has_effect,
         TEMPTATION_RATE,
         debuff_turn_range,
         member_spell_ability,
@@ -109,6 +114,7 @@ else:
         resolve_spell_damage,
         resolve_status_spell,
         spell_cast_delay,
+        spell_reflection_chance,
     )
     from battle_physical import (
         PHYSICAL_EFFECT_RESISTANCE,
@@ -275,6 +281,10 @@ class ForecastActor:
         )
 
     @property
+    def is_defending(self) -> bool:
+        return self.defending and self.actionable
+
+    @property
     def incapacitated_for_physical_hit(self) -> bool:
         return bool(self.sleeping or self.confused)
 
@@ -303,6 +313,7 @@ class ForecastActor:
             ) = 0
             self.slow_turns = self.defense_down_turns = 0
             self.focus = self.cover = None
+            self.defending = False
         return old - self.hp
 
     def drain(self, damage: int) -> None:
@@ -315,6 +326,22 @@ class ForecastActor:
     def apply_protection(self) -> None:
         self.protection = min(MAX_PROTECTION_LEVEL, self.protection + 1)
         self.defense_down_turns = 0
+
+    @property
+    def can_recover_with_black_wind(self) -> bool:
+        return self.is_alive and black_wind_has_effect(
+            poisoned=self.poisoned, sleeping=self.sleeping,
+            confused=self.confused, silenced=self.silenced,
+            defense_modifier=self.protection, speed_modifier=self.speed,
+        )
+
+    def recover_with_black_wind(self) -> None:
+        self.poisoned = False
+        self.sleeping = self.confused = self.silenced = 0
+        if self.protection < 0:
+            self.protection = self.defense_down_turns = 0
+        if self.speed < 0:
+            self.speed = self.slow_turns = 0
 
     def interrupt_focus(self) -> None:
         if (
@@ -944,6 +971,7 @@ class BattleForecast:
                     hit=weapon.hit,
                     target_defense=target.defense,
                     target_evasion=target.evasion,
+                    target_defending=target.is_defending,
                     hit_roll=int(
                         self.roll(actor, roll_target, 2 + hand * 3, case) * 100
                     ),
@@ -985,6 +1013,7 @@ class BattleForecast:
         )
         results = self.physical_results(actor, target, action, roll_target=roll_target)
         hidden = actor.hidden
+        defending = target.is_defending
         counter = False
         for hand, (weapon, result) in enumerate(zip(actor.spec.weapons, results)):
             self.reveal(target, "profile")
@@ -1036,6 +1065,7 @@ class BattleForecast:
                     target_has_boss_resistance=ResistanceType.DEATH in target.spec.resistances,
                     target_is_weak=resistance in target.spec.weaknesses,
                     target_is_resistant=resistance in target.spec.resistances,
+                    target_defending=defending,
                     critical=result.critical,
                     attacker_hidden=hidden,
                     weapon_effective=physical_weapon_is_effective(
@@ -1113,8 +1143,30 @@ class BattleForecast:
             target.poisoned = target.paralyzed = target.stunned = False
             target.sleeping = target.confused = target.silenced = 0
 
+    def spell_recipient(self, actor: ForecastActor, target: ForecastActor) -> ForecastActor:
+        if target.spec.enemy:
+            chance = spell_reflection_chance(
+                defending=target.is_defending,
+                has_reflect=MonsterSpecialAction.MIRROR in target.spec.special_actions,
+            )
+        else:
+            chance = spell_reflection_chance(
+                defending=target.is_defending,
+                has_reflect=target.has_skill("Reflect"),
+                equipment_reflects=any(
+                    item.special is ItemSpecial.REFLECT for item in target.equipment.equipped_items()
+                ),
+            )
+        if chance == SPELL_REFLECTION_ROLL_COUNT or (
+            chance > 0
+            and self.roll(actor, target.spec.number, 17) * SPELL_REFLECTION_ROLL_COUNT < chance
+        ):
+            return actor
+        return target
+
     def cast(self, actor, action):
         spell = self.spells[action.spell_key]
+        reflected_damage = 0
         for n in action.targets:
             target = self.actors[n]
             roll_target = (
@@ -1124,6 +1176,8 @@ class BattleForecast:
                 self.reveal(target, "profile")
                 if spell.attribute is not None:
                     self.reveal(target, spell.attribute.value)
+            if spell.to_enemy and spell.action is not SpellAction.IDENTIFY:
+                target = self.spell_recipient(actor, target)
             u = self.roll(actor, roll_target, 8)
             if spell.action is SpellAction.HEAL:
                 self.apply_spell_healing(actor, target, spell, u)
@@ -1184,9 +1238,12 @@ class BattleForecast:
                     )
                     if result.is_miss:
                         continue
-                    drained = target.damage(result.damage)
-                    if spell.action is SpellAction.BLOOD_SUCK:
-                        actor.drain(drained)
+                    if target is actor:
+                        reflected_damage += result.damage
+                    else:
+                        drained = target.damage(result.damage)
+                        if spell.action is SpellAction.BLOOD_SUCK:
+                            actor.drain(drained)
                 if target.is_alive and (
                     spell.action
                     in (
@@ -1201,9 +1258,10 @@ class BattleForecast:
                     successful = self.status_success(
                         actor, target, spell, modifier, roll_target=roll_target
                     )
-                    if (
-                        spell.action is SpellAction.SILENCE
-                        and not target.spec.spells
+                    if spell.action is SpellAction.SILENCE and not target.spec.spells:
+                        successful = False
+                    elif spell.action is SpellAction.BREAK and (
+                        target.protection < 0 or target.defense <= 0
                     ):
                         successful = False
                     if successful:
@@ -1232,6 +1290,10 @@ class BattleForecast:
                             )
                         if spell.attribute is ResistanceType.POISON:
                             target.poisoned = True
+        if reflected_damage:
+            drained = actor.damage(reflected_damage)
+            if spell.action is SpellAction.BLOOD_SUCK:
+                actor.drain(drained)
         actor.hidden = False
 
     def debuff_turns(
@@ -1391,7 +1453,8 @@ class BattleForecast:
         spell_targets = {}
         priority_spell_key = None
         intelligence = actor.spec.intelligence
-        is_solo = intelligence == 2 and len(self.enemies()) == 1
+        enemies = self.enemies()
+        is_solo = intelligence == 2 and len(enemies) == 1
         for spell in actor.spec.spells:
             if intelligence > 0 and (actor.silenced or actor.mp < spell.mp):
                 continue
@@ -1426,7 +1489,7 @@ class BattleForecast:
             and actor.spec.monster_placement is not None
         ):
             occupied = tuple(
-                enemy.spec.monster_placement for enemy in self.enemies()
+                enemy.spec.monster_placement for enemy in enemies
                 if enemy.spec.monster_placement is not None
             )
             call_placement = find_monster_placement(actor.spec.monster_placement, occupied)
@@ -1440,6 +1503,10 @@ class BattleForecast:
             can_breathe=bool(available),
             can_earthquake=bool(allies),
             can_tempt=bool(temptation_targets),
+            black_wind_has_targets=(
+                MonsterSpecialAction.BLACK_WIND in actor.spec.special_actions
+                and any(enemy.can_recover_with_black_wind for enemy in enemies)
+            ),
             intelligence=intelligence,
             fire_breath_effective=any(
                 ResistanceType.FIRE not in target.spec.resistances
@@ -1451,7 +1518,6 @@ class BattleForecast:
             priority_spell_key=priority_spell_key,
         )
         silenced = actor.silenced > 0
-        actor.silenced = max(0, actor.silenced - 1)
         if intelligence == 3:
             action, actor.action_rotation_index = rotate_monster_action(
                 special_actions=actor.spec.special_actions,
@@ -1468,14 +1534,22 @@ class BattleForecast:
             action = candidates[int(self.roll(actor, 0, 0) * len(candidates))]
         else:
             action = None
+        if action is not MonsterAction.BLACK_WIND:
+            actor.silenced = max(0, actor.silenced - 1)
         if action is None:
             self.advance(actor, 0)
             return
         delay = 0
-        if action is MonsterAction.ESCAPE:
+        if action is MonsterAction.DEFEND:
+            actor.defending = True
+        elif action is MonsterAction.ESCAPE:
             actor.removed = True
         elif action is MonsterAction.CALL and call_placement is not None:
             self.enemy_call(actor, call_placement)
+        elif action is MonsterAction.BLACK_WIND:
+            for target in enemies:
+                if target.can_recover_with_black_wind:
+                    target.recover_with_black_wind()
         elif action is MonsterAction.EARTHQUAKE:
             for target in allies:
                 result = resolve_earthquake_attack(
@@ -1559,9 +1633,13 @@ class BattleForecast:
                             target.apply_protection()
                         elif spell.action is SpellAction.HEAL:
                             self.apply_spell_healing(actor, target, spell, self.roll(actor, n, 8))
+                if spell.to_enemy:
+                    recipients = tuple(
+                        (n, self.spell_recipient(actor, self.actors[n])) for n in targets
+                    )
                 if spell.to_enemy and spell.action in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK):
-                    for n in targets:
-                        target = self.actors[n]
+                    reflected_damage = 0
+                    for n, target in recipients:
                         result = resolve_spell_damage(
                             intensity=spell.intensity,
                             spell_modifier=actor.spec.magic,
@@ -1570,18 +1648,26 @@ class BattleForecast:
                             target_weaknesses=target.spec.weaknesses,
                             target_resistances=target.spec.resistances,
                             dark_resistance_causes_miss=spell.action is SpellAction.BLOOD_SUCK,
-                            random_factor=self.roll(actor, target.spec.number, 5),
+                            target_is_shadow=target.spec.shadow,
+                            flying_effective=spell.effective_race == "FLYING",
+                            random_factor=self.roll(actor, n, 5),
                         )
                         if result.is_miss:
+                            continue
+                        if target is actor:
+                            reflected_damage += result.damage
                             continue
                         drained = target.damage(result.damage)
                         if spell.action is SpellAction.BLOOD_SUCK:
                             actor.drain(drained)
                         target.interrupt_focus()
+                    if reflected_damage:
+                        drained = actor.damage(reflected_damage)
+                        if spell.action is SpellAction.BLOOD_SUCK:
+                            actor.drain(drained)
                 if spell.to_enemy and spell.action in ENEMY_SPELL_ACTIONS:
-                    for n in targets:
-                        target = self.actors[n]
-                        if (
+                    for n, target in recipients:
+                        if target.is_alive and (
                             spell.action is not SpellAction.BREAK
                             or (
                                 target.protection > -1
@@ -1592,32 +1678,32 @@ class BattleForecast:
                             target,
                             spell,
                             actor.spec.magic,
+                            roll_target=n,
                         ):
                             if spell.action is SpellAction.SLEEP:
-                                self.apply_extra(actor, target, AdditionalEffect.SLEEP)
+                                self.apply_extra(actor, target, AdditionalEffect.SLEEP, roll_target=n)
                             elif spell.action is SpellAction.CONFUSE:
                                 self.apply_extra(
                                     actor,
                                     target,
-                                    AdditionalEffect.CONFUSE,
+                                    AdditionalEffect.CONFUSE, roll_target=n,
                                 )
                             elif spell.action is SpellAction.SILENCE:
-                                self.apply_extra(actor, target, AdditionalEffect.SILENCE)
+                                self.apply_extra(actor, target, AdditionalEffect.SILENCE, roll_target=n)
                             elif spell.action is SpellAction.SLOW:
-                                self.apply_slow(target, actor)
+                                self.apply_slow(target, actor, roll_target=n)
                             else:
                                 target.protection = (
                                     0 if target.protection > 0 else -1
                                 )
                                 target.defense_down_turns = (
-                                    self.debuff_turns(actor, target)
+                                    self.debuff_turns(actor, target, roll_target=n)
                                     if target.protection < 0 else 0
                                 )
                 if spell.to_enemy and spell.attribute is ResistanceType.POISON:
-                    for n in targets:
-                        target = self.actors[n]
+                    for n, target in recipients:
                         if target.is_alive and self.status_success(
-                            actor, target, spell, actor.spec.magic,
+                            actor, target, spell, actor.spec.magic, roll_target=n,
                         ):
                             target.poisoned = True
         elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
@@ -1648,7 +1734,7 @@ class BattleForecast:
             caller.spec, number=number, key=f"enemy:{species_key}:{number - 5}",
             species_key=species_key, hp=caller.max_hp, mp=caller.spec.max_mp,
             front=placement.slot >= 2, hp_displayed=False,
-            poisoned=False, sleeping=0, silenced=0, paralyzed=False,
+            poisoned=False, sleeping=0, silenced=0, paralyzed=False, defending=False,
             confused=0, stunned=False, protection=0, speed=0,
             slow_turns=0, defense_down_turns=0, action_rotation_index=None,
             monster_placement=placement,
@@ -1708,12 +1794,13 @@ class BattleForecast:
 
     def enemy_physical(self, actor, target, *, charged=False, roll_offset=0, allow_counter=False):
         power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
+        defending = target.is_defending if target.spec.enemy else target.defending
         result = resolve_physical_attack(
             attack=int(actor.spec.attack * (1.5 if charged else 1)),
             hit=actor.spec.hit,
             target_defense=target.defense,
             target_evasion=target.evasion,
-            target_defending=target.defending,
+            target_defending=defending,
             target_unable_to_evade=target.focus is not None,
             target_incapacitated=target.incapacitated_for_physical_hit,
             attacker_is_monster=True,
@@ -1732,7 +1819,7 @@ class BattleForecast:
             target_is_member=not target.spec.enemy,
             target_resistances=target.spec.resistances,
             target_weaknesses=target.spec.weaknesses if target.spec.enemy else (),
-            target_defending=target.defending,
+            target_defending=defending,
         )
         if AdditionalEffect.DRAIN in actor.spec.additional_effects:
             actor.drain(result.damage)
@@ -1867,8 +1954,8 @@ class BattleForecast:
         target.interrupt_focus()
 
     def prepare_turn(self, actor) -> bool:
+        actor.defending = False
         if not actor.spec.enemy:
-            actor.defending = False
             actor.cover = None
             if not self.surprise:
                 self.restore_surprise_rows((actor,), after_confusion_tick=True)

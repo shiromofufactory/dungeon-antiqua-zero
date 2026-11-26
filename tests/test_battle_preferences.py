@@ -473,7 +473,7 @@ class BattlePreferencesTest(AutoBattleFixtures, unittest.TestCase):
         overlay = scene.auto_battle_screen
         texts = {placement.text: placement for placement in overlay.window.texts}
         title = overlay.window.texts[0]
-        self.assertEqual(title.text, "オートバトルの　せんぽうを　へんこうします")
+        self.assertEqual(title.text, "オートバトルでの　たたかいかたを　へんこうできます")
         self.assertLess(title.y, texts["じゅもん"].y)
         self.assertNotIn("オートバトルせってい", texts)
         heading_font = scene.fonts.font_for(Language.JAPANESE, role=FontRole.LARGE)

@@ -15,7 +15,7 @@ from app.audio_catalog import (
     SoundEffectDefinition,
     load_sound_effects,
 )
-from app.spell_effect import SpellEffectDefinition
+from app.spell_effect import BLACK_WIND_EFFECT_KEY, SPELL_REFLECT_EFFECT_KEY, SpellEffectDefinition
 from scripts.spell_effect_pipeline import (
     SpellEffectCatalogs,
     SpellEffectDiagnostic,
@@ -167,6 +167,9 @@ class SpellEffectEditorStore:
             ):
                 raise SpellEffectSourceError(f"呪文マスターの表示項目が不正です: {key}")
             result.append(EditorSpell(key, name, spell_type, bool(on_battle)))
+        for key, name in ((SPELL_REFLECT_EFFECT_KEY, "じゅもんミラー"), (BLACK_WIND_EFFECT_KEY, "黒い風")):
+            if key in self.catalogs.spell_keys:
+                result.append(EditorSpell(key, name, "", True))
         return tuple(result)
 
     @property

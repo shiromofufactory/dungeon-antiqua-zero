@@ -12,6 +12,33 @@ else:
     from .resistance import ResistanceType
 
 
+SPELL_REFLECTION_ROLL_COUNT = 4
+
+
+def spell_reflection_chance(
+    *, defending: bool, has_reflect: bool, equipment_reflects: bool = False,
+) -> int:
+    """Return DA2's reflection threshold on a four-sided roll."""
+
+    if defending and has_reflect:
+        return SPELL_REFLECTION_ROLL_COUNT
+    if equipment_reflects:
+        return 2 if defending else 1
+    return 0
+
+
+def black_wind_has_effect(
+    *, poisoned: bool, sleeping: int, confused: int, silenced: int,
+    defense_modifier: int, speed_modifier: int,
+) -> bool:
+    """Return whether DA2's Black Wind can cure or remove a condition."""
+
+    return bool(
+        poisoned or sleeping or confused or silenced
+        or defense_modifier < 0 or speed_modifier < 0
+    )
+
+
 DEFAULT_DEBUFF_MIN_TURNS = 4
 TEMPTATION_RATE = 6
 PRAY_SUCCESS_ROLL_COUNT = 10_000

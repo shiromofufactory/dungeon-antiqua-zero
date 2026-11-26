@@ -13,7 +13,7 @@ from monster_ai import MonsterAction, monster_action_candidates, select_monster_
 from resistance import ResistanceType
 from resources import load_record_array
 from scenes.battle import (
-    BattleMonster, BattlePhase, BREATH_TINT_FRAME_COUNT, DAMAGE_POPUP_FRAME_COUNT,
+    BattleMonster, BattlePhase, BATTLE_BACKGROUND_TINT_FRAME_COUNT, DAMAGE_POPUP_FRAME_COUNT,
     FIRE_BREATH_TINT_COLOR, SPELL_EFFECT_FLASH_PALETTE,
 )
 from tests.test_auto_battle import AutoBattleFixtures
@@ -101,13 +101,13 @@ class FireBreathSceneTest(unittest.TestCase):
         self.begin(scene, actor)
         presentation = scene.action_presentation
         self.assertIs(scene.phase, BattlePhase.ACTION_PRESENTATION)
-        self.assertEqual(presentation.breath_tint_color, FIRE_BREATH_TINT_COLOR)
+        self.assertEqual(presentation.background_tint_color, FIRE_BREATH_TINT_COLOR)
         self.assertEqual(presentation.party_poison_results, ())
         self.assertEqual(len(presentation.party_damage_results), 2)
         self.assertEqual(actor.state.mp, 0)
         scene._show_monster_action_message.assert_called_once_with("battle.monster.fire_breath")
         scene.palette_shifter.define_mix = Mock(wraps=scene.palette_shifter.define_mix)
-        for frame in range(1, DAMAGE_POPUP_FRAME_COUNT + BREATH_TINT_FRAME_COUNT + 1):
+        for frame in range(1, DAMAGE_POPUP_FRAME_COUNT + BATTLE_BACKGROUND_TINT_FRAME_COUNT + 1):
             scene._update_action_presentation()
             if frame < DAMAGE_POPUP_FRAME_COUNT:
                 self.assertEqual(tuple(m.hp for m in scene.party), hp)
@@ -166,7 +166,7 @@ class FireBreathSceneTest(unittest.TestCase):
         scene.progression = Mock()
         with patch("scenes.battle.play_se"):
             scene._update_monster_action()
-        self.assertEqual(scene.action_presentation.breath_tint_color, FIRE_BREATH_TINT_COLOR)
+        self.assertEqual(scene.action_presentation.background_tint_color, FIRE_BREATH_TINT_COLOR)
         scene.progression.record_enemy_action.assert_called_once_with(0)
 
 

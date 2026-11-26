@@ -415,7 +415,7 @@ class StatusMenuTest(unittest.TestCase):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusMenuHarness(member_index=4)
+            mock = StatusMenuHarness(member_index=TEST_PARTY_CHARACTER_KEYS.index("Ragna"))
 
         self.assertEqual(
             (
@@ -433,7 +433,7 @@ class StatusMenuTest(unittest.TestCase):
         )
         self.assertEqual(
             [target.key for target in mock.skill_cursor.targets],
-            ["Aim", "Focus"],
+            ["Aim", "Retaliate"],
         )
         self.assertFalse(mock.skill_cursor.active)
 
@@ -445,7 +445,7 @@ class StatusMenuTest(unittest.TestCase):
             images.return_value.image.return_value = object()
             fonts.return_value.font_for.return_value = FixedWidthFont()
             fonts.return_value.baseline_offset_for.return_value = 0
-            mock = StatusMenuHarness(member_index=4)
+            mock = StatusMenuHarness(member_index=TEST_PARTY_CHARACTER_KEYS.index("Ragna"))
 
         self.assertFalse(mock.update(input_state(confirm=True)))
 
@@ -468,13 +468,10 @@ class StatusMenuTest(unittest.TestCase):
 
         self.assertFalse(mock.update(input_state(navigation=Direction.DOWN)))
 
-        self.assertEqual(mock.selected_skill.key, "Focus")
+        self.assertEqual(mock.selected_skill.key, "Retaliate")
         self.assertEqual(
             [text.text for text in mock.skill_description_window.texts],
-            [
-                "ちからを　ためて",
-                "つぎの　こうげきの　いりょくを　あげる",
-            ],
+            ["たまに　てきからの　こうげきに　はんげきする"],
         )
 
         member_index = mock.member_index

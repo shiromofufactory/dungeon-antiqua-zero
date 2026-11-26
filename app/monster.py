@@ -13,6 +13,7 @@ if __package__ == "":
         DEFAULT_DEBUFF_MIN_TURNS,
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
+        black_wind_has_effect,
         modified_defense,
     )
     from battle_speed import (
@@ -24,6 +25,7 @@ else:
         DEFAULT_DEBUFF_MIN_TURNS,
         MAX_PROTECTION_LEVEL,
         MIN_PROTECTION_LEVEL,
+        black_wind_has_effect,
         modified_defense,
     )
     from .battle_speed import (
@@ -88,6 +90,8 @@ class MonsterSpecialAction(StrEnum):
     COUNTER = "反"
     EARTHQUAKE = "地"
     TEMPTATION = "誘"
+    MIRROR = "鏡"
+    BLACK_WIND = "黒"
     DOUBLE_ATTACK = "連"
     RANGED_ATTACK = "遠"
 
@@ -346,6 +350,7 @@ class MonsterBattleState:
     slow_turns: int = 0
     defense_down_turns: int = 0
     action_rotation_index: int | None = field(default=None, init=False)
+    defending: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.max_hp, bool) or not isinstance(self.max_hp, int):
@@ -429,6 +434,32 @@ class MonsterBattleState:
         assert self.hp is not None
         return self.hp > 0
 
+    @property
+    def is_defending(self) -> bool:
+        return self.defending and self.is_alive and not (
+            self.sleeping or self.confused or self.stunned
+        )
+
+    @property
+    def can_recover_with_black_wind(self) -> bool:
+        return self.is_alive and black_wind_has_effect(
+            poisoned=self.poisoned, sleeping=self.sleeping,
+            confused=self.confused, silenced=self.silenced,
+            defense_modifier=self.defense_modifier, speed_modifier=self.speed_modifier,
+        )
+
+    def recover_with_black_wind(self) -> None:
+        """Clear DA2's curable ailments and negative battle stages."""
+
+        if not self.is_alive:
+            return
+        self.poisoned = False
+        self.sleeping = self.confused = self.silenced = 0
+        if self.defense_modifier < 0:
+            self.defense_modifier = self.defense_down_turns = 0
+        if self.speed_modifier < 0:
+            self.speed_modifier = self.slow_turns = 0
+
     def take_damage(self, damage: int) -> int:
         """Apply non-negative damage and return the actual HP reduction."""
 
@@ -443,6 +474,7 @@ class MonsterBattleState:
             self.sleeping = 0
             self.confused = 0
         if self.hp <= 0:
+            self.defending = False
             self.confused = 0
             self.silenced = 0
             self.stunned = False
@@ -522,6 +554,7 @@ class MonsterBattleState:
         assert previous is not None
         self.hp = max(0, previous - damage)
         if self.hp <= 0:
+            self.defending = False
             self.confused = 0
             self.silenced = 0
             self.stunned = False
@@ -665,6 +698,7 @@ class MonsterBattleState:
         """Set HP to zero for a mock attack that always defeats its target."""
 
         self.hp = 0
+        self.defending = False
         self.confused = 0
         self.silenced = 0
         self.stunned = False
@@ -688,6 +722,7 @@ class MonsterBattleState:
         self.slow_turns = 0
         self.defense_down_turns = 0
         self.action_rotation_index = None
+        self.defending = False
 
 
 def promote_rear_monsters_if_front_empty(

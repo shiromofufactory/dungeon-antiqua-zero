@@ -19,6 +19,9 @@
     "battle_fire_breath": {
       "sound": 13
     },
+    "battle_black_wind": {
+      "sound": 47
+    },
     "battle_earthquake": {
       "sound": 48
     },
@@ -120,6 +123,12 @@
     },
     "spell_blood_suck": {
       "sound": 51
+    },
+    "spell_reflect": {
+      "sound": 44
+    },
+    "spell_purge": {
+      "sound": 19
     }
   }
 }

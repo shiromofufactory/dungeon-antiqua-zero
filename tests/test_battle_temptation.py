@@ -22,14 +22,14 @@ from tests.test_battle_monster_spells import spell_scene
 
 class TemptationSceneTest(unittest.TestCase):
     def setUp(self):
-        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Lamia")
-        self.actor = BattleMonster.from_record(record, is_front_row=False)
+        self.record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Lamia")
+        self.actor = BattleMonster.from_record(self.record, is_front_row=False)
         self.scene = spell_scene(self.actor)
 
     def test_turn_tints_screen_while_animating_only_successful_men(self):
         scene, actor = self.scene, self.actor
         self.assertEqual(actor.special_actions, (MonsterSpecialAction.TEMPTATION,))
-        self.assertEqual(actor.magic, 12)
+        self.assertEqual(actor.magic, self.record["mag"])
         self.assertEqual(actor.spell_keys, ())
         items = load_mock_items()
         scene.party = load_mock_party(
