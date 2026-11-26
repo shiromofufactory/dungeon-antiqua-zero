@@ -495,6 +495,9 @@ def compile_event_sources(
         ],
         "events": {key: events[key] for key in sorted(events)},
         "battles": {entry["battle_id"]: entry["monster_keys"] for entry in battles or []},
+        "knockout_battles": [
+            entry["battle_id"] for entry in battles or [] if entry.get("mode") == "knockout"
+        ],
         "battle_start_events": {key: battle_start_events[key] for key in sorted(battle_start_events)},
         "battle_defeat_events": {
             entry["battle_id"]: entry["defeat_event_id"]

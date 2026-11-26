@@ -632,7 +632,7 @@ function renderLists() {
       ${renderListDropZone("battle", index)}
       <div class="list-item reorderable-list-item ${state.mode === "battle" && index === state.selectedBattle ? "active" : ""}" data-list-item-kind="battle">
         <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(battle.battle_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="battle" data-index="${index}">⠿</span>
-        <button type="button" class="list-item-select" data-action="select-battle" data-index="${index}"><strong>${esc(battle.battle_id)}</strong><small>${battle.monster_keys?.length || 0}体 · ${esc(battle.note || "メモなし")}</small></button>
+        <button type="button" class="list-item-select" data-action="select-battle" data-index="${index}"><strong>${esc(battle.battle_id)}</strong><small>${battle.mode === "knockout" ? "勝ち抜き戦" : `${battle.monster_keys?.length || 0}体`} · ${esc(battle.note || "メモなし")}</small></button>
       </div>`).join("") + listEnd("battle", battles, "イベントバトルはありません。");
   }
 
@@ -908,11 +908,12 @@ function renderBattleEditor() {
   const fieldEventIds = state.data.events
     .filter((event) => event.id && event.battle_start_id === undefined)
     .map((event) => event.id).sort();
+  const knockout = battle.mode === "knockout";
   $("event-editor").innerHTML = `
     <div class="event-meta">${field("バトルID", `<input data-battle-field="battle_id" value="${esc(battle.battle_id)}">`)}${field("制作メモ", `<input data-battle-field="note" value="${esc(battle.note || "")}">`)}<button class="danger" data-action="delete-battle">イベントバトルを削除</button></div>
-    <div class="event-meta">${field("全滅時イベント", `<select data-battle-field="defeat_event_id">${options(fieldEventIds, battle.defeat_event_id, "指定なし（通常の全滅復帰）")}</select>`, true)}</div>
-    <h2>敵編成（1〜5体・上から配置）</h2>
-    <p class="compact">本編イベントとダンジョン試行で共通の編成です。同じモンスターを複数指定できます。画面内に収まらない敵は戦闘開始時に除外します。</p>
+    <div class="event-meta">${field("バトル形式", `<select data-battle-field="mode"><option value="normal">通常戦</option><option value="knockout" ${knockout ? "selected" : ""}>勝ち抜き戦</option></select>`)}${field("全滅時イベント", `<select data-battle-field="defeat_event_id">${options(fieldEventIds, battle.defeat_event_id, "指定なし（通常の全滅復帰）")}</select>`, true)}</div>
+    <h2>${knockout ? "敵の出場順（5体・上から1体ずつ）" : "敵編成（1〜5体・上から配置）"}</h2>
+    <p class="compact">本編イベントとダンジョン試行で共通の編成です。同じモンスターを複数指定できます。${knockout ? "" : "画面内に収まらない敵は戦闘開始時に除外します。"}</p>
     ${(battle.monster_keys || []).map((key, index) => `<div class="add-row"><select aria-label="敵${index+1}" data-registered-monster-index="${index}">${options(state.catalogs.monster_keys || [], key)}</select><button data-action="remove-registered-monster" data-index="${index}" ${battle.monster_keys.length <= 1 ? "disabled" : ""}>削除</button></div>`).join("")}
     <button data-action="add-registered-monster" ${battle.monster_keys.length >= 5 ? "disabled" : ""}>敵を追加</button>`;
 }
@@ -1231,7 +1232,7 @@ $("event-editor").addEventListener("change", (event) => {
   if (target.dataset.battleField) {
     const key = target.dataset.battleField;
     commit(() => {
-      if (key === "defeat_event_id" && !target.value) delete currentBattle()[key];
+      if ((key === "defeat_event_id" && !target.value) || (key === "mode" && target.value === "normal")) delete currentBattle()[key];
       else currentBattle()[key] = target.value;
     });
   } else if (target.dataset.registeredMonsterIndex !== undefined) {

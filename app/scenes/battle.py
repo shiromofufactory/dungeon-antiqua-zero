@@ -126,6 +126,7 @@ from item import (
 )
 from localization import LocalizedText, Localizer, ascii_to_fullwidth, format_number
 from member import (
+    BATTLE_PARTY_MEMBER_COUNT,
     EquipmentSlot,
     FormationRow,
     Gender,
@@ -345,6 +346,7 @@ MONSTER_ENTRANCE_FRAME_COUNTS = tuple(
 )
 REINFORCEMENT_POST_ENTRANCE_WAIT_FRAME_COUNT = 12
 PARTY_ENTRANCE_FRAME_COUNT = 10
+KNOCKOUT_HANDOFF_HALF_FRAMES = 12
 PARTY_ENTRANCE_STAGGER_FRAME_COUNT = 2
 PARTY_ENTRANCE_START_X = SCREEN_WIDTH
 PARTY_ENTRANCE_OFFSET_Y = -24
@@ -780,6 +782,7 @@ class BattlePhase(StrEnum):
     FORMATION = "formation"
     MONSTER_DEATH = "monster_death"
     DEFEAT_MESSAGE = "defeat_message"
+    KNOCKOUT_HANDOFF = "knockout_handoff"
     TIMELINE = "timeline"
     MONSTER_ACTION = "monster_action"
     VICTORY_SUMMARY = "victory_summary"
@@ -1946,13 +1949,14 @@ class BattleScene:
         encounter: BattleEncounter,
         save_data: SaveData,
         result_party: tuple[Member, ...],
-        return_bgm_id: str,
+        return_bgm_id: str | None,
         return_bgm_start_sec: float = 0.0,
         command_memory: BattleCommandMemory | None = None,
         on_invalid_action: Callable[[], None] | None = None,
         proficiency_level_limit: int | None = None,
         experience_limit: int | None = None,
         character_states: Mapping[str, Member] | None = None,
+        knockout_party: tuple[Member, ...] = (),
     ) -> BattleScene:
         """Build a production scene from one game session and encounter."""
 
@@ -1996,6 +2000,7 @@ class BattleScene:
             proficiency_level_limit=proficiency_level_limit,
             experience_limit=experience_limit,
             character_states=character_states,
+            knockout_party=knockout_party,
         )
 
     def __init__(
@@ -2031,6 +2036,7 @@ class BattleScene:
         proficiency_level_limit: int | None = None,
         experience_limit: int | None = None,
         character_states: Mapping[str, Member] | None = None,
+        knockout_party: tuple[Member, ...] = (),
     ) -> None:
         if not isinstance(settings, Settings):
             raise TypeError("settings must be Settings")
@@ -2113,13 +2119,24 @@ class BattleScene:
             or not all(isinstance(member, Member) for member in self.result_party)
         ):
             raise ValueError("result_party must contain from 1 to 6 members")
-        if tuple(self.result_party[: len(party)]) != party:
+        if knockout_party:
+            if (
+                len(encounter.monster_keys) != 1
+                or party != knockout_party[:1]
+                or len({id(member) for member in knockout_party}) != len(knockout_party)
+                or not all(
+                    member in self.result_party[:BATTLE_PARTY_MEMBER_COUNT]
+                    for member in knockout_party
+                )
+            ):
+                raise ValueError("a knockout battle requires one enemy and an ordered battle party")
+        elif tuple(self.result_party[: len(party)]) != party:
             raise ValueError("battle party must be the leading result party members")
         self.party_entrance_complete_frame = (
             PARTY_ENTRANCE_FRAME_COUNT
             + (len(party) - 1) * PARTY_ENTRANCE_STAGGER_FRAME_COUNT
         )
-        self.party_visuals = tuple(
+        ordered_visuals = tuple(
             BattleCharacter.from_record(
                 member,
                 _record_for_key(
@@ -2128,8 +2145,11 @@ class BattleScene:
                     label="character",
                 ),
             )
-            for member in self.party
+            for member in (knockout_party or party)
         )
+        self.knockout_battle = bool(knockout_party)
+        self.knockout_queue = ordered_visuals[1:] if knockout_party else ()
+        self.party_visuals = ordered_visuals[: len(party)]
         monsters_by_key = _records_by_key(
             monster_records,
             label="monster",
@@ -2168,6 +2188,12 @@ class BattleScene:
             for index, encounter_index in enumerate(layout.monster_indexes)
         )
         self.initial_monsters = self.monsters
+        if knockout_party:
+            monster = self.monsters[0]
+            monster.special_actions = tuple(
+                action for action in monster.special_actions
+                if action not in (MonsterSpecialAction.CALL, MonsterSpecialAction.REINFORCE)
+            )
         self.reinforcement_entrance_frames: dict[int, int] = {}
         self._monster_call_pending = False
         self._reinforcement_waiting_actor: BattleMonster | None = None
@@ -2568,7 +2594,14 @@ class BattleScene:
                 )
             )
             or getattr(self, "phase", None) is BattlePhase.FADE_ESCAPE
+            or getattr(self, "phase", None) is BattlePhase.KNOCKOUT_HANDOFF
         )
+
+    @property
+    def knockout_survivors(self) -> tuple[Member, ...]:
+        """Return the current fighter followed by the remaining entrants."""
+
+        return (*self.party, *(visual.member for visual in self.knockout_queue))
 
     @property
     def is_party_command_ready(self) -> bool:
@@ -2631,6 +2664,10 @@ class BattleScene:
         if getattr(self, "phase", None) is BattlePhase.RESULT:
             self.input_device = input_state.device
             self._update_result(input_state)
+            return
+        if getattr(self, "phase", None) is BattlePhase.KNOCKOUT_HANDOFF:
+            self.input_device = input_state.device
+            self._update_knockout_handoff()
             return
         if getattr(self, "phase", None) in (
             BattlePhase.BOSS_INTRO,
@@ -3068,6 +3105,8 @@ class BattleScene:
         self.covering_party_index = None
         self.escaped_party_indexes.clear()
         self.temporary_front_party_indexes.clear()
+        if getattr(self, "knockout_battle", False):
+            self.temporary_front_party_indexes.add(0)
         self._prepare_surprise()
         self.victory_motion_frame = 0
         self.victory_summary_window = None
@@ -3379,7 +3418,7 @@ class BattleScene:
                 s
                 for s in self.spells.values()
                 if s.type is not SpellType.ITEM
-                and s.on_battle
+                and self._party_spell_is_usable(s)
                 and s.is_learned_by(member)
             )
             combatants.append(
@@ -3761,6 +3800,10 @@ class BattleScene:
     def _begin_defeat_message(self) -> None:
         """Stop battle input and show DA2's persistent party-defeat message."""
 
+        if getattr(self, "knockout_queue", ()):
+            self._begin_knockout_handoff()
+            return
+
         self.phase = BattlePhase.DEFEAT_MESSAGE
         self.active_party_index = None
         self.blinking_monster_index = None
@@ -3794,6 +3837,80 @@ class BattleScene:
         if input_state.confirm.triggered or input_state.cancel.triggered:
             self._complete_defeat()
 
+    def _begin_knockout_handoff(self) -> None:
+        """Keep the opponent in place while the outgoing fighter fades out."""
+
+        self._clear_turn_state()
+        self._remove_timeline_actors(self.party_visuals)
+        self.timeline_removal_animation = None
+        self.timeline_animation_phase = None
+        self.timeline_advance = None
+        self.active_party_index = None
+        self.blinking_monster_index = None
+        self.monster_blink_frames_remaining = 0
+        self.monster_attack_target_index = None
+        self.monster_attack_damage = None
+        self.command_cursor.active = False
+        self.command_window.close_immediately()
+        self.global_command_window.close_immediately()
+        self.battle_popup.clear()
+        self.healing_popups.clear()
+        self.spell_damage_popups.clear()
+        self.affinity_popups.clear()
+        self.pending_party_counter_index = None
+        self.pending_monster_counters.clear()
+        self.counter_defeated_turn_actor = False
+        self.monster_previous_attack_popup = None
+        self.monster_drain_presentation = None
+        self.auto_battle_planner = None
+        self.knockout_handoff_frame = 0
+        self.phase = BattlePhase.KNOCKOUT_HANDOFF
+        self._refresh_party_hp_text(0)
+        self._refresh_party_text_colors()
+
+    def _update_knockout_handoff(self) -> None:
+        self.knockout_handoff_frame += 1
+        if self.knockout_handoff_frame == KNOCKOUT_HANDOFF_HALF_FRAMES:
+            self._replace_knockout_fighter()
+        if self.knockout_handoff_frame == 2 * KNOCKOUT_HANDOFF_HALF_FRAMES:
+            self._timeline_order = initialize_timeline_order(
+                tuple(
+                    (actor, self._actor_agility(actor))
+                    for actor in (*self.party_visuals, *self.monsters)
+                )
+            )
+            self.timeline = self._timeline_order.actors
+            self._activate_timeline_head()
+
+    def _replace_knockout_fighter(self) -> None:
+        self.party[0].clear_temporary_battle_conditions()
+        entrant, *waiting = self.knockout_queue
+        self.knockout_queue = tuple(waiting)
+        self.party = (entrant.member,)
+        self.party_visuals = (entrant,)
+        self.defending_party_indexes.clear()
+        self.cover_target_by_party_index.clear()
+        self.protected_party_index = None
+        self.covering_party_index = None
+        self.focused_target_by_party_index.clear()
+        self.hidden_party_indexes.clear()
+        self.formation_actor_indexes = ()
+        self.last_command_by_party_index.clear()
+        self.last_spell_key_by_party_index.clear()
+        self.last_item_selection_by_party_index.clear()
+        self.last_cover_target_by_party_index.clear()
+        pending_global_command = self.initial_global_command_pending
+        self._restore_command_memory()
+        self.initial_global_command_pending = pending_global_command
+        window = self.party_status_windows[0]
+        name, hp = self.party_status_texts[0]
+        window.remove_text(name)
+        name = window.add_text(
+            entrant.display_name(self.localizer), name.x, name.y, color=name.color,
+        )
+        self.party_status_texts[0] = (name, hp)
+        self._refresh_party_hp_text(0)
+
     def _complete_defeat(self) -> None:
         """Restore spent items and report defeat to the transition owner."""
 
@@ -3801,7 +3918,7 @@ class BattleScene:
             if not self.inventory_system.add(key, quantity):
                 raise RuntimeError(f"cannot restore {quantity} consumed copies of {key!r}")
         for (index, slot), item in self._broken_equipment.items():
-            member = self.party[index]
+            member = getattr(self, "result_party", self.party)[index]
             member.equipment = member.equipment.replaced({slot: item})
         self._consumed_items.clear()
         self._broken_equipment.clear()
@@ -4406,7 +4523,13 @@ class BattleScene:
         if not item.use_spell_key:
             return False
         spell = self.spells.get(item.use_spell_key)
-        return spell is not None and spell.on_battle
+        return spell is not None and self._party_spell_is_usable(spell)
+
+    def _party_spell_is_usable(self, spell: Spell) -> bool:
+        return spell.on_battle and (
+            not getattr(self, "knockout_battle", False)
+            or spell.action not in (SpellAction.FADE, SpellAction.TELEPORT)
+        )
 
     @property
     def selected_item_candidate(self) -> BattleItemCandidate | None:
@@ -4640,7 +4763,7 @@ class BattleScene:
             for spell in self.spells.values()
             if (
                 spell.type is not SpellType.ITEM
-                and spell.on_battle
+                and self._party_spell_is_usable(spell)
                 and spell.is_learned_by(member)
             )
         )
@@ -6968,7 +7091,8 @@ class BattleScene:
         if member.equipment.item_at(slot) != item:
             return False
         member.equipment = member.equipment.replaced({slot: None})
-        self._broken_equipment[index, slot] = item
+        result_index = getattr(self, "result_party", self.party).index(member)
+        self._broken_equipment[result_index, slot] = item
         return True
 
     def _cancel_action_target_selection(self) -> None:
@@ -8149,7 +8273,7 @@ class BattleScene:
         growth = getattr(self, "growth_result", None)
         if growth is None:
             raise RuntimeError("victory result requires settled growth")
-        if not growth.has_result_growth:
+        if not growth.has_result_growth and not getattr(self, "knockout_battle", False):
             self._request_victory_completion()
             return
         self.result_overlay = BattleResultOverlay(
@@ -8331,6 +8455,16 @@ class BattleScene:
     def _complete_current_turn(self) -> None:
         if self._begin_pending_monster_counter():
             return
+        self._clear_turn_state()
+        if getattr(self, "counter_defeated_turn_actor", False):
+            self.counter_defeated_turn_actor = False
+            self._start_timeline_removal_animation()
+        else:
+            self._start_timeline_animation()
+
+    def _clear_turn_state(self) -> None:
+        """Release command and presentation state tied to the last action."""
+
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
@@ -8375,11 +8509,6 @@ class BattleScene:
         self._close_spell_windows()
         self.command_guide_window.close_immediately()
         self.command_guide_window.clear_texts()
-        if getattr(self, "counter_defeated_turn_actor", False):
-            self.counter_defeated_turn_actor = False
-            self._start_timeline_removal_animation()
-        else:
-            self._start_timeline_animation()
 
     def _start_timeline_animation(self) -> None:
         actor = self._timeline_order.entries[0].actor
@@ -11862,6 +11991,9 @@ class BattleScene:
         return presentation.pose
 
     def _draw_party(self) -> None:
+        if self.phase is BattlePhase.KNOCKOUT_HANDOFF:
+            self._draw_knockout_fighter()
+            return
         for index, visual in enumerate(self.party_visuals):
             if index in getattr(self, "escaped_party_indexes", ()):
                 continue
@@ -12134,7 +12266,34 @@ class BattleScene:
             if weapon.layer == "front":
                 draw_weapon(weapon)
 
+    def _draw_knockout_fighter(self) -> None:
+        frame = self.knockout_handoff_frame
+        x = self._party_sprite_x(0)
+        if frame < KNOCKOUT_HANDOFF_HALF_FRAMES:
+            source_x = self._party_sprite_source_x(0)
+            opacity = 1.0 - frame / KNOCKOUT_HANDOFF_HALF_FRAMES
+        else:
+            elapsed = frame - KNOCKOUT_HANDOFF_HALF_FRAMES
+            x = SCREEN_WIDTH - (SCREEN_WIDTH - x) * elapsed // KNOCKOUT_HANDOFF_HALF_FRAMES
+            source_x = (elapsed // FORMATION_WALK_PATTERN_FRAME_COUNT % 2) * FORMATION_SPRITE_STEP_X
+            opacity = 1.0
+        y = PARTY_SPRITE_Y[0]
+        width = self._party_sprite_width(0, is_escaping=False)
+        pyxel.dither(opacity)
+        try:
+            if self._party_shadow_is_visible(source_x):
+                self._draw_party_shadow(x, y, width)
+            pyxel.blt(
+                x, y - self._party_floating_offset(0, source_x), self.character_sprites,
+                source_x, self.party_visuals[0].battle_sprite * 32,
+                width, 32, TRANSPARENT_INDEX,
+            )
+        finally:
+            pyxel.dither(1.0)
+
     def _party_draw_position(self, index: int) -> tuple[int, int] | None:
+        if getattr(self, "phase", None) is BattlePhase.KNOCKOUT_HANDOFF:
+            return None
         if index in getattr(self, "escaped_party_indexes", ()):
             return None
         target_x = self._party_sprite_x(index)

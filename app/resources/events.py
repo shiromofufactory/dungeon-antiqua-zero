@@ -245,6 +245,7 @@ class EventCatalog:
         battle_start_events: Mapping[str, str] | None = None,
         battles: Mapping[str, tuple[str, ...]] | None = None,
         battle_defeat_events: Mapping[str, str] | None = None,
+        knockout_battles: tuple[str, ...] = (),
     ) -> None:
         normalized = {} if events is None else dict(events)
         if not all(
@@ -282,6 +283,14 @@ class EventCatalog:
                    for key, lineup in definitions.items()):
             raise EventResourceError("イベントバトルの登録が不正です。")
         self._battles = MappingProxyType(definitions)
+        if not all(
+            isinstance(battle_id, str)
+            and battle_id in definitions
+            and len(definitions[battle_id]) == 5
+            for battle_id in knockout_battles
+        ) or len(set(knockout_battles)) != len(knockout_battles):
+            raise EventResourceError("勝ち抜き戦の登録が不正です。")
+        self._knockout_battles = frozenset(knockout_battles)
         defeat_triggers = {} if battle_defeat_events is None else dict(battle_defeat_events)
         if not all(
             battle_id in definitions
@@ -302,6 +311,9 @@ class EventCatalog:
             return self._battles[battle_id]
         except KeyError as error:
             raise EventResourceError(f"未登録のイベントバトルです: {battle_id}") from error
+
+    def is_knockout_battle(self, battle_id: str) -> bool:
+        return battle_id in self._knockout_battles
 
     @property
     def missions(self) -> tuple[MissionDefinition, ...]:
@@ -347,7 +359,7 @@ class EventCatalog:
     def from_document(cls, document: object) -> EventCatalog:
         if not isinstance(document, dict):
             raise EventResourceError("イベントJSONのルートが不正です。")
-        if set(document) - {"missions", "battle_start_events", "battles", "battle_defeat_events"} != {"format_version", "source_sha256", "flags", "events"}:
+        if set(document) - {"missions", "battle_start_events", "battles", "battle_defeat_events", "knockout_battles"} != {"format_version", "source_sha256", "flags", "events"}:
             raise EventResourceError("イベントJSONのルート属性が不正です。")
         if document.get("format_version") != EVENT_FORMAT_VERSION:
             raise EventResourceError("イベントJSONのformat_versionが不正です。")
@@ -418,10 +430,14 @@ class EventCatalog:
         battle_defeat_events = document.get("battle_defeat_events", {})
         if not isinstance(battle_defeat_events, dict):
             raise EventResourceError("バトル全滅時イベントの定義が不正です。")
+        knockout_battles = document.get("knockout_battles", [])
+        if not isinstance(knockout_battles, list):
+            raise EventResourceError("勝ち抜き戦の登録が不正です。")
         catalog = cls(loaded, flag_ids=frozenset(flag_values), missions=tuple(missions),
                       battle_start_events=battle_start_events,
                       battles={key: tuple(lineup) for key, lineup in battles.items()},
-                      battle_defeat_events=battle_defeat_events)
+                      battle_defeat_events=battle_defeat_events,
+                      knockout_battles=tuple(knockout_battles))
         def check_references(commands):
             for command in commands:
                 if command["command"] == "start_battle":

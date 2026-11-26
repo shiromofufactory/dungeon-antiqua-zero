@@ -29,7 +29,7 @@ def validate_event_battles(
         if not isinstance(battle, dict):
             _diagnostic(diagnostics, "error", "invalid_battle", path, "イベントバトルはobjectで指定してください。")
             continue
-        _known_fields(battle, {"battle_id", "note", "monster_keys", "defeat_event_id"}, diagnostics, path)
+        _known_fields(battle, {"battle_id", "note", "monster_keys", "defeat_event_id", "mode"}, diagnostics, path)
         battle_id = battle.get("battle_id")
         if not isinstance(battle_id, str) or LOCAL_ID_PATTERN.fullmatch(battle_id) is None:
             _diagnostic(diagnostics, "error", "invalid_battle_id", path, "バトルIDはlower_snake_caseで指定してください。")
@@ -46,9 +46,14 @@ def validate_event_battles(
                 _diagnostic(diagnostics, "error", "invalid_defeat_event_id", event_path, "全滅時イベントは完全IDで指定してください。")
             elif event_id not in field_events:
                 _diagnostic(diagnostics, "error", "unknown_defeat_event", event_path, f"全滅時イベントは登録済みのフィールドイベントを指定してください: {event_id}")
+        mode = battle.get("mode", "normal")
+        if mode not in ("normal", "knockout"):
+            _diagnostic(diagnostics, "error", "invalid_battle_mode", f"{path}.mode", "バトル形式が不正です。")
         lineup = battle.get("monster_keys")
-        if not isinstance(lineup, list) or not 1 <= len(lineup) <= 5:
-            _diagnostic(diagnostics, "error", "invalid_monster_lineup", path, "敵は1〜5体指定してください。")
+        minimum = 5 if mode == "knockout" else 1
+        if not isinstance(lineup, list) or not minimum <= len(lineup) <= 5:
+            message = "勝ち抜き戦の敵は出場順に5体指定してください。" if mode == "knockout" else "敵は1〜5体指定してください。"
+            _diagnostic(diagnostics, "error", "invalid_monster_lineup", path, message)
             continue
         for i, key in enumerate(lineup):
             if not isinstance(key, str) or key not in monsters:

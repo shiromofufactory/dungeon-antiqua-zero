@@ -147,6 +147,12 @@ class DebugDungeonScene:
         self.notice = DEBUG_TEXT.dungeon_battle_finished
         self.refresh()
 
+    def cancel_battle(self) -> None:
+        """Return to preparation after canceling a battle before it starts."""
+
+        self.waiting_for_battle = False
+        self.refresh()
+
     def complete_event(self, *, succeeded: bool) -> None:
         if not self.waiting_for_event:
             raise RuntimeError("debug dungeon has no active event")

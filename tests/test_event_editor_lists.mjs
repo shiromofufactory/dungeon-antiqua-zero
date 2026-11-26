@@ -7,7 +7,7 @@ const source = readFileSync(new URL('../tools/event_editor/static/app.js', impor
 const names = ['filteredList', 'listEnd', 'setIdFilter', 'listForKind', 'insertListItem', 'moveListItem',
   'renderLists', 'renderListDropZone', 'currentFlag', 'battleIds', 'currentBattle', 'currentEvent', 'currentMission', 'currentMessage',
   'snapshot', 'begin', 'commit', 'restore', 'normalize', 'undo', 'redo', 'uniqueId', 'addEvent',
-  'eventIdPrefix', 'requestBody', 'savePendingActorEventLink'];
+  'eventIdPrefix', 'requestBody', 'savePendingActorEventLink', 'renderBattleEditor', 'field', 'options'];
 const declarations = names.map((name) => {
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
   assert.notEqual(start, -1);
@@ -26,6 +26,7 @@ function editor() {
     messages: ids.map((id) => ({ message_id: id, text_ja: ['common body'] })),
     selectedFlag: 2, selectedEvent: 2, selectedMission: 2, selectedMessage: 2,
     filterText: '', mode: 'event', dirty: false, history: [], future: [],
+    catalogs: { monster_keys: ['SLIME', 'BAT'] },
   };
   const nodes = new Map();
   const node = (id) => {
@@ -91,6 +92,26 @@ test('adding a hidden item clears the filter and selects its original index', ()
   context.insertListItem('flag', { flag_id: 'new_flag' });
   assert.equal(state.filterText, '');
   assert.equal(context.currentFlag().flag_id, 'new_flag');
+});
+
+test('knockout battles display the ordered five slots and save the mode with the lineup', () => {
+  const { context, node } = editor();
+  const lineup = ['BAT', 'SLIME', 'BAT', 'BAT', 'SLIME'];
+  context.commit(() => Object.assign(context.currentBattle(), {
+    mode: 'knockout', monster_keys: lineup, defeat_event_id: 'common.first',
+  }));
+  context.renderBattleEditor();
+  const html = node('event-editor').innerHTML;
+  assert.match(html, /value="knockout" selected/);
+  assert.match(html, /敵の出場順（5体・上から1体ずつ）/);
+  assert.equal((html.match(/data-registered-monster-index/g) || []).length, 5);
+  const saved = JSON.parse(context.requestBody()).battles[2];
+  assert.deepEqual(saved.monster_keys, lineup);
+  assert.equal(saved.mode, 'knockout');
+  assert.equal(saved.defeat_event_id, 'common.first');
+  context.undo();
+  context.renderBattleEditor();
+  assert.match(node('event-editor').innerHTML, /敵編成（1〜5体・上から配置）/);
 });
 
 test('new events store complete IDs and avoid collisions across prefixes', () => {

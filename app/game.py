@@ -35,6 +35,7 @@ from ui.teleport_menu import TeleportTarget
 from ui.game_menu import GameMenuAction, GameMenuOverlay
 from ui.field_menu_guide import FieldMenuGuide
 from ui.hint import HintOverlay
+from ui.knockout_order import KnockoutOrderOverlay
 from ui.control_guide import ControlGuideOverlay, ControlGuideResult
 from ui.equipment_menu import (
     EquipmentMenuDataError,
@@ -671,6 +672,9 @@ class Game:
         self.battle_scene: BattleScene | None = None
         self.pending_first_party_turn_hint = False
         self.pending_event_battle_encounter: BattleEncounter | None = None
+        self.knockout_order: KnockoutOrderOverlay | None = None
+        self.knockout_party: tuple[Member, ...] = ()
+        self.knockout_enemy_keys: tuple[str, ...] = ()
         self.event_battle_id: str | None = None
         self.suspended_field_event: tuple[EventRunner, StartBattleEffect] | None = None
         self.pending_shop = None
@@ -792,12 +796,18 @@ class Game:
             return settings.with_language(self._preferred_language)
         return settings
 
-    def _build_battle_scene(self, encounter: BattleEncounter) -> BattleScene:
+    def _build_battle_scene(
+        self, encounter: BattleEncounter, *, return_bgm_start_sec: float | None = None,
+    ) -> BattleScene:
         """Create a battle from current session state without choosing when it starts."""
 
         memory = getattr(self, "battle_command_memory", None)
         if memory is None:
             memory = self.battle_command_memory = BattleCommandMemory()
+        knockout_party = getattr(self, "knockout_party", ())
+        return_bgm_id = (
+            None if getattr(self, "knockout_enemy_keys", ()) else self._exploration_bgm_id()
+        )
         return BattleScene.create(
             settings=self.settings,
             palette_shifter=self.palette_shifter,
@@ -809,17 +819,21 @@ class Game:
             spells=self.spells,
             inventory_system=self.inventory_system,
             character_records=self.character_records,
-            party=self.party[:BATTLE_PARTY_MEMBER_COUNT],
+            party=knockout_party[:1] or self.party[:BATTLE_PARTY_MEMBER_COUNT],
             result_party=self.party,
             save_data=self.save_data,
-            return_bgm_id=self._exploration_bgm_id(),
-            return_bgm_start_sec=getattr(self, "pending_battle_bgm_start_sec", 0.0),
+            return_bgm_id=return_bgm_id,
+            return_bgm_start_sec=(
+                getattr(self, "pending_battle_bgm_start_sec", 0.0)
+                if return_bgm_start_sec is None else return_bgm_start_sec
+            ),
             encounter=encounter,
             command_memory=memory,
             on_invalid_action=self.alert.start,
             proficiency_level_limit=self.launch_mode.proficiency_level_limit,
             experience_limit=self.launch_mode.experience_limit,
             character_states=self.character_states,
+            knockout_party=knockout_party,
         )
 
     def _advance_random_encounter(self) -> bool:
@@ -1086,13 +1100,63 @@ class Game:
         runner = self.event_runner
         if runner is None or getattr(self, "suspended_field_event", None) is not None:
             raise RuntimeError("an event battle is already active")
+        if self.event_catalog.is_knockout_battle(effect.battle_id) is True:
+            self._open_knockout_order(effect.battle_id)
+            return
         encounter = BattleEncounter(self.event_catalog.battle_monster_keys(effect.battle_id), escape_command_enabled=False)
+        self._launch_event_battle(effect, encounter)
+
+    def _launch_event_battle(self, effect: StartBattleEffect, encounter: BattleEncounter) -> None:
+        runner = self.event_runner
+        if runner is None:
+            raise RuntimeError("an event battle requires a waiting field event")
         self.pending_event_battle_encounter = encounter
         self.event_battle_id = effect.battle_id
         self.suspended_field_event = (runner, effect)
         self.event_runner = None
         self.event_effect = None
         self._begin_random_encounter()
+
+    def _open_knockout_order(self, battle_id: str) -> None:
+        self.knockout_order = KnockoutOrderOverlay(
+            candidates=tuple(
+                member for member in self.party[:BATTLE_PARTY_MEMBER_COUNT]
+                if member.is_alive and not member.paralyzed
+            ),
+            settings=self.settings, fonts=self.fonts, texts=self.texts,
+        )
+        self.event_battle_id = battle_id
+
+    def _update_knockout_order(self, input_state: InputState) -> None:
+        selection = self.knockout_order.update(input_state)
+        if selection is None:
+            return
+        self.knockout_order = None
+        effect = getattr(self, "event_effect", None)
+        simulation = getattr(self, "debug_dungeon_scene", None)
+        if not selection:
+            self.event_battle_id = None
+            self.event_release_confirm = input_state.confirm.held
+            self.event_release_direction = input_state.held_direction
+            if isinstance(effect, StartBattleEffect):
+                self.event_runner = None
+                self.event_effect = None
+                self._finish_field_conversation()
+                if simulation is not None and simulation.waiting_for_event:
+                    simulation.complete_event(succeeded=False)
+            elif simulation is not None:
+                simulation.cancel_battle()
+            return
+
+        keys = self.event_catalog.battle_monster_keys(self.event_battle_id)
+        self.knockout_party = selection
+        self.knockout_enemy_keys = keys[1:]
+        encounter = BattleEncounter(keys[:1], escape_command_enabled=False)
+        if isinstance(effect, StartBattleEffect):
+            self._launch_event_battle(effect, encounter)
+        else:
+            self.pending_debug_battle_encounter = encounter
+            self._begin_random_encounter()
 
     def _start_battle_event(self, event_id: str) -> None:
         """Run the event at the first playable party command of this battle."""
@@ -1122,6 +1186,8 @@ class Game:
         """Clear the battle ID and resolve the suspended field event."""
 
         self.event_battle_id = None
+        self.knockout_party = ()
+        self.knockout_enemy_keys = ()
         suspended = getattr(self, "suspended_field_event", None)
         self.suspended_field_event = None
         if suspended is None:
@@ -1243,6 +1309,10 @@ class Game:
         if event is FadeEvent.COVERED:
             if self.battle_return_result is BattleResult.DEFEAT:
                 self._begin_defeat_presentation(input_state)
+            elif self.battle_return_result is BattleResult.VICTORY and getattr(
+                self, "knockout_enemy_keys", ()
+            ):
+                self._advance_knockout_battle()
             else:
                 self._apply_battle_return()
         if event is FadeEvent.FINISHED:
@@ -1257,6 +1327,28 @@ class Game:
                 self._show_hint_once(FIRST_DEFEAT_RESTART_HINT_ID)
             else:
                 self._resume_event_after_battle(finished_result)
+
+    def _advance_knockout_battle(self) -> None:
+        """Count this victory and replace the opponent while the screen is black."""
+
+        previous = self.battle_scene
+        previous.clear_temporary_member_conditions()
+        previous.release_palette_variants()
+        self.save_data.battle_count += 1
+        self.knockout_party = previous.knockout_survivors
+        next_key, *remaining = self.knockout_enemy_keys
+        self.knockout_enemy_keys = tuple(remaining)
+        self.battle_scene = self._build_battle_scene(
+            BattleEncounter((next_key,), escape_command_enabled=False),
+            return_bgm_start_sec=previous.return_bgm_start_sec,
+        )
+        if (
+            self.pending_first_party_turn_hint
+            and self.event_catalog.battle_start_event(self.event_battle_id) is not None
+        ):
+            self.battle_scene.defer_first_party_command()
+        self.battle_return_fade = None
+        self.battle_return_result = None
 
     def _begin_defeat_presentation(self, input_state: InputState) -> None:
         """Select the defeat event or rescue message once fully covered."""
@@ -2398,6 +2490,9 @@ class Game:
         self.bgm.play(self.debug_dungeon_scene.dungeon.bgm_id)
 
     def _start_debug_dungeon_battle(self, step: DungeonStep) -> bool:
+        if step.type == "event_battle" and self.event_catalog.is_knockout_battle(step.battle_id) is True:
+            self._open_knockout_order(step.battle_id)
+            return True
         try:
             encounter = (self._create_random_battle_encounter(step.encounter)
                          if step.type == "random_encounter"
@@ -4145,6 +4240,9 @@ class Game:
         if getattr(self, "battle_return_fade", None) is not None:
             self._update_battle_return(input_state)
             return
+        if getattr(self, "knockout_order", None) is not None:
+            self._update_knockout_order(input_state)
+            return
         runner = getattr(self, "event_runner", None)
         if runner is not None and runner.context is EventContext.BATTLE:
             self._update_event(input_state)
@@ -4455,8 +4553,11 @@ class Game:
                     hint_overlay = getattr(self, "hint_overlay", None)
                     if hint_overlay is not None:
                         hint_overlay.draw()
-                    return
-                self._draw_field_screen()
+                else:
+                    self._draw_field_screen()
+                order = getattr(self, "knockout_order", None)
+                if order is not None:
+                    order.draw()
                 return
             item_screen = getattr(self, "item_screen", None)
             auto_recovery_screen = getattr(self, "auto_recovery_screen", None)
