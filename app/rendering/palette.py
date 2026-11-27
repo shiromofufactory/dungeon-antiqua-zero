@@ -107,6 +107,17 @@ class PaletteShifter:
     def global_base_rate(self) -> float:
         return self._global_base_rate
 
+    def has_variant(self, name: str) -> bool:
+        return name in self._variants
+
+    def can_define_variant(self, name: str) -> bool:
+        """Return whether a full base-sized variant can be added or updated."""
+
+        return (
+            self.has_variant(name)
+            or len(self._colors) + len(self._base_colors) <= MAX_PALETTE_COLOR_COUNT
+        )
+
     def _globally_mixed(self, colors: Sequence[int]) -> tuple[int, ...]:
         if self._screen_flash_mix is not None:
             base_rate, target_color = self._screen_flash_mix
@@ -143,7 +154,7 @@ class PaletteShifter:
 
         variant = self._variants.get(name)
         if variant is None:
-            if len(self._colors) + len(variant_colors) > MAX_PALETTE_COLOR_COUNT:
+            if not self.can_define_variant(name):
                 raise ValueError(
                     "palette variants exceed Pyxel's 0-255 color-number range"
                 )

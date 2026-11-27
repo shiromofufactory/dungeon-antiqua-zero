@@ -1728,6 +1728,29 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         enemy.damage(1)
         self.assertEqual(enemy.sleeping, 0)
 
+    def test_inner_steel_recovers_before_action_and_uses_current_hp_in_forecast(self):
+        spec = replace(
+            self.specs[0], hp=26, max_hp=100, poisoned=True,
+            sleeping=2, silenced=2, skills=self.specs[0].skills | {"Inner Steel"},
+        )
+        forecast = BattleForecast(self.snapshot(spec, self.enemy()), 0)
+        member, enemy = forecast.actors[0], forecast.actors[5]
+        action = AutoAction(BattleCommand.ATTACK, (5,))
+
+        with patch("auto_battle_simulation.resolve_physical_attack") as resolve:
+            forecast.physical_results(member, enemy, action)
+            base_attack = resolve.call_args.kwargs["attack"]
+            self.assertEqual(base_attack, spec.weapons[-1].attack)
+            self.assertFalse(forecast.prepare_turn(member))
+            self.assertTrue(member.poisoned)
+            self.assertEqual(member.hp, 19)
+            self.assertEqual((member.sleeping, member.silenced), (0, 0))
+            forecast.physical_results(member, enemy, action)
+            self.assertEqual(resolve.call_args.kwargs["attack"], base_attack * 3 // 2)
+            member.hp = 26
+            forecast.physical_results(member, enemy, action)
+            self.assertEqual(resolve.call_args.kwargs["attack"], base_attack)
+
     def test_surprise_forecast_defers_rows_until_first_actionable_turn(self):
         for status, value in (
             ("sleeping", 2), ("sleeping", 1), ("paralyzed", True),

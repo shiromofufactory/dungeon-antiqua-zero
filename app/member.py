@@ -15,6 +15,10 @@ if __package__ == "":
         modified_defense,
         spell_resistances,
     )
+    from battle_physical import (
+        INNER_STEEL_SKILL_KEY,
+        inner_steel_at_low_hp,
+    )
     from battle_speed import (
         MAX_SPEED_MODIFIER,
         MIN_SPEED_MODIFIER,
@@ -33,6 +37,10 @@ else:
         MIN_PROTECTION_LEVEL,
         modified_defense,
         spell_resistances,
+    )
+    from .battle_physical import (
+        INNER_STEEL_SKILL_KEY,
+        inner_steel_at_low_hp,
     )
     from .battle_speed import (
         MAX_SPEED_MODIFIER,
@@ -1276,6 +1284,22 @@ class Member:
         return self.poisoned or (
             self.is_alive and self.hp <= self.max_hp // 4
         )
+
+    @property
+    def inner_steel_active(self) -> bool:
+        return inner_steel_at_low_hp(self.hp, self.max_hp) and self.has_skill(
+            INNER_STEEL_SKILL_KEY
+        )
+
+    def recover_with_inner_steel(self) -> bool:
+        if not (
+            self.is_alive
+            and (self.sleeping or self.confused or self.silenced)
+            and self.has_skill(INNER_STEEL_SKILL_KEY)
+        ):
+            return False
+        self.sleeping = self.confused = self.silenced = 0
+        return True
 
     @property
     def has_curable_ailment(self) -> bool:

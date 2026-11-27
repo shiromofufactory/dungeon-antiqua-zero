@@ -51,6 +51,8 @@ from scenes.battle import (
     ESCAPE_MEMBER_STAGGER_FRAME_COUNT,
     ESCAPE_RUN_SPEED,
     FORMATION_MOVE_FRAME_COUNT,
+    INNER_STEEL_CYCLE_FRAMES,
+    INNER_STEEL_PALETTE,
     SPELL_EFFECT_FLASH_PALETTE,
     UNSELECTABLE_TARGET_PALETTE,
     _battle_start_front_monster_indexes,
@@ -150,6 +152,66 @@ class BattlePhysicalSoundTest(unittest.TestCase):
 
 
 class BattlePaletteLifecycleTest(unittest.TestCase):
+    def test_inner_steel_waits_for_a_free_slot_and_releases_it_for_targeting(self) -> None:
+        colors = [0x000000] * 62
+        shifter = PaletteShifter(colors, Mock())
+        for name in (DIMMED_PALETTE, MONOCHROME_PALETTE, SPELL_EFFECT_FLASH_PALETTE):
+            shifter.define_variant(name, shifter.base_colors)
+        skills = load_mock_skills()
+        member = load_mock_party(load_mock_items(), skills, character_keys=("Fiora",))[0]
+        member.skills.append(skills["Inner Steel"])
+        member.hp = 1
+        scene = BattleScene.__new__(BattleScene)
+        scene.palette_shifter = shifter
+        scene.party = (member,)
+        scene.active_party_index = 0
+        scene.phase = BattlePhase.COMMAND
+        scene.command_window = SimpleNamespace(is_open=True)
+        scene.global_command_window = SimpleNamespace(is_open=True)
+        scene._update_battle = Mock()
+
+        scene.update(InputState())
+        self.assertFalse(shifter.has_variant(INNER_STEEL_PALETTE))
+        self.assertTrue(shifter.has_variant(SPELL_EFFECT_FLASH_PALETTE))
+        self.assertEqual(len(colors), 248)
+        shifter.remove_variant(SPELL_EFFECT_FLASH_PALETTE)
+        scene.command_window.is_open = False
+        scene.update(InputState())
+        self.assertFalse(shifter.has_variant(INNER_STEEL_PALETTE))
+
+        scene.command_window.is_open = True
+        scene.update(InputState())
+        self.assertEqual(scene.inner_steel_frame, 0)
+        self.assertEqual(colors[186], 0x000000)
+        for _ in range(24):
+            scene.update(InputState())
+        self.assertEqual(scene.inner_steel_frame, 24)
+        self.assertEqual(colors[186], 0x651414)  # DA2's channel truncation at the peak
+        for _ in range(22):
+            scene.update(InputState())
+        end_color = colors[186]
+        for _ in range(9):
+            scene.update(InputState())
+            self.assertEqual(colors[186], end_color)
+        self.assertEqual(scene.inner_steel_frame, INNER_STEEL_CYCLE_FRAMES - 1)
+        scene.update(InputState())
+        self.assertEqual(colors[186], 0x000000)
+
+        scene._update_battle.side_effect = lambda _input: setattr(scene, "phase", BattlePhase.TARGET)
+        scene.update(InputState())
+        self.assertFalse(shifter.has_variant(INNER_STEEL_PALETTE))
+        self.assertTrue(shifter.has_variant(UNSELECTABLE_TARGET_PALETTE))
+        self.assertEqual(len(colors), 248)
+
+        scene._update_battle.side_effect = lambda _input: setattr(scene, "phase", BattlePhase.GLOBAL_COMMAND)
+        scene.update(InputState())
+        self.assertFalse(shifter.has_variant(UNSELECTABLE_TARGET_PALETTE))
+        self.assertTrue(shifter.has_variant(INNER_STEEL_PALETTE))
+        self.assertEqual(scene.inner_steel_frame, 0)
+
+        scene.release_palette_variants()
+        self.assertEqual(len(colors), 186)
+
     def test_repeated_battles_release_palette_slots_at_every_exit(self) -> None:
         colors = list(range(62))
         shifter = PaletteShifter(colors, Mock())

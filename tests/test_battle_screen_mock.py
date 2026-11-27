@@ -218,7 +218,6 @@ from tools.screen_mocks.battle import (
     THROWING_PROJECTILE_PATTERN_FRAME_COUNT,
     THROWING_PROJECTILE_SPEED,
     UNSELECTABLE_TARGET_PALETTE,
-    UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
     WEAPON_ATTRIBUTE_RESISTANCE,
     TimelineAnimationPhase,
     WindowText,
@@ -914,16 +913,6 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(
             palette_shifter.define_mix.call_args_list,
             [
-                call(
-                    UNSELECTABLE_TARGET_PALETTE,
-                    base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
-                    target_color=0x858585,
-                ),
-                call(
-                    UNSELECTABLE_TARGET_PALETTE,
-                    base_rate=UNSELECTABLE_TARGET_PALETTE_BASE_RATE,
-                    target_color=0x858585,
-                ),
                 call(
                     ACTIVE_PARTY_CURSOR_PALETTE,
                     base_rate=1.0,
@@ -4156,6 +4145,50 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_damage_popups[0].damage, expected_damage)
         mock._start_timeline_animation.assert_called_once_with()
 
+    def test_inner_steel_clears_sleep_confusion_and_silence_at_member_turn_start(self) -> None:
+        skills = load_mock_skills()
+        member = load_mock_party(load_mock_items(), skills, character_keys=("Fiora",))[0]
+        member.skills.append(skills["Inner Steel"])
+        visual = BattleMockCharacter(member, 0, 0, 0)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.party = (member,)
+        mock.party_visuals = mock.timeline = (visual,)
+        mock.defending_party_indexes = set()
+        mock._apply_turn_start_hp_change = Mock(return_value=False)
+        mock._open_global_command_menu = Mock()
+        mock._start_timeline_animation = Mock()
+        mock._refresh_party_text_colors = Mock()
+
+        for status in ("sleeping", "confused"):
+            with self.subTest(status=status):
+                mock.initial_global_command_pending = True
+                setattr(member, status, 2)
+                member.silenced = 2
+                member.poisoned = True
+                mock._activate_timeline_head()
+                self.assertEqual((member.sleeping, member.confused, member.silenced), (0, 0, 0))
+                self.assertTrue(member.poisoned)
+                self.assertEqual(mock.inner_steel_recovery_index, 0)
+        self.assertEqual(mock._open_global_command_menu.call_count, 2)
+        mock._start_timeline_animation.assert_not_called()
+
+    def test_inner_steel_weapon_attack_uses_the_quarter_hp_boundary(self) -> None:
+        skills = load_mock_skills()
+        member = load_mock_party(load_mock_items(), skills, character_keys=("Fiora",))[0]
+        base_attack = BattleScreenMock._member_actual_physical_attack(member)
+        self.assertGreater(base_attack, 0)
+        member.skills.append(skills["Inner Steel"])
+        member.hp = member.max_hp // 4 + 1
+        member.poisoned = True
+        self.assertFalse(member.inner_steel_active)
+        self.assertEqual(BattleScreenMock._member_actual_physical_attack(member), base_attack)
+
+        member.hp -= 1
+        self.assertTrue(member.inner_steel_active)
+        self.assertEqual(BattleScreenMock._member_actual_physical_attack(member), base_attack * 3 // 2)
+        member.hp = 0
+        self.assertFalse(member.inner_steel_active)
+
     def test_regenerate_recovers_one_sixteenth_at_turn_start(self) -> None:
         skills = load_mock_skills()
         member = load_mock_party(
@@ -5933,11 +5966,11 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._update_action_presentation()
         mock._complete_current_turn.assert_called_once_with()
         self.assertNotIn(SPELL_EFFECT_FLASH_PALETTE, palette_shifter._variants)
-        self.assertIn(
+        self.assertNotIn(
             UNSELECTABLE_TARGET_PALETTE,
             palette_shifter._variants,
         )
-        self.assertEqual(len(colors), 248)
+        self.assertEqual(len(colors), 186)
 
     def test_heal_applies_at_da2_overlap_and_popup_does_not_delay_return(self) -> None:
         items = load_mock_items()

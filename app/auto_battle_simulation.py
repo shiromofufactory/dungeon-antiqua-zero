@@ -47,9 +47,11 @@ if __package__:
         spell_resistances,
     )
     from .battle_physical import (
+        INNER_STEEL_SKILL_KEY,
         PHYSICAL_EFFECT_RESISTANCE,
         PHYSICAL_STATUS_EFFECTS,
         drain_healing_amount,
+        inner_steel_attack,
         physical_weapon_is_effective,
         resolve_monster_attack_effects,
         resolve_physical_additional_effect,
@@ -121,9 +123,11 @@ else:
         spell_resistances,
     )
     from battle_physical import (
+        INNER_STEEL_SKILL_KEY,
         PHYSICAL_EFFECT_RESISTANCE,
         PHYSICAL_STATUS_EFFECTS,
         drain_healing_amount,
+        inner_steel_attack,
         physical_weapon_is_effective,
         resolve_monster_attack_effects,
         resolve_physical_additional_effect,
@@ -265,6 +269,11 @@ class ForecastActor:
 
     def has_skill(self, key: str) -> bool:
         return key in self.spec.skills
+
+    def weapon_attack(self, attack: int) -> int:
+        if self.has_skill(INNER_STEEL_SKILL_KEY):
+            return inner_steel_attack(attack, self.hp, self.max_hp)
+        return attack
 
     @property
     def agility(self) -> int:
@@ -987,7 +996,8 @@ class BattleForecast:
                 if weapon.iai_attack is None:
                     raise ValueError("Iai requires a right-hand katana attack value")
                 attack = weapon.iai_attack
-            elif action.command is BattleCommand.FOCUS:
+            attack = actor.weapon_attack(attack)
+            if action.command is BattleCommand.FOCUS:
                 attack *= 2
             effective = physical_weapon_is_effective(
                 effective_tribe=weapon.effective_tribe,
@@ -1500,7 +1510,7 @@ class BattleForecast:
         ):
             member = allies[int(self.roll(actor, 0, 13) * len(allies))]
             physical = (
-                member.spec.weapons[0].attack
+                member.weapon_attack(member.spec.weapons[0].attack)
                 if member.spec.weapons
                 and member.equipment.weapon_at(EquipmentSlot.RIGHT) is not None
                 else 0
@@ -2025,6 +2035,8 @@ class BattleForecast:
         actor.defending = False
         if not actor.spec.enemy:
             actor.cover = None
+            if actor.is_alive and actor.has_skill(INNER_STEEL_SKILL_KEY):
+                actor.sleeping = actor.confused = actor.silenced = 0
             if not self.surprise:
                 self.restore_surprise_rows((actor,), after_confusion_tick=True)
         poison = (

@@ -92,12 +92,14 @@ from battle_speed import (
     modified_agility,
 )
 from battle_physical import (
+    INNER_STEEL_SKILL_KEY,
     PHYSICAL_EFFECT_RESISTANCE,
     PHYSICAL_STATUS_EFFECTS,
     counter_attack_succeeds,
     resolve_earthquake_attack,
     PhysicalAttackResult,
     drain_healing_amount,
+    inner_steel_attack,
     member_physical_attack,
     physical_weapon_is_effective,
     resolve_monster_attack_effects,
@@ -159,6 +161,7 @@ from input import Direction, InputAction, InputDevice, InputState
 from rendering import (
     DEFAULT_FADE_FRAME_COUNT,
     DIMMED_PALETTE,
+    MONOCHROME_PALETTE,
     MONSTER_DEATH_PALETTE,
     MONSTER_DEATH_PALETTE_BASE_RATE,
     SPELL_EFFECT_FLASH_PALETTE,
@@ -340,6 +343,13 @@ SPELL_FIRST_Y = 2
 SPELL_ROW_HEIGHT = 3
 SPELL_VISIBLE_COUNT = 4
 DA2_REFERENCE_FPS = 30
+INNER_STEEL_PALETTE = "inner_steel"
+INNER_STEEL_TINT_COLOR = 0xFF3333  # DA2's palette color 24
+DA2_INNER_STEEL_TINT_FRAMES = 24
+DA2_INNER_STEEL_PAUSE_FRAMES = 4
+INNER_STEEL_CYCLE_FRAMES = (
+    (DA2_INNER_STEEL_TINT_FRAMES + DA2_INNER_STEEL_PAUSE_FRAMES) * FPS // DA2_REFERENCE_FPS
+)
 DA2_CONFIRM_REPEAT_DELAY_FRAME_COUNT = 10
 DA2_CONFIRM_REPEAT_INTERVAL_FRAME_COUNT = 2
 BATTLE_CONFIRM_REPEAT_DELAY_FRAME_COUNT = (
@@ -2135,7 +2145,8 @@ class BattleScene:
         self.return_bgm_id = return_bgm_id
         self.return_bgm_start_sec = return_bgm_start_sec
         self.palette_shifter = palette_shifter
-        self._sync_unselectable_target_palette()
+        self.inner_steel_frame: int | None = None
+        self.inner_steel_flashing_indexes: tuple[int, ...] = ()
         self.bgm = bgm
 
         background_entry = resources.entry(BACKGROUND_IMAGE_ID)
@@ -2704,6 +2715,16 @@ class BattleScene:
 
         if not isinstance(input_state, InputState):
             raise TypeError("input_state must be an InputState")
+        was_targeting = getattr(self, "phase", None) is BattlePhase.TARGET
+        self._update_battle(input_state)
+        if getattr(self, "phase", None) is BattlePhase.TARGET:
+            self._stop_inner_steel_palette()
+            self._sync_unselectable_target_palette()
+        elif was_targeting:
+            self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
+        self._update_inner_steel_palette()
+
+    def _update_battle(self, input_state: InputState) -> None:
         auto_battle_screen = getattr(self, "auto_battle_screen", None)
         if auto_battle_screen is not None:
             self.input_device = input_state.device
@@ -2999,6 +3020,7 @@ class BattleScene:
 
         self._defer_first_party_command = False
         self._pending_first_party_command = False
+        self.inner_steel_recovery_index: int | None = None
         self.auto_battle_planner = None
         self.auto_battle_log = []
         self.auto_battle_sequence = 0
@@ -7020,6 +7042,7 @@ class BattleScene:
     ) -> None:
         if not effects:
             return
+        self._stop_inner_steel_palette()
         self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
         self._prepare_target_spell_effects(effects, 0)
 
@@ -7125,7 +7148,6 @@ class BattleScene:
             self.action_progression_weapon = None
             self.action_progression_enemy_levels = ()
             self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
-            self._sync_unselectable_target_palette()
             if presentation.fade_escape:
                 self._begin_fade_escape()
                 return
@@ -7715,12 +7737,7 @@ class BattleScene:
                 + projectile_frame_count
                 - 1
             )
-            attack = member_physical_attack(
-                weapon_attack=weapon_attack,
-                strength=member.adjusted_abilities.strength,
-                weapon_level=member.weapon_level(weapon),
-                internal_level=member.internal_level,
-            )
+            attack = self._member_weapon_attack(member, weapon, weapon_attack)
             if is_focused:
                 attack *= FOCUS_ATTACK_MULTIPLIER
             weapon_has_power_hit = weapon.special is ItemSpecial.POWER_HIT
@@ -7847,12 +7864,7 @@ class BattleScene:
             return False
         weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
         stats = member.battle_stats
-        attack = member_physical_attack(
-            weapon_attack=stats.attack_right * 60 // 100,
-            strength=member.adjusted_abilities.strength,
-            weapon_level=member.weapon_level(weapon),
-            internal_level=member.internal_level,
-        )
+        attack = self._member_weapon_attack(member, weapon, stats.attack_right * 60 // 100)
         hidden = party_index in getattr(self, "hidden_party_indexes", set())
         power_hit = member.has_skill("Power Hit")
         weapon_power_hit = weapon.special is ItemSpecial.POWER_HIT
@@ -8336,7 +8348,6 @@ class BattleScene:
         self.dying_monster_indexes = ()
         self.monster_death_from_timeline_head = False
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
-        self._sync_unselectable_target_palette()
         if self._monsters_are_defeated():
             self._begin_victory_summary()
             return
@@ -8635,9 +8646,10 @@ class BattleScene:
         """Release mutually exclusive effect blocks before restarting the scene."""
 
         self.sync_action_screen_flash(suspended=True)
+        self._stop_inner_steel_palette()
         self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
         self._release_palette_variant(MONSTER_DEATH_PALETTE)
-        self._sync_unselectable_target_palette()
+        self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
 
     def clear_temporary_member_conditions(self) -> None:
         """Clear DA2's battle-only member ailments before leaving the scene."""
@@ -8649,6 +8661,7 @@ class BattleScene:
         """Release this battle's palette blocks before the shared shifter is reused."""
 
         self.sync_action_screen_flash(suspended=True)
+        self._stop_inner_steel_palette()
         for name in (
             SPELL_EFFECT_FLASH_PALETTE,
             MONSTER_DEATH_PALETTE,
@@ -8662,13 +8675,17 @@ class BattleScene:
             palette_shifter.remove_variant(name)
 
     def _sync_unselectable_target_palette(self) -> None:
-        """Restore the target-selection block after a transient battle effect."""
+        """Reserve the palette used to mark enemies outside weapon reach."""
 
         palette_shifter = getattr(self, "palette_shifter", None)
         if palette_shifter is None:
             return
         base_colors = getattr(palette_shifter, "base_colors", ())
         if not isinstance(base_colors, tuple) or len(base_colors) <= DISABLED_COLOR:
+            return
+        if palette_shifter.has_variant(UNSELECTABLE_TARGET_PALETTE) or not (
+            palette_shifter.can_define_variant(UNSELECTABLE_TARGET_PALETTE)
+        ):
             return
         palette_shifter.define_mix(
             UNSELECTABLE_TARGET_PALETTE,
@@ -8680,6 +8697,7 @@ class BattleScene:
         animation = self.monster_death_animation
         if animation is None:
             return
+        self._stop_inner_steel_palette()
         self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
         self.palette_shifter.define_mix(
             MONSTER_DEATH_PALETTE,
@@ -8757,6 +8775,7 @@ class BattleScene:
     def _clear_turn_state(self) -> None:
         """Release command and presentation state tied to the last action."""
 
+        self.inner_steel_recovery_index = None
         self.selected_command = None
         self.selectable_target_indexes = ()
         self.selected_target_index = None
@@ -8803,6 +8822,7 @@ class BattleScene:
         self.command_guide_window.clear_texts()
 
     def _start_timeline_animation(self) -> None:
+        self.inner_steel_recovery_index = None
         actor = self._timeline_order.entries[0].actor
         if isinstance(actor, BattleCharacter) and isinstance(actor.member, Member):
             actor.member.elapse_silence_turn()
@@ -8885,6 +8905,7 @@ class BattleScene:
     def _start_timeline_removal_animation(self) -> None:
         """Slide the timeline after an escaping actor leaves permanently."""
 
+        self.inner_steel_recovery_index = None
         self.timeline_advance = remove_timeline_head(self._timeline_order)
         self.phase = BattlePhase.TIMELINE
         self.active_party_index = None
@@ -8939,6 +8960,50 @@ class BattleScene:
             base_rate=base_rate,
             target_color=ACTIVE_PARTY_CURSOR_TARGET_COLOR,
         )
+
+    def _update_inner_steel_palette(self) -> None:
+        if (
+            getattr(self, "phase", None) not in (BattlePhase.COMMAND, BattlePhase.GLOBAL_COMMAND)
+            or getattr(self, "auto_battle_active", False)
+            or getattr(self, "auto_battle_screen", None) is not None
+            or getattr(self, "escape_start_frame_by_party_index", {})
+        ):
+            self._stop_inner_steel_palette()
+            return
+
+        recovery_index = getattr(self, "inner_steel_recovery_index", None)
+        flashing_indexes = tuple(
+            index for index, member in enumerate(getattr(self, "party", ()))
+            if isinstance(member, Member) and member.is_alive
+            and (member.inner_steel_active or index == recovery_index)
+        )
+        if not flashing_indexes or not self.is_party_command_ready:
+            self._stop_inner_steel_palette()
+            return
+        if not self.palette_shifter.can_define_variant(INNER_STEEL_PALETTE):
+            self._stop_inner_steel_palette()
+            return
+
+        previous = getattr(self, "inner_steel_frame", None)
+        frame = 0 if previous is None else (previous + 1) % INNER_STEEL_CYCLE_FRAMES
+        if previous is None or frame * DA2_REFERENCE_FPS // FPS != previous * DA2_REFERENCE_FPS // FPS:
+            reference_frame = min(frame * DA2_REFERENCE_FPS // FPS, DA2_INNER_STEEL_TINT_FRAMES - 1)
+            angle = reference_frame * 2 * pi / DA2_INNER_STEEL_TINT_FRAMES
+            self.palette_shifter.define_mix(
+                INNER_STEEL_PALETTE,
+                base_rate=0.8 + cos(angle) * 0.2,
+                target_color=INNER_STEEL_TINT_COLOR,
+            )
+        self.inner_steel_frame = frame
+        self.inner_steel_flashing_indexes = flashing_indexes
+        if frame == INNER_STEEL_CYCLE_FRAMES - 1:
+            self.inner_steel_recovery_index = None
+
+    def _stop_inner_steel_palette(self) -> None:
+        if getattr(self, "inner_steel_frame", None) is not None:
+            self._release_palette_variant(INNER_STEEL_PALETTE)
+            self.inner_steel_frame = None
+            self.inner_steel_flashing_indexes = ()
 
     def _update_timeline_animation(self) -> None:
         self.command_window.update(None)
@@ -9089,6 +9154,8 @@ class BattleScene:
                 for index, visual in enumerate(self.party_visuals)
                 if visual is actor
             )
+            if isinstance(actor.member, Member) and actor.member.recover_with_inner_steel():
+                self.inner_steel_recovery_index = self.active_party_index
             if getattr(self, "surprise_active", False):
                 self.surprise_turned_party_indexes.add(self.active_party_index)
             elif (
@@ -9323,12 +9390,7 @@ class BattleScene:
             getattr(target, "sleeping", 0) or getattr(target, "confused", 0)
         )
         for weapon, weapon_attack, weapon_hit, pose_branches in equipped_attacks:
-            attack = member_physical_attack(
-                weapon_attack=weapon_attack,
-                strength=actor.adjusted_abilities.strength,
-                weapon_level=actor.weapon_level(weapon),
-                internal_level=actor.internal_level,
-            )
+            attack = self._member_weapon_attack(actor, weapon, weapon_attack)
             result = resolve_physical_attack(
                 attack=attack,
                 hit=weapon_hit,
@@ -10649,6 +10711,7 @@ class BattleScene:
         """Update only the background palette; draw never advances the tint."""
 
         # Breaths and Black Wind use the palette block without a target flash.
+        self._stop_inner_steel_palette()
         self._release_palette_variant(UNSELECTABLE_TARGET_PALETTE)
         self.palette_shifter.define_mix(
             SPELL_EFFECT_FLASH_PALETTE,
@@ -10970,12 +11033,19 @@ class BattleScene:
         weapon = member.equipment.weapon_at(EquipmentSlot.RIGHT)
         if weapon is None:
             return 0
-        return member_physical_attack(
-            weapon_attack=member.battle_stats.attack_right,
+        return BattleScene._member_weapon_attack(member, weapon, member.battle_stats.attack_right)
+
+    @staticmethod
+    def _member_weapon_attack(member: Member, weapon: Item, weapon_attack: int) -> int:
+        attack = member_physical_attack(
+            weapon_attack=weapon_attack,
             strength=member.adjusted_abilities.strength,
             weapon_level=member.weapon_level(weapon),
             internal_level=member.internal_level,
         )
+        if member.has_skill(INNER_STEEL_SKILL_KEY):
+            attack = inner_steel_attack(attack, member.hp, member.max_hp)
+        return attack
 
     def _party_member_can_cover(self, index: int) -> bool:
         """Return DA2's actionable condition for a potential coverer."""
@@ -12367,16 +12437,7 @@ class BattleScene:
                         index,
                         FORMATION_SPRITE_STEP_X,
                     )
-                    pyxel.blt(
-                        x,
-                        y,
-                        self.character_sprites,
-                        FORMATION_SPRITE_STEP_X,
-                        visual.battle_sprite * 32,
-                        PARTY_SPRITE_WIDTH,
-                        32,
-                        TRANSPARENT_INDEX,
-                    )
+                    self._draw_party_body(index, x, y, FORMATION_SPRITE_STEP_X, PARTY_SPRITE_WIDTH)
                 finally:
                     pyxel.dither(1.0)
                 continue
@@ -12408,34 +12469,30 @@ class BattleScene:
             if attack_pose is not None:
                 self._draw_attack_composite(index, x, y, attack_pose)
                 continue
-            if self.phase is BattlePhase.ACTION_PRESENTATION:
-                self._draw_spell_effect_target(
-                    "ally",
-                    index,
-                    lambda: pyxel.blt(
-                        x,
-                        y,
-                        self.character_sprites,
-                        sprite_source_x,
-                        visual.battle_sprite * 32,
-                        width,
-                        32,
-                        TRANSPARENT_INDEX,
-                    ),
-                )
-                continue
-            pyxel.blt(
-                x,
-                y,
-                self.character_sprites,
-                sprite_source_x,
-                visual.battle_sprite * 32,
-                width,
-                32,
-                TRANSPARENT_INDEX,
-            )
-            self._draw_focus_effect(index, x, y, foreground=True)
+            self._draw_party_body(index, x, y, sprite_source_x, width)
+            if self.phase is not BattlePhase.ACTION_PRESENTATION:
+                self._draw_focus_effect(index, x, y, foreground=True)
         self._draw_active_party_cursor()
+
+    def _draw_party_body(self, index: int, x: int, y: int, source_x: int, width: int) -> None:
+        visual = self.party_visuals[index]
+
+        def draw_body() -> None:
+            pyxel.blt(
+                x, y, self.character_sprites, source_x, visual.battle_sprite * 32,
+                width, 32, TRANSPARENT_INDEX,
+            )
+
+        phase = getattr(self, "phase", None)
+        if phase is BattlePhase.ACTION_PRESENTATION:
+            self._draw_spell_effect_target("ally", index, draw_body)
+        elif phase in (BattlePhase.COMMAND, BattlePhase.GLOBAL_COMMAND) and index in getattr(
+            self, "inner_steel_flashing_indexes", ()
+        ):
+            with self.palette_shifter.shifted(INNER_STEEL_PALETTE):
+                draw_body()
+        else:
+            draw_body()
 
     def _draw_active_party_cursor(self) -> None:
         """Frame the acting member at its position before floating is applied."""
@@ -12564,16 +12621,7 @@ class BattleScene:
         for weapon in pose.weapons:
             if weapon.layer == "back":
                 draw_weapon(weapon)
-        pyxel.blt(
-            x,
-            y,
-            self.character_sprites,
-            pose.character_pose * 16,
-            self.party_visuals[index].battle_sprite * 32,
-            16,
-            32,
-            TRANSPARENT_INDEX,
-        )
+        self._draw_party_body(index, x, y, pose.character_pose * 16, 16)
         for weapon in pose.weapons:
             if weapon.layer == "front":
                 draw_weapon(weapon)
@@ -12595,10 +12643,8 @@ class BattleScene:
         try:
             if self._party_shadow_is_visible(source_x):
                 self._draw_party_shadow(x, y, width)
-            pyxel.blt(
-                x, y - self._party_floating_offset(0, source_x), self.character_sprites,
-                source_x, self.party_visuals[0].battle_sprite * 32,
-                width, 32, TRANSPARENT_INDEX,
+            self._draw_party_body(
+                0, x, y - self._party_floating_offset(0, source_x), source_x, width
             )
         finally:
             pyxel.dither(1.0)
@@ -13288,7 +13334,12 @@ class BattleScene:
                     )
                     self._draw_identified_monster_hp(index, monster, x, y)
                     continue
-                with self.palette_shifter.shifted(UNSELECTABLE_TARGET_PALETTE):
+                palette = (
+                    UNSELECTABLE_TARGET_PALETTE
+                    if self.palette_shifter.has_variant(UNSELECTABLE_TARGET_PALETTE)
+                    else MONOCHROME_PALETTE
+                )
+                with self.palette_shifter.shifted(palette):
                     self._draw_monster_image(monster, x, y)
                 self._draw_identified_monster_hp(index, monster, x, y)
                 continue

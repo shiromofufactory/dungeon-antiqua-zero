@@ -81,6 +81,21 @@ class PaletteShifterTest(unittest.TestCase):
             [call(0, 2), call(1, 3), call()],
         )
 
+    def test_full_palette_can_update_a_variant_and_accept_one_after_release(self) -> None:
+        colors = list(range(62))
+        remap = Mock()
+        shifter = PaletteShifter(colors, remap)
+        for name in ("dimmed", "monochrome", "flash"):
+            shifter.define_variant(name, shifter.base_colors)
+        self.assertFalse(shifter.can_define_variant("inner_steel"))
+        self.assertTrue(shifter.can_define_variant("flash"))
+        shifter.define_mix("flash", base_rate=0.6, target_color=0xFF3333)
+        self.assertEqual(len(colors), 248)
+        shifter.remove_variant("flash")
+        self.assertTrue(shifter.can_define_variant("inner_steel"))
+        shifter.define_variant("inner_steel", shifter.base_colors)
+        self.assertEqual(len(colors), 248)
+
     def test_removing_variant_compacts_later_blocks_for_reuse(self) -> None:
         colors = [0x000000, 0x101010, 0x202020]
         remap = Mock()

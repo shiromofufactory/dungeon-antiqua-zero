@@ -23,6 +23,7 @@ DA2_MONSTER_STATUS_BASE_RATE = 30
 STUN_BASE_RATE = 20
 DA2_MEMBER_DEATH_BASE_RATE = 6
 DA2_MONSTER_DEATH_BASE_RATE = 10
+INNER_STEEL_SKILL_KEY = "Inner Steel"
 
 PHYSICAL_EFFECT_RESISTANCE = {
     AdditionalEffect.SLEEP: ResistanceType.SLEEP,
@@ -121,6 +122,14 @@ def member_physical_attack(
         * (175 + weapon_level * 25 + internal_level)
         // 1250
     )
+
+
+def inner_steel_at_low_hp(hp: int, max_hp: int) -> bool:
+    return 0 < hp <= max_hp // 4
+
+
+def inner_steel_attack(attack: int, hp: int, max_hp: int) -> int:
+    return attack * 3 // 2 if inner_steel_at_low_hp(hp, max_hp) else attack
 
 
 def resolve_physical_attack(
