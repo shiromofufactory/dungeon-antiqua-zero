@@ -969,6 +969,18 @@
           "battle_id": "battle_21"
         }
       ]
+    },
+    {
+      "id": "dungeon_a3e740eaa8c74d67a15f6849a9b035a0",
+      "name": "峠の道　元素究極呪文",
+      "bgm_id": "da3-mountain",
+      "steps": [
+        {
+          "id": "event_battle_f037a8f04e2548cd925fcf17f2c83559",
+          "type": "event_battle",
+          "battle_id": "battle_22"
+        }
+      ]
     }
   ]
 }

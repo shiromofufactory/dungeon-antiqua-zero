@@ -129,6 +129,9 @@
     },
     "spell_purge": {
       "sound": 19
+    },
+    "spell_air_blade": {
+      "sound": 11
     }
   }
 }
