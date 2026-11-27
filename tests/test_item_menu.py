@@ -1003,14 +1003,18 @@ class ItemMenuTest(unittest.TestCase):
         self.select_item(mock, "POTION")
         self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))
 
-    def test_mana_drop_caps_mp_and_consumes_its_last_copy(self) -> None:
-        items = ItemMenuHarness().items
+    def test_last_mana_drop_shows_recovered_mp_until_item_navigation(self) -> None:
+        items = load_test_items()
         item = items["MANA DROP"]
-        inventory = InventorySystem(items, {item.key: 1, "POTION": 1})
+        inventory = InventorySystem(
+            items, {item.key: 1, "POTION": 1, "DIVINE TEAR": 1}
+        )
         mock = ItemMenuHarness(items=items, inventory_system=inventory)
         target = mock.party_panel.party[2]
         target.mp = target.max_mp - 1
-        self.select_item(mock, item.key)
+        mock.update(InputState(confirm=InputButton(True, True)))
+        mock.update(InputState(navigation=Direction.DOWN))
+        self.assertEqual(mock.item_cursor.selected_key, item.key)
         mock.update(InputState(confirm=InputButton(True, True)))
 
         with (
@@ -1022,7 +1026,39 @@ class ItemMenuTest(unittest.TestCase):
         self.assertEqual(target.mp, target.max_mp)
         self.assertEqual(inventory.quantity(item), 0)
         self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertEqual(mock.item_cursor.selected_key, "DIVINE TEAR")
+        recovered_mp = f"ＭＰ{pad(target.max_mp, 3)}"
+        self.assertEqual(mock.party_window.texts[4].text, recovered_mp)
+        mock.update(InputState(confirm=InputButton(held=True)))
+        mock.update(InputState())
+        self.assertEqual(mock.party_window.texts[4].text, recovered_mp)
+
+        mock.update(InputState(navigation=Direction.DOWN))
         self.assertEqual(mock.item_cursor.selected_key, "POTION")
+        self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))
+
+    @patch("ui.item_menu.play_se")
+    def test_last_mana_drop_leaves_empty_list_open_until_cancel(self, _play) -> None:
+        items = load_test_items()
+        inventory = InventorySystem(items, {"MANA DROP": 1})
+        mock = ItemMenuHarness(items=items, inventory_system=inventory)
+        target = mock.party_panel.party[2]
+        target.mp = target.max_mp - 1
+        for _ in range(3):
+            mock.update(InputState(confirm=InputButton(True, True)))
+
+        self.assertEqual(inventory.items, ())
+        self.assertIs(mock.phase, ItemSelectionPhase.ITEM)
+        self.assertTrue(mock.item_list_window.active)
+        self.assertFalse(mock.category_cursor.active)
+        self.assertFalse(mock.member_cursor.active)
+        self.assertIsNone(mock.item_cursor.selected_key)
+        self.assertEqual(mock.party_window.texts[4].text, f"ＭＰ{pad(target.max_mp, 3)}")
+
+        self.assertFalse(mock.update(InputState(cancel=InputButton(True, True))))
+        self.assertIs(mock.phase, ItemSelectionPhase.CATEGORY)
+        self.assertIs(mock.category, ItemCategory.USE)
+        self.assertTrue(mock.category_cursor.active)
         self.assertTrue(mock.party_window.texts[4].text.startswith("ＨＰ"))
 
     def test_mana_drop_requires_missing_mp_and_a_spell_user(self) -> None:

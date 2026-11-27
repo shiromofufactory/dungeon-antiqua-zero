@@ -981,6 +981,117 @@
           "battle_id": "battle_22"
         }
       ]
+    },
+    {
+      "id": "dungeon_f1b60dee8144420891d0a6b6cfc538bc",
+      "name": "アイゼンタール鉱山（黒）",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "event_battle_98b44f0331ce411f94658fd739af8ff8",
+          "type": "event_battle",
+          "battle_id": "battle_10",
+          "flag_id": "eisental_mine.boss_3"
+        },
+        {
+          "id": "random_encounter_7f3dd819bcd541dc9c2732607bbd97cf",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 7,
+            "danger": "low",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_973a3aa7eeb34640bff378fbc69d5dad",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "SHISHIGOROSHI"
+          }
+        },
+        {
+          "id": "treasure_bb63280302114126b8f79250411f5e3a",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "BOOK of DOOM"
+          }
+        },
+        {
+          "id": "random_encounter_8a354b3a4af54b90804b1f3e05edf058",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 7,
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_b664b09bfc814a1fb7ae0eeb89e65893",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "BLESSED SHIELD"
+          }
+        },
+        {
+          "id": "treasure_3e48a607cc5f41ce9f5ee8c66051aa20",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "FRUIT of STR"
+          }
+        },
+        {
+          "id": "treasure_b0cf77806de842acac06e872a1024465",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "BLACK ORE"
+          }
+        },
+        {
+          "id": "random_encounter_831cd946f5dc4534a156ef3448931ca8",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 7,
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": false,
+            "allow_humans": false,
+            "allow_giants": true,
+            "allow_large_animals": true
+          }
+        },
+        {
+          "id": "treasure_2903542175e24fdba26bae0c506a3589",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "DIVINE TEAR"
+          }
+        },
+        {
+          "id": "treasure_30b460eca38449b99b9bfe8e3d8358ae",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "BLACK ORE"
+          }
+        }
+      ]
     }
   ]
 }

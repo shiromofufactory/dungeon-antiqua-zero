@@ -186,6 +186,7 @@ class ItemMenuOverlay:
         self.on_invalid_action = on_invalid_action
         self.teleport_menu: TeleportMenuOverlay | None = None
         self.ability_notice_window = None
+        self._show_mana_recovery_result = False
         self.phase = ItemSelectionPhase.CATEGORY
         self.selected_item_index = 0
         self.scroll_offset = 0
@@ -300,7 +301,7 @@ class ItemMenuOverlay:
             faces=self.faces,
             palette_shifter=self.palette_shifter,
             cursor_active=self.phase is ItemSelectionPhase.TARGET,
-            show_mp=self._show_mp_for_selected_item(),
+            show_mp=self._should_show_mp(),
         )
         self.party_window = self.party_panel.window
         self.member_cursor = self.party_panel.cursor
@@ -392,11 +393,11 @@ class ItemMenuOverlay:
             info_texts,
         )
         self._refresh_windows()
-        if self.party_panel.show_mp != self._show_mp_for_selected_item():
+        if self.party_panel.show_mp != self._should_show_mp():
             self._build_party_panel()
 
-    def _show_mp_for_selected_item(self) -> bool:
-        return (
+    def _should_show_mp(self) -> bool:
+        return self._show_mana_recovery_result or (
             self.category is ItemCategory.USE
             and self.phase in (ItemSelectionPhase.ITEM, ItemSelectionPhase.TARGET)
             and self.selected_item is not None
@@ -609,7 +610,8 @@ class ItemMenuOverlay:
         preferred_target_index: int,
     ) -> None:
         items = self.category_items
-        if item in items:
+        item_remains = item in items
+        if item_remains:
             self.selected_item_index = items.index(item)
         elif items:
             self.selected_item_index = min(self.selected_item_index, len(items) - 1)
@@ -620,7 +622,10 @@ class ItemMenuOverlay:
             max(0, len(items) - ITEM_VISIBLE_COUNT),
         )
 
-        can_reuse = item in items and bool(self._usable_target_indexes(spell))
+        self._show_mana_recovery_result = (
+            spell.action is SpellAction.MANA and not item_remains
+        )
+        can_reuse = item_remains and bool(self._usable_target_indexes(spell))
         self.phase = (
             ItemSelectionPhase.TARGET
             if can_reuse and (
@@ -952,6 +957,16 @@ class ItemMenuOverlay:
             return False
 
         self.item_cursor.update()
+        if self._show_mana_recovery_result and (
+            input_state.navigation is not None
+            or input_state.previous_page.triggered
+            or input_state.next_page.triggered
+            or input_state.confirm.triggered
+            or input_state.cancel.triggered
+        ):
+            self._show_mana_recovery_result = False
+            if self.party_panel.show_mp != self._should_show_mp():
+                self._build_party_panel()
         if input_state.cancel.triggered:
             self._return_to_category_selection()
             return False
