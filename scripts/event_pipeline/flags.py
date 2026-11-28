@@ -8,6 +8,8 @@ import re
 import tempfile
 from typing import Mapping, Sequence
 
+from app.event_flags import RESERVED_EVENT_FLAGS
+
 from .events import EventDiagnostic, EventSourceError
 
 
@@ -82,6 +84,15 @@ def validate_event_flags(value: object) -> list[EventDiagnostic]:
                     "flag_idはlower_snake_caseまたはドット区切りで指定してください。",
                 )
             )
+        elif flag_id in RESERVED_EVENT_FLAGS:
+            diagnostics.append(
+                EventDiagnostic(
+                    "error",
+                    "reserved_flag_id",
+                    f"{path}.flag_id",
+                    f"予約済みのフラグIDです: {flag_id}",
+                )
+            )
         elif flag_id in seen:
             diagnostics.append(
                 EventDiagnostic(
@@ -117,12 +128,23 @@ def event_flag_ids(value: object) -> set[str]:
     }
 
 
+def registered_event_flag_ids(value: object) -> set[str]:
+    return event_flag_ids(value) | RESERVED_EVENT_FLAGS.keys()
+
+
+def reserved_event_flag_options() -> list[dict[str, str]]:
+    return [
+        {"flag_id": flag_id, "note": note}
+        for flag_id, note in RESERVED_EVENT_FLAGS.items()
+    ]
+
+
 def compile_event_flags(value: object) -> list[str]:
     diagnostics = validate_event_flags(value)
     errors = [item for item in diagnostics if item.severity == "error"]
     if errors:
         raise EventSourceError(errors[0].message)
-    return sorted(event_flag_ids(value))
+    return sorted(registered_event_flag_ids(value))
 
 
 def _atomic_write(path: Path, content: bytes) -> None:
@@ -158,6 +180,8 @@ __all__ = [
     "event_flag_ids",
     "event_flags_path",
     "load_event_flags",
+    "registered_event_flag_ids",
+    "reserved_event_flag_options",
     "save_event_flags",
     "validate_event_flags",
 ]

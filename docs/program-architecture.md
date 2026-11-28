@@ -1743,9 +1743,12 @@ BattleSceneは出場中の味方と味方の交代演出を所有し、同じ敵
 `content/events/events.json` に集約し、制作時から完全IDを保持する。接頭辞はID整理の単位であり、
 マップIDとは対応付けない。
 
-イベントフラグ宣言は各イベントへ持たせず、`content/events/flags.json` でグローバルに
-管理する。`flag_id` は全イベントから同じ値を参照し、任意のドット区切り接頭辞は分類目的だけに
-使用する。生成時に宣言済みIDを `app/events/events.json` へ収録する。
+イベントフラグはグローバルに宣言する。制作側で編集できるフラグは
+`content/events/flags.json`、ゲームルールが参照する予約済みフラグは `app/event_flags.py` が所有する。
+生成時に両方のIDを `app/events/events.json` に収録し、通常のイベントフラグと同様に
+`SaveData.event_flags` に保存する。覚醒は `systems/event_progression.py` のフラグ設定時に
+Memberへ反映し、ロード時は同フラグに対応する適性を使ってMemberを復元する。
+封印呪文はフラグから解放済みの呪文キーを取得し、各利用箇所の `Spell.is_learned_by()` へ渡す。
 
 Sceneはトリガー検出、EventRunnerは条件評価とコマンド進行、既存のDomain Model／Systemは
 状態変更、Overlayはメッセージなどの入力待ちを担当する。RunnerはUIや具体的Sceneを直接参照せず、

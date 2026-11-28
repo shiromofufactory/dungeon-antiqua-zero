@@ -280,10 +280,10 @@ class Spell:
             raise TypeError("event_spell_keys must contain strings")
         if self.type is SpellType.ITEM:
             return False
+        proficiency = member.proficiency(SPELL_PROFICIENCY_BY_TYPE[self.type])
         if self.level == 0:
-            return self.key in event_spell_keys
-        proficiency_kind = SPELL_PROFICIENCY_BY_TYPE[self.type]
-        return self.level <= member.proficiency(proficiency_kind).level
+            return bool(proficiency.aptitude) and self.key in event_spell_keys
+        return self.level <= proficiency.level
 
 
 __all__ = [

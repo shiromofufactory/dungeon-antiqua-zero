@@ -20,6 +20,8 @@ from .flags import (
     event_flag_ids,
     event_flags_path,
     load_event_flags,
+    registered_event_flag_ids,
+    reserved_event_flag_options,
     save_event_flags,
     validate_event_flags,
 )
@@ -61,6 +63,8 @@ __all__ = (
     "event_flag_ids",
     "event_flags_path",
     "load_event_flags",
+    "registered_event_flag_ids",
+    "reserved_event_flag_options",
     "save_event_flags",
     "validate_event_flags",
     "FACE_SIZE",

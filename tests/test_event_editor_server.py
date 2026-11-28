@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from PIL import Image
 
+from app.event_flags import FIORA_AWAKENED, RESERVED_EVENT_FLAGS
 from tools.event_editor.server import EventEditorApplication, create_server
 
 
@@ -377,7 +378,11 @@ class EventEditorServerTest(unittest.TestCase):
             payload["catalogs"]["shop_keys"], ["FAIRY_HAMLET_ITEMS"]
         )
 
-        self.assertEqual(payload["catalogs"]["flag_ids"], ["story.done"])
+        self.assertEqual(payload["catalogs"]["flag_ids"], sorted({"story.done", *RESERVED_EVENT_FLAGS}))
+        self.assertEqual(
+            {entry["flag_id"]: entry["note"] for entry in payload["reserved_flags"]},
+            RESERVED_EVENT_FLAGS,
+        )
         self.assertEqual(payload["flags"][0]["flag_id"], "story.done")
         self.assertEqual(payload["catalogs"]["message_ids"], ["sample.hello"])
         self.assertEqual(payload["messages"][0]["message_id"], "sample.hello")
@@ -465,7 +470,7 @@ class EventEditorServerTest(unittest.TestCase):
             self.application.runtime_messages_path.read_text(encoding="utf-8")
         )
         self.assertEqual(saved, data)
-        self.assertEqual(runtime["flags"], ["story.done"])
+        self.assertEqual(runtime["flags"], sorted({"story.done", *RESERVED_EVENT_FLAGS}))
         self.assertIn("sample.hello", runtime["events"])
         self.assertEqual(
             runtime["events"]["sample.hello"]["commands"][1:4],
@@ -513,8 +518,28 @@ class EventEditorServerTest(unittest.TestCase):
             json.loads(self.application.runtime_path.read_text(encoding="utf-8"))[
                 "flags"
             ],
-            ["quest.alvan_joined"],
+            sorted({"quest.alvan_joined", *RESERVED_EVENT_FLAGS}),
         )
+
+    def test_reserved_flag_is_referenceable_but_cannot_be_saved_as_editable(self) -> None:
+        data = {
+            "format_version": 1,
+            "events": [{
+                "id": "sample.awaken",
+                "commands": [{"command": "set_flag", "flag_id": FIORA_AWAKENED}],
+            }],
+        }
+        self.assertTrue(self.post_json("/api/save", data, flags=[])["saved"])
+        flags_path = self.content_root / "events" / "flags.json"
+        self.assertEqual(json.loads(flags_path.read_text(encoding="utf-8")), [])
+        runtime_before = self.application.runtime_path.read_bytes()
+
+        result = self.post_json("/api/save", data, flags=[{"flag_id": FIORA_AWAKENED}])
+
+        self.assertFalse(result["saved"])
+        self.assertIn("reserved_flag_id", {item["code"] for item in result["diagnostics"]})
+        self.assertEqual(self.application.runtime_path.read_bytes(), runtime_before)
+        self.assertEqual(json.loads(flags_path.read_text(encoding="utf-8")), [])
 
     def test_saves_new_message_and_its_event_reference_together(self) -> None:
         messages = [

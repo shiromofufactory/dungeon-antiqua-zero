@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 
+from app.event_flags import FIORA_AWAKENED
 from app.input import Direction
 from app.item import Item
 from app.member import (
     EquipmentSlot,
     Member,
+    ProficiencyAptitude,
     ProficiencyKind,
     required_experience_for_level,
 )
@@ -416,6 +418,25 @@ class EventRunnerTest(unittest.TestCase):
         self.assertIsNone(runner.advance())
         self.assertTrue(runner.is_complete)
         self.assertIn("sample.done", self.save_data.event_flags)
+
+    def test_awakening_upgrades_only_fioras_normal_aptitudes(self) -> None:
+        fiora = self.party.active_party[0]
+        fiora.proficiency(ProficiencyKind.KNIFE).progress = 74
+        runner = self.runner([
+            {"command": "join_party", "character_key": "Alvan"},
+            {"command": "set_flag", "flag_id": FIORA_AWAKENED},
+            {"command": "set_flag", "flag_id": FIORA_AWAKENED},
+        ])
+
+        self.assertIsNone(runner.advance())
+
+        alvan = self.party.active_party[1]
+        self.assertEqual(self.save_data.event_flags, {FIORA_AWAKENED})
+        for kind in ProficiencyKind:
+            self.assertIs(fiora.proficiency(kind).aptitude, ProficiencyAptitude.FAVORED)
+            self.assertIs(alvan.proficiency(kind).aptitude, ProficiencyAptitude.NORMAL)
+        knife = fiora.proficiency(ProficiencyKind.KNIFE)
+        self.assertEqual((knife.level, knife.progress, knife.max_level), (1, 74, 9))
 
     def test_branch_uses_current_flag_member_and_item_state(self) -> None:
         self.save_data.event_flags.add("sample.done")

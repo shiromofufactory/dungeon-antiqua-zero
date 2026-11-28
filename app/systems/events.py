@@ -18,6 +18,7 @@ else:
     from ..state import LaunchMode, SaveData
 
 from .conditions import evaluate_condition
+from .event_progression import set_event_flag
 from .inventory import InventorySystem
 from .party import PartySystem, PartySystemError
 
@@ -233,7 +234,10 @@ class EventRunner:
         command_type = command["command"]
         try:
             if command_type == "set_flag":
-                self.save_data.event_flags.add(str(command["flag_id"]))
+                set_event_flag(
+                    str(command["flag_id"]), self.save_data.event_flags,
+                    self.party.active_party,
+                )
                 return None
             if command_type == "join_party":
                 self._require_field(command_type)

@@ -112,7 +112,7 @@ class ProficiencyKind(StrEnum):
 
 
 class ProficiencyAptitude(IntEnum):
-    """A character's immutable aptitude and corresponding level cap."""
+    """A character's aptitude and corresponding level cap."""
 
     DISABLED = 0
     NORMAL = 1
@@ -752,6 +752,22 @@ class CharacterDefinition:
             ),
             MAX_INTERNAL_LEVEL,
         )
+
+    def with_awakened_aptitudes(self) -> CharacterDefinition:
+        """Upgrade Fiora's normal aptitudes to favored."""
+
+        if (
+            self.key != FIORA_CHARACTER_KEY
+            or ProficiencyAptitude.NORMAL not in self.proficiency_aptitudes.values()
+        ):
+            return self
+        return replace(self, proficiency_aptitudes=MappingProxyType({
+            kind: (
+                ProficiencyAptitude.FAVORED
+                if aptitude is ProficiencyAptitude.NORMAL else aptitude
+            )
+            for kind, aptitude in self.proficiency_aptitudes.items()
+        }))
 
     @staticmethod
     def _enum_value(
@@ -1688,6 +1704,16 @@ class Member:
         if not isinstance(kind, ProficiencyKind):
             raise TypeError("kind must be a ProficiencyKind")
         return self.proficiencies[kind]
+
+    def awaken(self) -> None:
+        """Apply awakening while retaining current levels and progress."""
+
+        definition = self.definition.with_awakened_aptitudes()
+        if definition is self.definition:
+            return
+        self.definition = definition
+        for kind, proficiency in self.proficiencies.items():
+            proficiency.aptitude = definition.proficiency_aptitudes[kind]
 
     def weapon_level(self, weapon: Item) -> int:
         """Return the current proficiency level for one weapon."""

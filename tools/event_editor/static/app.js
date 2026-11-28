@@ -37,6 +37,7 @@ const editorRoute = location.pathname.match(/^\/(tileset|map|event)(?:\/|$)/)?.[
 const state = {
   data: null,
   flags: [],
+  reservedFlags: [],
   messages: [],
   missions: [],
   battles: [],
@@ -47,6 +48,7 @@ const state = {
   diagnostics: [],
   filterText: "",
   selectedFlag: 0,
+  selectedReservedFlag: null,
   selectedEvent: 0,
   selectedMessage: 0,
   mode: "event",
@@ -271,6 +273,7 @@ function snapshot() {
     selectedBattle: state.selectedBattle,
     selectedMission: state.selectedMission,
     selectedFlag: state.selectedFlag,
+    selectedReservedFlag: state.selectedReservedFlag,
     selectedEvent: state.selectedEvent,
     selectedMessage: state.selectedMessage,
     mode: state.mode,
@@ -303,6 +306,7 @@ function restore(value) {
   state.selectedBattle = restored.selectedBattle || 0;
   state.selectedMission = restored.selectedMission || 0;
   state.selectedFlag = restored.selectedFlag || 0;
+  state.selectedReservedFlag = restored.selectedReservedFlag || null;
   state.selectedEvent = restored.selectedEvent;
   state.selectedMessage = restored.selectedMessage;
   state.mode = restored.mode;
@@ -373,8 +377,8 @@ function currentMessage() {
   return state.messages[state.selectedMessage] || null;
 }
 
-function fullFlags() {
-  return state.flags
+function fullFlags(records = state.flags) {
+  return records
     .filter((item) => item && typeof item.flag_id === "string")
     .map((item) => item.flag_id)
     .sort();
@@ -470,9 +474,11 @@ function noteSummary(note) {
 }
 
 function flagOptions(selected) {
-  return options(fullFlags(), selected, "選択してください", (id) => {
-    const summary = noteSummary(state.flags.find((flag) => flag.flag_id === id)?.note);
-    return summary ? `${id} — ${summary}` : id;
+  const records = [...state.flags, ...state.reservedFlags];
+  return options(fullFlags(records), selected, "選択してください", (id) => {
+    const summary = noteSummary(records.find((flag) => flag.flag_id === id)?.note);
+    const label = state.reservedFlags.some((flag) => flag.flag_id === id) ? `${id}（予約済み）` : id;
+    return summary ? `${label} — ${summary}` : label;
   });
 }
 
@@ -483,10 +489,10 @@ function options(values, selected, empty = "選択してください", label = (
     + all.map((value) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label(value))}${values.includes(value) ? "" : "（不明）"}</option>`).join("");
 }
 
-function filteredList(kind) {
+function filteredList(kind, items = listForKind(kind)) {
   const fieldName = kind === "battle" ? "battle_id" : kind === "flag" ? "flag_id" : kind === "message" ? "message_id" : "id";
   const query = (state.filterText || "").trim().toLowerCase();
-  return listForKind(kind)
+  return items
     .map((item, index) => ({item, index}))
     .filter(({item}) => String(item[fieldName] || "").toLowerCase().includes(query));
 }
@@ -587,20 +593,27 @@ function renderLists() {
   });
 
   const flags = filteredList("flag");
+  const reservedFlags = filteredList("flag", state.reservedFlags);
   const events = filteredList("event");
   const missions = filteredList("mission");
   const messages = filteredList("message");
   $("flags").className = "list";
   $("flags").innerHTML = flags.map(({item: flag, index}) => `
     ${renderListDropZone("flag", index)}
-    <div class="list-item reorderable-list-item ${state.mode === "flag" && index === state.selectedFlag ? "active" : ""}" data-list-item-kind="flag">
+    <div class="list-item reorderable-list-item ${state.mode === "flag" && !state.selectedReservedFlag && index === state.selectedFlag ? "active" : ""}" data-list-item-kind="flag">
       <span class="list-drag-handle" draggable="true" role="button" aria-label="${esc(flag.flag_id)}を移動" title="ドラッグして移動" data-list-item-drag data-list-kind="flag" data-index="${index}">⠿</span>
       <button type="button" class="list-item-select" data-action="select-flag" data-index="${index}">
         <strong>${esc(flag.flag_id)}</strong>
         <small>${esc(noteSummary(flag.note) || "メモなし")}</small>
       </button>
     </div>
-  `).join("") + listEnd("flag", flags, "フラグはありません。");
+  `).join("") + (flags.length || !reservedFlags.length ? listEnd("flag", flags, "フラグはありません。") : "")
+    + reservedFlags.map(({item: flag}) => `
+      <button type="button" class="list-item ${state.selectedReservedFlag === flag.flag_id ? "active" : ""}" data-action="select-reserved-flag" data-flag-id="${esc(flag.flag_id)}">
+        <strong>${esc(flag.flag_id)}</strong>
+        <small>予約済み · ${esc(noteSummary(flag.note))}</small>
+      </button>
+    `).join("");
 
   $("events").className = "list";
   $("events").innerHTML = events.map(({item: event, index}) => `
@@ -886,6 +899,18 @@ function newMissionMessage(mission) {
 }
 
 function renderFlagEditor() {
+  const reserved = state.reservedFlags.find((flag) => flag.flag_id === state.selectedReservedFlag);
+  if (reserved) {
+    $("event-editor").className = "";
+    $("event-editor").innerHTML = `
+      <div class="heading"><h2>予約済みフラグ</h2></div>
+      <div class="message-form">
+        ${field("グローバルID", `<input readonly value="${esc(reserved.flag_id)}">`, true)}
+        ${field("制作メモ", `<textarea rows="3" readonly>${esc(reserved.note)}</textarea>`, true)}
+      </div>
+    `;
+    return;
+  }
   const flag = currentFlag();
   $("event-editor").className = flag ? "" : "empty";
   if (!flag) {
@@ -1083,6 +1108,7 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.revision += 1;
   state.data = payload.data;
   state.flags = payload.flags;
+  state.reservedFlags = payload.reserved_flags || [];
   state.messages = payload.messages;
   state.missions = payload.missions || [];
   state.battles = payload.battles || [];
@@ -1097,6 +1123,7 @@ function applyDocument(payload, selectedEventId = null, selectedListTab = "event
   state.selectedEvent = requestedEventIndex >= 0 ? requestedEventIndex : 0;
   state.selectedMessage = 0;
   state.selectedFlag = 0;
+  state.selectedReservedFlag = null;
   state.pendingActorEventId = null;
   state.mode = selectedEventId !== null || !LIST_TABS.includes(selectedListTab)
     ? "event"
@@ -1122,14 +1149,20 @@ document.body.addEventListener("click", (event) => {
     render();
   } else if (action === "add-flag") {
     commit(() => {
+      state.selectedReservedFlag = null;
       insertListItem("flag", {flag_id: uniqueId("flag", state.flags, "flag_id"), note: ""});
       state.mode = "flag";
     });
   } else if (action === "select-flag") {
     state.selectedFlag = Number(target.dataset.index);
+    state.selectedReservedFlag = null;
     state.mode = "flag";
     render();
-  } else if (action === "delete-flag") {
+  } else if (action === "select-reserved-flag") {
+    state.selectedReservedFlag = target.dataset.flagId;
+    state.mode = "flag";
+    render();
+  } else if (action === "delete-flag" && !state.selectedReservedFlag) {
     commit(() => state.flags.splice(state.selectedFlag, 1));
   } else if (action === "add-mission") {
     commit(() => {
@@ -1237,7 +1270,7 @@ $("event-editor").addEventListener("change", (event) => {
     });
   } else if (target.dataset.registeredMonsterIndex !== undefined) {
     commit(() => { currentBattle().monster_keys[Number(target.dataset.registeredMonsterIndex)] = target.value; });
-  } else if (target.dataset.flagField) {
+  } else if (target.dataset.flagField && !state.selectedReservedFlag) {
     commit(() => { currentFlag()[target.dataset.flagField] = target.value; });
   } else if (target.dataset.missionField) {
     commit(() => { currentMission()[target.dataset.missionField] = target.value; });

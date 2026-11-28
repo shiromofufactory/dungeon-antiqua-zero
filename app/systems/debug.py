@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 if __package__ == "systems":
+    from event_flags import FIORA_AWAKENED
     from item import Item
     from member import (
         FIORA_CHARACTER_KEY,
@@ -18,6 +19,7 @@ if __package__ == "systems":
     )
     from skill import Skill
 else:
+    from ..event_flags import FIORA_AWAKENED
     from ..item import Item
     from ..member import (
         FIORA_CHARACTER_KEY,
@@ -52,6 +54,7 @@ class DebugPartyEditor:
         party: Sequence[Member],
         shared_experience: int,
         character_states: Mapping[str, Member] | None = None,
+        event_flags: Collection[str] = (),
     ) -> None:
         if not isinstance(character_records, Sequence):
             raise TypeError("character_records must be a sequence")
@@ -110,6 +113,7 @@ class DebugPartyEditor:
         self._definitions = tuple(definitions)
         self._items = items
         self._skills = skills
+        self._event_flags = event_flags
         self._shared_experience = shared_experience
         self._party_by_key = party_by_key
         self._character_states = dict(character_states or {})
@@ -292,6 +296,8 @@ class DebugPartyEditor:
             items=self._items,
             skills=self._skills,
         )
+        if character_key == FIORA_CHARACTER_KEY and FIORA_AWAKENED in self._event_flags:
+            member.awaken()
         member.set_joining_experience_offset(self._shared_experience)
         if formation_row is not None:
             member.formation_row = formation_row

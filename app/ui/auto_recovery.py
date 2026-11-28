@@ -12,6 +12,7 @@ from localization import Localizer
 from member import Member
 from rendering import PaletteShifter
 from resources import FontResources, play_se
+from event_flags import unlocked_event_spell_keys
 from spell import Spell, SpellType
 from state import AutoRecoveryMethod, Language, SaveData, Settings
 from systems.auto_recovery import (
@@ -376,6 +377,7 @@ class AutoRecoveryOverlay:
                     self.inventory,
                     self.save_data.auto_recovery,
                     proficiency_level_limit=self.proficiency_level_limit,
+                    event_spell_keys=unlocked_event_spell_keys(self.save_data.event_flags),
                 )
                 if self.result.actions:
                     play_se("spell_healing1")

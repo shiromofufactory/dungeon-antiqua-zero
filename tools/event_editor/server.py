@@ -26,7 +26,6 @@ from scripts.event_pipeline import (
     compile_event_flags,
     compile_event_messages,
     compile_event_sources,
-    event_flag_ids,
     event_flags_path,
     event_message_ids,
     event_messages_path,
@@ -34,6 +33,8 @@ from scripts.event_pipeline import (
     load_event_messages,
     load_event_source,
     reference_catalogs,
+    registered_event_flag_ids,
+    reserved_event_flag_options,
     save_compiled_events,
     save_event_flags,
     save_event_messages,
@@ -125,7 +126,7 @@ class EventEditorApplication:
     ) -> dict[str, set[str] | dict[str, set[str]]]:
         catalogs = reference_catalogs(self.content_root, app_root=self.app_root)
         if flags is not None:
-            catalogs["flag_ids"] = event_flag_ids(flags)
+            catalogs["flag_ids"] = registered_event_flag_ids(flags)
         if messages is not None:
             catalogs["message_ids"] = event_message_ids(messages)
         maps_root = self.content_root / "maps" / "sources"
@@ -210,6 +211,7 @@ class EventEditorApplication:
         return {
             "data": data,
             "flags": flags,
+            "reserved_flags": reserved_event_flag_options(),
             "messages": messages,
             "missions": load_missions(self.content_root),
             "battles": load_event_battles(self.content_root),

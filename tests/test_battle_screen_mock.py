@@ -5462,6 +5462,7 @@ class BattleScreenMockTest(unittest.TestCase):
         )
         mock.active_party_index = 0
         mock.spells = load_mock_spells()
+        mock.save_data = SaveData()
 
         candidates = mock._active_member_spell_candidates()
 
@@ -5494,6 +5495,7 @@ class BattleScreenMockTest(unittest.TestCase):
                 before_mp = member.mp
                 self.assertGreaterEqual(before_mp, fade.mp)
                 mock.active_party_index = 0
+                mock.save_data = SaveData()
                 mock.monsters = (SimpleNamespace(is_boss=is_boss),)
                 mock.knockout_battle = knockout
                 mock.spells = spells

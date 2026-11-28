@@ -1359,7 +1359,7 @@ class DebugMenuOverlay:
             elif key == "event_flags":
                 self.flag_menu = DebugFlagsOverlay(
                     flag_ids=self.flag_ids, save_data=self.save_data,
-                    fonts=self.fonts, alert=self.alert,
+                    fonts=self.fonts, alert=self.alert, party=self.party,
                 )
                 self.phase = DebugMenuPhase.EVENT_FLAGS
             elif key == "dungeon":

@@ -9,6 +9,8 @@ from app.audio_catalog import load_sound_effects
 from app.item import EquipmentSlot
 from app.member import CharacterType
 
+from .flags import load_event_flags, registered_event_flag_ids
+
 
 def _load_records(path: Path) -> list[dict[str, object]]:
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -37,7 +39,6 @@ def reference_catalogs(
     """Return every stable ID list shared by validation and authoring tools."""
 
     audio_dir = app_root / "audio"
-    flag_path = content_root / "events" / "flags.json"
     message_path = content_root / "events" / "messages.json"
     characters = {
         record["name_en"]: record.get("type")
@@ -66,11 +67,7 @@ def reference_catalogs(
         "monster_keys": _record_keys(
             content_root / "data" / "monsters.json", "name_en"
         ),
-        "flag_ids": (
-            _record_keys(flag_path, "flag_id")
-            if flag_path.is_file()
-            else set()
-        ),
+        "flag_ids": registered_event_flag_ids(load_event_flags(content_root)),
         "message_ids": (
             _record_keys(message_path, "message_id")
             if message_path.is_file()

@@ -1,10 +1,13 @@
 """Development-only event flag editor with a paged catalog."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
+from event_flags import FIORA_AWAKENED
 from input import Direction, InputAction, InputDevice, InputState
+from member import Member
 from resources import FontResources
 from state import Language, SaveData
+from systems.event_progression import set_event_flag
 from ui import (
     DISABLED_COLOR,
     CursorTarget,
@@ -28,9 +31,11 @@ class DebugFlagsOverlay:
     def __init__(
         self, *, flag_ids: Iterable[str], save_data: SaveData,
         fonts: FontResources, alert: object,
+        party: Sequence[Member] = (),
     ) -> None:
         self.flag_ids = tuple(sorted(flag_ids))
         self.save_data = save_data
+        self.party = party
         self.alert = alert
         self.texts = LocalizedWindowTextFactory.from_language(fonts, Language.JAPANESE)
         # Use the Latin font's normal display glyphs without changing flag keys.
@@ -118,9 +123,12 @@ class DebugFlagsOverlay:
             else:
                 flag_id = self.cursor.selected_key
                 if flag_id in self.save_data.event_flags:
+                    if flag_id == FIORA_AWAKENED:
+                        self.alert.start()
+                        return False
                     self.save_data.event_flags.remove(flag_id)
                 else:
-                    self.save_data.event_flags.add(flag_id)
+                    set_event_flag(flag_id, self.save_data.event_flags, self.party)
                 self._build_window()
         elif self.window.update(input_state.navigation) and self.cursor is not None:
             self.row = self.visible_flags.index(self.cursor.selected_key)

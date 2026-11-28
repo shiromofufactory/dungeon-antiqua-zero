@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 
 from battle_magic import (
     DA2_DEFAULT_ITEM_SPELL_ABILITY,
@@ -114,6 +114,7 @@ def _spell_for_target(
     target: Member,
     spells: Mapping[str, Spell],
     threshold: int,
+    event_spell_keys: Collection[str],
 ) -> Spell | None:
     available = tuple(
         spell
@@ -122,7 +123,7 @@ def _spell_for_target(
         and spell.on_camp
         and not spell.to_enemy
         and spell.action in (SpellAction.HEAL, SpellAction.CURE, SpellAction.REVIVE)
-        and spell.is_learned_by(caster)
+        and spell.is_learned_by(caster, event_spell_keys)
         and caster.mp >= spell.mp
     )
     if target.is_dead:
@@ -173,6 +174,8 @@ def next_recovery_step(
     spells: Mapping[str, Spell],
     inventory: InventorySystem,
     config: AutoRecoveryConfig,
+    *,
+    event_spell_keys: Collection[str] = (),
 ) -> RecoveryStep | None:
     """Choose one usable step, giving the selected method global priority."""
 
@@ -192,7 +195,9 @@ def next_recovery_step(
                     caster = party[caster_index]
                     if not _can_cast(caster):
                         continue
-                    spell = _spell_for_target(caster, target, spells, config.threshold)
+                    spell = _spell_for_target(
+                        caster, target, spells, config.threshold, event_spell_keys,
+                    )
                     if spell is not None:
                         return RecoveryStep(caster_index, target_index, spell)
             else:
@@ -220,12 +225,15 @@ def execute_auto_recovery(
     *,
     random_factor: Callable[[], float] = random.random,
     proficiency_level_limit: int | None = None,
+    event_spell_keys: Collection[str] = (),
 ) -> RecoveryResult:
     """Apply each step and recalculate until no usable recovery remains."""
 
     result = RecoveryResult()
     for _attempt in range(10_000):
-        step = next_recovery_step(party, spells, inventory, config)
+        step = next_recovery_step(
+            party, spells, inventory, config, event_spell_keys=event_spell_keys,
+        )
         if step is None:
             result.recovery_needed = any(
                 member.is_dead

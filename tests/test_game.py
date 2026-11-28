@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 
 from tools._bootstrap import APP_ROOT
 from battle_command_memory import BattleCommandMemory
+from event_flags import TELEPORT_UNSEALED
 from ui.debug_menu import DebugShopTarget, DebugTeleportTarget
 from game import (
     SE_CHANNEL,
@@ -3392,6 +3393,7 @@ class GameTest(unittest.TestCase):
         mock.command_cursor = Mock(selected_key="spell", active=True)
         mock.party = (Mock(),)
         mock.spells = {"FIRE1": Mock()}
+        mock.save_data = SaveData(event_flags={TELEPORT_UNSEALED})
         mock.settings = Settings()
         mock.texts = Mock()
         mock.fonts = Mock()
@@ -3419,6 +3421,7 @@ class GameTest(unittest.TestCase):
         spell_screen_class.assert_called_once_with(
             party=mock.party,
             spells=mock.spells,
+            event_spell_keys=frozenset({"TELEPORT"}),
             settings=mock.settings,
             texts=mock.texts,
             fonts=mock.fonts,
@@ -3457,6 +3460,7 @@ class GameTest(unittest.TestCase):
         mock.command_cursor = Mock(active=True)
         mock.party = (Mock(), Mock())
         mock.spells = {"HEALING1": Mock()}
+        mock.save_data = SaveData()
         mock.settings = Settings()
         mock.texts = Mock()
         mock.fonts = Mock()

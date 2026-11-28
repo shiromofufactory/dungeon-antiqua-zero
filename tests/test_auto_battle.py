@@ -32,6 +32,7 @@ from battle_layout import MonsterPlacement
 from battle_magic import member_spell_ability, resolve_healing
 from battle_physical import member_physical_attack, resolve_physical_attack
 from battle_timeline import TimelineEntry, TimelineOrder
+from event_flags import ABYSS_NOVA_UNSEALED, REVIVE2_UNSEALED, TELEPORT_UNSEALED
 from item import AdditionalEffect
 from member import EquipmentSlot
 from monster import MonsterSpecialAction, MonsterTribe
@@ -2240,6 +2241,55 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
 
 
 class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
+    def test_manual_and_auto_battle_share_the_spell_unlocks(self):
+        from resources import load_record_array
+        from scenes.battle import BattleMonster, BattleScene
+        from state import SaveData
+
+        scene = BattleScene.__new__(BattleScene)
+        scene.party = self.party[:2]
+        scene.spells = self.spells
+        scene.save_data = SaveData()
+        record = next(
+            record for record in load_record_array("monsters.json") if record["name_en"] == "Giant Spider"
+        )
+        scene.monsters = (BattleMonster.from_record(record, is_front_row=True),)
+        scene.party_visuals = tuple(Mock(member=member) for member in scene.party)
+        scene.progression = Mock()
+        scene.progression.used_spell_kinds.return_value = ()
+        for name in (
+            "escaped_party_indexes", "hidden_party_indexes", "defending_party_indexes",
+            "surprise_pending_party_indexes", "surprise_deferred_party_indexes",
+            "identified_monster_indexes",
+        ):
+            setattr(scene, name, set())
+        for name in (
+            "cover_target_by_party_index", "focused_target_by_party_index",
+            "surprise_original_front_rows",
+        ):
+            setattr(scene, name, {})
+        scene._party_member_is_front_row = Mock(return_value=True)
+
+        for flag_id, spell_key, member_index in (
+            (TELEPORT_UNSEALED, "TELEPORT", 0),
+            (ABYSS_NOVA_UNSEALED, "ABYSS NOVA", 0),
+            (REVIVE2_UNSEALED, "REVIVE2", 1),
+        ):
+            with self.subTest(flag_id=flag_id):
+                spell = self.spells[spell_key]
+                scene.active_party_index = member_index
+                scene._timeline_order = TimelineOrder((
+                    TimelineEntry(scene.party_visuals[member_index], 15, 64),
+                    TimelineEntry(scene.monsters[0], 10, 20),
+                ))
+                scene.save_data.event_flags.clear()
+                self.assertNotIn(spell, scene._active_member_spell_candidates())
+                self.assertNotIn(spell, scene._auto_battle_snapshot().combatants[member_index].spells)
+
+                scene.save_data.event_flags.add(flag_id)
+                self.assertIn(spell, scene._active_member_spell_candidates())
+                self.assertIn(spell, scene._auto_battle_snapshot().combatants[member_index].spells)
+
     def test_target_cursors_hidden_during_auto_and_restored_for_manual(self):
         from scenes.battle import BattlePhase, BattleScene
 

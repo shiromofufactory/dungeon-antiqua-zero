@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from tools._bootstrap import APP_ROOT
+from event_flags import REVIVE2_UNSEALED
 from field import FieldPosition
 from game_data import load_spells
 from input import Direction, InputButton, InputState
@@ -50,6 +51,26 @@ class AutoRecoveryTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.party = load_mock_party(self.items, self.skills)
+
+    def test_auto_recovery_can_cast_revive2_after_its_seal_is_unlocked(self) -> None:
+        fiora, cerion = self.party[:2]
+        fiora.hp = 0
+        revive = self.spells["REVIVE2"]
+        cerion.mp = revive.mp
+        inventory = InventorySystem(self.items)
+        with patch("ui.auto_recovery.play_se"), patch("ui.window.pyxel"):
+            overlay = AutoRecoveryOverlay(
+                party=(fiora, cerion), spells={"REVIVE2": revive}, items=self.items,
+                inventory=inventory, save_data=SaveData(event_flags={REVIVE2_UNSEALED}),
+                settings=Settings(), texts=self.texts, fonts=FontResources(),
+                faces=Mock(), palette_shifter=Mock(),
+            )
+            overlay.cursor.select_key("execute")
+            overlay.update(InputState(confirm=InputButton(triggered=True, held=True)))
+
+        self.assertGreater(fiora.hp, 0)
+        self.assertEqual(fiora.hp, fiora.max_hp)
+        self.assertEqual(cerion.mp, 0)
 
     def test_threshold_is_strict_and_includes_reserve(self) -> None:
         reserve = self.party[5]

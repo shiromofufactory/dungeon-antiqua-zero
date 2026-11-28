@@ -11,10 +11,12 @@ from tools._bootstrap import APP_ROOT
 from battle_command_memory import BattleCommandMemory
 from debug_dungeon import DungeonCheckpoint
 from battle_commands import BattleCommand
+from event_flags import FIORA_AWAKENED, REVIVE2_UNSEALED
 from field import FieldPosition
 from input import Direction
 from state import AutoBattleConfig, Difficulty, SaveData
-from member import Ability, AbilityBonuses, EquipmentSlot, ProficiencyKind, internal_level_for_experience, required_experience_for_level
+from member import Ability, AbilityBonuses, EquipmentSlot, ProficiencyAptitude, ProficiencyKind, internal_level_for_experience, required_experience_for_level
+from systems.event_progression import set_event_flag
 from systems import (
     AUTO_SAVE_SLOT,
     SAVE_FORMAT_VERSION,
@@ -35,6 +37,38 @@ from tools.screen_mocks._fixtures import (
 
 
 class SaveSystemTest(unittest.TestCase):
+    def test_event_progression_round_trips_awakened_level_nine(self):
+        catalog = {
+            "character_records": load_mock_character_records(),
+            "items": self.items,
+            "skills": self.skills,
+        }
+        initial = restore_save_document(self.save_document(), **catalog)
+        fiora = initial.active_party[0]
+        knife = fiora.proficiency(ProficiencyKind.KNIFE)
+        knife.level, knife.progress = 8, 99
+        set_event_flag(FIORA_AWAKENED, initial.save_data.event_flags, initial.active_party)
+        knife.add_progress(25)
+        initial.save_data.event_flags.add(REVIVE2_UNSEALED)
+
+        document = create_save_document(
+            save_data=initial.save_data,
+            active_party=initial.active_party,
+            character_states=initial.character_states,
+            inventory=initial.inventory,
+            map_id=initial.map_id,
+            position=initial.position,
+            facing=initial.facing,
+        )
+        loaded = restore_save_document(document, **catalog)
+        fiora = loaded.active_party[0]
+
+        self.assertEqual(document["format_version"], SAVE_FORMAT_VERSION)
+        self.assertEqual(loaded.save_data.event_flags, initial.save_data.event_flags)
+        self.assertEqual(fiora.proficiency(ProficiencyKind.KNIFE), knife)
+        self.assertEqual((knife.level, knife.progress), (9, 24))
+        self.assertIs(fiora.proficiency(ProficiencyKind.SACRED).aptitude, ProficiencyAptitude.DISABLED)
+
     def test_debug_trial_checkpoints_are_optional_and_preserve_old_saves(self):
         for version in (1, 2, 3, 4, SAVE_FORMAT_VERSION):
             with self.subTest(version=version):

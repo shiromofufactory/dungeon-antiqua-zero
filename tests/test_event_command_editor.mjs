@@ -29,7 +29,7 @@ const declarations = names.map((name) => {
 function editor() {
   const state = {
     data: { format_version: 1, events: [{ id: 'sample.run', commands: [] }] },
-    flags: [{ flag_id: 'story.done' }], messages: [], missions: [],
+    flags: [{ flag_id: 'story.done' }], reservedFlags: [], messages: [], missions: [],
     selectedEvent: 0, selectedFlag: 0, selectedMessage: 0, selectedMission: 0, selectedBattle: 0,
     mode: 'event', battles: [{battle_id:'guard',monster_keys:['Giant Spider']}], catalogs: { monster_keys: ['Giant Spider'] },
     history: [], future: [], dirty: false,
@@ -48,6 +48,21 @@ function editor() {
   vm.runInContext(source.slice(changeHandlerStart, changeHandlerEnd), context);
   return { state, context, handlers, editorNode, focused: () => focused };
 }
+
+test('reserved flags can be selected for set_flag and conditions', () => {
+  const { state, context } = editor();
+  const flagId = 'progress.teleport_unsealed';
+  state.reservedFlags = [{ flag_id: flagId, note: 'テレポートを解放' }];
+  assert.equal(context.defaultCommand('set_flag').flag_id, 'story.done');
+  assert.match(
+    context.renderCommand({command: 'set_flag', flag_id: flagId}, '0'),
+    /value="progress.teleport_unsealed" selected>.*予約済み/,
+  );
+  assert.match(
+    context.renderCondition({type: 'flag_set', flag_id: flagId}, '0', ''),
+    /value="progress.teleport_unsealed" selected>.*予約済み/,
+  );
+});
 
 test('event battle defeat event selects field events, clears the reference and supports undo', () => {
   const { state, context, handlers, editorNode } = editor();

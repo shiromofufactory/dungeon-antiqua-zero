@@ -8,6 +8,12 @@ from tools.screen_mocks._fixtures import (
     load_mock_skills,
     load_mock_spells,
 )
+from event_flags import (
+    ABYSS_NOVA_UNSEALED,
+    REVIVE2_UNSEALED,
+    TELEPORT_UNSEALED,
+    unlocked_event_spell_keys,
+)
 from localization import Localizer
 from resources import load_record_array
 from resistance import ResistanceType
@@ -65,6 +71,21 @@ class SpellTest(unittest.TestCase):
 
         self.assertFalse(teleport.is_learned_by(fiora))
         self.assertTrue(teleport.is_learned_by(fiora, {"TELEPORT"}))
+
+    def test_each_seal_only_unlocks_its_own_spell_for_eligible_members(self) -> None:
+        fiora, cerion, _alvan, _elika, ragna, _dain = self.party
+        cases = (
+            (TELEPORT_UNSEALED, "TELEPORT", fiora, ragna),
+            (REVIVE2_UNSEALED, "REVIVE2", cerion, fiora),
+            (ABYSS_NOVA_UNSEALED, "ABYSS NOVA", fiora, ragna),
+        )
+        for flag_id, spell_key, eligible, ineligible in cases:
+            with self.subTest(flag_id=flag_id):
+                keys = unlocked_event_spell_keys({flag_id})
+
+                self.assertEqual(keys, {spell_key})
+                self.assertTrue(self.spells[spell_key].is_learned_by(eligible, keys))
+                self.assertFalse(self.spells[spell_key].is_learned_by(ineligible, keys))
 
     def test_item_effect_records_are_not_member_spells(self) -> None:
         self.assertFalse(self.spells["POTION"].is_learned_by(self.party[0]))

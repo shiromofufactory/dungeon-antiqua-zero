@@ -1118,6 +1118,33 @@
           "battle_id": "battle_25"
         }
       ]
+    },
+    {
+      "id": "dungeon_f7a77210065c4b17a738dcad4f1d35e3",
+      "name": "リアンノル奪還",
+      "bgm_id": "da3-dungeon1",
+      "steps": [
+        {
+          "id": "event_battle_32d8cbf7f64a43679a061b957dd46f2c",
+          "type": "event_battle",
+          "battle_id": "battle_26"
+        },
+        {
+          "id": "event_battle_9e637ff2d7a34e01857883a9fbf89496",
+          "type": "event_battle",
+          "battle_id": "battle_27"
+        },
+        {
+          "id": "event_battle_8682660b03144c33ad2f0d1107e3dc10",
+          "type": "event_battle",
+          "battle_id": "battle_28"
+        },
+        {
+          "id": "event_battle_256709eae7634357babfd54ac91cab03",
+          "type": "event_battle",
+          "battle_id": "battle_29"
+        }
+      ]
     }
   ]
 }

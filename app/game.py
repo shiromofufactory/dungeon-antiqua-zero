@@ -58,6 +58,7 @@ from ui.spell_menu import (
     SpellMenuOverlay,
 )
 from ui.shop import ShopOverlay, ShopUiDataError
+from event_flags import unlocked_event_spell_keys
 from field import FieldActors, FieldMovement, FieldPosition
 from field_birds import WorldMapBirds
 from input import (
@@ -2428,6 +2429,7 @@ class Game:
             party=self.party,
             shared_experience=self.save_data.experience,
             character_states=self.character_states,
+            event_flags=self.save_data.event_flags,
         )
         self.debug_screen = DebugMenuOverlay(
             editor=editor,
@@ -3007,6 +3009,7 @@ class Game:
         self.spell_screen = SpellMenuOverlay(
             party=self.party,
             spells=self.spells,
+            event_spell_keys=unlocked_event_spell_keys(self.save_data.event_flags),
             settings=self.settings,
             texts=self.texts,
             fonts=self.fonts,

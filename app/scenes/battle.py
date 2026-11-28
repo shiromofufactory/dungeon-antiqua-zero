@@ -189,6 +189,7 @@ from resources import (
     load_record_array,
     play_se,
 )
+from event_flags import unlocked_event_spell_keys
 from state import Language, SaveData, Settings
 from spell import (
     SPELL_PROFICIENCY_BY_TYPE,
@@ -3518,6 +3519,7 @@ class BattleScene:
         """Capture exact HP/MP and apply the encounter's disclosure rules."""
 
         combatants = []
+        event_spell_keys = unlocked_event_spell_keys(self.save_data.event_flags)
         for index, member in enumerate(self.party):
             if index in self.escaped_party_indexes:
                 continue
@@ -3526,7 +3528,7 @@ class BattleScene:
                 for s in self.spells.values()
                 if s.type is not SpellType.ITEM
                 and self._party_spell_is_usable(s)
-                and s.is_learned_by(member)
+                and s.is_learned_by(member, event_spell_keys)
             )
             combatants.append(
                 AutoCombatant.from_member(
@@ -4925,6 +4927,7 @@ class BattleScene:
         if self.active_party_index is None:
             return ()
         member = self.party[self.active_party_index]
+        event_spell_keys = unlocked_event_spell_keys(self.save_data.event_flags)
         return tuple(
             spell
             for spell in self.spells.values()
@@ -4934,7 +4937,7 @@ class BattleScene:
                     self._party_spell_is_usable(spell)
                     or (spell.on_battle and spell.action is SpellAction.FADE)
                 )
-                and spell.is_learned_by(member)
+                and spell.is_learned_by(member, event_spell_keys)
             )
         )
 
@@ -10486,10 +10489,11 @@ class BattleScene:
         return tuple(self._monster_spell_candidates)
 
     def _member_can_cast_spells(self, member: Member) -> bool:
+        event_spell_keys = unlocked_event_spell_keys(self.save_data.event_flags)
         return any(
             spell.type is not SpellType.ITEM
             and spell.on_battle
-            and spell.is_learned_by(member)
+            and spell.is_learned_by(member, event_spell_keys)
             for spell in self.spells.values()
         )
 

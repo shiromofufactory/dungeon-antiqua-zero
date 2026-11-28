@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from app.event_flags import FIORA_AWAKENED, RESERVED_EVENT_FLAGS
 from scripts.event_pipeline import (
     compile_event_flags,
     event_flag_ids,
@@ -22,7 +23,7 @@ class EventFlagPipelineTest(unittest.TestCase):
         self.assertEqual(validate_event_flags(source), [])
         self.assertEqual(
             compile_event_flags(source),
-            ["game_started", "quest.alvan_joined"],
+            sorted({"game_started", "quest.alvan_joined", *RESERVED_EVENT_FLAGS}),
         )
         self.assertEqual(
             event_flag_ids(source),
@@ -46,6 +47,11 @@ class EventFlagPipelineTest(unittest.TestCase):
     def test_loads_missing_catalog_as_empty_for_initial_setup(self) -> None:
         with TemporaryDirectory() as directory:
             self.assertEqual(load_event_flags(Path(directory)), [])
+
+    def test_rejects_redeclaring_a_reserved_flag(self) -> None:
+        diagnostics = validate_event_flags([{"flag_id": FIORA_AWAKENED}])
+
+        self.assertEqual([entry.code for entry in diagnostics], ["reserved_flag_id"])
 
 
 if __name__ == "__main__":

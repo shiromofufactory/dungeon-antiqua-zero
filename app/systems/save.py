@@ -12,6 +12,7 @@ if __package__ == "systems":
     from debug_dungeon import DungeonCheckpoint, DebugDungeonDataError
     from battle_command_memory import BattleCommandMemory
     from battle_commands import BattleCommand
+    from event_flags import FIORA_AWAKENED
     from field import FieldPosition
     from input import Direction
     from member import (
@@ -44,6 +45,7 @@ else:
     from ..debug_dungeon import DungeonCheckpoint, DebugDungeonDataError
     from ..battle_command_memory import BattleCommandMemory
     from ..battle_commands import BattleCommand
+    from ..event_flags import FIORA_AWAKENED
     from ..field import FieldPosition
     from ..input import Direction
     from ..member import (
@@ -274,6 +276,7 @@ def restore_save_document(
             saved_experience=saved_experience,
             shared_experience=save_data.experience,
             format_version=format_version,
+            fiora_awakened=FIORA_AWAKENED in save_data.event_flags,
         )
     try:
         active_party = tuple(character_states[key] for key in active_keys)
@@ -419,6 +422,7 @@ def _restore_member(
     saved_experience: int,
     shared_experience: int,
     format_version: int,
+    fiora_awakened: bool,
 ) -> Member:
     state = _mapping(value, f"party.character_states.{key}")
     internal_level = _non_negative_int(state, "internal_level", f"member {key}")
@@ -429,6 +433,9 @@ def _restore_member(
         items=items,
         skills=skills,
     )
+    definition = initial.definition
+    if fiora_awakened:
+        definition = definition.with_awakened_aptitudes()
 
     skill_keys = _string_list(state.get("skill_keys"), f"member {key}.skill_keys")
     try:
@@ -485,7 +492,7 @@ def _restore_member(
             f"member {key}.proficiencies.{kind.value}",
         )
         proficiencies[kind] = Proficiency(
-            initial.definition.proficiency_aptitudes[kind],
+            definition.proficiency_aptitudes[kind],
             level=_non_negative_int(current, "level", f"member {key} proficiency"),
             progress=_non_negative_int(
                 current,
@@ -544,7 +551,7 @@ def _restore_member(
             if not MIN_INTERNAL_LEVEL <= departure_level <= MAX_INTERNAL_LEVEL:
                 raise SaveSystemError(f"member {key}.departure_level is out of range")
     member = Member(
-        initial.definition,
+        definition,
         internal_level=internal_level,
         experience_offset=experience_offset,
         has_joined=has_joined,

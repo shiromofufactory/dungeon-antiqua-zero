@@ -7,7 +7,8 @@ const source = readFileSync(new URL('../tools/event_editor/static/app.js', impor
 const names = ['filteredList', 'listEnd', 'setIdFilter', 'listForKind', 'insertListItem', 'moveListItem',
   'renderLists', 'renderListDropZone', 'currentFlag', 'battleIds', 'currentBattle', 'currentEvent', 'currentMission', 'currentMessage',
   'snapshot', 'begin', 'commit', 'restore', 'normalize', 'undo', 'redo', 'uniqueId', 'addEvent',
-  'eventIdPrefix', 'requestBody', 'savePendingActorEventLink', 'renderBattleEditor', 'field', 'options'];
+  'eventIdPrefix', 'requestBody', 'savePendingActorEventLink', 'renderBattleEditor',
+  'renderFlagEditor', 'field', 'options'];
 const declarations = names.map((name) => {
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
   assert.notEqual(start, -1);
@@ -22,6 +23,7 @@ function editor() {
     battles: [{battle_id:'common_battle_a', monster_keys:['SLIME']}, {battle_id:'forest_battle_b', monster_keys:['SLIME']}, {battle_id:'common_battle_c', monster_keys:['SLIME']}, {battle_id:'forest_battle_d', monster_keys:['SLIME']}], selectedBattle: 2,
     data: { format_version: 1, events: ids.map((id) => ({ id, commands: [], note: 'common note' })) },
     flags: ids.map((id) => ({ flag_id: id, note: 'common note' })),
+    reservedFlags: [],
     missions: ids.map((id) => ({ id: id.replace('.', '_'), message_id: id })),
     messages: ids.map((id) => ({ message_id: id, text_ja: ['common body'] })),
     selectedFlag: 2, selectedEvent: 2, selectedMission: 2, selectedMessage: 2,
@@ -42,6 +44,22 @@ function editor() {
   vm.runInContext(declarations, context);
   return { state, context, node };
 }
+
+test('reserved flag can be searched and inspected without appearing in editable data', () => {
+  const { state, context, node } = editor();
+  const flagId = 'progress.fiora_awakened';
+  state.reservedFlags = [{ flag_id: flagId, note: 'フィオラの覚醒' }];
+  state.mode = 'flag';
+  state.selectedReservedFlag = flagId;
+  context.setIdFilter('progress');
+  context.renderFlagEditor();
+
+  assert.match(node('flags').innerHTML, /data-action="select-reserved-flag"/);
+  assert.doesNotMatch(node('flags').innerHTML, /draggable/);
+  assert.match(node('event-editor').innerHTML, /readonly value="progress.fiora_awakened"/);
+  assert.doesNotMatch(node('event-editor').innerHTML, /delete-flag|data-flag-field/);
+  assert.ok(!JSON.parse(context.requestBody()).flags.some((flag) => flag.flag_id === flagId));
+});
 
 for (const [kind, idField, listNode] of [
   ['flag', 'flag_id', 'flags'], ['event', 'id', 'events'],

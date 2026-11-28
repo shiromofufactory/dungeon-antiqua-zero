@@ -9,6 +9,7 @@ from input import InputState
 from localization import Localizer, format_number
 from resources import play_se
 from state import Language
+from systems.event_progression import set_event_flag
 from systems.treasure import TreasureOpenStatus
 from ui import CursorTarget, DEFAULT_TEXT_COLOR, DISABLED_COLOR, NEGATIVE_COLOR, LocalizedWindowTextFactory, MessageOverlay, WindowFactory
 from ui.debug_dungeon import DebugDungeonExitOverlay
@@ -142,7 +143,7 @@ class DebugDungeonScene:
         self.waiting_for_battle = False
         step = self.progress.current
         if victory and step.type == "event_battle" and step.flag_id is not None:
-            self.event_flags.add(step.flag_id)
+            set_event_flag(step.flag_id, self.event_flags, self.party)
         self.progress.complete()
         self.notice = DEBUG_TEXT.dungeon_battle_finished
         self.refresh()

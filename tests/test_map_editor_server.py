@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from PIL import Image
 
+from app.event_flags import RESERVED_EVENT_FLAGS
 from scripts.map_pipeline import (
     initial_map_source,
     initial_tileset,
@@ -114,7 +115,11 @@ class MapEditorServerTest(unittest.TestCase):
         tileset["objects"] = [{"id": "rock", "size": [1, 1], "default_draw_group": "object", "cells": [{"offset": [0, 0], "collision": "blocked", "tile": [0, 0]}]}]
         save_tileset(self.application.content_root / "maps" / "tilesets" / "worldmap.json", tileset)
         payload = self.application.document_payload()
-        self.assertEqual(payload["flag_options"], flags)
+        self.assertEqual(payload["flag_options"][:1], flags)
+        self.assertEqual(
+            {entry["flag_id"]: entry["note"] for entry in payload["flag_options"][1:]},
+            RESERVED_EVENT_FLAGS,
+        )
         data = payload["data"]
         data["objects"] = [{"id": "rock_1", "definition_id": "rock", "origin": [2, 2], "order": 0, "visibility_condition": {"flag_id": "story.open", "value": False}}]
         self.assertTrue(self.application.save(data, {})["saved"])
