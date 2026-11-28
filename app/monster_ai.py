@@ -26,6 +26,7 @@ class MonsterAction(StrEnum):
     ATTACK = "attack"
     ESCAPE = "escape"
     CHARGE = "charge"
+    CONSTRICTION = "constriction"
     CALL = "call"
     POISON_BREATH = "poison_breath"
     FIRE_BREATH = "fire_breath"
@@ -69,9 +70,26 @@ class MonsterSpellCandidate:
     priority: bool = False
 
 
+def monster_spell_evaluation_order(spells: Sequence[Spell], intelligence: int) -> Sequence[Spell]:
+    """Check usable revival spells before other priority spells at intelligence 2."""
+
+    if intelligence == 2:
+        return sorted(spells, key=lambda spell: spell.action is not SpellAction.REVIVE)
+    return spells
+
+
+def evaluate_monster_support_spell(
+    spell: Spell, indexes: tuple[int, ...], *, intelligence: int,
+) -> MonsterSpellCandidate:
+    return MonsterSpellCandidate(
+        indexes,
+        priority=bool(indexes) and intelligence == 2 and spell.action is SpellAction.REVIVE,
+    )
+
+
 def evaluate_monster_spell(
     spell: Spell, targets: Sequence[MonsterSpellTarget], *,
-    intelligence: int, is_solo: bool,
+    intelligence: int,
     choose: Callable[[tuple[int, ...]], int] = random.choice,
 ) -> MonsterSpellCandidate:
     """Evaluate a hostile spell using DA2's generic intelligence rules."""
@@ -99,19 +117,13 @@ def evaluate_monster_spell(
             if intelligence <= 1 or spell.attribute not in target.resistances
         )
         if spell.action is SpellAction.SLEEP:
-            effective_count = sum(target.actionable for target in applicable)
+            has_effective_target = any(target.actionable for target in applicable)
         elif spell.action is SpellAction.SILENCE:
-            applicable = tuple(target for target in applicable if target.can_cast)
-            effective_count = sum(not target.silenced for target in applicable)
+            has_effective_target = any(target.can_cast and not target.silenced for target in applicable)
         else:
-            effective_count = sum(target.speed >= 0 for target in applicable)
-        if not effective_count:
+            has_effective_target = any(target.speed >= 0 for target in applicable)
+        if not has_effective_target:
             return MonsterSpellCandidate(())
-        if intelligence == 2:
-            if effective_count == len(applicable):
-                return MonsterSpellCandidate(indexes, priority=True)
-            if is_solo:
-                return MonsterSpellCandidate(())
     if spell.to_all and spell.action is SpellAction.PURGE and not any(
         has_dispellable_buffs(target.protection, target.speed, target.magic_shield)
         for target in targets
@@ -197,6 +209,10 @@ def monster_action_candidates(
         candidates.append(MonsterAction.ESCAPE)
     if MonsterSpecialAction.CHARGE in special_actions and can_charge:
         candidates.append(MonsterAction.CHARGE)
+    can_attack_from_row = is_front_row or MonsterSpecialAction.RANGED_ATTACK in special_actions
+    attack_available = can_attack_from_row and can_attack
+    if attack_available and MonsterSpecialAction.CONSTRICTION in special_actions:
+        candidates.append(MonsterAction.CONSTRICTION)
     if MonsterSpecialAction.CALL in special_actions and call_eligible:
         candidates.append(MonsterAction.CALL)
     if MonsterSpecialAction.POISON_BREATH in special_actions and can_breathe:
@@ -217,8 +233,7 @@ def monster_action_candidates(
     ):
         candidates.append(MonsterAction.BLACK_WIND)
     candidates.extend(MonsterSpellAction(key) for key in spell_keys)
-    can_attack_from_row = is_front_row or MonsterSpecialAction.RANGED_ATTACK in special_actions
-    if can_attack_from_row and can_attack:
+    if attack_available:
         candidates.append(MonsterAction.ATTACK)
     elif not can_attack_from_row and intelligence != 3 and (intelligence <= 1 or not candidates):
         candidates.append(MonsterAction.IDLE)
@@ -282,8 +297,9 @@ def select_monster_action(
     weight as a normal attack. A rear-row monster without ranged reach receives
     one idle candidate at intelligence 0 or 1, or when no other action is available.
     Call uses a 3/4 candidate gate below intelligence 2. At intelligence 2 or
-    higher it takes priority when the first available slot is 0 or 1. At intelligence 3,
-    available actions follow a fixed rotation with a random start.
+    higher it requires the first available slot to be 0 or 1 and takes priority
+    at intelligence 4 or higher. At intelligence 3, available actions follow a
+    fixed rotation with a random start.
     """
 
     if not isinstance(is_front_row, bool):
@@ -326,7 +342,7 @@ def select_monster_action(
     if MonsterSpecialAction.CALL in specials and call_slot is not None:
         if intelligence >= 2:
             if call_slot <= 1:
-                if intelligence != 3:
+                if intelligence >= 4:
                     return MonsterAction.CALL
                 call_eligible = True
         else:
@@ -366,6 +382,8 @@ __all__ = [
     "MonsterSpellTarget",
     "MonsterSpellCandidate",
     "evaluate_monster_spell",
+    "evaluate_monster_support_spell",
+    "monster_spell_evaluation_order",
     "monster_attack_targets",
     "prefer_monster_targets",
     "reinforcement_arrives",

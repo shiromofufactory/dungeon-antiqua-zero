@@ -673,7 +673,7 @@ DA2と同じ確認文とはい／いいえの選択を表示し、はいの場�
 基本性能の表示名はステータス画面のキーを流用せず、`item.detail.attack`、
 `item.detail.hit`、`item.detail.defense`、`item.detail.evasion`、
 `item.detail.spell_resistance` のアイテム画面専用キーを使う。
-`special` は `ItemSpecial` の10種の安定キーへ変換して `Item` が保持し、
+`special` は `ItemSpecial` の安定キーへ変換して `Item` が保持し、
 `item.detail.special.<special>` の辞書行をその他の特性として表示する。未入力で
 `pending: true` の辞書行は表示しない。`%COL_BLUE%` は `ui/colors.py` の
 `BLUE_TEXT_COLOR`（色13）へ変更し、
@@ -1242,6 +1242,9 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 通常攻撃の射程判定も `monster_ai.py` が共有し、各呼び出し元は生存している可視対象と戦闘中の隊列を渡す。
 基本AIは残MPと沈黙状態を候補選択へ使わず、選択後の共通発動処理が戦闘ごとの沈黙状態と
 現在MPをこの順に検査し、発動時だけMPを消費する。
+敵の蘇生は `monster_ai.py` で優先条件、`battle_layout.py` で配置の再利用可否を共有する。
+`MonsterBattleState` がHPと戦闘状態を更新し、BattleSceneが元の個体を隊列とタイムラインへ戻して
+`BattleActionPresentation` の時刻から復活時の描画率を求める。報酬は同じ敵個体の撃破順を更新する。
 
 味方とモンスターのブレスは `battle_breath.py` がPyxel非依存のダメージ・HP消費・毒付与・耐性判定を
 所有し、BattleSceneとオートバトル予測が同じ関数を呼ぶ。モンスターの行動候補の組み立てと知恵による
@@ -1267,6 +1270,7 @@ Rendererは生の連結文字列・改行区切り文字列を再解釈せず、
 進めずに、反撃者の側に応じた通常攻撃の演出を実行する。死亡した元の行動者は
 次の参加者を消費せずタイムラインから除外する。
 モンスターの物理追加効果も `battle_physical.py` が共通の乱数でまとめて判定する。
+まきつきの命中率補正とスタン付与の判定は同モジュールで実戦と予測が共有する。
 地震のスタンと画面揺れは `BattleActionPresentation` が保持し、Gameと単独戦闘起動口は
 Sceneの `screen_shake_offset` を既存のカメラへ合成する。Gameは揺れの乱数や時間を所有しない。
 妖精の地震回避は種族によるルールとして判定し、予測用の `AutoCombatant.floating` にも渡す。
@@ -1362,7 +1366,8 @@ NPCの空き枠へ追加した装備は固定せず、取り外しや
 `InventorySystem` が担当する。
 
 装備中の `special=DUAL_WIELD` は「にとうりゅう」、`special=TWO_HANDED` は
-「りょうてもち」の習得と同等に扱う。この装備由来判定は `Member.has_skill()` に集約し、
+「りょうてもち」、`special=RETALIATE` は「はんげき」の習得と同等に扱う。
+この装備由来判定は `Member.has_skill()` に集約し、
 装備画面、オート装備、戦闘処理が個別に `Item.special` を調べない。
 
 装備品の `atk`、`hit`、`dfc`、`rst` は `Item` が非負整数として保持する。現在装備、

@@ -550,6 +550,20 @@
       "bgm_id": "da3-battle2",
       "steps": [
         {
+          "id": "random_encounter_3b5534fef4014fdc8c13ba93e9442ad4",
+          "type": "random_encounter",
+          "count": 5,
+          "encounter": {
+            "monster_level": 4,
+            "danger": "high",
+            "polarity": "neutral",
+            "allow_demons": true,
+            "allow_humans": false,
+            "allow_giants": false,
+            "allow_large_animals": true
+          }
+        },
+        {
           "id": "event_battle_f6eb930b0eff4f52adffefe75fea9ec5",
           "type": "event_battle",
           "battle_id": "battle_13"
@@ -1090,6 +1104,18 @@
             "type": "item",
             "item_key": "BLACK ORE"
           }
+        }
+      ]
+    },
+    {
+      "id": "dungeon_fc93b1f97db54207b10a73228b20cacc",
+      "name": "孤児院襲撃",
+      "bgm_id": "da3-battle2",
+      "steps": [
+        {
+          "id": "event_battle_eacd5bfeb49a4355a309fa57c8f98ebc",
+          "type": "event_battle",
+          "battle_id": "battle_25"
         }
       ]
     }

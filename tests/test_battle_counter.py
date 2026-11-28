@@ -8,7 +8,7 @@ from tools._bootstrap import APP_ROOT
 from tools.screen_mocks._fixtures import load_mock_items, load_mock_skills
 from battle_physical import counter_attack_succeeds
 from battle_timeline import TimelineEntry, TimelineOrder
-from item import AdditionalEffect
+from item import AdditionalEffect, ItemSpecial
 from localization import Localizer
 from monster import MonsterSpecialAction
 from monster_ai import MonsterAction, monster_action_candidates
@@ -182,9 +182,10 @@ class CounterSceneTest(unittest.TestCase):
         actor.state.apply_stun()
         self.assertFalse(scene._begin_pending_monster_counter())
 
-    def party_counter_scene(self):
+    def party_counter_scene(self, *, learned_retaliate=True):
         scene, actor = self.scene()
-        scene.party[0].skills.append(load_mock_skills()["Retaliate"])
+        if learned_retaliate:
+            scene.party[0].skills.append(load_mock_skills()["Retaliate"])
         scene._timeline_order = TimelineOrder((
             TimelineEntry(actor, actor.agility, 64),
             TimelineEntry(scene.party_visuals[0], 10, 30),
@@ -210,6 +211,25 @@ class CounterSceneTest(unittest.TestCase):
         scene.localizer = Localizer(Language.JAPANESE)
         scene._clear_action_motion_state()
         return scene, actor
+
+    def test_equipped_retaliate_enables_counter_and_forecast_until_removed(self):
+        scene, _ = self.party_counter_scene(learned_retaliate=False)
+        member = scene.party[0]
+        original_equipment = member.equipment
+        helm = replace(load_mock_items()["IRON HELM"], special=ItemSpecial.RETALIATE)
+        equipment = original_equipment.replaced({EquipmentSlot.HEAD: helm})
+        original_skills = tuple(member.skills)
+
+        for equipped in (False, True, False):
+            with self.subTest(equipped=equipped):
+                member.equipment = equipment if equipped else original_equipment
+                scene.pending_party_counter_index = None
+                with patch("scenes.battle.random.randint", return_value=0):
+                    scene._queue_party_counter(0)
+                self.assertEqual(scene.pending_party_counter_index, 0 if equipped else None)
+                defender = AutoCombatant.from_member(member, 0, front=True, spells=())
+                self.assertEqual("Retaliate" in defender.skills, equipped)
+                self.assertEqual(tuple(member.skills), original_skills)
 
     def test_party_counter_uses_actual_hit_recipient_and_keeps_enemy_turn(self):
         scene, actor = self.party_counter_scene()
@@ -247,6 +267,24 @@ class CounterSceneTest(unittest.TestCase):
         self.assertEqual(member.silenced, 3)
         self.assertIn(0, scene.defending_party_indexes)
         scene.progression.record_weapon_action.assert_called_once()
+
+    def test_party_counter_does_not_roll_when_hit_clears_sleep_or_confusion(self):
+        for condition in ("sleeping", "confused"):
+            with self.subTest(condition=condition):
+                scene, _ = self.party_counter_scene()
+                member = scene.party[0]
+                setattr(member, condition, 2)
+                before_hp = member.hp
+                scene.monster_attack_damage = 1
+
+                with patch("scenes.battle.random.randint", return_value=0) as roll:
+                    scene._finish_monster_attack()
+
+                self.assertEqual(member.hp, before_hp - 1)
+                self.assertEqual(getattr(member, condition), 0)
+                roll.assert_not_called()
+                scene._show_battle_popup.assert_not_called()
+                scene._start_timeline_animation.assert_called_once_with()
 
     def test_party_counter_uses_da2_reach_and_actionability(self):
         for condition in ("surprised", "sleeping", "paralyzed", "stunned", "confused", "dead", "rear", "long_reach"):
@@ -314,6 +352,23 @@ class CounterForecastTest(AutoBattleFixtures, unittest.TestCase):
         self.assertFalse(forecast.actors[5].is_alive)
         self.assertTrue(forecast.actors[6].front)
         self.assertLess(forecast.actors[0].hp, 100)
+
+    def test_party_counter_forecast_skips_hit_that_clears_sleep_or_confusion(self):
+        attacker = self.enemy(hp=1, max_hp=1, attack=30)
+        for condition in ("sleeping", "confused"):
+            with self.subTest(condition=condition):
+                defender = replace(
+                    self.specs[0], hp=500, max_hp=500, skills=("Retaliate",),
+                    **{condition: 2},
+                )
+                forecast = BattleForecast(self.snapshot(attacker, defender, active=5), 0)
+                forecast.roll = lambda *_args: 0.0
+
+                forecast.enemy_turn(forecast.actors[5])
+
+                self.assertLess(forecast.actors[0].hp, 500)
+                self.assertEqual(getattr(forecast.actors[0], condition), 0)
+                self.assertEqual(forecast.actors[5].hp, 1)
 
     def test_party_counter_forecast_damages_original_attacker_without_using_own_turn(self):
         member = self.party[0]

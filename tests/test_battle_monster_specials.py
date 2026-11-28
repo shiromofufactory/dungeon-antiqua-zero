@@ -538,7 +538,7 @@ class MonsterRangedAttackTest(unittest.TestCase):
                 self.assertIs(scene._select_monster_action(actor), MonsterAction.ATTACK)
                 scene._begin_standard_monster_attack(actor)
                 scene._resolve_monster_attack.assert_called_with(
-                    actor, (0, 1), attack=actor.combat_stats.attack,
+                    actor, (0, 1), attack=actor.combat_stats.attack, constricting=False,
                 )
                 self.assertEqual(scene.monster_attack_target_index, 1)
 

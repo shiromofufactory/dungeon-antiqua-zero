@@ -82,6 +82,7 @@ class MonsterSpecialAction(StrEnum):
 
     ESCAPE = "逃"
     CHARGE = "突"
+    CONSTRICTION = "巻"
     REINFORCE = "援"
     CALL = "呼"
     POWER_HIT = "会"
@@ -717,6 +718,21 @@ class MonsterBattleState:
         self.speed_modifier = 0
         self.slow_turns = 0
         self.defense_down_turns = 0
+
+    def revive(self, hp_percentage: int) -> int:
+        """Return a defeated monster at the spell's authored HP percentage."""
+
+        if isinstance(hp_percentage, bool) or not isinstance(hp_percentage, int):
+            raise TypeError("hp_percentage must be an integer")
+        if not 1 <= hp_percentage <= 100:
+            raise ValueError("hp_percentage must be from 1 to 100")
+        if self.is_alive:
+            return 0
+        previous_mp = self.mp
+        self.restore()
+        self.mp = previous_mp
+        self.hp = max(1, self.max_hp * hp_percentage // 100)
+        return self.hp
 
     def restore(self) -> None:
         """Restore initial HP when restarting a battle fixture."""

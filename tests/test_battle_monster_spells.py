@@ -151,7 +151,7 @@ class MonsterSpellTest(unittest.TestCase):
         spell = scene.spells["PROTECTION"]
         for old_stage, expected_defense in ((-1, 8), (0, 16), (1, 27)):
             self.assertIn(spell.key, actor.spell_keys)
-            self.assertEqual(scene._evaluate_monster_spell(actor, spell, is_solo=True).targets, (0,))
+            self.assertEqual(scene._evaluate_monster_spell(actor, spell).targets, (0,))
             self.assertTrue(scene._begin_monster_spell(actor, spell))
             self.assertEqual(actor.state.defense_modifier, old_stage)
             scene._update_action_presentation()
@@ -936,24 +936,31 @@ class IntelligentMonsterSpellTest(unittest.TestCase):
         self.assertEqual(actor.state.mp, actor.max_mp)
         self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("FREEZE2"))
 
-    def test_int_two_prioritizes_area_debuff_if_all_applicable_targets_are_effective(self):
-        actor, scene = self.scene("SLEEP", intelligence=2)
-        actor.spell_keys = ("FIRE1", "SLEEP")
-        scene.party[0].sleeping = 2
-        self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("FIRE1"))
-        actor.is_front_row = True
-        with (
-            patch.object(
-                Member, "resistances", property(
-                    lambda member: frozenset({ResistanceType.SLEEP})
-                    if member is scene.party[0] else frozenset()
-                ),
-            ),
-            patch("monster_ai.random.choice") as choose,
-        ):
-            self.assertEqual(scene._select_monster_action(actor), MonsterSpellAction("SLEEP"))
-        choose.assert_not_called()
-        self.assertEqual(scene._monster_spell_candidates["SLEEP"].targets, (0, 1))
+    def test_int_two_draws_area_debuff_when_any_target_can_be_affected(self):
+        fire = MonsterSpellAction("FIRE1")
+        for key, status in (("SLEEP", "sleeping"), ("SILENCE", "silenced")):
+            for resistant_count, affected_count in ((0, 0), (1, 0), (2, 0), (0, 1), (0, 2)):
+                with self.subTest(key=key, resistant=resistant_count, affected=affected_count):
+                    actor, scene = self.scene(key, intelligence=2)
+                    actor.spell_keys = (key, "FIRE1")
+                    scene._member_can_cast_spells = Mock(return_value=True)
+                    for member in scene.party[:affected_count]:
+                        setattr(member, status, 2)
+                    resistant = {id(member) for member in scene.party[:resistant_count]}
+                    attribute = scene.spells[key].attribute
+                    with (
+                        patch.object(Member, "resistances", property(
+                            lambda member: frozenset({attribute}) if id(member) in resistant else frozenset()
+                        )),
+                        patch("monster_ai.random.choice", return_value=fire) as choose,
+                    ):
+                        self.assertEqual(scene._select_monster_action(actor), fire)
+                    if max(resistant_count, affected_count) == len(scene.party):
+                        choose.assert_not_called()
+                        self.assertNotIn(key, scene._monster_spell_candidates)
+                    else:
+                        choose.assert_called_once_with([MonsterSpellAction(key), fire])
+                        self.assertEqual(scene._monster_spell_candidates[key].targets, (0, 1))
 
     def test_int_two_prefers_visible_sleeping_or_paralyzed_targets(self):
         actor, scene = self.scene("FIRE1", intelligence=2)

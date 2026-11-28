@@ -137,6 +137,29 @@ class BattleProgressionTest(unittest.TestCase):
 
         self.assertEqual(progression.rewards(), (48, 10))
 
+    def test_revived_enemy_can_escape_and_a_second_defeat_updates_the_drop(self) -> None:
+        first = EnemyProgressionData(2, 0, 1, 25, "First Enemy", self.sword.key, 16)
+        second = EnemyProgressionData(2, 0, 1, 10, "Second Enemy", self.other_item.key, 16)
+        for escaped in (False, True):
+            with self.subTest(escaped=escaped):
+                progression = BattleProgression((first, second))
+                progression.record_enemy_defeat(1)
+                progression.record_enemy_defeat(0)
+                progression.record_enemy_revival(0)
+                if escaped:
+                    progression.record_enemy_escape(0)
+                else:
+                    progression.record_enemy_defeat(0)
+
+                save_data = SaveData()
+                growth = progression.settle(
+                    save_data, (Member.from_record(member_record("Fighter")),),
+                    inventory_system=InventorySystem(self.items),
+                    monster_record_system=MonsterRecordSystem(save_data),
+                )
+                self.assertEqual(growth.gold_gained, 10 if escaped else 35)
+                self.assertEqual(growth.treasure_drop.monster_key, (second if escaped else first).monster_key)
+
     def test_only_last_defeated_enemy_can_drop_its_treasure(self) -> None:
         save_data = SaveData()
         inventory = InventorySystem(self.items)

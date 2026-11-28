@@ -28,6 +28,12 @@ class MonsterPlacement:
     def bottom(self) -> int:
         return self.y + self.height
 
+    def shares_space_with(self, other: "MonsterPlacement") -> bool:
+        return self.slot == other.slot or (
+            self.x < other.x + other.width and other.x < self.x + self.width
+            and self.y < other.bottom and other.y < self.bottom
+        )
+
 
 @dataclass(frozen=True)
 class MonsterLayout:
@@ -38,6 +44,13 @@ class MonsterLayout:
 
 def _is_large_square(monster: object) -> bool:
     return (getattr(monster, "width", 64), getattr(monster, "height", 64)) == LARGE_SQUARE_SIZE
+
+
+def _is_large_square_companion(placement: MonsterPlacement) -> bool:
+    return (
+        placement.slot == LARGE_SQUARE_COMPANION_SLOT
+        and (placement.x, placement.y) == LARGE_SQUARE_COMPANION_POSITION
+    )
 
 
 def find_monster_placement(
@@ -53,9 +66,7 @@ def find_monster_placement(
     fixed_position = None
     if (width, height) == LARGE_SQUARE_SIZE:
         if LARGE_SQUARE_SLOT not in slots or any(
-            other.slot != LARGE_SQUARE_COMPANION_SLOT
-            or (other.x, other.y) != LARGE_SQUARE_COMPANION_POSITION
-            for other in occupied
+            not _is_large_square_companion(other) for other in occupied
         ):
             return None
         slots = (LARGE_SQUARE_SLOT,)
@@ -92,6 +103,20 @@ def find_monster_placement(
         ):
             return MonsterPlacement(slot, x, y, width, height)
     return None
+
+
+def monster_revival_placement_available(
+    placement: MonsterPlacement, occupied: Sequence[MonsterPlacement],
+) -> bool:
+    """Return whether a defeated monster can reappear at its original position."""
+
+    if any(placement.shares_space_with(other) for other in occupied):
+        return False
+    if _is_large_square(placement):
+        return all(_is_large_square_companion(other) for other in occupied)
+    if any(_is_large_square(other) for other in occupied):
+        return _is_large_square_companion(placement)
+    return True
 
 
 def monster_layout(monsters: Sequence[object]) -> MonsterLayout:

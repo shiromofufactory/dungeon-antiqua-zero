@@ -21,6 +21,9 @@ DA2_EFFECTIVE_HIT_VALUE_BONUS = 60
 DA2_MEMBER_STATUS_BASE_RATE = 12
 DA2_MONSTER_STATUS_BASE_RATE = 30
 STUN_BASE_RATE = 20
+PHYSICAL_HIT_ROLL_COUNT = 100
+CONSTRICTION_HIT_ROLL_COUNT = PHYSICAL_HIT_ROLL_COUNT * 5
+CONSTRICTION_ROLLS_PER_NORMAL_ROLL = 3
 DA2_MEMBER_DEATH_BASE_RATE = 6
 DA2_MONSTER_DEATH_BASE_RATE = 10
 INNER_STEEL_SKILL_KEY = "Inner Steel"
@@ -151,6 +154,7 @@ def resolve_physical_attack(
     target_resists_tribe: bool = False,
     critical_rate_scale: float = 1.0,
     critical_roll: int | None = None,
+    constricting: bool = False,
 ) -> PhysicalAttackResult:
     """Resolve a physical attack, including DA2's defend-command effect."""
 
@@ -160,8 +164,13 @@ def resolve_physical_attack(
     target_evasion = _nonnegative_integer(target_evasion, "target_evasion")
     hit_roll = _nonnegative_integer(hit_roll, "hit_roll")
     hit_value_bonus = _nonnegative_integer(hit_value_bonus, "hit_value_bonus")
-    if hit_roll > 99:
-        raise ValueError("hit_roll must be from 0 to 99")
+    roll_count = CONSTRICTION_HIT_ROLL_COUNT if constricting else PHYSICAL_HIT_ROLL_COUNT
+    if hit_roll >= roll_count:
+        raise ValueError(f"hit_roll must be from 0 to {roll_count - 1}")
+    if constricting:
+        # Give each normal roll three outcomes out of 500 to keep its damage
+        # and reduce its chance to 60%. Rolls mapped above 99 always miss.
+        hit_roll //= CONSTRICTION_ROLLS_PER_NORMAL_ROLL
     if critical_roll is not None:
         critical_roll = _nonnegative_integer(critical_roll, "critical_roll")
         if critical_roll > 99:
@@ -210,7 +219,7 @@ def resolve_physical_attack(
             - hit_roll
             + hit_value_bonus
         )
-    if hit_value < 0:
+    if hit_roll >= PHYSICAL_HIT_ROLL_COUNT or hit_value < 0:
         return PhysicalAttackResult(
             hit=False,
             damage=0,
@@ -379,9 +388,18 @@ def resolve_monster_attack_effects(
     target_resistances: Collection[ResistanceType],
     target_weaknesses: Collection[ResistanceType] = (),
     target_defending: bool = False,
+    constricting: bool = False,
 ) -> tuple[AdditionalEffect, ...]:
-    """Resolve one monster hit using a shared roll and DA2's status priorities."""
+    """Resolve the status effects of one monster attack."""
 
+    if constricting:
+        if (
+            result.hit
+            and not result.tribe_resisted
+            and ResistanceType.STUN not in target_resistances
+        ):
+            return (AdditionalEffect.STUN,)
+        return ()
     if not result.hit and not (target_defending and result.hit_value >= 0):
         return ()
     candidates = tuple(effect for effect in effects if effect in PHYSICAL_STATUS_EFFECTS)
@@ -457,6 +475,7 @@ def counter_attack_succeeds(
 
 
 __all__ = [
+    "CONSTRICTION_HIT_ROLL_COUNT",
     "DA2_CRITICAL_RATE_UNIT",
     "DA2_EFFECTIVE_HIT_VALUE_BONUS",
     "DA2_MEMBER_DEATH_BASE_RATE",
@@ -465,6 +484,7 @@ __all__ = [
     "DA2_MONSTER_STATUS_BASE_RATE",
     "DEFENDING_HIT_VALUE_THRESHOLD",
     "PHYSICAL_EFFECT_RESISTANCE",
+    "PHYSICAL_HIT_ROLL_COUNT",
     "PHYSICAL_STATUS_EFFECTS",
     "PhysicalAdditionalEffectResult",
     "PhysicalAttackResult",

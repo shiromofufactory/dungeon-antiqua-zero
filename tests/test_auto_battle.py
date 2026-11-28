@@ -2038,6 +2038,34 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
                     forecast.actors[5].mp, mp - (spell.mp if uses_spell else 0),
                 )
 
+    def test_int_two_forecast_draws_sleep_and_silence_with_damage_spell(self):
+        spells = tuple(self.spells[key] for key in ("SLEEP", "SILENCE", "POISON2"))
+        enemy = self.enemy(front=False, intelligence=2, spells=spells, mp=20, max_mp=20)
+        target = replace(self.specs[0], spells=(self.spells["FIRE1"],), resistances=frozenset())
+        resistant = replace(target, resistances=frozenset((ResistanceType.SLEEP, ResistanceType.SILENCE)))
+        for member, roll, expected in (
+            (target, 0.0, "POISON2"), (target, 0.5, "SILENCE"),
+            (target, 0.9, "SLEEP"), (resistant, 0.9, "POISON2"),
+        ):
+            with self.subTest(roll=roll, expected=expected):
+                forecast = BattleForecast(self.snapshot(enemy, member, active=5), 0)
+                with patch.object(forecast, "roll", return_value=roll):
+                    forecast.enemy_turn(forecast.actors[5])
+                self.assertEqual(forecast.actors[5].mp, enemy.mp - self.spells[expected].mp)
+
+    def test_int_two_forecast_draws_call_with_damage_spell(self):
+        enemy = self.enemy(
+            front=False, intelligence=2, spells=(self.spells["POISON2"],), mp=20, max_mp=20,
+            special_actions=(MonsterSpecialAction.CALL,),
+            monster_placement=MonsterPlacement(1, 4, 112, 64, 64),
+        )
+        for roll, calls in ((0.0, False), (0.9, True)):
+            with self.subTest(roll=roll):
+                forecast = BattleForecast(self.snapshot(enemy, self.specs[0], active=5), 0)
+                with patch.object(forecast, "roll", return_value=roll):
+                    forecast.enemy_turn(forecast.actors[5])
+                self.assertEqual(6 in forecast.actors, calls)
+
     def test_int_two_enemy_attack_prefers_sleeping_front_row_member(self):
         for intelligence, expected in ((1, 0), (2, 1)):
             with self.subTest(intelligence=intelligence):

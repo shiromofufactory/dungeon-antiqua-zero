@@ -22,7 +22,7 @@ if __package__:
         resolve_battle_commands,
         selectable_attack_target_indexes,
     )
-    from .battle_layout import MonsterPlacement, find_monster_placement
+    from .battle_layout import MonsterPlacement, find_monster_placement, monster_revival_placement_available
     from .battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
@@ -47,8 +47,10 @@ if __package__:
         spell_resistances,
     )
     from .battle_physical import (
+        CONSTRICTION_HIT_ROLL_COUNT,
         INNER_STEEL_SKILL_KEY,
         PHYSICAL_EFFECT_RESISTANCE,
+        PHYSICAL_HIT_ROLL_COUNT,
         PHYSICAL_STATUS_EFFECTS,
         drain_healing_amount,
         inner_steel_attack,
@@ -75,7 +77,8 @@ if __package__:
     from .monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from .monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
-        evaluate_monster_spell, monster_action_candidates, monster_attack_targets,
+        evaluate_monster_spell, evaluate_monster_support_spell,
+        monster_action_candidates, monster_attack_targets, monster_spell_evaluation_order,
         prefer_monster_targets, rotate_monster_action,
     )
     from .resistance import ResistanceType
@@ -98,7 +101,7 @@ else:
         resolve_battle_commands,
         selectable_attack_target_indexes,
     )
-    from battle_layout import MonsterPlacement, find_monster_placement
+    from battle_layout import MonsterPlacement, find_monster_placement, monster_revival_placement_available
     from battle_magic import (
         DA2_DEFAULT_ITEM_SPELL_ABILITY,
         MAX_PROTECTION_LEVEL,
@@ -123,8 +126,10 @@ else:
         spell_resistances,
     )
     from battle_physical import (
+        CONSTRICTION_HIT_ROLL_COUNT,
         INNER_STEEL_SKILL_KEY,
         PHYSICAL_EFFECT_RESISTANCE,
+        PHYSICAL_HIT_ROLL_COUNT,
         PHYSICAL_STATUS_EFFECTS,
         drain_healing_amount,
         inner_steel_attack,
@@ -151,7 +156,8 @@ else:
     from monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from monster_ai import (
         MonsterAction, MonsterSpellAction, MonsterSpellTarget,
-        evaluate_monster_spell, monster_action_candidates, monster_attack_targets,
+        evaluate_monster_spell, evaluate_monster_support_spell,
+        monster_action_candidates, monster_attack_targets, monster_spell_evaluation_order,
         prefer_monster_targets, rotate_monster_action,
     )
     from resistance import ResistanceType
@@ -329,15 +335,15 @@ class ForecastActor:
         if amount > 0 and not poison:
             self.sleeping = self.confused = 0
         if self.hp == 0:
-            self.poisoned = self.paralyzed = self.stunned = self.hidden = False
-            self.magic_shield = False
-            self.sleeping = self.confused = self.silenced = self.protection = (
-                self.speed
-            ) = 0
-            self.slow_turns = self.defense_down_turns = 0
-            self.focus = self.cover = None
-            self.defending = False
+            self.clear_defeated_conditions()
         return old - self.hp
+
+    def clear_defeated_conditions(self) -> None:
+        self.poisoned = self.paralyzed = self.stunned = self.hidden = False
+        self.magic_shield = self.defending = False
+        self.sleeping = self.confused = self.silenced = 0
+        self.protection = self.speed = self.slow_turns = self.defense_down_turns = 0
+        self.focus = self.cover = None
 
     def drain(self, damage: int) -> None:
         self.hp += drain_healing_amount(damage=damage, hp=self.hp, max_hp=self.max_hp)
@@ -480,6 +486,8 @@ class BattleForecast:
 
     def spell_targets(self, actor: ForecastActor, spell: Spell) -> tuple[int, ...]:
         if actor.spec.enemy:
+            if not spell.to_enemy and spell.action is SpellAction.REVIVE:
+                return self.monster_revival_targets()
             targets = (
                 tuple(a for a in self.allies() if not a.hidden)
                 if spell.to_enemy
@@ -1241,21 +1249,7 @@ class BattleForecast:
                 target.poisoned = target.paralyzed = False
                 target.sleeping = target.confused = 0
             elif spell.action is SpellAction.REVIVE:
-                target.hp = max(1, target.max_hp * spell.intensity // 100)
-                target.poisoned = target.paralyzed = target.stunned = False
-                target.sleeping = target.confused = target.silenced = 0
-                target.protection = target.speed = 0
-                target.magic_shield = False
-                target.slow_turns = target.defense_down_turns = 0
-                target.hidden = False
-                target.focus = target.cover = None
-                if target.spec.number not in self.order.actors:
-                    self.order = insert_timeline_actor(
-                        self.order,
-                        target.spec.number,
-                        agility=target.agility,
-                        gauge=min(float(target.agility), GAUGE_READY_VALUE),
-                    )
+                self.revive_spell_target(target, spell)
             elif spell.action is SpellAction.IDENTIFY:
                 self.identify(target)
             else:
@@ -1519,8 +1513,7 @@ class BattleForecast:
         spell_targets = {}
         priority_spell_key = None
         enemies = self.enemies()
-        is_solo = intelligence == 2 and len(enemies) == 1
-        for spell in actor.spec.spells:
+        for spell in monster_spell_evaluation_order(actor.spec.spells, intelligence):
             if intelligence > 0 and (actor.silenced or actor.mp < spell.mp):
                 continue
             indexes = self.spell_targets(actor, spell)
@@ -1537,13 +1530,14 @@ class BattleForecast:
                     )
                     for n in indexes
                 )
-                candidate = evaluate_monster_spell(
-                    spell, states, intelligence=intelligence, is_solo=is_solo,
+                indexes = evaluate_monster_spell(
+                    spell, states, intelligence=intelligence,
                     choose=lambda values: values[int(self.roll(actor, 0, 15) * len(values))],
-                )
-                indexes = candidate.targets
-                if candidate.priority:
-                    priority_spell_key = spell.key
+                ).targets
+            elif not spell.to_enemy and evaluate_monster_support_spell(
+                spell, indexes, intelligence=intelligence,
+            ).priority:
+                priority_spell_key = spell.key
             if indexes:
                 spell_targets[spell.key] = indexes
             if priority_spell_key is not None:
@@ -1551,7 +1545,7 @@ class BattleForecast:
         spell_keys = tuple(spell_targets)
         call_placement = None
         if (
-            intelligence == 3 and MonsterSpecialAction.CALL in actor.spec.special_actions
+            intelligence in (2, 3) and MonsterSpecialAction.CALL in actor.spec.special_actions
             and actor.spec.monster_placement is not None
         ):
             occupied = tuple(
@@ -1704,6 +1698,8 @@ class BattleForecast:
                             target.magic_shield = True
                         elif spell.action is SpellAction.HEAL:
                             self.apply_spell_healing(actor, target, spell, self.roll(actor, n, 8))
+                        elif spell.action is SpellAction.REVIVE and n in self.monster_revival_targets():
+                            self.revive_spell_target(target, spell)
                 if spell.to_enemy:
                     recipients = tuple(
                         (n, self.spell_recipient(actor, self.actors[n])) for n in targets
@@ -1780,13 +1776,15 @@ class BattleForecast:
                             actor, target, spell, actor.spec.magic, roll_target=n,
                         ):
                             target.poisoned = True
-        elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE):
+        elif action in (MonsterAction.ATTACK, MonsterAction.CHARGE, MonsterAction.CONSTRICTION):
             charged = action is MonsterAction.CHARGE
+            normal_attack = action is MonsterAction.ATTACK
             countering_member = self.enemy_attack(
                 actor, available if charged else attack_targets, charged=charged,
-                allow_counter=not charged and not self.surprise,
+                constricting=action is MonsterAction.CONSTRICTION,
+                allow_counter=normal_attack and not self.surprise,
             )
-            if not charged and MonsterSpecialAction.DOUBLE_ATTACK in actor.spec.special_actions:
+            if normal_attack and MonsterSpecialAction.DOUBLE_ATTACK in actor.spec.special_actions:
                 self.normalize()
                 targets = self._enemy_attack_targets(actor, self.allies())
                 if targets and not self.party_defeated:
@@ -1800,6 +1798,33 @@ class BattleForecast:
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
+
+    def monster_revival_targets(self) -> tuple[int, ...]:
+        occupied = tuple(
+            placement for enemy in self.enemies()
+            if (placement := enemy.spec.monster_placement) is not None
+        )
+        return tuple(
+            enemy.spec.number for enemy in self.enemy_actors
+            if not enemy.is_alive and not enemy.removed and (
+                (placement := enemy.spec.monster_placement) is None
+                or monster_revival_placement_available(placement, occupied)
+            )
+        )
+
+    def revive_spell_target(self, target: ForecastActor, spell: Spell) -> None:
+        target.hp = max(1, target.max_hp * spell.intensity // 100)
+        target.clear_defeated_conditions()
+        if target.spec.enemy:
+            target.action_rotation_index = None
+            self.refresh_placed_enemy_rows()
+        if target.spec.number not in self.order.actors:
+            self.order = insert_timeline_actor(
+                self.order,
+                target.spec.number,
+                agility=target.agility,
+                gauge=min(float(target.agility), GAUGE_READY_VALUE),
+            )
 
     def enemy_call(self, caller: ForecastActor, placement: MonsterPlacement) -> None:
         number = max(self.actors) + 1
@@ -1819,6 +1844,13 @@ class BattleForecast:
         self.enemy_actors += (newcomer,)
         self.turns[number] = 0
         self.start_hp[number] = newcomer.hp
+        self.refresh_placed_enemy_rows()
+        self.order = insert_timeline_actor(
+            self.order, number, agility=newcomer.agility,
+            gauge=min(float(newcomer.agility), GAUGE_READY_VALUE),
+        )
+
+    def refresh_placed_enemy_rows(self) -> None:
         placed_enemies = tuple(
             (enemy, enemy.spec.monster_placement.slot) for enemy in self.enemies()
             if enemy.spec.monster_placement is not None
@@ -1826,10 +1858,6 @@ class BattleForecast:
         front_slot_occupied = any(slot >= 2 for _, slot in placed_enemies)
         for enemy, slot in placed_enemies:
             enemy.front = slot >= 2 or not front_slot_occupied
-        self.order = insert_timeline_actor(
-            self.order, number, agility=newcomer.agility,
-            gauge=min(float(newcomer.agility), GAUGE_READY_VALUE),
-        )
 
     def preferred_monster_party_targets(
         self, actor: ForecastActor, indexes: tuple[int, ...],
@@ -1853,7 +1881,9 @@ class BattleForecast:
             target_is_front_row=lambda ally: ally.front,
         )
 
-    def enemy_attack(self, actor, targets, *, charged=False, roll_offset=0, allow_counter=False):
+    def enemy_attack(
+        self, actor, targets, *, charged=False, constricting=False, roll_offset=0, allow_counter=False,
+    ):
         indexes = self.preferred_monster_party_targets(
             actor, tuple(target.spec.number for target in targets),
         )
@@ -1862,14 +1892,18 @@ class BattleForecast:
         if target.spec.number != protected:
             target.hidden = False
         if self.enemy_physical(
-            actor, target, charged=charged, roll_offset=roll_offset, allow_counter=allow_counter,
+            actor, target, charged=charged, constricting=constricting,
+            roll_offset=roll_offset, allow_counter=allow_counter,
         ):
             return target
         return None
 
-    def enemy_physical(self, actor, target, *, charged=False, roll_offset=0, allow_counter=False):
+    def enemy_physical(
+        self, actor, target, *, charged=False, constricting=False, roll_offset=0, allow_counter=False,
+    ):
         power_hit = MonsterSpecialAction.POWER_HIT in actor.spec.special_actions
         defending = target.is_defending if target.spec.enemy else target.defending
+        roll_count = CONSTRICTION_HIT_ROLL_COUNT if constricting else PHYSICAL_HIT_ROLL_COUNT
         result = resolve_physical_attack(
             attack=int(actor.spec.attack * (1.5 if charged else 1)),
             hit=actor.spec.hit,
@@ -1883,7 +1917,8 @@ class BattleForecast:
             target_resists_tribe=(
                 not target.spec.enemy and target.spec.equipment.resists_tribe(actor.spec.tribe)
             ),
-            hit_roll=int(self.roll(actor, target.spec.number, 2 + roll_offset) * 100),
+            hit_roll=int(self.roll(actor, target.spec.number, 2 + roll_offset) * roll_count),
+            constricting=constricting,
             critical_roll=int(self.roll(actor, target.spec.number, 3 + roll_offset) * 100)
             if power_hit or target.incapacitated_for_physical_hit
             else None,
@@ -1898,12 +1933,18 @@ class BattleForecast:
             target_resistances=target.spec.resistances,
             target_weaknesses=target.spec.weaknesses if target.spec.enemy else (),
             target_defending=defending,
+            constricting=constricting,
         )
-        if not result.tribe_resisted and AdditionalEffect.DRAIN in actor.spec.additional_effects:
+        if (
+            not constricting and not result.tribe_resisted
+            and AdditionalEffect.DRAIN in actor.spec.additional_effects
+        ):
             actor.drain(result.damage)
+        was_actionable = target.actionable
         target.damage(result.damage)
         counter = (
-            allow_counter and target.has_skill("Retaliate") and target.actionable
+            allow_counter and was_actionable and target.actionable
+            and target.has_skill("Retaliate")
             and member_can_attack(target)
             and counter_attack_succeeds(
                 attacker_agility=actor.agility, defender_agility=target.agility,

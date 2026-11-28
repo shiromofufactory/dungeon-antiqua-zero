@@ -202,8 +202,7 @@ class BattleProgression:
         self.enemies = tuple(enemies)
         self._enemy_action_counts = [0] * len(self.enemies)
         self._escaped_enemy_indexes: set[int] = set()
-        self._defeated_enemy_indexes: set[int] = set()
-        self._last_defeated_enemy_index: int | None = None
+        self._defeated_enemy_indexes: dict[int, None] = {}
         self._weapon_uses: dict[str, dict[ProficiencyKind, _WeaponUse]] = {}
         self._spell_uses: dict[str, dict[ProficiencyKind, _SpellUse]] = {}
         self._settled = False
@@ -242,8 +241,13 @@ class BattleProgression:
             raise ValueError("an escaped enemy cannot be defeated")
         if enemy_index in self._defeated_enemy_indexes:
             return
-        self._defeated_enemy_indexes.add(enemy_index)
-        self._last_defeated_enemy_index = enemy_index
+        self._defeated_enemy_indexes[enemy_index] = None
+
+    def record_enemy_revival(self, enemy_index: int) -> None:
+        """Return the same individual to battle without duplicating its rewards."""
+
+        self._require_enemy_index(enemy_index)
+        self._defeated_enemy_indexes.pop(enemy_index, None)
 
     def record_simultaneous_enemy_defeats(
         self,
@@ -261,10 +265,8 @@ class BattleProgression:
                 raise ValueError("an escaped enemy cannot be defeated")
             if enemy_index not in self._defeated_enemy_indexes:
                 newly_defeated.append(enemy_index)
-        if not newly_defeated:
-            return
-        self._defeated_enemy_indexes.update(newly_defeated)
-        self._last_defeated_enemy_index = min(newly_defeated)
+        for enemy_index in sorted(newly_defeated, reverse=True):
+            self._defeated_enemy_indexes[enemy_index] = None
 
     def record_weapon_action(
         self,
@@ -555,9 +557,10 @@ class BattleProgression:
         inventory_system: InventorySystem | None,
         members: Sequence[Member],
     ) -> BattleTreasureDrop | None:
-        if inventory_system is None or self._last_defeated_enemy_index is None:
+        last_defeated_enemy_index = next(reversed(self._defeated_enemy_indexes), None)
+        if inventory_system is None or last_defeated_enemy_index is None:
             return None
-        enemy = self.enemies[self._last_defeated_enemy_index]
+        enemy = self.enemies[last_defeated_enemy_index]
         if enemy.treasure_rate == 0:
             return None
         if random.randrange(TREASURE_RATE_DENOMINATOR) >= enemy.treasure_rate:

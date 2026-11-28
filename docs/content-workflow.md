@@ -259,7 +259,7 @@ Member状態で管理する。
 `type2=BOOK` とし、通常の消耗品の `type2=ITEM` と区別する。価格と入手元は店画面だけが
 使用する表示データである。
 `special` は空文字または `ATK_REDUCE_WT`、`COUNTER_STUN`、`DUAL_WIELD`、
-`GAIN_TWICE`、`LURE`、`POWER_HIT`、`REFLECT`、`SPL_REDUCE_WT`、
+`GAIN_TWICE`、`LURE`、`POWER_HIT`、`REFLECT`、`RETALIATE`、`SPL_REDUCE_WT`、
 `TWO_HANDED`、`VIGILANCE` のいずれかとする。各値には
 `item.detail.special.<special>` の表示キーを必ず用意する。
 

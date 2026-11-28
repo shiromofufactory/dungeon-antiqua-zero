@@ -189,6 +189,7 @@ _REGENERATE_SKILL_KEY = "Regenerate"
 _EQUIPMENT_GRANTED_SKILLS = MappingProxyType(
     {
         _DUAL_WIELD_SKILL_KEY: ItemSpecial.DUAL_WIELD,
+        "Retaliate": ItemSpecial.RETALIATE,
         _TWO_HANDED_SKILL_KEY: ItemSpecial.TWO_HANDED,
     }
 )
