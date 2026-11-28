@@ -143,6 +143,7 @@
 - モンスターの `REVIVE1` は `python3 -B -m unittest tests.test_battle_monster_revive tests.test_battle_monster_spells tests.test_auto_battle tests.test_battle_screen_mock tests.test_battle_progression` で優先条件・元の配置・蘇生演出・手番復帰・予測・再撃破の報酬を回帰検証する。
 - 知恵2の状態異常呪文と仲間呼びの抽選・蘇生優先は `python3 -B -m unittest tests.test_monster_ai tests.test_battle_monster_spells tests.test_battle_monster_revive tests.test_auto_battle` で回帰検証する。
 - 知恵3の行動ローテーションは `python3 -B -m unittest tests.test_monster_ai tests.test_battle_monster_spells tests.test_auto_battle` で開始位置・順番・使えない枠の飛ばし・後衛の待機・予測への引き継ぎを回帰検証する。
+- モンスターの全体攻撃の間隔は `python3 -B -m unittest tests.test_battle_area_attacks tests.test_monster_ai tests.test_auto_battle` で呪文・ブレス・地震の候補除外、発動失敗、本人の手番・撃破による解除、知恵3の例外、予測への引き継ぎを回帰検証する。
 - モンスターの遠距離攻撃は `python3 -B -m unittest tests.test_monster_ai tests.test_battle_monster_specials tests.test_battle_screen_mock tests.test_auto_battle` で `遠` の読込・両列からの通常攻撃・対象の除外・知恵3の順番・予測を回帰検証する。
 - モンスターの「まきつき」は `python3 -B -m unittest tests.test_battle_constriction tests.test_battle_physical tests.test_monster_ai tests.test_battle_monster_specials tests.test_auto_battle` で命中率・ダメージ・スタン・候補と予測を回帰検証する。
 - ラミアの「誘」は `python3 -B -m unittest tests.test_battle_temptation tests.test_monster_ai tests.test_battle_monster_spells tests.test_auto_battle` で対象・術防御と混乱耐性・全画面フラッシュ・成功時の演出・予測を回帰検証する。

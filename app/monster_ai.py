@@ -52,6 +52,31 @@ MonsterActionChoice = MonsterAction | MonsterSpellAction
 
 
 @dataclass(frozen=True)
+class MonsterAreaAttackCooldown:
+    """Battle-wide restriction owned by the monster that used an area attack."""
+
+    attacker: int | None = None
+
+    def permits(self, intelligence: int) -> bool:
+        return intelligence == 3 or self.attacker is None
+
+    def after_attack(self, attacker: int, intelligence: int) -> MonsterAreaAttackCooldown:
+        if intelligence == 3:
+            return self
+        return MonsterAreaAttackCooldown(attacker)
+
+    def release(self, attacker: int) -> MonsterAreaAttackCooldown:
+        return MonsterAreaAttackCooldown() if self.attacker == attacker else self
+
+
+def is_monster_area_attack_spell(spell: Spell) -> bool:
+    return (
+        spell.to_enemy and spell.to_all
+        and spell.action in (SpellAction.DAMAGE, SpellAction.BLOOD_SUCK)
+    )
+
+
+@dataclass(frozen=True)
 class MonsterSpellTarget:
     index: int
     front: bool
@@ -199,8 +224,9 @@ def monster_action_candidates(
     can_tempt: bool = False,
     black_wind_has_targets: bool = False,
     priority_spell_key: str | None = None,
+    allow_area_attacks: bool = True,
 ) -> tuple[MonsterActionChoice, ...]:
-    """Share candidate construction between live AI and deterministic forecasts."""
+    """Build candidates using spell keys already filtered by the caller."""
 
     if priority_spell_key is not None and intelligence != 3:
         return (MonsterSpellAction(priority_spell_key),)
@@ -215,15 +241,16 @@ def monster_action_candidates(
         candidates.append(MonsterAction.CONSTRICTION)
     if MonsterSpecialAction.CALL in special_actions and call_eligible:
         candidates.append(MonsterAction.CALL)
-    if MonsterSpecialAction.POISON_BREATH in special_actions and can_breathe:
-        candidates.append(MonsterAction.POISON_BREATH)
-    if (
-        MonsterSpecialAction.FIRE_BREATH in special_actions and can_breathe
-        and (intelligence != 7 or fire_breath_effective)
-    ):
-        candidates.append(MonsterAction.FIRE_BREATH)
-    if MonsterSpecialAction.EARTHQUAKE in special_actions and can_earthquake:
-        candidates.append(MonsterAction.EARTHQUAKE)
+    if allow_area_attacks:
+        if can_breathe:
+            if MonsterSpecialAction.POISON_BREATH in special_actions:
+                candidates.append(MonsterAction.POISON_BREATH)
+            if MonsterSpecialAction.FIRE_BREATH in special_actions and (
+                intelligence != 7 or fire_breath_effective
+            ):
+                candidates.append(MonsterAction.FIRE_BREATH)
+        if MonsterSpecialAction.EARTHQUAKE in special_actions and can_earthquake:
+            candidates.append(MonsterAction.EARTHQUAKE)
     if MonsterSpecialAction.TEMPTATION in special_actions and can_tempt:
         candidates.append(MonsterAction.TEMPTATION)
     if MonsterSpecialAction.MIRROR in special_actions:
@@ -286,6 +313,7 @@ def select_monster_action(
     priority_spell_key: str | None = None,
     rotation_state: MonsterBattleState | None = None,
     learned_spell_keys: Sequence[str] = (),
+    allow_area_attacks: bool = True,
 ) -> MonsterActionChoice | None:
     """Choose one DA2-style candidate, including call and ZERO's charge.
 
@@ -357,6 +385,7 @@ def select_monster_action(
         can_tempt=can_tempt,
         black_wind_has_targets=black_wind_has_targets,
         priority_spell_key=priority_spell_key,
+        allow_area_attacks=allow_area_attacks,
     )
 
     if intelligence == 3:
@@ -379,9 +408,11 @@ __all__ = [
     "MonsterAction",
     "MonsterActionChoice",
     "MonsterSpellAction",
+    "MonsterAreaAttackCooldown",
     "MonsterSpellTarget",
     "MonsterSpellCandidate",
     "evaluate_monster_spell",
+    "is_monster_area_attack_spell",
     "evaluate_monster_support_spell",
     "monster_spell_evaluation_order",
     "monster_attack_targets",

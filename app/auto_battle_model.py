@@ -281,6 +281,7 @@ class AutoBattleSnapshot:
     used_spell_types: frozenset[str] = frozenset()
     surprise_deferred: frozenset[int] = frozenset()
     consumables: tuple[tuple[Item, int], ...] = ()
+    monster_area_attack_attacker: int | None = None
 
     def __post_init__(self) -> None:
         numbers = {c.number for c in self.combatants}

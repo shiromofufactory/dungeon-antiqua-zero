@@ -2387,6 +2387,11 @@ class AutoBattleSceneIntegrationTest(AutoBattleFixtures, unittest.TestCase):
         initial = scene._auto_battle_snapshot().combatants[-1]
         self.assertEqual((initial.hp, initial.max_hp, initial.mp, initial.max_mp),
                          (state.max_hp, state.max_hp, 12, 12))
+        scene._record_monster_area_attack(scene.monsters[0])
+        snapshot = scene._auto_battle_snapshot()
+        forecast = BattleForecast(snapshot, 0)
+        self.assertEqual(snapshot.monster_area_attack_attacker, 5)
+        self.assertEqual(forecast.monster_area_attack_cooldown.attacker, 5)
         state.take_damage(state.max_hp - 1)
         state.spend_mp(9)
         state.apply_confusion(2)

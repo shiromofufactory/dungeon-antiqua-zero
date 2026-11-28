@@ -73,6 +73,7 @@ class BattleTribeTest(unittest.TestCase):
 
     def test_onigoroshi_resists_fafnirs_physical_hit_and_displays_resist(self):
         weapon = self.items["ONIGOROSHI"]
+        attack, hit = self.fafnir["attack"], self.fafnir["hit"]
         for warded in (False, True):
             with self.subTest(warded=warded):
                 scene = self.scene(weapon if warded else replace(weapon, effective_tribe=None))
@@ -84,12 +85,12 @@ class BattleTribeTest(unittest.TestCase):
                 with patch("scenes.battle.random.randint", return_value=0), patch("scenes.battle.play_se"):
                     scene._begin_standard_monster_attack(actor, target_indexes=(0,))
                 stats = scene.party[0].battle_stats
-                hit_factor = 0.8 + 95 * (100 - stats.evasion) / 25000
+                hit_factor = 0.8 + hit * (100 - stats.evasion) / 25000
                 if warded:
-                    expected = int((136 - stats.defense) * hit_factor
+                    expected = int((attack - stats.defense) * hit_factor
                                    * (1 - stats.defense / 200) + 0.99) // 2
                 else:
-                    expected = int(136 * 1.5 * hit_factor * (1 - stats.defense / 100) + 0.99)
+                    expected = int(attack * 1.5 * hit_factor * (1 - stats.defense / 100) + 0.99)
                 self.assertEqual(scene.monster_attack_damage, expected)
                 self.assertEqual(scene.monster_attack_critical, not warded)
                 self.assertEqual([popup.affinity for popup in scene.affinity_popups],

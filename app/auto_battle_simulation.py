@@ -76,8 +76,9 @@ if __package__:
     from .member import EquipmentSlot, Gender
     from .monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from .monster_ai import (
-        MonsterAction, MonsterSpellAction, MonsterSpellTarget,
+        MonsterAction, MonsterAreaAttackCooldown, MonsterSpellAction, MonsterSpellTarget,
         evaluate_monster_spell, evaluate_monster_support_spell,
+        is_monster_area_attack_spell,
         monster_action_candidates, monster_attack_targets, monster_spell_evaluation_order,
         prefer_monster_targets, rotate_monster_action,
     )
@@ -155,8 +156,9 @@ else:
     from member import EquipmentSlot, Gender
     from monster import MonsterSpecialAction, promote_rear_monsters_if_front_empty
     from monster_ai import (
-        MonsterAction, MonsterSpellAction, MonsterSpellTarget,
+        MonsterAction, MonsterAreaAttackCooldown, MonsterSpellAction, MonsterSpellTarget,
         evaluate_monster_spell, evaluate_monster_support_spell,
+        is_monster_area_attack_spell,
         monster_action_candidates, monster_attack_targets, monster_spell_evaluation_order,
         prefer_monster_targets, rotate_monster_action,
     )
@@ -430,6 +432,9 @@ class BattleForecast:
         self.surprise = set(snapshot.surprise_pending)
         self.surprise_deferred = set(snapshot.surprise_deferred)
         self.original_rows = dict(snapshot.surprise_original_rows)
+        self.monster_area_attack_cooldown = MonsterAreaAttackCooldown(
+            snapshot.monster_area_attack_attacker,
+        )
         self.info = 0.0
         self.died: set[int] = set()
         self.defeated = False
@@ -1495,6 +1500,7 @@ class BattleForecast:
         temptation_targets = tuple(a for a in allies if a.spec.gender is Gender.MALE)
         attack_targets = self._enemy_attack_targets(actor, allies)
         intelligence = actor.spec.intelligence
+        allow_area_attacks = self.monster_area_attack_cooldown.permits(intelligence)
         escape = False
         if (
             intelligence != 3
@@ -1514,6 +1520,8 @@ class BattleForecast:
         priority_spell_key = None
         enemies = self.enemies()
         for spell in monster_spell_evaluation_order(actor.spec.spells, intelligence):
+            if not allow_area_attacks and is_monster_area_attack_spell(spell):
+                continue
             if intelligence > 0 and (actor.silenced or actor.mp < spell.mp):
                 continue
             indexes = self.spell_targets(actor, spell)
@@ -1576,6 +1584,7 @@ class BattleForecast:
             escape_eligible=escape,
             call_eligible=call_placement is not None,
             priority_spell_key=priority_spell_key,
+            allow_area_attacks=allow_area_attacks,
         )
         silenced = actor.silenced > 0
         if intelligence == 3:
@@ -1611,6 +1620,7 @@ class BattleForecast:
                 if target.can_recover_with_black_wind:
                     target.recover_with_black_wind()
         elif action is MonsterAction.EARTHQUAKE:
+            self.record_monster_area_attack(actor)
             for target in allies:
                 result = resolve_earthquake_attack(
                     attack=actor.spec.attack, hit=actor.spec.hit,
@@ -1648,6 +1658,7 @@ class BattleForecast:
                 ).success:
                     self.apply_extra(actor, target, AdditionalEffect.CONFUSE)
         elif action in (MonsterAction.POISON_BREATH, MonsterAction.FIRE_BREATH):
+            self.record_monster_area_attack(actor)
             number = actor.spec.number
             hp = actor.hp
             if self.fixed_breath_hp:
@@ -1682,6 +1693,8 @@ class BattleForecast:
             spell = self.spells[action.spell_key]
             if not silenced and actor.mp >= spell.mp:
                 actor.mp -= spell.mp
+                if is_monster_area_attack_spell(spell):
+                    self.record_monster_area_attack(actor)
                 targets = spell_targets[spell.key]
                 if spell.to_enemy and not spell.to_all:
                     targets = self.preferred_monster_party_targets(actor, targets)
@@ -1798,6 +1811,11 @@ class BattleForecast:
             delay = -16 if charged else 0
         self.normalize()
         self.advance(actor, delay)
+
+    def record_monster_area_attack(self, actor: ForecastActor) -> None:
+        self.monster_area_attack_cooldown = self.monster_area_attack_cooldown.after_attack(
+            actor.spec.number, actor.spec.intelligence,
+        )
 
     def monster_revival_targets(self) -> tuple[int, ...]:
         occupied = tuple(
@@ -2073,6 +2091,10 @@ class BattleForecast:
         target.interrupt_focus()
 
     def prepare_turn(self, actor) -> bool:
+        if actor.spec.enemy:
+            self.monster_area_attack_cooldown = self.monster_area_attack_cooldown.release(
+                actor.spec.number,
+            )
         actor.defending = False
         if not actor.spec.enemy:
             actor.cover = None
@@ -2145,6 +2167,9 @@ class BattleForecast:
                 actor.front = True
 
     def normalize(self):
+        attacker = self.monster_area_attack_cooldown.attacker
+        if attacker is not None and not self.actors[attacker].is_alive:
+            self.monster_area_attack_cooldown = self.monster_area_attack_cooldown.release(attacker)
         for n, a in self.actors.items():
             if not a.is_alive and n in self.original_alive:
                 self.died.add(n)

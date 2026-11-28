@@ -76,11 +76,13 @@ from battle_magic import (
 from monster_ai import (
     MonsterAction,
     MonsterActionChoice,
+    MonsterAreaAttackCooldown,
     MonsterSpellAction,
     MonsterSpellCandidate,
     MonsterSpellTarget,
     evaluate_monster_spell,
     evaluate_monster_support_spell,
+    is_monster_area_attack_spell,
     monster_attack_targets,
     monster_spell_evaluation_order,
     prefer_monster_targets,
@@ -2011,6 +2013,7 @@ class BattleScene:
     experience_limit: int | None = None
     character_states: Mapping[str, Member] | None = None
     next_knockout_bgm_id: str | None = None
+    _monster_area_attack_cooldown = MonsterAreaAttackCooldown()
 
     @classmethod
     def create(
@@ -3046,6 +3049,7 @@ class BattleScene:
         self.auto_battle_planner = None
         self.auto_battle_log = []
         self.auto_battle_sequence = 0
+        self._monster_area_attack_cooldown = MonsterAreaAttackCooldown()
         self.reinforcement_entrance_frames.clear()
         self._reinforcement_waiting_actor = None
         self._monster_call_pending = False
@@ -3619,6 +3623,7 @@ class BattleScene:
             and self._item_is_usable_in_battle(item)
             and (quantity := self.inventory_system.quantity(key)) > 0
         )
+        attacker = self._monster_area_attack_cooldown.attacker
         return AutoBattleSnapshot(
             tuple(combatants),
             tuple(
@@ -3634,6 +3639,7 @@ class BattleScene:
             ),
             surprise_deferred=frozenset(self.surprise_deferred_party_indexes),
             consumables=consumables,
+            monster_area_attack_attacker=None if attacker is None else 5 + attacker,
         )
 
     def _update_auto_thinking(self) -> None:
@@ -8341,6 +8347,7 @@ class BattleScene:
             else:
                 self.progression.record_simultaneous_enemy_defeats(dying_indexes)
         for index in dying_indexes:
+            self._monster_area_attack_cooldown = self._monster_area_attack_cooldown.release(index)
             monster = self.monsters[index]
             if monster.is_alive:
                 monster.state.defeat()
@@ -9309,6 +9316,9 @@ class BattleScene:
                 self.command_window.open()
                 self._refresh_input_guide()
         else:
+            cooldown = self._monster_area_attack_cooldown
+            if cooldown.attacker is not None and self.monsters[cooldown.attacker] is actor:
+                self._monster_area_attack_cooldown = cooldown.release(cooldown.attacker)
             actor.state.defending = False
             self.active_party_index = None
             self.command_cursor.active = False
@@ -10504,6 +10514,7 @@ class BattleScene:
             intelligence=actor.intelligence,
             rotation_state=actor.state,
             learned_spell_keys=actor.spell_keys,
+            allow_area_attacks=self._monster_area_attack_cooldown.permits(actor.intelligence),
         )
 
     def _targetable_monster_spell_keys(
@@ -10514,13 +10525,21 @@ class BattleScene:
 
         self._monster_spell_candidates: dict[str, MonsterSpellCandidate] = {}
         spells = tuple(self.spells[key] for key in actor.spell_keys)
+        allow_area_attacks = self._monster_area_attack_cooldown.permits(actor.intelligence)
         for spell in monster_spell_evaluation_order(spells, actor.intelligence):
+            if not allow_area_attacks and is_monster_area_attack_spell(spell):
+                continue
             candidate = self._evaluate_monster_spell(actor, spell)
             if candidate.targets:
                 self._monster_spell_candidates[spell.key] = candidate
                 if candidate.priority:
                     break
         return tuple(self._monster_spell_candidates)
+
+    def _record_monster_area_attack(self, actor: BattleMonster) -> None:
+        self._monster_area_attack_cooldown = self._monster_area_attack_cooldown.after_attack(
+            self._monster_index(actor), actor.intelligence,
+        )
 
     def _member_can_cast_spells(self, member: Member) -> bool:
         event_spell_keys = unlocked_event_spell_keys(self.save_data.event_flags)
@@ -10675,6 +10694,7 @@ class BattleScene:
         )
         self._show_monster_action_message("battle.monster.earthquake")
         play_se(BATTLE_EARTHQUAKE_SE_ID)
+        self._record_monster_area_attack(actor)
         return True
 
     def _begin_monster_temptation(self, actor: BattleMonster) -> bool:
@@ -10808,6 +10828,7 @@ class BattleScene:
             "battle.monster.poison_breath" if poisonous else "battle.monster.fire_breath"
         )
         play_se(BATTLE_POISON_BREATH_SE_ID if poisonous else BATTLE_FIRE_BREATH_SE_ID)
+        self._record_monster_area_attack(actor)
         return True
 
     def _sync_action_background(
@@ -10871,6 +10892,8 @@ class BattleScene:
         self.phase = BattlePhase.ACTION_PRESENTATION
         self._show_spell_cast_message(spell, actor_is_enemy=True)
         self._start_target_spell_effects(self.action_presentation.spell_effects)
+        if is_monster_area_attack_spell(spell):
+            self._record_monster_area_attack(actor)
         return True
 
     def _resolve_monster_spell_damage_results(
@@ -11567,6 +11590,7 @@ class BattleScene:
         self.monster_escape_actor_index = actor_index
         self.monster_escape_animation_frame = 0
         self.escaped_monster_indexes.add(actor_index)
+        self._monster_area_attack_cooldown = self._monster_area_attack_cooldown.release(actor_index)
         actor.state.defeat()
         promote_rear_monsters_if_front_empty(self.monsters)
         if hasattr(self, "progression"):

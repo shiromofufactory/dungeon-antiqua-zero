@@ -28,7 +28,9 @@ class TemptationSceneTest(unittest.TestCase):
 
     def test_turn_tints_screen_while_animating_only_successful_men(self):
         scene, actor = self.scene, self.actor
-        self.assertEqual(actor.special_actions, (MonsterSpecialAction.TEMPTATION,))
+        self.assertEqual(actor.special_actions, (
+            MonsterSpecialAction.TEMPTATION, MonsterSpecialAction.CONSTRICTION,
+        ))
         self.assertEqual(actor.magic, self.record["mag"])
         self.assertEqual(actor.spell_keys, ())
         items = load_mock_items()
