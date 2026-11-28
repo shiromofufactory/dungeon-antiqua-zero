@@ -815,6 +815,7 @@ class BattlePhase(StrEnum):
     HIDE_PRESENTATION = "hide_presentation"
     IDENTIFY_PRESENTATION = "identify_presentation"
     IDENTIFY_RESULT = "identify_result"
+    INNER_STEEL_RECOVERY = "inner_steel_recovery"
     ACTION_PRESENTATION = "action_presentation"
     ACTION_RETURN = "action_return"
     ESCAPE_CONFIRMATION = "escape_confirmation"
@@ -2870,6 +2871,9 @@ class BattleScene:
             return
         if self.phase is BattlePhase.ACTION_TARGET:
             self._update_action_target_selection(input_state)
+            return
+        if self.phase is BattlePhase.INNER_STEEL_RECOVERY:
+            self._update_inner_steel_recovery()
             return
         if self.phase is BattlePhase.ACTION_PRESENTATION:
             self._update_action_presentation()
@@ -9203,6 +9207,8 @@ class BattleScene:
             )
             if isinstance(actor.member, Member) and actor.member.recover_with_inner_steel():
                 self.inner_steel_recovery_index = self.active_party_index
+                if self._begin_inner_steel_recovery(self.active_party_index):
+                    return
             if getattr(self, "surprise_active", False):
                 self.surprise_turned_party_indexes.add(self.active_party_index)
             elif (
@@ -9360,6 +9366,34 @@ class BattleScene:
                 self.blinking_monster_index = self._monster_index(actor)
                 self.monster_blink_frames_remaining = MONSTER_BLINK_FRAME_COUNT
         self._refresh_party_text_colors()
+
+    def _begin_inner_steel_recovery(self, index: int) -> bool:
+        """Play the configured CURE effect on the recovered member."""
+
+        effects = self._build_target_spell_effects("CURE", "ally", (index,), caster=("ally", index))
+        if not effects:
+            return False
+        self.phase = BattlePhase.INNER_STEEL_RECOVERY
+        self.action_presentation = BattleActionPresentation(
+            effects, post_effect_wait_frame_count=0, screen_flash=effects[0].player.screen_flash,
+        )
+        self._start_target_spell_effects(effects)
+        self.sync_action_screen_flash()
+        return True
+
+    def _update_inner_steel_recovery(self) -> None:
+        presentation = self.action_presentation
+        assert presentation is not None
+        presentation.update()
+        self.sync_action_screen_flash()
+        if not presentation.is_complete:
+            self._prepare_target_spell_effects(presentation.spell_effects, presentation.elapsed_frame)
+            return
+        self.action_presentation = None
+        self._release_palette_variant(SPELL_EFFECT_FLASH_PALETTE)
+        # Only the skill's ailments have been cleared. The same head still
+        # needs its HP tick, status checks, and normal handoff to the command.
+        self._activate_timeline_head()
 
     def _begin_confused_party_action(self, actor_index: int) -> bool:
         """Force DA2's confused member attack against an ally when possible."""
@@ -12572,7 +12606,7 @@ class BattleScene:
             )
 
         phase = getattr(self, "phase", None)
-        if phase is BattlePhase.ACTION_PRESENTATION:
+        if phase in (BattlePhase.ACTION_PRESENTATION, BattlePhase.INNER_STEEL_RECOVERY):
             self._draw_spell_effect_target("ally", index, draw_body)
         elif phase in (BattlePhase.COMMAND, BattlePhase.GLOBAL_COMMAND) and index in getattr(
             self, "inner_steel_flashing_indexes", ()

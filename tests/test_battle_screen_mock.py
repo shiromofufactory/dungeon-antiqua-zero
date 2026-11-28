@@ -4145,7 +4145,7 @@ class BattleScreenMockTest(unittest.TestCase):
         self.assertEqual(mock.spell_damage_popups[0].damage, expected_damage)
         mock._start_timeline_animation.assert_called_once_with()
 
-    def test_inner_steel_clears_sleep_confusion_and_silence_at_member_turn_start(self) -> None:
+    def test_inner_steel_clears_ailments_and_plays_cure_before_resuming_the_turn(self) -> None:
         skills = load_mock_skills()
         member = load_mock_party(load_mock_items(), skills, character_keys=("Fiora",))[0]
         member.skills.append(skills["Inner Steel"])
@@ -4158,18 +4158,49 @@ class BattleScreenMockTest(unittest.TestCase):
         mock._open_global_command_menu = Mock()
         mock._start_timeline_animation = Mock()
         mock._refresh_party_text_colors = Mock()
+        mock._party_draw_position = Mock(return_value=(172, 64))
+        mock.character_sprites = object()
+        definition = load_spell_effects(APP_ROOT / "effects" / "spells.json")["CURE"]
+        mock.spell_effects = {"CURE": definition}
+        mock.spell_effect_renderer = Mock()
+        mock.palette_shifter = Mock()
+        starting_mp = member.mp
 
         for status in ("sleeping", "confused"):
             with self.subTest(status=status):
+                mock._apply_turn_start_hp_change.reset_mock()
+                mock._open_global_command_menu.reset_mock()
+                mock.spell_effect_renderer.reset_mock()
                 mock.initial_global_command_pending = True
                 setattr(member, status, 2)
                 member.silenced = 2
                 member.poisoned = True
-                mock._activate_timeline_head()
-                self.assertEqual((member.sleeping, member.confused, member.silenced), (0, 0, 0))
-                self.assertTrue(member.poisoned)
-                self.assertEqual(mock.inner_steel_recovery_index, 0)
-        self.assertEqual(mock._open_global_command_menu.call_count, 2)
+                with patch("scenes.battle.play_se") as play_se:
+                    mock._activate_timeline_head()
+                    self.assertEqual((member.sleeping, member.confused, member.silenced), (0, 0, 0))
+                    self.assertTrue(member.poisoned)
+                    self.assertEqual(mock.inner_steel_recovery_index, 0)
+                    self.assertIs(mock.phase, BattleMockPhase.INNER_STEEL_RECOVERY)
+                    effect, = mock.action_presentation.spell_effects
+                    self.assertEqual((effect.target_side, effect.target_index), ("ally", 0))
+                    self.assertIs(effect.player.definition, definition)
+                    self.assertEqual(effect.player.center, (180, 80))
+                    mock._draw_spell_effects()
+                    mock._draw_party_body(0, 172, 64, 0, 16)
+                    mock.spell_effect_renderer.draw_effect.assert_called_once_with(effect.player)
+                    self.assertIs(mock.spell_effect_renderer.draw_target.call_args.args[0], effect.player)
+                    for _ in range(effect.player.playback_frames - 1):
+                        mock._update_inner_steel_recovery()
+                    mock._apply_turn_start_hp_change.assert_not_called()
+                    mock._open_global_command_menu.assert_not_called()
+                    mock._update_inner_steel_recovery()
+
+                play_se.assert_called_once_with("spell_healing1")
+                self.assertIsNone(mock.action_presentation)
+                mock.palette_shifter.remove_variant.assert_called_with(SPELL_EFFECT_FLASH_PALETTE)
+                mock._apply_turn_start_hp_change.assert_called_once_with(visual)
+                mock._open_global_command_menu.assert_called_once_with()
+                self.assertEqual(member.mp, starting_mp)
         mock._start_timeline_animation.assert_not_called()
 
     def test_inner_steel_weapon_attack_uses_the_quarter_hp_boundary(self) -> None:
