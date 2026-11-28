@@ -242,15 +242,18 @@ class EquipmentMenuOverlay:
             for item in self.inventory_system.items
             if self._is_item_for_slot(item, slot)
         ]
-        items.sort(
-            key=lambda item: not self.inventory_system.can_equip(
-                self.member,
-                slot,
-                item,
-            )
-        )
+        items.sort(key=lambda item: not self._candidate_uses_normal_color(slot, item))
         values.extend(items)
         return tuple(values)
+
+    def _candidate_uses_normal_color(
+        self, slot: EquipmentSlot | None, item: Item | None
+    ) -> bool:
+        if slot is None:
+            return False
+        if item is not None and self.member.is_equipment_fixed(slot):
+            return self.member.can_equip_at(item, slot)
+        return self.inventory_system.can_equip(self.member, slot, item)
 
     def _is_item_for_slot(self, item: Item, slot: EquipmentSlot) -> bool:
         if slot is EquipmentSlot.RIGHT:
@@ -501,6 +504,7 @@ class EquipmentMenuOverlay:
             self.member.equipment = current
 
     def _build_item_windows(self) -> None:
+        slot = self.selected_slot
         candidates = self.candidates
         visible = candidates[
             self.scroll_offset : self.scroll_offset + ITEM_VISIBLE_COUNT
@@ -508,8 +512,6 @@ class EquipmentMenuOverlay:
         list_texts: list[WindowText] = []
         targets: list[CursorTarget] = []
         for row, item in enumerate(visible):
-            candidate_index = self.scroll_offset + row
-            equippable = self._candidate_is_equippable(candidate_index)
             y = ITEM_FIRST_Y + row * ITEM_ROW_HEIGHT
             if item is None:
                 name = self.labels["remove"]
@@ -520,7 +522,11 @@ class EquipmentMenuOverlay:
                     icon = ""
                 name = icon + str(item.localized_name(self.localizer))
                 key = item.key
-            color = DEFAULT_TEXT_COLOR if equippable else DISABLED_COLOR
+            color = (
+                DEFAULT_TEXT_COLOR
+                if self._candidate_uses_normal_color(slot, item)
+                else DISABLED_COLOR
+            )
             list_texts.append(
                 self.localized_texts.create(
                     name,

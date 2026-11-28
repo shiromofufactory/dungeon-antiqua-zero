@@ -308,6 +308,30 @@ class BattleMonsterRecordTest(unittest.TestCase):
             TRANSPARENT_INDEX,
         )
 
+    def test_breath_draws_revealed_fire_weakness_and_effective_resistance(self) -> None:
+        scene = self._target_scene()
+        scene.phase = BattlePhase.TARGET
+        scene.selected_command = BattleCommand.BREATH
+        scene.selected_target_index = None
+        weak, shielded = scene.monsters
+        weak.spell_resistances = frozenset()
+        shielded.weaknesses = weak.weaknesses
+        shielded.resistances = frozenset()
+        shielded.spell_resistances = frozenset((ResistanceType.FIRE,))
+        scene._monster_draw_x = Mock(side_effect=(4, 68))
+
+        with patch("scenes.battle.pyxel.frame_count", 0), patch("scenes.battle.pyxel.blt") as blt:
+            scene._draw_target_affinity_indicators()
+            blt.assert_not_called()
+            for monster in scene.monsters:
+                scene.monster_record_system.reveal_affinity(monster.key, ResistanceType.FIRE)
+            scene._draw_target_affinity_indicators()
+
+        self.assertEqual(
+            [draw.args[4] for draw in blt.call_args_list],
+            [WEAK_ICON_SOURCE_Y, RESIST_ICON_SOURCE_Y],
+        )
+
     def test_draws_known_affinities_for_each_all_target_marker(self) -> None:
         scene = self._target_scene()
         scene.action_targets_all = True

@@ -36,12 +36,16 @@ class FireBreathRuleTest(unittest.TestCase):
             ({"random_factor": 0}, 26), ({"random_factor": 1}, 33),
             ({"target_spell_defense": 100}, 0),
             ({"fire_resistant": True, "random_factor": 1}, 8),
+            ({"fire_weak": True}, 90),
+            ({"fire_weak": True, "random_factor": 1}, 100),
+            ({"fire_weak": True, "fire_resistant": True}, 7),
         ):
             with self.subTest(changes=changes):
                 result = resolve_fire_breath(**(args | changes))
                 self.assertEqual(result.damage, expected)
                 self.assertFalse(result.poisoned)
                 self.assertEqual(result.resisted, changes.get("fire_resistant", False))
+                self.assertEqual(result.weak, changes.get("fire_weak", False) and not result.resisted)
 
 
 class FireBreathSelectionTest(unittest.TestCase):
@@ -235,6 +239,7 @@ class MemberFireBreathTest(AutoBattleFixtures, unittest.TestCase):
                 scene, front = poison_tests.PoisonBreathSceneTest().scene()
                 front.is_front_row = True
                 front.state = MonsterBattleState(max_hp=100)
+                front.weaknesses = frozenset((ResistanceType.FIRE,))
                 rear = replace(front, is_front_row=False, state=MonsterBattleState(max_hp=200))
                 rear.state.magic_shield = True
                 defeated = replace(front, state=MonsterBattleState(max_hp=20, hp=0))
@@ -295,8 +300,11 @@ class MemberFireBreathTest(AutoBattleFixtures, unittest.TestCase):
                     presentation = scene.action_presentation
                     self.assertEqual(presentation.background_tint_color, FIRE_BREATH_TINT_COLOR)
                     self.assertTrue(presentation.wave_enemy_sprites)
-                    self.assertEqual(tuple(hit.damage for hit in presentation.damage_results), (300, 75))
-                    self.assertEqual(len(scene.affinity_popups), 1)
+                    self.assertEqual(tuple(hit.damage for hit in presentation.damage_results), (902, 75))
+                    self.assertEqual(
+                        tuple(popup.affinity for popup in scene.affinity_popups),
+                        (SpellAffinity.WEAK, SpellAffinity.RESIST),
+                    )
                     for _ in range(DAMAGE_POPUP_FRAME_COUNT - 1):
                         scene._update_action_presentation()
                     self.assertEqual((front.state.hp, rear.state.hp), (100, 200))
@@ -352,9 +360,10 @@ class MemberFireBreathTest(AutoBattleFixtures, unittest.TestCase):
     def test_forecast_charges_hp_and_hits_front_and_rear_with_pre_cost_power(self):
         member = self.vald()
         spec = AutoCombatant.from_member(member, 0, front=False, spells=(), hidden=True)
-        front = self.enemy(hp=500, max_hp=500, spell_defense=0)
+        fire_weakness = frozenset((ResistanceType.FIRE,))
+        front = self.enemy(hp=1200, max_hp=1200, spell_defense=0, weaknesses=fire_weakness)
         rear = self.enemy(number=6, front=False, hp=500, max_hp=500, spell_defense=0,
-                          magic_shield=True)
+                          weaknesses=fire_weakness, magic_shield=True)
         forecast = BattleForecast(self.snapshot(spec, front, rear), 0)
         forecast.roll = lambda *_: 0.5
         action = AutoAction(BattleCommand.BREATH, (5, 6))
@@ -365,7 +374,7 @@ class MemberFireBreathTest(AutoBattleFixtures, unittest.TestCase):
         self.assertEqual(cost, 0)
         self.assertEqual(forecast.actors[0].hp, 80)
         self.assertFalse(forecast.actors[0].hidden)
-        self.assertEqual(forecast.actors[5].hp, 200)
+        self.assertEqual(forecast.actors[5].hp, 298)
         self.assertEqual(forecast.actors[6].hp, 425)
 
 

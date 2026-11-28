@@ -141,7 +141,10 @@ class MonsterActionSelectionTest(unittest.TestCase):
             self.assertIs(select_monster_action(**arguments, call_slot=1), MonsterAction.CALL)
             self.assertIs(select_monster_action(**arguments, call_slot=1), MonsterAction.ATTACK)
             self.assertIs(select_monster_action(**arguments, call_slot=2), MonsterAction.CHARGE)
-            self.assertIs(select_monster_action(**arguments, call_slot=2), MonsterAction.ATTACK)
+            self.assertIs(select_monster_action(**arguments, call_slot=2), MonsterAction.CALL)
+            self.assertIs(select_monster_action(**arguments, call_slot=None), MonsterAction.ATTACK)
+            self.assertIs(select_monster_action(**arguments, call_slot=None), MonsterAction.CHARGE)
+            self.assertIs(select_monster_action(**arguments, call_slot=None), MonsterAction.ATTACK)
         choose_start.assert_called_once_with(3)
 
     def test_rotation_selects_escape_on_its_turn_without_eligibility_rolls(self):
@@ -400,21 +403,17 @@ class MonsterCallRuleTest(unittest.TestCase):
             self.assertIs(self.choose(slot=None), MonsterAction.ATTACK)
             rng.assert_not_called()
 
-    def test_da2_high_intelligence_prioritizes_first_two_empty_slots(self):
+    def test_high_intelligence_prioritizes_call_in_any_available_slot(self):
         for slot in range(5):
             with self.subTest(slot=slot), patch("monster_ai.random.randint") as rng:
-                expected = MonsterAction.CALL if slot <= 1 else MonsterAction.ATTACK
-                self.assertIs(self.choose(slot=slot, intelligence=4), expected)
+                self.assertIs(self.choose(slot=slot, intelligence=4), MonsterAction.CALL)
                 rng.assert_not_called()
 
     def test_int_two_draws_call_when_an_eligible_slot_is_available(self):
         for slot in range(5):
             with self.subTest(slot=slot), patch("monster_ai.random.choice", return_value=MonsterAction.ATTACK) as choose:
                 self.assertIs(self.choose(slot=slot, intelligence=2), MonsterAction.ATTACK)
-                if slot <= 1:
-                    choose.assert_called_once_with([MonsterAction.CALL, MonsterAction.ATTACK])
-                else:
-                    choose.assert_not_called()
+                choose.assert_called_once_with([MonsterAction.CALL, MonsterAction.ATTACK])
 
     def test_call_data_key_is_supported(self):
         self.assertEqual(monster_special_actions_from_record({"special": "呼"}),

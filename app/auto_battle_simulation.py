@@ -1467,6 +1467,7 @@ class BattleForecast:
                 attack=actor.spec.breath_attack, hp=hp, max_hp=actor.max_hp,
                 target_spell_defense=target.spec.spell_defense,
                 fire_resistant=ResistanceType.FIRE in target.spell_resistances,
+                fire_weak=ResistanceType.FIRE in target.spec.weaknesses,
                 random_factor=self.roll(actor, number, 5),
             )
             target.damage(result.damage)
@@ -1553,7 +1554,7 @@ class BattleForecast:
         spell_keys = tuple(spell_targets)
         call_placement = None
         if (
-            intelligence in (2, 3) and MonsterSpecialAction.CALL in actor.spec.special_actions
+            MonsterSpecialAction.CALL in actor.spec.special_actions
             and actor.spec.monster_placement is not None
         ):
             occupied = tuple(
@@ -1561,8 +1562,6 @@ class BattleForecast:
                 if enemy.spec.monster_placement is not None
             )
             call_placement = find_monster_placement(actor.spec.monster_placement, occupied)
-            if call_placement is not None and call_placement.slot > 1:
-                call_placement = None
         candidates = monster_action_candidates(
             special_actions=actor.spec.special_actions,
             is_front_row=actor.front,
@@ -1582,7 +1581,10 @@ class BattleForecast:
             ),
             spell_keys=spell_keys,
             escape_eligible=escape,
-            call_eligible=call_placement is not None,
+            call_eligible=(
+                call_placement is not None
+                and (intelligence >= 2 or self.roll(actor, 0, 18) >= 0.25)
+            ),
             priority_spell_key=priority_spell_key,
             allow_area_attacks=allow_area_attacks,
         )

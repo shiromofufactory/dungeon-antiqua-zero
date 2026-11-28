@@ -13,6 +13,7 @@ class BreathResult:
     damage: int
     poisoned: bool
     resisted: bool
+    weak: bool = False
 
 
 def member_breath_attack(member: Member) -> float:
@@ -55,18 +56,20 @@ def resolve_poison_breath(
 
 def resolve_fire_breath(
     *, attack: int | float, hp: int, max_hp: int, target_spell_defense: int,
-    fire_resistant: bool, random_factor: float,
+    fire_resistant: bool, random_factor: float, fire_weak: bool = False,
 ) -> BreathResult:
-    """Use full attack for DA2 fire breath, with no status-effect roll."""
+    """Use full attack for fire breath and apply weakness before truncation."""
 
+    weak = fire_weak and not fire_resistant
     return BreathResult(
         damage=_breath_damage(
             attack=attack, hp=hp, max_hp=max_hp,
-            target_spell_defense=target_spell_defense, attack_multiplier=1,
+            target_spell_defense=target_spell_defense, attack_multiplier=3 if weak else 1,
             resisted=fire_resistant, random_factor=random_factor,
         ),
         poisoned=False,
         resisted=fire_resistant,
+        weak=weak,
     )
 
 

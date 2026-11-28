@@ -228,6 +228,9 @@ def monster_action_candidates(
 ) -> tuple[MonsterActionChoice, ...]:
     """Build candidates using spell keys already filtered by the caller."""
 
+    can_call = MonsterSpecialAction.CALL in special_actions and call_eligible
+    if can_call and intelligence >= 4:
+        return (MonsterAction.CALL,)
     if priority_spell_key is not None and intelligence != 3:
         return (MonsterSpellAction(priority_spell_key),)
     candidates: list[MonsterActionChoice] = []
@@ -239,7 +242,7 @@ def monster_action_candidates(
     attack_available = can_attack_from_row and can_attack
     if attack_available and MonsterSpecialAction.CONSTRICTION in special_actions:
         candidates.append(MonsterAction.CONSTRICTION)
-    if MonsterSpecialAction.CALL in special_actions and call_eligible:
+    if can_call:
         candidates.append(MonsterAction.CALL)
     if allow_area_attacks:
         if can_breathe:
@@ -324,10 +327,9 @@ def select_monster_action(
     Without a priority action, eligible specials and spells have the same
     weight as a normal attack. A rear-row monster without ranged reach receives
     one idle candidate at intelligence 0 or 1, or when no other action is available.
-    Call uses a 3/4 candidate gate below intelligence 2. At intelligence 2 or
-    higher it requires the first available slot to be 0 or 1 and takes priority
-    at intelligence 4 or higher. At intelligence 3, available actions follow a
-    fixed rotation with a random start.
+    Call requires a placement that fits. Below intelligence 2 it uses a 3/4
+    candidate gate, and at intelligence 4 or higher it takes priority.
+    At intelligence 3, available actions follow a fixed rotation with a random start.
     """
 
     if not isinstance(is_front_row, bool):
@@ -366,15 +368,10 @@ def select_monster_action(
         member_attack = random.choice(tuple(party_actual_attacks))
         if member_attack > monster_attack * random.uniform(1.0, 2.0):
             escape_eligible = True
-    call_eligible = False
-    if MonsterSpecialAction.CALL in specials and call_slot is not None:
-        if intelligence >= 2:
-            if call_slot <= 1:
-                if intelligence >= 4:
-                    return MonsterAction.CALL
-                call_eligible = True
-        else:
-            call_eligible = random.randint(0, 3) > 0
+    call_eligible = (
+        MonsterSpecialAction.CALL in specials and call_slot is not None
+        and (intelligence >= 2 or random.randint(0, 3) > 0)
+    )
     candidates = monster_action_candidates(
         special_actions=specials, is_front_row=is_front_row,
         can_attack=can_attack, can_charge=can_charge, spell_keys=spell_keys,

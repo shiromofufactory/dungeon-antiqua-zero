@@ -4997,6 +4997,31 @@ class BattleScreenMockTest(unittest.TestCase):
             ],
         )
 
+    def test_identified_monster_hp_draws_over_the_lower_monster_image(self) -> None:
+        upper = replace(_damage_test_monster(hp=25), height=48)
+        lower = _damage_test_monster(1)
+        mock = BattleScreenMock.__new__(BattleScreenMock)
+        mock.phase = BattleMockPhase.COMMAND
+        mock.monsters = (upper, lower)
+        mock.monster_positions = ((4, 56), (4, 106))
+        mock.blinking_monster_index = None
+        mock.identified_monster_indexes = {0}
+        draw = Mock()
+        mock._draw_monster_image = draw.sprite
+        mock._draw_small_text_with_edge = draw.hp_text
+
+        mock._draw_monsters()
+
+        self.assertEqual(
+            draw.mock_calls,
+            [
+                call.sprite(upper, 4, 56, flip_x=False),
+                call.sprite(lower, 4, 106, flip_x=False),
+                call.hp_text(12, 106, "HP", DEFAULT_TEXT_COLOR),
+                call.hp_text(24, 106, "25", DEFAULT_TEXT_COLOR),
+            ],
+        )
+
     def test_identify_result_closes_on_confirm_and_returns_the_actor(self) -> None:
         mock = BattleScreenMock.__new__(BattleScreenMock)
         mock.identify_detail_window = Mock()

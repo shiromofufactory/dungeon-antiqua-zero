@@ -4493,13 +4493,18 @@ class BattleScene:
                 attack=attack, hp=hp, max_hp=member.max_hp,
                 target_spell_defense=monster.combat_stats.spell_resistance,
                 fire_resistant=ResistanceType.FIRE in monster.spell_resistances,
+                fire_weak=ResistanceType.FIRE in monster.weaknesses,
                 random_factor=random.random(),
             )
             _x, y = self._monster_base_position(index)
             center_x = self._monster_draw_x(index) + monster.width // 2
+            affinity = SpellAffinity.NORMAL
+            if result.resisted:
+                affinity = SpellAffinity.RESIST
+            elif result.weak:
+                affinity = SpellAffinity.WEAK
             damages.append(BattleSpellDamageResult(
-                index, result.damage,
-                SpellAffinity.RESIST if result.resisted else SpellAffinity.NORMAL,
+                index, result.damage, affinity,
                 center_x, y + monster.height - 8,
                 center_x - AFFINITY_ICON_WIDTH // 2, y + 20,
             ))
@@ -5624,7 +5629,10 @@ class BattleScene:
 
         attributes: tuple[ResistanceType, ...] = ()
         flying_effective = False
-        if self.phase is BattlePhase.TARGET:
+        is_breath = self.phase is BattlePhase.TARGET and self.selected_command is BattleCommand.BREATH
+        if is_breath:
+            attributes = (ResistanceType.FIRE,)
+        elif self.phase is BattlePhase.TARGET:
             if (
                 self.selected_command
                 not in (
@@ -5665,6 +5673,7 @@ class BattleScene:
         monster = self.monsters[index]
         if records is None:
             return ()
+        resistances = monster.spell_resistances if is_breath else monster.resistances
         affinities: list[SpellAffinity] = []
         if (
             flying_effective
@@ -5676,7 +5685,7 @@ class BattleScene:
             if not records.affinity_is_revealed(monster.key, attribute):
                 continue
             affinity = SpellAffinity.NORMAL
-            if attribute in monster.resistances:
+            if attribute in resistances:
                 affinity = SpellAffinity.RESIST
             elif attribute in monster.weaknesses:
                 affinity = SpellAffinity.WEAK
@@ -9844,10 +9853,11 @@ class BattleScene:
             return True
         if self._monster_attack_target_indexes(actor):
             return True
-        if actor.intelligence in (2, 3) and MonsterSpecialAction.CALL in actor.special_actions:
-            slot = self._monster_ally_slot(actor)
-            if slot is not None and slot <= 1:
-                return True
+        if (
+            MonsterSpecialAction.CALL in actor.special_actions
+            and self._monster_ally_slot(actor) is not None
+        ):
+            return True
         if any(
             self._monster_spell_target_indexes(self.spells[key])
             for key in actor.spell_keys
@@ -10326,10 +10336,10 @@ class BattleScene:
             return False
         return self._add_monster_ally(actor, same_monster=False)
 
-    def _monster_ally_slot(self, target: BattleMonster | None = None) -> int | None:
-        """Find the first unoccupied display slot, including defeated slots."""
+    def _monster_ally_slot(self, target: BattleMonster) -> int | None:
+        """Find the first display slot that can fit the target."""
 
-        placement = self._monster_ally_placement(self.monsters[0] if target is None else target)
+        placement = self._monster_ally_placement(target)
         return None if placement is None else placement[0]
 
     def _monster_ally_placement(
@@ -10507,7 +10517,7 @@ class BattleScene:
             spell_keys=spell_keys,
             priority_spell_key=priority_spell_key,
             call_slot=(
-                self._monster_ally_slot(actor if actor.intelligence in (2, 3) else None)
+                self._monster_ally_slot(actor)
                 if MonsterSpecialAction.CALL in actor.special_actions
                 else None
             ),
@@ -13407,6 +13417,7 @@ class BattleScene:
             and action_presentation is not None
             and action_presentation.wave_enemy_sprites else 0.0
         )
+        hp_label_positions: list[tuple[int, int, int]] = []
         for index, monster in enumerate(self.monsters):
             is_dying = (
                 self.phase is BattlePhase.MONSTER_DEATH
@@ -13476,30 +13487,26 @@ class BattleScene:
                         self._draw_spell_effect_target(
                             "enemy", index, lambda: self._draw_monster_image(monster, x, y),
                         )
-                    self._draw_identified_monster_hp(index, monster, x, y)
-                    continue
-                is_unselectable_rear_target = (
+                elif (
                     self.phase is BattlePhase.TARGET
                     and not monster.is_front_row
                     and index not in self.selectable_target_indexes
-                )
-                if not is_unselectable_rear_target:
+                ):
+                    palette = (
+                        UNSELECTABLE_TARGET_PALETTE
+                        if self.palette_shifter.has_variant(UNSELECTABLE_TARGET_PALETTE)
+                        else MONOCHROME_PALETTE
+                    )
+                    with self.palette_shifter.shifted(palette):
+                        self._draw_monster_image(monster, x, y)
+                else:
                     self._draw_monster_image(
                         monster,
                         x,
                         y,
                         flip_x=is_escaping,
                     )
-                    self._draw_identified_monster_hp(index, monster, x, y)
-                    continue
-                palette = (
-                    UNSELECTABLE_TARGET_PALETTE
-                    if self.palette_shifter.has_variant(UNSELECTABLE_TARGET_PALETTE)
-                    else MONOCHROME_PALETTE
-                )
-                with self.palette_shifter.shifted(palette):
-                    self._draw_monster_image(monster, x, y)
-                self._draw_identified_monster_hp(index, monster, x, y)
+                hp_label_positions.append((index, x, y))
                 continue
             animation = self.monster_death_animation
             if animation is None:
@@ -13511,6 +13518,10 @@ class BattleScene:
                     self._draw_monster_image(monster, x, y)
             finally:
                 pyxel.dither(1.0)
+
+        # Draw HP over every monster sprite, including those in lower slots.
+        for index, x, y in hp_label_positions:
+            self._draw_identified_monster_hp(index, self.monsters[index], x, y)
 
     def _draw_identified_monster_hp(
         self,

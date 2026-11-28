@@ -43,6 +43,7 @@ from input import Direction, InputButton, InputState
 from item import ItemEquipType
 from member import BattleStats, EquipmentSlot, HandHit, ProficiencyKind
 from state import Language, Settings
+from systems import InventorySystem
 from ui import DEFAULT_TEXT_COLOR, DISABLED_COLOR
 
 
@@ -381,6 +382,36 @@ class EquipmentMenuTest(unittest.TestCase):
         head = next(text for text in mock.main_window.texts if text.y == 23)
         self.assertEqual(head.color, DEFAULT_TEXT_COLOR)
         self.assertIn(None, mock.candidates)
+
+    def test_fixed_slot_list_colors_items_by_member_eligibility(self) -> None:
+        mock = self.build_mock(member_index=4)
+        self.assertEqual(mock.member.definition.key, "Ragna")
+        self.assertTrue(mock.member.is_equipment_fixed(EquipmentSlot.RIGHT))
+        colors_by_key = {
+            "WAND of POISON": DISABLED_COLOR,
+            "IRON SWORD": DEFAULT_TEXT_COLOR,
+            "MURASAME!": DISABLED_COLOR,
+        }
+        mock.inventory_system = InventorySystem.with_one_each(
+            {key: mock.items[key] for key in colors_by_key}
+        )
+
+        mock._rebuild()
+
+        self.assertEqual(
+            tuple(target.key for target in mock.item_cursor.targets),
+            ("IRON SWORD", "WAND of POISON", "MURASAME!"),
+        )
+        colors_by_row = {
+            (text.x, text.y): text.color for text in mock.item_list_window.texts
+        }
+        for target in mock.item_cursor.targets:
+            with self.subTest(item=target.key):
+                expected = colors_by_key[target.key]
+                self.assertEqual(colors_by_row[(ITEM_TEXT_X, target.y)], expected)
+                self.assertEqual(colors_by_row[(ITEM_COUNT_X, target.y)], expected)
+        self.assertFalse(mock.item_cursor.active)
+        self.assertFalse(mock.equippable_candidate_indexes)
 
     @patch("ui.equipment_menu.play_se")
     def test_confirming_npc_initial_equipment_stays_put_and_alerts(

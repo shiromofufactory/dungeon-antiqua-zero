@@ -1143,6 +1143,22 @@
           "id": "event_battle_256709eae7634357babfd54ac91cab03",
           "type": "event_battle",
           "battle_id": "battle_29"
+        },
+        {
+          "id": "treasure_765cc5224a8e41cda1201cf18981fea7",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "ELVEN'S ARCANUM"
+          }
+        },
+        {
+          "id": "treasure_4379f7cc3e064b7dbcfdc4e9c2e98367",
+          "type": "treasure",
+          "contents": {
+            "type": "item",
+            "item_key": "ELVEN LEATHER+"
+          }
         }
       ]
     }

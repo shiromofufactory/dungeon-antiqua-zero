@@ -177,7 +177,7 @@ class MonsterReinforcementTest(unittest.TestCase):
                     tuple(monster.is_front_row for monster in scene.monsters),
                     (False, True, True, False),
                 )
-                self.assertEqual(scene._monster_ally_slot(), 4)
+                self.assertEqual(scene._monster_ally_slot(initial_monsters[0]), 4)
 
     def test_reinforcement_waits_twelve_frames_after_entrance(self) -> None:
         actor = charge_monster()

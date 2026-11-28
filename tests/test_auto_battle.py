@@ -161,6 +161,32 @@ class AutoBattleRulesTest(AutoBattleFixtures, unittest.TestCase):
         decision = decide_auto_battle(self.snapshot(self.specs[0], caller))
         self.assertTrue(decision.evaluations)
 
+    def test_forecast_calls_into_last_front_slot_using_intelligence_rules(self):
+        occupied = (
+            self.enemy(6, front=False, monster_placement=MonsterPlacement(0, 4, 48, 64, 64)),
+            self.enemy(7, front=False, monster_placement=MonsterPlacement(1, 4, 112, 64, 64)),
+            self.enemy(8, front=True, monster_placement=MonsterPlacement(3, 68, 80, 64, 64)),
+        )
+        for intelligence, roll, calls in (
+            (0, 0.0, False), (1, 0.99, True), (2, 0.99, True),
+            (3, 0.0, True), (4, 0.0, True),
+        ):
+            with self.subTest(intelligence=intelligence, roll=roll):
+                caller = self.enemy(
+                    intelligence=intelligence, action_rotation_index=0, front=True,
+                    special_actions=(MonsterSpecialAction.CALL,),
+                    monster_placement=MonsterPlacement(2, 68, 16, 64, 64),
+                )
+                forecast = BattleForecast(self.snapshot(caller, self.specs[0], *occupied, active=5), 0)
+                with patch.object(forecast, "roll", return_value=roll):
+                    forecast.enemy_turn(forecast.actors[5])
+
+                self.assertEqual(9 in forecast.actors, calls)
+                if calls:
+                    newcomer = forecast.actors[9]
+                    self.assertEqual(newcomer.spec.monster_placement.slot, 4)
+                    self.assertTrue(newcomer.front)
+
     def test_forecast_rotating_escape_removes_enemy_without_eligibility_rolls(self):
         enemy = self.enemy(
             intelligence=3, action_rotation_index=0, attack=60,

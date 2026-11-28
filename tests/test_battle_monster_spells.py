@@ -21,6 +21,7 @@ from tools.screen_mocks.battle import (
 from monster import MonsterBattleState, MonsterCombatStats
 from monster_ai import MonsterAction, MonsterSpellAction
 from battle_magic import resolve_healing, resolve_spell_damage, SpellAffinity
+from battle_layout import MONSTER_POSITIONS
 from member import EquipmentSlot, Member, FormationRow
 from battle_timeline import TimelineEntry, TimelineOrder
 from resources import load_record_array
@@ -893,6 +894,32 @@ class IntelligentMonsterSpellTest(unittest.TestCase):
                 choose_start.assert_called_once_with(3)
                 actor.restore()
                 self.assertIsNone(actor.state.action_rotation_index)
+
+    def test_greater_demon_can_call_when_only_the_last_front_slot_fits(self):
+        record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Greater Demon")
+        actor = BattleMonster.from_record(record, is_front_row=True)
+        scene = spell_scene(actor)
+        scene.monsters = tuple(
+            BattleMonster.from_record(record, is_front_row=slot >= 2) for slot in range(3)
+        ) + (actor,)
+        scene.monster_slot_indexes = (0, 1, 2, 3)
+        scene.monster_positions = MONSTER_POSITIONS[:4]
+        scene.hidden_party_indexes = set(range(len(scene.party)))
+        actor.state.action_rotation_index = 0
+
+        self.assertTrue(scene._monster_can_attempt_action(actor))
+        self.assertEqual(scene._monster_ally_slot(actor), 4)
+        self.assertIs(scene._select_monster_action(actor), MonsterAction.CALL)
+        self.assertEqual(actor.state.action_rotation_index, 1)
+
+        scene.monsters += (BattleMonster.from_record(record, is_front_row=True),)
+        scene.monster_slot_indexes += (4,)
+        scene.monster_positions = MONSTER_POSITIONS
+        scene.hidden_party_indexes.clear()
+        actor.state.apply_silence(1)
+        actor.state.action_rotation_index = 0
+        self.assertIsNone(scene._monster_ally_slot(actor))
+        self.assertIs(scene._select_monster_action(actor), MonsterAction.ATTACK)
 
     def test_frau_skips_silenced_unaffordable_and_ineffective_spells(self):
         record = next(r for r in load_record_array("monsters.json") if r["name_en"] == "Frau")
